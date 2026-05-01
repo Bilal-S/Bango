@@ -134,7 +134,7 @@
 # **/speckit.plan: Technology Stack**
 
 * **Framework**: Tauri 2.x. This provides a lightweight binary. It enables cross-platform desktop and mobile support without heavy browser overhead.  
-* **Frontend**: React or Vue (TypeScript). This ensures strict type-checking for complex UI state management during screening.  
+* **Frontend**: Vue 3.x (TypeScript). This ensures strict type-checking for complex UI state management during screening.
 * **Backend**: Rust. This ensures memory safety. It handles intensive background tasks like RIS parsing and deduplication without blocking the user interface.  
 * **Database**: Local SQLite. This guarantees data portability and supports offline functionality. It handles standard review datasets easily.  
 * **AI Integration**: Direct REST API client in Rust. This handles asynchronous requests to external or local LLM endpoints.
