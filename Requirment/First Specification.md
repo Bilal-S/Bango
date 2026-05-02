@@ -16,7 +16,7 @@
 5. The user sets priority levels for criteria: critical, high, moderate, low, or optional. These priorities act as weights during the AI evaluation phase.  
 6. The app suggests relevant tags based on RIS metadata and user criteria. The system scans article abstracts to recommend these predefined categories.  
 7. The user configures connections to hosted LLMs (OpenAI, Google, z.ai) or local setups (llama.cpp, Ollama, LM Studio). The user provides API keys and endpoint URLs. The app securely encrypts these credentials in local storage.  
-8. The AI scans the working list to develop meta-tags for accepted or rejected articles. The user can manually edit or delete these generated meta-tags.  
+8. The AI scans the working list, especially the Topics in RIS imports, to develop tags for accepted or rejected articles. The user can manually edit or delete these generated tags.  
 9. The AI screens the working list against the defined criteria and research aims. The app analyzes each article in isolation. The AI evaluates only the abstract. The app does not process full texts. The system processes articles in background batches to manage API rate limits.  
 10. The AI prompts enforce strict data formatting. The LLM must return all screening decisions, tags, and reasoning exclusively as structured JSON.  
 11. The AI assigns a reasoning paragraph, matching criteria tags, and labels to each article based on the JSON response. The reasoning paragraph cites specific sentences from the abstract to justify the decision.  
