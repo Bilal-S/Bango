@@ -12,8 +12,8 @@
     "lint:check": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint:rust": "cd src-tauri && cargo clippy -- -D warnings",
-    "format:rust": "cd src-tauri && cargo fmt --check",
+    "lint:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo clippy -- -D warnings",
+    "format:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo fmt --check",
     "check:all": "npm run lint:check && npm run format:check && npm run format:rust && npm run lint:rust",
     "postinstall": "simple-git-hooks || true"
   },

@@ -2,6 +2,3 @@ edition = "2021"
 max_width = 100
 use_small_heuristics = "Max"
 fn_params_layout = "Tall"
-match_arm_blocks = false
-imports_granularity = "Crate"
-group_imports = "StdExternalCrate"
