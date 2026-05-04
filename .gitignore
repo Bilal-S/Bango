@@ -24,3 +24,4 @@ src-tauri/Cargo.lock
 
 # Logs
 *.log
+.worktrees/
