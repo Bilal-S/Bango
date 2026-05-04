@@ -60,6 +60,15 @@ pub mod ris_writer;
 
 ```rust
 use bango_lib::export::ris_writer::{article_to_ris, RisExportArticle};
+use std::fs;
+use std::path::PathBuf;
+
+fn asset_path(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("../tests/assets");
+    path.push(name);
+    path
+}
 
 fn make_export_article() -> RisExportArticle {
     RisExportArticle {
@@ -138,6 +147,33 @@ fn test_multiple_articles_to_ris() {
     let article = make_export_article();
     let ris = article_to_ris(&article) + &article_to_ris(&article);
     assert_eq!(ris.matches("ER  -").count(), 2);
+}
+
+#[test]
+fn test_ris_roundtrip_with_real_data() {
+    // Parse a real RIS file, convert to articles, then export back to RIS
+    let content = fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+    let parsed = parse_ris(&content).expect("Parse failed");
+    let record = &parsed.records[0];
+
+    // Verify key fields survive roundtrip
+    assert!(record.title.is_some());
+    assert!(record.doi.is_some());
+    assert!(record.abstract_text.is_some());
+    assert!(!record.authors.is_empty());
+
+    // Export to RIS string
+    let exported = write_ris(record);
+
+    // Re-parse the exported RIS
+    let reparsed = parse_ris(&exported).expect("Re-parse failed");
+    assert_eq!(reparsed.records.len(), 1);
+
+    let rerecord = &reparsed.records[0];
+    assert_eq!(rerecord.title, record.title);
+    assert_eq!(rerecord.doi, record.doi);
+    assert_eq!(rerecord.authors, record.authors);
+    assert_eq!(rerecord.publication_year, record.publication_year);
 }
 ```
 

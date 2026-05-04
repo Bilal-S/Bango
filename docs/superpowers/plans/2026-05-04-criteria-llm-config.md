@@ -31,7 +31,8 @@ src-tauri/src/
 │   └── mod.rs              (modify: add modules)
 ├── tests/
 │   ├── criteria_test.rs    (new: criteria tests)
-│   └── crypto_test.rs      (new: encryption tests)
+│   ├── crypto_test.rs      (new: encryption tests)
+│   └── priority_test.rs    (new: priority resolution tests)
 ```
 
 ### TypeScript/Vue (src/)
@@ -425,6 +426,75 @@ chrono = { version = "0.4", features = ["serde"] }
 ```bash
 git add src-tauri/src/db/criteria_repo.rs src-tauri/src/db/mod.rs src-tauri/tests/criteria_test.rs src-tauri/Cargo.toml
 git commit -m "feat(criteria): add research aims and criteria repository with CRUD"
+```
+
+---
+
+## Task 2.5: Priority Resolution Tests
+
+**Files:**
+- Create: `src-tauri/tests/priority_test.rs`
+
+- [ ] **Step 1: Write priority edge case tests**
+
+Create `src-tauri/tests/priority_test.rs`:
+
+```rust
+use bango_lib::db::connection::create_connection;
+use bango_lib::db::migration::run_migrations;
+use bango_lib::db::criteria_repo;
+use bango_lib::models::criterion::Priority;
+
+#[test]
+fn test_priority_ordering() {
+    assert!(Priority::Critical > Priority::High);
+    assert!(Priority::High > Priority::Standard);
+    assert!(Priority::Standard > Priority::Low);
+    assert!(Priority::Low > Priority::Optional);
+}
+
+#[test]
+fn test_criteria_priority_in_database() {
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+
+    criteria_repo::create_criterion(&conn, "inclusion", "Critical item", "critical").unwrap();
+    criteria_repo::create_criterion(&conn, "inclusion", "Standard item", "standard").unwrap();
+    criteria_repo::create_criterion(&conn, "exclusion", "High item", "high").unwrap();
+
+    let all = criteria_repo::get_all_criteria(&conn).unwrap();
+    assert_eq!(all.len(), 3);
+
+    let critical = all.iter().find(|c| c.text == "Critical item").unwrap();
+    assert!(matches!(critical.priority, Priority::Critical));
+}
+
+#[test]
+fn test_criteria_type_filtering() {
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+
+    criteria_repo::create_criterion(&conn, "inclusion", "Include ML", "standard").unwrap();
+    criteria_repo::create_criterion(&conn, "inclusion", "Include AI", "high").unwrap();
+    criteria_repo::create_criterion(&conn, "exclusion", "Exclude non-English", "standard").unwrap();
+
+    let inc = criteria_repo::get_criteria_by_type(&conn, "inclusion").unwrap();
+    let exc = criteria_repo::get_criteria_by_type(&conn, "exclusion").unwrap();
+    assert_eq!(inc.len(), 2);
+    assert_eq!(exc.len(), 1);
+}
+```
+
+- [ ] **Step 2: Run tests**
+
+Run: `cd src-tauri && cargo test priority_test --test priority_test`
+Expected: PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src-tauri/tests/priority_test.rs
+git commit -m "test(criteria): add priority ordering and type filtering tests"
 ```
 
 ---

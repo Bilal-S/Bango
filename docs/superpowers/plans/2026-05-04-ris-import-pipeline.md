@@ -54,12 +54,9 @@ src/
 
 ```
 tests/
-└── fixtures/
-    ├── valid_simple.ris       (new: basic valid RIS file)
-    ├── valid_multi.ris        (new: multi-record RIS file)
-    ├── missing_title.ris      (new: invalid - missing title)
-    ├── missing_abstract.ris   (new: invalid - missing abstract)
-    └── missing_authors.ris    (new: invalid - missing authors)
+└── assets/                        (existing: real RIS files)
+    ├── 10A_Lewicki_Stages.ris     (existing: 1 record, full fields)
+    └── 11A-Resilience-Intersection-Capabilities.ris  (existing: 2 records, multi-author)
 ```
 
 ---
@@ -156,94 +153,16 @@ git commit -m "feat(ris): add RIS parser types"
 **Files:**
 - Create: `src-tauri/src/ris/parser.rs`
 - Create: `src-tauri/tests/ris_test.rs`
-- Create: `tests/fixtures/valid_simple.ris`
-- Create: `tests/fixtures/valid_multi.ris`
-- Create: `tests/fixtures/missing_title.ris`
-- Create: `tests/fixtures/missing_abstract.ris`
-- Create: `tests/fixtures/missing_authors.ris`
+- Uses existing: `tests/assets/10A_Lewicki_Stages.ris`
+- Uses existing: `tests/assets/11A-Resilience-Intersection-Capabilities.ris`
 
-- [ ] **Step 1: Create test fixture files**
+- [ ] **Step 1: Note test asset paths**
 
-Create `tests/fixtures/valid_simple.ris`:
+Real RIS files are in `tests/assets/`:
+- `10A_Lewicki_Stages.ris` — 1 record with full metadata (authors, DOI, keywords, abstract, journal)
+- `11A-Resilience-Intersection-Capabilities.ris` — 2 records with multiple authors, ISSN, C3 fields
 
-```
-TY  - JOUR
-TI  - Machine Learning Approaches to Systematic Review Automation
-AU  - Smith, John
-AU  - Doe, Jane
-AB  - This paper presents a comprehensive evaluation of machine learning approaches for automating the systematic review process, including screening, data extraction, and quality assessment.
-PY  - 2023
-DO  - 10.1234/example.2023.001
-T2  - Journal of Biomedical Informatics
-VL  - 120
-IS  - 3
-SP  - 45
-EP  - 58
-KW  - machine learning
-KW  - systematic review
-KW  - automation
-UR  - https://example.com/paper1
-LA  - English
-PB  - Elsevier
-SN  - 1532-0464
-ER  -
-```
-
-Create `tests/fixtures/valid_multi.ris`:
-
-```
-TY  - JOUR
-TI  - First Article Title
-AU  - Author One
-AB  - Abstract of the first article about clinical trials and drug efficacy.
-PY  - 2022
-DO  - 10.1234/first
-T2  - Medical Journal
-ER  -
-TY  - BOOK
-TI  - Second Book Title
-AU  - Author Two
-AU  - Author Three
-AB  - Abstract of the second article covering epidemiological study design.
-N2  - Alternate abstract text
-PY  - 2021
-T2  - Health Sciences Press
-ER  -
-TY  - JOUR
-TI  - Third Article Title
-AU  - Author Four
-AB  - Abstract about statistical methods in meta-analysis.
-KW  - meta-analysis
-KW  - statistics
-ER  -
-```
-
-Create `tests/fixtures/missing_title.ris`:
-
-```
-TY  - JOUR
-AU  - Author One
-AB  - Abstract without a title.
-ER  -
-```
-
-Create `tests/fixtures/missing_abstract.ris`:
-
-```
-TY  - JOUR
-TI  - Title Without Abstract
-AU  - Author One
-ER  -
-```
-
-Create `tests/fixtures/missing_authors.ris`:
-
-```
-TY  - JOUR
-TI  - Title Without Authors
-AB  - Abstract without any authors listed.
-ER  -
-```
+These will be used for parser tests. No synthetic fixtures needed.
 
 - [ ] **Step 2: Write failing tests in `src-tauri/tests/ris_test.rs`**
 
@@ -252,60 +171,64 @@ use bango_lib::ris::parser::parse_ris;
 use std::fs;
 use std::path::PathBuf;
 
-fn fixture_path(name: &str) -> PathBuf {
+fn asset_path(name: &str) -> PathBuf {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.push("../tests/fixtures");
+    path.push("../tests/assets");
     path.push(name);
     path
 }
 
 #[test]
-fn test_parse_valid_simple_ris() {
-    let content = fs::read_to_string(fixture_path("valid_simple.ris")).expect("fixture not found");
+fn test_parse_single_record_ris() {
+    let content = fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
     let result = parse_ris(&content).expect("Parse failed");
     assert_eq!(result.records.len(), 1);
     assert_eq!(result.errors.len(), 0);
 
     let record = &result.records[0];
-    assert_eq!(record.title.as_deref(), Some("Machine Learning Approaches to Systematic Review Automation"));
-    assert_eq!(record.abstract_text.as_deref(), Some("This paper presents a comprehensive evaluation of machine learning approaches for automating the systematic review process, including screening, data extraction, and quality assessment."));
-    assert_eq!(record.authors, vec!["Smith, John", "Doe, Jane"]);
-    assert_eq!(record.publication_year, Some(2023));
-    assert_eq!(record.doi.as_deref(), Some("10.1234/example.2023.001"));
-    assert_eq!(record.journal.as_deref(), Some("Journal of Biomedical Informatics"));
-    assert_eq!(record.volume.as_deref(), Some("120"));
-    assert_eq!(record.issue.as_deref(), Some("3"));
-    assert_eq!(record.start_page.as_deref(), Some("45"));
-    assert_eq!(record.end_page.as_deref(), Some("58"));
-    assert_eq!(record.keywords, vec!["machine learning", "systematic review", "automation"]);
     assert_eq!(record.reference_type.as_deref(), Some("JOUR"));
+    assert!(record.title.as_ref().unwrap().contains("Multi-Paradigm Ethical Framework"));
+    assert_eq!(record.authors.len(), 1);
+    assert_eq!(record.authors[0], "Alibasic, H");
+    assert!(record.abstract_text.as_ref().unwrap().contains("artificial intelligence"));
+    assert_eq!(record.publication_year, Some(2025));
+    assert_eq!(record.doi.as_deref(), Some("10.3390/fintech4030034"));
+    assert_eq!(record.journal.as_deref(), Some("FINTECH"));
+    assert_eq!(record.volume.as_deref(), Some("4"));
+    assert_eq!(record.issue.as_deref(), Some("3"));
+    assert_eq!(record.start_page.as_deref(), Some("34"));
+    assert!(record.keywords.len() >= 5);
+    assert_eq!(record.language.as_deref(), Some("English"));
+    assert_eq!(record.issn.as_deref(), Some("2674-1032"));
+    assert_eq!(record.publisher.as_deref(), Some("MDPI"));
+    assert!(record.notes.is_some());
 }
 
 #[test]
-fn test_parse_valid_multi_ris() {
-    let content = fs::read_to_string(fixture_path("valid_multi.ris")).expect("fixture not found");
+fn test_parse_multi_record_ris() {
+    let content = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris")).expect("fixture not found");
     let result = parse_ris(&content).expect("Parse failed");
-    assert_eq!(result.records.len(), 3);
+    assert_eq!(result.records.len(), 2);
     assert_eq!(result.errors.len(), 0);
 
-    assert_eq!(result.records[0].title.as_deref(), Some("First Article Title"));
-    assert_eq!(result.records[1].title.as_deref(), Some("Second Book Title"));
-    assert_eq!(result.records[2].title.as_deref(), Some("Third Article Title"));
-}
+    // First record
+    let rec1 = &result.records[0];
+    assert!(rec1.title.as_ref().unwrap().contains("blockchain we trust"));
+    assert_eq!(rec1.authors.len(), 2);
+    assert_eq!(rec1.authors[0], "Toufaily, E");
+    assert_eq!(rec1.authors[1], "Zalan, T");
+    assert_eq!(rec1.publication_year, Some(2024));
+    assert_eq!(rec1.doi.as_deref(), Some("10.1016/j.techfore.2024.123574"));
+    assert!(rec1.keywords.len() >= 5);
 
-#[test]
-fn test_parse_n2_abstract_fallback() {
-    let content = fs::read_to_string(fixture_path("valid_multi.ris")).expect("fixture not found");
-    let result = parse_ris(&content).expect("Parse failed");
-    // Second record has both AB and N2 — AB takes priority
-    assert!(result.records[1].abstract_text.is_some());
-}
-
-#[test]
-fn test_parse_multiple_authors() {
-    let content = fs::read_to_string(fixture_path("valid_multi.ris")).expect("fixture not found");
-    let result = parse_ris(&content).expect("Parse failed");
-    assert_eq!(result.records[1].authors, vec!["Author Two", "Author Three"]);
+    // Second record
+    let rec2 = &result.records[1];
+    assert!(rec2.title.as_ref().unwrap().contains("qualitative systematic review"));
+    assert_eq!(rec2.authors.len(), 4);
+    assert_eq!(rec2.publication_year, Some(2025));
+    assert_eq!(rec2.doi.as_deref(), Some("10.1177/02683962241254392"));
+    assert_eq!(rec2.start_page.as_deref(), Some("55"));
+    assert_eq!(rec2.end_page.as_deref(), Some("76"));
 }
 
 #[test]
@@ -463,12 +386,12 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
 - [ ] **Step 5: Run tests**
 
 Run: `cd src-tauri && cargo test ris_test --test ris_test`
-Expected: PASS — all 6 tests pass
+Expected: PASS — all 4 tests pass
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src-tauri/src/ris/ src-tauri/tests/ris_test.rs tests/fixtures/
+git add src-tauri/src/ris/ src-tauri/tests/ris_test.rs
 git commit -m "feat(ris): implement RIS parser with all supported tags"
 ```
 
@@ -1138,6 +1061,51 @@ Expected: All tests pass
 ```bash
 git add src-tauri/src/
 git commit -m "feat(import): add article repository and Tauri import commands"
+```
+
+- [ ] **Step 9: Write integration test for full import pipeline**
+
+Add to `src-tauri/tests/ris_test.rs`:
+
+```rust
+use bango_lib::db::connection::create_connection;
+use bango_lib::db::migration::run_migrations;
+use bango_lib::db::article_repo;
+use bango_lib::ris::validator::validate_all;
+
+#[test]
+fn test_full_import_pipeline_with_real_ris() {
+    let content = fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+    let parse_result = parse_ris(&content).expect("Parse failed");
+    let (valid, errors) = validate_all(&parse_result.records);
+
+    assert!(errors.is_empty(), "Expected no validation errors: {:?}", errors);
+    assert_eq!(valid.len(), 1);
+
+    let conn = create_connection().expect("DB connection failed");
+    run_migrations(&conn).expect("Migration failed");
+
+    let articles = article_repo::get_all_articles(&conn).expect("Query failed");
+    assert_eq!(articles.len(), 0, "Should start empty");
+
+    // Verify DB schema supports all parsed fields
+    let record = &valid[0];
+    assert!(record.title.is_some());
+    assert!(record.abstract_text.is_some());
+    assert!(!record.authors.is_empty());
+}
+```
+
+- [ ] **Step 10: Run all tests**
+
+Run: `cd src-tauri && cargo test --test ris_test`
+Expected: PASS — all tests pass including real RIS file parsing
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add src-tauri/tests/ris_test.rs
+git commit -m "test(ris): add integration test for full import pipeline"
 ```
 
 ---

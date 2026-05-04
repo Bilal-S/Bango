@@ -29,7 +29,8 @@ src-tauri/src/
 ├── db/
 │   └── article_repo.rs       (modify: add dedup queries)
 ├── tests/
-│   └── dedup_test.rs         (new: dedup unit tests)
+│   ├── dedup_test.rs         (new: dedup unit tests)
+│   └── dedup_integration_test.rs (new: full pipeline test with real RIS data)
 ```
 
 ### TypeScript/Vue (src/)
@@ -579,6 +580,95 @@ Expected: PASS — all tests pass
 ```bash
 git add src-tauri/src/dedup/engine.rs src-tauri/tests/dedup_test.rs
 git commit -m "feat(dedup): implement multi-strategy deduplication engine"
+```
+
+- [ ] **Step 6: Write integration test with real RIS data**
+
+Create `src-tauri/tests/dedup_integration_test.rs`:
+
+```rust
+use bango_lib::db::connection::create_connection;
+use bango_lib::db::migration::run_migrations;
+use bango_lib::db::article_repo;
+use bango_lib::dedup::engine::{self, DedupArticle};
+use bango_lib::ris::parser::parse_ris;
+use bango_lib::ris::validator::validate_all;
+use std::fs;
+use std::path::PathBuf;
+
+fn asset_path(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("../tests/assets");
+    path.push(name);
+    path
+}
+
+#[test]
+fn test_dedup_no_false_positives_on_real_data() {
+    // Both real RIS files have distinct articles — no duplicates should be found
+    let content1 = fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+    let content2 = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris")).expect("fixture not found");
+
+    let parsed1 = parse_ris(&content1).expect("Parse failed");
+    let parsed2 = parse_ris(&content2).expect("Parse failed");
+
+    let (valid1, _) = validate_all(&parsed1.records);
+    let (valid2, _) = validate_all(&parsed2.records);
+
+    let articles: Vec<DedupArticle> = valid1.iter().chain(valid2.iter()).map(|r| DedupArticle {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: r.title.clone().unwrap_or_default(),
+        authors: r.authors.clone(),
+        publication_year: r.publication_year,
+        doi: r.doi.clone(),
+    }).collect();
+
+    // 3 unique articles — no duplicates expected
+    assert_eq!(articles.len(), 3);
+    let result = engine::run_dedup(&articles);
+    assert_eq!(result.exact_duplicates.len(), 0, "Should not find exact duplicates in real data");
+    assert_eq!(result.fuzzy_matches.len(), 0, "Should not find fuzzy matches in real data");
+}
+
+#[test]
+fn test_dedup_detects_doi_duplicate_from_real_data() {
+    let content = fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+    let parsed = parse_ris(&content).expect("Parse failed");
+    let (valid, _) = validate_all(&parsed.records);
+
+    let original = &valid[0];
+    let mut articles = vec![DedupArticle {
+        id: "a1".to_string(),
+        title: original.title.clone().unwrap_or_default(),
+        authors: original.authors.clone(),
+        publication_year: original.publication_year,
+        doi: original.doi.clone(),
+    }];
+
+    // Add a duplicate with same DOI but different title
+    articles.push(DedupArticle {
+        id: "a2".to_string(),
+        title: "Completely Different Title".to_string(),
+        authors: vec!["Other Author".to_string()],
+        publication_year: Some(2020),
+        doi: original.doi.clone(),
+    });
+
+    let result = engine::run_dedup(&articles);
+    assert_eq!(result.exact_duplicates.len(), 1, "Should detect DOI duplicate");
+}
+```
+
+- [ ] **Step 7: Run integration tests**
+
+Run: `cd src-tauri && cargo test dedup_integration_test --test dedup_integration_test`
+Expected: PASS
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src-tauri/tests/dedup_integration_test.rs
+git commit -m "test(dedup): add integration tests with real RIS data"
 ```
 
 ---

@@ -154,6 +154,62 @@ git add src-tauri/src/db/audit_repo.rs src-tauri/src/db/mod.rs
 git commit -m "feat(audit): add audit trail repository"
 ```
 
+- [ ] **Add audit trail tests**
+
+Create `src-tauri/tests/audit_test.rs`:
+
+```rust
+use bango_lib::db::connection::create_connection;
+use bango_lib::db::migration::run_migrations;
+use bango_lib::db::audit_repo;
+
+#[test]
+fn test_create_and_retrieve_audit_entry() {
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+
+    // Insert an article first
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('art-1', 'imported', 'Test', 'Abstract', '[\"Author\"]')",
+        [],
+    ).unwrap();
+
+    audit_repo::create_entry(&conn, "art-1", "import", None, None, Some("Imported from test.ris"), "system").unwrap();
+
+    let entries = audit_repo::get_entries_for_article(&conn, "art-1").unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].action, "import");
+    assert_eq!(entries[0].source, "system");
+}
+
+#[test]
+fn test_audit_tracks_status_changes() {
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('art-2', 'working', 'Test', 'Abstract', '[\"Author\"]')",
+        [],
+    ).unwrap();
+
+    audit_repo::create_entry(&conn, "art-2", "status_change", Some("imported"), Some("working"), None, "system").unwrap();
+    audit_repo::create_entry(&conn, "art-2", "ai_screen", Some("working"), Some("included"), Some("AI screened: include"), "ai").unwrap();
+
+    let entries = audit_repo::get_entries_for_article(&conn, "art-2").unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].from_status, Some("imported".to_string()));
+    assert_eq!(entries[1].to_status, Some("included".to_string()));
+}
+```
+
+Run: `cd src-tauri && cargo test audit_test --test audit_test`
+Expected: PASS
+
+```bash
+git add src-tauri/tests/audit_test.rs
+git commit -m "test(audit): add audit trail repository tests"
+```
+
 ---
 
 ## Task 2: Article Query Commands with Search/Filter/Sort

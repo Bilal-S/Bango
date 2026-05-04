@@ -161,6 +161,37 @@ fn test_multiple_exclusion_picks_highest() {
     // Critical exclusion > Standard inclusion → exclude
     assert_eq!(resolve_decision(&input), "exclude");
 }
+
+#[test]
+fn test_realistic_screening_scenario() {
+    // Simulates screening: article matches 2 inclusion (standard, high) and 1 exclusion (standard)
+    let input = ScreeningInput {
+        inclusion_matches: vec![
+            make_match("inc-1", CriterionType::Inclusion, Priority::Standard),
+            make_match("inc-2", CriterionType::Inclusion, Priority::High),
+        ],
+        exclusion_matches: vec![
+            make_match("exc-1", CriterionType::Exclusion, Priority::Standard),
+        ],
+    };
+    // High inclusion > Standard exclusion → include
+    assert_eq!(resolve_decision(&input), "include");
+}
+
+#[test]
+fn test_critical_exclusion_overrides_all() {
+    let input = ScreeningInput {
+        inclusion_matches: vec![
+            make_match("inc-1", CriterionType::Inclusion, Priority::High),
+            make_match("inc-2", CriterionType::Inclusion, Priority::Standard),
+        ],
+        exclusion_matches: vec![
+            make_match("exc-1", CriterionType::Exclusion, Priority::Critical),
+        ],
+    };
+    // Critical exclusion > everything → exclude
+    assert_eq!(resolve_decision(&input), "exclude");
+}
 ```
 
 - [ ] **Step 3: Run tests to verify they fail**

@@ -517,6 +517,56 @@ git add src-tauri/src/prisma/
 git commit -m "feat(prisma): add PRISMA 2020 data computation and SVG rendering"
 ```
 
+- [ ] **Write PRISMA data accuracy tests**
+
+Create `src-tauri/tests/prisma_test.rs`:
+
+```rust
+use bango_lib::db::connection::create_connection;
+use bango_lib::db::migration::run_migrations;
+use bango_lib::prisma::data::compute_prisma_data;
+
+#[test]
+fn test_prisma_counts_from_empty_database() {
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+
+    let data = compute_prisma_data(&conn).unwrap();
+    assert_eq!(data.records_identified, 0);
+    assert_eq!(data.duplicates_removed, 0);
+    assert_eq!(data.records_screened, 0);
+    assert_eq!(data.records_excluded, 0);
+    assert_eq!(data.studies_included, 0);
+}
+
+#[test]
+fn test_prisma_counts_with_articles() {
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+
+    // Insert articles in various states
+    conn.execute("INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('a1', 'imported', 'T1', 'A1', '[]')", []).unwrap();
+    conn.execute("INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('a2', 'working', 'T2', 'A2', '[]')", []).unwrap();
+    conn.execute("INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('a3', 'included', 'T3', 'A3', '[]')", []).unwrap();
+    conn.execute("INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('a4', 'rejected', 'T4', 'A4', '[]')", []).unwrap();
+    conn.execute("INSERT INTO articles (id, status, title, abstract_text, authors, duplicate_of) VALUES ('a5', 'imported', 'T5', 'A5', '[]', 'a1')", []).unwrap();
+
+    let data = compute_prisma_data(&conn).unwrap();
+    assert_eq!(data.records_identified, 5); // All articles
+    assert_eq!(data.duplicates_removed, 1); // a5 has duplicate_of
+    assert_eq!(data.studies_included, 1); // Only a3
+    assert_eq!(data.records_excluded, 1); // Only a4
+}
+```
+
+Run: `cd src-tauri && cargo test prisma_test --test prisma_test`
+Expected: PASS
+
+```bash
+git add src-tauri/tests/prisma_test.rs
+git commit -m "test(prisma): add PRISMA data accuracy tests"
+```
+
 ---
 
 ## Task 3: Summary & PRISMA Tauri Commands

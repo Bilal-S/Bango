@@ -70,8 +70,12 @@ src/
 │   └── base.css                  (new: reset + base styles)
 ├── composables/
 │   └── use-tauri-command.ts      (new: typed Tauri invoke wrapper)
-└── utils/
-    └── formatters.ts             (new: display formatters)
+├── utils/
+│   └── formatters.ts             (new: display formatters)
+└── __tests__/
+    ├── formatters.test.ts      (new: utility function tests)
+    ├── nav-sidebar.test.ts     (new: component test)
+    └── app-shell.test.ts       (new: component test)
 ```
 
 ---
@@ -202,6 +206,23 @@ fn test_migrations_are_idempotent() {
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("First migration run failed");
     run_migrations(&conn).expect("Second migration run should succeed");
+}
+
+#[test]
+fn test_database_stores_all_article_fields() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, doi, publication_year, journal, keywords) VALUES ('test-1', 'imported', 'Test Title', 'Test Abstract', '[\"Author, A\"]', '10.1234/test', 2024, 'Test Journal', '[\"keyword1\"]')",
+        [],
+    ).expect("Insert failed");
+
+    let title: String = conn.query_row("SELECT title FROM articles WHERE id = 'test-1'", [], |row| row.get(0)).expect("Query failed");
+    assert_eq!(title, "Test Title");
+
+    let doi: Option<String> = conn.query_row("SELECT doi FROM articles WHERE id = 'test-1'", [], |row| row.get(0)).expect("Query failed");
+    assert_eq!(doi, Some("10.1234/test".to_string()));
 }
 ```
 
@@ -1323,6 +1344,99 @@ a {
 ```bash
 git add src/styles/
 git commit -m "feat(styles): add design tokens and base CSS from DESIGN.md"
+```
+
+---
+
+## Task 6.5: Vitest Setup & Frontend Test Infrastructure
+
+**Files:**
+- Modify: `package.json` (add vitest + test libs)
+- Create: `vitest.config.ts`
+- Create: `src/__tests__/formatters.test.ts`
+
+- [ ] **Step 1: Install Vitest and testing dependencies**
+
+Run: `npm install -D vitest @vue/test-utils happy-dom`
+
+- [ ] **Step 2: Create `vitest.config.ts`**
+
+```typescript
+import { defineConfig } from 'vitest/config';
+import vue from '@vitejs/plugin-vue';
+import { resolve } from 'path';
+
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+  },
+  test: {
+    environment: 'happy-dom',
+    globals: true,
+    include: ['src/**/*.test.ts'],
+  },
+});
+```
+
+- [ ] **Step 3: Add test script to `package.json`**
+
+Add to `scripts`:
+```json
+"test": "vitest run",
+"test:watch": "vitest"
+```
+
+- [ ] **Step 4: Write failing test for formatters**
+
+Create `src/__tests__/formatters.test.ts`:
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { formatDate, formatConfidence, formatPriority } from '@/utils/formatters';
+
+describe('formatDate', () => {
+  it('formats ISO string to locale date', () => {
+    const result = formatDate('2023-06-15T10:30:00Z');
+    expect(result).toContain('2023');
+    expect(result).toContain('Jun');
+  });
+});
+
+describe('formatConfidence', () => {
+  it('formats confidence as percentage', () => {
+    expect(formatConfidence(0.856)).toBe('86%');
+  });
+
+  it('returns dash for null', () => {
+    expect(formatConfidence(null)).toBe('—');
+  });
+
+  it('rounds correctly', () => {
+    expect(formatConfidence(0.999)).toBe('100%');
+  });
+});
+
+describe('formatPriority', () => {
+  it('capitalizes first letter', () => {
+    expect(formatPriority('critical')).toBe('Critical');
+    expect(formatPriority('standard')).toBe('Standard');
+  });
+});
+```
+
+- [ ] **Step 5: Run test to verify it fails**
+
+Run: `npm test`
+Expected: FAIL — `formatters.ts` not yet created (will be created in Task 9)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add vitest.config.ts package.json package-lock.json src/__tests__/
+git commit -m "feat(test): add Vitest infrastructure and formatter tests"
 ```
 
 ---

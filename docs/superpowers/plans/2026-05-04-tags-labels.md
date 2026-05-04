@@ -373,6 +373,22 @@ fn test_delete_label() {
     label_repo::delete_label(&conn, &label.id).unwrap();
     assert!(label_repo::get_all_labels(&conn).unwrap().is_empty());
 }
+
+#[test]
+fn test_tag_label_isolation() {
+    // Tags and labels live in separate tables — names can overlap
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+
+    tag_repo::create_tag(&conn, "machine-learning", "user_created").unwrap();
+    label_repo::create_label(&conn, "machine-learning", "user_created").unwrap();
+
+    let tags = tag_repo::get_all_tags(&conn).unwrap();
+    let labels = label_repo::get_all_labels(&conn).unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(tags[0].name, labels[0].name); // Same name, different entities
+}
 ```
 
 - [ ] **Step 3: Run tests**
