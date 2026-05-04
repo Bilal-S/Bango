@@ -30,8 +30,5 @@ impl Serialize for AppError {
     }
 }
 
-impl From<AppError> for tauri::ipc::InvokeError {
-    fn from(error: AppError) -> Self {
-        tauri::ipc::InvokeError::from(error.to_string())
-    }
-}
+// InvokeError has a blanket From<T: Serialize> impl, so AppError (which
+// implements Serialize) is automatically convertible — no manual impl needed.
