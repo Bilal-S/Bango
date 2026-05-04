@@ -2,6 +2,8 @@
 
 Comprehensive specification incorporating all resolved ambiguities from the initial requirements. Supersedes `initial reqs.md`.
 
+This is superseeded by `docs/superpowers/specs/bango-v3-spec.md`
+
 ---
 
 ## 1. Product Overview
