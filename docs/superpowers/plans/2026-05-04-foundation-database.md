@@ -1448,6 +1448,8 @@ git commit -m "feat(test): add Vitest infrastructure and formatter tests"
 - Create: `src/views/dashboard.vue`
 - Create: `src/views/placeholder.vue`
 
+> **Design reference:** Before implementing, read `docs/design-reference/01-dashboard.html` and `docs/design-reference/01-dashboard.png`. Extract the exact layout structure, spacing, and component hierarchy from the Stitch HTML. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
+
 - [ ] **Step 1: Install vue-router**
 
 Run: `npm install vue-router@4`
@@ -1576,6 +1578,8 @@ git commit -m "feat(router): add Vue Router, Pinia, and placeholder views"
 - Create: `src/components/nav-sidebar.vue`
 - Create: `src/components/app-shell.vue`
 - Modify: `src/App.vue`
+
+> **Design reference:** Before implementing, read the sidebar pattern from `docs/design-reference/00-design-patterns.md` Section 1. Extract the exact layout structure, spacing, and component hierarchy from the design patterns. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
 
 - [ ] **Step 1: Create `src/components/nav-sidebar.vue`**
 

@@ -414,6 +414,11 @@ git commit -m "feat(articles): add search/filter/sort queries and state manageme
 - Create: `src/views/article-list.vue`
 - Modify: `src/router/index.ts`
 
+> **Design references:**
+> - For the article list/table: read `docs/design-reference/03-article-list.html` and `docs/design-reference/03-article-list.png`.
+> - For the detail panel: read `docs/design-reference/04-article-detail.html` and `docs/design-reference/04-article-detail.png`.
+> Extract the exact layout structure, spacing, and component hierarchy from the Stitch HTML. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
+
 - [ ] **Step 1: Create `src/composables/use-article-search.ts`**
 
 ```typescript

@@ -698,6 +698,8 @@ git commit -m "feat(export): add Tauri commands for RIS export and project backu
 - Create: `src/components/export-dialog.vue`
 - Create: `src/components/import-dialog.vue`
 
+> **Design note:** No direct Stitch screen; follow `docs/design-reference/00-design-patterns.md` patterns for buttons, forms, and layout.
+
 - [ ] **Step 1: Create `src/composables/use-export.ts`**
 
 ```typescript

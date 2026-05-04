@@ -811,6 +811,8 @@ git commit -m "feat(criteria-llm): add Tauri commands for criteria CRUD and LLM 
 - Create: `src/views/criteria-editor.vue`
 - Modify: `src/router/index.ts`
 
+> **Design reference:** Before implementing, read `docs/design-reference/06-criteria-editor.html` and `docs/design-reference/06-criteria-editor.png`. Extract the exact layout structure, spacing, and component hierarchy from the Stitch HTML. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
+
 - [ ] **Step 1: Create `src/views/criteria-editor.vue`**
 
 ```vue
@@ -1104,6 +1106,8 @@ git commit -m "feat(criteria): add three-section criteria editor UI"
 - Create: `src/composables/use-llm-config.ts`
 - Create: `src/views/llm-config.vue`
 - Modify: `src/router/index.ts`
+
+> **Design reference:** Before implementing, read `docs/design-reference/10-llm-config.html` and `docs/design-reference/10-llm-config.png`. Extract the exact layout structure, spacing, and component hierarchy from the Stitch HTML. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
 
 - [ ] **Step 1: Create `src/composables/use-llm-config.ts`**
 

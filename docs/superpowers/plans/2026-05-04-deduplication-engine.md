@@ -907,6 +907,8 @@ git commit -m "feat(dedup): add Tauri commands for dedup operations"
 - Create: `src/views/dedup-review.vue`
 - Modify: `src/router/index.ts`
 
+> **Design reference:** Before implementing, read `docs/design-reference/07-dedup-review.html` and `docs/design-reference/07-dedup-review.png`. Extract the exact layout structure, spacing, and component hierarchy from the Stitch HTML. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
+
 - [ ] **Step 1: Create `src/composables/use-dedup.ts`**
 
 ```typescript
