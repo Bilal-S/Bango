@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tauri *)"
+      "Bash(npx tauri *)",
+      "Bash(npx -y @anthropic/mcp-client --help)",
+      "Bash(npm search *)",
+      "Bash(STITCH_API_KEY=\"AQ.Ab8RN6ID_cQ6iPbAlZMlwYAXCKniAgQdpvGU7KUP-__N1vT1JA\" npx -y @_davideast/stitch-mcp tool list_projects)"
     ]
   }
 }

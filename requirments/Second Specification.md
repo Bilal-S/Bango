@@ -611,7 +611,181 @@ Available filter options:
 
 ---
 
-## 19. Scope Exclusions (v1)
+## 19. UI Design System
+
+### 19.1 Design Tool
+
+UI designs are created in [Google Stitch](https://stitch.withgoogle.com/) and exported as code via the Stitch MCP server. The design system is captured in `DESIGN.md` at the project root, which serves as the single source of truth for design tokens (colors, typography, spacing, component specs).
+
+### 19.2 Design Tokens
+
+The design system is named **"Scholarly Precision"** — a Minimalist-Corporate aesthetic inspired by "Notion meets Zotero." Full token definitions live in `DESIGN.md`.
+
+**Colors:**
+- Primary Indigo: `#4F46E5` — primary actions, active states, Standard priority
+- Surface: `#FCF8FF` — main workspace background
+- Sidebar Slate: `#1E293B` — navigation panel
+- Text Primary: `#1B1B24`
+- Text Secondary: `#464555`
+- Outline: `#777587`
+- Error: `#BA1A1A`
+
+**Priority Colors:**
+- Critical: Bright Red (`#EF4444`)
+- High: Orange (`#F97316`)
+- Standard: Indigo (`#3B82F6`)
+- Low: Medium Gray (`#6B7280`)
+- Optional: Subtle Gray with dashed borders (`#9CA3AF`)
+
+**Typography:**
+- Font family: Inter, system-ui, sans-serif
+- Display: 24px/600, -0.02em tracking
+- H1: 20px/600, -0.01em tracking
+- H2: 16px/600
+- Body: 14px/400
+- Caption: 13px/400
+- Label-caps: 11px/600, 0.05em tracking
+- Mono: ui-monospace, SFMono-Regular, 13px/400
+
+**Spacing:**
+- Base unit: 4px
+- Container padding: 24px
+- Sidebar width: 260px
+- Gutter: 16px
+- Stack gap: 12px
+
+**Border Radius:**
+- Primary (containers, buttons, inputs): 8px (0.5rem)
+- Small: 4px (0.25rem)
+- Medium: 12px (0.75rem)
+- Pill badges/chips: 9999px (full round)
+
+### 19.3 Layout Philosophy
+
+- **Fixed-Fluid Hybrid**: Fixed-width sidebar + fluid main content area
+- **Master-Detail View**: 3-pane layout (Navigation > List > Content)
+- **8pt grid system** with 4px increments for dense data components
+- Subtle shadows only (`0 4px 12px rgba(0, 0, 0, 0.05)`)
+- Pane separation via 1px borders (`#E5E7EB`) rather than shadows
+
+### 19.4 Component Specifications
+
+| Component | Spec |
+|-----------|------|
+| **Primary Button** | Solid Indigo background, white text, 8px radius |
+| **Secondary Button** | Light gray ghost or subtle outline, 8px radius |
+| **Pill Badge** (Status) | Fully rounded (999px), soft tinted background, dark text |
+| **Colored Chip** (Tags) | Solid background, 8px radius |
+| **Outlined Chip** (Labels) | 1px border, no fill, 8px radius |
+| **Priority Indicator** | Solid circle or text-pill in semantic color; Optional uses dashed border |
+| **Input Field** | 1px gray border → 2px Indigo on focus, no inner shadow |
+| **Data Table** | Row-based, hover state `#F3F4F6`, horizontal rules only, no vertical dividers |
+
+### 19.5 Screen Inventory
+
+The following screens are designed in the Stitch project "Bango AI Literature Reviewer":
+
+| Screen | Description | Key Elements |
+|--------|-------------|-------------|
+| **Project Dashboard** | Landing screen after opening a project | Project name, article counts by status (pill badges), "Start Screening" CTA, activity feed, quick-action cards (Import RIS, Edit Criteria, View PRISMA) |
+| **Article List View** | Core data-heavy screen | Left sidebar with status tabs + counts, filterable/sortable table (checkbox, title, authors, year, journal, status badge, confidence bar, tag chips, label chips), top toolbar (search, sort, filter, bulk actions) |
+| **Article Detail Panel** | Right-sliding side panel | Full title, scrollable abstract, metadata (DOI, journal, year, keywords), AI decision card (decision, confidence %, reasoning, matched criteria), editable tags, labels, audit trail timeline |
+| **Criteria Editor** | Three-section editor | Research Aims (text entries, add/delete), Inclusion Criteria (text + priority dropdown), Exclusion Criteria (text + priority dropdown). Colored left borders for priority levels |
+| **AI Screening Progress** | Batch screening monitor | Progress bar, processed/total count, batch info, live decision feed, pause/resume/stop controls, stats panel (included, rejected, error counts) |
+| **RIS Import** | File import flow | Drag-and-drop zone, parsed article preview table (10 rows), import summary card, stepper (Upload → Parse → Dedup → Complete) |
+| **Deduplication Review** | Side-by-side comparison | Two-panel view (Record A vs Record B), yellow-highlighted differences, Keep A / Keep B / Keep Both buttons, duplicate pair list with similarity scores |
+| **PRISMA 2020 Flow Diagram** | Standard four-phase diagram | Identification → Screening → Eligibility → Included, record counts, exclusion arrows with reasons, export buttons (SVG/PNG/PDF), toggle for exclusion reason breakdown |
+| **LLM Configuration** | Provider setup form | Provider dropdown, endpoint URL, model name, API key (masked), max tokens slider, concurrency, request delay, Test Connection button, VRAM warning banner |
+| **Tag & Label Management** | Dual-panel management | Tags (colored chips, article counts, add input, AI generate button), Labels (outlined chips, add input, AI generate button) |
+
+---
+
+## 20. Design-to-Code Integration (Stitch MCP)
+
+### 20.1 Overview
+
+The project uses [Google Stitch](https://stitch.withgoogle.com/) for UI design and the `@_davideast/stitch-mcp` package as the MCP bridge between Stitch and Claude Code. This enables a direct design-to-code pipeline without manual handoff.
+
+### 20.2 Stitch Project
+
+- **Project Name**: "Bango AI Literature Reviewer"
+- **Project ID**: `4799487491058521486`
+- **Design System**: "Scholarly Precision" (exported as `DESIGN.md`)
+- **Screens**: 10 design screens + 1 design system instance + 2 icon variants
+
+### 20.3 MCP Configuration
+
+The Stitch MCP server is configured in `.claude/settings.local.json`:
+
+```json
+{
+  "mcpServers": {
+    "stitch": {
+      "command": "npx",
+      "args": ["-y", "@_davideast/stitch-mcp", "proxy"],
+      "env": {
+        "STITCH_API_KEY": "<stored-in-settings>"
+      }
+    }
+  }
+}
+```
+
+Authentication uses the `STITCH_API_KEY` environment variable (no browser-based OAuth required in development).
+
+### 20.4 Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `list_projects` | List all Stitch projects accessible with the configured API key |
+| `list_screens` | List all screens within a project |
+| `get_screen_code` | Download the HTML/CSS code for a specific screen |
+| `get_screen_image` | Get a screenshot of a specific screen as base64 |
+| `build_site` | Map screens to routes and generate a deployable site |
+
+### 20.5 Workflow
+
+```
+Google Stitch (generate / iterate designs)
+    → DESIGN.md (export design system tokens)
+    → Claude Code reads DESIGN.md + pulls screen code via MCP
+    → Generate Vue 3 components matching design tokens
+    → Iterate in Stitch for visual refinements
+    → Re-sync via DESIGN.md + MCP
+```
+
+**Step-by-step:**
+1. Generate or refine designs in Google Stitch using the prompts in the Stitch prompt plan.
+2. Export the updated design system as `DESIGN.md` (replaces the file in the project root).
+3. Use Claude Code with the Stitch MCP to pull screen HTML/CSS and generate matching Vue components.
+4. DESIGN.md provides the design token contract (colors, typography, spacing) — components reference these tokens rather than hardcoding values.
+5. All design changes are version-controlled alongside code via `DESIGN.md`.
+
+### 20.6 CLI Commands (Reference)
+
+```bash
+# List projects
+npx @_davideast/stitch-mcp tool list_projects
+
+# List screens in the Bango project
+npx @_davideast/stitch-mcp tool list_screens -d '{"projectId": "4799487491058521486"}'
+
+# Get screen code (HTML/CSS)
+npx @_davideast/stitch-mcp tool get_screen_code -d '{"projectId": "4799487491058521486", "screenId": "<screen-id>"}'
+
+# Get screen screenshot
+npx @_davideast/stitch-mcp tool get_screen_image -d '{"projectId": "4799487491058521486", "screenId": "<screen-id>"}'
+
+# Run health check
+npx @_davideast/stitch-mcp doctor
+
+# Interactive browser (requires terminal with raw mode support)
+npx @_davideast/stitch-mcp view --projects
+```
+
+---
+
+## 21. Scope Exclusions (v1)
 
 The following features are explicitly **out of scope** for v1:
 
