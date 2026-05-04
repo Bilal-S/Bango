@@ -1,0 +1,267 @@
+<!DOCTYPE html><html class="light" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>ResearchStream - PRISMA Flow</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary-fixed-dim": "#c3c0ff",
+                        "on-surface": "#1b1b24",
+                        "on-secondary-fixed": "#111c2d",
+                        "inverse-primary": "#c3c0ff",
+                        "on-primary": "#ffffff",
+                        "on-secondary-fixed-variant": "#3c475a",
+                        "on-secondary": "#ffffff",
+                        "tertiary-fixed-dim": "#ffb695",
+                        "surface-container-low": "#f5f2ff",
+                        "on-error": "#ffffff",
+                        "on-background": "#1b1b24",
+                        "inverse-surface": "#302f39",
+                        "on-primary-container": "#dad7ff",
+                        "inverse-on-surface": "#f3effc",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed-variant": "#3323cc",
+                        "surface": "#fcf8ff",
+                        "on-surface-variant": "#464555",
+                        "surface-container-highest": "#e4e1ee",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed": "#ffdbcc",
+                        "tertiary-container": "#a44100",
+                        "surface-container": "#f0ecf9",
+                        "surface-container-high": "#eae6f4",
+                        "background": "#fcf8ff",
+                        "primary-container": "#4f46e5",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-fixed-variant": "#7b2f00",
+                        "outline-variant": "#c7c4d8",
+                        "error-container": "#ffdad6",
+                        "secondary-fixed": "#d8e3fb",
+                        "on-tertiary-fixed": "#351000",
+                        "on-primary-fixed": "#0f0069",
+                        "outline": "#777587",
+                        "surface-tint": "#4d44e3",
+                        "on-secondary-container": "#586377",
+                        "secondary": "#545f73",
+                        "on-error-container": "#93000a",
+                        "tertiary": "#7e3000",
+                        "surface-bright": "#fcf8ff",
+                        "surface-dim": "#dcd8e5",
+                        "surface-variant": "#e4e1ee",
+                        "secondary-container": "#d5e0f8",
+                        "primary": "#3525cd",
+                        "secondary-fixed-dim": "#bcc7de",
+                        "on-tertiary-container": "#ffd2be",
+                        "primary-fixed": "#e2dfff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "16px",
+                        "unit": "4px",
+                        "sidebar-width": "260px",
+                        "container-padding": "24px",
+                        "stack-gap": "12px"
+                    },
+                    "fontFamily": {
+                        "mono": ["ui-monospace, SFMono-Regular"],
+                        "h2": ["Inter, system-ui"],
+                        "body-sm": ["Inter, system-ui"],
+                        "body-main": ["Inter, system-ui"],
+                        "label-caps": ["Inter, system-ui"],
+                        "h1": ["Inter, system-ui"],
+                        "display": ["Inter, system-ui"]
+                    },
+                    "fontSize": {
+                        "mono": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "h2": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                        "body-main": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "h1": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "display": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex">
+<!-- SideNavBar -->
+<nav class="bg-slate-900 dark:bg-black text-indigo-400 text-sm font-medium Inter docked fixed-left h-screen w-64 border-r border-slate-800 flex flex-col py-4 z-40 shrink-0">
+<div class="px-6 pb-6">
+<div class="flex items-center gap-3 mb-6">
+<img alt="Project icon" class="w-8 h-8 rounded-lg object-cover bg-slate-800" data-alt="A clean, minimalist 3D rendering of an abstract geometric shape, serving as a placeholder project icon. Soft, high-key lighting creates a professional, modern aesthetic suitable for an academic software interface." src="https://lh3.googleusercontent.com/aida-public/AB6AXuByQsqnk3A0JF0YI8-X9Ajm3-yc3LBcRY3Oz7YGF1khaRGtT5H9ZNizQ17yBzAJweDuf7SKSslgzPfLaZhIoQw-pNL23l56A6OkbOUOhLSEj02WA1OwnhGHE7fPX2uvo53lw1yNEM4UosaCvkoV93bVs67v6QMQ6nsXFgtriCrUN1my_kP1vXCv-ujEL3Sit7vJCtYmVTNwqnoaFBurQm7pB73cZpwZQTct4cjU3Rff-XCx6ksGD8_gTZTBYuea2reeWhVADNYuh5I">
+<div>
+<h2 class="text-white font-black tracking-tight text-base leading-tight">Bango</h2>
+<p class="text-slate-400 text-xs">LITERATURE REVIEW</p>
+</div>
+</div>
+<button class="w-full bg-primary hover:bg-primary/90 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-sm">add</span>
+                New Search
+            </button>
+</div>
+<div class="flex-1 overflow-y-auto space-y-1 px-2">
+<a class="text-slate-400 flex items-center gap-3 px-4 py-3 hover:text-white transition-all hover:bg-slate-800/50 rounded-lg" href="#">
+<span class="material-symbols-outlined">book</span>
+                Library
+            </a>
+<a class="bg-slate-800 text-white flex items-center gap-3 px-4 py-3 rounded-lg mx-2 duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+                PRISMA Flow
+            </a>
+<a class="text-slate-400 flex items-center gap-3 px-4 py-3 hover:text-white transition-all hover:bg-slate-800/50 rounded-lg" href="#">
+<span class="material-symbols-outlined">description</span>
+                Data Extraction
+            </a>
+<a class="text-slate-400 flex items-center gap-3 px-4 py-3 hover:text-white transition-all hover:bg-slate-800/50 rounded-lg" href="#">
+<span class="material-symbols-outlined">insights</span>
+                Synthesis
+            </a>
+<a class="text-slate-400 flex items-center gap-3 px-4 py-3 hover:text-white transition-all hover:bg-slate-800/50 rounded-lg" href="#">
+<span class="material-symbols-outlined">settings</span>
+                Project Settings
+            </a>
+</div>
+<div class="mt-auto px-2 space-y-1 pt-4 border-t border-slate-800/50">
+<a class="text-slate-400 flex items-center gap-3 px-4 py-2 hover:text-white transition-all hover:bg-slate-800/50 rounded-lg text-sm" href="#">
+<span class="material-symbols-outlined text-sm">help_outline</span>
+                Help
+            </a>
+<a class="text-slate-400 flex items-center gap-3 px-4 py-2 hover:text-white transition-all hover:bg-slate-800/50 rounded-lg text-sm" href="#">
+<span class="material-symbols-outlined text-sm">archive</span>
+                Archive
+            </a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 ml-[260px] flex flex-col min-h-screen bg-surface-container-lowest">
+<!-- TopAppBar (Generic Shell structure, customized for specific view) -->
+<header class="bg-white dark:bg-slate-900 font-sans antialiased text-slate-900 dark:text-slate-100 docked full-width top-0 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center px-6 py-4 w-full sticky top-0 z-30">
+<h1 class="font-display text-display text-on-surface">PRISMA 2020 Flow Diagram</h1>
+<div class="flex items-center gap-4">
+<label class="flex items-center cursor-pointer gap-3">
+<span class="font-body-main text-body-main text-on-surface-variant">Show exclusion reasons breakdown</span>
+<div class="relative">
+<input checked="" class="sr-only" type="checkbox">
+<div class="block bg-primary w-10 h-6 rounded-full"></div>
+<div class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform translate-x-4"></div>
+</div>
+</label>
+</div>
+</header>
+<!-- Diagram Canvas -->
+<div class="flex-1 p-container-padding overflow-auto flex flex-col items-center justify-start py-12">
+<!-- Flow Diagram Container -->
+<div class="relative w-full max-w-3xl flex flex-col items-center">
+<!-- Level 1: Identification -->
+<div class="w-64 bg-surface border border-outline-variant rounded-lg p-4 text-center shadow-sm relative z-10">
+<h3 class="font-h2 text-h2 text-on-surface mb-1">Identification</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Records identified from databases (n=1,240)</p>
+</div>
+<!-- Vertical Line & Branch -->
+<div class="w-full flex justify-center relative h-16">
+<div class="w-px h-full bg-outline-variant absolute left-1/2 transform -translate-x-1/2"></div>
+<!-- Right Arrow -->
+<div class="absolute top-1/2 left-1/2 w-32 h-px bg-outline-variant"></div>
+<div class="absolute top-1/2 left-[calc(50%+8rem)] transform -translate-y-1/2 translate-x-[-4px]">
+<span class="material-symbols-outlined text-outline-variant text-[16px]">arrow_right</span>
+</div>
+<!-- Down Arrow -->
+<div class="absolute bottom-[-4px] left-1/2 transform -translate-x-1/2">
+<span class="material-symbols-outlined text-outline-variant text-[16px]">arrow_drop_down</span>
+</div>
+<!-- Side Box: Duplicates -->
+<div class="absolute top-1/2 left-[calc(50%+9rem)] transform -translate-y-1/2 w-48 bg-surface-container-low border border-outline-variant border-dashed rounded-lg p-3 text-center">
+<p class="font-body-sm text-body-sm text-on-surface-variant">Duplicates removed (n=142)</p>
+</div>
+</div>
+<!-- Level 2: Screening -->
+<div class="w-64 bg-surface border border-outline-variant rounded-lg p-4 text-center shadow-sm relative z-10">
+<h3 class="font-h2 text-h2 text-on-surface mb-1">Screening</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Records screened (n=1,098)</p>
+</div>
+<!-- Vertical Line & Branch -->
+<div class="w-full flex justify-center relative h-16">
+<div class="w-px h-full bg-outline-variant absolute left-1/2 transform -translate-x-1/2"></div>
+<!-- Right Arrow -->
+<div class="absolute top-1/2 left-1/2 w-32 h-px bg-outline-variant"></div>
+<div class="absolute top-1/2 left-[calc(50%+8rem)] transform -translate-y-1/2 translate-x-[-4px]">
+<span class="material-symbols-outlined text-outline-variant text-[16px]">arrow_right</span>
+</div>
+<!-- Down Arrow -->
+<div class="absolute bottom-[-4px] left-1/2 transform -translate-x-1/2">
+<span class="material-symbols-outlined text-outline-variant text-[16px]">arrow_drop_down</span>
+</div>
+<!-- Side Box: Excluded by AI -->
+<div class="absolute top-1/2 left-[calc(50%+9rem)] transform -translate-y-1/2 w-48 bg-surface-container-low border border-outline-variant border-dashed rounded-lg p-3 text-center">
+<p class="font-body-sm text-body-sm text-on-surface-variant">Records excluded by AI (n=986)</p>
+</div>
+</div>
+<!-- Level 3: Eligibility -->
+<div class="w-64 bg-surface border border-outline-variant rounded-lg p-4 text-center shadow-sm relative z-10">
+<h3 class="font-h2 text-h2 text-on-surface mb-1">Eligibility</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Full-text articles assessed for eligibility (n=112)</p>
+</div>
+<!-- Vertical Line & Branch -->
+<div class="w-full flex justify-center relative h-16">
+<div class="w-px h-full bg-outline-variant absolute left-1/2 transform -translate-x-1/2"></div>
+<!-- Right Arrow -->
+<div class="absolute top-1/2 left-1/2 w-32 h-px bg-outline-variant"></div>
+<div class="absolute top-1/2 left-[calc(50%+8rem)] transform -translate-y-1/2 translate-x-[-4px]">
+<span class="material-symbols-outlined text-outline-variant text-[16px]">arrow_right</span>
+</div>
+<!-- Down Arrow -->
+<div class="absolute bottom-[-4px] left-1/2 transform -translate-x-1/2">
+<span class="material-symbols-outlined text-outline-variant text-[16px]">arrow_drop_down</span>
+</div>
+<!-- Side Box: Excluded with reasons -->
+<div class="absolute top-1/2 left-[calc(50%+9rem)] transform -translate-y-1/2 w-48 bg-surface-container-low border border-outline-variant border-dashed rounded-lg p-3 text-left">
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-2">Articles excluded with reasons (n=28)</p>
+<ul class="text-[11px] leading-[16px] text-on-surface-variant/80 list-disc pl-4 space-y-1">
+<li class="">Wrong intervention (n=12)</li>
+<li class="">Wrong population (n=9)</li>
+<li class="">No full text (n=7)</li>
+</ul>
+</div>
+</div>
+<!-- Level 4: Included -->
+<div class="w-64 bg-primary-fixed border border-primary-fixed-dim rounded-lg p-4 text-center shadow-sm relative z-10">
+<h3 class="font-h2 text-h2 text-on-primary-fixed mb-1">Included</h3>
+<p class="font-body-sm text-body-sm text-on-primary-fixed-variant">Studies included in review (n=84)</p>
+</div>
+</div>
+<!-- Actions -->
+<div class="mt-16 flex gap-4 justify-center w-full">
+<button class="flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg font-body-main text-body-main text-on-surface hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                    Export as SVG
+                </button>
+<button class="flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg font-body-main text-body-main text-on-surface hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                    Export as PNG
+                </button>
+<button class="flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg font-body-main text-body-main text-on-surface hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]">download</span>
+                    Export as PDF
+                </button>
+</div>
+</div>
+</main>
+
+
+</body></html>

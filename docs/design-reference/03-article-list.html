@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "surface-tint": "#4d44e3",
+                "tertiary-container": "#a44100",
+                "outline-variant": "#c7c4d8",
+                "on-tertiary-container": "#ffd2be",
+                "surface-container-highest": "#e4e1ee",
+                "surface-container-high": "#eae6f4",
+                "on-surface": "#1b1b24",
+                "primary-fixed": "#e2dfff",
+                "on-secondary-fixed": "#111c2d",
+                "error-container": "#ffdad6",
+                "surface-container-low": "#f5f2ff",
+                "tertiary": "#7e3000",
+                "on-primary-container": "#dad7ff",
+                "on-tertiary-fixed": "#351000",
+                "on-tertiary": "#ffffff",
+                "on-primary-fixed": "#0f0069",
+                "on-background": "#1b1b24",
+                "surface-container": "#f0ecf9",
+                "tertiary-fixed": "#ffdbcc",
+                "secondary-fixed": "#d8e3fb",
+                "on-tertiary-fixed-variant": "#7b2f00",
+                "on-surface-variant": "#464555",
+                "on-error": "#ffffff",
+                "on-secondary": "#ffffff",
+                "on-primary-fixed-variant": "#3323cc",
+                "outline": "#777587",
+                "primary-container": "#4f46e5",
+                "inverse-surface": "#302f39",
+                "tertiary-fixed-dim": "#ffb695",
+                "surface-container-lowest": "#ffffff",
+                "secondary-fixed-dim": "#bcc7de",
+                "primary": "#3525cd",
+                "secondary": "#545f73",
+                "surface": "#fcf8ff",
+                "background": "#fcf8ff",
+                "on-error-container": "#93000a",
+                "on-secondary-container": "#586377",
+                "inverse-primary": "#c3c0ff",
+                "inverse-on-surface": "#f3effc",
+                "on-secondary-fixed-variant": "#3c475a",
+                "secondary-container": "#d5e0f8",
+                "surface-dim": "#dcd8e5",
+                "surface-bright": "#fcf8ff",
+                "error": "#ba1a1a",
+                "primary-fixed-dim": "#c3c0ff",
+                "surface-variant": "#e4e1ee",
+                "on-primary": "#ffffff"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+            },
+            "spacing": {
+                "stack-gap": "12px",
+                "container-padding": "24px",
+                "unit": "4px",
+                "gutter": "16px",
+                "sidebar-width": "260px"
+            },
+            "fontFamily": {
+                "display": ["Inter, system-ui"],
+                "body-sm": ["Inter, system-ui"],
+                "label-caps": ["Inter, system-ui"],
+                "h2": ["Inter, system-ui"],
+                "h1": ["Inter, system-ui"],
+                "body-main": ["Inter, system-ui"],
+                "mono": ["ui-monospace, SFMono-Regular"]
+            },
+            "fontSize": {
+                "display": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
+                "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                "h2": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                "h1": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                "body-main": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "mono": ["13px", {"lineHeight": "18px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background antialiased flex">
+<!-- SideNavBar -->
+<aside class="bg-slate-800 text-slate-400 w-64 h-screen fixed left-0 top-0 border-r border-slate-700 flex flex-col p-4 gap-2 duration-200 ease-in-out">
+<div class="flex items-center gap-3 mb-8 px-2">
+<div class="w-8 h-8 rounded bg-primary-container flex items-center justify-center text-white font-bold">B</div>
+<div>
+<h1 class="text-xl font-bold tracking-tight text-white leading-none">Bango</h1>
+<p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Literature Review</p>
+</div>
+</div>
+<button class="mb-6 bg-indigo-500 hover:bg-indigo-400 text-white py-2 px-4 rounded-md font-medium text-sm flex items-center justify-center gap-2 transition-colors">
+<span class="material-symbols-outlined text-[18px]">add</span>
+            New Search
+        </button>
+<nav class="flex-1 space-y-1">
+<a class="text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-md px-3 py-2 transition-all flex items-center justify-between group" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-sans text-sm font-medium">Dashboard</span>
+</div>
+</a>
+<a class="bg-slate-700 text-white rounded-md px-3 py-2 flex items-center justify-between" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined">description</span>
+<span class="font-sans text-sm font-medium">Articles</span>
+</div>
+<span class="text-[10px] bg-slate-600 px-1.5 py-0.5 rounded text-slate-300 font-mono">1,240</span>
+</a>
+<div class="ml-9 space-y-1 mt-1 mb-2">
+<a class="flex items-center justify-between text-[13px] py-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<span>Included</span>
+<span class="font-mono text-[11px]">112</span>
+</a>
+<a class="flex items-center justify-between text-[13px] py-1 text-slate-500 hover:text-slate-300 transition-colors" href="#">
+<span>Rejected</span>
+<span class="font-mono text-[11px]">678</span>
+</a>
+</div>
+<a class="text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-md px-3 py-2 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">rule</span>
+<span class="font-sans text-sm font-medium">Criteria</span>
+</a>
+<a class="text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-md px-3 py-2 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-sans text-sm font-medium">Screening</span>
+</a>
+<a class="text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-md px-3 py-2 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-sans text-sm font-medium">Settings</span>
+</a>
+</nav>
+<div class="mt-auto pt-4 border-t border-slate-700 space-y-1">
+<a class="text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-md px-3 py-2 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-sans text-sm font-medium">Support</span>
+</a>
+<a class="text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 rounded-md px-3 py-2 transition-all flex items-center gap-3" href="#">
+<span class="material-symbols-outlined">account_circle</span>
+<span class="font-sans text-sm font-medium">Account</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 flex-1 flex flex-col min-h-screen">
+<!-- TopAppBar -->
+<header class="bg-white/80 backdrop-blur-md fixed top-0 right-0 left-64 h-16 z-40 border-b border-slate-200 flex items-center justify-between px-6 w-auto">
+<div class="flex items-center gap-8">
+<h2 class="text-lg font-semibold text-slate-900">Articles</h2>
+<nav class="flex gap-6">
+<a class="text-indigo-600 font-bold border-b-2 border-indigo-600 pb-1 font-sans text-sm antialiased" href="#">Projects</a>
+<a class="text-slate-500 hover:text-slate-900 transition-colors font-sans text-sm antialiased" href="#">Archive</a>
+<a class="text-slate-500 hover:text-slate-900 transition-colors font-sans text-sm antialiased" href="#">Team</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+<input class="pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all" placeholder="Search articles..." type="text"/>
+</div>
+<div class="flex items-center gap-2 border-l border-slate-200 pl-4">
+<button class="p-1.5 text-slate-500 hover:bg-slate-50 rounded-md transition-all active:scale-95">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-1.5 text-slate-500 hover:bg-slate-50 rounded-md transition-all active:scale-95">
+<span class="material-symbols-outlined">help</span>
+</button>
+<button class="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-all active:scale-95">
+                        Export Results
+                    </button>
+</div>
+<img class="w-8 h-8 rounded-full border border-slate-200 cursor-pointer object-cover" data-alt="A professional close-up portrait of a female academic researcher with a neutral, focused expression. The background is a brightly lit, minimalist office with clean white walls and a soft depth of field effect. She is wearing modern glasses and professional business casual attire. The lighting is high-key and natural, emphasizing a light-mode, scholarly aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4vpsh8elnumiQzcPSUn4gO1LHeHmtyR-J3TjL3cJtRzSjFgvfvHuqDzZljOu0ifsCaZpNTT-MPX4xzFQxbm7F6_b5MfMNr5cXh3WGP58uBaL5nWo9cV82E6KeN6Nr3EpD1L02pM1oIAg6OXhf3qW1zFqaQja4teCf5ynI9VvYOqwEkiBVEy29SMMD3_hPDPv79HRhPHYOgV5fr94gwz3ayZeteyTwVSxuF7IcD2IxHWBhZkv0gZrqkohmITaekrd_4XiMv5xKzUQ"/>
+</div>
+</header>
+<!-- Table Content -->
+<div class="mt-16 p-container-padding flex-1">
+<!-- Toolbar -->
+<div class="flex items-center justify-between mb-6 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg text-slate-700 text-sm font-medium cursor-pointer hover:bg-slate-200 transition-colors">
+<span class="material-symbols-outlined text-[18px]">filter_list</span>
+                        Filter
+                    </div>
+<div class="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-600 text-sm cursor-pointer hover:bg-slate-50 transition-colors">
+<span class="material-symbols-outlined text-[18px]">sort</span>
+                        Sort: Relevance
+                    </div>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-xs text-slate-400 mr-2">12 items selected</span>
+<button class="px-3 py-1.5 text-indigo-600 bg-indigo-50 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">Bulk Actions</button>
+<button class="p-1.5 text-slate-400 hover:bg-slate-100 rounded-md transition-colors"><span class="material-symbols-outlined">more_vert</span></button>
+</div>
+</div>
+<!-- Data Table -->
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead class="bg-slate-50/50 border-b border-slate-200">
+<tr>
+<th class="py-4 px-4 w-10"><input class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" type="checkbox"/></th>
+<th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Title</th>
+<th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Authors</th>
+<th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-16">Year</th>
+<th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Journal</th>
+<th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Status</th>
+<th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-32">Confidence</th>
+<th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Tags</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-slate-100">
+<!-- Row 1 -->
+<tr class="hover:bg-slate-50/80 transition-colors group">
+<td class="py-5 px-4"><input class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" type="checkbox"/></td>
+<td class="py-5 px-2 max-w-xs">
+<p class="text-body-main font-semibold text-slate-900 truncate">Socio-Economic Impacts of AI in Emerging Markets...</p>
+</td>
+<td class="py-5 px-2 text-body-sm text-slate-600">Chen, A. &amp; Gupta, R.</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 font-mono">2023</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 italic">Journal of Digital Tech</td>
+<td class="py-5 px-2">
+<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700">Included</span>
+</td>
+<td class="py-5 px-2">
+<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+<div class="bg-indigo-500 h-full w-[92%]"></div>
+</div>
+</td>
+<td class="py-5 px-2">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-lg text-[11px] font-medium">Artificial Intelligence</span>
+<span class="px-2 py-0.5 border border-slate-200 text-slate-500 rounded-lg text-[11px] font-medium">Systematic</span>
+</div>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-slate-50/80 transition-colors group">
+<td class="py-5 px-4"><input class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" type="checkbox"/></td>
+<td class="py-5 px-2 max-w-xs">
+<p class="text-body-main font-semibold text-slate-900 truncate">Metadata Standards for Interdisciplinary Research...</p>
+</td>
+<td class="py-5 px-2 text-body-sm text-slate-600">Smith, J. et al.</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 font-mono">2022</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 italic">Open Science Quart.</td>
+<td class="py-5 px-2">
+<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700">Pending</span>
+</td>
+<td class="py-5 px-2">
+<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+<div class="bg-indigo-300 h-full w-[45%]"></div>
+</div>
+</td>
+<td class="py-5 px-2">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-lg text-[11px] font-medium">Data Management</span>
+<span class="px-2 py-0.5 border border-slate-200 text-slate-500 rounded-lg text-[11px] font-medium">Librarianship</span>
+</div>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-slate-50/80 transition-colors group">
+<td class="py-5 px-4"><input class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" type="checkbox"/></td>
+<td class="py-5 px-2 max-w-xs">
+<p class="text-body-main font-semibold text-slate-900 truncate">Methodological Bias in Qualitative Case Studies...</p>
+</td>
+<td class="py-5 px-2 text-body-sm text-slate-600">Vargas, L.</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 font-mono">2024</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 italic">Methodology Review</td>
+<td class="py-5 px-2">
+<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-700">Rejected</span>
+</td>
+<td class="py-5 px-2">
+<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+<div class="bg-indigo-500 h-full w-[78%]"></div>
+</div>
+</td>
+<td class="py-5 px-2">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-lg text-[11px] font-medium">Case Study</span>
+<span class="px-2 py-0.5 border border-slate-200 text-slate-500 rounded-lg text-[11px] font-medium">Critical</span>
+</div>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-slate-50/80 transition-colors group">
+<td class="py-5 px-4"><input class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" type="checkbox"/></td>
+<td class="py-5 px-2 max-w-xs">
+<p class="text-body-main font-semibold text-slate-900 truncate">Large Language Models in Academic Literature Reviews...</p>
+</td>
+<td class="py-5 px-2 text-body-sm text-slate-600">O'Neil, B.</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 font-mono">2023</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 italic">Nature Machine Intelligence</td>
+<td class="py-5 px-2">
+<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-100 text-indigo-700">Reviewing</span>
+</td>
+<td class="py-5 px-2">
+<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+<div class="bg-indigo-500 h-full w-[98%]"></div>
+</div>
+</td>
+<td class="py-5 px-2">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-teal-100 text-teal-700 rounded-lg text-[11px] font-medium">NLP</span>
+<span class="px-2 py-0.5 border border-slate-200 text-slate-500 rounded-lg text-[11px] font-medium">Pre-print</span>
+</div>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-slate-50/80 transition-colors group">
+<td class="py-5 px-4"><input class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" type="checkbox"/></td>
+<td class="py-5 px-2 max-w-xs">
+<p class="text-body-main font-semibold text-slate-900 truncate">The Ethics of Automated Screening in Medicine...</p>
+</td>
+<td class="py-5 px-2 text-body-sm text-slate-600">Kaufman, H.</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 font-mono">2021</td>
+<td class="py-5 px-2 text-body-sm text-slate-600 italic">Bioethics Journal</td>
+<td class="py-5 px-2">
+<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700">Included</span>
+</td>
+<td class="py-5 px-2">
+<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+<div class="bg-indigo-500 h-full w-[85%]"></div>
+</div>
+</td>
+<td class="py-5 px-2">
+<div class="flex flex-wrap gap-1">
+<span class="px-2 py-0.5 bg-rose-100 text-rose-700 rounded-lg text-[11px] font-medium">Ethics</span>
+<span class="px-2 py-0.5 border border-slate-200 text-slate-500 rounded-lg text-[11px] font-medium">Healthcare</span>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+<span class="text-xs text-slate-500 font-medium">Showing 1-12 of 1,240 articles</span>
+<div class="flex gap-2">
+<button class="px-3 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50">Previous</button>
+<button class="px-3 py-1 bg-white border border-slate-200 rounded text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors">Next</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</body></html>
