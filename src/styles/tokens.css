@@ -1,0 +1,83 @@
+:root {
+  /* Colors — Scholarly Precision */
+  --color-primary: #4f46e5;
+  --color-primary-container: #4f46e5;
+  --color-on-primary: #ffffff;
+  --color-surface: #fcf8ff;
+  --color-surface-dim: #dcd8e5;
+  --color-surface-container: #f0ecf9;
+  --color-surface-container-low: #f5f2ff;
+  --color-surface-container-high: #eae6f4;
+  --color-surface-container-highest: #e4e1ee;
+  --color-surface-bright: #fcf8ff;
+  --color-on-surface: #1b1b24;
+  --color-on-surface-variant: #464555;
+  --color-outline: #777587;
+  --color-outline-variant: #c7c4d8;
+  --color-sidebar: #1e293b;
+  --color-sidebar-text: #e2e8f0;
+  --color-sidebar-hover: #334155;
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+  --color-on-error: #ffffff;
+  --color-border: #e5e7eb;
+  --color-hover: #f3f4f6;
+
+  /* Priority Colors */
+  --color-priority-critical: #ef4444;
+  --color-priority-high: #f97316;
+  --color-priority-standard: #3b82f6;
+  --color-priority-low: #6b7280;
+  --color-priority-optional: #9ca3af;
+
+  /* Typography */
+  --font-family: Inter, system-ui, -apple-system, sans-serif;
+  --font-family-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  --font-size-display: 24px;
+  --font-size-h1: 20px;
+  --font-size-h2: 16px;
+  --font-size-body: 14px;
+  --font-size-caption: 13px;
+  --font-size-label: 11px;
+  --font-size-mono: 13px;
+
+  --font-weight-semibold: 600;
+  --font-weight-regular: 400;
+
+  --line-height-display: 32px;
+  --line-height-h1: 28px;
+  --line-height-h2: 24px;
+  --line-height-body: 20px;
+  --line-height-caption: 18px;
+  --line-height-label: 16px;
+
+  --letter-spacing-display: -0.02em;
+  --letter-spacing-h1: -0.01em;
+  --letter-spacing-label: 0.05em;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Layout */
+  --sidebar-width: 260px;
+  --container-padding: 24px;
+  --gutter: 16px;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-default: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
