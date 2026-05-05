@@ -38,10 +38,25 @@ export function useImport() {
   const importResult = ref<ImportResult | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  const removedIndices = ref<Set<number>>(new Set());
 
   const hasFile = computed(() => fileContent.value !== null);
   const hasErrors = computed(() => (preview.value?.errorCount ?? 0) > 0);
   const canImport = computed(() => preview.value !== null && preview.value.errorCount === 0);
+
+  const visibleArticles = computed(() => {
+    if (!preview.value) return [];
+    return preview.value.previewArticles.filter((_, i) => !removedIndices.value.has(i));
+  });
+
+  const visibleCount = computed(() => {
+    if (!preview.value) return 0;
+    return preview.value.validRecords - removedIndices.value.size;
+  });
+
+  function removeArticle(index: number): void {
+    removedIndices.value = new Set([...removedIndices.value, index]);
+  }
 
   async function loadFile(file: File): Promise<void> {
     loading.value = true;
@@ -90,6 +105,7 @@ export function useImport() {
         request: {
           content: fileContent.value,
           fileName: fileName.value,
+          excludedIndices: [...removedIndices.value],
         },
       });
       step.value = 'complete';
@@ -108,6 +124,7 @@ export function useImport() {
     importResult.value = null;
     loading.value = false;
     error.value = null;
+    removedIndices.value = new Set();
   }
 
   return {
@@ -120,9 +137,13 @@ export function useImport() {
     hasFile,
     hasErrors,
     canImport,
+    removedIndices,
+    visibleArticles,
+    visibleCount,
     loadFile,
     parseFile,
     confirmImport,
+    removeArticle,
     reset,
   };
 }

@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import type { PreviewArticle, ImportError } from '@/composables/use-import';
 
-defineProps<{
+const props = defineProps<{
   articles: PreviewArticle[];
   errorCount: number;
   errors: ImportError[];
+  removedIndices: Set<number>;
+}>();
+
+defineEmits<{
+  remove: [index: number];
 }>();
 </script>
 
@@ -27,18 +32,22 @@ defineProps<{
             <th>Authors</th>
             <th>Year</th>
             <th>Journal</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(article, i) in articles" :key="i">
-            <td>{{ article.title }}</td>
-            <td>{{ article.authors.join('; ') }}</td>
-            <td>{{ article.publicationYear ?? '—' }}</td>
-            <td>{{ article.journal ?? '—' }}</td>
-          </tr>
+          <template v-for="(article, i) in articles" :key="i">
+            <tr v-if="!removedIndices.has(i)">
+              <td>{{ article.title }}</td>
+              <td>{{ article.authors.join('; ') }}</td>
+              <td>{{ article.publicationYear ?? '—' }}</td>
+              <td>{{ article.journal ?? '—' }}</td>
+              <td><button class="preview__remove" @click="$emit('remove', i)">×</button></td>
+            </tr>
+          </template>
         </tbody>
       </table>
-      <p class="preview__note">Showing first {{ articles.length }} articles</p>
+      <p class="preview__note">Showing {{ articles.length - props.removedIndices.size }} articles</p>
     </div>
   </div>
 </template>
@@ -101,6 +110,23 @@ defineProps<{
 
 .preview__table tr:hover td {
   background-color: var(--color-hover);
+}
+
+.preview__remove {
+  background: none;
+  border: none;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-default);
+  line-height: 1;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.preview__remove:hover {
+  color: var(--color-error);
+  background-color: var(--color-error-container);
 }
 
 .preview__note {

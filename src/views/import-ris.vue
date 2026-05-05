@@ -12,9 +12,12 @@ const {
   loading,
   error,
   canImport,
+  removedIndices,
+  visibleCount,
   loadFile,
   parseFile,
   confirmImport,
+  removeArticle,
   reset,
 } = useImport();
 </script>
@@ -55,7 +58,7 @@ const {
             <span class="import-view__stat-label">Total Records</span>
           </div>
           <div class="import-view__stat">
-            <span class="import-view__stat-value">{{ preview.validRecords }}</span>
+            <span class="import-view__stat-value">{{ visibleCount }}</span>
             <span class="import-view__stat-label">Valid</span>
           </div>
           <div class="import-view__stat import-view__stat--error">
@@ -68,12 +71,14 @@ const {
           :articles="preview.previewArticles"
           :error-count="preview.errorCount"
           :errors="preview.errors"
+          :removed-indices="removedIndices"
+          @remove="removeArticle"
         />
 
         <div class="import-view__actions">
           <button class="btn btn--secondary" @click="reset">Cancel</button>
           <button class="btn btn--primary" :disabled="!canImport || loading" @click="confirmImport">
-            {{ loading ? 'Importing...' : `Import ${preview.validRecords} Articles` }}
+            {{ loading ? 'Importing...' : `Import ${visibleCount} Articles` }}
           </button>
         </div>
       </section>
