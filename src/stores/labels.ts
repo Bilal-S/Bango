@@ -42,5 +42,14 @@ export const useLabelsStore = defineStore('labels', () => {
     }
   }
 
-  return { labels, loading, suggesting, fetchLabels, createLabel, renameLabel, deleteLabel, suggestLabels };
+  return {
+    labels,
+    loading,
+    suggesting,
+    fetchLabels,
+    createLabel,
+    renameLabel,
+    deleteLabel,
+    suggestLabels,
+  };
 });

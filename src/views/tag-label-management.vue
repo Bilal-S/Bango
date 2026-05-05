@@ -52,12 +52,8 @@ async function addLabel(): Promise<void> {
           <div class="p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
             <div class="flex items-center justify-between mb-4">
               <div>
-                <h2
-                  class="font-h2 text-h2 text-on-surface flex items-center gap-2"
-                >
-                  <span class="material-symbols-outlined text-primary text-[20px]"
-                    >sell</span
-                  >
+                <h2 class="font-h2 text-h2 text-on-surface flex items-center gap-2">
+                  <span class="material-symbols-outlined text-primary text-[20px]">sell</span>
                   Tags
                 </h2>
                 <p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
@@ -104,9 +100,7 @@ async function addLabel(): Promise<void> {
                 <TagChip :name="tag.name" @remove="tagsStore.deleteTag(tag.id)" />
               </div>
               <div class="flex items-center gap-4">
-                <div
-                  class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
+                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
                     @click="tagsStore.deleteTag(tag.id)"
@@ -132,9 +126,7 @@ async function addLabel(): Promise<void> {
           <div class="p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
             <div class="flex items-center justify-between mb-4">
               <div>
-                <h2
-                  class="font-h2 text-h2 text-on-surface flex items-center gap-2"
-                >
+                <h2 class="font-h2 text-h2 text-on-surface flex items-center gap-2">
                   <span class="material-symbols-outlined text-secondary text-[20px]"
                     >bookmark_manager</span
                   >
@@ -181,15 +173,10 @@ async function addLabel(): Promise<void> {
               class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
             >
               <div class="flex items-center gap-3">
-                <LabelChip
-                  :name="label.name"
-                  @remove="labelsStore.deleteLabel(label.id)"
-                />
+                <LabelChip :name="label.name" @remove="labelsStore.deleteLabel(label.id)" />
               </div>
               <div class="flex items-center gap-4">
-                <div
-                  class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
+                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
                     @click="labelsStore.deleteLabel(label.id)"
