@@ -1,0 +1,146 @@
+use serde::{Deserialize, Serialize};
+use tauri::State;
+
+use crate::db::connection::DbState;
+use crate::db::criteria_repo;
+use crate::db::label_repo;
+use crate::db::llm_config_repo;
+use crate::error::AppError;
+use crate::llm::client;
+use crate::models::label::Label;
+
+#[tauri::command]
+pub fn get_labels(db_state: State<'_, DbState>) -> Result<Vec<Label>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    label_repo::get_all_labels(&conn)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateLabelRequest {
+    pub name: String,
+}
+
+#[tauri::command]
+pub fn create_label(
+    db_state: State<'_, DbState>,
+    request: CreateLabelRequest,
+) -> Result<Label, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    label_repo::create_label(&conn, &request.name, "user_created")
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameLabelRequest {
+    pub id: String,
+    pub new_name: String,
+}
+
+#[tauri::command]
+pub fn rename_label(
+    db_state: State<'_, DbState>,
+    request: RenameLabelRequest,
+) -> Result<Label, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    label_repo::rename_label(&conn, &request.id, &request.new_name)
+}
+
+#[tauri::command]
+pub fn delete_label(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    label_repo::delete_label(&conn, &id)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SuggestLabelsResult {
+    pub labels: Vec<Label>,
+}
+
+#[tauri::command]
+pub async fn suggest_labels(db_state: State<'_, DbState>) -> Result<SuggestLabelsResult, AppError> {
+    let (config, inclusion_criteria, exclusion_criteria) = {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let config = llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+        let inc = criteria_repo::get_criteria_by_type(&conn, "inclusion")?;
+        let exc = criteria_repo::get_criteria_by_type(&conn, "exclusion")?;
+        (config, inc, exc)
+    };
+
+    let inc_list: Vec<String> = inclusion_criteria
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{}. {}", i + 1, c.text))
+        .collect();
+    let exc_list: Vec<String> = exclusion_criteria
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{}. {}", i + 1, c.text))
+        .collect();
+
+    let user_prompt = format!(
+        r#"## Task
+Generate a set of workflow labels for tracking articles through the screening process. Labels should represent organizational or process categories (e.g., "priority-read", "disputed", "needs-full-text", "strong-methodology").
+
+## Inclusion Criteria
+{inclusion}
+
+## Exclusion Criteria
+{exclusion}
+
+## Response Format
+Return JSON exactly matching this schema:
+{{
+  "labels": ["label-name-1", "label-name-2", ...]
+}}
+
+Rules:
+- Generate 5-15 labels.
+- Each label should be a short, descriptive string.
+- Labels should help categorize articles by their screening status or quality indicators.
+- Do not duplicate or overlap concepts."#,
+        inclusion = inc_list.join("\n"),
+        exclusion = exc_list.join("\n"),
+    );
+
+    let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process.";
+    let response = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
+
+    let json_str = response
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let parsed: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+        AppError::Import(format!("Failed to parse label suggestion response: {}", e))
+    })?;
+    let label_names: Vec<String> = parsed["labels"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let labels = label_repo::create_labels_batch(&conn, &label_names, "ai_generated")?;
+
+    Ok(SuggestLabelsResult { labels })
+}
