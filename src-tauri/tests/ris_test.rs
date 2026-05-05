@@ -1,6 +1,9 @@
+use bango_lib::db::article_repo;
+use bango_lib::db::connection::create_connection;
+use bango_lib::db::migration::run_migrations;
 use bango_lib::ris::parser::parse_ris;
 use bango_lib::ris::types::RisRecord;
-use bango_lib::ris::validator::validate_record;
+use bango_lib::ris::validator::{validate_all, validate_record};
 use std::fs;
 use std::path::PathBuf;
 
@@ -131,4 +134,27 @@ fn test_validate_n2_abstract_fallback() {
     record.authors = vec!["Author".to_string()];
     let errors = validate_record(&record, 1);
     assert!(errors.is_empty());
+}
+
+#[test]
+fn test_full_import_pipeline_with_real_ris() {
+    let content = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris"))
+        .expect("fixture not found");
+    let parse_result = parse_ris(&content).expect("Parse failed");
+    let (valid, errors) = validate_all(&parse_result.records);
+
+    assert!(errors.is_empty(), "Expected no validation errors: {:?}", errors);
+    assert_eq!(valid.len(), 1);
+
+    let conn = create_connection().expect("DB connection failed");
+    run_migrations(&conn).expect("Migration failed");
+
+    let articles = article_repo::get_all_articles(&conn).expect("Query failed");
+    assert_eq!(articles.len(), 0, "Should start empty");
+
+    // Verify DB schema supports all parsed fields
+    let record = &valid[0];
+    assert!(record.title.is_some());
+    assert!(record.abstract_text.is_some());
+    assert!(!record.authors.is_empty());
 }
