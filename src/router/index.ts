@@ -4,6 +4,7 @@ const Dashboard = () => import('@/views/dashboard.vue');
 const Placeholder = () => import('@/views/placeholder.vue');
 const ImportRis = () => import('@/views/import-ris.vue');
 const DedupReview = () => import('@/views/dedup-review.vue');
+const TagLabelManagement = () => import('@/views/tag-label-management.vue');
 
 const routes = [
   { path: '/', name: 'dashboard', component: Dashboard },
@@ -30,8 +31,7 @@ const routes = [
   {
     path: '/tags',
     name: 'tags',
-    component: Placeholder,
-    props: { title: 'Tags & Labels' },
+    component: TagLabelManagement,
   },
   {
     path: '/prisma',
