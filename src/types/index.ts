@@ -72,6 +72,10 @@ export interface Tag {
 
 export type TagSource = 'ai_suggested' | 'user_created' | 'ris_keyword';
 
+export interface TagWithCount extends Tag {
+  articleCount: number;
+}
+
 export interface Label {
   id: string;
   name: string;
@@ -79,6 +83,10 @@ export interface Label {
 }
 
 export type LabelSource = 'ai_generated' | 'user_created';
+
+export interface LabelWithCount extends Label {
+  articleCount: number;
+}
 
 export interface AuditEntry {
   id: string;

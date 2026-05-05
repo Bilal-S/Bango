@@ -26,7 +26,10 @@ function stepIndex(step: ImportStep): number {
         'stepper__step--done': stepIndex(currentStep) > i,
       }"
     >
-      <div class="stepper__dot">{{ stepIndex(currentStep) > i ? '✓' : i + 1 }}</div>
+      <div class="stepper__dot">
+        <span v-if="stepIndex(currentStep) > i" class="material-symbols-outlined">check</span>
+        <template v-else>{{ i + 1 }}</template>
+      </div>
       <span class="stepper__label">{{ step.label }}</span>
       <div v-if="i < steps.length - 1" class="stepper__line" />
     </div>

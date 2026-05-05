@@ -1,17 +1,17 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import type { Tag } from '@/types';
+import type { Tag, TagWithCount } from '@/types';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
 export const useTagsStore = defineStore('tags', () => {
-  const tags = ref<Tag[]>([]);
+  const tags = ref<TagWithCount[]>([]);
   const loading = ref(false);
   const suggesting = ref(false);
 
   async function fetchTags(): Promise<void> {
     loading.value = true;
     try {
-      tags.value = await tauriCommand<Tag[]>('get_tags');
+      tags.value = await tauriCommand<TagWithCount[]>('get_tags_with_counts');
     } finally {
       loading.value = false;
     }

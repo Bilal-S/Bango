@@ -1,17 +1,17 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import type { Label } from '@/types';
+import type { Label, LabelWithCount } from '@/types';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
 export const useLabelsStore = defineStore('labels', () => {
-  const labels = ref<Label[]>([]);
+  const labels = ref<LabelWithCount[]>([]);
   const loading = ref(false);
   const suggesting = ref(false);
 
   async function fetchLabels(): Promise<void> {
     loading.value = true;
     try {
-      labels.value = await tauriCommand<Label[]>('get_labels');
+      labels.value = await tauriCommand<LabelWithCount[]>('get_labels_with_counts');
     } finally {
       loading.value = false;
     }

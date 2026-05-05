@@ -10,6 +10,15 @@ use crate::error::AppError;
 use crate::llm::client;
 use crate::models::tag::Tag;
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagWithCount {
+    pub id: String,
+    pub name: String,
+    pub source: String,
+    pub article_count: usize,
+}
+
 #[tauri::command]
 pub fn get_tags(db_state: State<'_, DbState>) -> Result<Vec<Tag>, AppError> {
     let conn = db_state
@@ -17,6 +26,32 @@ pub fn get_tags(db_state: State<'_, DbState>) -> Result<Vec<Tag>, AppError> {
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     tag_repo::get_all_tags(&conn)
+}
+
+#[tauri::command]
+pub fn get_tags_with_counts(db_state: State<'_, DbState>) -> Result<Vec<TagWithCount>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let tags = tag_repo::get_all_tags(&conn)?;
+    let result: Vec<TagWithCount> = tags
+        .into_iter()
+        .map(|tag| {
+            let count = tag_repo::get_article_count_for_tag(&conn, &tag.id).unwrap_or(0);
+            TagWithCount {
+                id: tag.id,
+                name: tag.name,
+                source: match tag.source {
+                    crate::models::tag::TagSource::AiSuggested => "ai_suggested".to_string(),
+                    crate::models::tag::TagSource::RisKeyword => "ris_keyword".to_string(),
+                    crate::models::tag::TagSource::UserCreated => "user_created".to_string(),
+                },
+                article_count: count,
+            }
+        })
+        .collect();
+    Ok(result)
 }
 
 #[derive(Deserialize)]

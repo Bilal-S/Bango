@@ -10,6 +10,10 @@ const labelsStore = useLabelsStore();
 
 const newTagName = ref('');
 const newLabelName = ref('');
+const editingTagId = ref<string | null>(null);
+const editingTagName = ref('');
+const editingLabelId = ref<string | null>(null);
+const editingLabelName = ref('');
 
 onMounted(async () => {
   await Promise.all([tagsStore.fetchTags(), labelsStore.fetchLabels()]);
@@ -27,6 +31,50 @@ async function addLabel(): Promise<void> {
   if (!name) return;
   await labelsStore.createLabel(name);
   newLabelName.value = '';
+}
+
+function startEditingTag(id: string, currentName: string): void {
+  editingTagId.value = id;
+  editingTagName.value = currentName;
+}
+
+async function saveTagEdit(): Promise<void> {
+  if (!editingTagId.value) return;
+  const name = editingTagName.value.trim();
+  if (!name) {
+    cancelTagEdit();
+    return;
+  }
+  await tagsStore.renameTag(editingTagId.value, name);
+  editingTagId.value = null;
+  editingTagName.value = '';
+}
+
+function cancelTagEdit(): void {
+  editingTagId.value = null;
+  editingTagName.value = '';
+}
+
+function startEditingLabel(id: string, currentName: string): void {
+  editingLabelId.value = id;
+  editingLabelName.value = currentName;
+}
+
+async function saveLabelEdit(): Promise<void> {
+  if (!editingLabelId.value) return;
+  const name = editingLabelName.value.trim();
+  if (!name) {
+    cancelLabelEdit();
+    return;
+  }
+  await labelsStore.renameLabel(editingLabelId.value, name);
+  editingLabelId.value = null;
+  editingLabelName.value = '';
+}
+
+function cancelLabelEdit(): void {
+  editingLabelId.value = null;
+  editingLabelName.value = '';
 }
 </script>
 
@@ -97,16 +145,51 @@ async function addLabel(): Promise<void> {
               class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
             >
               <div class="flex items-center gap-3">
-                <TagChip :name="tag.name" @remove="tagsStore.deleteTag(tag.id)" />
+                <template v-if="editingTagId === tag.id">
+                  <input
+                    v-model="editingTagName"
+                    class="px-2 py-1 bg-surface-container-lowest border border-primary rounded-lg focus:ring-1 focus:ring-primary font-mono text-mono text-on-surface transition-all w-48"
+                    @keyup.enter="saveTagEdit"
+                    @keyup.escape="cancelTagEdit"
+                  />
+                </template>
+                <template v-else>
+                  <TagChip :name="tag.name" />
+                </template>
               </div>
               <div class="flex items-center gap-4">
+                <span class="font-body-sm text-body-sm text-on-surface-variant"
+                  >{{ tag.articleCount }} articles</span
+                >
                 <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
-                    @click="tagsStore.deleteTag(tag.id)"
-                  >
-                    <span class="material-symbols-outlined text-[16px]">close</span>
-                  </button>
+                  <template v-if="editingTagId === tag.id">
+                    <button
+                      class="p-1 text-primary hover:bg-surface-variant rounded transition-colors"
+                      @click="saveTagEdit"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">check</span>
+                    </button>
+                    <button
+                      class="p-1 text-outline hover:bg-surface-variant rounded transition-colors"
+                      @click="cancelTagEdit"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      class="p-1 text-outline hover:text-primary rounded hover:bg-surface-variant transition-colors"
+                      @click="startEditingTag(tag.id, tag.name)"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">edit</span>
+                    </button>
+                    <button
+                      class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
+                      @click="tagsStore.deleteTag(tag.id)"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </template>
                 </div>
               </div>
             </div>
@@ -173,16 +256,51 @@ async function addLabel(): Promise<void> {
               class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
             >
               <div class="flex items-center gap-3">
-                <LabelChip :name="label.name" @remove="labelsStore.deleteLabel(label.id)" />
+                <template v-if="editingLabelId === label.id">
+                  <input
+                    v-model="editingLabelName"
+                    class="px-2 py-1 bg-surface-container-lowest border border-secondary rounded-lg focus:ring-1 focus:ring-secondary font-mono text-mono text-on-surface transition-all w-48"
+                    @keyup.enter="saveLabelEdit"
+                    @keyup.escape="cancelLabelEdit"
+                  />
+                </template>
+                <template v-else>
+                  <LabelChip :name="label.name" />
+                </template>
               </div>
               <div class="flex items-center gap-4">
+                <span class="font-body-sm text-body-sm text-on-surface-variant"
+                  >{{ label.articleCount }} articles</span
+                >
                 <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
-                    @click="labelsStore.deleteLabel(label.id)"
-                  >
-                    <span class="material-symbols-outlined text-[16px]">close</span>
-                  </button>
+                  <template v-if="editingLabelId === label.id">
+                    <button
+                      class="p-1 text-secondary hover:bg-surface-variant rounded transition-colors"
+                      @click="saveLabelEdit"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">check</span>
+                    </button>
+                    <button
+                      class="p-1 text-outline hover:bg-surface-variant rounded transition-colors"
+                      @click="cancelLabelEdit"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      class="p-1 text-outline hover:text-secondary rounded hover:bg-surface-variant transition-colors"
+                      @click="startEditingLabel(label.id, label.name)"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">edit</span>
+                    </button>
+                    <button
+                      class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
+                      @click="labelsStore.deleteLabel(label.id)"
+                    >
+                      <span class="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </template>
                 </div>
               </div>
             </div>

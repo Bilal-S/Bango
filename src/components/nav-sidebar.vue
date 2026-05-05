@@ -10,15 +10,15 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard', icon: '▣', route: '/' },
-  { label: 'Articles', icon: '♧', route: '/articles' },
-  { label: 'Import RIS', icon: '↑', route: '/import' },
-  { label: 'Deduplicate', icon: '⊞', route: '/dedup' },
-  { label: 'Criteria', icon: '✓', route: '/criteria' },
-  { label: 'Screening', icon: '◎', route: '/screening' },
-  { label: 'Tags & Labels', icon: '◉', route: '/tags' },
-  { label: 'PRISMA', icon: '◦', route: '/prisma' },
-  { label: 'Settings', icon: '⚙', route: '/settings' },
+  { label: 'Dashboard', icon: 'dashboard', route: '/' },
+  { label: 'Articles', icon: 'description', route: '/articles' },
+  { label: 'Import RIS', icon: 'upload_file', route: '/import' },
+  { label: 'Deduplicate', icon: 'science', route: '/dedup' },
+  { label: 'Criteria', icon: 'rule', route: '/criteria' },
+  { label: 'Screening', icon: 'analytics', route: '/screening' },
+  { label: 'Tags & Labels', icon: 'sell', route: '/tags' },
+  { label: 'PRISMA', icon: 'account_tree', route: '/prisma' },
+  { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
 </script>
 
@@ -35,7 +35,7 @@ const navItems: NavItem[] = [
           class="sidebar__link"
           :class="{ 'sidebar__link--active': route.path === item.route }"
         >
-          <span class="sidebar__icon">{{ item.icon }}</span>
+          <span class="material-symbols-outlined sidebar__icon">{{ item.icon }}</span>
           <span class="sidebar__label">{{ item.label }}</span>
         </router-link>
       </li>
@@ -104,16 +104,5 @@ const navItems: NavItem[] = [
 .sidebar__link--active {
   background-color: var(--color-sidebar-hover);
   color: #ffffff;
-}
-
-.sidebar__icon {
-  width: 20px;
-  text-align: center;
-  font-size: 14px;
-  opacity: 0.7;
-}
-
-.sidebar__link--active .sidebar__icon {
-  opacity: 1;
 }
 </style>

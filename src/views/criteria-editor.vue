@@ -544,49 +544,4 @@ function priorityLabel(priority: Priority): string {
 .btn-primary-sm:hover {
   background-color: #4f46e5;
 }
-
-.space-y-3 {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.space-y-4 {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.mt-4 {
-  margin-top: 1rem;
-}
-
-.flex-1 {
-  flex: 1;
-}
-
-.group {
-  position: relative;
-}
-
-.text-primary {
-  color: #3525cd;
-}
-
-.text-green-600 {
-  color: #16a34a;
-}
-
-.text-error {
-  color: #ba1a1a;
-}
-
-.material-symbols-outlined {
-  font-variation-settings:
-    'FILL' 0,
-    'wght' 400,
-    'GRAD' 0,
-    'opsz' 24;
-  vertical-align: middle;
-}
 </style>

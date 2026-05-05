@@ -18,28 +18,28 @@ const statusTiles: StatusTile[] = [
   {
     key: 'imported',
     label: 'Imported',
-    icon: '↓',
+    icon: 'import_export',
     description: 'Total citations in library',
     cssClass: 'status-tile--imported',
   },
   {
     key: 'working',
     label: 'Working',
-    icon: '◎',
+    icon: 'pending',
     description: 'Awaiting title/abstract review',
     cssClass: 'status-tile--working',
   },
   {
     key: 'included',
     label: 'Included',
-    icon: '✓',
+    icon: 'check_circle',
     description: 'Confirmed for full-text analysis',
     cssClass: 'status-tile--included',
   },
   {
     key: 'rejected',
     label: 'Rejected',
-    icon: '✕',
+    icon: 'cancel',
     description: 'Does not meet inclusion criteria',
     cssClass: 'status-tile--rejected',
   },
@@ -56,19 +56,19 @@ const quickActions: QuickAction[] = [
   {
     label: 'Import RIS/BibTeX',
     description: 'Add new references from search',
-    icon: '↑',
+    icon: 'upload_file',
     route: '/import',
   },
   {
     label: 'Edit Research Criteria',
     description: 'Update inclusion & exclusion rules',
-    icon: '✎',
+    icon: 'rule',
     route: '/criteria',
   },
   {
     label: 'View PRISMA Flow Diagram',
     description: 'Track reporting and transparency',
-    icon: '⊕',
+    icon: 'account_tree',
     route: '/prisma',
   },
 ];
@@ -88,7 +88,7 @@ function navigateTo(route: string): void {
         <p class="dashboard__subtitle">AI-assisted systematic literature review</p>
       </div>
       <button v-if="hasArticles" class="dashboard__cta" @click="navigateTo('/screening')">
-        <span class="dashboard__cta-icon">✦</span>
+        <span class="material-symbols-outlined dashboard__cta-icon">play_arrow</span>
         Start AI Screening
       </button>
     </section>
@@ -109,7 +109,7 @@ function navigateTo(route: string): void {
       <!-- Empty State -->
       <section v-if="!hasArticles" class="dashboard__empty">
         <div class="dashboard__empty-card">
-          <div class="dashboard__empty-icon">↓</div>
+          <div class="dashboard__empty-icon material-symbols-outlined">import_export</div>
           <h2 class="dashboard__empty-title">No articles yet</h2>
           <p class="dashboard__empty-desc">
             Import an RIS or BibTeX file to get started with your systematic review.
@@ -130,7 +130,7 @@ function navigateTo(route: string): void {
             :class="tile.cssClass"
           >
             <div class="status-tile__top">
-              <span class="status-tile__icon">{{ tile.icon }}</span>
+              <span class="material-symbols-outlined status-tile__icon">{{ tile.icon }}</span>
               <span class="status-tile__badge">{{ tile.label }}</span>
             </div>
             <div class="status-tile__value">
@@ -161,9 +161,15 @@ function navigateTo(route: string): void {
                       'activity-item__icon--system': entry.source === 'system',
                     }"
                   >
-                    <template v-if="entry.source === 'ai'">✦</template>
-                    <template v-else-if="entry.source === 'system'">⚙</template>
-                    <template v-else>◉</template>
+                    <template v-if="entry.source === 'ai'"
+                      ><span class="material-symbols-outlined">auto_awesome</span></template
+                    >
+                    <template v-else-if="entry.source === 'system'"
+                      ><span class="material-symbols-outlined">settings</span></template
+                    >
+                    <template v-else
+                      ><span class="material-symbols-outlined">radio_button_checked</span></template
+                    >
                   </div>
                   <div class="activity-item__content">
                     <p class="activity-item__text">
@@ -210,7 +216,7 @@ function navigateTo(route: string): void {
               class="quick-action"
               @click="navigateTo(action.route)"
             >
-              <div class="quick-action__icon">
+              <div class="quick-action__icon material-symbols-outlined">
                 {{ action.icon }}
               </div>
               <div class="quick-action__text">

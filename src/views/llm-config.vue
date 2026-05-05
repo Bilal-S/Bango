@@ -571,18 +571,4 @@ const { config, testing, testResult, showApiKey, testConnection, revert, isLocal
   background-color: #f0fdf4;
   color: #166534;
 }
-
-/* Utility */
-.text-primary {
-  color: #3525cd;
-}
-
-.material-symbols-outlined {
-  font-variation-settings:
-    'FILL' 0,
-    'wght' 400,
-    'GRAD' 0,
-    'opsz' 24;
-  vertical-align: middle;
-}
 </style>

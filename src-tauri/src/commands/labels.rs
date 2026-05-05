@@ -9,6 +9,15 @@ use crate::error::AppError;
 use crate::llm::client;
 use crate::models::label::Label;
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelWithCount {
+    pub id: String,
+    pub name: String,
+    pub source: String,
+    pub article_count: usize,
+}
+
 #[tauri::command]
 pub fn get_labels(db_state: State<'_, DbState>) -> Result<Vec<Label>, AppError> {
     let conn = db_state
@@ -16,6 +25,33 @@ pub fn get_labels(db_state: State<'_, DbState>) -> Result<Vec<Label>, AppError> 
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     label_repo::get_all_labels(&conn)
+}
+
+#[tauri::command]
+pub fn get_labels_with_counts(
+    db_state: State<'_, DbState>,
+) -> Result<Vec<LabelWithCount>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let labels = label_repo::get_all_labels(&conn)?;
+    let result: Vec<LabelWithCount> = labels
+        .into_iter()
+        .map(|label| {
+            let count = label_repo::get_article_count_for_label(&conn, &label.id).unwrap_or(0);
+            LabelWithCount {
+                id: label.id,
+                name: label.name,
+                source: match label.source {
+                    crate::models::label::LabelSource::AiGenerated => "ai_generated".to_string(),
+                    crate::models::label::LabelSource::UserCreated => "user_created".to_string(),
+                },
+                article_count: count,
+            }
+        })
+        .collect();
+    Ok(result)
 }
 
 #[derive(Deserialize)]

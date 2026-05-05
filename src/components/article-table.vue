@@ -37,9 +37,9 @@ function formatAuthors(authors: string[]): string {
   return authors.length > 2 ? `${display} et al.` : display;
 }
 
-function getSortIndicator(columnKey: string): string {
+function getSortIcon(columnKey: string): string {
   if (props.sortColumn !== columnKey) return '';
-  return props.sortDirection === 'asc' ? '▲' : '▼';
+  return props.sortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward';
 }
 
 function formatDate(dateStr: string | null): string {
@@ -65,10 +65,14 @@ function formatDate(dateStr: string | null): string {
               @click="$emit('sort', col.key)"
             >
               <span>{{ col.label }}</span>
-              <span v-if="sortColumn === col.key" class="text-indigo-600 text-[10px]">
-                {{ getSortIndicator(col.key) }}
+              <span v-if="sortColumn === col.key" class="text-indigo-600">
+                <span class="material-symbols-outlined text-[16px]">{{
+                  getSortIcon(col.key)
+                }}</span>
               </span>
-              <span v-else class="text-slate-300 text-[10px]"> &#9650; </span>
+              <span v-else class="text-slate-300">
+                <span class="material-symbols-outlined text-[16px]">arrow_upward</span>
+              </span>
             </button>
           </th>
         </tr>
