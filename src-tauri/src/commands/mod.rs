@@ -1,3 +1,4 @@
+pub mod dedup;
 pub mod import;
 
 use crate::db::connection::DbState;

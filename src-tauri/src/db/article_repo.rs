@@ -203,6 +203,93 @@ pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Art
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+pub fn get_imported_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM articles WHERE status = 'imported' AND duplicate_of IS NULL ORDER BY imported_at DESC"
+    )?;
+    let rows = stmt.query_map([], row_to_article)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn get_working_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
+    let mut stmt =
+        conn.prepare("SELECT * FROM articles WHERE status = 'working' ORDER BY imported_at DESC")?;
+    let rows = stmt.query_map([], row_to_article)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn mark_as_duplicate(
+    conn: &Connection,
+    article_id: &str,
+    surviving_id: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET duplicate_of = ?1 WHERE id = ?2",
+        params![surviving_id, article_id],
+    )?;
+    Ok(())
+}
+
+pub fn move_to_working(conn: &Connection, article_id: &str) -> Result<(), AppError> {
+    conn.execute("UPDATE articles SET status = 'working' WHERE id = ?1", params![article_id])?;
+    Ok(())
+}
+
+/// Returns the count of non-null/non-empty fields for an article (for merge decisions).
+pub fn get_article_field_count(conn: &Connection, id: &str) -> Result<usize, AppError> {
+    let article = get_article_by_id(conn, id)?;
+    let mut count = 0;
+    if article.doi.is_some() {
+        count += 1;
+    }
+    if article.journal.is_some() {
+        count += 1;
+    }
+    if article.volume.is_some() {
+        count += 1;
+    }
+    if article.issue.is_some() {
+        count += 1;
+    }
+    if article.start_page.is_some() {
+        count += 1;
+    }
+    if article.end_page.is_some() {
+        count += 1;
+    }
+    if article.publication_year.is_some() {
+        count += 1;
+    }
+    if article.url.is_some() {
+        count += 1;
+    }
+    if article.language.is_some() {
+        count += 1;
+    }
+    if article.publisher.is_some() {
+        count += 1;
+    }
+    if article.issn.is_some() {
+        count += 1;
+    }
+    if article.reference_type.is_some() {
+        count += 1;
+    }
+    if article.date.is_some() {
+        count += 1;
+    }
+    if !article.keywords.is_empty() {
+        count += 1;
+    }
+    if article.notes.is_some() {
+        count += 1;
+    }
+    if !article.abstract_text.is_empty() {
+        count += 1;
+    }
+    Ok(count)
+}
+
 fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
     let status_str: String = row.get("status")?;
     let status = match status_str.as_str() {
