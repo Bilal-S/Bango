@@ -3,19 +3,49 @@ import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
 import ConfidenceBar from './confidence-bar.vue';
 
-defineProps<{
+const props = defineProps<{
   articles: Article[];
   selectedId: string | null;
+  sortColumn: string | null;
+  sortDirection: 'asc' | 'desc';
 }>();
 
 defineEmits<{
   select: [id: string];
+  sort: [column: string];
 }>();
+
+interface ColumnDef {
+  key: string;
+  label: string;
+  width?: string;
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: 'title', label: 'Title' },
+  { key: 'authors', label: 'Authors' },
+  { key: 'publicationYear', label: 'Year', width: 'w-16' },
+  { key: 'journal', label: 'Journal' },
+  { key: 'status', label: 'Status' },
+  { key: 'aiConfidence', label: 'Confidence', width: 'w-32' },
+  { key: 'importedAt', label: 'Imported', width: 'w-28' },
+];
 
 function formatAuthors(authors: string[]): string {
   if (authors.length === 0) return '---';
   const display = authors.slice(0, 2).join('; ');
   return authors.length > 2 ? `${display} et al.` : display;
+}
+
+function getSortIndicator(columnKey: string): string {
+  if (props.sortColumn !== columnKey) return '';
+  return props.sortDirection === 'asc' ? '▲' : '▼';
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '---';
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 </script>
 
@@ -24,13 +54,30 @@ function formatAuthors(authors: string[]): string {
     <table class="w-full text-left border-collapse">
       <thead class="bg-slate-50/50 border-b border-slate-200">
         <tr>
-          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Title</th>
-          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Authors</th>
-          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-16">Year</th>
-          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Journal</th>
-          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Status</th>
-          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-32">
-            Confidence
+          <th
+            v-for="col in COLUMNS"
+            :key="col.key"
+            class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase select-none"
+            :class="[col.width]"
+          >
+            <button
+              class="flex items-center gap-1 hover:text-slate-700 transition-colors"
+              @click="$emit('sort', col.key)"
+            >
+              <span>{{ col.label }}</span>
+              <span
+                v-if="sortColumn === col.key"
+                class="text-indigo-600 text-[10px]"
+              >
+                {{ getSortIndicator(col.key) }}
+              </span>
+              <span
+                v-else
+                class="text-slate-300 text-[10px]"
+              >
+                &#9650;
+              </span>
+            </button>
           </th>
         </tr>
       </thead>
@@ -61,6 +108,9 @@ function formatAuthors(authors: string[]): string {
           </td>
           <td class="py-5 px-2">
             <ConfidenceBar :confidence="article.aiConfidence" />
+          </td>
+          <td class="py-5 px-2 text-body-sm text-slate-500">
+            {{ formatDate(article.importedAt) }}
           </td>
         </tr>
       </tbody>
