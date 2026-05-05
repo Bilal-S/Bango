@@ -44,6 +44,16 @@ pub fn run() {
             commands::llm_config::get_llm_config,
             commands::llm_config::save_llm_config,
             commands::llm_config::test_llm_connection,
+            commands::tags::get_tags,
+            commands::tags::create_tag,
+            commands::tags::rename_tag,
+            commands::tags::delete_tag,
+            commands::tags::suggest_tags,
+            commands::labels::get_labels,
+            commands::labels::create_label,
+            commands::labels::rename_label,
+            commands::labels::delete_label,
+            commands::labels::suggest_labels,
         ])
         .run(tauri::generate_context!())
     {
