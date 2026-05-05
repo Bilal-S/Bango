@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection};
+use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::error::AppError;
@@ -235,7 +236,184 @@ pub fn move_to_working(conn: &Connection, article_id: &str) -> Result<(), AppErr
     Ok(())
 }
 
-/// Returns the count of non-null/non-empty fields for an article (for merge decisions).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArticleQuery {
+    pub status: Option<String>,
+    pub search: Option<String>,
+    pub sort_by: Option<String>,
+    pub sort_dir: Option<String>,
+    pub year_from: Option<i32>,
+    pub year_to: Option<i32>,
+    pub manual_override_only: bool,
+    pub screening_errors_only: bool,
+}
+
+pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
+    let mut sql = String::from("SELECT * FROM articles WHERE duplicate_of IS NULL");
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref status) = query.status {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(" AND status = ?{idx}"));
+        param_values.push(Box::new(status.clone()));
+    }
+
+    if let Some(ref search) = query.search {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(
+            " AND (LOWER(title) LIKE ?{idx} OR LOWER(abstract_text) LIKE ?{idx})"
+        ));
+        let pattern = format!("%{}%", search.to_lowercase());
+        param_values.push(Box::new(pattern));
+    }
+
+    if let Some(year_from) = query.year_from {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(" AND publication_year >= ?{idx}"));
+        param_values.push(Box::new(year_from));
+    }
+
+    if let Some(year_to) = query.year_to {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(" AND publication_year <= ?{idx}"));
+        param_values.push(Box::new(year_to));
+    }
+
+    if query.manual_override_only {
+        sql.push_str(" AND manual_override = 1");
+    }
+
+    if query.screening_errors_only {
+        sql.push_str(" AND screening_error = 1");
+    }
+
+    let sort_by = query.sort_by.as_deref().unwrap_or("imported_at");
+    let sort_dir = query.sort_dir.as_deref().unwrap_or("DESC");
+    let order_clause = match sort_by {
+        "title" => format!(" ORDER BY title {sort_dir}"),
+        "publicationYear" => format!(" ORDER BY publication_year {sort_dir} NULLS LAST"),
+        "aiConfidence" => format!(" ORDER BY ai_confidence {sort_dir} NULLS LAST"),
+        _ => format!(" ORDER BY imported_at {sort_dir}"),
+    };
+    sql.push_str(&order_clause);
+
+    let params: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), row_to_article)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn update_article_status(
+    conn: &Connection,
+    article_id: &str,
+    new_status: &str,
+) -> Result<(), AppError> {
+    let old_status: String =
+        conn.query_row("SELECT status FROM articles WHERE id = ?1", [article_id], |row| {
+            row.get(0)
+        })?;
+
+    conn.execute(
+        "UPDATE articles SET status = ?1, manual_override = 1 WHERE id = ?2",
+        params![new_status, article_id],
+    )?;
+
+    crate::db::audit_repo::create_entry(
+        conn,
+        article_id,
+        "status_change",
+        Some(&old_status),
+        Some(new_status),
+        Some("Manual status change"),
+        "user",
+    )?;
+
+    Ok(())
+}
+
+pub fn update_article_tags(
+    conn: &Connection,
+    article_id: &str,
+    tag_ids: &[String],
+) -> Result<(), AppError> {
+    conn.execute("DELETE FROM article_tags WHERE article_id = ?1", [article_id])?;
+
+    for tag_id in tag_ids {
+        conn.execute(
+            "INSERT INTO article_tags (article_id, tag_id) VALUES (?1, ?2)",
+            params![article_id, tag_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn update_article_labels(
+    conn: &Connection,
+    article_id: &str,
+    label_ids: &[String],
+) -> Result<(), AppError> {
+    conn.execute("DELETE FROM article_labels WHERE article_id = ?1", [article_id])?;
+
+    for label_id in label_ids {
+        conn.execute(
+            "INSERT INTO article_labels (article_id, label_id) VALUES (?1, ?2)",
+            params![article_id, label_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn update_user_notes(conn: &Connection, article_id: &str, notes: &str) -> Result<(), AppError> {
+    conn.execute("UPDATE articles SET user_notes = ?1 WHERE id = ?2", params![notes, article_id])?;
+    Ok(())
+}
+
+pub fn override_ai_decision(
+    conn: &Connection,
+    article_id: &str,
+    new_decision: &str,
+    new_status: &str,
+    reasoning: Option<&str>,
+) -> Result<(), AppError> {
+    let old_decision: Option<String> =
+        conn.query_row("SELECT ai_decision FROM articles WHERE id = ?1", [article_id], |row| {
+            row.get(0)
+        })?;
+
+    conn.execute(
+        "UPDATE articles SET ai_decision = ?1, status = ?2, manual_override = 1 WHERE id = ?3",
+        params![new_decision, new_status, article_id],
+    )?;
+
+    if let Some(reason) = reasoning {
+        conn.execute(
+            "UPDATE articles SET ai_reasoning = ?1 WHERE id = ?2",
+            params![reason, article_id],
+        )?;
+    }
+
+    let detail = format!(
+        "Override AI decision from {} to {}",
+        old_decision.as_deref().unwrap_or("none"),
+        new_decision
+    );
+    crate::db::audit_repo::create_entry(
+        conn,
+        article_id,
+        "manual_override",
+        None,
+        Some(new_status),
+        Some(&detail),
+        "user",
+    )?;
+
+    Ok(())
+}
+
 pub fn get_article_field_count(conn: &Connection, id: &str) -> Result<usize, AppError> {
     let article = get_article_by_id(conn, id)?;
     let mut count = 0;
