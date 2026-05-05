@@ -1,5 +1,9 @@
+pub mod criteria;
 pub mod dedup;
 pub mod import;
+pub mod labels;
+pub mod llm_config;
+pub mod tags;
 
 use crate::db::connection::DbState;
 use crate::error::AppError;

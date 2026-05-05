@@ -1,7 +1,9 @@
 pub mod commands;
+pub mod crypto;
 pub mod db;
 pub mod dedup;
 pub mod error;
+pub mod llm;
 pub mod models;
 pub mod ris;
 
@@ -32,6 +34,16 @@ pub fn run() {
             commands::import::get_articles,
             commands::dedup::run_deduplication,
             commands::dedup::resolve_fuzzy_match,
+            commands::criteria::get_research_aims,
+            commands::criteria::create_research_aim,
+            commands::criteria::delete_research_aim,
+            commands::criteria::get_criteria,
+            commands::criteria::create_criterion,
+            commands::criteria::update_criterion,
+            commands::criteria::delete_criterion,
+            commands::llm_config::get_llm_config,
+            commands::llm_config::save_llm_config,
+            commands::llm_config::test_llm_connection,
         ])
         .run(tauri::generate_context!())
     {
