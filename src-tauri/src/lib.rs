@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod models;
+pub mod ris;
 
 use db::connection::{create_connection, DbState};
 use db::migration::run_migrations;

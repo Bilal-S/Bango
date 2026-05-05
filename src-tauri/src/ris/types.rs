@@ -1,0 +1,50 @@
+use std::collections::HashMap;
+
+/// A single parsed RIS record, before conversion to NewArticle.
+/// Fields are optional during parsing — validation happens separately.
+#[derive(Debug, Clone, Default)]
+pub struct RisRecord {
+    pub reference_type: Option<String>,
+    pub title: Option<String>,
+    pub abstract_text: Option<String>,
+    pub authors: Vec<String>,
+    pub publication_year: Option<i32>,
+    pub doi: Option<String>,
+    pub journal: Option<String>,
+    pub volume: Option<String>,
+    pub issue: Option<String>,
+    pub start_page: Option<String>,
+    pub end_page: Option<String>,
+    pub keywords: Vec<String>,
+    pub url: Option<String>,
+    pub language: Option<String>,
+    pub publisher: Option<String>,
+    pub publisher_city: Option<String>,
+    pub publisher_address: Option<String>,
+    pub issn: Option<String>,
+    pub date: Option<String>,
+    pub author_address: Option<String>,
+    pub accession_number: Option<String>,
+    pub custom_field3: Option<String>,
+    pub journal_abbreviation: Option<String>,
+    pub journal_iso_abbreviation: Option<String>,
+    pub notes: Option<String>,
+    pub web_of_science_db: Option<String>,
+    /// All unrecognized RIS tags preserved as key-value pairs.
+    pub extras: HashMap<String, Vec<String>>,
+}
+
+/// Result of parsing a complete RIS file.
+#[derive(Debug)]
+pub struct RisParseResult {
+    pub records: Vec<RisRecord>,
+    pub errors: Vec<RisParseError>,
+}
+
+/// A single parse error for a record in the RIS file.
+#[derive(Debug)]
+pub struct RisParseError {
+    /// 1-based index of the record in the file.
+    pub record_index: usize,
+    pub message: String,
+}
