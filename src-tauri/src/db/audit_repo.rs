@@ -12,6 +12,18 @@ pub fn get_audit_trail(conn: &Connection, article_id: &str) -> Result<Vec<AuditE
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+pub fn get_recent_audit_entries(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<AuditEntry>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, article_id, timestamp, action, from_status, to_status, details, source \
+         FROM audit_entries ORDER BY timestamp DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], row_to_audit_entry)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn create_entry(
     conn: &Connection,
     article_id: &str,

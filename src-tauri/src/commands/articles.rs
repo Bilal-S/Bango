@@ -54,6 +54,19 @@ pub fn get_audit_trail(
 }
 
 #[tauri::command]
+pub fn get_recent_audit_entries(
+    db_state: State<'_, DbState>,
+    limit: Option<usize>,
+) -> Result<Vec<AuditEntry>, AppError> {
+    let limit = limit.unwrap_or(10);
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    audit_repo::get_recent_audit_entries(&conn, limit)
+}
+
+#[tauri::command]
 pub fn update_article_notes(
     db_state: State<'_, DbState>,
     id: String,

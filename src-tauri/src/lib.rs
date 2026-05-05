@@ -65,6 +65,7 @@ pub fn run() {
             commands::articles::get_article,
             commands::articles::update_article_status,
             commands::articles::get_audit_trail,
+            commands::articles::get_recent_audit_entries,
             commands::articles::update_article_notes,
             commands::articles::update_article_tags,
             commands::articles::update_article_labels,
