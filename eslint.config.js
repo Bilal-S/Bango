@@ -2,6 +2,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import pluginVue from 'eslint-plugin-vue';
 import prettierConfig from 'eslint-config-prettier';
+import globals from 'globals';
 
 export default tseslint.config(
   { ignores: ['dist/**', 'src-tauri/**', 'node_modules/**'] },
@@ -13,6 +14,9 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         parser: tseslint.parser,
+      },
+      globals: {
+        ...globals.browser,
       },
     },
   },

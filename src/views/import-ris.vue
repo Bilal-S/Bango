@@ -1,0 +1,208 @@
+<script setup lang="ts">
+import { useImport } from '@/composables/use-import';
+import ImportDropZone from '@/components/import-drop-zone.vue';
+import ImportStepper from '@/components/import-stepper.vue';
+import ImportPreview from '@/components/import-preview.vue';
+
+const {
+  step,
+  fileName,
+  preview,
+  importResult,
+  loading,
+  error,
+  canImport,
+  loadFile,
+  parseFile,
+  confirmImport,
+  reset,
+} = useImport();
+</script>
+
+<template>
+  <div class="import-view">
+    <div class="import-view__header">
+      <h1>Import RIS File</h1>
+      <ImportStepper :current-step="step" />
+    </div>
+
+    <div v-if="error" class="import-view__error">
+      {{ error }}
+    </div>
+
+    <div class="import-view__body">
+      <!-- Step 1: Upload -->
+      <section v-if="step === 'upload'">
+        <ImportDropZone @file-selected="loadFile" />
+      </section>
+
+      <!-- Step 2: Parse -->
+      <section v-if="step === 'parse'">
+        <p class="import-view__file-name">Selected: {{ fileName }}</p>
+        <div class="import-view__actions">
+          <button class="btn btn--secondary" @click="reset">Cancel</button>
+          <button class="btn btn--primary" :disabled="loading" @click="parseFile">
+            {{ loading ? 'Parsing...' : 'Parse File' }}
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 3: Review & Import -->
+      <section v-if="step === 'import' && preview">
+        <div class="import-view__summary">
+          <div class="import-view__stat">
+            <span class="import-view__stat-value">{{ preview.totalRecords }}</span>
+            <span class="import-view__stat-label">Total Records</span>
+          </div>
+          <div class="import-view__stat">
+            <span class="import-view__stat-value">{{ preview.validRecords }}</span>
+            <span class="import-view__stat-label">Valid</span>
+          </div>
+          <div class="import-view__stat import-view__stat--error">
+            <span class="import-view__stat-value">{{ preview.errorCount }}</span>
+            <span class="import-view__stat-label">Errors</span>
+          </div>
+        </div>
+
+        <ImportPreview
+          :articles="preview.previewArticles"
+          :error-count="preview.errorCount"
+          :errors="preview.errors"
+        />
+
+        <div class="import-view__actions">
+          <button class="btn btn--secondary" @click="reset">Cancel</button>
+          <button class="btn btn--primary" :disabled="!canImport || loading" @click="confirmImport">
+            {{ loading ? 'Importing...' : `Import ${preview.validRecords} Articles` }}
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 4: Complete -->
+      <section v-if="step === 'complete' && importResult">
+        <div class="import-view__success">
+          <h2>Import Complete</h2>
+          <p>{{ importResult.importedCount }} articles imported successfully.</p>
+          <p class="import-view__capacity">
+            Remaining capacity: {{ importResult.remainingCapacity }} articles
+          </p>
+        </div>
+        <div class="import-view__actions">
+          <button class="btn btn--primary" @click="reset">Import Another File</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.import-view {
+  padding: var(--space-6);
+  max-width: 900px;
+}
+
+.import-view__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.import-view__error {
+  padding: var(--space-3);
+  background-color: var(--color-error-container);
+  color: var(--color-error);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  margin-bottom: var(--space-4);
+}
+
+.import-view__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.import-view__file-name {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+}
+
+.import-view__summary {
+  display: flex;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.import-view__stat {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-default);
+  min-width: 100px;
+}
+
+.import-view__stat-value {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+}
+
+.import-view__stat-label {
+  font-size: var(--font-size-label);
+  color: var(--color-on-surface-variant);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+}
+
+.import-view__stat--error .import-view__stat-value {
+  color: var(--color-error);
+}
+
+.import-view__actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.import-view__success {
+  padding: var(--space-6);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-default);
+  text-align: center;
+}
+
+.import-view__success h2 {
+  margin-bottom: var(--space-2);
+}
+
+.import-view__capacity {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+  margin-top: var(--space-2);
+}
+
+.btn {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.btn--secondary {
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+}
+</style>

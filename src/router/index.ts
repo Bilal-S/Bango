@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from 'vue-router';
 
 const Dashboard = () => import('@/views/dashboard.vue');
 const Placeholder = () => import('@/views/placeholder.vue');
+const ImportRis = () => import('@/views/import-ris.vue');
 
 const routes = [
   { path: '/', name: 'dashboard', component: Dashboard },
@@ -11,12 +12,7 @@ const routes = [
     component: Placeholder,
     props: { title: 'Articles' },
   },
-  {
-    path: '/import',
-    name: 'import',
-    component: Placeholder,
-    props: { title: 'RIS Import' },
-  },
+  { path: '/import', name: 'import', component: ImportRis },
   {
     path: '/dedup',
     name: 'dedup',
