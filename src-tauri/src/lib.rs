@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod db;
+pub mod dedup;
 pub mod error;
 pub mod models;
 pub mod ris;
@@ -29,6 +30,8 @@ pub fn run() {
             commands::import::parse_ris_file,
             commands::import::import_ris_file,
             commands::import::get_articles,
+            commands::dedup::run_deduplication,
+            commands::dedup::resolve_fuzzy_match,
         ])
         .run(tauri::generate_context!())
     {
