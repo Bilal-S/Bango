@@ -24,7 +24,12 @@ pub fn run() {
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(DbState { conn: std::sync::Mutex::new(conn) })
-        .invoke_handler(tauri::generate_handler![commands::health_check])
+        .invoke_handler(tauri::generate_handler![
+            commands::health_check,
+            commands::import::parse_ris_file,
+            commands::import::import_ris_file,
+            commands::import::get_articles,
+        ])
         .run(tauri::generate_context!())
     {
         eprintln!("fatal: {e:#}");

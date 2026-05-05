@@ -80,10 +80,10 @@ fn parse_line_tags(line: &str) -> Vec<(&str, &str)> {
         let rest = &remaining[2..];
 
         // Accept "  - " (4 chars) or "  -" (3 chars, e.g., "ER  -")
-        let value_and_rest = if rest.starts_with("  - ") {
-            &rest[4..]
-        } else if rest.starts_with("  -") {
-            &rest[3..]
+        let value_and_rest = if let Some(stripped) = rest.strip_prefix("  - ") {
+            stripped
+        } else if let Some(stripped) = rest.strip_prefix("  -") {
+            stripped
         } else {
             // Not a valid tag separator; try to find the next tag start.
             if let Some(pos) = find_next_tag_start(remaining) {
@@ -121,21 +121,14 @@ fn find_next_tag_start(s: &str) -> Option<usize> {
         return None;
     }
 
-    for i in 0..=len.saturating_sub(6) {
-        // Check for: uppercase letter, uppercase letter, ' ', ' ', '-', ' '
-        if i >= 1
-            && bytes[i].is_ascii_uppercase()
+    (1..=len.saturating_sub(6)).find(|&i| {
+        bytes[i].is_ascii_uppercase()
             && bytes[i + 1].is_ascii_uppercase()
             && bytes[i + 2] == b' '
             && bytes[i + 3] == b' '
             && bytes[i + 4] == b'-'
             && bytes[i + 5] == b' '
-        {
-            return Some(i);
-        }
-    }
-
-    None
+    })
 }
 
 /// Applies a single RIS tag-value pair to a record.
