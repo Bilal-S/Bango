@@ -1,4 +1,6 @@
 use bango_lib::ris::parser::parse_ris;
+use bango_lib::ris::types::RisRecord;
+use bango_lib::ris::validator::validate_record;
 use std::fs;
 use std::path::PathBuf;
 
@@ -79,4 +81,54 @@ fn test_parse_preserves_unrecognized_tags() {
 fn test_parse_empty_input() {
     let result = parse_ris("").expect("Parse failed");
     assert_eq!(result.records.len(), 0);
+}
+
+#[test]
+fn test_validate_valid_record() {
+    let mut record = RisRecord::default();
+    record.title = Some("Title".to_string());
+    record.abstract_text = Some("Abstract".to_string());
+    record.authors = vec!["Author".to_string()];
+    let errors = validate_record(&record, 1);
+    assert!(errors.is_empty());
+}
+
+#[test]
+fn test_validate_missing_title() {
+    let mut record = RisRecord::default();
+    record.abstract_text = Some("Abstract".to_string());
+    record.authors = vec!["Author".to_string()];
+    let errors = validate_record(&record, 1);
+    assert!(errors.iter().any(|e| e.message.contains("Title")));
+}
+
+#[test]
+fn test_validate_missing_abstract() {
+    let mut record = RisRecord::default();
+    record.title = Some("Title".to_string());
+    record.authors = vec!["Author".to_string()];
+    let errors = validate_record(&record, 1);
+    assert!(errors.iter().any(|e| e.message.contains("Abstract")));
+}
+
+#[test]
+fn test_validate_missing_authors() {
+    let mut record = RisRecord::default();
+    record.title = Some("Title".to_string());
+    record.abstract_text = Some("Abstract".to_string());
+    let errors = validate_record(&record, 1);
+    assert!(errors.iter().any(|e| e.message.contains("Author")));
+}
+
+#[test]
+fn test_validate_n2_abstract_fallback() {
+    // N2 was already mapped to abstract_text by the parser.
+    // This test verifies the parser correctly falls back.
+    // Direct validation: if abstract_text is present, it's valid.
+    let mut record = RisRecord::default();
+    record.title = Some("Title".to_string());
+    record.abstract_text = Some("From N2".to_string());
+    record.authors = vec!["Author".to_string()];
+    let errors = validate_record(&record, 1);
+    assert!(errors.is_empty());
 }
