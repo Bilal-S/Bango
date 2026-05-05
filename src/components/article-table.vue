@@ -65,18 +65,10 @@ function formatDate(dateStr: string | null): string {
               @click="$emit('sort', col.key)"
             >
               <span>{{ col.label }}</span>
-              <span
-                v-if="sortColumn === col.key"
-                class="text-indigo-600 text-[10px]"
-              >
+              <span v-if="sortColumn === col.key" class="text-indigo-600 text-[10px]">
                 {{ getSortIndicator(col.key) }}
               </span>
-              <span
-                v-else
-                class="text-slate-300 text-[10px]"
-              >
-                &#9650;
-              </span>
+              <span v-else class="text-slate-300 text-[10px]"> &#9650; </span>
             </button>
           </th>
         </tr>

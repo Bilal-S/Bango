@@ -28,9 +28,7 @@ function updateField(key: keyof ArticleFilter, value: unknown): void {
 
 function toggleTag(tag: string): void {
   const current = props.filter.tags;
-  const updated = current.includes(tag)
-    ? current.filter((t) => t !== tag)
-    : [...current, tag];
+  const updated = current.includes(tag) ? current.filter((t) => t !== tag) : [...current, tag];
   updateField('tags', updated);
 }
 
@@ -44,9 +42,7 @@ function toggleLabel(label: string): void {
 </script>
 
 <template>
-  <div
-    class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6"
-  >
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="font-h2 text-h2 text-on-surface">Filters</h3>
       <button
@@ -65,7 +61,12 @@ function toggleLabel(label: string): void {
           <select
             class="shrink-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.titleMatch"
-            @change="updateField('titleMatch', ($event.target as HTMLSelectElement).value as TitleMatchType)"
+            @change="
+              updateField(
+                'titleMatch',
+                ($event.target as HTMLSelectElement).value as TitleMatchType
+              )
+            "
           >
             <option v-for="mt in MATCH_TYPES" :key="mt.value" :value="mt.value">
               {{ mt.label }}
@@ -119,7 +120,14 @@ function toggleLabel(label: string): void {
             placeholder="From"
             class="w-24 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.yearFrom ?? ''"
-            @input="updateField('yearFrom', ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : null)"
+            @input="
+              updateField(
+                'yearFrom',
+                ($event.target as HTMLInputElement).value
+                  ? Number(($event.target as HTMLInputElement).value)
+                  : null
+              )
+            "
           />
           <span class="text-slate-400 text-sm">&ndash;</span>
           <input
@@ -127,7 +135,14 @@ function toggleLabel(label: string): void {
             placeholder="To"
             class="w-24 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.yearTo ?? ''"
-            @input="updateField('yearTo', ($event.target as HTMLInputElement).value ? Number(($event.target as HTMLInputElement).value) : null)"
+            @input="
+              updateField(
+                'yearTo',
+                ($event.target as HTMLInputElement).value
+                  ? Number(($event.target as HTMLInputElement).value)
+                  : null
+              )
+            "
           />
         </div>
       </div>
@@ -161,10 +176,7 @@ function toggleLabel(label: string): void {
           >
             {{ tag }}
           </button>
-          <span
-            v-if="allTags.length === 0"
-            class="text-[11px] text-slate-400 italic"
-          >
+          <span v-if="allTags.length === 0" class="text-[11px] text-slate-400 italic">
             No tags available
           </span>
         </div>
@@ -187,10 +199,7 @@ function toggleLabel(label: string): void {
           >
             {{ label }}
           </button>
-          <span
-            v-if="allLabels.length === 0"
-            class="text-[11px] text-slate-400 italic"
-          >
+          <span v-if="allLabels.length === 0" class="text-[11px] text-slate-400 italic">
             No labels available
           </span>
         </div>

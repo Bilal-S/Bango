@@ -47,7 +47,9 @@ defineEmits<{
           </template>
         </tbody>
       </table>
-      <p class="preview__note">Showing {{ articles.length - props.removedIndices.size }} articles</p>
+      <p class="preview__note">
+        Showing {{ articles.length - props.removedIndices.size }} articles
+      </p>
     </div>
   </div>
 </template>
@@ -121,7 +123,9 @@ defineEmits<{
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-default);
   line-height: 1;
-  transition: color 0.15s, background-color 0.15s;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
 }
 
 .preview__remove:hover {
