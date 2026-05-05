@@ -1,295 +1,456 @@
-<!DOCTYPE html>
+<!doctype html>
 
-<html class="light" lang="en"><head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>LLM Configuration - Bango</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    "colors": {
-                        "tertiary-fixed-dim": "#ffb695",
-                        "error-container": "#ffdad6",
-                        "surface-dim": "#dcd8e5",
-                        "on-tertiary-fixed": "#351000",
-                        "on-primary-container": "#dad7ff",
-                        "on-error": "#ffffff",
-                        "tertiary-fixed": "#ffdbcc",
-                        "on-primary-fixed-variant": "#3323cc",
-                        "surface-container-highest": "#e4e1ee",
-                        "on-tertiary-fixed-variant": "#7b2f00",
-                        "on-tertiary": "#ffffff",
-                        "surface-bright": "#fcf8ff",
-                        "on-background": "#1b1b24",
-                        "inverse-on-surface": "#f3effc",
-                        "on-error-container": "#93000a",
-                        "background": "#fcf8ff",
-                        "secondary": "#545f73",
-                        "inverse-primary": "#c3c0ff",
-                        "on-surface-variant": "#464555",
-                        "primary": "#3525cd",
-                        "on-secondary-container": "#586377",
-                        "secondary-fixed-dim": "#bcc7de",
-                        "on-surface": "#1b1b24",
-                        "primary-fixed": "#e2dfff",
-                        "primary-container": "#4f46e5",
-                        "secondary-fixed": "#d8e3fb",
-                        "surface-container": "#f0ecf9",
-                        "tertiary-container": "#a44100",
-                        "inverse-surface": "#302f39",
-                        "on-secondary-fixed-variant": "#3c475a",
-                        "surface-container-low": "#f5f2ff",
-                        "on-secondary-fixed": "#111c2d",
-                        "outline-variant": "#c7c4d8",
-                        "surface": "#fcf8ff",
-                        "on-secondary": "#ffffff",
-                        "on-tertiary-container": "#ffd2be",
-                        "secondary-container": "#d5e0f8",
-                        "surface-container-high": "#eae6f4",
-                        "surface-variant": "#e4e1ee",
-                        "error": "#ba1a1a",
-                        "surface-container-lowest": "#ffffff",
-                        "primary-fixed-dim": "#c3c0ff",
-                        "surface-tint": "#4d44e3",
-                        "on-primary-fixed": "#0f0069",
-                        "outline": "#777587",
-                        "tertiary": "#7e3000",
-                        "on-primary": "#ffffff"
-                    },
-                    "borderRadius": {
-                        "DEFAULT": "0.25rem",
-                        "lg": "0.5rem",
-                        "xl": "0.75rem",
-                        "full": "9999px"
-                    },
-                    "spacing": {
-                        "stack-gap": "12px",
-                        "container-padding": "24px",
-                        "sidebar-width": "260px",
-                        "unit": "4px",
-                        "gutter": "16px"
-                    },
-                    "fontFamily": {
-                        "h1": ["Inter, system-ui"],
-                        "body-sm": ["Inter, system-ui"],
-                        "label-caps": ["Inter, system-ui"],
-                        "body-main": ["Inter, system-ui"],
-                        "mono": ["ui-monospace, SFMono-Regular"],
-                        "display": ["Inter, system-ui"],
-                        "h2": ["Inter, system-ui"]
-                    },
-                    "fontSize": {
-                        "h1": ["20px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
-                        "body-sm": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
-                        "label-caps": ["11px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
-                        "body-main": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
-                        "mono": ["13px", { "lineHeight": "18px", "fontWeight": "400" }],
-                        "display": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
-                        "h2": ["16px", { "lineHeight": "24px", "fontWeight": "600" }]
-                    }
-                }
-            }
-        }
+<html class="light" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>LLM Configuration - Bango</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              'tertiary-fixed-dim': '#ffb695',
+              'error-container': '#ffdad6',
+              'surface-dim': '#dcd8e5',
+              'on-tertiary-fixed': '#351000',
+              'on-primary-container': '#dad7ff',
+              'on-error': '#ffffff',
+              'tertiary-fixed': '#ffdbcc',
+              'on-primary-fixed-variant': '#3323cc',
+              'surface-container-highest': '#e4e1ee',
+              'on-tertiary-fixed-variant': '#7b2f00',
+              'on-tertiary': '#ffffff',
+              'surface-bright': '#fcf8ff',
+              'on-background': '#1b1b24',
+              'inverse-on-surface': '#f3effc',
+              'on-error-container': '#93000a',
+              background: '#fcf8ff',
+              secondary: '#545f73',
+              'inverse-primary': '#c3c0ff',
+              'on-surface-variant': '#464555',
+              primary: '#3525cd',
+              'on-secondary-container': '#586377',
+              'secondary-fixed-dim': '#bcc7de',
+              'on-surface': '#1b1b24',
+              'primary-fixed': '#e2dfff',
+              'primary-container': '#4f46e5',
+              'secondary-fixed': '#d8e3fb',
+              'surface-container': '#f0ecf9',
+              'tertiary-container': '#a44100',
+              'inverse-surface': '#302f39',
+              'on-secondary-fixed-variant': '#3c475a',
+              'surface-container-low': '#f5f2ff',
+              'on-secondary-fixed': '#111c2d',
+              'outline-variant': '#c7c4d8',
+              surface: '#fcf8ff',
+              'on-secondary': '#ffffff',
+              'on-tertiary-container': '#ffd2be',
+              'secondary-container': '#d5e0f8',
+              'surface-container-high': '#eae6f4',
+              'surface-variant': '#e4e1ee',
+              error: '#ba1a1a',
+              'surface-container-lowest': '#ffffff',
+              'primary-fixed-dim': '#c3c0ff',
+              'surface-tint': '#4d44e3',
+              'on-primary-fixed': '#0f0069',
+              outline: '#777587',
+              tertiary: '#7e3000',
+              'on-primary': '#ffffff',
+            },
+            borderRadius: {
+              DEFAULT: '0.25rem',
+              lg: '0.5rem',
+              xl: '0.75rem',
+              full: '9999px',
+            },
+            spacing: {
+              'stack-gap': '12px',
+              'container-padding': '24px',
+              'sidebar-width': '260px',
+              unit: '4px',
+              gutter: '16px',
+            },
+            fontFamily: {
+              h1: ['Inter, system-ui'],
+              'body-sm': ['Inter, system-ui'],
+              'label-caps': ['Inter, system-ui'],
+              'body-main': ['Inter, system-ui'],
+              mono: ['ui-monospace, SFMono-Regular'],
+              display: ['Inter, system-ui'],
+              h2: ['Inter, system-ui'],
+            },
+            fontSize: {
+              h1: ['20px', { lineHeight: '28px', letterSpacing: '-0.01em', fontWeight: '600' }],
+              'body-sm': ['13px', { lineHeight: '18px', fontWeight: '400' }],
+              'label-caps': [
+                '11px',
+                { lineHeight: '16px', letterSpacing: '0.05em', fontWeight: '600' },
+              ],
+              'body-main': ['14px', { lineHeight: '20px', fontWeight: '400' }],
+              mono: ['13px', { lineHeight: '18px', fontWeight: '400' }],
+              display: [
+                '24px',
+                { lineHeight: '32px', letterSpacing: '-0.02em', fontWeight: '600' },
+              ],
+              h2: ['16px', { lineHeight: '24px', fontWeight: '600' }],
+            },
+          },
+        },
+      };
     </script>
-<style>
-        body { font-family: 'Inter', sans-serif; }
-        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+    <style>
+      body {
+        font-family: 'Inter', sans-serif;
+      }
+      .material-symbols-outlined {
+        font-variation-settings:
+          'FILL' 0,
+          'wght' 400,
+          'GRAD' 0,
+          'opsz' 24;
+      }
     </style>
-</head>
-<body class="bg-background text-on-background antialiased flex h-screen overflow-hidden">
-<!-- SideNavBar Component -->
-<nav class="h-screen w-64 flex-col border-r border-slate-700 bg-slate-800 dark:bg-slate-950 text-indigo-500 font-inter text-sm antialiased fixed left-0 top-0 flex flex-col py-6 px-4 z-50">
-<div class="mb-8 px-2 flex items-center gap-3">
-<div class="w-8 h-8 rounded bg-indigo-500 flex items-center justify-center text-white shrink-0">
-<span class="material-symbols-outlined text-lg" data-icon="hub">hub</span>
-</div>
-<div>
-<div class="text-2xl font-bold text-white tracking-tight">Bango</div>
-<div class="text-slate-400 text-xs">Systematic Review</div>
-</div>
-</div>
-<button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 mb-6 transition-colors shadow-sm">
-<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
-            New Project
-        </button>
-<div class="flex-1 overflow-y-auto space-y-1">
-<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
-                Dashboard
-            </a>
-<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined" data-icon="description">description</span>
-                Articles
-            </a>
-<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined" data-icon="rule">rule</span>
-                Criteria
-            </a>
-<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined" data-icon="checklist_rtl">checklist_rtl</span>
-                Screening
-            </a>
-<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-white font-semibold border-l-4 border-indigo-500 bg-slate-700/50 scale-95 duration-150 ease-in-out" href="#">
-<span class="material-symbols-outlined" data-icon="settings">settings</span>
-                Settings
-            </a>
-</div>
-<div class="mt-auto pt-6 border-t border-slate-700 px-2 flex items-center gap-3 cursor-pointer hover:bg-slate-700/30 p-2 rounded-lg transition-colors">
-<img alt="Research Project Icon" class="w-8 h-8 rounded-full border border-slate-600" data-alt="A small square profile picture of a professional researcher with short brown hair, wearing a dark blue sweater. The background is a soft, out-of-focus gray. The lighting is soft and natural, suggesting an indoor office setting. The style is a realistic photograph suitable for a professional avatar in a corporate or academic application." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCkAteIK5jhxbDsMK1sJZm7BlBLeWF4tQXU-eYyKlR8i61FFv4lPDmBlLr-fPuO465P3F4S9QlYmLGYTzULoJFtXlpFhlU9d8ft_hGW6VvHIHRwz7E5yQREUm0YG_dIYES8MoTMWesVUIe0ov-kawnRPw3v1384ybP21kjRjQuPvKwRrQQ9kTfMzqB0GUC4HySVm704FFhs7su-3dt9Pd3X4SHqZP4M5xx7HS69Cpvza3praBlxBMxpxT1W7R1AlApXmByYx6Q2FWI"/>
-<div class="flex flex-col">
-<span class="text-sm font-medium text-white">Dr. J. Smith</span>
-<span class="text-xs text-slate-400">Lead Researcher</span>
-</div>
-</div>
-</nav>
-<!-- Main Content Area -->
-<div class="flex-1 ml-64 flex flex-col h-screen overflow-hidden bg-background">
-<!-- TopAppBar Component -->
-<header class="h-16 w-full sticky top-0 z-40 border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md text-indigo-600 dark:text-indigo-400 font-inter font-medium text-slate-700 dark:text-slate-200 flex items-center justify-between px-8 w-full max-w-[calc(100%-16rem)]">
-<div class="flex items-center gap-6">
-<!-- Search on Left -->
-<div class="relative group hidden md:block">
-<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-indigo-500 transition-colors" data-icon="search">search</span>
-<input class="pl-10 pr-4 py-1.5 bg-slate-100 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg text-sm w-64 transition-all outline-none text-slate-700 placeholder-slate-400" placeholder="Search parameters..." type="text"/>
-</div>
-</div>
-<div class="flex items-center gap-2">
-<button class="p-2 text-slate-500 hover:text-indigo-500 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-lg transition-opacity duration-200 active:opacity-70">
-<span class="material-symbols-outlined" data-icon="help">help</span>
-</button>
-<button class="p-2 text-slate-500 hover:text-indigo-500 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-lg transition-opacity duration-200 active:opacity-70 relative">
-<span class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
-</button>
-<button class="p-2 text-slate-500 hover:text-indigo-500 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-lg transition-opacity duration-200 active:opacity-70">
-<span class="material-symbols-outlined" data-icon="account_circle">account_circle</span>
-</button>
-</div>
-</header>
-<!-- Page Content -->
-<main class="flex-1 overflow-y-auto p-container-padding">
-<div class="max-w-4xl mx-auto space-y-6">
-<!-- Header Section -->
-<div>
-<h1 class="font-display text-display text-on-surface mb-2">LLM Configuration</h1>
-<p class="font-body-main text-body-main text-on-surface-variant">Configure the Large Language Model endpoint and parameters for text generation tasks.</p>
-</div>
-<!-- Warning Banner -->
-<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
-<span class="material-symbols-outlined text-yellow-600 mt-0.5" data-icon="warning">warning</span>
-<p class="font-body-sm text-body-sm text-yellow-800">
-<strong class="font-semibold">Hardware Requirement Notice:</strong> Local providers require 16+ GB VRAM for 50k token context to maintain stable inference speeds.
-                    </p>
-</div>
-<!-- Main Configuration Form - Bento Layout -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-<!-- Primary Settings (Spans 2 columns) -->
-<div class="md:col-span-2 bg-surface rounded-xl border border-surface-variant p-6 space-y-6 shadow-sm">
-<h2 class="font-h2 text-h2 text-on-surface flex items-center gap-2 border-b border-surface-variant pb-3">
-<span class="material-symbols-outlined text-primary" data-icon="dns">dns</span>
-                            Connection Details
-                        </h2>
-<div class="space-y-4">
-<!-- Provider Dropdown -->
-<div>
-<label class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">Provider</label>
-<div class="relative">
-<select class="w-full appearance-none bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2.5 font-body-main text-body-main text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors">
-<option>OpenAI</option>
-<option>Google</option>
-<option>z.ai</option>
-<option>llama.cpp</option>
-<option>Ollama</option>
-<option>LM Studio</option>
-<option>Custom</option>
-</select>
-<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none" data-icon="expand_more">expand_more</span>
-</div>
-</div>
-<!-- Endpoint URL -->
-<div>
-<label class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">Endpoint URL</label>
-<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2.5 font-mono text-mono text-on-surface placeholder:text-outline focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors" placeholder="https://api.openai.com/v1/chat/completions" type="text"/>
-</div>
-<!-- Model Name & API Key Row -->
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-<div>
-<label class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">Model Name</label>
-<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2.5 font-mono text-mono text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors" placeholder="gpt-4-turbo" type="text" value="gpt-4-turbo"/>
-</div>
-<div>
-<label class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">API Key</label>
-<div class="relative">
-<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-4 pr-10 py-2.5 font-mono text-mono text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors" type="password" value="sk-1234567890abcdef"/>
-<button class="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface transition-colors">
-<span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span>
-</button>
-</div>
-</div>
-</div>
-</div>
-</div>
-<!-- Inference Parameters (Spans 1 column) -->
-<div class="bg-surface-container-low rounded-xl border border-surface-variant p-6 space-y-6 shadow-sm">
-<h2 class="font-h2 text-h2 text-on-surface flex items-center gap-2 border-b border-surface-variant pb-3">
-<span class="material-symbols-outlined text-primary" data-icon="tune">tune</span>
-                            Parameters
-                        </h2>
-<div class="space-y-6">
-<!-- Max Tokens Slider -->
-<div>
-<div class="flex justify-between items-center mb-2">
-<label class="block font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider">Max Context Tokens</label>
-<span class="font-mono text-mono text-primary font-medium bg-primary-fixed text-on-primary-fixed px-2 py-0.5 rounded">4000</span>
-</div>
-<input class="w-full h-1.5 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary" max="50000" min="1000" type="range" value="4000"/>
-<div class="flex justify-between text-xs text-outline mt-1 font-mono">
-<span>1k</span>
-<span>50k</span>
-</div>
-</div>
-<!-- Concurrency -->
-<div>
-<label class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">Concurrency Threads</label>
-<div class="flex items-center gap-3">
-<input class="w-20 bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 font-mono text-mono text-center text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors" max="16" min="1" type="number" value="3"/>
-<span class="font-body-sm text-body-sm text-on-surface-variant">Parallel requests</span>
-</div>
-</div>
-<!-- Request Delay -->
-<div>
-<label class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">Request Delay (ms)</label>
-<div class="flex items-center gap-3">
-<input class="w-24 bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 font-mono text-mono text-center text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors" min="0" step="100" type="number" value="500"/>
-<span class="font-body-sm text-body-sm text-on-surface-variant">Rate limiting</span>
-</div>
-</div>
-</div>
-</div>
-</div>
-<!-- Footer Actions -->
-<div class="flex items-center justify-between pt-6 border-t border-surface-variant mt-8">
-<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-variant/50 border border-surface-variant">
-<span class="w-2 h-2 rounded-full bg-outline"></span>
-<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Disconnected</span>
-</div>
-<div class="flex gap-3">
-<button class="px-6 py-2.5 rounded-lg font-body-main text-body-main font-medium border border-outline-variant text-on-surface hover:bg-surface-variant transition-colors">
-                            Revert
-                        </button>
-<button class="px-6 py-2.5 rounded-lg font-body-main text-body-main font-medium bg-primary text-on-primary hover:bg-primary/90 shadow-sm flex items-center gap-2 transition-colors">
-<span class="material-symbols-outlined text-[18px]" data-icon="cable">cable</span>
-                            Test Connection
-                        </button>
-</div>
-</div>
-</div>
-</main>
-</div>
-</body></html>
+  </head>
+  <body class="bg-background text-on-background antialiased flex h-screen overflow-hidden">
+    <!-- SideNavBar Component -->
+    <nav
+      class="h-screen w-64 flex-col border-r border-slate-700 bg-slate-800 dark:bg-slate-950 text-indigo-500 font-inter text-sm antialiased fixed left-0 top-0 flex flex-col py-6 px-4 z-50"
+    >
+      <div class="mb-8 px-2 flex items-center gap-3">
+        <div
+          class="w-8 h-8 rounded bg-indigo-500 flex items-center justify-center text-white shrink-0"
+        >
+          <span class="material-symbols-outlined text-lg" data-icon="hub">hub</span>
+        </div>
+        <div>
+          <div class="text-2xl font-bold text-white tracking-tight">Bango</div>
+          <div class="text-slate-400 text-xs">Systematic Review</div>
+        </div>
+      </div>
+      <button
+        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 mb-6 transition-colors shadow-sm"
+      >
+        <span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+        New Project
+      </button>
+      <div class="flex-1 overflow-y-auto space-y-1">
+        <a
+          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+          Dashboard
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="description">description</span>
+          Articles
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="rule">rule</span>
+          Criteria
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-700/30 transition-colors scale-95 duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="checklist_rtl">checklist_rtl</span>
+          Screening
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 rounded-lg text-white font-semibold border-l-4 border-indigo-500 bg-slate-700/50 scale-95 duration-150 ease-in-out"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="settings">settings</span>
+          Settings
+        </a>
+      </div>
+      <div
+        class="mt-auto pt-6 border-t border-slate-700 px-2 flex items-center gap-3 cursor-pointer hover:bg-slate-700/30 p-2 rounded-lg transition-colors"
+      >
+        <img
+          alt="Research Project Icon"
+          class="w-8 h-8 rounded-full border border-slate-600"
+          data-alt="A small square profile picture of a professional researcher with short brown hair, wearing a dark blue sweater. The background is a soft, out-of-focus gray. The lighting is soft and natural, suggesting an indoor office setting. The style is a realistic photograph suitable for a professional avatar in a corporate or academic application."
+          src="https://lh3.googleusercontent.com/aida-public/AB6AXuCkAteIK5jhxbDsMK1sJZm7BlBLeWF4tQXU-eYyKlR8i61FFv4lPDmBlLr-fPuO465P3F4S9QlYmLGYTzULoJFtXlpFhlU9d8ft_hGW6VvHIHRwz7E5yQREUm0YG_dIYES8MoTMWesVUIe0ov-kawnRPw3v1384ybP21kjRjQuPvKwRrQQ9kTfMzqB0GUC4HySVm704FFhs7su-3dt9Pd3X4SHqZP4M5xx7HS69Cpvza3praBlxBMxpxT1W7R1AlApXmByYx6Q2FWI"
+        />
+        <div class="flex flex-col">
+          <span class="text-sm font-medium text-white">Dr. J. Smith</span>
+          <span class="text-xs text-slate-400">Lead Researcher</span>
+        </div>
+      </div>
+    </nav>
+    <!-- Main Content Area -->
+    <div class="flex-1 ml-64 flex flex-col h-screen overflow-hidden bg-background">
+      <!-- TopAppBar Component -->
+      <header
+        class="h-16 w-full sticky top-0 z-40 border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md text-indigo-600 dark:text-indigo-400 font-inter font-medium text-slate-700 dark:text-slate-200 flex items-center justify-between px-8 w-full max-w-[calc(100%-16rem)]"
+      >
+        <div class="flex items-center gap-6">
+          <!-- Search on Left -->
+          <div class="relative group hidden md:block">
+            <span
+              class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-indigo-500 transition-colors"
+              data-icon="search"
+              >search</span
+            >
+            <input
+              class="pl-10 pr-4 py-1.5 bg-slate-100 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 rounded-lg text-sm w-64 transition-all outline-none text-slate-700 placeholder-slate-400"
+              placeholder="Search parameters..."
+              type="text"
+            />
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            class="p-2 text-slate-500 hover:text-indigo-500 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-lg transition-opacity duration-200 active:opacity-70"
+          >
+            <span class="material-symbols-outlined" data-icon="help">help</span>
+          </button>
+          <button
+            class="p-2 text-slate-500 hover:text-indigo-500 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-lg transition-opacity duration-200 active:opacity-70 relative"
+          >
+            <span
+              class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"
+            ></span>
+            <span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+          </button>
+          <button
+            class="p-2 text-slate-500 hover:text-indigo-500 hover:bg-gray-50 dark:hover:bg-slate-800 rounded-lg transition-opacity duration-200 active:opacity-70"
+          >
+            <span class="material-symbols-outlined" data-icon="account_circle">account_circle</span>
+          </button>
+        </div>
+      </header>
+      <!-- Page Content -->
+      <main class="flex-1 overflow-y-auto p-container-padding">
+        <div class="max-w-4xl mx-auto space-y-6">
+          <!-- Header Section -->
+          <div>
+            <h1 class="font-display text-display text-on-surface mb-2">LLM Configuration</h1>
+            <p class="font-body-main text-body-main text-on-surface-variant">
+              Configure the Large Language Model endpoint and parameters for text generation tasks.
+            </p>
+          </div>
+          <!-- Warning Banner -->
+          <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
+            <span class="material-symbols-outlined text-yellow-600 mt-0.5" data-icon="warning"
+              >warning</span
+            >
+            <p class="font-body-sm text-body-sm text-yellow-800">
+              <strong class="font-semibold">Hardware Requirement Notice:</strong> Local providers
+              require 16+ GB VRAM for 50k token context to maintain stable inference speeds.
+            </p>
+          </div>
+          <!-- Main Configuration Form - Bento Layout -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Primary Settings (Spans 2 columns) -->
+            <div
+              class="md:col-span-2 bg-surface rounded-xl border border-surface-variant p-6 space-y-6 shadow-sm"
+            >
+              <h2
+                class="font-h2 text-h2 text-on-surface flex items-center gap-2 border-b border-surface-variant pb-3"
+              >
+                <span class="material-symbols-outlined text-primary" data-icon="dns">dns</span>
+                Connection Details
+              </h2>
+              <div class="space-y-4">
+                <!-- Provider Dropdown -->
+                <div>
+                  <label
+                    class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider"
+                    >Provider</label
+                  >
+                  <div class="relative">
+                    <select
+                      class="w-full appearance-none bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2.5 font-body-main text-body-main text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors"
+                    >
+                      <option>OpenAI</option>
+                      <option>Google</option>
+                      <option>z.ai</option>
+                      <option>llama.cpp</option>
+                      <option>Ollama</option>
+                      <option>LM Studio</option>
+                      <option>Custom</option>
+                    </select>
+                    <span
+                      class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-outline pointer-events-none"
+                      data-icon="expand_more"
+                      >expand_more</span
+                    >
+                  </div>
+                </div>
+                <!-- Endpoint URL -->
+                <div>
+                  <label
+                    class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider"
+                    >Endpoint URL</label
+                  >
+                  <input
+                    class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2.5 font-mono text-mono text-on-surface placeholder:text-outline focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors"
+                    placeholder="https://api.openai.com/v1/chat/completions"
+                    type="text"
+                  />
+                </div>
+                <!-- Model Name & API Key Row -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider"
+                      >Model Name</label
+                    >
+                    <input
+                      class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg px-4 py-2.5 font-mono text-mono text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors"
+                      placeholder="gpt-4-turbo"
+                      type="text"
+                      value="gpt-4-turbo"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider"
+                      >API Key</label
+                    >
+                    <div class="relative">
+                      <input
+                        class="w-full bg-surface-container-lowest border border-outline-variant rounded-lg pl-4 pr-10 py-2.5 font-mono text-mono text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors"
+                        type="password"
+                        value="sk-1234567890abcdef"
+                      />
+                      <button
+                        class="absolute right-3 top-1/2 -translate-y-1/2 text-outline hover:text-on-surface transition-colors"
+                      >
+                        <span class="material-symbols-outlined text-[20px]" data-icon="visibility"
+                          >visibility</span
+                        >
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- Inference Parameters (Spans 1 column) -->
+            <div
+              class="bg-surface-container-low rounded-xl border border-surface-variant p-6 space-y-6 shadow-sm"
+            >
+              <h2
+                class="font-h2 text-h2 text-on-surface flex items-center gap-2 border-b border-surface-variant pb-3"
+              >
+                <span class="material-symbols-outlined text-primary" data-icon="tune">tune</span>
+                Parameters
+              </h2>
+              <div class="space-y-6">
+                <!-- Max Tokens Slider -->
+                <div>
+                  <div class="flex justify-between items-center mb-2">
+                    <label
+                      class="block font-label-caps text-label-caps text-on-surface-variant uppercase tracking-wider"
+                      >Max Context Tokens</label
+                    >
+                    <span
+                      class="font-mono text-mono text-primary font-medium bg-primary-fixed text-on-primary-fixed px-2 py-0.5 rounded"
+                      >4000</span
+                    >
+                  </div>
+                  <input
+                    class="w-full h-1.5 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary"
+                    max="50000"
+                    min="1000"
+                    type="range"
+                    value="4000"
+                  />
+                  <div class="flex justify-between text-xs text-outline mt-1 font-mono">
+                    <span>1k</span>
+                    <span>50k</span>
+                  </div>
+                </div>
+                <!-- Concurrency -->
+                <div>
+                  <label
+                    class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider"
+                    >Concurrency Threads</label
+                  >
+                  <div class="flex items-center gap-3">
+                    <input
+                      class="w-20 bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 font-mono text-mono text-center text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors"
+                      max="16"
+                      min="1"
+                      type="number"
+                      value="3"
+                    />
+                    <span class="font-body-sm text-body-sm text-on-surface-variant"
+                      >Parallel requests</span
+                    >
+                  </div>
+                </div>
+                <!-- Request Delay -->
+                <div>
+                  <label
+                    class="block font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase tracking-wider"
+                    >Request Delay (ms)</label
+                  >
+                  <div class="flex items-center gap-3">
+                    <input
+                      class="w-24 bg-surface-container-lowest border border-outline-variant rounded-lg px-3 py-2 font-mono text-mono text-center text-on-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors"
+                      min="0"
+                      step="100"
+                      type="number"
+                      value="500"
+                    />
+                    <span class="font-body-sm text-body-sm text-on-surface-variant"
+                      >Rate limiting</span
+                    >
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Footer Actions -->
+          <div class="flex items-center justify-between pt-6 border-t border-surface-variant mt-8">
+            <div
+              class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-variant/50 border border-surface-variant"
+            >
+              <span class="w-2 h-2 rounded-full bg-outline"></span>
+              <span class="font-label-caps text-label-caps text-on-surface-variant uppercase"
+                >Disconnected</span
+              >
+            </div>
+            <div class="flex gap-3">
+              <button
+                class="px-6 py-2.5 rounded-lg font-body-main text-body-main font-medium border border-outline-variant text-on-surface hover:bg-surface-variant transition-colors"
+              >
+                Revert
+              </button>
+              <button
+                class="px-6 py-2.5 rounded-lg font-body-main text-body-main font-medium bg-primary text-on-primary hover:bg-primary/90 shadow-sm flex items-center gap-2 transition-colors"
+              >
+                <span class="material-symbols-outlined text-[18px]" data-icon="cable">cable</span>
+                Test Connection
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

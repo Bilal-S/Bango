@@ -6,8 +6,5 @@ pub struct Migration {
 }
 
 pub fn get_migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: v001_initial::VERSION,
-        up_sql: v001_initial::UP_SQL,
-    }]
+    vec![Migration { version: v001_initial::VERSION, up_sql: v001_initial::UP_SQL }]
 }

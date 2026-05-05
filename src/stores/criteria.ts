@@ -20,12 +20,8 @@ export const useCriteriaStore = defineStore('criteria', () => {
       ]);
       aims.value = aimsResult;
       criteria.value = criteriaResult;
-      inclusionCriteria.value = criteriaResult.filter(
-        (c) => c.criterionType === 'inclusion',
-      );
-      exclusionCriteria.value = criteriaResult.filter(
-        (c) => c.criterionType === 'exclusion',
-      );
+      inclusionCriteria.value = criteriaResult.filter((c) => c.criterionType === 'inclusion');
+      exclusionCriteria.value = criteriaResult.filter((c) => c.criterionType === 'exclusion');
     } finally {
       loading.value = false;
     }

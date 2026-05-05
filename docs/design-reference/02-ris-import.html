@@ -1,346 +1,523 @@
-<!DOCTYPE html><html class="light" lang="en"><head>
-<meta charset="utf-8">
-<meta content="width=device-width, initial-scale=1.0" name="viewport">
-<title>Bango RIS - Import Data</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
-<script id="tailwind-config">
+<!doctype html>
+<html class="light" lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Bango RIS - Import Data</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+      rel="stylesheet"
+    />
+    <script id="tailwind-config">
       tailwind.config = {
-        darkMode: "class",
+        darkMode: 'class',
         theme: {
           extend: {
-            "colors": {
-                    "surface-container-highest": "#e4e1ee",
-                    "surface-container-low": "#f5f2ff",
-                    "on-background": "#1b1b24",
-                    "on-primary": "#ffffff",
-                    "tertiary-container": "#a44100",
-                    "background": "#fcf8ff",
-                    "secondary-fixed": "#d8e3fb",
-                    "on-error": "#ffffff",
-                    "on-tertiary-fixed": "#351000",
-                    "inverse-primary": "#c3c0ff",
-                    "on-primary-container": "#dad7ff",
-                    "tertiary-fixed-dim": "#ffb695",
-                    "surface-container-lowest": "#ffffff",
-                    "error": "#ba1a1a",
-                    "surface-container": "#f0ecf9",
-                    "on-primary-fixed-variant": "#3323cc",
-                    "primary-fixed": "#e2dfff",
-                    "secondary": "#545f73",
-                    "outline-variant": "#c7c4d8",
-                    "inverse-on-surface": "#f3effc",
-                    "error-container": "#ffdad6",
-                    "surface-variant": "#e4e1ee",
-                    "primary-fixed-dim": "#c3c0ff",
-                    "on-tertiary-fixed-variant": "#7b2f00",
-                    "surface-container-high": "#eae6f4",
-                    "on-surface": "#1b1b24",
-                    "tertiary": "#7e3000",
-                    "surface-bright": "#fcf8ff",
-                    "on-error-container": "#93000a",
-                    "on-secondary-fixed-variant": "#3c475a",
-                    "on-secondary-container": "#586377",
-                    "inverse-surface": "#302f39",
-                    "tertiary-fixed": "#ffdbcc",
-                    "surface-dim": "#dcd8e5",
-                    "primary": "#3525cd",
-                    "on-primary-fixed": "#0f0069",
-                    "surface-tint": "#4d44e3",
-                    "secondary-fixed-dim": "#bcc7de",
-                    "on-tertiary": "#ffffff",
-                    "on-tertiary-container": "#ffd2be",
-                    "surface": "#fcf8ff",
-                    "primary-container": "#4f46e5",
-                    "secondary-container": "#d5e0f8",
-                    "on-surface-variant": "#464555",
-                    "on-secondary": "#ffffff",
-                    "outline": "#777587",
-                    "on-secondary-fixed": "#111c2d"
+            colors: {
+              'surface-container-highest': '#e4e1ee',
+              'surface-container-low': '#f5f2ff',
+              'on-background': '#1b1b24',
+              'on-primary': '#ffffff',
+              'tertiary-container': '#a44100',
+              background: '#fcf8ff',
+              'secondary-fixed': '#d8e3fb',
+              'on-error': '#ffffff',
+              'on-tertiary-fixed': '#351000',
+              'inverse-primary': '#c3c0ff',
+              'on-primary-container': '#dad7ff',
+              'tertiary-fixed-dim': '#ffb695',
+              'surface-container-lowest': '#ffffff',
+              error: '#ba1a1a',
+              'surface-container': '#f0ecf9',
+              'on-primary-fixed-variant': '#3323cc',
+              'primary-fixed': '#e2dfff',
+              secondary: '#545f73',
+              'outline-variant': '#c7c4d8',
+              'inverse-on-surface': '#f3effc',
+              'error-container': '#ffdad6',
+              'surface-variant': '#e4e1ee',
+              'primary-fixed-dim': '#c3c0ff',
+              'on-tertiary-fixed-variant': '#7b2f00',
+              'surface-container-high': '#eae6f4',
+              'on-surface': '#1b1b24',
+              tertiary: '#7e3000',
+              'surface-bright': '#fcf8ff',
+              'on-error-container': '#93000a',
+              'on-secondary-fixed-variant': '#3c475a',
+              'on-secondary-container': '#586377',
+              'inverse-surface': '#302f39',
+              'tertiary-fixed': '#ffdbcc',
+              'surface-dim': '#dcd8e5',
+              primary: '#3525cd',
+              'on-primary-fixed': '#0f0069',
+              'surface-tint': '#4d44e3',
+              'secondary-fixed-dim': '#bcc7de',
+              'on-tertiary': '#ffffff',
+              'on-tertiary-container': '#ffd2be',
+              surface: '#fcf8ff',
+              'primary-container': '#4f46e5',
+              'secondary-container': '#d5e0f8',
+              'on-surface-variant': '#464555',
+              'on-secondary': '#ffffff',
+              outline: '#777587',
+              'on-secondary-fixed': '#111c2d',
             },
-            "borderRadius": {
-                    "DEFAULT": "0.25rem",
-                    "lg": "0.5rem",
-                    "xl": "0.75rem",
-                    "full": "9999px"
+            borderRadius: {
+              DEFAULT: '0.25rem',
+              lg: '0.5rem',
+              xl: '0.75rem',
+              full: '9999px',
             },
-            "spacing": {
-                    "unit": "4px",
-                    "gutter": "16px",
-                    "sidebar-width": "260px",
-                    "container-padding": "24px",
-                    "stack-gap": "12px"
+            spacing: {
+              unit: '4px',
+              gutter: '16px',
+              'sidebar-width': '260px',
+              'container-padding': '24px',
+              'stack-gap': '12px',
             },
-            "fontFamily": {
-                    "label-caps": ["Inter, system-ui"],
-                    "body-sm": ["Inter, system-ui"],
-                    "mono": ["ui-monospace, SFMono-Regular"],
-                    "body-main": ["Inter, system-ui"],
-                    "h1": ["Inter, system-ui"],
-                    "display": ["Inter, system-ui"],
-                    "h2": ["Inter, system-ui"]
+            fontFamily: {
+              'label-caps': ['Inter, system-ui'],
+              'body-sm': ['Inter, system-ui'],
+              mono: ['ui-monospace, SFMono-Regular'],
+              'body-main': ['Inter, system-ui'],
+              h1: ['Inter, system-ui'],
+              display: ['Inter, system-ui'],
+              h2: ['Inter, system-ui'],
             },
-            "fontSize": {
-                    "label-caps": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
-                    "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
-                    "mono": ["13px", {"lineHeight": "18px", "fontWeight": "400"}],
-                    "body-main": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
-                    "h1": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
-                    "display": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
-                    "h2": ["16px", {"lineHeight": "24px", "fontWeight": "600"}]
-            }
+            fontSize: {
+              'label-caps': [
+                '11px',
+                { lineHeight: '16px', letterSpacing: '0.05em', fontWeight: '600' },
+              ],
+              'body-sm': ['13px', { lineHeight: '18px', fontWeight: '400' }],
+              mono: ['13px', { lineHeight: '18px', fontWeight: '400' }],
+              'body-main': ['14px', { lineHeight: '20px', fontWeight: '400' }],
+              h1: ['20px', { lineHeight: '28px', letterSpacing: '-0.01em', fontWeight: '600' }],
+              display: [
+                '24px',
+                { lineHeight: '32px', letterSpacing: '-0.02em', fontWeight: '600' },
+              ],
+              h2: ['16px', { lineHeight: '24px', fontWeight: '600' }],
+            },
           },
         },
-      }
+      };
     </script>
-<style>
-        .material-symbols-outlined {
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-            vertical-align: middle;
-        }
-        .ris-upload-zone:hover {
-            border-color: #3525cd;
-            background-color: rgba(79, 70, 229, 0.04);
-        }
+    <style>
+      .material-symbols-outlined {
+        font-variation-settings:
+          'FILL' 0,
+          'wght' 400,
+          'GRAD' 0,
+          'opsz' 24;
+        vertical-align: middle;
+      }
+      .ris-upload-zone:hover {
+        border-color: #3525cd;
+        background-color: rgba(79, 70, 229, 0.04);
+      }
     </style>
-</head>
-<body class="bg-surface font-body-main text-on-surface antialiased">
-<!-- SideNavBar Component -->
-<aside class="fixed left-0 top-0 h-full w-64 border-r border-slate-800 bg-slate-900 dark:bg-black z-50 flex flex-col p-4 gap-2 font-inter antialiased text-sm font-medium">
-<div class="flex items-center gap-3 px-2 mb-8">
-<div class="h-8 w-8 rounded bg-indigo-600 flex items-center justify-center overflow-hidden">
-<img alt="Bango RIS Logo" class="h-6 w-6" data-alt="A clean, minimalist abstract logo for a high-end academic data management software. The logo features sharp geometric shapes in shades of deep indigo and soft white, set against a dark charcoal background. The mood is professional, intellectual, and highly organized, reflecting a focus on research integrity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA1joe7ZOwK7wLc3V7TzV6wqM31GyFVgViWqzF69FwK9w_IgLioTetTGyqdYDQ9A8Dtfb1qNxEg_pj6T4VDnYr2tlTXviVKeA7EoshC_88aqdUgpG8pq5YmtPQTbzKrfd5HVPNS7Q9e-GV_g_v-Xz-OjjDixfKj9cSpVLuDuivqIfpwYSYkOATarGDFU8KMnB131JgmDZpQei6T03p_vAmLscntfrsDsGD3lbpJXfT5vGWC-Wx-qOtMmXP_aeOt3dnh3SI1zqS7N2s">
-</div>
-<div>
-<h1 class="text-lg font-bold tracking-tight text-white leading-none">Bango</h1>
-<p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">LITERATURE REVIEW</p>
-</div>
-</div>
-<nav class="flex-1 space-y-1">
-<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50" href="#">
-<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
-<span class="">Dashboard</span>
-</a>
-<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50" href="#">
-<span class="material-symbols-outlined" data-icon="database">database</span>
-<span class="">Sources</span>
-</a>
-<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50" href="#">
-<span class="material-symbols-outlined" data-icon="library_books">library_books</span>
-<span class="">Library</span>
-</a>
-<a class="flex items-center gap-3 px-3 py-2 bg-slate-800 text-white rounded-md" href="#">
-<span class="material-symbols-outlined" data-icon="upload_file">upload_file</span>
-<span class="">Imports</span>
-</a>
-<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50" href="#">
-<span class="material-symbols-outlined" data-icon="settings">settings</span>
-<span class="">Settings</span>
-</a>
-</nav>
-<div class="mt-auto pt-4 border-t border-slate-800">
-<button class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-4 rounded-md mb-4 flex items-center justify-center gap-2 transition-all duration-75 ease-in-out active:scale-95">
-<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
-                New Project
+  </head>
+  <body class="bg-surface font-body-main text-on-surface antialiased">
+    <!-- SideNavBar Component -->
+    <aside
+      class="fixed left-0 top-0 h-full w-64 border-r border-slate-800 bg-slate-900 dark:bg-black z-50 flex flex-col p-4 gap-2 font-inter antialiased text-sm font-medium"
+    >
+      <div class="flex items-center gap-3 px-2 mb-8">
+        <div class="h-8 w-8 rounded bg-indigo-600 flex items-center justify-center overflow-hidden">
+          <img
+            alt="Bango RIS Logo"
+            class="h-6 w-6"
+            data-alt="A clean, minimalist abstract logo for a high-end academic data management software. The logo features sharp geometric shapes in shades of deep indigo and soft white, set against a dark charcoal background. The mood is professional, intellectual, and highly organized, reflecting a focus on research integrity."
+            src="https://lh3.googleusercontent.com/aida-public/AB6AXuA1joe7ZOwK7wLc3V7TzV6wqM31GyFVgViWqzF69FwK9w_IgLioTetTGyqdYDQ9A8Dtfb1qNxEg_pj6T4VDnYr2tlTXviVKeA7EoshC_88aqdUgpG8pq5YmtPQTbzKrfd5HVPNS7Q9e-GV_g_v-Xz-OjjDixfKj9cSpVLuDuivqIfpwYSYkOATarGDFU8KMnB131JgmDZpQei6T03p_vAmLscntfrsDsGD3lbpJXfT5vGWC-Wx-qOtMmXP_aeOt3dnh3SI1zqS7N2s"
+          />
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight text-white leading-none">Bango</h1>
+          <p class="text-[10px] text-slate-500 uppercase tracking-widest mt-1">LITERATURE REVIEW</p>
+        </div>
+      </div>
+      <nav class="flex-1 space-y-1">
+        <a
+          class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+          <span class="">Dashboard</span>
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="database">database</span>
+          <span class="">Sources</span>
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="library_books">library_books</span>
+          <span class="">Library</span>
+        </a>
+        <a class="flex items-center gap-3 px-3 py-2 bg-slate-800 text-white rounded-md" href="#">
+          <span class="material-symbols-outlined" data-icon="upload_file">upload_file</span>
+          <span class="">Imports</span>
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="settings">settings</span>
+          <span class="">Settings</span>
+        </a>
+      </nav>
+      <div class="mt-auto pt-4 border-t border-slate-800">
+        <button
+          class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-4 rounded-md mb-4 flex items-center justify-center gap-2 transition-all duration-75 ease-in-out active:scale-95"
+        >
+          <span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+          New Project
+        </button>
+        <a
+          class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+          <span class="">Support</span>
+        </a>
+        <a
+          class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50"
+          href="#"
+        >
+          <span class="material-symbols-outlined" data-icon="person">person</span>
+          <span class="">Profile</span>
+        </a>
+      </div>
+    </aside>
+    <!-- Main Content Area -->
+    <div class="ml-64 flex-1 min-h-screen flex flex-col">
+      <!-- TopAppBar Component -->
+      <header
+        class="sticky top-0 z-40 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-gray-200 dark:border-slate-800 flex items-center justify-between px-6 py-3 w-full font-inter text-sm tracking-wide"
+      >
+        <div class="flex items-center gap-4">
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Import RIS Data
+          </h2>
+          <span class="text-slate-300">/</span>
+          <span class="text-slate-500">Project Alpha</span>
+        </div>
+        <div class="flex items-center gap-6">
+          <div class="relative flex items-center">
+            <span
+              class="material-symbols-outlined absolute left-3 text-slate-400 pointer-events-none"
+              data-icon="search"
+              >search</span
+            >
+            <input
+              class="pl-10 pr-4 py-1.5 bg-gray-100 dark:bg-slate-900 border-none rounded-full text-xs focus:ring-2 focus:ring-indigo-500/20 w-64 transition-all"
+              placeholder="Search resources..."
+              type="text"
+            />
+          </div>
+          <div class="flex items-center gap-3">
+            <button
+              class="p-2 text-slate-500 hover:bg-gray-50 dark:hover:bg-slate-900 rounded-full transition-all duration-200"
+            >
+              <span class="material-symbols-outlined" data-icon="notifications">notifications</span>
             </button>
-<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50" href="#">
-<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
-<span class="">Support</span>
-</a>
-<a class="flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-slate-200 transition-colors hover:bg-slate-800/50" href="#">
-<span class="material-symbols-outlined" data-icon="person">person</span>
-<span class="">Profile</span>
-</a>
-</div>
-</aside>
-<!-- Main Content Area -->
-<div class="ml-64 flex-1 min-h-screen flex flex-col">
-<!-- TopAppBar Component -->
-<header class="sticky top-0 z-40 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md border-b border-gray-200 dark:border-slate-800 flex items-center justify-between px-6 py-3 w-full font-inter text-sm tracking-wide">
-<div class="flex items-center gap-4">
-<h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Import RIS Data</h2>
-<span class="text-slate-300">/</span>
-<span class="text-slate-500">Project Alpha</span>
-</div>
-<div class="flex items-center gap-6">
-<div class="relative flex items-center">
-<span class="material-symbols-outlined absolute left-3 text-slate-400 pointer-events-none" data-icon="search">search</span>
-<input class="pl-10 pr-4 py-1.5 bg-gray-100 dark:bg-slate-900 border-none rounded-full text-xs focus:ring-2 focus:ring-indigo-500/20 w-64 transition-all" placeholder="Search resources..." type="text">
-</div>
-<div class="flex items-center gap-3">
-<button class="p-2 text-slate-500 hover:bg-gray-50 dark:hover:bg-slate-900 rounded-full transition-all duration-200">
-<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
-</button>
-<button class="p-2 text-slate-500 hover:bg-gray-50 dark:hover:bg-slate-900 rounded-full transition-all duration-200">
-<span class="material-symbols-outlined" data-icon="history">history</span>
-</button>
-<div class="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center ml-2 cursor-pointer border border-indigo-200">
-<img alt="User Researcher Avatar" class="h-7 w-7 rounded-full object-cover" data-alt="A detailed, high-quality portrait of a professional academic researcher in a modern office environment. The scene is lit with bright, natural light streaming from a window, creating a soft, optimistic light-mode aesthetic. The individual wears professional attire and has a focused, intelligent expression. The background shows a clean, organized workspace with research materials." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDEh6Uq7hUSek8kIEseXK9Xq2z8QapDEPfPnsTuPPNCCpfmyYzzJdQ2zwlJ8SBw3nXCtqrskwaSxeteZ_IF7YLXeq8OiTwoPcaeNmIS-OdlvWhPZMu1rOvFvvuGwlN3z4v2hj1YSnSikrShZpTfLHDXA4cG94kDOhUWZ_jDCs257K_Og93ulDsod9uYmC9NJuKMDB8A8ejiWWuD4PgmiZCHMXjqQwV0NNNlT9nKw-zvQ9J6K7FTyExU0Clt1E2bWCdTFregTs9wRBE">
-</div>
-</div>
-</div>
-</header>
-<main class="p-container-padding flex-1 bg-surface">
-<!-- Stepper -->
-<div class="max-w-5xl mx-auto mb-10">
-<div class="flex items-center justify-between">
-<!-- Step 1 -->
-<div class="flex flex-col items-center gap-2 flex-1">
-<div class="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold shadow-sm">1</div>
-<span class="font-h2 text-primary">Upload File</span>
-</div>
-<div class="h-px bg-outline-variant flex-1 mb-6"></div>
-<!-- Step 2 -->
-<div class="flex flex-col items-center gap-2 flex-1">
-<div class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-medium">2</div>
-<span class="font-body-sm text-on-surface-variant">Parse &amp; Validate</span>
-</div>
-<div class="h-px bg-outline-variant flex-1 mb-6"></div>
-<!-- Step 3 -->
-<div class="flex flex-col items-center gap-2 flex-1">
-<div class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-medium">3</div>
-<span class="font-body-sm text-on-surface-variant">Deduplication</span>
-</div>
-<div class="h-px bg-outline-variant flex-1 mb-6"></div>
-<!-- Step 4 -->
-<div class="flex flex-col items-center gap-2 flex-1">
-<div class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-medium">4</div>
-<span class="font-body-sm text-on-surface-variant">Import Complete</span>
-</div>
-</div>
-</div>
-<div class="max-w-5xl mx-auto space-y-gutter">
-<!-- Upload Zone -->
-<section class="bg-white p-8 rounded-xl border-2 border-dashed border-outline-variant ris-upload-zone flex flex-col items-center justify-center transition-all cursor-pointer group min-h-[300px]">
-<div class="w-16 h-16 bg-surface-container-low rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-<span class="material-symbols-outlined text-primary text-4xl" data-icon="cloud_upload">cloud_upload</span>
-</div>
-<h3 class="font-h1 text-on-surface mb-2">Drag and drop .ris files here or click to browse</h3>
-<p class="font-body-sm text-on-surface-variant">Maximum file size: 50MB. Only valid RIS formats are supported for parsing.</p>
-</section>
-<!-- Preview Table Section -->
-<section class="bg-white rounded-xl border border-outline-variant overflow-hidden">
-<div class="px-6 py-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-lowest">
-<h3 class="font-h2 text-on-surface">Parsed Articles Preview</h3>
-<div class="flex gap-2">
-<span class="px-3 py-1 bg-surface-container text-on-surface-variant rounded-full text-[12px] font-medium border border-outline-variant">10 of 1,240 rows shown</span>
-</div>
-</div>
-<div class="overflow-x-auto">
-<table class="w-full text-left border-collapse">
-<thead>
-<tr class="bg-surface-container-low border-b border-outline-variant">
-<th class="px-6 py-3 font-label-caps text-on-surface-variant">Title</th>
-<th class="px-6 py-3 font-label-caps text-on-surface-variant">Authors</th>
-<th class="px-6 py-3 font-label-caps text-on-surface-variant">Year</th>
-<th class="px-6 py-3 font-label-caps text-on-surface-variant">DOI</th>
-</tr>
-</thead>
-<tbody class="divide-y divide-outline-variant">
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Advances in Neural Network Architecture for Large-scale NLP</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Chen, J., Smith, A.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2023</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1038/s41586-023-01</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Climate Change Mitigation Strategies in Urban Planning</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Rodriguez, M. et al.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2022</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1126/science.abf12</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">The Role of Ethno-botany in Modern Pharmaceutical Discovery</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Patel, S.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2024</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1021/acs.jnatprod</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Blockchain Consensus Protocols: A Comparative Study</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Nakamoto, S.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2021</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1109/BLOCK.2021.05</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Socio-economic Impacts of Remote Work Post-Pandemic</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Wilson, K., Baker, R.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2023</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1016/j.worlddev.2023</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Genomic Sequencing of Ancient Flora in South America</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Silva, L. G.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2022</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1038/nature12345</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Quantum Entanglement in Macroscopic Systems</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Heisenberg, W.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2024</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1103/PhysRevA.109</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Macroeconomic Policy Response to Global Inflation</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Lagarde, C.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2023</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1093/qje/qjac015</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">AI Ethics: Navigating the Black Box Problem</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Turing, A., Lovelace, A.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2024</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.1017/S135334522</td>
-</tr>
-<tr class="hover:bg-surface-container transition-colors">
-<td class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate">Sustainable Fisheries Management in the Baltic Sea</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">Johansson, M.</td>
-<td class="px-6 py-4 font-body-main text-on-surface-variant">2022</td>
-<td class="px-6 py-4 font-mono text-[12px] text-primary">10.3389/fmars.2022</td>
-</tr>
-</tbody>
-</table>
-</div>
-</section>
-<!-- Spacer for sticky footer -->
-<div class="h-24"></div>
-</div>
-</main>
-<!-- Sticky Summary Card -->
-<div class="fixed bottom-0 left-64 right-0 p-6 bg-white/95 backdrop-blur-sm border-t border-outline-variant shadow-[0_-4px_12px_rgba(0,0,0,0.05)] z-40">
-<div class="max-w-5xl mx-auto flex items-center justify-between">
-<div class="flex items-center gap-12">
-<div>
-<p class="font-label-caps text-on-surface-variant mb-1">Import Summary</p>
-<div class="flex gap-6 items-center">
-<div class="flex flex-col">
-<span class="text-xs text-on-surface-variant">Total articles</span>
-<span class="font-h1 text-primary">1,240</span>
-</div>
-<div class="w-px h-8 bg-outline-variant"></div>
-<div class="flex flex-col">
-<span class="text-xs text-on-surface-variant">Duplicates detected</span>
-<span class="font-h1 text-error">12</span>
-</div>
-</div>
-</div>
-<div class="flex items-center gap-2 bg-secondary-container px-3 py-2 rounded-lg">
-<span class="material-symbols-outlined text-on-secondary-container" data-icon="check_circle">check_circle</span>
-<span class="font-body-sm text-on-secondary-container">Parsing validation passed successfully</span>
-</div>
-</div>
-<div class="flex items-center gap-4">
-<button class="px-6 py-2.5 font-h2 text-on-surface-variant hover:bg-gray-100 rounded-lg transition-colors">
-                        Cancel
-                    </button>
-<button class="px-8 py-2.5 bg-primary hover:bg-primary-container text-white font-h2 rounded-lg shadow-sm active:scale-95 transition-all">
-                        Add to Project
-                    </button>
-</div>
-</div>
-</div>
-</div>
-
-
-</body></html>
+            <button
+              class="p-2 text-slate-500 hover:bg-gray-50 dark:hover:bg-slate-900 rounded-full transition-all duration-200"
+            >
+              <span class="material-symbols-outlined" data-icon="history">history</span>
+            </button>
+            <div
+              class="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center ml-2 cursor-pointer border border-indigo-200"
+            >
+              <img
+                alt="User Researcher Avatar"
+                class="h-7 w-7 rounded-full object-cover"
+                data-alt="A detailed, high-quality portrait of a professional academic researcher in a modern office environment. The scene is lit with bright, natural light streaming from a window, creating a soft, optimistic light-mode aesthetic. The individual wears professional attire and has a focused, intelligent expression. The background shows a clean, organized workspace with research materials."
+                src="https://lh3.googleusercontent.com/aida-public/AB6AXuDEh6Uq7hUSek8kIEseXK9Xq2z8QapDEPfPnsTuPPNCCpfmyYzzJdQ2zwlJ8SBw3nXCtqrskwaSxeteZ_IF7YLXeq8OiTwoPcaeNmIS-OdlvWhPZMu1rOvFvvuGwlN3z4v2hj1YSnSikrShZpTfLHDXA4cG94kDOhUWZ_jDCs257K_Og93ulDsod9uYmC9NJuKMDB8A8ejiWWuD4PgmiZCHMXjqQwV0NNNlT9nKw-zvQ9J6K7FTyExU0Clt1E2bWCdTFregTs9wRBE"
+              />
+            </div>
+          </div>
+        </div>
+      </header>
+      <main class="p-container-padding flex-1 bg-surface">
+        <!-- Stepper -->
+        <div class="max-w-5xl mx-auto mb-10">
+          <div class="flex items-center justify-between">
+            <!-- Step 1 -->
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div
+                class="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold shadow-sm"
+              >
+                1
+              </div>
+              <span class="font-h2 text-primary">Upload File</span>
+            </div>
+            <div class="h-px bg-outline-variant flex-1 mb-6"></div>
+            <!-- Step 2 -->
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div
+                class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-medium"
+              >
+                2
+              </div>
+              <span class="font-body-sm text-on-surface-variant">Parse &amp; Validate</span>
+            </div>
+            <div class="h-px bg-outline-variant flex-1 mb-6"></div>
+            <!-- Step 3 -->
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div
+                class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-medium"
+              >
+                3
+              </div>
+              <span class="font-body-sm text-on-surface-variant">Deduplication</span>
+            </div>
+            <div class="h-px bg-outline-variant flex-1 mb-6"></div>
+            <!-- Step 4 -->
+            <div class="flex flex-col items-center gap-2 flex-1">
+              <div
+                class="w-10 h-10 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center font-medium"
+              >
+                4
+              </div>
+              <span class="font-body-sm text-on-surface-variant">Import Complete</span>
+            </div>
+          </div>
+        </div>
+        <div class="max-w-5xl mx-auto space-y-gutter">
+          <!-- Upload Zone -->
+          <section
+            class="bg-white p-8 rounded-xl border-2 border-dashed border-outline-variant ris-upload-zone flex flex-col items-center justify-center transition-all cursor-pointer group min-h-[300px]"
+          >
+            <div
+              class="w-16 h-16 bg-surface-container-low rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300"
+            >
+              <span class="material-symbols-outlined text-primary text-4xl" data-icon="cloud_upload"
+                >cloud_upload</span
+              >
+            </div>
+            <h3 class="font-h1 text-on-surface mb-2">
+              Drag and drop .ris files here or click to browse
+            </h3>
+            <p class="font-body-sm text-on-surface-variant">
+              Maximum file size: 50MB. Only valid RIS formats are supported for parsing.
+            </p>
+          </section>
+          <!-- Preview Table Section -->
+          <section class="bg-white rounded-xl border border-outline-variant overflow-hidden">
+            <div
+              class="px-6 py-4 border-b border-outline-variant flex justify-between items-center bg-surface-container-lowest"
+            >
+              <h3 class="font-h2 text-on-surface">Parsed Articles Preview</h3>
+              <div class="flex gap-2">
+                <span
+                  class="px-3 py-1 bg-surface-container text-on-surface-variant rounded-full text-[12px] font-medium border border-outline-variant"
+                  >10 of 1,240 rows shown</span
+                >
+              </div>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-surface-container-low border-b border-outline-variant">
+                    <th class="px-6 py-3 font-label-caps text-on-surface-variant">Title</th>
+                    <th class="px-6 py-3 font-label-caps text-on-surface-variant">Authors</th>
+                    <th class="px-6 py-3 font-label-caps text-on-surface-variant">Year</th>
+                    <th class="px-6 py-3 font-label-caps text-on-surface-variant">DOI</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-outline-variant">
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Advances in Neural Network Architecture for Large-scale NLP
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">
+                      Chen, J., Smith, A.
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2023</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1038/s41586-023-01
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Climate Change Mitigation Strategies in Urban Planning
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">
+                      Rodriguez, M. et al.
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2022</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1126/science.abf12
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      The Role of Ethno-botany in Modern Pharmaceutical Discovery
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">Patel, S.</td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2024</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1021/acs.jnatprod
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Blockchain Consensus Protocols: A Comparative Study
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">Nakamoto, S.</td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2021</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1109/BLOCK.2021.05
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Socio-economic Impacts of Remote Work Post-Pandemic
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">
+                      Wilson, K., Baker, R.
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2023</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1016/j.worlddev.2023
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Genomic Sequencing of Ancient Flora in South America
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">Silva, L. G.</td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2022</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1038/nature12345
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Quantum Entanglement in Macroscopic Systems
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">Heisenberg, W.</td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2024</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1103/PhysRevA.109
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Macroeconomic Policy Response to Global Inflation
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">Lagarde, C.</td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2023</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">
+                      10.1093/qje/qjac015
+                    </td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      AI Ethics: Navigating the Black Box Problem
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">
+                      Turing, A., Lovelace, A.
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2024</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">10.1017/S135334522</td>
+                  </tr>
+                  <tr class="hover:bg-surface-container transition-colors">
+                    <td
+                      class="px-6 py-4 font-body-main font-semibold text-on-surface max-w-xs truncate"
+                    >
+                      Sustainable Fisheries Management in the Baltic Sea
+                    </td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">Johansson, M.</td>
+                    <td class="px-6 py-4 font-body-main text-on-surface-variant">2022</td>
+                    <td class="px-6 py-4 font-mono text-[12px] text-primary">10.3389/fmars.2022</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <!-- Spacer for sticky footer -->
+          <div class="h-24"></div>
+        </div>
+      </main>
+      <!-- Sticky Summary Card -->
+      <div
+        class="fixed bottom-0 left-64 right-0 p-6 bg-white/95 backdrop-blur-sm border-t border-outline-variant shadow-[0_-4px_12px_rgba(0,0,0,0.05)] z-40"
+      >
+        <div class="max-w-5xl mx-auto flex items-center justify-between">
+          <div class="flex items-center gap-12">
+            <div>
+              <p class="font-label-caps text-on-surface-variant mb-1">Import Summary</p>
+              <div class="flex gap-6 items-center">
+                <div class="flex flex-col">
+                  <span class="text-xs text-on-surface-variant">Total articles</span>
+                  <span class="font-h1 text-primary">1,240</span>
+                </div>
+                <div class="w-px h-8 bg-outline-variant"></div>
+                <div class="flex flex-col">
+                  <span class="text-xs text-on-surface-variant">Duplicates detected</span>
+                  <span class="font-h1 text-error">12</span>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 bg-secondary-container px-3 py-2 rounded-lg">
+              <span
+                class="material-symbols-outlined text-on-secondary-container"
+                data-icon="check_circle"
+                >check_circle</span
+              >
+              <span class="font-body-sm text-on-secondary-container"
+                >Parsing validation passed successfully</span
+              >
+            </div>
+          </div>
+          <div class="flex items-center gap-4">
+            <button
+              class="px-6 py-2.5 font-h2 text-on-surface-variant hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              class="px-8 py-2.5 bg-primary hover:bg-primary-container text-white font-h2 rounded-lg shadow-sm active:scale-95 transition-all"
+            >
+              Add to Project
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

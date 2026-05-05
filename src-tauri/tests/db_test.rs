@@ -42,9 +42,13 @@ fn test_database_stores_all_article_fields() {
         [],
     ).expect("Insert failed");
 
-    let title: String = conn.query_row("SELECT title FROM articles WHERE id = 'test-1'", [], |row| row.get(0)).expect("Query failed");
+    let title: String = conn
+        .query_row("SELECT title FROM articles WHERE id = 'test-1'", [], |row| row.get(0))
+        .expect("Query failed");
     assert_eq!(title, "Test Title");
 
-    let doi: Option<String> = conn.query_row("SELECT doi FROM articles WHERE id = 'test-1'", [], |row| row.get(0)).expect("Query failed");
+    let doi: Option<String> = conn
+        .query_row("SELECT doi FROM articles WHERE id = 'test-1'", [], |row| row.get(0))
+        .expect("Query failed");
     assert_eq!(doi, Some("10.1234/test".to_string()));
 }
