@@ -1,20 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-
-const greeting = ref('Bango — AI-Powered Systematic Literature Review');
+import AppShell from './components/app-shell.vue';
 </script>
 
 <template>
-  <div class="app">
-    <h1>{{ greeting }}</h1>
-  </div>
+  <AppShell />
 </template>
-
-<style scoped>
-.app {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-}
-</style>
