@@ -19,6 +19,11 @@ export default tseslint.config(
         ...globals.browser,
       },
     },
+    rules: {
+      // Disable TS no-unused-vars for Vue files since it doesn't understand template bindings.
+      // The Vue plugin's own rule handles this correctly.
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
   },
   {
     rules: {

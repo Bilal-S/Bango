@@ -4,7 +4,7 @@ import { computed } from 'vue';
 const props = defineProps<{ confidence: number | null }>();
 
 const percentage = computed(() =>
-  props.confidence !== null ? Math.round(props.confidence * 100) : 0,
+  props.confidence !== null ? Math.round(props.confidence * 100) : 0
 );
 
 const fillClass = computed(() => {

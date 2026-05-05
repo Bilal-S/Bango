@@ -26,9 +26,7 @@ const emit = defineEmits<{
           placeholder="Search articles..."
           class="pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
           :value="query.search ?? ''"
-          @input="
-            emit('update', 'search', ($event.target as HTMLInputElement).value || null)
-          "
+          @input="emit('update', 'search', ($event.target as HTMLInputElement).value || null)"
           @keyup.enter="emit('search')"
         />
       </div>
@@ -41,13 +39,7 @@ const emit = defineEmits<{
         <select
           class="bg-transparent outline-none cursor-pointer text-sm font-medium"
           :value="query.status ?? ''"
-          @change="
-            emit(
-              'update',
-              'status',
-              ($event.target as HTMLSelectElement).value || null,
-            )
-          "
+          @change="emit('update', 'status', ($event.target as HTMLSelectElement).value || null)"
         >
           <option value="">All Status</option>
           <option value="imported">Imported</option>
@@ -65,9 +57,7 @@ const emit = defineEmits<{
         <select
           class="bg-transparent outline-none cursor-pointer text-sm"
           :value="query.sortBy ?? 'imported_at'"
-          @change="
-            emit('update', 'sortBy', ($event.target as HTMLSelectElement).value)
-          "
+          @change="emit('update', 'sortBy', ($event.target as HTMLSelectElement).value)"
         >
           <option value="imported_at">Date Added</option>
           <option value="title">Title</option>

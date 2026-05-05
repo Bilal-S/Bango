@@ -3,12 +3,18 @@ pub mod crypto;
 pub mod db;
 pub mod dedup;
 pub mod error;
+pub mod export;
 pub mod llm;
 pub mod models;
+pub mod prisma;
 pub mod ris;
+pub mod screening;
+pub mod summary;
 
 use db::connection::{create_connection, DbState};
 use db::migration::run_migrations;
+
+use commands::screening::ScreeningState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -27,6 +33,7 @@ pub fn run() {
     if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(DbState { conn: std::sync::Mutex::new(conn) })
+        .manage(ScreeningState { engine: tokio::sync::Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::import::parse_ris_file,
@@ -54,6 +61,26 @@ pub fn run() {
             commands::labels::rename_label,
             commands::labels::delete_label,
             commands::labels::suggest_labels,
+            commands::articles::query_articles,
+            commands::articles::get_article,
+            commands::articles::update_article_status,
+            commands::articles::get_audit_trail,
+            commands::articles::update_article_notes,
+            commands::articles::update_article_tags,
+            commands::articles::update_article_labels,
+            commands::articles::override_ai_decision,
+            commands::screening::start_screening,
+            commands::screening::get_screening_progress,
+            commands::screening::pause_screening,
+            commands::screening::resume_screening,
+            commands::screening::stop_screening,
+            commands::screening::estimate_screening_tokens,
+            commands::summary::generate_summary,
+            commands::prisma::get_prisma_data,
+            commands::prisma::get_prisma_svg,
+            commands::export_cmd::export_ris,
+            commands::export_cmd::export_project_backup,
+            commands::export_cmd::import_project_backup,
         ])
         .run(tauri::generate_context!())
     {

@@ -26,16 +26,10 @@ function formatAuthors(authors: string[]): string {
         <tr>
           <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Title</th>
           <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Authors</th>
-          <th
-            class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-16"
-          >
-            Year
-          </th>
+          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-16">Year</th>
           <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Journal</th>
           <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase">Status</th>
-          <th
-            class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-32"
-          >
+          <th class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase w-32">
             Confidence
           </th>
         </tr>
@@ -73,10 +67,7 @@ function formatAuthors(authors: string[]): string {
     </table>
 
     <!-- Empty state -->
-    <div
-      v-if="articles.length === 0"
-      class="text-center py-16 text-slate-400 text-sm"
-    >
+    <div v-if="articles.length === 0" class="text-center py-16 text-slate-400 text-sm">
       No articles found. Import an RIS file to get started.
     </div>
   </div>

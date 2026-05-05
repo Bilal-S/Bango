@@ -14,9 +14,7 @@ const emit = defineEmits<{
 }>();
 
 const confidencePercentage = computed(() =>
-  props.article.aiConfidence !== null
-    ? `${Math.round(props.article.aiConfidence * 100)}%`
-    : '---',
+  props.article.aiConfidence !== null ? `${Math.round(props.article.aiConfidence * 100)}%` : '---'
 );
 
 const aiDecisionLabel = computed(() => {
@@ -45,9 +43,7 @@ const aiDecisionColors = computed(() => {
 });
 
 const confidenceBarWidth = computed(() =>
-  props.article.aiConfidence !== null
-    ? `${Math.round(props.article.aiConfidence * 100)}%`
-    : '0%',
+  props.article.aiConfidence !== null ? `${Math.round(props.article.aiConfidence * 100)}%` : '0%'
 );
 </script>
 
@@ -125,7 +121,11 @@ const confidenceBarWidth = computed(() =>
               :style="{ width: confidenceBarWidth }"
             />
           </div>
-          <p v-if="article.aiReasoning" class="text-body-sm leading-relaxed" :class="aiDecisionColors.text">
+          <p
+            v-if="article.aiReasoning"
+            class="text-body-sm leading-relaxed"
+            :class="aiDecisionColors.text"
+          >
             <span class="font-semibold">Reasoning:</span> {{ article.aiReasoning }}
           </p>
         </div>
@@ -134,8 +134,7 @@ const confidenceBarWidth = computed(() =>
       <!-- Matched Criteria -->
       <section
         v-if="
-          article.matchedInclusionCriteria.length > 0 ||
-          article.matchedExclusionCriteria.length > 0
+          article.matchedInclusionCriteria.length > 0 || article.matchedExclusionCriteria.length > 0
         "
       >
         <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
@@ -172,9 +171,7 @@ const confidenceBarWidth = computed(() =>
       </section>
 
       <!-- Tags & Labels -->
-      <section
-        v-if="article.tags.length > 0 || article.labels.length > 0"
-      >
+      <section v-if="article.tags.length > 0 || article.labels.length > 0">
         <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
           Tags &amp; Labels
         </h3>
@@ -198,10 +195,10 @@ const confidenceBarWidth = computed(() =>
 
       <!-- User Notes -->
       <section v-if="article.userNotes">
-        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
-          Notes
-        </h3>
-        <p class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-slate-50 p-3 rounded-lg">
+        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">Notes</h3>
+        <p
+          class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-slate-50 p-3 rounded-lg"
+        >
           {{ article.userNotes }}
         </p>
       </section>

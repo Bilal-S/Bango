@@ -50,12 +50,7 @@ async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
       />
 
       <div v-if="loading" class="text-center py-16 text-slate-400 text-sm">Loading...</div>
-      <ArticleTable
-        v-else
-        :articles="articles"
-        :selected-id="selectedId"
-        @select="selectArticle"
-      />
+      <ArticleTable v-else :articles="articles" :selected-id="selectedId" @select="selectArticle" />
     </div>
 
     <!-- Detail Panel -->
