@@ -1,0 +1,63 @@
+import { createRouter, createWebHashHistory } from 'vue-router';
+
+const Dashboard = () => import('@/views/dashboard.vue');
+const Placeholder = () => import('@/views/placeholder.vue');
+
+const routes = [
+  { path: '/', name: 'dashboard', component: Dashboard },
+  {
+    path: '/articles',
+    name: 'articles',
+    component: Placeholder,
+    props: { title: 'Articles' },
+  },
+  {
+    path: '/import',
+    name: 'import',
+    component: Placeholder,
+    props: { title: 'RIS Import' },
+  },
+  {
+    path: '/dedup',
+    name: 'dedup',
+    component: Placeholder,
+    props: { title: 'Deduplication' },
+  },
+  {
+    path: '/criteria',
+    name: 'criteria',
+    component: Placeholder,
+    props: { title: 'Criteria Editor' },
+  },
+  {
+    path: '/screening',
+    name: 'screening',
+    component: Placeholder,
+    props: { title: 'AI Screening' },
+  },
+  {
+    path: '/tags',
+    name: 'tags',
+    component: Placeholder,
+    props: { title: 'Tags & Labels' },
+  },
+  {
+    path: '/prisma',
+    name: 'prisma',
+    component: Placeholder,
+    props: { title: 'PRISMA Flow Diagram' },
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: Placeholder,
+    props: { title: 'LLM Configuration' },
+  },
+];
+
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes,
+});
+
+export default router;

@@ -22,7 +22,9 @@
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-opener": "^2.5.4",
-    "vue": "^3.5.33"
+    "pinia": "^3.0.4",
+    "vue": "^3.5.33",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
