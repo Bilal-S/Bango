@@ -107,7 +107,8 @@ Users can manually override AI decisions and move articles freely between Workin
 | Layer | Technology |
 |-------|------------|
 | **Framework** | Tauri 2.x — lightweight cross-platform runtime |
-| **Frontend** | Vue 3.x with TypeScript |
+| **Frontend** | Vue 3.x with TypeScript, Tailwind CSS v4 |
+| **Styling** | Tailwind CSS v4 (`@theme` design tokens) + CSS custom properties |
 | **Backend** | Rust — memory-safe, non-blocking background processing |
 | **Database** | Local SQLite — portable, offline-first |
 | **AI** | REST API client in Rust — async requests to external or local LLM endpoints |
@@ -137,15 +138,135 @@ API keys are encrypted locally with AES-256-GCM using a machine-derived key. Pro
 
 ## Project Status
 
-Bango is currently in the **requirements and planning** phase. The specification is complete and development has not yet started.
+Bango v3 is in **active development**. The core backend (Rust) and all frontend views (Vue) are implemented. See the [v3 specification](docs/superpowers/specs/bango-v3-spec.md) for the full feature spec and [implementation gaps](docs/superpowers/plans/implementation-gaps.md) for remaining work.
 
-See the [requirements documents](./Requirment/) for detailed functional and non-functional specifications.
+---
+
+## Prerequisites
+
+| Tool | Version | Install |
+|------|---------|---------|
+| **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
+| **Rust** | Latest stable | [rustup.rs](https://rustup.rs/) |
+| **Tauri CLI** | v2.x | Included via `@tauri-apps/cli` in devDependencies |
 
 ---
 
 ## Getting Started
 
-> Setup instructions will be added once development begins.
+### Install dependencies
+
+```bash
+npm install
+```
+
+This also runs `simple-git-hooks` to set up pre-commit linting.
+
+### Development (frontend only)
+
+Starts the Vite dev server on `http://localhost:1420`:
+
+```bash
+npm run dev
+```
+
+Note: Tauri commands (`invoke`) will not work in browser-only mode. Use the Tauri dev command for full functionality.
+
+### Development (full Tauri app)
+
+Starts the Vite dev server + Rust backend in a native window:
+
+```bash
+npm run tauri dev
+```
+
+### Build for production
+
+Compiles TypeScript, builds the Vite frontend, and bundles the Tauri app:
+
+```bash
+npm run tauri build
+```
+
+---
+
+## Testing
+
+### Frontend tests (Vitest)
+
+```bash
+npm test            # Run once
+npm run test:watch  # Watch mode
+```
+
+### Backend tests (Rust)
+
+```bash
+cd src-tauri && cargo test
+```
+
+### Run all checks
+
+Runs ESLint, Prettier, Rust formatting, and Clippy:
+
+```bash
+npm run check:all
+```
+
+Individual commands:
+
+| Command | What it does |
+|---------|-------------|
+| `npm run lint:check` | ESLint on `.ts` and `.vue` files |
+| `npm run format:check` | Prettier formatting check |
+| `npm run lint:rust` | Cargo clippy with `-D warnings` |
+| `npm run format:rust` | Cargo `fmt --check` |
+
+---
+
+## Project Structure
+
+```
+├── src/                        # Vue 3 frontend
+│   ├── components/             # Reusable Vue components
+│   ├── composables/            # Vue composables (shared reactive logic)
+│   ├── stores/                 # Pinia stores for global state
+│   ├── views/                  # Page-level components (one per route)
+│   ├── types/                  # TypeScript interfaces
+│   ├── styles/                 # CSS: base.css (Tailwind + tokens), tokens.css (CSS variables)
+│   └── main.ts                 # App entry point
+├── src-tauri/                  # Rust backend
+│   ├── src/
+│   │   ├── commands/           # Tauri command handlers (one per domain)
+│   │   ├── db/                 # SQLite repos, migrations, connection
+│   │   ├── models/             # Domain models (Article, Tag, Label, etc.)
+│   │   ├── ris/                # RIS parser, validator, types
+│   │   ├── screening/          # AI screening engine, prompt builder
+│   │   ├── dedup/              # Deduplication engine, similarity scoring
+│   │   ├── export/             # RIS writer, project backup
+│   │   ├── llm/                # LLM HTTP client
+│   │   ├── prisma/             # PRISMA diagram data + SVG generation
+│   │   └── crypto/             # AES-256-GCM encryption for API keys
+│   └── tests/                  # Rust integration tests
+├── docs/
+│   ├── design-reference/       # 10 Stitch HTML reference screens + patterns doc
+│   └── superpowers/
+│       ├── specs/              # v3 specification
+│       └── plans/              # Implementation plans + gaps doc
+├── DESIGN.md                   # Scholarly Precision design system tokens
+└── CLAUDE.md                   # Coding rules for Claude Code
+```
+
+---
+
+## Design System
+
+The UI follows the **Scholarly Precision** design system defined in `DESIGN.md`. Reference designs for all 10 screens are in `docs/design-reference/`.
+
+- **Colors**: Material Design 3 inspired palette (Indigo primary, Slate sidebar, cool gray surfaces)
+- **Typography**: Inter font family, sizes from 11px (label-caps) to 24px (display)
+- **Icons**: Material Symbols Outlined via Google Fonts
+- **CSS approach**: Tailwind CSS v4 (`@theme` tokens) + CSS custom properties (`tokens.css`). Tailwind preflight is disabled to support views using scoped CSS.
 
 ---
 

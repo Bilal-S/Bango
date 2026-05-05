@@ -797,11 +797,36 @@ The design system is named **"Scholarly Precision"** — a Minimalist-Corporate 
 
 ### 18.3 Layout Philosophy
 
-- **Fixed-Fluid Hybrid**: Fixed-width sidebar + fluid main content area
+- **Fixed-Fluid Hybrid**: Fixed-width sidebar (260px dark slate) + fluid main content area
 - **Master-Detail View**: 3-pane layout (Navigation > List > Content)
 - **8pt grid system** with 4px increments for dense data components
 - Subtle shadows only (`0 4px 12px rgba(0, 0, 0, 0.05)`)
 - Pane separation via 1px borders (`#E5E7EB`) rather than shadows
+
+### 18.3.1 Implementation (Tailwind CSS v4)
+
+The design system is implemented via **Tailwind CSS v4** with the `@tailwindcss/vite` plugin. Tailwind's preflight reset is **disabled** (`preflight(false)`) to preserve compatibility with existing custom-CSS views.
+
+**Design token mapping:**
+
+Custom CSS variables in `src/styles/tokens.css` define `--color-*`, `--font-*`, `--space-*`, `--radius-*` tokens consumed by views using scoped CSS. The Tailwind `@theme` block in `src/styles/base.css` maps the same values to Tailwind utilities (`bg-surface-container-lowest`, `text-on-surface`, `font-display`, `text-display`, etc.) for views using Tailwind classes.
+
+**Dual styling approach:**
+- **Custom CSS views** (dashboard, import-ris, dedup-review, screening-progress, prisma-diagram, summary-view, llm-config, criteria-editor) use scoped CSS with `var(--color-primary)` etc.
+- **Tailwind views** (article-list, tag-label-management, article-table, status-badge, confidence-bar, tag-chip, label-chip) use Tailwind utility classes referencing the `@theme` tokens.
+
+**Font loading:**
+- Inter (400, 500, 600, 700, 800) loaded via Google Fonts `<link>` in `index.html`
+- Material Symbols Outlined loaded via Google Fonts with `font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24`
+
+**Icons:**
+- All navigation and UI icons use `<span class="material-symbols-outlined">icon_name</span>`
+- No Unicode fallback characters in any view
+
+**Design reference files:**
+- 10 reference HTML screens in `docs/design-reference/` (01-dashboard.html through 10-llm-config.html)
+- Comprehensive design patterns: `docs/design-reference/00-design-patterns.md`
+- Implementation gaps documented: `docs/superpowers/plans/implementation-gaps.md`
 
 ### 18.4 Component Specifications
 
@@ -944,6 +969,7 @@ The following features are explicitly **out of scope** for v1:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v3.1 | 2026-05-05 | Design implementation update: added Tailwind CSS v4 with @theme tokens, disabled preflight for custom-CSS compatibility, Material Symbols Outlined icons replacing all Unicode fallbacks, Inter font loading, dual styling approach (custom CSS + Tailwind utilities). Documented design reference files and implementation gaps. |
 | v3 | 2026-05-04 | Scope reductions: dropped mobile, single-project, simplified PRISMA exports, static VRAM warning, optional tag/label pass, no audit revert. Gap fills: screeningError as boolean flag, PRISMA data mapping, token estimation method, resume screening detail, export specVersion, import limit behavior, short-title dedup guard, multiple-import dedup scoping. Detail expansions: prompt templates for tag/label generation and AI summary, screening override note format, batch summary handling. |
 | v2 | Prior | Second Specification (superseded by v3). |
 | v1 | Prior | First Specification (archived). |
