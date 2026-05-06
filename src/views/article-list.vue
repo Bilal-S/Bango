@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue';
+import { onMounted, ref, computed } from 'vue';
 import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import ArticleFilterPanel from '@/components/article-filter-panel.vue';
+import ExportDialog from '@/components/export-dialog.vue';
 
 const {
   articles,
@@ -26,6 +27,9 @@ const {
   search,
   selectArticle,
   moveArticle,
+  updateNotes,
+  updateTags,
+  updateLabels,
   closeDetail,
   setStatusTab,
   toggleSort,
@@ -37,6 +41,8 @@ const {
 onMounted(search);
 
 const selectedId = computed(() => selectedArticle.value?.id ?? null);
+
+const showExport = ref(false);
 
 const STATUS_TAB_LABELS: Record<string, string> = {
   all: 'All',
@@ -98,6 +104,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
         :show-filters="showFilters"
         @toggle-filters="toggleFilters"
         @search="search"
+        @export-ris="showExport = true"
       />
 
       <!-- Filter Panel (collapsible) -->
@@ -125,6 +132,9 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       />
     </div>
 
+    <!-- Export Dialog -->
+    <ExportDialog v-if="showExport" @close="showExport = false" />
+
     <!-- Detail Panel -->
     <ArticleDetailPanel
       v-if="showDetail && selectedArticle"
@@ -132,6 +142,9 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       :audit-trail="auditTrail"
       @close="closeDetail"
       @move-article="handleMoveArticle"
+      @update-notes="updateNotes"
+      @update-tags="updateTags"
+      @update-labels="updateLabels"
     />
   </div>
 </template>

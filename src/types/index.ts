@@ -97,6 +97,7 @@ export interface AuditEntry {
   toStatus: string | null;
   details: string | null;
   source: AuditSource;
+  articleTitle: string | null;
 }
 
 export type AuditAction =

@@ -405,9 +405,13 @@ git commit -m "feat(ris): implement RIS parser with all supported tags"
 - Create: `src-tauri/src/ris/validator.rs`
 - Add tests to: `src-tauri/tests/ris_test.rs`
 
-> **Partial Import Support (added 2026-05-06):** The validator now provides `validate_all_grouped()` which returns validation errors grouped by message for expandable UI summaries. The `ErrorGroup` struct contains `message`, `count`, and `record_indices`. Valid articles can be imported even when some records fail validation - the import command no longer blocks on validation errors.
+> **Partial Import Support (added 2026-05-06):** The validator provides `validate_all_grouped()` which returns validation errors grouped by message for expandable UI summaries. The `ErrorGroup` struct contains `message`, `count`, and `record_indices`. Valid articles can be imported even when some records fail validation - the import command imports valid records and returns grouped error summaries. The frontend displays these as collapsible banners, e.g. "7 records missing required field: Abstract (AB or N2)" with expand/collapse to show affected record indices.
 
-> **Dashboard Import Activities (added 2026-05-06):** The dashboard now uses `get_import_activities` - a SQL-aggregated endpoint that returns one row per import file with the correct article count, instead of counting individual audit rows in the frontend. The `ImportActivity` type is in `models/audit.rs`. The `get_recent_audit_entries` endpoint now excludes `action='import'` entries to avoid double-counting.
+> **Dashboard Import Activities (added 2026-05-06):** The dashboard uses `get_import_activities` - a SQL-aggregated endpoint returning one row per import file with the correct article count, instead of counting individual audit rows in the frontend. The `ImportActivity` type is in `models/audit.rs`. The `get_recent_audit_entries` endpoint excludes `action='import'` entries to avoid double-counting. Non-import audit entries now include `articleTitle` (first 40 chars of the article title) for context.
+
+> **Article Detail Editing (added 2026-05-06):** The article detail panel now supports inline editing of notes (textarea with edit/save/cancel), tags (add/remove with close buttons), and labels (add/remove with close buttons). Events are wired through `use-article-search.ts` composable to backend Tauri commands `update_article_notes`, `update_article_tags`, `update_article_labels`. All changes are audit-logged by the backend.
+
+> **Export RIS (added 2026-05-06):** Export buttons added to the Articles screen toolbar and the PRISMA diagram screen. Both open the existing `ExportDialog` component which calls `export_ris` to export included articles as RIS format.
 
 - [ ] **Step 1: Add failing validation tests to `src-tauri/tests/ris_test.rs`**
 

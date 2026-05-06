@@ -76,7 +76,17 @@ pub fn update_article_notes(
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    article_repo::update_user_notes(&conn, &id, &notes)
+    article_repo::update_user_notes(&conn, &id, &notes)?;
+    audit_repo::create_entry(
+        &conn,
+        &id,
+        "status_change",
+        None,
+        None,
+        Some(&format!("Notes updated: {}", if notes.is_empty() { "(cleared)" } else { &notes })),
+        "user",
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -89,7 +99,17 @@ pub fn update_article_tags(
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    article_repo::update_article_tags(&conn, &id, &tag_ids)
+    article_repo::update_article_tags(&conn, &id, &tag_ids)?;
+    audit_repo::create_entry(
+        &conn,
+        &id,
+        "tag_add",
+        None,
+        None,
+        Some(&format!("Tags updated: {} tag(s)", tag_ids.len())),
+        "user",
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -102,7 +122,17 @@ pub fn update_article_labels(
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    article_repo::update_article_labels(&conn, &id, &label_ids)
+    article_repo::update_article_labels(&conn, &id, &label_ids)?;
+    audit_repo::create_entry(
+        &conn,
+        &id,
+        "label_add",
+        None,
+        None,
+        Some(&format!("Labels updated: {} label(s)", label_ids.len())),
+        "user",
+    )?;
+    Ok(())
 }
 
 #[tauri::command]

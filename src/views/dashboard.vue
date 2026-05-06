@@ -177,11 +177,19 @@ function navigateTo(route: string): void {
                       <span class="activity-item__action">
                         {{ formatAuditAction(entry.action) }}
                       </span>
+                      <span class="activity-item__source">
+                        <template v-if="entry.source === 'ai'"> by AI</template>
+                        <template v-else-if="entry.source === 'user'"> by User</template>
+                      </span>
+                      <span v-if="entry.articleTitle" class="activity-item__title">
+                        &mdash; {{ entry.articleTitle
+                        }}{{ entry.articleTitle.length >= 40 ? '...' : '' }}
+                      </span>
                       <span v-if="entry.count && entry.count > 1" class="activity-item__count">
                         {{ entry.count }} articles
                       </span>
                       <span v-if="entry.details" class="activity-item__details">
-                        - {{ entry.details }}
+                        &mdash; {{ entry.details }}
                       </span>
                     </p>
                     <p class="activity-item__time">
@@ -618,6 +626,16 @@ function navigateTo(route: string): void {
   color: #4f46e5;
   margin-left: var(--space-1);
   margin-right: var(--space-1);
+}
+
+.activity-item__source {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-body);
+}
+
+.activity-item__title {
+  color: var(--color-on-surface-variant);
+  font-style: italic;
 }
 
 .activity-item__details {

@@ -343,7 +343,10 @@ watch(
       <div class="llm-config__actions">
         <button class="btn btn--secondary" @click="revert">Revert</button>
         <button class="btn btn--primary" :disabled="testing" @click="testConnection">
-          <span class="material-symbols-outlined btn__icon">cable</span>
+          <span v-if="testing" class="material-symbols-outlined btn__icon spinner"
+            >progress_activity</span
+          >
+          <span v-else class="material-symbols-outlined btn__icon">cable</span>
           {{ testing ? 'Testing...' : 'Test Connection' }}
         </button>
       </div>
@@ -751,5 +754,18 @@ watch(
 .llm-config__test-result--success {
   background-color: #f0fdf4;
   color: #166534;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

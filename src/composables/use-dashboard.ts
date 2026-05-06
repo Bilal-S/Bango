@@ -23,6 +23,8 @@ export interface GroupedAuditEntry {
   source: string;
   timestamp: string;
   details: string | null;
+  /** First 40 chars of article title for context */
+  articleTitle?: string | null;
   /** For grouped imports: how many articles were imported */
   count?: number;
 }
@@ -70,6 +72,7 @@ export function useDashboard() {
       source: entry.source,
       timestamp: entry.timestamp,
       details: entry.details,
+      articleTitle: entry.articleTitle,
     }));
 
     // Merge with import activities (already aggregated with correct counts at SQL level)

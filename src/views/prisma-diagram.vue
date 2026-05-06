@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import { usePrisma } from '@/composables/use-prisma';
+import ExportDialog from '@/components/export-dialog.vue';
 
 const { svgContent, data, loading, loadDiagram, exportSvg, exportPng } = usePrisma();
+const showExport = ref(false);
 
 onMounted(loadDiagram);
 </script>
@@ -20,6 +22,10 @@ onMounted(loadDiagram);
           <span class="material-symbols-outlined btn__icon">download</span>
           Export PNG
         </button>
+        <button class="btn btn--secondary" @click="showExport = true">
+          <span class="material-symbols-outlined btn__icon">download</span>
+          Export RIS
+        </button>
         <button class="btn btn--primary" :disabled="loading" @click="loadDiagram">Refresh</button>
       </div>
     </div>
@@ -34,6 +40,9 @@ onMounted(loadDiagram);
         {{ data.studiesIncluded }} included
       </span>
     </div>
+
+    <!-- Export Dialog -->
+    <ExportDialog v-if="showExport" @close="showExport = false" />
 
     <div v-if="data && data.exclusionReasons.length > 0" class="prisma-view__reasons">
       <h2>Exclusion Reasons</h2>

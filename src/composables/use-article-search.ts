@@ -190,6 +190,17 @@ export function useArticleSearch() {
 
   async function updateNotes(id: string, notes: string): Promise<void> {
     await tauriCommand('update_article_notes', { id, notes });
+    await selectArticle(id);
+  }
+
+  async function updateTags(id: string, tagIds: string[]): Promise<void> {
+    await tauriCommand('update_article_tags', { id, tagIds });
+    await selectArticle(id);
+  }
+
+  async function updateLabels(id: string, labelIds: string[]): Promise<void> {
+    await tauriCommand('update_article_labels', { id, labelIds });
+    await selectArticle(id);
   }
 
   function closeDetail(): void {
@@ -220,6 +231,8 @@ export function useArticleSearch() {
     selectArticle,
     moveArticle,
     updateNotes,
+    updateTags,
+    updateLabels,
     closeDetail,
     setStatusTab,
     toggleSort,

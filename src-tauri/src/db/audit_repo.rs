@@ -5,8 +5,11 @@ use crate::models::audit::{AuditAction, AuditEntry, AuditSource, ImportActivity}
 
 pub fn get_audit_trail(conn: &Connection, article_id: &str) -> Result<Vec<AuditEntry>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, article_id, timestamp, action, from_status, to_status, details, source \
-         FROM audit_entries WHERE article_id = ?1 ORDER BY timestamp DESC",
+        "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
+         ae.details, ae.source, SUBSTR(a.title, 1, 40) as article_title \
+         FROM audit_entries ae \
+         LEFT JOIN articles a ON a.id = ae.article_id \
+         WHERE ae.article_id = ?1 ORDER BY ae.timestamp DESC",
     )?;
     let rows = stmt.query_map([article_id], row_to_audit_entry)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -18,8 +21,11 @@ pub fn get_recent_audit_entries(
 ) -> Result<Vec<AuditEntry>, AppError> {
     // Exclude 'import' entries - those are served by get_import_activities instead
     let mut stmt = conn.prepare(
-        "SELECT id, article_id, timestamp, action, from_status, to_status, details, source \
-         FROM audit_entries WHERE action != 'import' ORDER BY timestamp DESC LIMIT ?1",
+        "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
+         ae.details, ae.source, SUBSTR(a.title, 1, 40) as article_title \
+         FROM audit_entries ae \
+         LEFT JOIN articles a ON a.id = ae.article_id \
+         WHERE ae.action != 'import' ORDER BY ae.timestamp DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], row_to_audit_entry)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -65,6 +71,15 @@ pub fn create_entry(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![id, article_id, now, action, from_status, to_status, details, source],
     )?;
+    // Fetch article title for context
+    let article_title: Option<String> = conn
+        .query_row(
+            "SELECT SUBSTR(title, 1, 40) FROM articles WHERE id = ?1",
+            [article_id],
+            |row| row.get(0),
+        )
+        .ok();
+
     Ok(AuditEntry {
         id,
         article_id: article_id.to_string(),
@@ -74,6 +89,7 @@ pub fn create_entry(
         to_status: to_status.map(String::from),
         details: details.map(String::from),
         source: parse_source(source),
+        article_title,
     })
 }
 
@@ -89,6 +105,7 @@ fn row_to_audit_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
         to_status: row.get(5)?,
         details: row.get(6)?,
         source: parse_source(&source_str),
+        article_title: row.get(8)?,
     })
 }
 

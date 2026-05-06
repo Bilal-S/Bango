@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
 
@@ -11,7 +11,55 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
   moveArticle: [id: string, newStatus: string];
+  updateNotes: [id: string, notes: string];
+  updateTags: [id: string, tagIds: string[]];
+  updateLabels: [id: string, labelIds: string[]];
 }>();
+
+// Notes editing
+const editingNotes = ref(false);
+const noteDraft = ref('');
+
+watch(editingNotes, (val) => {
+  if (val) noteDraft.value = props.article.userNotes ?? '';
+});
+
+function saveNotes(): void {
+  emit('updateNotes', props.article.id, noteDraft.value);
+  editingNotes.value = false;
+}
+
+function cancelNotes(): void {
+  editingNotes.value = false;
+}
+
+// Tag/Label add inputs
+const newTag = ref('');
+const newLabel = ref('');
+
+function removeTag(tag: string): void {
+  const updated = props.article.tags.filter((t) => t !== tag);
+  emit('updateTags', props.article.id, updated);
+}
+
+function addTag(): void {
+  const val = newTag.value.trim();
+  if (!val || props.article.tags.includes(val)) return;
+  emit('updateTags', props.article.id, [...props.article.tags, val]);
+  newTag.value = '';
+}
+
+function removeLabel(label: string): void {
+  const updated = props.article.labels.filter((l) => l !== label);
+  emit('updateLabels', props.article.id, updated);
+}
+
+function addLabel(): void {
+  const val = newLabel.value.trim();
+  if (!val || props.article.labels.includes(val)) return;
+  emit('updateLabels', props.article.id, [...props.article.labels, val]);
+  newLabel.value = '';
+}
 
 const confidencePercentage = computed(() =>
   props.article.aiConfidence !== null ? `${Math.round(props.article.aiConfidence * 100)}%` : '---'
@@ -170,37 +218,113 @@ const confidenceBarWidth = computed(() =>
         </p>
       </section>
 
-      <!-- Tags & Labels -->
-      <section v-if="article.tags.length > 0 || article.labels.length > 0">
-        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
-          Tags &amp; Labels
-        </h3>
-        <div class="flex flex-wrap gap-2">
+      <!-- Tags -->
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-label-caps text-slate-500 uppercase tracking-wider">Tags</h3>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-2">
           <span
             v-for="tag in article.tags"
             :key="'tag-' + tag"
-            class="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-lg text-xs font-medium"
+            class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 pl-3 pr-1.5 py-1 rounded-lg text-xs font-medium group"
           >
             {{ tag }}
+            <button
+              class="material-symbols-outlined text-[14px] text-indigo-400 hover:text-indigo-700 cursor-pointer rounded-full hover:bg-indigo-100 leading-none"
+              @click="removeTag(tag)"
+            >
+              close
+            </button>
           </span>
           <span
             v-for="label in article.labels"
             :key="'label-' + label"
-            class="border border-slate-200 text-slate-600 px-3 py-1 rounded-lg text-xs font-medium"
+            class="inline-flex items-center gap-1 border border-slate-200 text-slate-600 pl-3 pr-1.5 py-1 rounded-lg text-xs font-medium group"
           >
             {{ label }}
+            <button
+              class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer rounded-full hover:bg-slate-100 leading-none"
+              @click="removeLabel(label)"
+            >
+              close
+            </button>
           </span>
+        </div>
+        <div class="flex gap-2">
+          <input
+            v-model="newTag"
+            type="text"
+            placeholder="Add tag…"
+            class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            @keydown.enter="addTag"
+          />
+          <button
+            class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+            :disabled="!newTag.trim()"
+            @click="addTag"
+          >
+            Add
+          </button>
+        </div>
+        <div class="flex gap-2 mt-2">
+          <input
+            v-model="newLabel"
+            type="text"
+            placeholder="Add label…"
+            class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+            @keydown.enter="addLabel"
+          />
+          <button
+            class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+            :disabled="!newLabel.trim()"
+            @click="addLabel"
+          >
+            Add
+          </button>
         </div>
       </section>
 
       <!-- User Notes -->
-      <section v-if="article.userNotes">
-        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">Notes</h3>
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-label-caps text-slate-500 uppercase tracking-wider">Notes</h3>
+          <button
+            v-if="!editingNotes"
+            class="material-symbols-outlined text-[16px] text-slate-400 hover:text-indigo-600 cursor-pointer"
+            @click="editingNotes = true"
+          >
+            edit
+          </button>
+        </div>
+        <div v-if="editingNotes" class="space-y-2">
+          <textarea
+            v-model="noteDraft"
+            class="w-full text-sm border border-slate-200 rounded-lg p-3 focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-y min-h-[80px]"
+            placeholder="Add notes about this article…"
+          />
+          <div class="flex gap-2 justify-end">
+            <button
+              class="text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer px-3 py-1"
+              @click="cancelNotes"
+            >
+              Cancel
+            </button>
+            <button
+              class="text-xs bg-indigo-600 text-white px-3 py-1 rounded-lg font-semibold hover:bg-indigo-700 cursor-pointer"
+              @click="saveNotes"
+            >
+              Save
+            </button>
+          </div>
+        </div>
         <p
+          v-else-if="article.userNotes"
           class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-slate-50 p-3 rounded-lg"
         >
           {{ article.userNotes }}
         </p>
+        <p v-else class="text-xs text-slate-400 italic">No notes yet. Click edit to add.</p>
       </section>
 
       <!-- Audit Trail -->

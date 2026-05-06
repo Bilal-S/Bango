@@ -11,6 +11,8 @@ pub struct AuditEntry {
     pub to_status: Option<String>,
     pub details: Option<String>,
     pub source: AuditSource,
+    /// First 40 chars of the article title (for dashboard context)
+    pub article_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

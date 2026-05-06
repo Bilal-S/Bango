@@ -7,6 +7,7 @@ defineProps<{
 const emit = defineEmits<{
   toggleFilters: [];
   search: [];
+  exportRis: [];
 }>();
 </script>
 
@@ -40,6 +41,13 @@ const emit = defineEmits<{
 
     <div class="flex items-center gap-2">
       <span class="text-xs text-slate-400 mr-2">{{ articleCount }} articles</span>
+      <button
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+        @click="emit('exportRis')"
+      >
+        <span class="material-symbols-outlined text-[16px]">download</span>
+        Export
+      </button>
       <button
         class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors active:scale-95"
         @click="emit('search')"
