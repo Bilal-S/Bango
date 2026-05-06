@@ -11,28 +11,44 @@ pub mod ris;
 pub mod screening;
 pub mod summary;
 
-use db::connection::{create_connection, DbState};
-use db::migration::run_migrations;
-
+use db::connection::DbState;
 use commands::screening::ScreeningState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let conn = match create_connection() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("fatal: failed to create database connection: {e:#}");
-            std::process::exit(1);
-        }
-    };
-    if let Err(e) = run_migrations(&conn) {
-        eprintln!("fatal: failed to run database migrations: {e:#}");
-        std::process::exit(1);
-    }
-
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(DbState { conn: std::sync::Mutex::new(conn) })
+        .setup(|app| {
+            use tauri::Manager;
+            let app_data_dir = app.path().app_data_dir().unwrap_or_else(|e| {
+                eprintln!("fatal: failed to get app data dir: {e}");
+                std::process::exit(1);
+            });
+            if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+                eprintln!("fatal: failed to create app data dir: {e}");
+                std::process::exit(1);
+            }
+            let db_path = app_data_dir.join("bango.db");
+            
+            let conn = match crate::db::connection::create_connection_at(&db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("fatal: failed to create database connection: {e:#}");
+                    std::process::exit(1);
+                }
+            };
+            
+            if let Err(e) = crate::db::migration::run_migrations(&conn) {
+                eprintln!("fatal: failed to run database migrations: {e:#}");
+                std::process::exit(1);
+            }
+            
+            app.manage(DbState {
+                conn: std::sync::Mutex::new(conn),
+            });
+            
+            Ok(())
+        })
         .manage(ScreeningState { engine: tokio::sync::Mutex::new(None) })
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
