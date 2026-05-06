@@ -20,12 +20,12 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: 'Dashboard', icon: 'dashboard', route: '/' },
-  { label: 'Articles', icon: 'description', route: '/articles' },
-  { label: 'Import RIS', icon: 'upload_file', route: '/import' },
-  { label: 'Deduplicate', icon: 'science', route: '/dedup' },
   { label: 'Criteria', icon: 'rule', route: '/criteria' },
-  { label: 'Screening', icon: 'analytics', route: '/screening' },
+  { label: 'Import RIS', icon: 'upload_file', route: '/import' },
   { label: 'Tags & Labels', icon: 'sell', route: '/tags' },
+  { label: 'Deduplicate', icon: 'science', route: '/dedup' },
+  { label: 'Screening', icon: 'analytics', route: '/screening' },
+  { label: 'Articles', icon: 'description', route: '/articles' },
   { label: 'PRISMA', icon: 'account_tree', route: '/prisma' },
   { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
@@ -159,12 +159,31 @@ function handleNavClick(): void {
 }
 
 .sidebar__link:hover {
-  background-color: var(--color-sidebar-hover);
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .sidebar__link--active {
-  background-color: var(--color-sidebar-hover);
+  background-color: rgba(255, 255, 255, 0.15);
   color: #ffffff;
+  font-weight: var(--font-weight-semibold);
+  border-left: 3px solid var(--color-primary);
+  padding-left: calc(var(--space-4) - 3px);
+}
+
+.sidebar__link--active .sidebar__icon {
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+/* Collapsed active: use left border as padding offset doesn't apply */
+.sidebar__link--collapsed.sidebar__link--active {
+  padding-left: var(--space-2);
+  border-left: none;
+  border-radius: var(--radius-default);
+  background-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Collapsed link: center the icon */
