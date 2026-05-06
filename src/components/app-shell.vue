@@ -45,18 +45,21 @@ provide('toggleSidebar', toggleSidebar);
     <!-- Mobile backdrop -->
     <div v-if="sidebarMobileOpen" class="app-shell__backdrop" @click="closeMobileSidebar" />
 
-    <!-- Mobile hamburger button -->
-    <button v-if="isBelowMd" class="app-shell__hamburger" @click="toggleSidebar">
-      <span class="material-symbols-outlined">menu</span>
-    </button>
-
     <NavSidebar
       :collapsed="sidebarCollapsed && !isBelowMd"
       :mobile-open="sidebarMobileOpen"
       @close-mobile="closeMobileSidebar"
     />
     <main class="app-shell__main">
-      <router-view />
+      <header v-if="isBelowMd" class="app-shell__mobile-bar">
+        <button class="app-shell__hamburger" @click="toggleSidebar">
+          <span class="material-symbols-outlined">menu</span>
+        </button>
+        <span class="app-shell__mobile-title">Bango</span>
+      </header>
+      <div class="app-shell__content">
+        <router-view />
+      </div>
     </main>
   </div>
 </template>
@@ -71,7 +74,9 @@ provide('toggleSidebar', toggleSidebar);
 
 .app-shell__main {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background-color: var(--color-surface);
   min-width: 0;
 }
@@ -84,36 +89,46 @@ provide('toggleSidebar', toggleSidebar);
   transition: opacity 0.2s;
 }
 
-.app-shell__hamburger {
-  position: fixed;
-  top: var(--space-3);
-  left: var(--space-3);
+.app-shell__mobile-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 48px;
+  padding: 0 var(--space-3);
+  background-color: var(--color-surface-container-lowest, #ffffff);
+  border-bottom: 1px solid var(--color-outline-variant, #c7c4d8);
+  position: sticky;
+  top: 0;
   z-index: 30;
+  flex-shrink: 0;
+}
+
+.app-shell__mobile-title {
+  font-size: var(--font-size-h1, 20px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-on-surface, #1b1b24);
+}
+
+.app-shell__hamburger {
   width: 40px;
   height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--color-sidebar);
-  color: var(--color-sidebar-text);
+  background-color: transparent;
+  color: var(--color-on-surface, #1b1b24);
   border: none;
   border-radius: var(--radius-default);
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
   transition: background-color 0.15s;
 }
 
 .app-shell__hamburger:hover {
-  background-color: var(--color-sidebar-hover);
+  background-color: var(--color-surface-container, #f0ecf9);
 }
 
-@media (min-width: 768px) {
-  .app-shell__hamburger {
-    display: none;
-  }
-
-  .app-shell__backdrop {
-    display: none;
-  }
+.app-shell__content {
+  flex: 1;
+  overflow-y: auto;
 }
 </style>
