@@ -53,6 +53,11 @@ const {
 
       <!-- Step 3: Review & Import -->
       <section v-if="step === 'import' && preview">
+        <div v-if="preview.errorCount > 0" class="import-view__warning">
+          {{ preview.errorCount }} of {{ preview.totalRecords }} records have validation issues and
+          will be skipped. Only {{ visibleCount }} valid articles will be imported.
+        </div>
+
         <div class="import-view__summary">
           <div class="import-view__stat">
             <span class="import-view__stat-value">{{ preview.totalRecords }}</span>
@@ -64,14 +69,14 @@ const {
           </div>
           <div class="import-view__stat import-view__stat--error">
             <span class="import-view__stat-value">{{ preview.errorCount }}</span>
-            <span class="import-view__stat-label">Errors</span>
+            <span class="import-view__stat-label">Skipped</span>
           </div>
         </div>
 
         <ImportPreview
           :articles="preview.previewArticles"
           :error-count="preview.errorCount"
-          :errors="preview.errors"
+          :error-groups="preview.errorGroups"
           :removed-indices="removedIndices"
           @remove="removeArticle"
         />
@@ -89,6 +94,14 @@ const {
         <div class="import-view__success">
           <h2>Import Complete</h2>
           <p>{{ importResult.importedCount }} articles imported successfully.</p>
+          <p v-if="importResult.skippedCount > 0" class="import-view__skipped">
+            {{ importResult.skippedCount }} record{{ importResult.skippedCount !== 1 ? 's' : '' }}
+            skipped due to validation issues.
+          </p>
+          <p v-if="importResult.skippedByUser > 0" class="import-view__skipped">
+            {{ importResult.skippedByUser }} record{{ importResult.skippedByUser !== 1 ? 's' : '' }}
+            excluded by user.
+          </p>
           <p class="import-view__capacity">
             Remaining capacity: {{ importResult.remainingCapacity }} articles
           </p>
@@ -191,6 +204,21 @@ const {
 
 .import-view__success h2 {
   margin-bottom: var(--space-2);
+}
+
+.import-view__warning {
+  padding: var(--space-3);
+  background-color: var(--color-warning-container, #fef3cd);
+  color: var(--color-on-warning-container, #664d03);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  margin-bottom: var(--space-4);
+}
+
+.import-view__skipped {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+  margin-top: var(--space-1);
 }
 
 .import-view__capacity {

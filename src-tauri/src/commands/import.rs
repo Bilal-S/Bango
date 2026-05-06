@@ -7,7 +7,7 @@ use crate::error::AppError;
 use crate::models::article::{Article, NewArticle};
 use crate::ris::parser::parse_ris;
 use crate::ris::types::RisRecord;
-use crate::ris::validator::validate_all;
+use crate::ris::validator::{validate_all_grouped, ErrorGroup};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +16,7 @@ pub struct ImportPreview {
     pub valid_records: usize,
     pub error_count: usize,
     pub errors: Vec<ImportError>,
+    pub error_groups: Vec<ErrorGroup>,
     pub preview_articles: Vec<PreviewArticle>,
 }
 
@@ -40,8 +41,12 @@ pub struct PreviewArticle {
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub imported_count: usize,
+    pub skipped_count: usize,
+    pub skipped_by_user: usize,
     pub articles: Vec<Article>,
     pub remaining_capacity: usize,
+    pub validation_errors: Vec<ImportError>,
+    pub error_groups: Vec<ErrorGroup>,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +55,8 @@ pub struct ParseRisRequest {
     pub content: Option<String>,
     pub file_path: Option<String>,
     pub file_name: String,
+    #[serde(default)]
+    pub excluded_indices: Vec<usize>,
 }
 
 #[tauri::command]
@@ -64,7 +71,7 @@ pub fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppErro
     };
 
     let parse_result = parse_ris(&content)?;
-    let (valid, errors) = validate_all(&parse_result.records);
+    let (valid, errors, error_groups) = validate_all_grouped(&parse_result.records);
 
     let preview_articles: Vec<PreviewArticle> = valid
         .iter()
@@ -86,11 +93,12 @@ pub fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppErro
             .into_iter()
             .map(|e| ImportError { record_index: e.record_index, message: e.message })
             .collect(),
+        error_groups,
         preview_articles,
     })
 }
 
-fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
+pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
     let extras: Option<serde_json::Value> = if record.extras.is_empty() {
         None
     } else {
@@ -144,21 +152,31 @@ pub fn import_ris_file(
     };
 
     let parse_result = parse_ris(&content)?;
-    let (valid, errors) = validate_all(&parse_result.records);
+    let (valid, errors, error_groups) = validate_all_grouped(&parse_result.records);
 
-    if !errors.is_empty() {
-        return Err(AppError::Import(format!(
-            "{} record(s) failed validation: {}",
-            errors.len(),
-            errors
-                .iter()
-                .map(|e| format!("Record {}: {}", e.record_index, e.message))
-                .collect::<Vec<_>>()
-                .join("; ")
-        )));
+    let excluded_set: std::collections::HashSet<usize> =
+        request.excluded_indices.iter().copied().collect();
+
+    // Filter out user-excluded articles (by valid-record index)
+    let to_import: Vec<&RisRecord> = valid
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !excluded_set.contains(i))
+        .map(|(_, r)| r)
+        .collect();
+
+    let skipped_by_user = excluded_set.len();
+    let skipped_validation = parse_result.records.len() - valid.len();
+
+    if to_import.is_empty() {
+        return Err(AppError::Import(
+            "No articles to import. All records were either excluded or failed validation."
+                .to_string(),
+        ));
     }
 
-    let new_articles: Vec<NewArticle> = valid.iter().map(ris_record_to_new_article).collect();
+    let new_articles: Vec<NewArticle> =
+        to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
     let conn = db_state
         .conn
         .lock()
@@ -169,8 +187,18 @@ pub fn import_ris_file(
 
     Ok(ImportResult {
         imported_count: imported.len(),
+        skipped_count: skipped_validation,
+        skipped_by_user,
         articles: imported,
         remaining_capacity: remaining,
+        validation_errors: errors
+            .into_iter()
+            .map(|e| ImportError {
+                record_index: e.record_index,
+                message: e.message,
+            })
+            .collect(),
+        error_groups,
     })
 }
 

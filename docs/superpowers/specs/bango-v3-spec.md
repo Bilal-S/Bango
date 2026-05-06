@@ -177,16 +177,21 @@ All unrecognized RIS tags are preserved as key-value pairs in `risExtras`.
 
 ### 4.2 Import Validation
 
-- Articles missing **Title**, **Abstract**, or **Authors** are **rejected** at import with a specific parse error indicating which required field is missing.
+- Articles missing **Title**, **Abstract**, or **Authors** are flagged as validation errors with a specific message indicating which required field is missing (e.g., "Missing required field: Title (TI)").
 - If `AB` is missing but `N2` is present, `N2` is used as the abstract.
 - Multiple `AU` tags for a single article are collected into the `authors[]` array.
 - Multiple `KW` tags for a single article are collected into the `keywords[]` array.
 - Each import records the source filename in `importSource`.
+- **Partial imports are supported**: valid articles are imported even when some records fail validation. Invalid records are skipped.
+- Validation errors are **grouped by error message** and displayed as collapsible summaries in the UI (e.g., "7 records — Missing required field: Abstract (AB or N2)"). Users can expand each group to see the affected record indices.
+- A **warning banner** is shown when there are validation issues, indicating how many records will be skipped and how many will be imported.
+- Users can also **manually exclude** individual valid articles from the preview table before confirming import.
 
 ### 4.3 Import Limits
 
-- If a single RIS file contains more records than the remaining project capacity (10,000 total article limit minus current article count), the import is **rejected** with an error stating how many articles were in the file and how many slots remain.
-- Partial imports are not supported — the entire file either succeeds or fails.
+- If a single RIS file contains more valid records than the remaining project capacity (10,000 total article limit minus current article count), the import is **rejected** with an error stating how many articles were in the file and how many slots remain.
+- **Partial imports**: Only valid articles count toward the import limit. Invalid records are excluded before the capacity check.
+- The import result reports: number imported, number skipped (validation), number excluded (user), and remaining capacity.
 
 ### 4.4 Multiple Imports
 

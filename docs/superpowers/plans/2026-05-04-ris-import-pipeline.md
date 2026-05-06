@@ -403,6 +403,8 @@ git commit -m "feat(ris): implement RIS parser with all supported tags"
 - Create: `src-tauri/src/ris/validator.rs`
 - Add tests to: `src-tauri/tests/ris_test.rs`
 
+> **Partial Import Support (added 2026-05-06):** The validator now provides `validate_all_grouped()` which returns validation errors grouped by message for expandable UI summaries. The `ErrorGroup` struct contains `message`, `count`, and `record_indices`. Valid articles can be imported even when some records fail validation — the import command no longer blocks on validation errors.
+
 - [ ] **Step 1: Add failing validation tests to `src-tauri/tests/ris_test.rs`**
 
 Append these tests:
@@ -821,6 +823,7 @@ pub mod migrations;
 
 ```rust
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tauri::State;
 
 use crate::db::article_repo;
@@ -828,7 +831,7 @@ use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::article::{Article, NewArticle};
 use crate::ris::parser::parse_ris;
-use crate::ris::validator::validate_all;
+use crate::ris::validator::{validate_all, validate_all_grouped, ErrorGroup};
 use crate::ris::types::RisRecord;
 
 #[derive(Serialize)]
@@ -838,6 +841,7 @@ pub struct ImportPreview {
     pub valid_records: usize,
     pub error_count: usize,
     pub errors: Vec<ImportError>,
+    pub error_groups: Vec<ErrorGroup>,
     pub preview_articles: Vec<PreviewArticle>,
 }
 
@@ -862,8 +866,12 @@ pub struct PreviewArticle {
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub imported_count: usize,
+    pub skipped_count: usize,
+    pub skipped_by_user: usize,
     pub articles: Vec<Article>,
     pub remaining_capacity: usize,
+    pub validation_errors: Vec<ImportError>,
+    pub error_groups: Vec<ErrorGroup>,
 }
 
 #[derive(Deserialize)]

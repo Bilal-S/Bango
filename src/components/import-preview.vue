@@ -1,27 +1,61 @@
 <script setup lang="ts">
-import type { PreviewArticle, ImportError } from '@/composables/use-import';
+import { ref } from 'vue';
+import type { PreviewArticle, ErrorGroup } from '@/composables/use-import';
 
 const props = defineProps<{
   articles: PreviewArticle[];
   errorCount: number;
-  errors: ImportError[];
+  errorGroups: ErrorGroup[];
   removedIndices: Set<number>;
 }>();
 
 defineEmits<{
   remove: [index: number];
 }>();
+
+const expandedGroups = ref<Set<string>>(new Set());
+
+function toggleGroup(message: string): void {
+  const next = new Set(expandedGroups.value);
+  if (next.has(message)) {
+    next.delete(message);
+  } else {
+    next.add(message);
+  }
+  expandedGroups.value = next;
+}
+
+function isExpanded(message: string): boolean {
+  return expandedGroups.value.has(message);
+}
 </script>
 
 <template>
   <div class="preview">
     <div v-if="errorCount > 0" class="preview__errors">
-      <h2>Validation Errors ({{ errorCount }})</h2>
-      <ul class="preview__error-list">
-        <li v-for="err in errors" :key="err.recordIndex" class="preview__error-item">
-          Record {{ err.recordIndex }}: {{ err.message }}
-        </li>
-      </ul>
+      <h2>Validation Issues ({{ errorCount }} records affected)</h2>
+      <div class="preview__error-groups">
+        <div v-for="group in errorGroups" :key="group.message" class="preview__error-group">
+          <button
+            class="preview__error-summary"
+            :aria-expanded="isExpanded(group.message)"
+            @click="toggleGroup(group.message)"
+          >
+            <span class="preview__error-chevron">
+              {{ isExpanded(group.message) ? '▾' : '▸' }}
+            </span>
+            <span class="preview__error-text">
+              {{ group.count }} record{{ group.count !== 1 ? 's' : '' }} — {{ group.message }}
+            </span>
+          </button>
+          <div v-if="isExpanded(group.message)" class="preview__error-detail">
+            <span class="preview__error-indices">
+              Record{{ group.recordIndices.length !== 1 ? 's' : '' }}:
+              {{ group.recordIndices.join(', ') }}
+            </span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="preview__table-wrapper">
@@ -73,14 +107,56 @@ defineEmits<{
   margin-bottom: var(--space-2);
 }
 
-.preview__error-list {
-  list-style: none;
-  font-size: var(--font-size-caption);
-  color: var(--color-error);
+.preview__error-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
-.preview__error-item {
-  padding: var(--space-1) 0;
+.preview__error-group {
+  border-radius: var(--radius-default);
+  overflow: hidden;
+}
+
+.preview__error-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-size-caption);
+  color: var(--color-error);
+  text-align: left;
+  border-radius: var(--radius-default);
+  transition: background-color 0.15s;
+}
+
+.preview__error-summary:hover {
+  background-color: var(--color-hover);
+}
+
+.preview__error-chevron {
+  flex-shrink: 0;
+  width: 1em;
+  text-align: center;
+}
+
+.preview__error-text {
+  flex: 1;
+}
+
+.preview__error-detail {
+  padding: var(--space-1) var(--space-3) var(--space-2) calc(1em + var(--space-5));
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+}
+
+.preview__error-indices {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85em;
 }
 
 .preview__table-wrapper {

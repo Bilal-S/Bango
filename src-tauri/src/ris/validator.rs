@@ -1,4 +1,16 @@
+use std::collections::HashMap;
+
 use super::types::{RisParseError, RisRecord};
+
+/// A group of validation errors that share the same message, used for
+/// summarised display in the UI (e.g. "7 records missing Abstract").
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorGroup {
+    pub message: String,
+    pub count: usize,
+    pub record_indices: Vec<usize>,
+}
 
 /// Validates a single RIS record for required fields.
 /// Returns a list of validation errors (empty if valid).
@@ -45,4 +57,31 @@ pub fn validate_all(records: &[RisRecord]) -> (Vec<RisRecord>, Vec<RisParseError
     }
 
     (valid, all_errors)
+}
+
+/// Validates all records and groups errors by message for summarised display.
+/// Returns (valid_records, all_errors, grouped_errors).
+pub fn validate_all_grouped(
+    records: &[RisRecord],
+) -> (Vec<RisRecord>, Vec<RisParseError>, Vec<ErrorGroup>) {
+    let (valid, all_errors) = validate_all(records);
+
+    let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+    for err in &all_errors {
+        groups
+            .entry(err.message.clone())
+            .or_default()
+            .push(err.record_index);
+    }
+
+    let error_groups: Vec<ErrorGroup> = groups
+        .into_iter()
+        .map(|(message, indices)| ErrorGroup {
+            count: indices.len(),
+            record_indices: indices,
+            message,
+        })
+        .collect();
+
+    (valid, all_errors, error_groups)
 }

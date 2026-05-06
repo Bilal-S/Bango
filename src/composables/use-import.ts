@@ -1,17 +1,24 @@
 import { ref, computed } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 
-export interface ImportPreview {
-  totalRecords: number;
-  validRecords: number;
-  errorCount: number;
-  errors: ImportError[];
-  previewArticles: PreviewArticle[];
+export interface ErrorGroup {
+  message: string;
+  count: number;
+  recordIndices: number[];
 }
 
 export interface ImportError {
   recordIndex: number;
   message: string;
+}
+
+export interface ImportPreview {
+  totalRecords: number;
+  validRecords: number;
+  errorCount: number;
+  errors: ImportError[];
+  errorGroups: ErrorGroup[];
+  previewArticles: PreviewArticle[];
 }
 
 export interface PreviewArticle {
@@ -24,8 +31,12 @@ export interface PreviewArticle {
 
 export interface ImportResult {
   importedCount: number;
+  skippedCount: number;
+  skippedByUser: number;
   articles: unknown[];
   remainingCapacity: number;
+  validationErrors: ImportError[];
+  errorGroups: ErrorGroup[];
 }
 
 export type ImportStep = 'upload' | 'parse' | 'import' | 'complete';
@@ -43,7 +54,7 @@ export function useImport() {
 
   const hasFile = computed(() => fileContent.value !== null || filePath.value !== null);
   const hasErrors = computed(() => (preview.value?.errorCount ?? 0) > 0);
-  const canImport = computed(() => preview.value !== null && preview.value.errorCount === 0);
+  const canImport = computed(() => preview.value !== null && preview.value.validRecords > 0);
 
   const visibleArticles = computed(() => {
     if (!preview.value) return [];

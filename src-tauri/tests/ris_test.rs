@@ -3,7 +3,7 @@ use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::ris::parser::parse_ris;
 use bango_lib::ris::types::RisRecord;
-use bango_lib::ris::validator::{validate_all, validate_record};
+use bango_lib::ris::validator::{validate_all, validate_all_grouped, validate_record};
 use std::fs;
 use std::path::PathBuf;
 
@@ -157,4 +157,90 @@ fn test_full_import_pipeline_with_real_ris() {
     assert!(record.title.is_some());
     assert!(record.abstract_text.is_some());
     assert!(!record.authors.is_empty());
+}
+
+#[test]
+fn test_validate_all_grouped_groups_errors_by_message() {
+    // 3 valid, 2 missing abstract, 1 missing title
+    let ris = "\
+TY  - JOUR\nTI  - Valid One\nAU  - Author A\nAB  - Abstract\nER  -\n\
+TY  - JOUR\nTI  - No Abstract\nAU  - Author B\nER  -\n\
+TY  - JOUR\nTI  - Valid Two\nAU  - Author C\nAB  - Abstract\nER  -\n\
+TY  - JOUR\nTI  - Also No Abstract\nAU  - Author D\nER  -\n\
+TY  - JOUR\nAU  - Author E\nAB  - Abstract\nER  -\n\
+TY  - JOUR\nTI  - Valid Three\nAU  - Author F\nAB  - Abstract\nER  -\n";
+    let parse_result = parse_ris(ris).expect("Parse failed");
+    let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
+
+    assert_eq!(valid.len(), 3, "Should have 3 valid records");
+    assert_eq!(errors.len(), 3, "Should have 3 total errors");
+    assert_eq!(groups.len(), 2, "Should have 2 error groups");
+
+    let abstract_group = groups.iter().find(|g| g.message.contains("Abstract")).expect("No abstract group");
+    assert_eq!(abstract_group.count, 2);
+    assert_eq!(abstract_group.record_indices.len(), 2);
+
+    let title_group = groups.iter().find(|g| g.message.contains("Title")).expect("No title group");
+    assert_eq!(title_group.count, 1);
+}
+
+#[test]
+fn test_partial_import_only_valid_records_imported() {
+    let ris = "\
+TY  - JOUR\nTI  - Valid One\nAU  - Author A\nAB  - Abstract\nER  -\n\
+TY  - JOUR\nTI  - Invalid\nAU  - Author B\nER  -\n\
+TY  - JOUR\nTI  - Valid Two\nAU  - Author C\nAB  - Abstract\nER  -\n";
+    let parse_result = parse_ris(ris).expect("Parse failed");
+    let (valid, errors, _groups) = validate_all_grouped(&parse_result.records);
+
+    assert_eq!(valid.len(), 2, "Should have 2 valid records");
+    assert_eq!(errors.len(), 1, "Should have 1 validation error");
+
+    let conn = create_connection().expect("DB connection failed");
+    run_migrations(&conn).expect("Migration failed");
+
+    use bango_lib::commands::import::ris_record_to_new_article;
+    let new_articles: Vec<_> = valid.iter().map(ris_record_to_new_article).collect();
+    let imported = article_repo::insert_articles_batch(&conn, &new_articles, "test.ris")
+        .expect("Insert failed");
+
+    assert_eq!(imported.len(), 2, "Should import 2 articles");
+}
+
+#[test]
+fn test_user_excluded_records_not_imported() {
+    let ris = "\
+TY  - JOUR\nTI  - Keep One\nAU  - Author A\nAB  - Abstract\nER  -\n\
+TY  - JOUR\nTI  - Exclude Me\nAU  - Author B\nAB  - Abstract\nER  -\n\
+TY  - JOUR\nTI  - Keep Two\nAU  - Author C\nAB  - Abstract\nER  -\n";
+    let parse_result = parse_ris(ris).expect("Parse failed");
+    let (valid, _errors, _groups) = validate_all_grouped(&parse_result.records);
+
+    assert_eq!(valid.len(), 3, "All 3 should be valid");
+
+    // User excludes valid record at index 1
+    let excluded: std::collections::HashSet<usize> = [1].into_iter().collect();
+    let to_import: Vec<&RisRecord> = valid
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !excluded.contains(i))
+        .map(|(_, r)| r)
+        .collect();
+
+    assert_eq!(to_import.len(), 2, "Only 2 should be imported after exclusion");
+    assert!(to_import[0].title.as_ref().unwrap().contains("Keep One"));
+    assert!(to_import[1].title.as_ref().unwrap().contains("Keep Two"));
+
+    let conn = create_connection().expect("DB connection failed");
+    run_migrations(&conn).expect("Migration failed");
+
+    use bango_lib::commands::import::ris_record_to_new_article;
+    let new_articles: Vec<_> = to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
+    let imported = article_repo::insert_articles_batch(&conn, &new_articles, "test.ris")
+        .expect("Insert failed");
+
+    assert_eq!(imported.len(), 2);
+    let all = article_repo::get_all_articles(&conn).expect("Query failed");
+    assert_eq!(all.len(), 2);
+    assert!(all.iter().all(|a| !a.title.contains("Exclude")));
 }
