@@ -3,7 +3,7 @@ import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
 
 const router = useRouter();
-const { counts, screeningProgress, recentAudit, loading, error, hasArticles, refresh } =
+const { counts, screeningProgress, groupedAudit, loading, error, hasArticles, refresh } =
   useDashboard();
 
 interface StatusTile {
@@ -112,7 +112,8 @@ function navigateTo(route: string): void {
           <div class="dashboard__empty-icon material-symbols-outlined">import_export</div>
           <h2 class="dashboard__empty-title">No articles yet</h2>
           <p class="dashboard__empty-desc">
-            Import an RIS or BibTeX file to get started with your systematic review.
+            Import an RIS file to get started with your systematic review. You will have to convert
+            your BibTeX files first.
           </p>
           <button class="dashboard__empty-cta" @click="navigateTo('/import')">
             Import References
@@ -149,11 +150,11 @@ function navigateTo(route: string): void {
               <div class="dashboard__card-header">
                 <h3 class="dashboard__card-title">Recent Activity</h3>
               </div>
-              <div v-if="recentAudit.length === 0" class="dashboard__no-activity">
+              <div v-if="groupedAudit.length === 0" class="dashboard__no-activity">
                 <p>No recent activity to display.</p>
               </div>
               <div v-else class="dashboard__activity-list">
-                <div v-for="entry in recentAudit" :key="entry.id" class="activity-item">
+                <div v-for="entry in groupedAudit" :key="entry.id" class="activity-item">
                   <div
                     class="activity-item__icon"
                     :class="{
@@ -175,6 +176,9 @@ function navigateTo(route: string): void {
                     <p class="activity-item__text">
                       <span class="activity-item__action">
                         {{ formatAuditAction(entry.action) }}
+                      </span>
+                      <span v-if="entry.count && entry.count > 1" class="activity-item__count">
+                        {{ entry.count }} articles
                       </span>
                       <span v-if="entry.details" class="activity-item__details">
                         — {{ entry.details }}
@@ -607,6 +611,13 @@ function navigateTo(route: string): void {
 
 .activity-item__action {
   font-weight: var(--font-weight-semibold);
+}
+
+.activity-item__count {
+  font-weight: var(--font-weight-semibold);
+  color: #4f46e5;
+  margin-left: var(--space-1);
+  margin-right: var(--space-1);
 }
 
 .activity-item__details {

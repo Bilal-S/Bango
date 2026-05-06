@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection};
 
 use crate::error::AppError;
-use crate::models::audit::{AuditAction, AuditEntry, AuditSource};
+use crate::models::audit::{AuditAction, AuditEntry, AuditSource, ImportActivity};
 
 pub fn get_audit_trail(conn: &Connection, article_id: &str) -> Result<Vec<AuditEntry>, AppError> {
     let mut stmt = conn.prepare(
@@ -16,11 +16,36 @@ pub fn get_recent_audit_entries(
     conn: &Connection,
     limit: usize,
 ) -> Result<Vec<AuditEntry>, AppError> {
+    // Exclude 'import' entries — those are served by get_import_activities instead
     let mut stmt = conn.prepare(
         "SELECT id, article_id, timestamp, action, from_status, to_status, details, source \
-         FROM audit_entries ORDER BY timestamp DESC LIMIT ?1",
+         FROM audit_entries WHERE action != 'import' ORDER BY timestamp DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], row_to_audit_entry)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Returns one row per import file with the correct article count,
+/// aggregated at the SQL level so the count is always accurate.
+pub fn get_import_activities(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<ImportActivity>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT MIN(id) as id, MIN(timestamp) as timestamp, \
+         REPLACE(details, 'Imported from ', '') as filename, COUNT(*) as count \
+         FROM audit_entries WHERE action = 'import' \
+         GROUP BY details \
+         ORDER BY MIN(timestamp) DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], |row| {
+        Ok(ImportActivity {
+            id: row.get(0)?,
+            timestamp: row.get(1)?,
+            filename: row.get(2)?,
+            count: row.get::<_, usize>(3)?,
+        })
+    })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 

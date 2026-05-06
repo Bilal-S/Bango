@@ -16,6 +16,25 @@ export interface ScreeningProgress {
   percentage: number;
 }
 
+/** A single audit entry or a group of import entries */
+export interface GroupedAuditEntry {
+  id: string;
+  action: string;
+  source: string;
+  timestamp: string;
+  details: string | null;
+  /** For grouped imports: how many articles were imported */
+  count?: number;
+}
+
+/** Shape returned by the Rust `get_import_activities` command */
+interface ImportActivity {
+  id: string;
+  timestamp: string;
+  filename: string;
+  count: number;
+}
+
 export function useDashboard() {
   const articles = ref<Article[]>([]);
   const recentAudit = ref<AuditEntry[]>([]);
@@ -42,16 +61,51 @@ export function useDashboard() {
 
   const hasArticles = computed(() => articles.value.length > 0);
 
+  /** Merged timeline: import activities (with correct counts from SQL) + other audit entries */
+  const groupedAudit = computed<GroupedAuditEntry[]>(() => {
+    // Convert non-import audit entries (already excludes imports from backend)
+    const nonImport: GroupedAuditEntry[] = recentAudit.value.map((entry) => ({
+      id: entry.id,
+      action: entry.action,
+      source: entry.source,
+      timestamp: entry.timestamp,
+      details: entry.details,
+    }));
+
+    // Merge with import activities (already aggregated with correct counts at SQL level)
+    const merged: GroupedAuditEntry[] = [
+      ...importActivities.value.map(
+        (act): GroupedAuditEntry => ({
+          id: act.id,
+          action: 'import',
+          source: 'system',
+          timestamp: act.timestamp,
+          details: act.filename,
+          count: act.count,
+        })
+      ),
+      ...nonImport,
+    ];
+
+    // Sort newest first
+    merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return merged;
+  });
+
+  const importActivities = ref<ImportActivity[]>([]);
+
   async function refresh(): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
-      const [fetchedArticles, fetchedAudit] = await Promise.all([
+      const [fetchedArticles, fetchedAudit, fetchedImports] = await Promise.all([
         tauriCommand<Article[]>('get_articles'),
         tauriCommand<AuditEntry[]>('get_recent_audit_entries', { limit: 10 }),
+        tauriCommand<ImportActivity[]>('get_import_activities', { limit: 10 }),
       ]);
       articles.value = fetchedArticles;
       recentAudit.value = fetchedAudit;
+      importActivities.value = fetchedImports;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -61,7 +115,17 @@ export function useDashboard() {
 
   onMounted(refresh);
 
-  return { articles, counts, screeningProgress, recentAudit, loading, error, hasArticles, refresh };
+  return {
+    articles,
+    counts,
+    screeningProgress,
+    recentAudit,
+    groupedAudit,
+    loading,
+    error,
+    hasArticles,
+    refresh,
+  };
 }
 
 export function formatStatusLabel(status: ArticleStatus): string {

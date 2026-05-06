@@ -54,9 +54,10 @@ src/
 
 ```
 tests/
-└── assets/                        (existing: real RIS files)
-    ├── 10A_Lewicki_Stages.ris     (existing: 1 record, full fields)
-    └── 11A-Resilience-Intersection-Capabilities.ris  (existing: 2 records, multi-author)
+└── assets/
+    ├── Sugar.ris     (10 records, all valid — Czech sugar research)
+    ├── Blue.ris      (13 records, some missing abstracts — blue foods research)
+    └── Green.ris     (7 records, some missing abstracts — green sustainability research)
 ```
 
 ---
@@ -159,10 +160,11 @@ git commit -m "feat(ris): add RIS parser types"
 - [ ] **Step 1: Note test asset paths**
 
 Real RIS files are in `tests/assets/`:
-- `10A_Lewicki_Stages.ris` — 1 record with full metadata (authors, DOI, keywords, abstract, journal)
-- `11A-Resilience-Intersection-Capabilities.ris` — 2 records with multiple authors, ISSN, C3 fields
+- `Sugar.ris` — 10 records, all valid (Czech sugar research, full metadata)
+- `Blue.ris` — 13 records, some missing abstracts (blue foods research, tests partial import)
+- `Green.ris` — 7 records, some missing abstracts (green sustainability research)
 
-These will be used for parser tests. No synthetic fixtures needed.
+These will be used for parser and validation tests.
 
 - [ ] **Step 2: Write failing tests in `src-tauri/tests/ris_test.rs`**
 
@@ -404,6 +406,8 @@ git commit -m "feat(ris): implement RIS parser with all supported tags"
 - Add tests to: `src-tauri/tests/ris_test.rs`
 
 > **Partial Import Support (added 2026-05-06):** The validator now provides `validate_all_grouped()` which returns validation errors grouped by message for expandable UI summaries. The `ErrorGroup` struct contains `message`, `count`, and `record_indices`. Valid articles can be imported even when some records fail validation — the import command no longer blocks on validation errors.
+
+> **Dashboard Import Activities (added 2026-05-06):** The dashboard now uses `get_import_activities` — a SQL-aggregated endpoint that returns one row per import file with the correct article count, instead of counting individual audit rows in the frontend. The `ImportActivity` type is in `models/audit.rs`. The `get_recent_audit_entries` endpoint now excludes `action='import'` entries to avoid double-counting.
 
 - [ ] **Step 1: Add failing validation tests to `src-tauri/tests/ris_test.rs`**
 
@@ -1071,7 +1075,7 @@ git add src-tauri/src/
 git commit -m "feat(import): add article repository and Tauri import commands"
 ```
 
-- [ ] **Step 9: Write integration test for full import pipeline**
+- [ ] **Step 9: Write integration tests for full and partial import pipelines**
 
 Add to `src-tauri/tests/ris_test.rs`:
 
@@ -1079,28 +1083,46 @@ Add to `src-tauri/tests/ris_test.rs`:
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::db::article_repo;
-use bango_lib::ris::validator::validate_all;
+use bango_lib::ris::validator::{validate_all, validate_all_grouped};
+use bango_lib::commands::import::ris_record_to_new_article;
 
 #[test]
-fn test_full_import_pipeline_with_real_ris() {
-    let content = fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+fn test_full_import_pipeline_with_sugar_ris() {
+    // Sugar.ris: 9 records, all valid
+    let content = fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
     let parse_result = parse_ris(&content).expect("Parse failed");
     let (valid, errors) = validate_all(&parse_result.records);
 
     assert!(errors.is_empty(), "Expected no validation errors: {:?}", errors);
-    assert_eq!(valid.len(), 1);
+    assert_eq!(valid.len(), 10);
 
     let conn = create_connection().expect("DB connection failed");
     run_migrations(&conn).expect("Migration failed");
 
-    let articles = article_repo::get_all_articles(&conn).expect("Query failed");
-    assert_eq!(articles.len(), 0, "Should start empty");
+    let new_articles: Vec<_> = valid.iter().map(ris_record_to_new_article).collect();
+    let imported = article_repo::insert_articles_batch(&conn, &new_articles, "Sugar.ris")
+        .expect("Insert failed");
+    assert_eq!(imported.len(), 9);
+}
 
-    // Verify DB schema supports all parsed fields
-    let record = &valid[0];
-    assert!(record.title.is_some());
-    assert!(record.abstract_text.is_some());
-    assert!(!record.authors.is_empty());
+#[test]
+fn test_partial_import_blue_ris() {
+    // Blue.ris: 13 records, some missing abstracts
+    let content = fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
+    let parse_result = parse_ris(&content).expect("Parse failed");
+    let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
+
+    assert!(valid.len() > 0, "Should have some valid records");
+    assert!(errors.len() > 0, "Should have some validation errors");
+    assert!(groups.iter().any(|g| g.message.contains("Abstract")));
+
+    let conn = create_connection().expect("DB connection failed");
+    run_migrations(&conn).expect("Migration failed");
+
+    let new_articles: Vec<_> = valid.iter().map(ris_record_to_new_article).collect();
+    let imported = article_repo::insert_articles_batch(&conn, &new_articles, "Blue.ris")
+        .expect("Insert failed");
+    assert_eq!(imported.len(), valid.len());
 }
 ```
 

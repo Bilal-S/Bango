@@ -5,7 +5,7 @@ use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::article::Article;
-use crate::models::audit::AuditEntry;
+use crate::models::audit::{AuditEntry, ImportActivity};
 
 #[tauri::command]
 pub fn query_articles(
@@ -118,4 +118,17 @@ pub fn override_ai_decision(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     article_repo::override_ai_decision(&conn, &id, &new_decision, &new_status, reasoning.as_deref())
+}
+
+#[tauri::command]
+pub fn get_import_activities(
+    db_state: State<'_, DbState>,
+    limit: Option<usize>,
+) -> Result<Vec<ImportActivity>, AppError> {
+    let limit = limit.unwrap_or(10);
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    audit_repo::get_import_activities(&conn, limit)
 }

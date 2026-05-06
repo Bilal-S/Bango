@@ -15,58 +15,65 @@ fn asset_path(name: &str) -> PathBuf {
 }
 
 #[test]
-fn test_parse_single_record_ris() {
-    let content = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris"))
-        .expect("fixture not found");
+fn test_parse_sugar_ris() {
+    let content = fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
     let result = parse_ris(&content).expect("Parse failed");
-    assert_eq!(result.records.len(), 1);
+    assert_eq!(result.records.len(), 10);
     assert_eq!(result.errors.len(), 0);
 
+    // First record: Pikhart, single author
     let record = &result.records[0];
     assert_eq!(record.reference_type.as_deref(), Some("JOUR"));
-    assert!(record.title.as_ref().unwrap().contains("Multi-Paradigm Ethical Framework"));
+    assert!(record.title.as_ref().unwrap().contains("Sugar Consumption"));
     assert_eq!(record.authors.len(), 1);
-    assert_eq!(record.authors[0], "Alibasic, H");
-    assert!(record.abstract_text.as_ref().unwrap().contains("artificial intelligence"));
-    assert_eq!(record.publication_year, Some(2025));
-    assert_eq!(record.doi.as_deref(), Some("10.3390/fintech4030034"));
-    assert_eq!(record.journal.as_deref(), Some("FINTECH"));
-    assert_eq!(record.volume.as_deref(), Some("4"));
-    assert_eq!(record.issue.as_deref(), Some("3"));
-    assert_eq!(record.start_page.as_deref(), Some("34"));
-    assert!(record.keywords.len() >= 5);
-    assert_eq!(record.language.as_deref(), Some("English"));
-    assert_eq!(record.issn.as_deref(), Some("2674-1032"));
-    assert_eq!(record.publisher.as_deref(), Some("MDPI"));
+    assert_eq!(record.authors[0], "Pikhart, Z");
+    assert!(record.abstract_text.as_ref().unwrap().contains("fundamental commodity"));
+    assert_eq!(record.publication_year, Some(2022));
+    assert!(record.doi.is_none()); // No DOI for this record
+    assert_eq!(record.journal.as_deref(), Some("LISTY CUKROVARNICKE A REPARSKE"));
+    assert_eq!(record.volume.as_deref(), Some("138"));
+    assert_eq!(record.issue.as_deref(), Some("5-6"));
+    assert_eq!(record.start_page.as_deref(), Some("220"));
+    assert_eq!(record.end_page.as_deref(), Some("223"));
+    assert!(record.keywords.len() >= 3);
+    assert_eq!(record.language.as_deref(), Some("Czech"));
+    assert_eq!(record.issn.as_deref(), Some("1210-3306"));
     assert!(record.notes.is_some());
 }
 
 #[test]
-fn test_parse_multi_record_ris() {
-    let content =
-        fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+fn test_parse_blue_ris() {
+    let content = fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
     let result = parse_ris(&content).expect("Parse failed");
-    assert_eq!(result.records.len(), 2);
+    assert_eq!(result.records.len(), 13);
     assert_eq!(result.errors.len(), 0);
 
-    // First record
+    // First record: Future of blue foods (anonymous author)
     let rec1 = &result.records[0];
-    assert!(rec1.title.as_ref().unwrap().contains("blockchain we trust"));
-    assert_eq!(rec1.authors.len(), 2);
-    assert_eq!(rec1.authors[0], "Toufaily, E");
-    assert_eq!(rec1.authors[1], "Zalan, T");
-    assert_eq!(rec1.publication_year, Some(2024));
-    assert_eq!(rec1.doi.as_deref(), Some("10.1016/j.techfore.2024.123574"));
-    assert!(rec1.keywords.len() >= 5);
+    assert!(rec1.title.as_ref().unwrap().contains("blue foods"));
+    assert_eq!(rec1.authors.len(), 1);
+    assert_eq!(rec1.authors[0], "[Anonymous]");
+    assert_eq!(rec1.publication_year, Some(2021));
+    assert!(rec1.doi.is_none());
+    assert!(rec1.abstract_text.is_none()); // No abstract
 
-    // Second record
+    // Second record: Natural blue food colorants
     let rec2 = &result.records[1];
-    assert!(rec2.title.as_ref().unwrap().contains("qualitative systematic review"));
-    assert_eq!(rec2.authors.len(), 4);
-    assert_eq!(rec2.publication_year, Some(2025));
-    assert_eq!(rec2.doi.as_deref(), Some("10.1177/02683962241254392"));
-    assert_eq!(rec2.start_page.as_deref(), Some("55"));
-    assert_eq!(rec2.end_page.as_deref(), Some("76"));
+    assert!(rec2.title.as_ref().unwrap().contains("Natural blue food colorants"));
+    assert_eq!(rec2.authors.len(), 3);
+    assert_eq!(rec2.authors[0], "Neves, MIL");
+    assert_eq!(rec2.publication_year, Some(2021));
+    assert_eq!(rec2.doi.as_deref(), Some("10.1016/j.tifs.2021.03.023"));
+    assert!(rec2.abstract_text.is_some());
+    assert!(rec2.keywords.len() >= 5);
+
+    // Environmental performance record (find it by DOI since order may vary)
+    let env_rec = result.records.iter().find(|r| r.doi.as_deref() == Some("10.1038/s41586-021-03889-2"))
+        .expect("Environmental performance record not found");
+    assert!(env_rec.title.as_ref().unwrap().contains("Environmental performance of blue foods"));
+    assert!(env_rec.authors.len() > 10);
+    assert_eq!(env_rec.publication_year, Some(2021));
+    assert_eq!(env_rec.doi.as_deref(), Some("10.1038/s41586-021-03889-2"));
 }
 
 #[test]
@@ -137,14 +144,13 @@ fn test_validate_n2_abstract_fallback() {
 }
 
 #[test]
-fn test_full_import_pipeline_with_real_ris() {
-    let content = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris"))
-        .expect("fixture not found");
+fn test_full_import_pipeline_with_sugar_ris() {
+    let content = fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
     let parse_result = parse_ris(&content).expect("Parse failed");
     let (valid, errors) = validate_all(&parse_result.records);
 
     assert!(errors.is_empty(), "Expected no validation errors: {:?}", errors);
-    assert_eq!(valid.len(), 1);
+    assert_eq!(valid.len(), 10);
 
     let conn = create_connection().expect("DB connection failed");
     run_migrations(&conn).expect("Migration failed");
@@ -157,6 +163,47 @@ fn test_full_import_pipeline_with_real_ris() {
     assert!(record.title.is_some());
     assert!(record.abstract_text.is_some());
     assert!(!record.authors.is_empty());
+}
+
+#[test]
+fn test_partial_import_blue_ris() {
+    // Blue.ris has 13 records; some are missing abstracts
+    let content = fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
+    let parse_result = parse_ris(&content).expect("Parse failed");
+    let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
+
+    // Some records should be valid, some should have validation errors
+    assert!(valid.len() > 0, "Should have at least some valid records");
+    assert!(errors.len() > 0, "Should have some validation errors");
+    assert!(groups.len() > 0, "Should have error groups");
+
+    // Verify that only valid records can be imported
+    let conn = create_connection().expect("DB connection failed");
+    run_migrations(&conn).expect("Migration failed");
+
+    use bango_lib::commands::import::ris_record_to_new_article;
+    let new_articles: Vec<_> = valid.iter().map(ris_record_to_new_article).collect();
+    let imported = article_repo::insert_articles_batch(&conn, &new_articles, "Blue.ris")
+        .expect("Insert failed");
+
+    assert_eq!(imported.len(), valid.len(), "Should import all valid records");
+}
+
+#[test]
+fn test_partial_import_green_ris() {
+    // Green.ris has 7 records; some are missing abstracts
+    let content = fs::read_to_string(asset_path("Green.ris")).expect("fixture not found");
+    let parse_result = parse_ris(&content).expect("Parse failed");
+    let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
+
+    assert_eq!(parse_result.records.len(), 7, "Green.ris should have 7 records");
+    assert!(valid.len() > 0, "Should have at least some valid records");
+    assert!(errors.len() > 0, "Should have some validation errors (missing abstracts)");
+
+    // Check grouped errors mention Abstract
+    let abstract_group = groups.iter().find(|g| g.message.contains("Abstract"));
+    assert!(abstract_group.is_some(), "Should have abstract-related error group");
+    assert!(abstract_group.unwrap().count > 0);
 }
 
 #[test]
