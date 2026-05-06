@@ -148,4 +148,20 @@
       'GRAD' 0,
       'opsz' 24;
   }
+
+  /* Shared page title — used as the main h1 on every screen */
+  .page-title {
+    font-size: var(--font-size-display);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--line-height-display);
+    letter-spacing: var(--letter-spacing-display);
+    color: var(--color-on-surface);
+    margin: 0;
+  }
+
+  .page-subtitle {
+    font-size: var(--font-size-body);
+    color: var(--color-on-surface-variant);
+    margin: var(--space-1) 0 0;
+  }
 }

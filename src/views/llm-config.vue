@@ -9,7 +9,7 @@ const { config, testing, testResult, showApiKey, testConnection, revert, isLocal
   <div class="llm-config">
     <!-- Header -->
     <div class="llm-config__header">
-      <h1 class="llm-config__title">LLM Configuration</h1>
+      <h1 class="page-title">LLM Configuration</h1>
       <p class="llm-config__subtitle">
         Configure the Large Language Model endpoint and parameters for text generation tasks.
       </p>

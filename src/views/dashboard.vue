@@ -84,7 +84,7 @@ function navigateTo(route: string): void {
     <section class="dashboard__header">
       <div class="dashboard__header-text">
         <span class="dashboard__badge">Active Project</span>
-        <h1 class="dashboard__title">Project Dashboard</h1>
+        <h1 class="page-title">Project Dashboard</h1>
         <p class="dashboard__subtitle">AI-assisted systematic literature review</p>
       </div>
       <button v-if="hasArticles" class="dashboard__cta" @click="navigateTo('/screening')">

@@ -4,7 +4,7 @@ defineProps<{ title: string }>();
 
 <template>
   <div class="placeholder">
-    <h1>{{ title }}</h1>
+    <h1 class="page-title">{{ title }}</h1>
     <p>Coming soon</p>
   </div>
 </template>
@@ -13,9 +13,5 @@ defineProps<{ title: string }>();
 .placeholder {
   padding: var(--space-6);
   color: var(--color-on-surface-variant);
-}
-
-.placeholder h1 {
-  color: var(--color-on-surface);
 }
 </style>

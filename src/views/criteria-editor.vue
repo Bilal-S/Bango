@@ -129,6 +129,11 @@ function priorityLabel(priority: Priority): string {
 
 <template>
   <div class="criteria-editor">
+    <div class="criteria-editor__header">
+      <h1 class="page-title">Criteria</h1>
+      <p class="page-subtitle">Define research aims and inclusion/exclusion criteria</p>
+    </div>
+
     <!-- Section 1: Research Aims -->
     <section class="section-panel">
       <div class="section-panel__header">

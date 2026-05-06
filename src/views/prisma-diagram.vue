@@ -10,7 +10,7 @@ onMounted(loadDiagram);
 <template>
   <div class="prisma-view">
     <div class="prisma-view__header">
-      <h1>PRISMA 2020 Flow Diagram</h1>
+      <h1 class="page-title">PRISMA 2020 Flow Diagram</h1>
       <div class="prisma-view__actions">
         <button class="btn btn--secondary" @click="exportSvg">
           <span class="material-symbols-outlined btn__icon">download</span>

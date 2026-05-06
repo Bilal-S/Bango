@@ -93,7 +93,7 @@ async function retry(): Promise<void> {
       <!-- Page Header -->
       <div class="flex items-center justify-between pb-4">
         <div>
-          <h1 class="font-display text-display text-on-surface">Tag & Label Management</h1>
+          <h1 class="page-title">Tags & Labels</h1>
           <p class="font-body-main text-body-main text-on-surface-variant mt-1">
             Organize your academic taxonomy and workflow states.
           </p>

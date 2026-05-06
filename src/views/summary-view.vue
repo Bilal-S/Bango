@@ -7,7 +7,7 @@ const { summary, loading, error, generate } = useSummary();
 <template>
   <div class="summary-view">
     <div class="summary-view__header">
-      <h1>AI Summary</h1>
+      <h1 class="page-title">AI Summary</h1>
       <button class="btn btn--primary" :disabled="loading" @click="generate()">
         {{ loading ? 'Generating...' : 'Generate Summary' }}
       </button>

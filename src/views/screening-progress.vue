@@ -54,7 +54,7 @@ function handleStart(): void {
     <section class="screening-view__hero">
       <div class="screening-view__hero-header">
         <div>
-          <h1 class="screening-view__title">AI Screening</h1>
+          <h1 class="page-title">AI Screening</h1>
           <p v-if="progress" class="screening-view__subtitle">
             Processing: <strong>{{ progress.completed }}</strong> / {{ progress.total }} articles
           </p>

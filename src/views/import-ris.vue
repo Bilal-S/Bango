@@ -25,7 +25,7 @@ const {
 <template>
   <div class="import-view">
     <div class="import-view__header">
-      <h1>Import RIS File</h1>
+      <h1 class="page-title">Import RIS File</h1>
       <ImportStepper :current-step="step" />
     </div>
 

@@ -13,7 +13,7 @@ function onResolve(pair: DuplicatePair, resolution: DedupResolution): void {
 <template>
   <div class="dedup-view">
     <div class="dedup-view__header">
-      <h1>Deduplication</h1>
+      <h1 class="page-title">Deduplication</h1>
       <button class="btn btn--primary" :disabled="loading" @click="runDeduplication">
         {{ loading ? 'Running...' : 'Run Deduplication' }}
       </button>

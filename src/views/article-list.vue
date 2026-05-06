@@ -64,7 +64,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
     >
       <!-- Header -->
       <div class="mb-6">
-        <h2 class="font-h1 text-h1 text-on-surface">Article Repository</h2>
+        <h1 class="page-title">Articles</h1>
       </div>
 
       <!-- Status Tabs -->
