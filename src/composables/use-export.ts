@@ -48,7 +48,19 @@ export function useExport() {
     }
   }
 
-  return { exporting, error, exportRis, exportProject, importProject };
+  async function resetProject(): Promise<void> {
+    exporting.value = true;
+    error.value = null;
+    try {
+      await tauriCommand('reset_project');
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      exporting.value = false;
+    }
+  }
+
+  return { exporting, error, exportRis, exportProject, importProject, resetProject };
 }
 
 function downloadFile(content: string, filename: string, mimeType: string): void {

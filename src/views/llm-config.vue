@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch, ref, computed } from 'vue';
 import { useLlmConfig } from '@/composables/use-llm-config';
+import { useExport } from '@/composables/use-export';
 
 const {
   config,
@@ -15,6 +16,45 @@ const {
   fetchModels,
   resetFetchedModels,
 } = useLlmConfig();
+
+const { exportProject, importProject, resetProject } = useExport();
+
+// Project management state
+const showImportDialog = ref(false);
+const showExportDialog = ref(false);
+const showDeleteDialog = ref(false);
+const importPassword = ref('');
+const exportPassword = ref('');
+const deleteConfirmText = ref('');
+const importFile = ref<File | null>(null);
+
+function handleImportFile(event: Event): void {
+  const target = event.target as HTMLInputElement;
+  if (target.files?.length) {
+    importFile.value = target.files[0] ?? null;
+  }
+}
+
+async function doImportProject(): Promise<void> {
+  if (!importFile.value) return;
+  await importProject(importFile.value, importPassword.value);
+  showImportDialog.value = false;
+  importPassword.value = '';
+  importFile.value = null;
+}
+
+async function doExportProject(): Promise<void> {
+  await exportProject(exportPassword.value);
+  showExportDialog.value = false;
+  exportPassword.value = '';
+}
+
+async function doDeleteProject(): Promise<void> {
+  if (deleteConfirmText.value !== 'DELETE') return;
+  await resetProject();
+  showDeleteDialog.value = false;
+  deleteConfirmText.value = '';
+}
 
 const providerDefaults: Record<string, { url: string; models: string[] }> = {
   openai: {
@@ -390,6 +430,130 @@ watch(
       :class="{ 'llm-config__test-result--success': testResult.success }"
     >
       {{ testResult.message }}
+    </div>
+
+    <!-- Project Management -->
+    <div class="llm-config__card pm-card" style="margin-top: 2rem">
+      <h2 class="llm-config__card-title">
+        <span class="material-symbols-outlined text-primary">settings_backup_restore</span>
+        Project Management
+      </h2>
+      <p class="pm-card__desc">Import, export, or reset your project data.</p>
+      <div class="pm-card__actions">
+        <button class="btn btn--secondary" @click="showImportDialog = true">
+          <span class="material-symbols-outlined btn__icon">upload_file</span>
+          Import Backup
+        </button>
+        <button class="btn btn--secondary" @click="showExportDialog = true">
+          <span class="material-symbols-outlined btn__icon">download</span>
+          Export Backup
+        </button>
+        <button class="btn btn--danger" @click="showDeleteDialog = true">
+          <span class="material-symbols-outlined btn__icon">delete_forever</span>
+          Delete All Data
+        </button>
+      </div>
+    </div>
+
+    <!-- Import Dialog -->
+    <div v-if="showImportDialog" class="dialog-overlay" @click.self="showImportDialog = false">
+      <div class="dialog">
+        <h2>Import Project Backup</h2>
+        <p class="dialog__desc">Select a <code>.bango.json</code> file and enter its password.</p>
+        <div class="field">
+          <label class="field__label">Backup File</label>
+          <input
+            type="file"
+            accept=".bango.json,.json"
+            class="field__input"
+            @change="handleImportFile"
+          />
+        </div>
+        <div class="field">
+          <label class="field__label">Password</label>
+          <input
+            v-model="importPassword"
+            type="password"
+            class="field__input"
+            placeholder="Enter backup password"
+          />
+        </div>
+        <div class="dialog__actions">
+          <button
+            class="btn btn--primary"
+            :disabled="!importFile || !importPassword"
+            @click="doImportProject"
+          >
+            Import
+          </button>
+          <button class="btn btn--ghost" @click="showImportDialog = false">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Dialog -->
+    <div v-if="showExportDialog" class="dialog-overlay" @click.self="showExportDialog = false">
+      <div class="dialog">
+        <h2>Export Project Backup</h2>
+        <p class="dialog__desc">Enter a password to encrypt your API keys in the backup.</p>
+        <div class="field">
+          <label class="field__label">Password</label>
+          <input
+            v-model="exportPassword"
+            type="password"
+            class="field__input"
+            placeholder="Encryption password"
+          />
+        </div>
+        <div class="dialog__actions">
+          <button class="btn btn--primary" :disabled="!exportPassword" @click="doExportProject">
+            Export Backup
+          </button>
+          <button class="btn btn--ghost" @click="showExportDialog = false">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Confirmation Dialog -->
+    <div v-if="showDeleteDialog" class="dialog-overlay" @click.self="showDeleteDialog = false">
+      <div class="dialog dialog--danger">
+        <h2>Delete All Project Data</h2>
+        <div class="dialog__danger-box">
+          <span class="material-symbols-outlined">warning</span>
+          <p>
+            This will permanently delete
+            <strong>all articles, criteria, tags, labels, and settings</strong>. This action cannot
+            be undone.
+          </p>
+        </div>
+        <div class="field">
+          <label class="field__label">Type DELETE to confirm</label>
+          <input
+            v-model="deleteConfirmText"
+            type="text"
+            class="field__input"
+            placeholder="DELETE"
+          />
+        </div>
+        <div class="dialog__actions">
+          <button
+            class="btn btn--danger"
+            :disabled="deleteConfirmText !== 'DELETE'"
+            @click="doDeleteProject"
+          >
+            Delete Everything
+          </button>
+          <button
+            class="btn btn--ghost"
+            @click="
+              showDeleteDialog = false;
+              deleteConfirmText = '';
+            "
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -798,5 +962,102 @@ watch(
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Project Management */
+.pm-card__desc {
+  font-size: 13px;
+  color: #464555;
+  margin-bottom: 1rem;
+}
+
+.pm-card__actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.btn--danger {
+  background-color: #dc2626;
+  color: #ffffff;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+.btn--ghost {
+  color: #464555;
+  background: none;
+  border: none;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background-color: #f0ecf9;
+}
+
+/* Dialog */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  width: 420px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.dialog h2 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1b1b24;
+}
+
+.dialog__desc {
+  font-size: 13px;
+  color: #464555;
+}
+
+.dialog__desc code {
+  background-color: #e2dfff;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 12px;
+}
+
+.dialog__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.dialog__danger-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 0.5rem;
+}
+
+.dialog__danger-box .material-symbols-outlined {
+  color: #dc2626;
+  margin-top: 2px;
+}
+
+.dialog__danger-box p {
+  font-size: 13px;
+  color: #991b1b;
 }
 </style>

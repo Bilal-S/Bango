@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::db::article_repo;
 use crate::db::connection::DbState;
+use crate::db::migration;
 use crate::error::AppError;
 use crate::export::project;
 use crate::export::ris_writer::{articles_to_ris, RisExportArticle};
@@ -80,4 +81,38 @@ pub fn import_project_backup(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     project::import_project(&conn, &request.json_content, &request.password)
+}
+
+#[tauri::command]
+pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    // Drop all data tables (child tables first due to FK constraints)
+    conn.execute_batch(
+        "DELETE FROM article_labels;
+         DELETE FROM article_tags;
+         DELETE FROM audit_entries;
+         DELETE FROM articles;
+         DELETE FROM criteria;
+         DELETE FROM research_aims;
+         DELETE FROM tags;
+         DELETE FROM labels;
+         DELETE FROM llm_config;",
+    )?;
+
+    // Reset the auto-increment counter
+    conn.execute_batch("DELETE FROM sqlite_sequence;")?;
+
+    // Re-run migrations to ensure clean schema (idempotent)
+    drop(conn);
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    migration::run_migrations(&conn)?;
+
+    Ok(())
 }

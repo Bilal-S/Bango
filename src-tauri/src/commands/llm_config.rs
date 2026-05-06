@@ -64,10 +64,5 @@ pub struct ListModelsRequest {
 
 #[tauri::command]
 pub async fn list_llm_models(request: ListModelsRequest) -> Result<Vec<String>, AppError> {
-    client::list_models(
-        &request.provider,
-        &request.endpoint_url,
-        request.api_key.as_deref(),
-    )
-    .await
+    client::list_models(&request.provider, &request.endpoint_url, request.api_key.as_deref()).await
 }

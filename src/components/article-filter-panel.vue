@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import type { TitleMatchType } from '@/composables/use-article-search';
 
@@ -39,6 +40,14 @@ function toggleLabel(label: string): void {
     : [...current, label];
   updateField('labels', updated);
 }
+
+const showAuthorDropdown = ref(false);
+
+const matchedAuthors = computed(() => {
+  const text = props.filter.authorText.toLowerCase();
+  if (!text) return [];
+  return props.allAuthors.filter((a) => a.toLowerCase().includes(text));
+});
 </script>
 
 <template>
@@ -53,13 +62,13 @@ function toggleLabel(label: string): void {
       </button>
     </div>
 
-    <div class="grid grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       <!-- Title -->
       <div>
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Title</label>
         <div class="flex gap-2">
           <select
-            class="shrink-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="shrink-0 w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.titleMatch"
             @change="
               updateField(
@@ -85,25 +94,31 @@ function toggleLabel(label: string): void {
       <!-- Author -->
       <div>
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Author</label>
-        <div class="relative">
+        <div class="relative w-[70%]">
           <input
             type="text"
             placeholder="Filter by author..."
             class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.authorText"
-            @input="updateField('authorText', ($event.target as HTMLInputElement).value)"
+            @focus="showAuthorDropdown = true"
+            @blur="setTimeout(() => (showAuthorDropdown = false), 200)"
+            @input="
+              showAuthorDropdown = true;
+              updateField('authorText', ($event.target as HTMLInputElement).value);
+            "
           />
           <div
-            v-if="filter.authorText.length > 0"
-            class="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-40 overflow-y-auto"
+            v-if="showAuthorDropdown && matchedAuthors.length > 0"
+            class="absolute top-full left-0 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-40 overflow-y-auto"
           >
             <button
-              v-for="author in allAuthors.filter((a) =>
-                a.toLowerCase().includes(filter.authorText.toLowerCase())
-              )"
+              v-for="author in matchedAuthors"
               :key="author"
               class="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors"
-              @click="updateField('authorText', author)"
+              @click="
+                updateField('authorText', author);
+                showAuthorDropdown = false;
+              "
             >
               {{ author }}
             </button>
@@ -118,7 +133,7 @@ function toggleLabel(label: string): void {
           <input
             type="number"
             placeholder="From"
-            class="w-24 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="flex-1 w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.yearFrom ?? ''"
             @input="
               updateField(
@@ -133,7 +148,7 @@ function toggleLabel(label: string): void {
           <input
             type="number"
             placeholder="To"
-            class="w-24 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="flex-1 w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.yearTo ?? ''"
             @input="
               updateField(

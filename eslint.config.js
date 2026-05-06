@@ -37,5 +37,14 @@ export default tseslint.config(
       'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
   },
+  // Re-disable no-unused-vars for Vue files — must come AFTER the general
+  // rule above so it takes precedence. <script setup> bindings are exposed
+  // to the template automatically; the TS rule cannot see template usage.
+  {
+    files: ['*.vue', '**/*.vue'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
   prettierConfig
 );

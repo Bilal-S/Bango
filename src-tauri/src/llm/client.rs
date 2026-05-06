@@ -124,9 +124,8 @@ pub async fn list_models(
     match provider {
         LlmProvider::Google => {
             let url = format!("{base_url}/models");
-            let key = api_key.ok_or_else(|| {
-                AppError::Import("API key required for Google".to_string())
-            })?;
+            let key = api_key
+                .ok_or_else(|| AppError::Import("API key required for Google".to_string()))?;
             let resp = client
                 .get(&url)
                 .header("Content-Type", "application/json")
@@ -138,14 +137,13 @@ pub async fn list_models(
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                return Err(AppError::Import(format!(
-                    "Failed to fetch models ({status}): {body}"
-                )));
+                return Err(AppError::Import(format!("Failed to fetch models ({status}): {body}")));
             }
 
-            let models: GoogleModelsResponse = resp.json().await.map_err(|e| {
-                AppError::Import(format!("Failed to parse models response: {e}"))
-            })?;
+            let models: GoogleModelsResponse = resp
+                .json()
+                .await
+                .map_err(|e| AppError::Import(format!("Failed to parse models response: {e}")))?;
 
             let ids: Vec<String> = models
                 .models
@@ -153,7 +151,7 @@ pub async fn list_models(
                 .filter(|m| {
                     m.supported_generation_methods
                         .as_ref()
-                        .map_or(true, |methods| methods.contains(&"generateContent".to_string()))
+                        .is_none_or(|methods| methods.contains(&"generateContent".to_string()))
                 })
                 .map(|m| m.name.strip_prefix("models/").map(|s| s.to_string()).unwrap_or(m.name))
                 .collect();
@@ -161,9 +159,8 @@ pub async fn list_models(
         }
         LlmProvider::Anthropic => {
             let url = format!("{base_url}/models");
-            let key = api_key.ok_or_else(|| {
-                AppError::Import("API key required for Anthropic".to_string())
-            })?;
+            let key = api_key
+                .ok_or_else(|| AppError::Import("API key required for Anthropic".to_string()))?;
             let resp = client
                 .get(&url)
                 .header("Content-Type", "application/json")
@@ -176,22 +173,19 @@ pub async fn list_models(
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                return Err(AppError::Import(format!(
-                    "Failed to fetch models ({status}): {body}"
-                )));
+                return Err(AppError::Import(format!("Failed to fetch models ({status}): {body}")));
             }
 
-            let models: OpenAiModelsResponse = resp.json().await.map_err(|e| {
-                AppError::Import(format!("Failed to parse models response: {e}"))
-            })?;
+            let models: OpenAiModelsResponse = resp
+                .json()
+                .await
+                .map_err(|e| AppError::Import(format!("Failed to parse models response: {e}")))?;
             Ok(models.data.into_iter().map(|m| m.id).collect())
         }
         _ => {
             // OpenAI-compatible: OpenAI, Mistral, z_ai, Ollama, LM Studio, llama.cpp, Custom
             let url = format!("{base_url}/models");
-            let mut req = client
-                .get(&url)
-                .header("Content-Type", "application/json");
+            let mut req = client.get(&url).header("Content-Type", "application/json");
             if let Some(key) = api_key {
                 if !key.is_empty() {
                     req = req.bearer_auth(key);
@@ -205,14 +199,13 @@ pub async fn list_models(
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                return Err(AppError::Import(format!(
-                    "Failed to fetch models ({status}): {body}"
-                )));
+                return Err(AppError::Import(format!("Failed to fetch models ({status}): {body}")));
             }
 
-            let models: OpenAiModelsResponse = resp.json().await.map_err(|e| {
-                AppError::Import(format!("Failed to parse models response: {e}"))
-            })?;
+            let models: OpenAiModelsResponse = resp
+                .json()
+                .await
+                .map_err(|e| AppError::Import(format!("Failed to parse models response: {e}")))?;
             Ok(models.data.into_iter().map(|m| m.id).collect())
         }
     }
