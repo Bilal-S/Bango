@@ -47,13 +47,23 @@ pub struct ImportResult {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParseRisRequest {
-    pub content: String,
+    pub content: Option<String>,
+    pub file_path: Option<String>,
     pub file_name: String,
 }
 
 #[tauri::command]
 pub fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppError> {
-    let parse_result = parse_ris(&request.content)?;
+    let content = if let Some(c) = request.content {
+        c
+    } else if let Some(p) = request.file_path {
+        std::fs::read_to_string(p)
+            .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+    } else {
+        return Err(AppError::Import("No content or file path provided".into()));
+    };
+
+    let parse_result = parse_ris(&content)?;
     let (valid, errors) = validate_all(&parse_result.records);
 
     let preview_articles: Vec<PreviewArticle> = valid
@@ -124,7 +134,16 @@ pub fn import_ris_file(
     db_state: State<'_, DbState>,
     request: ParseRisRequest,
 ) -> Result<ImportResult, AppError> {
-    let parse_result = parse_ris(&request.content)?;
+    let content = if let Some(c) = request.content {
+        c
+    } else if let Some(p) = request.file_path {
+        std::fs::read_to_string(p)
+            .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+    } else {
+        return Err(AppError::Import("No content or file path provided".into()));
+    };
+
+    let parse_result = parse_ris(&content)?;
     let (valid, errors) = validate_all(&parse_result.records);
 
     if !errors.is_empty() {

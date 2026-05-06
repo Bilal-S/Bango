@@ -172,10 +172,6 @@ function priorityLabel(priority: Priority): string {
           <span class="material-symbols-outlined text-green-600">check_circle</span>
           <h2 class="section-panel__title">Inclusion Criteria</h2>
         </div>
-        <button class="add-btn" @click="addInclusion">
-          <span class="material-symbols-outlined add-btn__icon">add</span>
-          Add Criterion
-        </button>
       </div>
 
       <!-- Add new inclusion criterion -->
@@ -229,7 +225,7 @@ function priorityLabel(priority: Priority): string {
               <option value="optional">Optional</option>
             </select>
             <button class="criterion-card__delete" @click="deleteCriterion(c.id)">
-              <span class="material-symbols-outlined">more_vert</span>
+              <span class="material-symbols-outlined">delete</span>
             </button>
           </div>
         </div>
@@ -243,10 +239,6 @@ function priorityLabel(priority: Priority): string {
           <span class="material-symbols-outlined text-error">cancel</span>
           <h2 class="section-panel__title">Exclusion Criteria</h2>
         </div>
-        <button class="add-btn" @click="addExclusion">
-          <span class="material-symbols-outlined add-btn__icon">add</span>
-          Add Criterion
-        </button>
       </div>
 
       <!-- Add new exclusion criterion -->
@@ -300,7 +292,7 @@ function priorityLabel(priority: Priority): string {
               <option value="optional">Optional</option>
             </select>
             <button class="criterion-card__delete" @click="deleteCriterion(c.id)">
-              <span class="material-symbols-outlined">more_vert</span>
+              <span class="material-symbols-outlined">delete</span>
             </button>
           </div>
         </div>

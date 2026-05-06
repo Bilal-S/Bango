@@ -1,11 +1,42 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-const emit = defineEmits<{ fileSelected: [file: File] }>();
+const emit = defineEmits<{
+  fileSelected: [file: File];
+  fileDropped: [path: string, name: string];
+}>();
 const isDragging = ref(false);
 
+let unlisten: UnlistenFn | null = null;
+
+onMounted(async () => {
+  unlisten = await listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
+    isDragging.value = false;
+    const path = event.payload.paths?.[0];
+    if (path && path.toLowerCase().endsWith('.ris')) {
+      const name = path.split(/[/\\]/).pop() || 'Unknown.ris';
+      emit('fileDropped', path, name);
+    }
+  });
+
+  await listen('tauri://drag-enter', () => {
+    isDragging.value = true;
+  });
+
+  await listen('tauri://drag-leave', () => {
+    isDragging.value = false;
+  });
+});
+
+onUnmounted(() => {
+  if (unlisten) unlisten();
+});
+
 function onDragOver(event: DragEvent): void {
-  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
   isDragging.value = true;
 }
 
@@ -14,11 +45,24 @@ function onDragLeave(): void {
 }
 
 function onDrop(event: DragEvent): void {
-  event.preventDefault();
   isDragging.value = false;
 
-  const file = event.dataTransfer?.files[0];
-  if (file && file.name.endsWith('.ris')) {
+  let file: File | null = null;
+  if (event.dataTransfer?.items && event.dataTransfer.items.length > 0) {
+    for (let i = 0; i < event.dataTransfer.items.length; i++) {
+      const item = event.dataTransfer.items[i];
+      if (item?.kind === 'file') {
+        file = item.getAsFile() ?? null;
+        if (file) break;
+      }
+    }
+  }
+
+  if (!file && event.dataTransfer?.files?.length) {
+    file = event.dataTransfer.files[0] ?? null;
+  }
+
+  if (file && file.name.toLowerCase().endsWith('.ris')) {
     emit('fileSelected', file);
   }
 }
@@ -36,9 +80,10 @@ function onFileInput(event: Event): void {
   <div
     class="drop-zone"
     :class="{ 'drop-zone--active': isDragging }"
-    @dragover="onDragOver"
-    @dragleave="onDragLeave"
-    @drop="onDrop"
+    @dragenter.prevent="onDragOver"
+    @dragover.prevent="onDragOver"
+    @dragleave.prevent="onDragLeave"
+    @drop.prevent="onDrop"
   >
     <div class="drop-zone__content">
       <div class="drop-zone__icon">↑</div>
