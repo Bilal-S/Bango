@@ -57,7 +57,8 @@ pub fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppErro
     let content = if let Some(c) = request.content {
         c
     } else if let Some(p) = request.file_path {
-        std::fs::read_to_string(p).map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+        std::fs::read_to_string(p)
+            .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
     } else {
         return Err(AppError::Import("No content or file path provided".into()));
     };
@@ -136,7 +137,8 @@ pub fn import_ris_file(
     let content = if let Some(c) = request.content {
         c
     } else if let Some(p) = request.file_path {
-        std::fs::read_to_string(p).map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+        std::fs::read_to_string(p)
+            .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
     } else {
         return Err(AppError::Import("No content or file path provided".into()));
     };
