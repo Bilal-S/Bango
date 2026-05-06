@@ -68,8 +68,25 @@ function onResolve(pair: DuplicatePair, resolution: DedupResolution): void {
 
 <style scoped>
 .dedup-view {
-  padding: var(--space-6);
+  padding: var(--container-padding);
   max-width: 1000px;
+  margin: 0 auto;
+}
+
+@media (max-width: 767px) {
+  .dedup-view {
+    padding: var(--container-padding-sm);
+  }
+
+  .dedup-view__header {
+    flex-direction: column;
+    gap: var(--space-3);
+    align-items: flex-start;
+  }
+
+  .dedup-view__summary {
+    flex-wrap: wrap;
+  }
 }
 
 .dedup-view__header {

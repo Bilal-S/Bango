@@ -803,3 +803,88 @@ From screens 03, 04, 08:
 ```css
 selection:bg-primary-container selection:text-on-primary-container
 ```
+
+---
+
+## 15. Responsive Design System
+
+Bango implements a mobile-first responsive design using CSS breakpoints. All views adapt from small screens (360px+) to full desktop (1440px+).
+
+### Breakpoints
+
+| Name | Width | Tailwind Class | Target Devices |
+|------|-------|---------------|----------------|
+| Mobile | 0–767px | Default | Phones, small tablets |
+| Tablet | 768–1023px | `md:` | Tablets, small laptops |
+| Desktop | 1024px+ | `lg:` | Laptops, desktops |
+| Wide | 1280px+ | `xl:` | Large desktops |
+
+### Responsive Tokens (tokens.css)
+
+```css
+--container-padding: 24px;
+--container-padding-sm: 16px;
+```
+
+All views use `--container-padding` as their outer padding, switching to `--container-padding-sm` below 768px.
+
+### Navigation Sidebar Behavior
+
+| Breakpoint | Behavior |
+|-----------|----------|
+| Desktop (≥1024px) | Full sidebar visible (260px wide), content shifts right |
+| Tablet/Mobile (<1024px) | Sidebar hidden, hamburger menu in header toggles overlay |
+
+On mobile, the sidebar slides over content with a dark backdrop (`bg-black/50`). The viewport composable (`use-viewport.ts`) provides reactive `isMobile` and `isTablet` refs.
+
+### Article Detail Panel Behavior
+
+| Breakpoint | Behavior |
+|-----------|----------|
+| Desktop (≥768px) | Side panel (480px wide) slides in from right, content area remains visible but dimmed |
+| Mobile (<768px) | Full-screen overlay panel with close button |
+
+### Article Table Adaptations
+
+| Breakpoint | Hidden Columns |
+|-----------|---------------|
+| Desktop (≥1024px) | All columns visible |
+| Tablet (768–1023px) | "Imported" date column hidden |
+| Mobile (<768px) | "Journal", "Confidence", "Imported" columns hidden; table scrolls horizontally |
+
+### Grid Layout Adaptations
+
+| View | Desktop | Tablet/Mobile |
+|------|---------|---------------|
+| Dashboard stats | 4-column grid | 2-column grid |
+| Dashboard main/sidebar | 2:1 grid | Single column, sidebar below |
+| Tags & Labels | 2-column grid | Single column, stacked |
+| LLM Config | 2:1 grid | Single column |
+| Criteria cards | Row layout | Column layout (stacked) |
+
+### Viewport Composable (`use-viewport.ts`)
+
+```ts
+const { isMobile, isTablet, isDesktop, width } = useViewport();
+```
+
+- `isMobile`: `width < 768`
+- `isTablet`: `width >= 768 && width < 1024`
+- `isDesktop`: `width >= 1024`
+
+### Responsive Pattern Summary per View
+
+| View | Mobile Adaptations |
+|------|--------------------|
+| `dashboard.vue` | 2-col stats, stacked grid, column header |
+| `article-list.vue` | Scrollable status tabs, full-screen detail panel |
+| `article-table.vue` | Hidden columns, horizontal scroll wrapper |
+| `article-detail-panel.vue` | Full-screen overlay mode |
+| `criteria-editor.vue` | Stacked criterion cards, wrapped inputs |
+| `tag-label-management.vue` | Stacked panels, auto height |
+| `llm-config.vue` | Single-column form, stacked footer |
+| `screening-progress.vue` | Column header, wrapped controls |
+| `dedup-review.vue` | Column header, wrapped stats |
+| `import-ris.vue` | Wrapped stats, responsive padding |
+| `prisma-diagram.vue` | Column header, scrollable diagram |
+| `summary-view.vue` | Column header, responsive padding |

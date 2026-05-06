@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
 
+const props = defineProps<{
+  collapsed?: boolean;
+  mobileOpen?: boolean;
+}>();
+
+const emit = defineEmits<{
+  closeMobile: [];
+}>();
+
 const route = useRoute();
 
 interface NavItem {
@@ -20,23 +29,40 @@ const navItems: NavItem[] = [
   { label: 'PRISMA', icon: 'account_tree', route: '/prisma' },
   { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
+
+function handleNavClick(): void {
+  if (props.mobileOpen) {
+    emit('closeMobile');
+  }
+}
 </script>
 
 <template>
-  <nav class="sidebar">
+  <nav
+    class="sidebar"
+    :class="{
+      'sidebar--collapsed': collapsed,
+      'sidebar--mobile-open': mobileOpen,
+    }"
+  >
     <div class="sidebar__header">
       <span class="sidebar__logo">B</span>
-      <span class="sidebar__title">Bango</span>
+      <span v-if="!collapsed" class="sidebar__title">Bango</span>
     </div>
     <ul class="sidebar__nav">
       <li v-for="item in navItems" :key="item.route">
         <router-link
           :to="item.route"
           class="sidebar__link"
-          :class="{ 'sidebar__link--active': route.path === item.route }"
+          :class="{
+            'sidebar__link--active': route.path === item.route,
+            'sidebar__link--collapsed': collapsed,
+          }"
+          :title="collapsed ? item.label : undefined"
+          @click="handleNavClick"
         >
           <span class="material-symbols-outlined sidebar__icon">{{ item.icon }}</span>
-          <span class="sidebar__label">{{ item.label }}</span>
+          <span v-if="!collapsed" class="sidebar__label">{{ item.label }}</span>
         </router-link>
       </li>
     </ul>
@@ -53,6 +79,31 @@ const navItems: NavItem[] = [
   flex-direction: column;
   flex-shrink: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  transition: width 0.2s ease;
+}
+
+/* Collapsed state (md breakpoint — icon-only sidebar) */
+.sidebar--collapsed {
+  width: var(--sidebar-collapsed-width);
+}
+
+/* Mobile: hidden by default, shown as overlay when open */
+@media (max-width: 767px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: none;
+  }
+
+  .sidebar--mobile-open {
+    transform: translateX(0);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.2);
+  }
 }
 
 .sidebar__header {
@@ -61,6 +112,13 @@ const navItems: NavItem[] = [
   gap: var(--space-3);
   padding: var(--space-6) var(--space-4);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sidebar--collapsed .sidebar__header {
+  justify-content: center;
+  padding: var(--space-6) var(--space-2);
 }
 
 .sidebar__logo {
@@ -74,6 +132,7 @@ const navItems: NavItem[] = [
   font-weight: var(--font-weight-semibold);
   font-size: var(--font-size-h1);
   color: var(--color-on-primary);
+  flex-shrink: 0;
 }
 
 .sidebar__title {
@@ -95,6 +154,8 @@ const navItems: NavItem[] = [
   text-decoration: none;
   font-size: var(--font-size-caption);
   transition: background-color 0.15s;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .sidebar__link:hover {
@@ -104,5 +165,21 @@ const navItems: NavItem[] = [
 .sidebar__link--active {
   background-color: var(--color-sidebar-hover);
   color: #ffffff;
+}
+
+/* Collapsed link: center the icon */
+.sidebar__link--collapsed {
+  justify-content: center;
+  padding: var(--space-2);
+}
+
+.sidebar__icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.sidebar__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

@@ -201,9 +201,29 @@ const { config, testing, testResult, showApiKey, testConnection, revert, isLocal
 
 <style scoped>
 .llm-config {
-  padding: 24px;
+  padding: var(--container-padding);
   max-width: 56rem;
   margin: 0 auto;
+}
+
+@media (max-width: 767px) {
+  .llm-config {
+    padding: var(--container-padding-sm);
+  }
+
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .llm-config__footer {
+    flex-direction: column;
+    gap: var(--space-4);
+    align-items: stretch;
+  }
+
+  .llm-config__actions {
+    justify-content: flex-end;
+  }
 }
 
 .llm-config__header {

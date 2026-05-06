@@ -42,8 +42,21 @@ const { summary, loading, error, generate } = useSummary();
 
 <style scoped>
 .summary-view {
-  padding: var(--space-6, 24px);
+  padding: var(--container-padding);
   max-width: 800px;
+  margin: 0 auto;
+}
+
+@media (max-width: 767px) {
+  .summary-view {
+    padding: var(--container-padding-sm);
+  }
+
+  .summary-view__header {
+    flex-direction: column;
+    gap: var(--space-3, 12px);
+    align-items: flex-start;
+  }
 }
 .summary-view__header {
   display: flex;

@@ -102,8 +102,19 @@ const {
 
 <style scoped>
 .import-view {
-  padding: var(--space-6);
+  padding: var(--container-padding);
   max-width: 900px;
+  margin: 0 auto;
+}
+
+@media (max-width: 767px) {
+  .import-view {
+    padding: var(--container-padding-sm);
+  }
+
+  .import-view__summary {
+    flex-wrap: wrap;
+  }
 }
 
 .import-view__header {

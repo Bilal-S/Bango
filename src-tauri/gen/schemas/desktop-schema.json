@@ -2409,6 +2409,30 @@
           "markdownDescription": "Denies the reveal_item_in_dir command without any pre-configured scope."
         },
         {
+          "description": "Default permissions for tauri-plugin-pilot (allows eval callback)\n#### This default permission set includes:\n\n- `allow-callback`",
+          "type": "string",
+          "const": "pilot:default",
+          "markdownDescription": "Default permissions for tauri-plugin-pilot (allows eval callback)\n#### This default permission set includes:\n\n- `allow-callback`"
+        },
+        {
+          "description": "Enables the __callback command without any pre-configured scope.",
+          "type": "string",
+          "const": "pilot:allow---callback",
+          "markdownDescription": "Enables the __callback command without any pre-configured scope."
+        },
+        {
+          "description": "Allow the internal __callback IPC command used by the eval engine",
+          "type": "string",
+          "const": "pilot:allow-callback",
+          "markdownDescription": "Allow the internal __callback IPC command used by the eval engine"
+        },
+        {
+          "description": "Denies the __callback command without any pre-configured scope.",
+          "type": "string",
+          "const": "pilot:deny---callback",
+          "markdownDescription": "Denies the __callback command without any pre-configured scope."
+        },
+        {
           "description": "### Default Permissions\n\nThis permission set configures what kind of\ndatabase operations are available from the sql plugin.\n\n### Granted Permissions\n\nAll reading related operations are enabled.\nAlso allows to load or close a connection.\n\n\n#### This default permission set includes:\n\n- `allow-close`\n- `allow-load`\n- `allow-select`",
           "type": "string",
           "const": "sql:default",

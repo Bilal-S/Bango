@@ -148,12 +148,34 @@ function handleStart(): void {
 
 <style scoped>
 .screening-view {
-  padding: var(--space-8);
+  padding: var(--container-padding);
   max-width: 960px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+}
+
+@media (max-width: 767px) {
+  .screening-view {
+    padding: var(--container-padding-sm);
+    gap: var(--space-4);
+  }
+
+  .screening-view__hero-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .screening-view__controls {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .screening-view__actions {
+    flex-wrap: wrap;
+  }
 }
 
 .screening-view__hero {

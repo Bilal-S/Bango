@@ -306,12 +306,19 @@ function priorityLabel(priority: Priority): string {
 
 <style scoped>
 .criteria-editor {
-  padding: 24px;
+  padding: var(--container-padding);
   max-width: 64rem;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 2rem;
+}
+
+@media (max-width: 767px) {
+  .criteria-editor {
+    padding: var(--container-padding-sm);
+    gap: 1.5rem;
+  }
 }
 
 .section-panel {
@@ -320,6 +327,17 @@ function priorityLabel(priority: Priority): string {
   padding: 1.5rem;
   border: 1px solid #e2e8f0;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+@media (max-width: 767px) {
+  .section-panel {
+    padding: 1rem;
+  }
+
+  .section-panel__header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
 }
 
 .section-panel__header {
@@ -425,6 +443,20 @@ function priorityLabel(priority: Priority): string {
   align-items: center;
 }
 
+@media (max-width: 767px) {
+  .add-criterion-row {
+    flex-wrap: wrap;
+  }
+
+  .add-criterion-row__input {
+    flex: 1 1 100%;
+  }
+
+  .priority-select {
+    flex: 1;
+  }
+}
+
 .add-criterion-row__input {
   flex: 1;
   padding: 0.5rem 0.75rem;
@@ -463,6 +495,19 @@ function priorityLabel(priority: Priority): string {
   gap: 1rem;
   padding: 1rem;
   border-radius: 0 0.5rem 0.5rem 0;
+}
+
+@media (max-width: 767px) {
+  .criterion-card {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .criterion-card__actions {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+  }
 }
 
 .criterion-card__label {

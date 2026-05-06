@@ -68,8 +68,17 @@
 
   /* Layout */
   --sidebar-width: 260px;
+  --sidebar-collapsed-width: 64px;
+  --detail-panel-width: 480px;
   --container-padding: 24px;
+  --container-padding-sm: 16px;
   --gutter: 16px;
+
+  /* Responsive Breakpoints (for reference — used in media queries) */
+  --bp-sm: 640px;
+  --bp-md: 768px;
+  --bp-lg: 1024px;
+  --bp-xl: 1280px;
 
   /* Border Radius */
   --radius-sm: 4px;

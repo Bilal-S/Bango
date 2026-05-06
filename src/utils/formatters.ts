@@ -14,3 +14,7 @@ export function formatConfidence(confidence: number | null): string {
 export function formatPriority(priority: string): string {
   return priority.charAt(0).toUpperCase() + priority.slice(1);
 }
+
+export function formatArticleCount(count: number): string {
+  return `${count} article${count === 1 ? '' : 's'}`;
+}

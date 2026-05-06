@@ -1,8 +1,8 @@
 [package]
 name = "bango"
-version = "0.1.0"
+version = "0.3.0"
 description = "AI-Powered Systematic Literature Review Tool"
-authors = ["Bango"]
+authors = ["BonCode"]
 edition = "2021"
 
 [lib]
@@ -29,6 +29,7 @@ rand = "0.8"
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["sync", "time", "rt"] }
+tauri-plugin-pilot = { git = "https://github.com/mpiton/tauri-pilot" }
 
 [lints.clippy]
 unwrap_used = "warn"

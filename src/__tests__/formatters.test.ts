@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { formatDate, formatConfidence, formatPriority } from '@/utils/formatters';
+import {
+  formatDate,
+  formatConfidence,
+  formatPriority,
+  formatArticleCount,
+} from '@/utils/formatters';
 
 describe('formatDate', () => {
   it('formats ISO string to locale date', () => {
@@ -27,5 +32,20 @@ describe('formatPriority', () => {
   it('capitalizes first letter', () => {
     expect(formatPriority('critical')).toBe('Critical');
     expect(formatPriority('standard')).toBe('Standard');
+  });
+});
+
+describe('formatArticleCount', () => {
+  it('uses plural for zero', () => {
+    expect(formatArticleCount(0)).toBe('0 articles');
+  });
+
+  it('uses singular for one', () => {
+    expect(formatArticleCount(1)).toBe('1 article');
+  });
+
+  it('uses plural for more than one', () => {
+    expect(formatArticleCount(2)).toBe('2 articles');
+    expect(formatArticleCount(142)).toBe('142 articles');
   });
 });

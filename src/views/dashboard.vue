@@ -255,9 +255,15 @@ function navigateTo(route: string): void {
 <style scoped>
 /* Layout */
 .dashboard {
-  padding: var(--space-6);
+  padding: var(--container-padding);
   max-width: 1120px;
   margin: 0 auto;
+}
+
+@media (max-width: 767px) {
+  .dashboard {
+    padding: var(--container-padding-sm);
+  }
 }
 
 .dashboard__header {

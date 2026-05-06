@@ -48,7 +48,27 @@ onMounted(loadDiagram);
 
 <style scoped>
 .prisma-view {
-  padding: var(--space-6, 24px);
+  padding: var(--container-padding);
+}
+
+@media (max-width: 767px) {
+  .prisma-view {
+    padding: var(--container-padding-sm);
+  }
+
+  .prisma-view__header {
+    flex-direction: column;
+    gap: var(--space-3, 12px);
+    align-items: flex-start;
+  }
+
+  .prisma-view__actions {
+    flex-wrap: wrap;
+  }
+
+  .prisma-view__diagram {
+    overflow-x: auto;
+  }
 }
 .prisma-view__header {
   display: flex;

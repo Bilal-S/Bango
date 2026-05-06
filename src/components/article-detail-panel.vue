@@ -49,7 +49,7 @@ const confidenceBarWidth = computed(() =>
 
 <template>
   <aside
-    class="w-[480px] h-full bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] border-l border-slate-200 flex flex-col z-50 relative"
+    class="detail-panel h-full bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] border-l border-slate-200 flex flex-col z-50 relative"
   >
     <!-- Header -->
     <div class="p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
@@ -235,3 +235,34 @@ const confidenceBarWidth = computed(() =>
     </div>
   </aside>
 </template>
+
+<style scoped>
+.detail-panel {
+  width: var(--detail-panel-width);
+  flex-shrink: 0;
+  transition: width 0.2s ease;
+}
+
+@media (max-width: 1023px) {
+  .detail-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 100vh;
+    border-left: none;
+    z-index: 60;
+    animation: slideInRight 0.25s ease;
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+</style>

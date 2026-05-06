@@ -4,6 +4,7 @@ import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import TagChip from '@/components/tag-chip.vue';
 import LabelChip from '@/components/label-chip.vue';
+import { formatArticleCount } from '@/utils/formatters';
 
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
@@ -133,9 +134,9 @@ async function retry(): Promise<void> {
       <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-container-padding items-start">
         <!-- Tags Panel -->
         <section
-          class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col h-[700px]"
+          class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col min-h-[400px] lg:h-[700px]"
         >
-          <div class="p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
+          <div class="p-4 lg:p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
             <div class="flex items-center justify-between mb-4">
               <div>
                 <h2 class="font-h2 text-h2 text-on-surface flex items-center gap-2">
@@ -176,7 +177,7 @@ async function retry(): Promise<void> {
               </button>
             </div>
           </div>
-          <div class="p-5 overflow-y-auto flex-1 space-y-3">
+          <div class="p-4 lg:p-5 overflow-y-auto flex-1 space-y-3">
             <div
               v-for="tag in tagsStore.tags"
               :key="tag.id"
@@ -196,9 +197,9 @@ async function retry(): Promise<void> {
                 </template>
               </div>
               <div class="flex items-center gap-4">
-                <span class="font-body-sm text-body-sm text-on-surface-variant"
-                  >{{ tag.articleCount }} articles</span
-                >
+                <span class="font-body-sm text-body-sm text-on-surface-variant">{{
+                  formatArticleCount(tag.articleCount)
+                }}</span>
                 <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <template v-if="editingTagId === tag.id">
                     <button
@@ -242,9 +243,9 @@ async function retry(): Promise<void> {
 
         <!-- Labels Panel -->
         <section
-          class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col h-[700px]"
+          class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col min-h-[400px] lg:h-[700px]"
         >
-          <div class="p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
+          <div class="p-4 lg:p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
             <div class="flex items-center justify-between mb-4">
               <div>
                 <h2 class="font-h2 text-h2 text-on-surface flex items-center gap-2">
@@ -287,7 +288,7 @@ async function retry(): Promise<void> {
               </button>
             </div>
           </div>
-          <div class="p-5 overflow-y-auto flex-1 space-y-3">
+          <div class="p-4 lg:p-5 overflow-y-auto flex-1 space-y-3">
             <div
               v-for="label in labelsStore.labels"
               :key="label.id"
@@ -307,9 +308,9 @@ async function retry(): Promise<void> {
                 </template>
               </div>
               <div class="flex items-center gap-4">
-                <span class="font-body-sm text-body-sm text-on-surface-variant"
-                  >{{ label.articleCount }} articles</span
-                >
+                <span class="font-body-sm text-body-sm text-on-surface-variant">{{
+                  formatArticleCount(label.articleCount)
+                }}</span>
                 <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <template v-if="editingLabelId === label.id">
                     <button

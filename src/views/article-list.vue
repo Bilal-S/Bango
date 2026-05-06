@@ -68,7 +68,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       </div>
 
       <!-- Status Tabs -->
-      <nav class="flex items-center gap-6 mb-6 border-b border-slate-200">
+      <nav class="status-tabs flex items-center gap-6 mb-6 border-b border-slate-200">
         <button
           v-for="tab in STATUS_TABS"
           :key="tab"
@@ -135,3 +135,21 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
     />
   </div>
 </template>
+
+<style scoped>
+.status-tabs {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.status-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .status-tabs {
+    gap: 1rem;
+  }
+}
+</style>

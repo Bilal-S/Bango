@@ -19,16 +19,17 @@ interface ColumnDef {
   key: string;
   label: string;
   width?: string;
+  responsiveClass?: string;
 }
 
 const COLUMNS: ColumnDef[] = [
   { key: 'title', label: 'Title' },
   { key: 'authors', label: 'Authors' },
   { key: 'publicationYear', label: 'Year', width: 'w-16' },
-  { key: 'journal', label: 'Journal' },
+  { key: 'journal', label: 'Journal', responsiveClass: 'col-journal' },
   { key: 'status', label: 'Status' },
-  { key: 'aiConfidence', label: 'Confidence', width: 'w-32' },
-  { key: 'importedAt', label: 'Imported', width: 'w-28' },
+  { key: 'aiConfidence', label: 'Confidence', width: 'w-32', responsiveClass: 'col-confidence' },
+  { key: 'importedAt', label: 'Imported', width: 'w-28', responsiveClass: 'col-imported' },
 ];
 
 function formatAuthors(authors: string[]): string {
@@ -50,67 +51,71 @@ function formatDate(dateStr: string | null): string {
 </script>
 
 <template>
-  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-    <table class="w-full text-left border-collapse">
-      <thead class="bg-slate-50/50 border-b border-slate-200">
-        <tr>
-          <th
-            v-for="col in COLUMNS"
-            :key="col.key"
-            class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase select-none"
-            :class="[col.width]"
-          >
-            <button
-              class="flex items-center gap-1 hover:text-slate-700 transition-colors"
-              @click="$emit('sort', col.key)"
+  <div
+    class="article-table-wrapper bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"
+  >
+    <div class="article-table-scroll">
+      <table class="w-full text-left border-collapse">
+        <thead class="bg-slate-50/50 border-b border-slate-200">
+          <tr>
+            <th
+              v-for="col in COLUMNS"
+              :key="col.key"
+              class="py-4 px-2 font-display text-label-caps text-slate-500 uppercase select-none"
+              :class="[col.width, col.responsiveClass]"
             >
-              <span>{{ col.label }}</span>
-              <span v-if="sortColumn === col.key" class="text-indigo-600">
-                <span class="material-symbols-outlined text-[16px]">{{
-                  getSortIcon(col.key)
-                }}</span>
-              </span>
-              <span v-else class="text-slate-300">
-                <span class="material-symbols-outlined text-[16px]">arrow_upward</span>
-              </span>
-            </button>
-          </th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100">
-        <tr
-          v-for="article in articles"
-          :key="article.id"
-          class="hover:bg-slate-50/80 transition-colors group cursor-pointer"
-          :class="{ 'bg-indigo-50/60': selectedId === article.id }"
-          @click="$emit('select', article.id)"
-        >
-          <td class="py-5 px-2 max-w-xs">
-            <p class="text-body-main font-semibold text-slate-900 truncate">
-              {{ article.title }}
-            </p>
-          </td>
-          <td class="py-5 px-2 text-body-sm text-slate-600">
-            {{ formatAuthors(article.authors) }}
-          </td>
-          <td class="py-5 px-2 text-body-sm text-slate-600 font-mono">
-            {{ article.publicationYear ?? '---' }}
-          </td>
-          <td class="py-5 px-2 text-body-sm text-slate-600 italic">
-            {{ article.journal ?? '---' }}
-          </td>
-          <td class="py-5 px-2">
-            <StatusBadge :status="article.status" />
-          </td>
-          <td class="py-5 px-2">
-            <ConfidenceBar :confidence="article.aiConfidence" />
-          </td>
-          <td class="py-5 px-2 text-body-sm text-slate-500">
-            {{ formatDate(article.importedAt) }}
-          </td>
-        </tr>
-      </tbody>
-    </table>
+              <button
+                class="flex items-center gap-1 hover:text-slate-700 transition-colors"
+                @click="$emit('sort', col.key)"
+              >
+                <span>{{ col.label }}</span>
+                <span v-if="sortColumn === col.key" class="text-indigo-600">
+                  <span class="material-symbols-outlined text-[16px]">{{
+                    getSortIcon(col.key)
+                  }}</span>
+                </span>
+                <span v-else class="text-slate-300">
+                  <span class="material-symbols-outlined text-[16px]">arrow_upward</span>
+                </span>
+              </button>
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <tr
+            v-for="article in articles"
+            :key="article.id"
+            class="hover:bg-slate-50/80 transition-colors group cursor-pointer"
+            :class="{ 'bg-indigo-50/60': selectedId === article.id }"
+            @click="$emit('select', article.id)"
+          >
+            <td class="py-5 px-2 max-w-xs">
+              <p class="text-body-main font-semibold text-slate-900 truncate">
+                {{ article.title }}
+              </p>
+            </td>
+            <td class="py-5 px-2 text-body-sm text-slate-600">
+              {{ formatAuthors(article.authors) }}
+            </td>
+            <td class="py-5 px-2 text-body-sm text-slate-600 font-mono">
+              {{ article.publicationYear ?? '---' }}
+            </td>
+            <td class="col-journal py-5 px-2 text-body-sm text-slate-600 italic">
+              {{ article.journal ?? '---' }}
+            </td>
+            <td class="py-5 px-2">
+              <StatusBadge :status="article.status" />
+            </td>
+            <td class="col-confidence py-5 px-2">
+              <ConfidenceBar :confidence="article.aiConfidence" />
+            </td>
+            <td class="col-imported py-5 px-2 text-body-sm text-slate-500">
+              {{ formatDate(article.importedAt) }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <!-- Empty state -->
     <div v-if="articles.length === 0" class="text-center py-16 text-slate-400 text-sm">
@@ -118,3 +123,25 @@ function formatDate(dateStr: string | null): string {
     </div>
   </div>
 </template>
+
+<style scoped>
+.article-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Hide lower-priority columns on smaller viewports */
+@media (max-width: 767px) {
+  .col-journal,
+  .col-imported,
+  .col-confidence {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) and (min-width: 768px) {
+  .col-imported {
+    display: none;
+  }
+}
+</style>
