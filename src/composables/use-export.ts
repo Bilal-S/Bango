@@ -1,4 +1,6 @@
 import { ref } from 'vue';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { tauriCommand } from './use-tauri-command';
 
 export function useExport() {
@@ -10,7 +12,13 @@ export function useExport() {
     error.value = null;
     try {
       const risContent = await tauriCommand<string>('export_ris');
-      downloadFile(risContent, 'included-articles.ris', 'application/x-research-info-systems');
+      const filePath = await save({
+        defaultPath: 'included-articles.ris',
+        filters: [{ name: 'RIS File', extensions: ['ris'] }],
+      });
+      if (filePath) {
+        await writeTextFile(filePath, risContent);
+      }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -25,7 +33,16 @@ export function useExport() {
       const jsonContent = await tauriCommand<string>('export_project_backup', {
         request: { password },
       });
-      downloadFile(jsonContent, 'bango-project.bango.json', 'application/json');
+      const filePath = await save({
+        defaultPath: 'bango-project.bango.json',
+        filters: [
+          { name: 'Bango Backup', extensions: ['bango.json'] },
+          { name: 'JSON', extensions: ['json'] },
+        ],
+      });
+      if (filePath) {
+        await writeTextFile(filePath, jsonContent);
+      }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -61,14 +78,4 @@ export function useExport() {
   }
 
   return { exporting, error, exportRis, exportProject, importProject, resetProject };
-}
-
-function downloadFile(content: string, filename: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }

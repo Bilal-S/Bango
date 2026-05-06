@@ -18,6 +18,8 @@ use db::connection::DbState;
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             use tauri::Manager;
             let app_data_dir = app.path().app_data_dir().unwrap_or_else(|e| {
