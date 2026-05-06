@@ -2,8 +2,19 @@
 import { watch, ref, computed } from 'vue';
 import { useLlmConfig } from '@/composables/use-llm-config';
 
-const { config, testing, testResult, showApiKey, testConnection, revert, isLocalProvider } =
-  useLlmConfig();
+const {
+  config,
+  testing,
+  testResult,
+  showApiKey,
+  fetchingModels,
+  fetchedModels,
+  testConnection,
+  revert,
+  isLocalProvider,
+  fetchModels,
+  resetFetchedModels,
+} = useLlmConfig();
 
 const providerDefaults: Record<string, { url: string; models: string[] }> = {
   openai: {
@@ -107,13 +118,22 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
 const isOtherModel = ref(false);
 
 const availableModels = computed(() => {
+  if (fetchedModels.value && fetchedModels.value.length > 0) {
+    return fetchedModels.value;
+  }
   return providerDefaults[config.value.provider]?.models || [];
+});
+
+const canFetchModels = computed(() => {
+  if (isLocalProvider()) return true;
+  return !!config.value.apiKeyEncrypted;
 });
 
 watch(
   () => config.value.provider,
   (newProvider, oldProvider) => {
     if (oldProvider && newProvider !== oldProvider) {
+      resetFetchedModels();
       const defaults = providerDefaults[newProvider];
       if (defaults) {
         config.value.endpointUrl = defaults.url;
@@ -342,6 +362,17 @@ watch(
       </div>
       <div class="llm-config__actions">
         <button class="btn btn--secondary" @click="revert">Revert</button>
+        <button
+          class="btn btn--secondary"
+          :disabled="fetchingModels || !canFetchModels"
+          @click="fetchModels"
+        >
+          <span v-if="fetchingModels" class="material-symbols-outlined btn__icon spinner"
+            >progress_activity</span
+          >
+          <span v-else class="material-symbols-outlined btn__icon">cloud_download</span>
+          {{ fetchingModels ? 'Fetching...' : 'Get Models' }}
+        </button>
         <button class="btn btn--primary" :disabled="testing" @click="testConnection">
           <span v-if="testing" class="material-symbols-outlined btn__icon spinner"
             >progress_activity</span

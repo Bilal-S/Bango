@@ -1,11 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::db::connection::DbState;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::client;
-use crate::models::llm_config::LlmConfig;
+use crate::models::llm_config::{LlmConfig, LlmProvider};
 
 #[tauri::command]
 pub fn get_llm_config(db_state: State<'_, DbState>) -> Result<Option<LlmConfig>, AppError> {
@@ -52,4 +52,22 @@ pub async fn test_llm_connection(
             Ok(TestConnectionResult { success: false, message: format!("Connection failed: {e}") })
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListModelsRequest {
+    pub provider: LlmProvider,
+    pub endpoint_url: String,
+    pub api_key: Option<String>,
+}
+
+#[tauri::command]
+pub async fn list_llm_models(request: ListModelsRequest) -> Result<Vec<String>, AppError> {
+    client::list_models(
+        &request.provider,
+        &request.endpoint_url,
+        request.api_key.as_deref(),
+    )
+    .await
 }

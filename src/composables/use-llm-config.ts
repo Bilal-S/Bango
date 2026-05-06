@@ -25,6 +25,8 @@ export function useLlmConfig() {
   const testing = ref(false);
   const testResult = ref<TestResult | null>(null);
   const showApiKey = ref(false);
+  const fetchingModels = ref(false);
+  const fetchedModels = ref<string[] | null>(null);
 
   onMounted(loadConfig);
 
@@ -66,10 +68,33 @@ export function useLlmConfig() {
   function revert(): void {
     config.value = { ...DEFAULT_CONFIG };
     testResult.value = null;
+    fetchedModels.value = null;
   }
 
   function isLocalProvider(): boolean {
     return ['llama_cpp', 'ollama', 'lm_studio'].includes(config.value.provider);
+  }
+
+  async function fetchModels(): Promise<void> {
+    fetchingModels.value = true;
+    try {
+      fetchedModels.value = await tauriCommand<string[]>('list_llm_models', {
+        request: {
+          provider: config.value.provider,
+          endpointUrl: config.value.endpointUrl,
+          apiKey: config.value.apiKeyEncrypted,
+        },
+      });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      testResult.value = { success: false, message: `Failed to fetch models: ${message}` };
+    } finally {
+      fetchingModels.value = false;
+    }
+  }
+
+  function resetFetchedModels(): void {
+    fetchedModels.value = null;
   }
 
   return {
@@ -79,10 +104,14 @@ export function useLlmConfig() {
     testing,
     testResult,
     showApiKey,
+    fetchingModels,
+    fetchedModels,
     loadConfig,
     save,
     testConnection,
     revert,
     isLocalProvider,
+    fetchModels,
+    resetFetchedModels,
   };
 }
