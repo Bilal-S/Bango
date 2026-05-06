@@ -30,7 +30,7 @@ pub fn run() {
         std::process::exit(1);
     }
 
-    if let Err(e) = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(DbState { conn: std::sync::Mutex::new(conn) })
         .manage(ScreeningState { engine: tokio::sync::Mutex::new(None) })
@@ -84,9 +84,14 @@ pub fn run() {
             commands::export_cmd::export_ris,
             commands::export_cmd::export_project_backup,
             commands::export_cmd::import_project_backup,
-        ])
-        .run(tauri::generate_context!())
+        ]);
+
+    #[cfg(debug_assertions)]
     {
+        builder = builder.plugin(tauri_plugin_pilot::init());
+    }
+
+    if let Err(e) = builder.run(tauri::generate_context!()) {
         eprintln!("fatal: {e:#}");
         std::process::exit(1);
     }
