@@ -1,46 +1,120 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type { Tag, TagWithCount } from '@/types';
-import { tauriCommand } from '@/composables/use-tauri-command';
+import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
+
+const DEMO_TAGS: TagWithCount[] = [
+  { id: '1', name: 'machine-learning', source: 'user_created', articleCount: 142 },
+  { id: '2', name: 'clinical-trial', source: 'user_created', articleCount: 89 },
+  { id: '3', name: 'nlp-models', source: 'ai_suggested', articleCount: 56 },
+  { id: '4', name: 'deep-learning', source: 'user_created', articleCount: 34 },
+  { id: '5', name: 'systematic-review', source: 'ris_keyword', articleCount: 67 },
+  { id: '6', name: 'meta-analysis', source: 'ai_suggested', articleCount: 23 },
+  { id: '7', name: 'data-extraction', source: 'user_created', articleCount: 45 },
+  { id: '8', name: 'bias-assessment', source: 'ai_suggested', articleCount: 18 },
+];
 
 export const useTagsStore = defineStore('tags', () => {
   const tags = ref<TagWithCount[]>([]);
   const loading = ref(false);
   const suggesting = ref(false);
+  const error = ref<string | null>(null);
 
   async function fetchTags(): Promise<void> {
     loading.value = true;
+    error.value = null;
     try {
+      if (!isTauri()) {
+        // Demo data for browser-only mode
+        tags.value = DEMO_TAGS;
+        return;
+      }
       tags.value = await tauriCommand<TagWithCount[]>('get_tags_with_counts');
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
     } finally {
       loading.value = false;
     }
   }
 
   async function createTag(name: string): Promise<void> {
-    await tauriCommand<Tag>('create_tag', { request: { name } });
-    await fetchTags();
+    try {
+      if (!isTauri()) {
+        const newTag: TagWithCount = {
+          id: String(Date.now()),
+          name,
+          source: 'user_created',
+          articleCount: 0,
+        };
+        tags.value = [...tags.value, newTag];
+        return;
+      }
+      await tauriCommand<Tag>('create_tag', { request: { name } });
+      await fetchTags();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function renameTag(id: string, newName: string): Promise<void> {
-    await tauriCommand<Tag>('rename_tag', { request: { id, newName } });
-    await fetchTags();
+    try {
+      if (!isTauri()) {
+        tags.value = tags.value.map((t) => (t.id === id ? { ...t, name: newName } : t));
+        return;
+      }
+      await tauriCommand<Tag>('rename_tag', { request: { id, newName } });
+      await fetchTags();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function deleteTag(id: string): Promise<void> {
-    await tauriCommand('delete_tag', { id });
-    await fetchTags();
+    try {
+      if (!isTauri()) {
+        tags.value = tags.value.filter((t) => t.id !== id);
+        return;
+      }
+      await tauriCommand('delete_tag', { id });
+      await fetchTags();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function suggestTags(): Promise<void> {
     suggesting.value = true;
+    error.value = null;
     try {
+      if (!isTauri()) {
+        // Simulate AI suggestion in demo mode
+        await new Promise((r) => setTimeout(r, 1500));
+        const suggested: TagWithCount[] = [
+          { id: 's1', name: 'neural-network', source: 'ai_suggested', articleCount: 0 },
+          { id: 's2', name: 'sentiment-analysis', source: 'ai_suggested', articleCount: 0 },
+          { id: 's3', name: 'knowledge-graph', source: 'ai_suggested', articleCount: 0 },
+        ];
+        tags.value = [...tags.value, ...suggested];
+        return;
+      }
       await tauriCommand('suggest_tags');
       await fetchTags();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
     } finally {
       suggesting.value = false;
     }
   }
 
-  return { tags, loading, suggesting, fetchTags, createTag, renameTag, deleteTag, suggestTags };
+  return {
+    tags,
+    loading,
+    suggesting,
+    error,
+    fetchTags,
+    createTag,
+    renameTag,
+    deleteTag,
+    suggestTags,
+  };
 });

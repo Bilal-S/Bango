@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import TagChip from '@/components/tag-chip.vue';
@@ -14,6 +14,10 @@ const editingTagId = ref<string | null>(null);
 const editingTagName = ref('');
 const editingLabelId = ref<string | null>(null);
 const editingLabelName = ref('');
+
+const isLoading = computed(() => tagsStore.loading && labelsStore.loading);
+const hasError = computed(() => tagsStore.error || labelsStore.error);
+const errorMessage = computed(() => tagsStore.error || labelsStore.error || 'Unknown error');
 
 onMounted(async () => {
   await Promise.all([tagsStore.fetchTags(), labelsStore.fetchLabels()]);
@@ -76,6 +80,10 @@ function cancelLabelEdit(): void {
   editingLabelId.value = null;
   editingLabelName.value = '';
 }
+
+async function retry(): Promise<void> {
+  await Promise.all([tagsStore.fetchTags(), labelsStore.fetchLabels()]);
+}
 </script>
 
 <template>
@@ -91,8 +99,38 @@ function cancelLabelEdit(): void {
         </div>
       </div>
 
+      <!-- Error State -->
+      <div
+        v-if="hasError && !isLoading"
+        class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm p-6 text-center"
+      >
+        <span class="material-symbols-outlined text-error text-[32px] mb-2 block">cloud_off</span>
+        <h2 class="font-h2 text-h2 text-on-surface mb-1">Unable to load tags & labels</h2>
+        <p class="font-body-sm text-body-sm text-on-surface-variant mb-4">
+          {{ errorMessage }}
+        </p>
+        <button
+          class="inline-flex items-center gap-2 px-4 py-2 bg-primary-container text-on-primary rounded-lg font-body-main text-body-main font-medium hover:opacity-90 transition-opacity"
+          @click="retry"
+        >
+          <span class="material-symbols-outlined text-[18px]">refresh</span>
+          Retry
+        </button>
+      </div>
+
+      <!-- Loading State -->
+      <div
+        v-else-if="isLoading"
+        class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm p-6 text-center"
+      >
+        <span class="material-symbols-outlined text-primary text-[32px] mb-2 block animate-spin"
+          >progress_activity</span
+        >
+        <p class="font-body-main text-body-main text-on-surface-variant">Loading tags & labels…</p>
+      </div>
+
       <!-- Dual-Panel Layout -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-container-padding items-start">
+      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-container-padding items-start">
         <!-- Tags Panel -->
         <section
           class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col h-[700px]"

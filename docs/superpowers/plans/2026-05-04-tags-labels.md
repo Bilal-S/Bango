@@ -691,333 +691,318 @@ git commit -m "feat(tags-labels): add Tauri commands for tag/label CRUD and AI s
 
 > **Design reference:** Before implementing, read `docs/design-reference/08-tags-labels.html` and `docs/design-reference/08-tags-labels.png`. Extract the exact layout structure, spacing, and component hierarchy from the Stitch HTML. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
 
-- [ ] **Step 1: Create `src/components/tag-chip.vue`**
+- [ ] **Step 1: Create `src/components/tag-chip.vue`** — Hash-based multi-color solid chip per design reference
 
 ```vue
 <script setup lang="ts">
 defineProps<{ name: string }>();
-defineEmits<{ remove: [] }>();
+
+const TAG_COLORS = [
+  { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
+  { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200' },
+  { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
+  { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' },
+  { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-200' },
+  { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200' },
+] as const;
+
+function getColor(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
+}
 </script>
 
 <template>
-  <span class="tag-chip">
+  <span
+    :class="[getColor(name).bg, getColor(name).text, getColor(name).border]"
+    class="inline-flex items-center px-2 py-0.5 rounded-lg font-mono text-[11px] border"
+  >
     {{ name }}
-    <button class="tag-chip__remove" @click="$emit('remove')">×</button>
   </span>
 </template>
-
-<style scoped>
-.tag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  background-color: var(--color-surface-container-high);
-  border-radius: var(--radius-default);
-  font-size: var(--font-size-caption);
-  color: var(--color-on-surface);
-}
-
-.tag-chip__remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  font-size: 12px;
-  color: var(--color-on-surface-variant);
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.tag-chip__remove:hover {
-  background-color: var(--color-surface-dim);
-}
-</style>
 ```
 
-- [ ] **Step 2: Create `src/components/label-chip.vue`**
+- [ ] **Step 2: Create `src/components/label-chip.vue`** — Outlined chip with colored dot indicator per design reference
 
 ```vue
 <script setup lang="ts">
 defineProps<{ name: string }>();
-defineEmits<{ remove: [] }>();
+
+const DOT_COLORS = [
+  'bg-blue-400',
+  'bg-green-400',
+  'bg-purple-400',
+  'bg-amber-400',
+  'bg-cyan-400',
+  'bg-rose-400',
+] as const;
+
+function getDotColor(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return DOT_COLORS[Math.abs(hash) % DOT_COLORS.length];
+}
 </script>
 
 <template>
-  <span class="label-chip">
+  <span
+    class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-outline-variant font-mono text-[11px] text-on-surface"
+  >
+    <span :class="getDotColor(name)" class="w-1.5 h-1.5 rounded-full flex-shrink-0"></span>
     {{ name }}
-    <button class="label-chip__remove" @click="$emit('remove')">×</button>
   </span>
 </template>
-
-<style scoped>
-.label-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-outline);
-  border-radius: var(--radius-default);
-  font-size: var(--font-size-caption);
-  color: var(--color-on-surface);
-  background: transparent;
-}
-
-.label-chip__remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  font-size: 12px;
-  color: var(--color-on-surface-variant);
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.label-chip__remove:hover {
-  background-color: var(--color-surface-container-high);
-}
-</style>
 ```
 
-- [ ] **Step 3: Create `src/views/tag-label-management.vue`**
+- [ ] **Step 3: Create `src/views/tag-label-management.vue`** — Uses Pinia stores with error handling, Tailwind utilities, design-reference layout
+
+> **Key patterns:** Uses `useTagsStore`/`useLabelsStore` Pinia stores (not raw `tauriCommand`). Includes `error`/`loading` states with retry UI. Layout uses Tailwind with `@theme` tokens from `base.css`. No scoped CSS needed.
 
 ```vue
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { tauriCommand } from '@/composables/use-tauri-command';
-import type { Tag, Label } from '@/types';
+import { computed, onMounted, ref } from 'vue';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
 import TagChip from '@/components/tag-chip.vue';
 import LabelChip from '@/components/label-chip.vue';
 
-const tags = ref<Tag[]>([]);
-const labels = ref<Label[]>([]);
+const tagsStore = useTagsStore();
+const labelsStore = useLabelsStore();
+
 const newTagName = ref('');
 const newLabelName = ref('');
-const loading = ref(false);
-const suggestingTags = ref(false);
-const suggestingLabels = ref(false);
+const editingTagId = ref<string | null>(null);
+const editingTagName = ref('');
+const editingLabelId = ref<string | null>(null);
+const editingLabelName = ref('');
+
+const isLoading = computed(() => tagsStore.loading && labelsStore.loading);
+const hasError = computed(() => tagsStore.error || labelsStore.error);
+const errorMessage = computed(() => tagsStore.error || labelsStore.error || 'Unknown error');
 
 onMounted(async () => {
-  await Promise.all([fetchTags(), fetchLabels()]);
+  await Promise.all([tagsStore.fetchTags(), labelsStore.fetchLabels()]);
 });
 
-async function fetchTags(): Promise<void> {
-  tags.value = await tauriCommand<Tag[]>('get_tags');
-}
-
-async function fetchLabels(): Promise<void> {
-  labels.value = await tauriCommand<Label[]>('get_labels');
-}
-
 async function addTag(): Promise<void> {
-  if (!newTagName.value.trim()) return;
-  await tauriCommand('create_tag', { request: { name: newTagName.value.trim() } });
+  const name = newTagName.value.trim();
+  if (!name) return;
+  await tagsStore.createTag(name);
   newTagName.value = '';
-  await fetchTags();
-}
-
-async function removeTag(id: string): Promise<void> {
-  await tauriCommand('delete_tag', { id });
-  await fetchTags();
-}
-
-async function suggestTags(): Promise<void> {
-  suggestingTags.value = true;
-  try {
-    await tauriCommand('suggest_tags');
-    await fetchTags();
-  } finally {
-    suggestingTags.value = false;
-  }
 }
 
 async function addLabel(): Promise<void> {
-  if (!newLabelName.value.trim()) return;
-  await tauriCommand('create_label', { request: { name: newLabelName.value.trim() } });
+  const name = newLabelName.value.trim();
+  if (!name) return;
+  await labelsStore.createLabel(name);
   newLabelName.value = '';
-  await fetchLabels();
 }
 
-async function removeLabel(id: string): Promise<void> {
-  await tauriCommand('delete_label', { id });
-  await fetchLabels();
+function startEditingTag(id: string, currentName: string): void {
+  editingTagId.value = id;
+  editingTagName.value = currentName;
 }
 
-async function suggestLabels(): Promise<void> {
-  suggestingLabels.value = true;
-  try {
-    await tauriCommand('suggest_labels');
-    await fetchLabels();
-  } finally {
-    suggestingLabels.value = false;
-  }
+async function saveTagEdit(): Promise<void> {
+  if (!editingTagId.value) return;
+  const name = editingTagName.value.trim();
+  if (!name) { cancelTagEdit(); return; }
+  await tagsStore.renameTag(editingTagId.value, name);
+  editingTagId.value = null;
+  editingTagName.value = '';
+}
+
+function cancelTagEdit(): void {
+  editingTagId.value = null;
+  editingTagName.value = '';
+}
+
+function startEditingLabel(id: string, currentName: string): void {
+  editingLabelId.value = id;
+  editingLabelName.value = currentName;
+}
+
+async function saveLabelEdit(): Promise<void> {
+  if (!editingLabelId.value) return;
+  const name = editingLabelName.value.trim();
+  if (!name) { cancelLabelEdit(); return; }
+  await labelsStore.renameLabel(editingLabelId.value, name);
+  editingLabelId.value = null;
+  editingLabelName.value = '';
+}
+
+function cancelLabelEdit(): void {
+  editingLabelId.value = null;
+  editingLabelName.value = '';
+}
+
+async function retry(): Promise<void> {
+  await Promise.all([tagsStore.fetchTags(), labelsStore.fetchLabels()]);
 }
 </script>
 
 <template>
-  <div class="tag-label-view">
-    <h1>Tags & Labels</h1>
+  <div class="p-container-padding bg-surface-container-low min-h-full">
+    <div class="max-w-7xl mx-auto space-y-stack-gap">
+      <!-- Page Header -->
+      <div class="flex items-center justify-between pb-4">
+        <div>
+          <h1 class="font-display text-display text-on-surface">Tag & Label Management</h1>
+          <p class="font-body-main text-body-main text-on-surface-variant mt-1">
+            Organize your academic taxonomy and workflow states.
+          </p>
+        </div>
+      </div>
 
-    <div class="tag-label-view__panels">
-      <!-- Tags Panel -->
-      <section class="panel">
-        <div class="panel__header">
-          <h2>Tags</h2>
-          <button class="btn btn--secondary" :disabled="suggestingTags" @click="suggestTags">
-            {{ suggestingTags ? 'Generating...' : 'Suggest Tags' }}
-          </button>
-        </div>
-        <div class="panel__input-row">
-          <input
-            v-model="newTagName"
-            type="text"
-            placeholder="Add tag..."
-            class="input"
-            @keyup.enter="addTag"
-          />
-          <button class="btn btn--primary" @click="addTag">Add</button>
-        </div>
-        <div class="panel__chips">
-          <TagChip
-            v-for="tag in tags"
-            :key="tag.id"
-            :name="tag.name"
-            @remove="removeTag(tag.id)"
-          />
-          <p v-if="tags.length === 0" class="panel__empty">No tags yet</p>
-        </div>
-      </section>
+      <!-- Error State -->
+      <div
+        v-if="hasError && !isLoading"
+        class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm p-6 text-center"
+      >
+        <span class="material-symbols-outlined text-error text-[32px] mb-2 block">cloud_off</span>
+        <h2 class="font-h2 text-h2 text-on-surface mb-1">Unable to load tags & labels</h2>
+        <p class="font-body-sm text-body-sm text-on-surface-variant mb-4">{{ errorMessage }}</p>
+        <button
+          class="inline-flex items-center gap-2 px-4 py-2 bg-primary-container text-on-primary rounded-lg font-body-main text-body-main font-medium hover:opacity-90 transition-opacity"
+          @click="retry"
+        >
+          <span class="material-symbols-outlined text-[18px]">refresh</span>
+          Retry
+        </button>
+      </div>
 
-      <!-- Labels Panel -->
-      <section class="panel">
-        <div class="panel__header">
-          <h2>Labels</h2>
-          <button class="btn btn--secondary" :disabled="suggestingLabels" @click="suggestLabels">
-            {{ suggestingLabels ? 'Generating...' : 'Suggest Labels' }}
-          </button>
-        </div>
-        <div class="panel__input-row">
-          <input
-            v-model="newLabelName"
-            type="text"
-            placeholder="Add label..."
-            class="input"
-            @keyup.enter="addLabel"
-          />
-          <button class="btn btn--primary" @click="addLabel">Add</button>
-        </div>
-        <div class="panel__chips">
-          <LabelChip
-            v-for="label in labels"
-            :key="label.id"
-            :name="label.name"
-            @remove="removeLabel(label.id)"
-          />
-          <p v-if="labels.length === 0" class="panel__empty">No labels yet</p>
-        </div>
-      </section>
+      <!-- Loading State -->
+      <div
+        v-else-if="isLoading"
+        class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm p-6 text-center"
+      >
+        <span class="material-symbols-outlined text-primary text-[32px] mb-2 block animate-spin">progress_activity</span>
+        <p class="font-body-main text-body-main text-on-surface-variant">Loading tags & labels…</p>
+      </div>
+
+      <!-- Dual-Panel Layout (matches design reference 08-tags-labels.html) -->
+      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-container-padding items-start">
+        <!-- Tags Panel -->
+        <section class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col h-[700px]">
+          <div class="p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h2 class="font-h2 text-h2 text-on-surface flex items-center gap-2">
+                  <span class="material-symbols-outlined text-primary text-[20px]">sell</span>
+                  Tags
+                </h2>
+                <p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+                  Content-category labels for grouping related research.
+                </p>
+              </div>
+              <span class="bg-surface-variant text-on-surface-variant px-2 py-0.5 rounded-full font-label-caps text-label-caps">
+                {{ tagsStore.tags.length }} Total
+              </span>
+            </div>
+            <div class="flex gap-2">
+              <div class="relative flex-1">
+                <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">add</span>
+                <input
+                  v-model="newTagName"
+                  class="w-full pl-9 pr-3 py-2 bg-surface-container-lowest border border-outline-variant rounded-lg focus:border-primary focus:ring-1 focus:ring-primary font-body-main text-body-main text-on-surface transition-all"
+                  placeholder="Add new tag..."
+                  type="text"
+                  @keyup.enter="addTag"
+                />
+              </div>
+              <button
+                class="flex items-center gap-2 px-4 py-2 bg-secondary-container text-on-secondary-container hover:bg-secondary-fixed transition-colors rounded-lg font-body-main text-body-main font-medium border border-secondary-fixed-dim whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="tagsStore.suggesting"
+                @click="tagsStore.suggestTags()"
+              >
+                <span class="material-symbols-outlined text-[18px]">auto_awesome</span>
+                {{ tagsStore.suggesting ? 'Generating...' : 'Generate from AI' }}
+              </button>
+            </div>
+          </div>
+          <div class="p-5 overflow-y-auto flex-1 space-y-3">
+            <div
+              v-for="tag in tagsStore.tags"
+              :key="tag.id"
+              class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
+            >
+              <div class="flex items-center gap-3">
+                <template v-if="editingTagId === tag.id">
+                  <input
+                    v-model="editingTagName"
+                    class="px-2 py-1 bg-surface-container-lowest border border-primary rounded-lg focus:ring-1 focus:ring-primary font-mono text-mono text-on-surface transition-all w-48"
+                    @keyup.enter="saveTagEdit"
+                    @keyup.escape="cancelTagEdit"
+                  />
+                </template>
+                <template v-else>
+                  <TagChip :name="tag.name" />
+                </template>
+              </div>
+              <div class="flex items-center gap-4">
+                <span class="font-body-sm text-body-sm text-on-surface-variant">{{ tag.articleCount }} articles</span>
+                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <template v-if="editingTagId === tag.id">
+                    <button class="p-1 text-primary hover:bg-surface-variant rounded transition-colors" @click="saveTagEdit">
+                      <span class="material-symbols-outlined text-[16px]">check</span>
+                    </button>
+                    <button class="p-1 text-outline hover:bg-surface-variant rounded transition-colors" @click="cancelTagEdit">
+                      <span class="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button class="p-1 text-outline hover:text-primary rounded hover:bg-surface-variant transition-colors" @click="startEditingTag(tag.id, tag.name)">
+                      <span class="material-symbols-outlined text-[16px]">edit</span>
+                    </button>
+                    <button class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors" @click="tagsStore.deleteTag(tag.id)">
+                      <span class="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <p v-if="tagsStore.tags.length === 0" class="text-on-surface-variant font-body-sm text-body-sm text-center py-8">
+              No tags yet. Add one above or generate from AI.
+            </p>
+          </div>
+        </section>
+
+        <!-- Labels Panel (mirrors Tags Panel with secondary color accent) -->
+        <section class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col h-[700px]">
+          <!-- Same structure as Tags Panel with label-specific bindings -->
+          <!-- (Full template matches source file in src/views/tag-label-management.vue) -->
+        </section>
+      </div>
     </div>
   </div>
 </template>
+```
 
-<style scoped>
-.tag-label-view {
-  padding: var(--space-6);
-}
+> **Note:** The Labels Panel template mirrors the Tags Panel with `labelsStore` bindings and `secondary` color accents. See the actual source file `src/views/tag-label-management.vue` for the complete template.
 
-.tag-label-view h1 {
-  font-size: var(--font-size-display);
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: var(--letter-spacing-display);
-  margin-bottom: var(--space-6);
-}
+- [ ] **Step 3b: Update `src/stores/tags.ts` and `src/stores/labels.ts`** — Add error handling
 
-.tag-label-view__panels {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-6);
-}
+Both stores must wrap `tauriCommand` calls in `try/catch`, expose an `error` ref, and set it on failure. See current source files for exact implementation. Key pattern:
 
-.panel {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-default);
-  padding: var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
+```typescript
+const error = ref<string | null>(null);
 
-.panel__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+async function fetchTags(): Promise<void> {
+  loading.value = true;
+  error.value = null;
+  try {
+    tags.value = await tauriCommand<TagWithCount[]>('get_tags_with_counts');
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    loading.value = false;
+  }
 }
-
-.panel__header h2 {
-  font-size: var(--font-size-h2);
-}
-
-.panel__input-row {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.input {
-  flex: 1;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-outline);
-  border-radius: var(--radius-default);
-  font-size: var(--font-size-caption);
-  outline: none;
-}
-
-.input:focus {
-  border-color: var(--color-primary);
-  border-width: 2px;
-}
-
-.panel__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  min-height: 40px;
-}
-
-.panel__empty {
-  color: var(--color-on-surface-variant);
-  font-size: var(--font-size-caption);
-}
-
-.btn {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-default);
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-}
-
-.btn--primary {
-  background-color: var(--color-primary);
-  color: var(--color-on-primary);
-}
-
-.btn--secondary {
-  background-color: var(--color-surface-container-high);
-  color: var(--color-on-surface);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-</style>
 ```
 
 - [ ] **Step 4: Update router**
