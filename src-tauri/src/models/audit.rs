@@ -69,7 +69,7 @@ impl AuditSource {
     }
 }
 
-/// A single import activity row — one per file import, with the correct article count.
+/// A single import activity row - one per file import, with the correct article count.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportActivity {

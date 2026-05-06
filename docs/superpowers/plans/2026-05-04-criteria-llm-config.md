@@ -340,7 +340,7 @@ fn parse_priority(s: &str) -> Priority {
 }
 ```
 
-- [ ] **Step 2: Update `src-tauri/src/db/mod.rs` — add `pub mod criteria_repo;` and `pub mod llm_config_repo;`**
+- [ ] **Step 2: Update `src-tauri/src/db/mod.rs` - add `pub mod criteria_repo;` and `pub mod llm_config_repo;`**
 
 - [ ] **Step 3: Write tests in `src-tauri/tests/criteria_test.rs`**
 
@@ -744,7 +744,7 @@ pub fn is_local_provider(provider: String) -> bool {
 }
 ```
 
-- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` — add `pub mod criteria;` and `pub mod llm_config;`**
+- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` - add `pub mod criteria;` and `pub mod llm_config;`**
 
 - [ ] **Step 4: Update `src-tauri/src/lib.rs` invoke handler with all new commands**
 

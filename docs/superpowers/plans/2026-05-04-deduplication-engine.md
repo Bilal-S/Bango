@@ -193,7 +193,7 @@ fn test_short_title_guard_boundary() {
 - [ ] **Step 4: Run tests to verify they fail**
 
 Run: `cd src-tauri && cargo test dedup_test --test dedup_test`
-Expected: FAIL — modules don't exist
+Expected: FAIL - modules don't exist
 
 - [ ] **Step 5: Implement `src-tauri/src/dedup/similarity.rs`**
 
@@ -293,7 +293,7 @@ pub fn levenshtein_similarity(a: &str, b: &str) -> f64 {
 - [ ] **Step 6: Run tests**
 
 Run: `cd src-tauri && cargo test dedup_test --test dedup_test`
-Expected: PASS — all 10 tests pass
+Expected: PASS - all 10 tests pass
 
 - [ ] **Step 7: Register module in `lib.rs` and commit**
 
@@ -421,7 +421,7 @@ fn test_first_match_wins_no_double_matching() {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd src-tauri && cargo test dedup_test --test dedup_test`
-Expected: FAIL — `DedupArticle` and `run_dedup` not defined
+Expected: FAIL - `DedupArticle` and `run_dedup` not defined
 
 - [ ] **Step 3: Implement `src-tauri/src/dedup/engine.rs`**
 
@@ -573,7 +573,7 @@ fn extract_last_name(author: &str) -> String {
 - [ ] **Step 4: Run tests**
 
 Run: `cd src-tauri && cargo test dedup_test --test dedup_test`
-Expected: PASS — all tests pass
+Expected: PASS - all tests pass
 
 - [ ] **Step 5: Commit**
 
@@ -605,7 +605,7 @@ fn asset_path(name: &str) -> PathBuf {
 
 #[test]
 fn test_dedup_no_false_positives_on_real_data() {
-    // Both real RIS files have distinct articles — no duplicates should be found
+    // Both real RIS files have distinct articles - no duplicates should be found
     let content1 = fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
     let content2 = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris")).expect("fixture not found");
 
@@ -623,7 +623,7 @@ fn test_dedup_no_false_positives_on_real_data() {
         doi: r.doi.clone(),
     }).collect();
 
-    // 3 unique articles — no duplicates expected
+    // 3 unique articles - no duplicates expected
     assert_eq!(articles.len(), 3);
     let result = engine::run_dedup(&articles);
     assert_eq!(result.exact_duplicates.len(), 0, "Should not find exact duplicates in real data");

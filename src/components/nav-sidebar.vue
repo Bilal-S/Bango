@@ -83,7 +83,7 @@ function handleNavClick(): void {
   transition: width 0.2s ease;
 }
 
-/* Collapsed state (md breakpoint — icon-only sidebar) */
+/* Collapsed state (md breakpoint - icon-only sidebar) */
 .sidebar--collapsed {
   width: var(--sidebar-collapsed-width);
 }

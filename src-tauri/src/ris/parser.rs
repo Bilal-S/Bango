@@ -139,7 +139,7 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
         "AB" => record.abstract_text = Some(value.to_string()),
         "AU" => record.authors.push(value.to_string()),
         "PY" => {
-            // PY can be "2023" or "2023/12/31/" — extract year
+            // PY can be "2023" or "2023/12/31/" - extract year
             let year_str = value.split('/').next().unwrap_or(value);
             record.publication_year = year_str.parse().ok();
         }

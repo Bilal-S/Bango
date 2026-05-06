@@ -1,4 +1,4 @@
-# Bango — v3 Specification
+# Bango - v3 Specification
 
 Third revision of the Bango specification. Incorporates scope reductions, gap-fills, and detail expansions from the v2 (Second Specification). Supersedes all prior specifications.
 
@@ -6,13 +6,13 @@ Third revision of the Bango specification. Incorporates scope reductions, gap-fi
 
 ## 1. Product Overview
 
-Bango is a **desktop application** for AI-assisted systematic literature review. Researchers import RIS bibliography files, define inclusion/exclusion criteria, and use LLMs to screen article abstracts — producing a rigorously categorized set of articles with reasoning, tags, and labels.
+Bango is a **desktop application** for AI-assisted systematic literature review. Researchers import RIS bibliography files, define inclusion/exclusion criteria, and use LLMs to screen article abstracts - producing a rigorously categorized set of articles with reasoning, tags, and labels.
 
 Built with **Tauri 2.x** for a lightweight, offline-capable experience. All data is stored locally in SQLite. No cloud upload is required.
 
 **v1 is desktop-only.** Mobile support is deferred to a future release.
 
-The app manages a **single project** — there is no project selector or multi-project workspace. The database and all state belong to one active review.
+The app manages a **single project** - there is no project selector or multi-project workspace. The database and all state belong to one active review.
 
 ---
 
@@ -130,7 +130,7 @@ The app manages a **single project** — there is no project selector or multi-p
 **Changes from v2:**
 - Removed `Project` as a top-level entity. The app is a single-project workspace.
 - `screeningError` is now a boolean flag on Article, not a separate status value. Articles with errors remain in `working` status with `screeningError: true`.
-- Removed `inclusionExclusionLabels` from Article — this is redundant with the `labels[]` relationship. Inclusion/exclusion label groupings are derived at export time.
+- Removed `inclusionExclusionLabels` from Article - this is redundant with the `labels[]` relationship. Inclusion/exclusion label groupings are derived at export time.
 - Added `ExportMetadata` schema for forward-compatible exports.
 
 ---
@@ -164,7 +164,7 @@ The app manages a **single project** — there is no project selector or multi-p
 | `AD` | Author Address | `authorAddress` | No |
 | `AN` | Accession Number | `accessionNumber` | No |
 | `C3` | Custom Field 3 | `customField3` | No |
-| `ER` | End of Reference | *(parser delimiter — not stored as article data)* | No |
+| `ER` | End of Reference | *(parser delimiter - not stored as article data)* | No |
 | `J9` | Journal Abbreviation (29-char) | `journalAbbreviation` | No |
 | `JI` | Journal ISO Abbreviation | `journalIsoAbbreviation` | No |
 | `N1` | Notes | `notes` | No |
@@ -183,7 +183,7 @@ All unrecognized RIS tags are preserved as key-value pairs in `risExtras`.
 - Multiple `KW` tags for a single article are collected into the `keywords[]` array.
 - Each import records the source filename in `importSource`.
 - **Partial imports are supported**: valid articles are imported even when some records fail validation. Invalid records are skipped.
-- Validation errors are **grouped by error message** and displayed as collapsible summaries in the UI (e.g., "7 records — Missing required field: Abstract (AB or N2)"). Users can expand each group to see the affected record indices.
+- Validation errors are **grouped by error message** and displayed as collapsible summaries in the UI (e.g., "7 records - Missing required field: Abstract (AB or N2)"). Users can expand each group to see the affected record indices.
 - A **warning banner** is shown when there are validation issues, indicating how many records will be skipped and how many will be imported.
 - Users can also **manually exclude** individual valid articles from the preview table before confirming import.
 
@@ -242,7 +242,7 @@ Before comparison, titles are:
 
 - Research aims are a **list of discrete text entries** (not a single free-text block).
 - Each aim is entered individually by the user.
-- No priority level is assigned to aims — they serve as context for the AI screening.
+- No priority level is assigned to aims - they serve as context for the AI screening.
 
 ### 6.2 Inclusion and Exclusion Criteria
 
@@ -262,7 +262,7 @@ When the AI screens an article and it matches multiple criteria:
 5. **If tied → include** (ties favor inclusion).
 6. **If no criteria match at all → exclude** (no basis for inclusion).
 
-This is deterministic logic applied by the app after the AI reports which criteria matched. The AI does not resolve priority conflicts — it only identifies matches.
+This is deterministic logic applied by the app after the AI reports which criteria matched. The AI does not resolve priority conflicts - it only identifies matches.
 
 ---
 
@@ -277,7 +277,7 @@ This is deterministic logic applied by the app after the AI reports which criter
 | **Included** | Article meeting inclusion criteria. |
 | **Rejected** | Article excluded based on criteria. |
 
-Articles in any state may have a `screeningError` flag set to `true`, which is displayed in the UI. The flag does not change the article's status — errored articles remain in their current state (typically Working).
+Articles in any state may have a `screeningError` flag set to `true`, which is displayed in the UI. The flag does not change the article's status - errored articles remain in their current state (typically Working).
 
 ### 7.2 State Transition Diagram
 
@@ -466,7 +466,7 @@ Return JSON exactly matching this schema:
 ### 9.2 Response Processing
 
 1. App parses the JSON response.
-2. App applies **deterministic priority conflict resolution** (Section 6.3) based on matched criteria and their priorities. The AI's `decision` field is advisory — the app computes the final decision.
+2. App applies **deterministic priority conflict resolution** (Section 6.3) based on matched criteria and their priorities. The AI's `decision` field is advisory - the app computes the final decision.
 3. If the app's computed decision differs from the AI's `decision`, the app's decision takes precedence and a note is appended to `aiReasoning` (e.g., "[App override: inclusion favored due to equal-priority tie]").
 4. The article moves to Included or Rejected.
 5. AI-suggested tags are matched to existing tags (case-insensitive name match) or created as new `ai_suggested` tags.
@@ -502,7 +502,7 @@ Before starting screening, the app estimates total token usage:
 3. Find the article with the largest estimated token count. Sum template tokens + that article's tokens to get a worst-case per-article estimate.
 4. Compare per-article estimate against `contextWindowTokens`.
 5. **Warn if estimated per-article tokens exceed 80%** of the configured context window.
-6. No hard block — user can override and proceed.
+6. No hard block - user can override and proceed.
 
 ---
 
@@ -520,7 +520,7 @@ Before starting screening, the app estimates total token usage:
 | LM Studio | No auth | `http://localhost:1234/v1/chat/completions` |
 | Custom | API key (optional) + full URL | User provides |
 
-All providers use the **OpenAI-compatible chat completions format**. Google Gemini requires a provider-specific adapter. The user provides the **full endpoint URL** — the app does not append `/v1/chat/completions` or any other path.
+All providers use the **OpenAI-compatible chat completions format**. Google Gemini requires a provider-specific adapter. The user provides the **full endpoint URL** - the app does not append `/v1/chat/completions` or any other path.
 
 ### 10.2 Connection Testing
 
@@ -538,7 +538,7 @@ All providers use the **OpenAI-compatible chat completions format**. Google Gemi
 - The app requires an LLM with a context window of **50,000 tokens or larger**.
 - Token estimation is performed before starting screening (Section 9.6).
 - If the estimated count approaches the configured context window, the user is warned.
-- No hard block — user can override.
+- No hard block - user can override.
 
 ---
 
@@ -731,7 +731,7 @@ Available filter options:
 
 ### 16.4 Offline Capability
 
-- All data is stored locally in SQLite — fully browsable offline.
+- All data is stored locally in SQLite - fully browsable offline.
 - AI screening requires an active LLM connection (hosted or local).
 - If connection is lost mid-screening, completed articles are saved; pending articles remain in Working.
 - User can browse, search, sort, filter, and manually move articles while offline.
@@ -759,12 +759,12 @@ UI designs are created in [Google Stitch](https://stitch.withgoogle.com/) and ex
 
 ### 18.2 Design Tokens
 
-The design system is named **"Scholarly Precision"** — a Minimalist-Corporate aesthetic inspired by "Notion meets Zotero." Full token definitions live in `DESIGN.md`.
+The design system is named **"Scholarly Precision"** - a Minimalist-Corporate aesthetic inspired by "Notion meets Zotero." Full token definitions live in `DESIGN.md`.
 
 **Colors:**
-- Primary Indigo: `#4F46E5` — primary actions, active states, Standard priority
-- Surface: `#FCF8FF` — main workspace background
-- Sidebar Slate: `#1E293B` — navigation panel
+- Primary Indigo: `#4F46E5` - primary actions, active states, Standard priority
+- Surface: `#FCF8FF` - main workspace background
+- Sidebar Slate: `#1E293B` - navigation panel
 - Text Primary: `#1B1B24`
 - Text Secondary: `#464555`
 - Outline: `#777587`
@@ -923,7 +923,7 @@ Google Stitch (generate / iterate designs)
 1. Generate or refine designs in Google Stitch using the prompts in the Stitch prompt plan.
 2. Export the updated design system as `DESIGN.md` (replaces the file in the project root).
 3. Use Claude Code with the Stitch MCP to pull screen HTML/CSS and generate matching Vue components.
-4. DESIGN.md provides the design token contract (colors, typography, spacing) — components reference these tokens rather than hardcoding values.
+4. DESIGN.md provides the design token contract (colors, typography, spacing) - components reference these tokens rather than hardcoding values.
 5. All design changes are version-controlled alongside code via `DESIGN.md`.
 
 ### 19.6 CLI Commands (Reference)
@@ -954,8 +954,8 @@ npx @_davideast/stitch-mcp view --projects
 
 The following features are explicitly **out of scope** for v1:
 
-- **Mobile support** — desktop only for v1.
-- **Multi-project workspace** — single project per app instance.
+- **Mobile support** - desktop only for v1.
+- **Multi-project workspace** - single project per app instance.
 - Multi-user collaboration / real-time sync.
 - Blind mode / conflict resolution between reviewers.
 - Full-text screening (abstract only).
@@ -964,9 +964,9 @@ The following features are explicitly **out of scope** for v1:
 - Machine learning relevance scoring (5-star rating).
 - Integration with external reference databases (PubMed API, etc.).
 - Automated keyword highlighting within abstracts.
-- **Per-article audit revert** — audit log is read-only.
-- **PDF PRISMA export** — SVG and PNG only.
-- **Dynamic VRAM detection** — static warning text only.
+- **Per-article audit revert** - audit log is read-only.
+- **PDF PRISMA export** - SVG and PNG only.
+- **Dynamic VRAM detection** - static warning text only.
 
 ---
 

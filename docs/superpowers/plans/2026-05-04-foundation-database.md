@@ -229,7 +229,7 @@ fn test_database_stores_all_article_fields() {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd src-tauri && cargo test db_test --test db_test`
-Expected: FAIL — modules don't exist yet
+Expected: FAIL - modules don't exist yet
 
 - [ ] **Step 3: Create `src-tauri/src/db/mod.rs`**
 
@@ -461,7 +461,7 @@ pub fn run() {
 - [ ] **Step 9: Run tests**
 
 Run: `cd src-tauri && cargo test db_test --test db_test`
-Expected: PASS — both tests pass
+Expected: PASS - both tests pass
 
 - [ ] **Step 10: Commit**
 
@@ -1173,7 +1173,7 @@ git commit -m "feat(frontend): add TypeScript types and Tauri command wrapper"
 
 ```css
 :root {
-  /* Colors — Scholarly Precision */
+  /* Colors - Scholarly Precision */
   --color-primary: #4f46e5;
   --color-primary-container: #4f46e5;
   --color-on-primary: #ffffff;
@@ -1411,7 +1411,7 @@ describe('formatConfidence', () => {
   });
 
   it('returns dash for null', () => {
-    expect(formatConfidence(null)).toBe('—');
+    expect(formatConfidence(null)).toBe('-');
   });
 
   it('rounds correctly', () => {
@@ -1430,7 +1430,7 @@ describe('formatPriority', () => {
 - [ ] **Step 5: Run test to verify it fails**
 
 Run: `npm test`
-Expected: FAIL — `formatters.ts` not yet created (will be created in Task 9)
+Expected: FAIL - `formatters.ts` not yet created (will be created in Task 9)
 
 - [ ] **Step 6: Commit**
 
@@ -1783,7 +1783,7 @@ export function formatDate(isoString: string): string {
 }
 
 export function formatConfidence(confidence: number | null): string {
-  if (confidence === null) return '—';
+  if (confidence === null) return '-';
   return `${Math.round(confidence * 100)}%`;
 }
 
@@ -1941,7 +1941,7 @@ git commit -m "feat(stores): add Pinia store stubs and utility formatters"
 - [ ] **Step 1: Run `npm run check:all`**
 
 Run: `npm run check:all`
-Expected: PASS — all linting, formatting, and Rust checks pass
+Expected: PASS - all linting, formatting, and Rust checks pass
 
 - [ ] **Step 2: Run Rust tests**
 

@@ -20,7 +20,7 @@ describe('formatConfidence', () => {
   });
 
   it('returns dash for null', () => {
-    expect(formatConfidence(null)).toBe('—');
+    expect(formatConfidence(null)).toBe('-');
   });
 
   it('rounds correctly', () => {

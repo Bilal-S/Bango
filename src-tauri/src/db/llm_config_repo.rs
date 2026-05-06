@@ -73,7 +73,9 @@ pub fn save_config(conn: &Connection, config: &LlmConfig) -> Result<(), AppError
 fn parse_provider(s: &str) -> LlmProvider {
     match s {
         "openai" => LlmProvider::Openai,
+        "anthropic" => LlmProvider::Anthropic,
         "google" => LlmProvider::Google,
+        "mistral_ai" => LlmProvider::MistralAi,
         "z_ai" => LlmProvider::ZAi,
         "llama_cpp" => LlmProvider::LlamaCpp,
         "ollama" => LlmProvider::Ollama,

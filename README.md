@@ -2,7 +2,7 @@
 
 **AI-Powered Systematic Literature Review Tool**
 
-Bango is a cross-platform desktop and mobile application that automates and accelerates the screening phase of systematic literature reviews, scoping reviews, and meta-analyses. Researchers import RIS bibliography files, define inclusion/exclusion criteria with weighted priorities, and let AI screen abstracts — producing a rigorously categorized set of articles ready for full-text review.
+Bango is a cross-platform desktop and mobile application that automates and accelerates the screening phase of systematic literature reviews, scoping reviews, and meta-analyses. Researchers import RIS bibliography files, define inclusion/exclusion criteria with weighted priorities, and let AI screen abstracts - producing a rigorously categorized set of articles ready for full-text review.
 
 Built with [Tauri 2.x](https://tauri.app/) for a lightweight, offline-capable experience with no cloud dependency.
 
@@ -21,7 +21,7 @@ Traditional systematic review workflows rely on spreadsheets and manual screenin
 - Generates PRISMA 2020 flow diagrams with optional exclusion reason breakdowns
 - Supports full project backup and transfer via encrypted `.bango.json` files
 
-All data stays on your machine in a local SQLite database — no cloud upload required.
+All data stays on your machine in a local SQLite database - no cloud upload required.
 
 ---
 
@@ -47,7 +47,7 @@ All data stays on your machine in a local SQLite database — no cloud upload re
 
 ### AI-Powered Abstract Screening
 - Configure connections to hosted LLMs (OpenAI, Google, z.ai) or local setups (llama.cpp, Ollama, LM Studio), plus any OpenAI-compatible endpoint
-- User provides the full endpoint URL — the app does not append paths
+- User provides the full endpoint URL - the app does not append paths
 - AI evaluates each article's abstract in isolation as a separate API call
 - Returns structured JSON with decision, reasoning paragraph, matched criteria, suggested tags, and confidence score
 - Background batch processing with configurable concurrency (default: 3) and request delay (default: 500ms)
@@ -55,10 +55,10 @@ All data stays on your machine in a local SQLite database — no cloud upload re
 - Generates a structured AI summary of included articles: key themes, research trends, methodological strengths, common weaknesses, and literature gaps
 
 ### Tag & Label Management
-- **Tags**: content-category labels (e.g., "machine-learning", "clinical-trial") — AI suggests from RIS keywords and user criteria; user can add, edit, delete
-- **Labels**: workflow markers (e.g., "priority-read", "disputed") — AI generates from inclusion/exclusion criteria; user can expand and modify
+- **Tags**: content-category labels (e.g., "machine-learning", "clinical-trial") - AI suggests from RIS keywords and user criteria; user can add, edit, delete
+- **Labels**: workflow markers (e.g., "priority-read", "disputed") - AI generates from inclusion/exclusion criteria; user can expand and modify
 - Tags and labels generated in a pre-screening pass; user reviews before AI screening begins
-- Full manual editing — override any AI decision, adjust tags and labels, move articles between lists
+- Full manual editing - override any AI decision, adjust tags and labels, move articles between lists
 
 ### PRISMA 2020 Flow Diagram
 - Standard four-phase PRISMA 2020 flow diagram with exact record counts
@@ -68,7 +68,7 @@ All data stays on your machine in a local SQLite database — no cloud upload re
 ### Audit Trail
 - Every state change, tag/label edit, and AI decision logged with timestamp and source
 - Per-article history view with revert capability
-- No global undo — corrections are made by moving articles or editing data
+- No global undo - corrections are made by moving articles or editing data
 
 ### Search, Sort, and Filter
 - Full-text search across title and abstract fields
@@ -78,7 +78,7 @@ All data stays on your machine in a local SQLite database — no cloud upload re
 ### Cross-Platform
 - Desktop and mobile support via Tauri 2.x with feature parity
 - Responsive layouts adapt to smaller screens
-- Offline-capable — all data stored locally in SQLite; browse, search, and edit without a network connection
+- Offline-capable - all data stored locally in SQLite; browse, search, and edit without a network connection
 - AI screening requires an active LLM connection (hosted or local)
 
 ---
@@ -106,12 +106,12 @@ Users can manually override AI decisions and move articles freely between Workin
 
 | Layer | Technology |
 |-------|------------|
-| **Framework** | Tauri 2.x — lightweight cross-platform runtime |
+| **Framework** | Tauri 2.x - lightweight cross-platform runtime |
 | **Frontend** | Vue 3.x with TypeScript, Tailwind CSS v4 |
 | **Styling** | Tailwind CSS v4 (`@theme` design tokens) + CSS custom properties |
-| **Backend** | Rust — memory-safe, non-blocking background processing |
-| **Database** | Local SQLite — portable, offline-first |
-| **AI** | REST API client in Rust — async requests to external or local LLM endpoints |
+| **Backend** | Rust - memory-safe, non-blocking background processing |
+| **Database** | Local SQLite - portable, offline-first |
+| **AI** | REST API client in Rust - async requests to external or local LLM endpoints |
 | **Encryption** | AES-256-GCM with PBKDF2 key derivation |
 
 ---

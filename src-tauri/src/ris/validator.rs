@@ -68,10 +68,7 @@ pub fn validate_all_grouped(
 
     let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
     for err in &all_errors {
-        groups
-            .entry(err.message.clone())
-            .or_default()
-            .push(err.record_index);
+        groups.entry(err.message.clone()).or_default().push(err.record_index);
     }
 
     let error_groups: Vec<ErrorGroup> = groups

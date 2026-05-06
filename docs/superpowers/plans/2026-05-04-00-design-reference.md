@@ -227,7 +227,7 @@ Read each PNG file using the Read tool (it renders images). Note:
 
 - [ ] **Step 3: Document any inconsistencies between Stitch screens**
 
-Compare the sidebar across all screens — are the nav items identical? Are the colors consistent? Is the spacing uniform? Note any differences and decide which version is canonical.
+Compare the sidebar across all screens - are the nav items identical? Are the colors consistent? Is the spacing uniform? Note any differences and decide which version is canonical.
 
 ---
 
@@ -274,7 +274,7 @@ The document structure:
 | Settings | [from Stitch] | /settings | |
 
 ### Nav Items (outdated/skip)
-[List any nav items in Stitch that don't map to v3 spec — e.g., "Summary" might be a separate nav item or merged into Dashboard]
+[List any nav items in Stitch that don't map to v3 spec - e.g., "Summary" might be a separate nav item or merged into Dashboard]
 
 ---
 
@@ -286,7 +286,7 @@ The document structure:
 ### v3 scope
 - H1 title: [font-size, weight, letter-spacing from Stitch]
 - Optional subtitle: [style from Stitch]
-- Action buttons: [placement — top-right of header? Below title?]
+- Action buttons: [placement - top-right of header? Below title?]
 - Breadcrumbs: [does Stitch use them?]
 
 ---
@@ -351,7 +351,7 @@ The document structure:
 **Plan:** Plan 5 (`tag-chip.vue`, `label-chip.vue`)
 
 ### Tag Chip (solid)
-- Background: [from Stitch — is it tinted with the tag color? Or neutral?]
+- Background: [from Stitch - is it tinted with the tag color? Or neutral?]
 - Border: none
 - Border radius: 8px
 - Text: [color from Stitch]
@@ -391,7 +391,7 @@ The document structure:
 [Extract: border, padding, focus state, placeholder color, label style]
 
 ### Select / Dropdown
-[Extract: styling — native or custom? Border, padding, arrow icon]
+[Extract: styling - native or custom? Border, padding, arrow icon]
 
 ### Priority Selector (Criteria Editor)
 [Extract: how does Stitch show the priority dropdown? Inline? Separate column?]
@@ -413,7 +413,7 @@ The document structure:
 [Extract: background (ghost/outline?), text color, padding, border-radius, hover]
 
 ### Icon Button
-[Extract: close button (×), add button (+), remove button — size, radius, color]
+[Extract: close button (×), add button (+), remove button - size, radius, color]
 
 ---
 
@@ -426,7 +426,7 @@ The document structure:
 [Extract: track height, fill color, track background, label position, percentage display]
 
 ### Stats Panel
-[Extract: stat card layout — value size, label style, background, spacing between cards]
+[Extract: stat card layout - value size, label style, background, spacing between cards]
 
 ---
 
@@ -449,7 +449,7 @@ The document structure:
 [Extract: box width, height, background, border, border-radius, font size, connector arrow style, side box style (exclusion counts)]
 
 ### Export Buttons
-[Extract: SVG/PNG button placement — below diagram or in toolbar?]
+[Extract: SVG/PNG button placement - below diagram or in toolbar?]
 
 ---
 
@@ -466,7 +466,7 @@ The document structure:
 
 ### Dashboard (`01-dashboard.html`)
 **v3 scope:** Project name, article counts by status (pill badges), "Start Screening" CTA, activity feed, quick-action cards (Import RIS, Edit Criteria, View PRISMA)
-**Stitch elements to skip:** [List any Stitch elements not in v3 spec — e.g., project selector if present, any mobile-specific elements]
+**Stitch elements to skip:** [List any Stitch elements not in v3 spec - e.g., project selector if present, any mobile-specific elements]
 
 ### RIS Import (`02-ris-import.html`)
 **v3 scope:** Drag-and-drop zone, parsed article preview table, import summary card, stepper (Upload → Parse → Dedup → Complete)
@@ -505,7 +505,7 @@ The document structure:
 **Stitch elements to skip:** [any elements not matching v3 Section 10]
 ```
 
-The actual content between `[Extract ...]` markers must be filled in by reading the Stitch HTML files pulled in Task 3. This is the critical step — the agent executing this plan reads each HTML file and fills in the exact values.
+The actual content between `[Extract ...]` markers must be filled in by reading the Stitch HTML files pulled in Task 3. This is the critical step - the agent executing this plan reads each HTML file and fills in the exact values.
 
 - [ ] **Step 2: Commit the design patterns document**
 
@@ -518,7 +518,7 @@ git commit -m "docs(design): add shared design patterns reference extracted from
 
 ## Task 6: Update Existing Plans to Reference Stitch Designs
 
-Add a reference step to each plan's UI tasks. This doesn't change the implementation code — it adds a "before you build" step.
+Add a reference step to each plan's UI tasks. This doesn't change the implementation code - it adds a "before you build" step.
 
 For each of plans 1–9, the following note should be prepended to each Vue component task:
 
@@ -526,17 +526,17 @@ For each of plans 1–9, the following note should be prepended to each Vue comp
 
 Specific plan updates:
 
-- [ ] **Step 1: Update Plan 1** — Dashboard task references `01-dashboard.html`
-- [ ] **Step 2: Update Plan 1** — Sidebar task references sidebar pattern from `00-design-patterns.md` Section 1
-- [ ] **Step 3: Update Plan 2** — Import UI task references `02-ris-import.html`
-- [ ] **Step 4: Update Plan 3** — Dedup UI task references `07-dedup-review.html`
-- [ ] **Step 5: Update Plan 4** — Criteria editor references `06-criteria-editor.html`
-- [ ] **Step 6: Update Plan 4** — LLM config references `10-llm-config.html`
-- [ ] **Step 7: Update Plan 5** — Tags/labels references `08-tags-labels.html`
-- [ ] **Step 8: Update Plan 6** — Screening progress references `05-screening-progress.html`
-- [ ] **Step 9: Update Plan 7** — Article list references `03-article-list.html`
-- [ ] **Step 10: Update Plan 7** — Article detail references `04-article-detail.html`
-- [ ] **Step 11: Update Plan 8** — PRISMA diagram references `09-prisma-diagram.html`
+- [ ] **Step 1: Update Plan 1** - Dashboard task references `01-dashboard.html`
+- [ ] **Step 2: Update Plan 1** - Sidebar task references sidebar pattern from `00-design-patterns.md` Section 1
+- [ ] **Step 3: Update Plan 2** - Import UI task references `02-ris-import.html`
+- [ ] **Step 4: Update Plan 3** - Dedup UI task references `07-dedup-review.html`
+- [ ] **Step 5: Update Plan 4** - Criteria editor references `06-criteria-editor.html`
+- [ ] **Step 6: Update Plan 4** - LLM config references `10-llm-config.html`
+- [ ] **Step 7: Update Plan 5** - Tags/labels references `08-tags-labels.html`
+- [ ] **Step 8: Update Plan 6** - Screening progress references `05-screening-progress.html`
+- [ ] **Step 9: Update Plan 7** - Article list references `03-article-list.html`
+- [ ] **Step 10: Update Plan 7** - Article detail references `04-article-detail.html`
+- [ ] **Step 11: Update Plan 8** - PRISMA diagram references `09-prisma-diagram.html`
 - [ ] **Step 12: Commit all plan updates**
 
 ```bash

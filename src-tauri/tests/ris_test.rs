@@ -68,7 +68,10 @@ fn test_parse_blue_ris() {
     assert!(rec2.keywords.len() >= 5);
 
     // Environmental performance record (find it by DOI since order may vary)
-    let env_rec = result.records.iter().find(|r| r.doi.as_deref() == Some("10.1038/s41586-021-03889-2"))
+    let env_rec = result
+        .records
+        .iter()
+        .find(|r| r.doi.as_deref() == Some("10.1038/s41586-021-03889-2"))
         .expect("Environmental performance record not found");
     assert!(env_rec.title.as_ref().unwrap().contains("Environmental performance of blue foods"));
     assert!(env_rec.authors.len() > 10);
@@ -223,7 +226,8 @@ TY  - JOUR\nTI  - Valid Three\nAU  - Author F\nAB  - Abstract\nER  -\n";
     assert_eq!(errors.len(), 3, "Should have 3 total errors");
     assert_eq!(groups.len(), 2, "Should have 2 error groups");
 
-    let abstract_group = groups.iter().find(|g| g.message.contains("Abstract")).expect("No abstract group");
+    let abstract_group =
+        groups.iter().find(|g| g.message.contains("Abstract")).expect("No abstract group");
     assert_eq!(abstract_group.count, 2);
     assert_eq!(abstract_group.record_indices.len(), 2);
 
@@ -267,12 +271,8 @@ TY  - JOUR\nTI  - Keep Two\nAU  - Author C\nAB  - Abstract\nER  -\n";
 
     // User excludes valid record at index 1
     let excluded: std::collections::HashSet<usize> = [1].into_iter().collect();
-    let to_import: Vec<&RisRecord> = valid
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !excluded.contains(i))
-        .map(|(_, r)| r)
-        .collect();
+    let to_import: Vec<&RisRecord> =
+        valid.iter().enumerate().filter(|(i, _)| !excluded.contains(i)).map(|(_, r)| r).collect();
 
     assert_eq!(to_import.len(), 2, "Only 2 should be imported after exclusion");
     assert!(to_import[0].title.as_ref().unwrap().contains("Keep One"));

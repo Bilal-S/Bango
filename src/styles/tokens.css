@@ -1,5 +1,5 @@
 :root {
-  /* Colors — Scholarly Precision */
+  /* Colors - Scholarly Precision */
   --color-primary: #4f46e5;
   --color-primary-container: #4f46e5;
   --color-on-primary: #ffffff;
@@ -74,7 +74,7 @@
   --container-padding-sm: 16px;
   --gutter: 16px;
 
-  /* Responsive Breakpoints (for reference — used in media queries) */
+  /* Responsive Breakpoints (for reference - used in media queries) */
   --bp-sm: 640px;
   --bp-md: 768px;
   --bp-lg: 1024px;

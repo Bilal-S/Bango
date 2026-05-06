@@ -7,7 +7,7 @@ export function formatDate(isoString: string): string {
 }
 
 export function formatConfidence(confidence: number | null): string {
-  if (confidence === null) return '—';
+  if (confidence === null) return '-';
   return `${Math.round(confidence * 100)}%`;
 }
 

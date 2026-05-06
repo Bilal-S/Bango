@@ -193,10 +193,7 @@ pub fn import_ris_file(
         remaining_capacity: remaining,
         validation_errors: errors
             .into_iter()
-            .map(|e| ImportError {
-                record_index: e.record_index,
-                message: e.message,
-            })
+            .map(|e| ImportError { record_index: e.record_index, message: e.message })
             .collect(),
         error_groups,
     })

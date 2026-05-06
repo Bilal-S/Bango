@@ -4,24 +4,24 @@ Plan: Google Stitch UI Design Prompts & MCP Integration for Bango
 Context
 Bango is in the requirements/planning phase with a complete specification but no UI yet. Google Stitch (stitch.withgoogle.com) can generate production-ready UI designs from text prompts, and its MCP server integrates directly with Claude Code for design-to-code handoff. This plan creates the Stitch prompts to generate Bango's UI and recommends an MCP-based workflow.
 
-1. Initial Stitch Prompt — Full Application Shell
+1. Initial Stitch Prompt - Full Application Shell
 Paste this as the first prompt in Google Stitch. It generates the main layout and navigation.
 
-Design a cross-platform desktop app called "Bango" — an AI-powered systematic literature review tool built with Tauri (lightweight native feel, no electron bloat).
+Design a cross-platform desktop app called "Bango" - an AI-powered systematic literature review tool built with Tauri (lightweight native feel, no electron bloat).
 
 CONCEPT: Researchers import bibliography files, define research criteria, and let AI screen hundreds of abstracts to produce a categorized list of included/excluded articles.
 
 SCREENS TO GENERATE (show all on one canvas):
 
-1. **Project Dashboard** — landing screen after opening a project. Shows: project name, article counts by status (Imported / Working / Included / Rejected as pill badges), a "Start Screening" CTA button, recent activity feed, and quick-action cards for "Import RIS", "Edit Criteria", "View PRISMA Diagram".
+1. **Project Dashboard** - landing screen after opening a project. Shows: project name, article counts by status (Imported / Working / Included / Rejected as pill badges), a "Start Screening" CTA button, recent activity feed, and quick-action cards for "Import RIS", "Edit Criteria", "View PRISMA Diagram".
 
-2. **Article List View** — the core data-heavy screen. Left sidebar with status tabs (Imported, Working, Included, Rejected) showing counts. Main area: a filterable/sortable table of articles with columns: checkbox, title, authors, year, journal, status badge, confidence score bar, tags as colored chips, labels as outlined chips. Top toolbar: search bar, sort dropdown, filter panel toggle, bulk actions dropdown.
+2. **Article List View** - the core data-heavy screen. Left sidebar with status tabs (Imported, Working, Included, Rejected) showing counts. Main area: a filterable/sortable table of articles with columns: checkbox, title, authors, year, journal, status badge, confidence score bar, tags as colored chips, labels as outlined chips. Top toolbar: search bar, sort dropdown, filter panel toggle, bulk actions dropdown.
 
-3. **Article Detail Panel** — slides in from the right as a side panel (not a modal). Shows: full title, abstract text in a scrollable block, metadata fields (DOI, journal, year, keywords), AI decision card (Included/Rejected with confidence %, reasoning paragraph, matched criteria list), tags section with editable chips, labels section, audit trail timeline at the bottom with timestamped entries.
+3. **Article Detail Panel** - slides in from the right as a side panel (not a modal). Shows: full title, abstract text in a scrollable block, metadata fields (DOI, journal, year, keywords), AI decision card (Included/Rejected with confidence %, reasoning paragraph, matched criteria list), tags section with editable chips, labels section, audit trail timeline at the bottom with timestamped entries.
 
-4. **Criteria Editor** — split into three sections: Research Aims (list of text entries with add/delete), Inclusion Criteria (each entry has text + priority dropdown: Critical/High/Standard/Low/Optional), Exclusion Criteria (same format). Use colored left-border indicators for priority levels (red=Critical, orange=High, blue=Standard, gray=Low, dashed=Optional).
+4. **Criteria Editor** - split into three sections: Research Aims (list of text entries with add/delete), Inclusion Criteria (each entry has text + priority dropdown: Critical/High/Standard/Low/Optional), Exclusion Criteria (same format). Use colored left-border indicators for priority levels (red=Critical, orange=High, blue=Standard, gray=Low, dashed=Optional).
 
-5. **AI Screening Progress** — shows a progress bar, articles processed / total count, current batch info, a live-updating list of recently screened articles with their decisions, and controls for pause/resume/stop. Include a small stats panel: included count, rejected count, error count.
+5. **AI Screening Progress** - shows a progress bar, articles processed / total count, current batch info, a live-updating list of recently screened articles with their decisions, and controls for pause/resume/stop. Include a small stats panel: included count, rejected count, error count.
 
 VISUAL TONE: Clean, academic, professional. Think Notion meets Zotero. Light theme with a cool gray palette, indigo accent color for primary actions, subtle shadows, rounded corners (8px), generous whitespace. Data-dense but not cluttered. Sidebar navigation is dark (slate-800). Typography: system font stack, clear hierarchy.
 
@@ -38,7 +38,7 @@ Add a PRISMA 2020 Flow Diagram viewer screen. Display the standard four-phase fl
 Screen: LLM Configuration
 Add an LLM Configuration screen. Show a form with: provider dropdown (OpenAI, Google, z.ai, llama.cpp, Ollama, LM Studio, Custom), endpoint URL text input (with placeholder "https://api.openai.com/v1/chat/completions"), model name input, API key input (masked with show/hide toggle), max tokens slider (range 1000–50000, default 4000), concurrency input (default 3), request delay input in ms (default 500). At the bottom: a "Test Connection" button and a status indicator showing connection result. Include a VRAM warning banner: "⚠️ Local providers require 16+ GB VRAM for 50k token context".
 Screen: Tag & Label Management
-Add a Tag & Label Management screen. Two sections side by side. Left: "Tags" — a list of content-category labels (e.g., "machine-learning", "clinical-trial") as colored removable chips, with an input to add new tags. Each tag shows article count. Right: "Labels" — workflow markers (e.g., "priority-read", "disputed") as outlined chips, with same add/delete capability. Both sections have a "Generate from AI" button that triggers tag/label suggestions based on criteria.
+Add a Tag & Label Management screen. Two sections side by side. Left: "Tags" - a list of content-category labels (e.g., "machine-learning", "clinical-trial") as colored removable chips, with an input to add new tags. Each tag shows article count. Right: "Labels" - workflow markers (e.g., "priority-read", "disputed") as outlined chips, with same add/delete capability. Both sections have a "Generate from AI" button that triggers tag/label suggestions based on criteria.
 3. MCP Integration Recommendation
 Setup Steps
 Enable Stitch MCP Server: In Google Stitch settings, enable the MCP server endpoint. This exposes a standard MCP interface that Claude Code, Cursor, and Gemini CLI can connect to.
@@ -105,7 +105,7 @@ After generating designs, create a DESIGN.md in the project root with this struc
 - Border radius: 8px (cards, buttons), 6px (inputs)
 
 ## Components
-[Populate from Stitch output — button variants, badge styles, table styles, etc.]
+[Populate from Stitch output - button variants, badge styles, table styles, etc.]
 4. Verification
 Copy the initial prompt into Google Stitch at https://stitch.withgoogle.com/
 Verify it generates 5 screens on the canvas matching the Bango specification

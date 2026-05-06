@@ -17,7 +17,9 @@ pub struct LlmConfig {
 #[serde(rename_all = "camelCase")]
 pub enum LlmProvider {
     Openai,
+    Anthropic,
     Google,
+    MistralAi,
     ZAi,
     LlamaCpp,
     Ollama,
@@ -30,7 +32,9 @@ impl LlmProvider {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Openai => "openai",
+            Self::Anthropic => "anthropic",
             Self::Google => "google",
+            Self::MistralAi => "mistral_ai",
             Self::ZAi => "z_ai",
             Self::LlamaCpp => "llama_cpp",
             Self::Ollama => "ollama",

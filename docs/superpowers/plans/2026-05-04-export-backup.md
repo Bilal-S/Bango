@@ -660,7 +660,7 @@ pub fn import_project_backup(db_state: State<'_, DbState>, request: ImportProjec
 }
 ```
 
-- [ ] **Step 2: Update `src-tauri/src/commands/mod.rs` — add `pub mod export_cmd;`**
+- [ ] **Step 2: Update `src-tauri/src/commands/mod.rs` - add `pub mod export_cmd;`**
 
 - [ ] **Step 3: Update `src-tauri/src/lib.rs` invoke handler**
 

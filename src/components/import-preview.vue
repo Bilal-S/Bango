@@ -45,7 +45,7 @@ function isExpanded(message: string): boolean {
               {{ isExpanded(group.message) ? '▾' : '▸' }}
             </span>
             <span class="preview__error-text">
-              {{ group.count }} record{{ group.count !== 1 ? 's' : '' }} — {{ group.message }}
+              {{ group.count }} record{{ group.count !== 1 ? 's' : '' }} - {{ group.message }}
             </span>
           </button>
           <div v-if="isExpanded(group.message)" class="preview__error-detail">
@@ -74,8 +74,8 @@ function isExpanded(message: string): boolean {
             <tr v-if="!removedIndices.has(i)">
               <td>{{ article.title }}</td>
               <td>{{ article.authors.join('; ') }}</td>
-              <td>{{ article.publicationYear ?? '—' }}</td>
-              <td>{{ article.journal ?? '—' }}</td>
+              <td>{{ article.publicationYear ?? '-' }}</td>
+              <td>{{ article.journal ?? '-' }}</td>
               <td><button class="preview__remove" @click="$emit('remove', i)">×</button></td>
             </tr>
           </template>

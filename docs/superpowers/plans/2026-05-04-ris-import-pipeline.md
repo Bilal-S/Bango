@@ -55,9 +55,9 @@ src/
 ```
 tests/
 └── assets/
-    ├── Sugar.ris     (10 records, all valid — Czech sugar research)
-    ├── Blue.ris      (13 records, some missing abstracts — blue foods research)
-    └── Green.ris     (7 records, some missing abstracts — green sustainability research)
+    ├── Sugar.ris     (10 records, all valid - Czech sugar research)
+    ├── Blue.ris      (13 records, some missing abstracts - blue foods research)
+    └── Green.ris     (7 records, some missing abstracts - green sustainability research)
 ```
 
 ---
@@ -82,7 +82,7 @@ pub mod validator;
 use std::collections::HashMap;
 
 /// A single parsed RIS record, before conversion to NewArticle.
-/// Fields are optional during parsing — validation happens separately.
+/// Fields are optional during parsing - validation happens separately.
 #[derive(Debug, Clone, Default)]
 pub struct RisRecord {
     pub reference_type: Option<String>,
@@ -160,9 +160,9 @@ git commit -m "feat(ris): add RIS parser types"
 - [ ] **Step 1: Note test asset paths**
 
 Real RIS files are in `tests/assets/`:
-- `Sugar.ris` — 10 records, all valid (Czech sugar research, full metadata)
-- `Blue.ris` — 13 records, some missing abstracts (blue foods research, tests partial import)
-- `Green.ris` — 7 records, some missing abstracts (green sustainability research)
+- `Sugar.ris` - 10 records, all valid (Czech sugar research, full metadata)
+- `Blue.ris` - 13 records, some missing abstracts (blue foods research, tests partial import)
+- `Green.ris` - 7 records, some missing abstracts (green sustainability research)
 
 These will be used for parser and validation tests.
 
@@ -250,7 +250,7 @@ fn test_parse_empty_input() {
 - [ ] **Step 3: Run tests to verify they fail**
 
 Run: `cd src-tauri && cargo test ris_test --test ris_test`
-Expected: FAIL — `parse_ris` not yet implemented
+Expected: FAIL - `parse_ris` not yet implemented
 
 - [ ] **Step 4: Implement `src-tauri/src/ris/parser.rs`**
 
@@ -329,7 +329,7 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
         "AB" => record.abstract_text = Some(value.to_string()),
         "AU" => record.authors.push(value.to_string()),
         "PY" => {
-            // PY can be "2023" or "2023/12/31/" — extract year
+            // PY can be "2023" or "2023/12/31/" - extract year
             let year_str = value.split('/').next().unwrap_or(value);
             record.publication_year = year_str.parse().ok();
         }
@@ -388,7 +388,7 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
 - [ ] **Step 5: Run tests**
 
 Run: `cd src-tauri && cargo test ris_test --test ris_test`
-Expected: PASS — all 4 tests pass
+Expected: PASS - all 4 tests pass
 
 - [ ] **Step 6: Commit**
 
@@ -405,9 +405,9 @@ git commit -m "feat(ris): implement RIS parser with all supported tags"
 - Create: `src-tauri/src/ris/validator.rs`
 - Add tests to: `src-tauri/tests/ris_test.rs`
 
-> **Partial Import Support (added 2026-05-06):** The validator now provides `validate_all_grouped()` which returns validation errors grouped by message for expandable UI summaries. The `ErrorGroup` struct contains `message`, `count`, and `record_indices`. Valid articles can be imported even when some records fail validation — the import command no longer blocks on validation errors.
+> **Partial Import Support (added 2026-05-06):** The validator now provides `validate_all_grouped()` which returns validation errors grouped by message for expandable UI summaries. The `ErrorGroup` struct contains `message`, `count`, and `record_indices`. Valid articles can be imported even when some records fail validation - the import command no longer blocks on validation errors.
 
-> **Dashboard Import Activities (added 2026-05-06):** The dashboard now uses `get_import_activities` — a SQL-aggregated endpoint that returns one row per import file with the correct article count, instead of counting individual audit rows in the frontend. The `ImportActivity` type is in `models/audit.rs`. The `get_recent_audit_entries` endpoint now excludes `action='import'` entries to avoid double-counting.
+> **Dashboard Import Activities (added 2026-05-06):** The dashboard now uses `get_import_activities` - a SQL-aggregated endpoint that returns one row per import file with the correct article count, instead of counting individual audit rows in the frontend. The `ImportActivity` type is in `models/audit.rs`. The `get_recent_audit_entries` endpoint now excludes `action='import'` entries to avoid double-counting.
 
 - [ ] **Step 1: Add failing validation tests to `src-tauri/tests/ris_test.rs`**
 
@@ -473,7 +473,7 @@ fn test_validate_n2_abstract_fallback() {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd src-tauri && cargo test validate --test ris_test`
-Expected: FAIL — `validate_record` not yet implemented
+Expected: FAIL - `validate_record` not yet implemented
 
 - [ ] **Step 3: Implement `src-tauri/src/ris/validator.rs`**
 
@@ -531,7 +531,7 @@ pub fn validate_all(records: &[RisRecord]) -> (Vec<RisRecord>, Vec<RisParseError
 - [ ] **Step 4: Run tests**
 
 Run: `cd src-tauri && cargo test --test ris_test`
-Expected: PASS — all tests pass
+Expected: PASS - all tests pass
 
 - [ ] **Step 5: Commit**
 
@@ -1129,7 +1129,7 @@ fn test_partial_import_blue_ris() {
 - [ ] **Step 10: Run all tests**
 
 Run: `cd src-tauri && cargo test --test ris_test`
-Expected: PASS — all tests pass including real RIS file parsing
+Expected: PASS - all tests pass including real RIS file parsing
 
 - [ ] **Step 11: Commit**
 
@@ -1526,8 +1526,8 @@ defineProps<{
           <tr v-for="(article, i) in articles" :key="i">
             <td>{{ article.title }}</td>
             <td>{{ article.authors.join('; ') }}</td>
-            <td>{{ article.publicationYear ?? '—' }}</td>
-            <td>{{ article.journal ?? '—' }}</td>
+            <td>{{ article.publicationYear ?? '-' }}</td>
+            <td>{{ article.journal ?? '-' }}</td>
           </tr>
         </tbody>
       </table>

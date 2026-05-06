@@ -197,7 +197,7 @@ fn test_critical_exclusion_overrides_all() {
 - [ ] **Step 3: Run tests to verify they fail**
 
 Run: `cd src-tauri && cargo test screening_test --test screening_test`
-Expected: FAIL — modules don't exist
+Expected: FAIL - modules don't exist
 
 - [ ] **Step 4: Implement `src-tauri/src/screening/resolution.rs`**
 
@@ -256,7 +256,7 @@ pub fn resolve_decision(input: &ScreeningInput) -> &'static str {
 - [ ] **Step 5: Run tests**
 
 Run: `cd src-tauri && cargo test screening_test --test screening_test`
-Expected: PASS — all 8 tests pass
+Expected: PASS - all 8 tests pass
 
 - [ ] **Step 6: Register module in `lib.rs` and commit**
 
@@ -368,7 +368,7 @@ fn test_build_prompt_response_format() {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd src-tauri && cargo test screening_test --test screening_test`
-Expected: FAIL — `build_screening_prompt` not defined
+Expected: FAIL - `build_screening_prompt` not defined
 
 - [ ] **Step 3: Implement `src-tauri/src/screening/prompt.rs`**
 
@@ -483,7 +483,7 @@ Return JSON exactly matching this schema:
 - [ ] **Step 4: Run tests**
 
 Run: `cd src-tauri && cargo test screening_test --test screening_test`
-Expected: PASS — all tests pass
+Expected: PASS - all tests pass
 
 - [ ] **Step 5: Commit**
 
@@ -1241,7 +1241,7 @@ commands::screening::estimate_screening_tokens,
 - [ ] **Step 4: Run `cargo check`**
 
 Run: `cd src-tauri && cargo check`
-Expected: PASS (may need stubs for criteria_repo and llm_config_repo — those are created in Plan 4)
+Expected: PASS (may need stubs for criteria_repo and llm_config_repo - those are created in Plan 4)
 
 - [ ] **Step 5: Commit**
 
@@ -1293,7 +1293,7 @@ export function useScreening() {
   });
 
   const estimatedTimeRemaining = computed((): string => {
-    if (!progress.value?.estimatedRemainingMs) return '—';
+    if (!progress.value?.estimatedRemainingMs) return '-';
     const seconds = Math.ceil(progress.value.estimatedRemainingMs / 1000);
     if (seconds < 60) return `${seconds}s`;
     const minutes = Math.floor(seconds / 60);
@@ -1305,7 +1305,7 @@ export function useScreening() {
     try {
       tokenWarning.value = await tauriCommand<string | null>('estimate_screening_tokens');
     } catch (e) {
-      // Ignore — may not have config yet
+      // Ignore - may not have config yet
     }
   }
 

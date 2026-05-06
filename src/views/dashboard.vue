@@ -181,7 +181,7 @@ function navigateTo(route: string): void {
                         {{ entry.count }} articles
                       </span>
                       <span v-if="entry.details" class="activity-item__details">
-                        — {{ entry.details }}
+                        - {{ entry.details }}
                       </span>
                     </p>
                     <p class="activity-item__time">

@@ -16,7 +16,7 @@ pub fn get_recent_audit_entries(
     conn: &Connection,
     limit: usize,
 ) -> Result<Vec<AuditEntry>, AppError> {
-    // Exclude 'import' entries — those are served by get_import_activities instead
+    // Exclude 'import' entries - those are served by get_import_activities instead
     let mut stmt = conn.prepare(
         "SELECT id, article_id, timestamp, action, from_status, to_status, details, source \
          FROM audit_entries WHERE action != 'import' ORDER BY timestamp DESC LIMIT ?1",

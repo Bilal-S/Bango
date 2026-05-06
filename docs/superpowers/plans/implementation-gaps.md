@@ -1,7 +1,7 @@
-# Implementation Gaps — v3 Design Reference vs Current Code
+# Implementation Gaps - v3 Design Reference vs Current Code
 
 > Generated from audit of `docs/design-reference/` HTML files against current Vue views in `.worktrees/v3-implementation`.
-> These are features visible in the Stitch reference designs but not yet implemented. Do NOT build them now — document for future planning.
+> These are features visible in the Stitch reference designs but not yet implemented. Do NOT build them now - document for future planning.
 
 ---
 
@@ -9,7 +9,7 @@
 
 **Reference:** `docs/design-reference/07-dedup-review.html`
 
-**Gap severity:** HIGH — current implementation is a basic pair listing; reference has a rich comparison UI.
+**Gap severity:** HIGH - current implementation is a basic pair listing; reference has a rich comparison UI.
 
 | Missing Feature | Reference Description |
 |----------------|----------------------|
@@ -28,7 +28,7 @@
 
 **Reference:** `docs/design-reference/05-screening-progress.html`
 
-**Gap severity:** MEDIUM — current has basic progress/stats; reference adds a live decision stream.
+**Gap severity:** MEDIUM - current has basic progress/stats; reference adds a live decision stream.
 
 | Missing Feature | Reference Description |
 |----------------|----------------------|
@@ -36,8 +36,8 @@
 | Stream item structure | Each item: timestamp (mono font), article title (truncated), status badge (Included/Rejected), confidence mini-bar |
 | Live indicator | Animated ping dot (`animate-ping`) with "Live" label showing screening is active |
 | Stream scroll mask | CSS `mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)` for fade effect at edges |
-| Control buttons | Pause button (primary style) and Stop button (secondary with red icon) — current may have different button styles |
-| Decorative background | Background has blurred circles (`bg-indigo-50/50 rounded-tl-full blur-3xl`) — low priority visual element |
+| Control buttons | Pause button (primary style) and Stop button (secondary with red icon) - current may have different button styles |
+| Decorative background | Background has blurred circles (`bg-indigo-50/50 rounded-tl-full blur-3xl`) - low priority visual element |
 
 ---
 
@@ -45,7 +45,7 @@
 
 **Reference:** `docs/design-reference/09-prisma-diagram.html`
 
-**Gap severity:** LOW — core diagram exists but missing one toggle feature.
+**Gap severity:** LOW - core diagram exists but missing one toggle feature.
 
 | Missing Feature | Reference Description |
 |----------------|----------------------|
@@ -53,7 +53,7 @@
 | Exclusion reason list | When toggled on: `text-[11px] leading-[16px] text-on-surface-variant/80 list-disc pl-4 space-y-1` with individual reasons |
 | Side boxes with dashed borders | Exclusion/duplicate count boxes use `border border-outline-variant border-dashed` styling |
 | Connector arrows | Arrow icons (`arrow_right`, `arrow_drop_down`) using Material Symbols between flow boxes |
-| Export buttons style | `flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg` — may differ from current |
+| Export buttons style | `flex items-center gap-2 px-4 py-2 border border-outline-variant rounded-lg` - may differ from current |
 
 ---
 
@@ -61,13 +61,13 @@
 
 **Reference:** `docs/design-reference/01-dashboard.html`
 
-**Gap severity:** LOW — structure exists but some visual elements are simplified.
+**Gap severity:** LOW - structure exists but some visual elements are simplified.
 
 | Missing Feature | Reference Description |
 |----------------|----------------------|
 | Bento grid stat cards | Reference uses a more elaborate card layout with `bg-white border border-slate-200 rounded-xl p-5 shadow-sm` with hover effects (`hover:border-indigo-200`) |
 | Quick-action card hover effects | Reference has `group-hover:bg-indigo-600 group-hover:text-white` on icon circles |
-| System status card (dark) | Reference has a dark card (`bg-slate-900 text-white`) for system status — may not be v3 scope |
+| System status card (dark) | Reference has a dark card (`bg-slate-900 text-white`) for system status - may not be v3 scope |
 | Activity timeline styling | Reference has more elaborate timeline items with colored dot indicators and relative timestamps |
 
 ---
@@ -76,7 +76,7 @@
 
 **Reference:** `docs/design-reference/02-ris-import.html`
 
-**Gap severity:** LOW — stepper and drop zone exist but reference has richer preview.
+**Gap severity:** LOW - stepper and drop zone exist but reference has richer preview.
 
 | Missing Feature | Reference Description |
 |----------------|----------------------|
@@ -90,7 +90,7 @@
 
 **Reference:** All 10 HTML files
 
-**Gap severity:** LOW — structure exists, icons need updating.
+**Gap severity:** LOW - structure exists, icons need updating.
 
 | Missing Feature | Reference Description |
 |----------------|----------------------|
@@ -105,7 +105,7 @@
 
 **Reference:** Most HTML files include a top header bar.
 
-**Gap severity:** LOW — current app shell may not have this component.
+**Gap severity:** LOW - current app shell may not have this component.
 
 | Missing Feature | Reference Description |
 |----------------|----------------------|
@@ -113,4 +113,4 @@
 | Global search input | `pl-10 pr-4 py-1.5 bg-slate-100 border-transparent focus:bg-white focus:border-indigo-600 rounded-lg text-sm w-64` |
 | Notification/help buttons | Icon buttons in header right side |
 
-Note: The top app bar may be out of v3 scope per `00-design-patterns.md` — some header elements are marked as "skip" (Projects/Archive/Team tabs, AI Assistant button). Verify with stakeholder.
+Note: The top app bar may be out of v3 scope per `00-design-patterns.md` - some header elements are marked as "skip" (Projects/Archive/Team tabs, AI Assistant button). Verify with stakeholder.

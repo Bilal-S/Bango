@@ -1,8 +1,132 @@
 <script setup lang="ts">
+import { watch, ref, computed } from 'vue';
 import { useLlmConfig } from '@/composables/use-llm-config';
 
 const { config, testing, testResult, showApiKey, testConnection, revert, isLocalProvider } =
   useLlmConfig();
+
+const providerDefaults: Record<string, { url: string; models: string[] }> = {
+  openai: {
+    url: 'https://api.openai.com/v1',
+    models: [
+      'gpt-5-nano',
+      'gpt-5-mini',
+      'gpt-5',
+      'gpt-4.1',
+      'gpt-realtime',
+      'gpt-5-codex',
+      'gpt-5.4',
+      'gpt-5.4-pro',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5.3-codex',
+      'gpt-5.2-codex',
+      'gpt-5.1-codex',
+      'gpt-5.1-codex-max',
+    ],
+  },
+  anthropic: {
+    url: 'https://api.anthropic.com/v1',
+    models: [
+      'claude-haiku-4-5-20251001',
+      'claude-3-5-sonnet-20241022',
+      'claude-opus-4',
+      'claude-sonnet-4',
+      'claude-3-7-sonnet-20250219',
+      'claude-3-5-haiku-20241022',
+      'claude-3-haiku-20240307',
+      'claude-opus-4-6',
+      'claude-opus-4-5',
+      'claude-opus-4-1',
+      'claude-sonnet-4-6',
+      'claude-sonnet-4-5',
+    ],
+  },
+  google: {
+    url: 'https://generativelanguage.googleapis.com/v1beta',
+    models: [
+      'gemini-3-flash',
+      'gemini-3-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-2.0-flash-001',
+      'gemini-2.0-flash-lite-001',
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-flash-image',
+      'gemini-2.5-flash-live',
+      'gemini-2.5-pro-tts',
+      'gemini-2.5-flash-tts',
+      'gemini-2.5-computer-use',
+      'gemini-2.5-deep-think',
+      'gemini-3-pro-image',
+      'gemini-3.1-flash',
+      'gemini-3.1-flash-lite',
+      'gemini-3.1-flash-live',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-pro',
+    ],
+  },
+  mistral_ai: {
+    url: 'https://api.mistral.ai/v1',
+    models: [
+      'mistral-nemo',
+      'mistral-large-2407',
+      'mistral-small-2402',
+      'ministral-8b-2410',
+      'ministral-3b-2410',
+      'codestral-2501',
+    ],
+  },
+  z_ai: {
+    url: 'https://api.z.ai/api/paas/v4',
+    models: [
+      'GLM-4-Flash',
+      'glm-4.5',
+      'glm-4.5-air',
+      'glm-4.6',
+      'glm-4.7',
+      'glm-5',
+      'glm-5-turbo',
+      'glm-5.1',
+    ],
+  },
+  ollama: {
+    url: 'http://localhost:11434/v1',
+    models: [],
+  },
+  lm_studio: {
+    url: 'http://localhost:1234/v1',
+    models: [],
+  },
+  llama_cpp: {
+    url: 'http://localhost:8080/v1',
+    models: [],
+  },
+};
+
+const isOtherModel = ref(false);
+
+const availableModels = computed(() => {
+  return providerDefaults[config.value.provider]?.models || [];
+});
+
+watch(
+  () => config.value.provider,
+  (newProvider, oldProvider) => {
+    if (oldProvider && newProvider !== oldProvider) {
+      const defaults = providerDefaults[newProvider];
+      if (defaults) {
+        config.value.endpointUrl = defaults.url;
+        config.value.modelName = defaults.models[0] || '';
+        isOtherModel.value = defaults.models.length === 0;
+      } else {
+        config.value.endpointUrl = '';
+        config.value.modelName = '';
+        isOtherModel.value = true;
+      }
+    }
+  }
+);
 </script>
 
 <template>
@@ -39,7 +163,9 @@ const { config, testing, testResult, showApiKey, testConnection, revert, isLocal
             <div class="field__select-wrapper">
               <select v-model="config.provider" class="field__select">
                 <option value="openai">OpenAI</option>
-                <option value="google">Google</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="google">Google Gemini</option>
+                <option value="mistral_ai">Mistral AI</option>
                 <option value="z_ai">z.ai</option>
                 <option value="llama_cpp">llama.cpp</option>
                 <option value="ollama">Ollama</option>
@@ -65,12 +191,47 @@ const { config, testing, testResult, showApiKey, testConnection, revert, isLocal
           <div class="field-row">
             <div class="field">
               <label class="field__label">Model Name</label>
-              <input
-                v-model="config.modelName"
-                type="text"
-                class="field__input field__input--mono"
-                placeholder="gpt-4-turbo"
-              />
+              <div v-if="!isOtherModel && availableModels.length > 0" class="field__select-wrapper">
+                <select
+                  v-model="config.modelName"
+                  class="field__select field__select--mono"
+                  @change="
+                    (e) => {
+                      if ((e.target as HTMLSelectElement).value === 'other') {
+                        isOtherModel = true;
+                        config.modelName = '';
+                      }
+                    }
+                  "
+                >
+                  <option v-for="model in availableModels" :key="model" :value="model">
+                    {{ model }}
+                  </option>
+                  <option value="other">Other...</option>
+                </select>
+                <span class="material-symbols-outlined field__select-arrow">expand_more</span>
+              </div>
+              <div v-else style="display: flex; gap: 0.5rem">
+                <input
+                  v-model="config.modelName"
+                  type="text"
+                  class="field__input field__input--mono"
+                  placeholder="e.g. custom-model-v1"
+                  style="flex: 1"
+                />
+                <button
+                  v-if="availableModels.length > 0"
+                  class="btn btn--secondary"
+                  title="Back to list"
+                  style="padding: 0 0.75rem"
+                  @click="
+                    isOtherModel = false;
+                    config.modelName = availableModels[0];
+                  "
+                >
+                  <span class="material-symbols-outlined">list</span>
+                </button>
+              </div>
             </div>
             <div class="field">
               <label class="field__label">API Key</label>

@@ -14,7 +14,7 @@ fn asset_path(name: &str) -> PathBuf {
 #[test]
 fn test_dedup_no_false_positives_on_real_data() {
     // 10A has 2 records (Toufaily + Schuetz), 11A has 1 record (Alibasic)
-    // All are distinct — no duplicates should be found
+    // All are distinct - no duplicates should be found
     let content1 =
         fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
     let content2 = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris"))
@@ -38,7 +38,7 @@ fn test_dedup_no_false_positives_on_real_data() {
         })
         .collect();
 
-    // 3 unique articles — no duplicates expected
+    // 3 unique articles - no duplicates expected
     assert_eq!(articles.len(), 3);
     let result = engine::run_dedup(&articles);
     assert_eq!(result.exact_duplicates.len(), 0, "Should not find exact duplicates in real data");

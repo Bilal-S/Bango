@@ -128,7 +128,9 @@ export interface LlmConfig {
 
 export type LlmProvider =
   | 'openai'
+  | 'anthropic'
   | 'google'
+  | 'mistral_ai'
   | 'z_ai'
   | 'llama_cpp'
   | 'ollama'

@@ -375,7 +375,7 @@ pub fn update_article_notes(db_state: State<'_, DbState>, id: String, notes: Str
 }
 ```
 
-- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` — add `pub mod articles;`**
+- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` - add `pub mod articles;`**
 
 - [ ] **Step 4: Update `src-tauri/src/lib.rs` invoke handler**
 
@@ -550,7 +550,7 @@ const percentage = computed(() => props.confidence !== null ? Math.round(props.c
         :style="{ width: `${percentage}%` }"
       />
     </div>
-    <span class="confidence-bar__label">{{ confidence !== null ? `${percentage}%` : '—' }}</span>
+    <span class="confidence-bar__label">{{ confidence !== null ? `${percentage}%` : '-' }}</span>
   </div>
 </template>
 
@@ -703,7 +703,7 @@ defineEmits<{ select: [id: string] }>();
       >
         <td class="article-table__title">{{ article.title }}</td>
         <td>{{ article.authors.slice(0, 2).join('; ') }}{{ article.authors.length > 2 ? ' et al.' : '' }}</td>
-        <td>{{ article.publicationYear ?? '—' }}</td>
+        <td>{{ article.publicationYear ?? '-' }}</td>
         <td><StatusBadge :status="article.status" /></td>
         <td><ConfidenceBar :confidence="article.aiConfidence" /></td>
       </tr>
@@ -809,7 +809,7 @@ function handleUpdate(key: string, value: unknown): void {
 
       <div v-if="selectedArticle.aiDecision" class="detail__section detail__ai-card">
         <h3>AI Decision: <StatusBadge :status="selectedArticle.status" /></h3>
-        <div class="detail__confidence">Confidence: {{ selectedArticle.aiConfidence ? Math.round(selectedArticle.aiConfidence * 100) + '%' : '—' }}</div>
+        <div class="detail__confidence">Confidence: {{ selectedArticle.aiConfidence ? Math.round(selectedArticle.aiConfidence * 100) + '%' : '-' }}</div>
         <p class="detail__reasoning">{{ selectedArticle.aiReasoning }}</p>
       </div>
 

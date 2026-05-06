@@ -31,4 +31,4 @@ impl Serialize for AppError {
 }
 
 // InvokeError has a blanket From<T: Serialize> impl, so AppError (which
-// implements Serialize) is automatically convertible — no manual impl needed.
+// implements Serialize) is automatically convertible - no manual impl needed.

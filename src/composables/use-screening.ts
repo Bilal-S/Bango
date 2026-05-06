@@ -25,7 +25,7 @@ export function useScreening() {
   });
 
   const estimatedTimeRemaining = computed((): string => {
-    if (!progress.value?.estimatedRemainingMs) return '—';
+    if (!progress.value?.estimatedRemainingMs) return '-';
     const seconds = Math.ceil(progress.value.estimatedRemainingMs / 1000);
     if (seconds < 60) return `${seconds}s`;
     const minutes = Math.floor(seconds / 60);

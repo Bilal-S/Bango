@@ -620,7 +620,7 @@ pub fn get_prisma_svg(db_state: State<'_, DbState>) -> Result<String, AppError> 
 }
 ```
 
-- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` — add `pub mod summary;` and `pub mod prisma;`**
+- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` - add `pub mod summary;` and `pub mod prisma;`**
 
 - [ ] **Step 4: Update `src-tauri/src/lib.rs` invoke handler**
 

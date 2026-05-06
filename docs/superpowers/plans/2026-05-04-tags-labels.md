@@ -162,7 +162,7 @@ pub fn create_tags_batch(conn: &Connection, names: &[String], source: &str) -> R
 }
 ```
 
-- [ ] **Step 2: Update `src-tauri/src/db/mod.rs` — add `pub mod tag_repo;` and `pub mod label_repo;`**
+- [ ] **Step 2: Update `src-tauri/src/db/mod.rs` - add `pub mod tag_repo;` and `pub mod label_repo;`**
 
 - [ ] **Step 3: Write failing tests in `src-tauri/tests/tags_labels_test.rs`**
 
@@ -376,7 +376,7 @@ fn test_delete_label() {
 
 #[test]
 fn test_tag_label_isolation() {
-    // Tags and labels live in separate tables — names can overlap
+    // Tags and labels live in separate tables - names can overlap
     let conn = create_connection().unwrap();
     run_migrations(&conn).unwrap();
 
@@ -648,9 +648,9 @@ Rules:
 }
 ```
 
-- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` — add `pub mod tags;` and `pub mod labels;`**
+- [ ] **Step 3: Update `src-tauri/src/commands/mod.rs` - add `pub mod tags;` and `pub mod labels;`**
 
-- [ ] **Step 4: Update `src-tauri/src/lib.rs` invoke handler — add all tag/label commands**
+- [ ] **Step 4: Update `src-tauri/src/lib.rs` invoke handler - add all tag/label commands**
 
 ```rust
 commands::tags::get_tags,
@@ -691,7 +691,7 @@ git commit -m "feat(tags-labels): add Tauri commands for tag/label CRUD and AI s
 
 > **Design reference:** Before implementing, read `docs/design-reference/08-tags-labels.html` and `docs/design-reference/08-tags-labels.png`. Extract the exact layout structure, spacing, and component hierarchy from the Stitch HTML. Implement only v3-scoped elements per `docs/design-reference/00-design-patterns.md` Section 14.
 
-- [ ] **Step 1: Create `src/components/tag-chip.vue`** — Hash-based multi-color solid chip per design reference
+- [ ] **Step 1: Create `src/components/tag-chip.vue`** - Hash-based multi-color solid chip per design reference
 
 ```vue
 <script setup lang="ts">
@@ -725,7 +725,7 @@ function getColor(name: string) {
 </template>
 ```
 
-- [ ] **Step 2: Create `src/components/label-chip.vue`** — Outlined chip with colored dot indicator per design reference
+- [ ] **Step 2: Create `src/components/label-chip.vue`** - Outlined chip with colored dot indicator per design reference
 
 ```vue
 <script setup lang="ts">
@@ -759,7 +759,7 @@ function getDotColor(name: string) {
 </template>
 ```
 
-- [ ] **Step 3: Create `src/views/tag-label-management.vue`** — Uses Pinia stores with error handling, Tailwind utilities, design-reference layout
+- [ ] **Step 3: Create `src/views/tag-label-management.vue`** - Uses Pinia stores with error handling, Tailwind utilities, design-reference layout
 
 > **Key patterns:** Uses `useTagsStore`/`useLabelsStore` Pinia stores (not raw `tauriCommand`). Includes `error`/`loading` states with retry UI. Layout uses Tailwind with `@theme` tokens from `base.css`. No scoped CSS needed.
 
@@ -985,7 +985,7 @@ async function retry(): Promise<void> {
 
 > **Note:** The Labels Panel template mirrors the Tags Panel with `labelsStore` bindings and `secondary` color accents. See the actual source file `src/views/tag-label-management.vue` for the complete template.
 
-- [ ] **Step 3b: Update `src/stores/tags.ts` and `src/stores/labels.ts`** — Add error handling
+- [ ] **Step 3b: Update `src/stores/tags.ts` and `src/stores/labels.ts`** - Add error handling
 
 Both stores must wrap `tauriCommand` calls in `try/catch`, expose an `error` ref, and set it on failure. See current source files for exact implementation. Key pattern:
 

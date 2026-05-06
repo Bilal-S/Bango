@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 /// A single parsed RIS record, before conversion to NewArticle.
-/// Fields are optional during parsing — validation happens separately.
+/// Fields are optional during parsing - validation happens separately.
 #[derive(Debug, Clone, Default)]
 pub struct RisRecord {
     pub reference_type: Option<String>,

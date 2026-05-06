@@ -44,8 +44,39 @@ pub async fn send_chat_completion(
 
     let api_key = config.api_key_encrypted.as_deref().unwrap_or("");
 
+    let base_url = config.endpoint_url.trim_end_matches('/');
+    let endpoint = match config.provider {
+        crate::models::llm_config::LlmProvider::Openai
+        | crate::models::llm_config::LlmProvider::MistralAi
+        | crate::models::llm_config::LlmProvider::ZAi
+        | crate::models::llm_config::LlmProvider::LlamaCpp
+        | crate::models::llm_config::LlmProvider::Ollama
+        | crate::models::llm_config::LlmProvider::LmStudio => {
+            if base_url.ends_with("/chat/completions") {
+                base_url.to_string()
+            } else {
+                format!("{}/chat/completions", base_url)
+            }
+        }
+        crate::models::llm_config::LlmProvider::Google => {
+            if base_url.contains(":generateContent") {
+                base_url.to_string()
+            } else {
+                format!("{}/models/{}:generateContent", base_url, config.model_name)
+            }
+        }
+        crate::models::llm_config::LlmProvider::Anthropic => {
+            if base_url.ends_with("/messages") {
+                base_url.to_string()
+            } else {
+                format!("{}/messages", base_url)
+            }
+        }
+        crate::models::llm_config::LlmProvider::Custom => base_url.to_string(),
+    };
+
     let response = client
-        .post(&config.endpoint_url)
+        .post(&endpoint)
         .header("Content-Type", "application/json")
         .bearer_auth(api_key)
         .json(&request)

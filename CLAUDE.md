@@ -1,4 +1,4 @@
-# Bango — Project Coding Rules
+# Bango - Project Coding Rules
 
 ## General
 
@@ -37,11 +37,11 @@
 
 ### Component Style
 - Always use `<script setup lang="ts">` with Composition API.
-- No Options API. No `defineComponent()` — use `<script setup>` exclusively.
+- No Options API. No `defineComponent()` - use `<script setup>` exclusively.
 - One component per file. File name in `kebab-case`: `article-list.vue`, `screening-panel.vue`.
 
 ### Type Safety
-- `strict: true` in tsconfig. No `any` — use `unknown` + type narrowing or proper interfaces.
+- `strict: true` in tsconfig. No `any` - use `unknown` + type narrowing or proper interfaces.
 - Define all API response shapes as TypeScript interfaces in a dedicated types file.
 - Use `defineProps<T>()` with generic syntax for component props.
 
@@ -53,20 +53,20 @@
 - Composables: prefixed with `use` (`useArticles.ts`, `useScreening.ts`).
 
 ### File Organization
-- `src/components/` — reusable Vue components.
-- `src/views/` — page-level components.
-- `src/composables/` — Vue composables (shared reactive logic).
-- `src/types/` — TypeScript interfaces and type definitions.
-- `src/utils/` — pure utility functions (formatters, validators).
-- `src/stores/` — Pinia stores for global state management.
+- `src/components/` - reusable Vue components.
+- `src/views/` - page-level components.
+- `src/composables/` - Vue composables (shared reactive logic).
+- `src/types/` - TypeScript interfaces and type definitions.
+- `src/utils/` - pure utility functions (formatters, validators).
+- `src/stores/` - Pinia stores for global state management.
 
 ## Security
 
 - No secrets, API keys, or credentials in source code.
 - API keys are encrypted with AES-256-GCM in local storage.
 - Validate all user input at system boundaries (RIS import, criteria text, LLM config).
-- Use `serde` deserialization with explicit field types — never deserialize untrusted input as `serde_json::Value` without validation.
-- RIS parser must handle malformed input gracefully — never crash on bad data.
+- Use `serde` deserialization with explicit field types - never deserialize untrusted input as `serde_json::Value` without validation.
+- RIS parser must handle malformed input gracefully - never crash on bad data.
 
 ## Testing
 

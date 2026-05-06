@@ -2,7 +2,7 @@
 @import './tokens.css';
 
 @theme {
-  /* Colors — Scholarly Precision */
+  /* Colors - Scholarly Precision */
   --color-surface: #fcf8ff;
   --color-surface-dim: #dcd8e5;
   --color-surface-bright: #fcf8ff;
@@ -51,7 +51,7 @@
   --color-on-background: #1b1b24;
   --color-surface-variant: #e4e1ee;
 
-  /* Typography — Font Families */
+  /* Typography - Font Families */
   --font-display: Inter, system-ui, -apple-system, sans-serif;
   --font-h1: Inter, system-ui, -apple-system, sans-serif;
   --font-h2: Inter, system-ui, -apple-system, sans-serif;
@@ -60,7 +60,7 @@
   --font-label-caps: Inter, system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 
-  /* Typography — Font Sizes (creates text-* utilities) */
+  /* Typography - Font Sizes (creates text-* utilities) */
   --font-size-display: 24px;
   --font-size-h1: 20px;
   --font-size-h2: 16px;
@@ -149,7 +149,7 @@
       'opsz' 24;
   }
 
-  /* Shared page title — used as the main h1 on every screen */
+  /* Shared page title - used as the main h1 on every screen */
   .page-title {
     font-size: var(--font-size-display);
     font-weight: var(--font-weight-semibold);
