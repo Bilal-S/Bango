@@ -170,7 +170,7 @@ pub fn insert_articles_batch(
 }
 
 pub fn get_article_by_id(conn: &Connection, id: &str) -> Result<Article, AppError> {
-    conn.query_row("SELECT * FROM articles WHERE id = ?1", [id], row_to_article).map_err(
+    conn.query_row("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE id = ?1", [id], row_to_article).map_err(
         |e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
                 AppError::NotFound(format!("Article {} not found", id))
@@ -181,7 +181,7 @@ pub fn get_article_by_id(conn: &Connection, id: &str) -> Result<Article, AppErro
 }
 
 fn get_article_by_id_tx(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<Article, AppError> {
-    tx.query_row("SELECT * FROM articles WHERE id = ?1", [id], row_to_article).map_err(
+    tx.query_row("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE id = ?1", [id], row_to_article).map_err(
         |e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
                 AppError::NotFound(format!("Article {} not found", id))
@@ -192,21 +192,21 @@ fn get_article_by_id_tx(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<Arti
 }
 
 pub fn get_all_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
-    let mut stmt = conn.prepare("SELECT * FROM articles ORDER BY imported_at DESC")?;
+    let mut stmt = conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles ORDER BY imported_at DESC")?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Article>, AppError> {
     let mut stmt =
-        conn.prepare("SELECT * FROM articles WHERE status = ?1 ORDER BY imported_at DESC")?;
+        conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = ?1 ORDER BY imported_at DESC")?;
     let rows = stmt.query_map([status], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn get_imported_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT * FROM articles WHERE status = 'imported' AND duplicate_of IS NULL ORDER BY imported_at DESC"
+        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'imported' AND duplicate_of IS NULL ORDER BY imported_at DESC"
     )?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -214,7 +214,7 @@ pub fn get_imported_articles(conn: &Connection) -> Result<Vec<Article>, AppError
 
 pub fn get_working_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let mut stmt =
-        conn.prepare("SELECT * FROM articles WHERE status = 'working' ORDER BY imported_at DESC")?;
+        conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'working' ORDER BY imported_at DESC")?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -250,7 +250,7 @@ pub struct ArticleQuery {
 }
 
 pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
-    let mut sql = String::from("SELECT * FROM articles WHERE duplicate_of IS NULL");
+    let mut sql = String::from("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE duplicate_of IS NULL");
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ref status) = query.status {
@@ -291,9 +291,13 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
     let sort_by = query.sort_by.as_deref().unwrap_or("imported_at");
     let sort_dir = query.sort_dir.as_deref().unwrap_or("DESC");
     let order_clause = match sort_by {
-        "title" => format!(" ORDER BY title {sort_dir}"),
+        "title" => format!(" ORDER BY title COLLATE NOCASE {sort_dir}"),
+        "authors" => format!(" ORDER BY authors COLLATE NOCASE {sort_dir} NULLS LAST"),
+        "journal" => format!(" ORDER BY journal COLLATE NOCASE {sort_dir} NULLS LAST"),
         "publicationYear" => format!(" ORDER BY publication_year {sort_dir} NULLS LAST"),
+        "status" => format!(" ORDER BY status COLLATE NOCASE {sort_dir}"),
         "aiConfidence" => format!(" ORDER BY ai_confidence {sort_dir} NULLS LAST"),
+        "importedAt" => format!(" ORDER BY imported_at {sort_dir}"),
         _ => format!(" ORDER BY imported_at {sort_dir}"),
     };
     sql.push_str(&order_clause);
@@ -336,11 +340,26 @@ pub fn update_article_status(
 pub fn update_article_tags(
     conn: &Connection,
     article_id: &str,
-    tag_ids: &[String],
+    tag_names: &[String],
 ) -> Result<(), AppError> {
     conn.execute("DELETE FROM article_tags WHERE article_id = ?1", [article_id])?;
 
-    for tag_id in tag_ids {
+    for tag_name in tag_names {
+        let existing_id: Option<String> = conn
+            .query_row("SELECT id FROM tags WHERE name = ?1", [tag_name], |row| row.get(0))
+            .ok();
+
+        let tag_id = if let Some(id) = existing_id {
+            id
+        } else {
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO tags (id, name, source) VALUES (?1, ?2, 'user_created')",
+                params![id, tag_name],
+            )?;
+            id
+        };
+
         conn.execute(
             "INSERT INTO article_tags (article_id, tag_id) VALUES (?1, ?2)",
             params![article_id, tag_id],
@@ -353,11 +372,26 @@ pub fn update_article_tags(
 pub fn update_article_labels(
     conn: &Connection,
     article_id: &str,
-    label_ids: &[String],
+    label_names: &[String],
 ) -> Result<(), AppError> {
     conn.execute("DELETE FROM article_labels WHERE article_id = ?1", [article_id])?;
 
-    for label_id in label_ids {
+    for label_name in label_names {
+        let existing_id: Option<String> = conn
+            .query_row("SELECT id FROM labels WHERE name = ?1", [label_name], |row| row.get(0))
+            .ok();
+
+        let label_id = if let Some(id) = existing_id {
+            id
+        } else {
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO labels (id, name, source) VALUES (?1, ?2, 'user_created')",
+                params![id, label_name],
+            )?;
+            id
+        };
+
         conn.execute(
             "INSERT INTO article_labels (article_id, label_id) VALUES (?1, ?2)",
             params![article_id, label_id],
@@ -544,11 +578,48 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         ai_confidence: row.get("ai_confidence")?,
         matched_inclusion_criteria: matched_inclusion,
         matched_exclusion_criteria: matched_exclusion,
-        tags: vec![],
-        labels: vec![],
+        tags: row
+            .get::<_, Option<String>>("tags_json")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
+        labels: row
+            .get::<_, Option<String>>("labels_json")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
         manual_override: manual_override_int != 0,
         import_source: row.get("import_source")?,
         imported_at: row.get("imported_at")?,
         screened_at: row.get("screened_at")?,
     })
+}
+
+pub fn get_article_counts(
+    conn: &Connection,
+) -> Result<crate::models::article::ArticleCounts, AppError> {
+    let mut stmt = conn.prepare("SELECT status, COUNT(*) FROM articles GROUP BY status")?;
+    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?)))?;
+
+    let mut counts = crate::models::article::ArticleCounts {
+        all: 0,
+        imported: 0,
+        working: 0,
+        included: 0,
+        rejected: 0,
+    };
+
+    for (status, count) in rows.flatten() {
+        counts.all += count;
+        match status.as_str() {
+            "imported" => counts.imported = count,
+            "working" => counts.working = count,
+            "included" => counts.included = count,
+            "rejected" => counts.rejected = count,
+            _ => {}
+        }
+    }
+    Ok(counts)
 }

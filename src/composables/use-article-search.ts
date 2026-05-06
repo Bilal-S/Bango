@@ -1,6 +1,6 @@
 import { ref, reactive, computed } from 'vue';
 import { tauriCommand } from './use-tauri-command';
-import type { Article, AuditEntry, ArticleStatus } from '@/types';
+import type { Article, AuditEntry, ArticleStatus, ArticleCounts } from '@/types';
 
 export type TitleMatchType = 'starts_with' | 'contains' | 'ends_with' | 'exact';
 
@@ -74,19 +74,21 @@ export function useArticleSearch() {
     screeningErrorsOnly: false,
   });
 
-  const statusCounts = computed(() => {
-    const counts: Record<string, number> = {
-      all: articles.value.length,
-      imported: 0,
-      working: 0,
-      included: 0,
-      rejected: 0,
-    };
-    for (const article of articles.value) {
-      counts[article.status] = (counts[article.status] ?? 0) + 1;
-    }
-    return counts;
+  const statusCounts = ref<ArticleCounts>({
+    all: 0,
+    imported: 0,
+    working: 0,
+    included: 0,
+    rejected: 0,
   });
+
+  async function fetchCounts(): Promise<void> {
+    try {
+      statusCounts.value = await tauriCommand<ArticleCounts>('get_article_counts', {});
+    } catch (e: unknown) {
+      console.error('Failed to fetch article counts', e);
+    }
+  }
 
   const allAuthors = computed((): string[] => {
     const authorSet = new Set<string>();
@@ -121,6 +123,7 @@ export function useArticleSearch() {
   function setStatusTab(tab: StatusTab): void {
     activeStatusTab.value = tab;
     query.status = tab === 'all' ? null : tab;
+    void search();
   }
 
   function toggleSort(column: string): void {
@@ -132,6 +135,7 @@ export function useArticleSearch() {
     }
     query.sortBy = sortColumn.value;
     query.sortDir = sortDirection.value;
+    void search();
   }
 
   function toggleFilters(): void {
@@ -165,6 +169,7 @@ export function useArticleSearch() {
     error.value = null;
     try {
       articles.value = await tauriCommand<Article[]>('query_articles', { query });
+      await fetchCounts();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {

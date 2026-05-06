@@ -29,14 +29,6 @@ const emit = defineEmits<{
         <span class="material-symbols-outlined text-[18px]">filter_list</span>
         Filter
       </button>
-
-      <!-- Sort indicator -->
-      <div
-        class="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-600 text-sm cursor-default"
-      >
-        <span class="material-symbols-outlined text-[18px]">sort</span>
-        Sort: Relevance
-      </div>
     </div>
 
     <div class="flex items-center gap-2">

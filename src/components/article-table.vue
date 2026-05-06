@@ -23,6 +23,7 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
+  { key: 'index', label: '#', width: 'w-12', responsiveClass: 'col-index' },
   { key: 'title', label: 'Title' },
   { key: 'authors', label: 'Authors' },
   { key: 'publicationYear', label: 'Year', width: 'w-16' },
@@ -83,12 +84,15 @@ function formatDate(dateStr: string | null): string {
         </thead>
         <tbody class="divide-y divide-slate-100">
           <tr
-            v-for="article in articles"
+            v-for="(article, index) in articles"
             :key="article.id"
             class="hover:bg-slate-50/80 transition-colors group cursor-pointer"
             :class="{ 'bg-indigo-50/60': selectedId === article.id }"
             @click="$emit('select', article.id)"
           >
+            <td class="col-index py-5 px-2 text-body-sm text-slate-500 font-mono">
+              {{ index + 1 }}
+            </td>
             <td class="py-5 px-2 max-w-xs">
               <p class="text-body-main font-semibold text-slate-900 truncate">
                 {{ article.title }}

@@ -124,3 +124,13 @@ pub struct NewArticle {
     pub ris_extras: Option<serde_json::Value>,
     pub import_source: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArticleCounts {
+    pub all: usize,
+    pub imported: usize,
+    pub working: usize,
+    pub included: usize,
+    pub rejected: usize,
+}

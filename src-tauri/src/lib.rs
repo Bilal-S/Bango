@@ -78,6 +78,7 @@ pub fn run() {
             commands::labels::delete_label,
             commands::labels::suggest_labels,
             commands::articles::query_articles,
+            commands::articles::get_article_counts,
             commands::articles::get_article,
             commands::articles::update_article_status,
             commands::articles::get_audit_trail,

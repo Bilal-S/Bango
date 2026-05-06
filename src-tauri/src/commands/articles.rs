@@ -20,6 +20,17 @@ pub fn query_articles(
 }
 
 #[tauri::command]
+pub fn get_article_counts(
+    db_state: State<'_, DbState>,
+) -> Result<crate::models::article::ArticleCounts, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    article_repo::get_article_counts(&conn)
+}
+
+#[tauri::command]
 pub fn get_article(db_state: State<'_, DbState>, id: String) -> Result<Article, AppError> {
     let conn = db_state
         .conn

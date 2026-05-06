@@ -47,6 +47,14 @@ export interface Article {
 export type ArticleStatus = 'imported' | 'working' | 'included' | 'rejected';
 export type AiDecision = 'include' | 'exclude';
 
+export interface ArticleCounts {
+  all: number;
+  imported: number;
+  working: number;
+  included: number;
+  rejected: number;
+}
+
 export interface ResearchAim {
   id: string;
   text: string;
