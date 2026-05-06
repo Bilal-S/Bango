@@ -73,11 +73,9 @@ pub fn create_entry(
     )?;
     // Fetch article title for context
     let article_title: Option<String> = conn
-        .query_row(
-            "SELECT SUBSTR(title, 1, 40) FROM articles WHERE id = ?1",
-            [article_id],
-            |row| row.get(0),
-        )
+        .query_row("SELECT SUBSTR(title, 1, 40) FROM articles WHERE id = ?1", [article_id], |row| {
+            row.get(0)
+        })
         .ok();
 
     Ok(AuditEntry {

@@ -226,7 +226,7 @@ watch(
                   style="padding: 0 0.75rem"
                   @click="
                     isOtherModel = false;
-                    config.modelName = availableModels[0];
+                    config.modelName = availableModels[0] || '';
                   "
                 >
                   <span class="material-symbols-outlined">list</span>
