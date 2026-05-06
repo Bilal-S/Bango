@@ -15,6 +15,7 @@ const {
   removedIndices,
   visibleCount,
   loadFile,
+  loadFilePath,
   parseFile,
   confirmImport,
   removeArticle,
@@ -36,7 +37,7 @@ const {
     <div class="import-view__body">
       <!-- Step 1: Upload -->
       <section v-if="step === 'upload'">
-        <ImportDropZone @file-selected="loadFile" />
+        <ImportDropZone @file-selected="loadFile" @file-dropped="loadFilePath" />
       </section>
 
       <!-- Step 2: Parse -->

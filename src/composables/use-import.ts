@@ -34,13 +34,14 @@ export function useImport() {
   const step = ref<ImportStep>('upload');
   const fileName = ref<string | null>(null);
   const fileContent = ref<string | null>(null);
+  const filePath = ref<string | null>(null);
   const preview = ref<ImportPreview | null>(null);
   const importResult = ref<ImportResult | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   const removedIndices = ref<Set<number>>(new Set());
 
-  const hasFile = computed(() => fileContent.value !== null);
+  const hasFile = computed(() => fileContent.value !== null || filePath.value !== null);
   const hasErrors = computed(() => (preview.value?.errorCount ?? 0) > 0);
   const canImport = computed(() => preview.value !== null && preview.value.errorCount === 0);
 
@@ -65,6 +66,7 @@ export function useImport() {
 
     try {
       fileContent.value = await file.text();
+      filePath.value = null;
       step.value = 'parse';
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to read file';
@@ -73,8 +75,15 @@ export function useImport() {
     }
   }
 
+  function loadFilePath(path: string, name: string): void {
+    fileName.value = name;
+    filePath.value = path;
+    fileContent.value = null;
+    step.value = 'parse';
+  }
+
   async function parseFile(): Promise<void> {
-    if (!fileContent.value || !fileName.value) return;
+    if ((!fileContent.value && !filePath.value) || !fileName.value) return;
 
     loading.value = true;
     error.value = null;
@@ -83,6 +92,7 @@ export function useImport() {
       preview.value = await tauriCommand<ImportPreview>('parse_ris_file', {
         request: {
           content: fileContent.value,
+          filePath: filePath.value,
           fileName: fileName.value,
         },
       });
@@ -95,7 +105,7 @@ export function useImport() {
   }
 
   async function confirmImport(): Promise<void> {
-    if (!fileContent.value || !fileName.value) return;
+    if ((!fileContent.value && !filePath.value) || !fileName.value) return;
 
     loading.value = true;
     error.value = null;
@@ -104,6 +114,7 @@ export function useImport() {
       importResult.value = await tauriCommand<ImportResult>('import_ris_file', {
         request: {
           content: fileContent.value,
+          filePath: filePath.value,
           fileName: fileName.value,
           excludedIndices: [...removedIndices.value],
         },
@@ -120,6 +131,7 @@ export function useImport() {
     step.value = 'upload';
     fileName.value = null;
     fileContent.value = null;
+    filePath.value = null;
     preview.value = null;
     importResult.value = null;
     loading.value = false;
@@ -141,6 +153,7 @@ export function useImport() {
     visibleArticles,
     visibleCount,
     loadFile,
+    loadFilePath,
     parseFile,
     confirmImport,
     removeArticle,
