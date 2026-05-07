@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
 import { tauriCommand } from './use-tauri-command';
+import type { DedupResult } from './use-dedup';
 
 export interface ErrorGroup {
   message: string;
@@ -51,6 +52,7 @@ export function useImport() {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const removedIndices = ref<Set<number>>(new Set());
+  const dedupSummary = ref<DedupResult | null>(null);
 
   const hasFile = computed(() => fileContent.value !== null || filePath.value !== null);
   const hasErrors = computed(() => (preview.value?.errorCount ?? 0) > 0);
@@ -130,6 +132,14 @@ export function useImport() {
           excludedIndices: [...removedIndices.value],
         },
       });
+
+      // Run duplicate detection (no merge) so we can show a summary
+      try {
+        dedupSummary.value = await tauriCommand<DedupResult>('check_duplicates');
+      } catch {
+        // Non-fatal — dedup summary is optional
+      }
+
       step.value = 'complete';
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Import failed';
@@ -145,6 +155,7 @@ export function useImport() {
     filePath.value = null;
     preview.value = null;
     importResult.value = null;
+    dedupSummary.value = null;
     loading.value = false;
     error.value = null;
     removedIndices.value = new Set();
@@ -163,6 +174,7 @@ export function useImport() {
     removedIndices,
     visibleArticles,
     visibleCount,
+    dedupSummary,
     loadFile,
     loadFilePath,
     parseFile,

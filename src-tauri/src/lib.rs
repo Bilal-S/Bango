@@ -55,6 +55,8 @@ pub fn run() {
             commands::import::parse_ris_file,
             commands::import::import_ris_file,
             commands::import::get_articles,
+            commands::dedup::check_duplicates,
+            commands::dedup::merge_exact_duplicates,
             commands::dedup::run_deduplication,
             commands::dedup::resolve_fuzzy_match,
             commands::criteria::get_research_aims,

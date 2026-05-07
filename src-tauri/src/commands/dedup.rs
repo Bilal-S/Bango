@@ -4,14 +4,15 @@ use tauri::State;
 use crate::db::article_repo;
 use crate::db::connection::DbState;
 use crate::dedup::engine::{self, DedupArticle};
-use crate::dedup::types::{DedupResolution, DedupResult};
+use crate::dedup::types::{DedupResolution, DedupResult, DuplicatePair};
 use crate::error::AppError;
 use crate::models::article::Article;
 
 use uuid::Uuid;
 
+/// Detection only — returns duplicate pairs without modifying the database.
 #[tauri::command]
-pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, AppError> {
+pub fn check_duplicates(db_state: State<'_, DbState>) -> Result<DedupResult, AppError> {
     let conn = db_state
         .conn
         .lock()
@@ -20,7 +21,6 @@ pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, Ap
     let imported = article_repo::get_imported_articles(&conn)?;
     let working = article_repo::get_working_articles(&conn)?;
 
-    // Convert to dedup articles for comparison
     let dedup_articles: Vec<DedupArticle> = imported
         .iter()
         .chain(working.iter())
@@ -33,7 +33,6 @@ pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, Ap
         })
         .collect();
 
-    // Compare only if there are imported articles
     let imported_count = imported.len();
     let result = if imported_count > 0 {
         engine::run_dedup(&dedup_articles)
@@ -46,9 +45,32 @@ pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, Ap
         }
     };
 
-    // Auto-merge exact duplicates
-    for pair in &result.exact_duplicates {
-        // Determine which article survives (most metadata fields)
+    // Report counts but do NOT merge — that's for merge_exact_duplicates
+    let mut report = result;
+    report.auto_merged_count = report.exact_duplicates.len();
+    report.needs_review_count = report.fuzzy_matches.len();
+    Ok(report)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeRequest {
+    pub pairs: Vec<DuplicatePair>,
+}
+
+/// User-triggered: merge all high-confidence exact duplicates.
+#[tauri::command]
+pub fn merge_exact_duplicates(
+    db_state: State<'_, DbState>,
+    request: MergeRequest,
+) -> Result<usize, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    let mut merged = 0usize;
+    for pair in &request.pairs {
         let count_a = article_repo::get_article_field_count(&conn, &pair.article_a_id).unwrap_or(0);
         let count_b = article_repo::get_article_field_count(&conn, &pair.article_b_id).unwrap_or(0);
 
@@ -60,14 +82,12 @@ pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, Ap
 
         article_repo::mark_as_duplicate(&conn, duplicate_id, surviving_id)?;
 
-        // Audit entry
         let audit_id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_merge', ?3, 'system')",
+            "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_merge', ?3, 'user')",
             rusqlite::params![audit_id, duplicate_id, format!("Merged into article {}", surviving_id)],
         )?;
 
-        // Move surviving article to Working
         article_repo::move_to_working(&conn, surviving_id)?;
 
         let audit_id2 = Uuid::new_v4().to_string();
@@ -75,9 +95,17 @@ pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, Ap
             "INSERT INTO audit_entries (id, article_id, action, from_status, to_status, details, source) VALUES (?1, ?2, 'status_change', 'imported', 'working', 'Advanced after deduplication', 'system')",
             rusqlite::params![audit_id2, surviving_id],
         )?;
+
+        merged += 1;
     }
 
-    Ok(result)
+    Ok(merged)
+}
+
+// Legacy command kept for backward compatibility — now just delegates to check_duplicates.
+#[tauri::command]
+pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, AppError> {
+    check_duplicates(db_state)
 }
 
 #[derive(Deserialize)]

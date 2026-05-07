@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import { useImport } from '@/composables/use-import';
 import ImportDropZone from '@/components/import-drop-zone.vue';
 import ImportStepper from '@/components/import-stepper.vue';
 import ImportPreview from '@/components/import-preview.vue';
+
+const router = useRouter();
 
 const {
   step,
@@ -14,6 +17,7 @@ const {
   canImport,
   removedIndices,
   visibleCount,
+  dedupSummary,
   loadFile,
   loadFilePath,
   parseFile,
@@ -21,6 +25,10 @@ const {
   removeArticle,
   reset,
 } = useImport();
+
+const hasDuplicates = () =>
+  dedupSummary.value &&
+  (dedupSummary.value.autoMergedCount > 0 || dedupSummary.value.needsReviewCount > 0);
 </script>
 
 <template>
@@ -106,8 +114,28 @@ const {
             Remaining capacity: {{ importResult.remainingCapacity }} articles
           </p>
         </div>
+
+        <!-- Dedup summary -->
+        <div v-if="hasDuplicates()" class="import-view__dedup">
+          <h3>Duplicate Check</h3>
+          <p v-if="dedupSummary!.autoMergedCount > 0">
+            🔍 {{ dedupSummary!.autoMergedCount }} high-confidence duplicate{{
+              dedupSummary!.autoMergedCount !== 1 ? 's' : ''
+            }}
+            detected.
+          </p>
+          <p v-if="dedupSummary!.needsReviewCount > 0">
+            ⚠️ {{ dedupSummary!.needsReviewCount }} potential duplicate{{
+              dedupSummary!.needsReviewCount !== 1 ? 's' : ''
+            }}
+            need manual review.
+          </p>
+          <button class="btn btn--primary" @click="router.push('/dedup')">Review Duplicates</button>
+        </div>
+
         <div class="import-view__actions">
-          <button class="btn btn--primary" @click="reset">Import Another File</button>
+          <button class="btn btn--secondary" @click="reset">Import Another File</button>
+          <button class="btn btn--primary" @click="router.push('/')">Go to Dashboard</button>
         </div>
       </section>
     </div>
@@ -224,6 +252,29 @@ const {
 .import-view__capacity {
   color: var(--color-on-surface-variant);
   font-size: var(--font-size-caption);
+  margin-top: var(--space-2);
+}
+
+.import-view__dedup {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background-color: var(--color-surface-container-low);
+  border-radius: var(--radius-default);
+  border-left: 3px solid var(--color-primary);
+}
+
+.import-view__dedup h3 {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  margin-bottom: var(--space-2);
+}
+
+.import-view__dedup p {
+  font-size: var(--font-size-caption);
+  margin-bottom: var(--space-2);
+}
+
+.import-view__dedup .btn {
   margin-top: var(--space-2);
 }
 
