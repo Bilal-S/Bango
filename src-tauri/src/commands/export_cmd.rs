@@ -46,6 +46,12 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
     Ok(articles_to_ris(&export_articles))
 }
 
+#[tauri::command]
+pub fn export_ris_to_file(db_state: State<'_, DbState>, path: String) -> Result<(), AppError> {
+    let content = export_ris(db_state)?;
+    std::fs::write(path, content).map_err(AppError::Io)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportProjectRequest {}
@@ -57,6 +63,12 @@ pub fn export_project_backup(db_state: State<'_, DbState>) -> Result<String, App
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     project::export_project(&conn)
+}
+
+#[tauri::command]
+pub fn export_project_to_file(db_state: State<'_, DbState>, path: String) -> Result<(), AppError> {
+    let content = export_project_backup(db_state)?;
+    std::fs::write(path, content).map_err(AppError::Io)
 }
 
 #[derive(Deserialize)]

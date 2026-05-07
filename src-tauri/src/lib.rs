@@ -103,7 +103,9 @@ pub fn run() {
             commands::prisma::get_prisma_data,
             commands::prisma::get_prisma_svg,
             commands::export_cmd::export_ris,
+            commands::export_cmd::export_ris_to_file,
             commands::export_cmd::export_project_backup,
+            commands::export_cmd::export_project_to_file,
             commands::export_cmd::import_project_backup,
             commands::export_cmd::reset_project,
         ]);

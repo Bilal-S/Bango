@@ -1,6 +1,5 @@
 import { ref } from 'vue';
 import { save } from '@tauri-apps/plugin-dialog';
-import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { tauriCommand } from './use-tauri-command';
 
 export function useExport() {
@@ -11,13 +10,12 @@ export function useExport() {
     exporting.value = true;
     error.value = null;
     try {
-      const risContent = await tauriCommand<string>('export_ris');
       const filePath = await save({
         defaultPath: 'included-articles.ris',
         filters: [{ name: 'RIS File', extensions: ['ris'] }],
       });
       if (filePath) {
-        await writeTextFile(filePath, risContent);
+        await tauriCommand('export_ris_to_file', { path: filePath });
       }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
@@ -30,7 +28,6 @@ export function useExport() {
     exporting.value = true;
     error.value = null;
     try {
-      const jsonContent = await tauriCommand<string>('export_project_backup');
       const filePath = await save({
         defaultPath: 'bango-project.bango.json',
         filters: [
@@ -39,7 +36,7 @@ export function useExport() {
         ],
       });
       if (filePath) {
-        await writeTextFile(filePath, jsonContent);
+        await tauriCommand('export_project_to_file', { path: filePath });
       }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
