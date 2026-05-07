@@ -1,17 +1,7 @@
-import { ref, onMounted } from 'vue';
+import { ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import { tauriCommand } from './use-tauri-command';
-import type { LlmConfig } from '@/types';
-
-const DEFAULT_CONFIG: LlmConfig = {
-  provider: 'openai',
-  endpointUrl: '',
-  apiKeyEncrypted: null,
-  modelName: '',
-  temperature: 0.2,
-  maxConcurrentRequests: 3,
-  requestDelayMs: 500,
-  contextWindowTokens: 50000,
-};
+import { useLlmConfigStore } from '@/stores/llm-config';
 
 interface TestResult {
   success: boolean;
@@ -19,7 +9,11 @@ interface TestResult {
 }
 
 export function useLlmConfig() {
-  const config = ref<LlmConfig>({ ...DEFAULT_CONFIG });
+  const store = useLlmConfigStore();
+
+  // storeToRefs gives us config as a writable Ref<LlmConfig> so
+  // config.value.xxx reads and writes work unchanged in the view.
+  const { config } = storeToRefs(store);
   const loading = ref(false);
   const saving = ref(false);
   const testing = ref(false);
@@ -28,24 +22,14 @@ export function useLlmConfig() {
   const fetchingModels = ref(false);
   const fetchedModels = ref<string[] | null>(null);
 
-  onMounted(loadConfig);
-
   async function loadConfig(): Promise<void> {
-    loading.value = true;
-    try {
-      const saved = await tauriCommand<LlmConfig | null>('get_llm_config');
-      if (saved) {
-        config.value = saved;
-      }
-    } finally {
-      loading.value = false;
-    }
+    await store.fetch();
   }
 
   async function save(): Promise<void> {
     saving.value = true;
     try {
-      await tauriCommand('save_llm_config', { config: config.value });
+      await tauriCommand('save_llm_config', { config: store.config });
     } finally {
       saving.value = false;
     }
@@ -66,13 +50,14 @@ export function useLlmConfig() {
   }
 
   function revert(): void {
-    config.value = { ...DEFAULT_CONFIG };
+    store.invalidate();
+    void store.fetch();
     testResult.value = null;
     fetchedModels.value = null;
   }
 
   function isLocalProvider(): boolean {
-    return ['llama_cpp', 'ollama', 'lm_studio'].includes(config.value.provider);
+    return ['llama_cpp', 'ollama', 'lm_studio'].includes(store.config.provider);
   }
 
   async function fetchModels(): Promise<void> {
@@ -80,9 +65,9 @@ export function useLlmConfig() {
     try {
       fetchedModels.value = await tauriCommand<string[]>('list_llm_models', {
         request: {
-          provider: config.value.provider,
-          endpointUrl: config.value.endpointUrl,
-          apiKey: config.value.apiKeyEncrypted,
+          provider: store.config.provider,
+          endpointUrl: store.config.endpointUrl,
+          apiKey: store.config.apiKeyEncrypted,
         },
       });
     } catch (e: unknown) {

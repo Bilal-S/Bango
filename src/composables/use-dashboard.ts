@@ -1,6 +1,7 @@
-import { ref, computed, onMounted } from 'vue';
-import { tauriCommand } from './use-tauri-command';
-import type { Article, AuditEntry, ArticleStatus } from '@/types';
+import { computed } from 'vue';
+import { useArticlesStore } from '@/stores/articles';
+import { useAuditStore } from '@/stores/audit';
+import type { ArticleStatus } from '@/types';
 
 export interface StatusCounts {
   total: number;
@@ -29,22 +30,12 @@ export interface GroupedAuditEntry {
   count?: number;
 }
 
-/** Shape returned by the Rust `get_import_activities` command */
-interface ImportActivity {
-  id: string;
-  timestamp: string;
-  filename: string;
-  count: number;
-}
-
 export function useDashboard() {
-  const articles = ref<Article[]>([]);
-  const recentAudit = ref<AuditEntry[]>([]);
-  const loading = ref(true);
-  const error = ref<string | null>(null);
+  const articlesStore = useArticlesStore();
+  const auditStore = useAuditStore();
 
   const counts = computed<StatusCounts>(() => {
-    const all = articles.value;
+    const all = articlesStore.articles;
     return {
       total: all.length,
       imported: all.filter((a) => a.status === 'imported').length,
@@ -55,18 +46,20 @@ export function useDashboard() {
   });
 
   const screeningProgress = computed<ScreeningProgress>(() => {
-    const total = articles.value.length;
-    const screened = articles.value.filter((a) => a.aiDecision !== null).length;
+    const total = articlesStore.articles.length;
+    const screened = articlesStore.articles.filter((a) => a.aiDecision !== null).length;
     const percentage = total > 0 ? Math.round((screened / total) * 100) : 0;
     return { screened, total, percentage };
   });
 
-  const hasArticles = computed(() => articles.value.length > 0);
+  const hasArticles = computed(() => articlesStore.articles.length > 0);
 
-  /** Merged timeline: import activities (with correct counts from SQL) + other audit entries */
+  const loading = computed(() => articlesStore.loading || auditStore.loading);
+  const error = computed(() => articlesStore.error);
+
+  /** Merged timeline: import activities + other audit entries */
   const groupedAudit = computed<GroupedAuditEntry[]>(() => {
-    // Convert non-import audit entries (already excludes imports from backend)
-    const nonImport: GroupedAuditEntry[] = recentAudit.value.map((entry) => ({
+    const nonImport: GroupedAuditEntry[] = auditStore.recentAudit.map((entry) => ({
       id: entry.id,
       action: entry.action,
       source: entry.source,
@@ -75,9 +68,8 @@ export function useDashboard() {
       articleTitle: entry.articleTitle,
     }));
 
-    // Merge with import activities (already aggregated with correct counts at SQL level)
     const merged: GroupedAuditEntry[] = [
-      ...importActivities.value.map(
+      ...auditStore.importActivities.map(
         (act): GroupedAuditEntry => ({
           id: act.id,
           action: 'import',
@@ -90,39 +82,20 @@ export function useDashboard() {
       ...nonImport,
     ];
 
-    // Sort newest first
     merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return merged;
   });
 
-  const importActivities = ref<ImportActivity[]>([]);
-
+  /** Force a full refresh of articles + audit from the DB */
   async function refresh(): Promise<void> {
-    loading.value = true;
-    error.value = null;
-    try {
-      const [fetchedArticles, fetchedAudit, fetchedImports] = await Promise.all([
-        tauriCommand<Article[]>('get_articles'),
-        tauriCommand<AuditEntry[]>('get_recent_audit_entries', { limit: 10 }),
-        tauriCommand<ImportActivity[]>('get_import_activities', { limit: 10 }),
-      ]);
-      articles.value = fetchedArticles;
-      recentAudit.value = fetchedAudit;
-      importActivities.value = fetchedImports;
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-    } finally {
-      loading.value = false;
-    }
+    articlesStore.invalidate();
+    auditStore.invalidate();
+    await Promise.all([articlesStore.fetchIfNeeded(), auditStore.fetchIfNeeded()]);
   }
 
-  onMounted(refresh);
-
   return {
-    articles,
     counts,
     screeningProgress,
-    recentAudit,
     groupedAudit,
     loading,
     error,

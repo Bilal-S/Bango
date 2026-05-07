@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import TagChip from '@/components/tag-chip.vue';
@@ -20,9 +20,13 @@ const isLoading = computed(() => tagsStore.loading && labelsStore.loading);
 const hasError = computed(() => tagsStore.error || labelsStore.error);
 const errorMessage = computed(() => tagsStore.error || labelsStore.error || 'Unknown error');
 
-onMounted(async () => {
-  await Promise.all([tagsStore.fetchTags(), labelsStore.fetchLabels()]);
-});
+// Stores are pre-warmed at startup — no onMounted fetch needed.
+// Only refetch if something went wrong (error state) or store was invalidated.
+async function retry(): Promise<void> {
+  tagsStore.invalidate();
+  labelsStore.invalidate();
+  await Promise.all([tagsStore.fetchIfNeeded(), labelsStore.fetchIfNeeded()]);
+}
 
 async function addTag(): Promise<void> {
   const name = newTagName.value.trim();
@@ -80,10 +84,6 @@ async function saveLabelEdit(): Promise<void> {
 function cancelLabelEdit(): void {
   editingLabelId.value = null;
   editingLabelName.value = '';
-}
-
-async function retry(): Promise<void> {
-  await Promise.all([tagsStore.fetchTags(), labelsStore.fetchLabels()]);
 }
 </script>
 

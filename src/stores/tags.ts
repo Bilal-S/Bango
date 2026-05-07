@@ -19,6 +19,12 @@ export const useTagsStore = defineStore('tags', () => {
   const loading = ref(false);
   const suggesting = ref(false);
   const error = ref<string | null>(null);
+  const initialized = ref(false);
+
+  async function fetchIfNeeded(): Promise<void> {
+    if (initialized.value) return;
+    await fetchTags();
+  }
 
   async function fetchTags(): Promise<void> {
     loading.value = true;
@@ -27,14 +33,20 @@ export const useTagsStore = defineStore('tags', () => {
       if (!isTauri()) {
         // Demo data for browser-only mode
         tags.value = DEMO_TAGS;
+        initialized.value = true;
         return;
       }
       tags.value = await tauriCommand<TagWithCount[]>('get_tags_with_counts');
+      initialized.value = true;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
       loading.value = false;
     }
+  }
+
+  function invalidate(): void {
+    initialized.value = false;
   }
 
   async function createTag(name: string): Promise<void> {
@@ -111,10 +123,13 @@ export const useTagsStore = defineStore('tags', () => {
     loading,
     suggesting,
     error,
+    initialized,
+    fetchIfNeeded,
     fetchTags,
     createTag,
     renameTag,
     deleteTag,
     suggestTags,
+    invalidate,
   };
 });

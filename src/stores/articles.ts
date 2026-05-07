@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { Article, ArticleStatus } from '@/types';
-import { tauriCommand } from '@/composables/use-tauri-command';
+import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
 export const useArticlesStore = defineStore('articles', () => {
   const articles = ref<Article[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
+  const initialized = ref(false);
 
   const byStatus = computed(() => {
     const counts: Record<ArticleStatus, number> = {
@@ -23,11 +24,17 @@ export const useArticlesStore = defineStore('articles', () => {
 
   const totalImported = computed(() => articles.value.length);
 
+  async function fetchIfNeeded(): Promise<void> {
+    if (initialized.value || !isTauri()) return;
+    await fetchArticles();
+  }
+
   async function fetchArticles(): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
       articles.value = await tauriCommand<Article[]>('get_articles');
+      initialized.value = true;
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -35,5 +42,19 @@ export const useArticlesStore = defineStore('articles', () => {
     }
   }
 
-  return { articles, loading, error, byStatus, totalImported, fetchArticles };
+  function invalidate(): void {
+    initialized.value = false;
+  }
+
+  return {
+    articles,
+    loading,
+    error,
+    byStatus,
+    totalImported,
+    initialized,
+    fetchIfNeeded,
+    fetchArticles,
+    invalidate,
+  };
 });

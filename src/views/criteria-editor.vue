@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, computed } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
-import type { ResearchAim, Criterion, Priority } from '@/types';
+import { useCriteriaStore } from '@/stores/criteria';
+import type { Priority } from '@/types';
 
-const aims = ref<ResearchAim[]>([]);
-const criteria = ref<Criterion[]>([]);
+const criteriaStore = useCriteriaStore();
+
+// Read directly from store — pre-warmed at startup, no onMounted fetch needed.
+const aims = computed(() => criteriaStore.aims);
+const criteria = computed(() => criteriaStore.criteria);
+
 const newAimText = ref('');
 const newInclusionText = ref('');
 const newExclusionText = ref('');
 const newInclusionPriority = ref<Priority>('standard');
 const newExclusionPriority = ref<Priority>('standard');
-const loading = ref(false);
 
 const inclusionCriteria = computed(() =>
   criteria.value.filter((c) => c.criterionType === 'inclusion')
@@ -19,20 +23,9 @@ const exclusionCriteria = computed(() =>
   criteria.value.filter((c) => c.criterionType === 'exclusion')
 );
 
-onMounted(fetchAll);
-
-async function fetchAll(): Promise<void> {
-  loading.value = true;
-  try {
-    const [aimsResult, criteriaResult] = await Promise.all([
-      tauriCommand<ResearchAim[]>('get_research_aims'),
-      tauriCommand<Criterion[]>('get_criteria'),
-    ]);
-    aims.value = aimsResult;
-    criteria.value = criteriaResult;
-  } finally {
-    loading.value = false;
-  }
+async function refetch(): Promise<void> {
+  criteriaStore.invalidate();
+  await criteriaStore.fetchIfNeeded();
 }
 
 async function addAim(): Promise<void> {
@@ -41,12 +34,12 @@ async function addAim(): Promise<void> {
     request: { text: newAimText.value.trim() },
   });
   newAimText.value = '';
-  await fetchAll();
+  await refetch();
 }
 
 async function deleteAim(id: string): Promise<void> {
   await tauriCommand('delete_research_aim', { id });
-  await fetchAll();
+  await refetch();
 }
 
 async function addInclusion(): Promise<void> {
@@ -60,7 +53,7 @@ async function addInclusion(): Promise<void> {
   });
   newInclusionText.value = '';
   newInclusionPriority.value = 'standard';
-  await fetchAll();
+  await refetch();
 }
 
 async function addExclusion(): Promise<void> {
@@ -74,7 +67,7 @@ async function addExclusion(): Promise<void> {
   });
   newExclusionText.value = '';
   newExclusionPriority.value = 'standard';
-  await fetchAll();
+  await refetch();
 }
 
 async function updateCriterionPriority(
@@ -85,12 +78,12 @@ async function updateCriterionPriority(
   await tauriCommand('update_criterion', {
     request: { id, text, priority },
   });
-  await fetchAll();
+  await refetch();
 }
 
 async function deleteCriterion(id: string): Promise<void> {
   await tauriCommand('delete_criterion', { id });
-  await fetchAll();
+  await refetch();
 }
 
 function priorityBorderClass(priority: Priority): string {

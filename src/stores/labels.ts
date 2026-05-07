@@ -17,6 +17,12 @@ export const useLabelsStore = defineStore('labels', () => {
   const loading = ref(false);
   const suggesting = ref(false);
   const error = ref<string | null>(null);
+  const initialized = ref(false);
+
+  async function fetchIfNeeded(): Promise<void> {
+    if (initialized.value) return;
+    await fetchLabels();
+  }
 
   async function fetchLabels(): Promise<void> {
     loading.value = true;
@@ -24,14 +30,20 @@ export const useLabelsStore = defineStore('labels', () => {
     try {
       if (!isTauri()) {
         labels.value = DEMO_LABELS;
+        initialized.value = true;
         return;
       }
       labels.value = await tauriCommand<LabelWithCount[]>('get_labels_with_counts');
+      initialized.value = true;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
       loading.value = false;
     }
+  }
+
+  function invalidate(): void {
+    initialized.value = false;
   }
 
   async function createLabel(name: string): Promise<void> {
@@ -106,10 +118,13 @@ export const useLabelsStore = defineStore('labels', () => {
     loading,
     suggesting,
     error,
+    initialized,
+    fetchIfNeeded,
     fetchLabels,
     createLabel,
     renameLabel,
     deleteLabel,
     suggestLabels,
+    invalidate,
   };
 });

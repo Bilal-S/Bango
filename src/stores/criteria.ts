@@ -1,15 +1,21 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import type { ResearchAim, Criterion } from '@/types';
-import { tauriCommand } from '@/composables/use-tauri-command';
+import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
 export const useCriteriaStore = defineStore('criteria', () => {
   const aims = ref<ResearchAim[]>([]);
   const criteria = ref<Criterion[]>([]);
   const loading = ref(false);
+  const initialized = ref(false);
 
   const inclusionCriteria = ref<Criterion[]>([]);
   const exclusionCriteria = ref<Criterion[]>([]);
+
+  async function fetchIfNeeded(): Promise<void> {
+    if (initialized.value || !isTauri()) return;
+    await fetchAll();
+  }
 
   async function fetchAll(): Promise<void> {
     loading.value = true;
@@ -22,9 +28,14 @@ export const useCriteriaStore = defineStore('criteria', () => {
       criteria.value = criteriaResult;
       inclusionCriteria.value = criteriaResult.filter((c) => c.criterionType === 'inclusion');
       exclusionCriteria.value = criteriaResult.filter((c) => c.criterionType === 'exclusion');
+      initialized.value = true;
     } finally {
       loading.value = false;
     }
+  }
+
+  function invalidate(): void {
+    initialized.value = false;
   }
 
   return {
@@ -33,6 +44,9 @@ export const useCriteriaStore = defineStore('criteria', () => {
     inclusionCriteria,
     exclusionCriteria,
     loading,
+    initialized,
+    fetchIfNeeded,
     fetchAll,
+    invalidate,
   };
 });
