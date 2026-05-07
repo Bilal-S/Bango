@@ -4,7 +4,6 @@ import { useExport } from '@/composables/use-export';
 
 const emit = defineEmits<{ close: []; imported: [] }>();
 const { exporting, error, importProject } = useExport();
-const password = ref('');
 const selectedFile = ref<File | null>(null);
 
 function onFileChange(event: Event): void {
@@ -14,7 +13,7 @@ function onFileChange(event: Event): void {
 
 async function doImport(): Promise<void> {
   if (!selectedFile.value) return;
-  await importProject(selectedFile.value, password.value);
+  await importProject(selectedFile.value);
   if (!error.value) {
     emit('imported');
     emit('close');
@@ -32,10 +31,7 @@ async function doImport(): Promise<void> {
       <div class="dialog__form">
         <label class="field__label">Backup File (.bango.json)</label>
         <input type="file" accept=".bango.json,.json" class="input" @change="onFileChange" />
-
-        <label class="field__label">Password (for API keys)</label>
-        <input v-model="password" type="password" placeholder="Enter password" class="input" />
-        <p class="hint">If the password is incorrect, the project will import without API keys.</p>
+        <p class="hint">Note: API keys are NOT included in the backup and must be re-entered.</p>
       </div>
 
       <div class="dialog__actions">

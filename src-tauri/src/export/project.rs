@@ -1,7 +1,6 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::aes_gcm;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
 
@@ -23,6 +22,8 @@ pub struct ProjectBackup {
     pub articles: Vec<serde_json::Value>,
     pub tags: Vec<serde_json::Value>,
     pub labels: Vec<serde_json::Value>,
+    pub article_tags: Vec<serde_json::Value>,
+    pub article_labels: Vec<serde_json::Value>,
     pub audit_entries: Vec<serde_json::Value>,
     pub llm_config: Option<LlmConfigBackup>,
 }
@@ -33,27 +34,22 @@ pub struct LlmConfigBackup {
     pub provider: String,
     pub endpoint_url: String,
     pub model_name: String,
-    pub api_key_encrypted: Option<String>,
 }
 
-pub fn export_project(conn: &Connection, password: &str) -> Result<String, AppError> {
+pub fn export_project(conn: &Connection) -> Result<String, AppError> {
     let aims = serialize_table(conn, "SELECT * FROM research_aims")?;
     let criteria = serialize_table(conn, "SELECT * FROM criteria")?;
     let articles = serialize_table(conn, "SELECT * FROM articles")?;
     let tags = serialize_table(conn, "SELECT * FROM tags")?;
     let labels = serialize_table(conn, "SELECT * FROM labels")?;
+    let article_tags = serialize_table(conn, "SELECT * FROM article_tags")?;
+    let article_labels = serialize_table(conn, "SELECT * FROM article_labels")?;
     let audit = serialize_table(conn, "SELECT * FROM audit_entries")?;
 
-    let llm_backup = llm_config_repo::get_config(conn)?.map(|c| {
-        let key = aes_gcm::derive_key_from_password(password);
-        let encrypted_key =
-            c.api_key_encrypted.as_ref().and_then(|k| aes_gcm::encrypt(k.as_bytes(), &key).ok());
-        LlmConfigBackup {
-            provider: c.provider.as_str().to_string(),
-            endpoint_url: c.endpoint_url,
-            model_name: c.model_name,
-            api_key_encrypted: encrypted_key,
-        }
+    let llm_backup = llm_config_repo::get_config(conn)?.map(|c| LlmConfigBackup {
+        provider: c.provider.as_str().to_string(),
+        endpoint_url: c.endpoint_url,
+        model_name: c.model_name,
     });
 
     let backup = ProjectBackup {
@@ -68,6 +64,8 @@ pub fn export_project(conn: &Connection, password: &str) -> Result<String, AppEr
         articles,
         tags,
         labels,
+        article_tags,
+        article_labels,
         audit_entries: audit,
         llm_config: llm_backup,
     };
@@ -121,7 +119,7 @@ fn to_camel_case(s: &str) -> String {
     result
 }
 
-pub fn import_project(conn: &Connection, json_str: &str, password: &str) -> Result<(), AppError> {
+pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError> {
     let backup: ProjectBackup = serde_json::from_str(json_str)
         .map_err(|e| AppError::Import(format!("Invalid backup file: {}", e)))?;
 
@@ -219,47 +217,130 @@ pub fn import_project(conn: &Connection, json_str: &str, password: &str) -> Resu
     for a in &backup.articles {
         let id = get_str(a, "id");
         let status = get_str(a, "status");
+        let screening_error = a.get("screeningError").and_then(|v| v.as_i64()).unwrap_or(0);
         let title = get_str(a, "title");
         let abstract_text = get_str_field(a, "abstractText", "abstract_text");
-        let authors_json =
+        let authors =
             serde_json::to_string(&a.get("authors").cloned().unwrap_or(serde_json::json!([])))
                 .unwrap_or_default();
+        let publication_year = a.get("publicationYear").and_then(|v| v.as_i64());
+        let doi = get_str_field(a, "doi", "doi");
+        let journal = get_str_field(a, "journal", "journal");
+        let volume = get_str_field(a, "volume", "volume");
+        let issue = get_str_field(a, "issue", "issue");
+        let start_page = get_str_field(a, "startPage", "start_page");
+        let end_page = get_str_field(a, "endPage", "end_page");
+        let keywords =
+            serde_json::to_string(&a.get("keywords").cloned().unwrap_or(serde_json::json!([])))
+                .unwrap_or_default();
+        let url = get_str_field(a, "url", "url");
+        let language = get_str_field(a, "language", "language");
+        let publisher = get_str_field(a, "publisher", "publisher");
+        let publisher_city = get_str_field(a, "publisherCity", "publisher_city");
+        let publisher_address = get_str_field(a, "publisherAddress", "publisher_address");
+        let issn = get_str_field(a, "issn", "issn");
+        let reference_type = get_str_field(a, "referenceType", "reference_type");
+        let date = get_str_field(a, "date", "date");
+        let author_address = get_str_field(a, "authorAddress", "author_address");
+        let accession_number = get_str_field(a, "accessionNumber", "accession_number");
+        let custom_field3 = get_str_field(a, "customField3", "custom_field3");
+        let journal_abbreviation = get_str_field(a, "journalAbbreviation", "journal_abbreviation");
+        let journal_iso_abbreviation =
+            get_str_field(a, "journalIsoAbbreviation", "journal_iso_abbreviation");
+        let notes = get_str_field(a, "notes", "notes");
+        let web_of_science_db = get_str_field(a, "webOfScienceDb", "web_of_science_db");
+        let user_notes = get_str_field(a, "userNotes", "user_notes");
+        let ris_extras =
+            serde_json::to_string(&a.get("risExtras").cloned().unwrap_or(serde_json::json!({})))
+                .unwrap_or_default();
+        let duplicate_of = get_str_field(a, "duplicateOf", "duplicate_of");
+        let ai_decision = get_str_field(a, "aiDecision", "ai_decision");
+        let ai_reasoning = get_str_field(a, "aiReasoning", "ai_reasoning");
+        let ai_confidence = a.get("aiConfidence").and_then(|v| v.as_f64());
+        let matched_inclusion_criteria = serde_json::to_string(
+            &a.get("matchedInclusionCriteria").cloned().unwrap_or(serde_json::json!([])),
+        )
+        .unwrap_or_default();
+        let matched_exclusion_criteria = serde_json::to_string(
+            &a.get("matchedExclusionCriteria").cloned().unwrap_or(serde_json::json!([])),
+        )
+        .unwrap_or_default();
+        let manual_override = a.get("manualOverride").and_then(|v| v.as_i64()).unwrap_or(0);
         let import_source = get_str_field(a, "importSource", "import_source");
+        let imported_at = get_str_field(a, "importedAt", "imported_at")
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        let screened_at = get_str_field(a, "screenedAt", "screened_at");
 
         conn.execute(
-            "INSERT INTO articles (id, status, title, abstract_text, authors, import_source, imported_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))",
-            rusqlite::params![id, status, title, abstract_text, authors_json, import_source],
+            "INSERT INTO articles (
+                id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
+                volume, issue, start_page, end_page, keywords, url, language, publisher, publisher_city,
+                publisher_address, issn, reference_type, date, author_address, accession_number,
+                custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
+                user_notes, ris_extras, duplicate_of, ai_decision, ai_reasoning, ai_confidence,
+                matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
+                imported_at, screened_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38,
+                ?39, ?40, ?41
+            )",
+            rusqlite::params![
+                id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
+                volume, issue, start_page, end_page, keywords, url, language, publisher, publisher_city,
+                publisher_address, issn, reference_type, date, author_address, accession_number,
+                custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
+                user_notes, ris_extras, duplicate_of, ai_decision, ai_reasoning, ai_confidence,
+                matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
+                imported_at, screened_at
+            ],
         )?;
     }
 
-    // Restore LLM config with decrypted key
-    if let Some(ref llm_backup) = backup.llm_config {
-        let key = aes_gcm::derive_key_from_password(password);
-        let decrypted_key = llm_backup
-            .api_key_encrypted
-            .as_ref()
-            .and_then(|enc| aes_gcm::decrypt(enc, &key).ok())
-            .and_then(|bytes| String::from_utf8(bytes).ok());
-
-        let machine_key = aes_gcm::derive_key_from_machine();
-        let re_encrypted = decrypted_key
-            .as_ref()
-            .map(|k| aes_gcm::encrypt(k.as_bytes(), &machine_key))
-            .transpose()
-            .ok()
-            .flatten();
-
+    // Restore article_tags
+    for at in &backup.article_tags {
+        let article_id = get_str(at, "articleId");
+        let tag_id = get_str(at, "tagId");
         conn.execute(
-            "INSERT INTO llm_config (id, provider, endpoint_url, api_key_encrypted, model_name, \
+            "INSERT INTO article_tags (article_id, tag_id) VALUES (?1, ?2)",
+            rusqlite::params![article_id, tag_id],
+        )?;
+    }
+
+    // Restore article_labels
+    for al in &backup.article_labels {
+        let article_id = get_str(al, "articleId");
+        let label_id = get_str(al, "labelId");
+        conn.execute(
+            "INSERT INTO article_labels (article_id, label_id) VALUES (?1, ?2)",
+            rusqlite::params![article_id, label_id],
+        )?;
+    }
+
+    // Restore audit entries
+    for ae in &backup.audit_entries {
+        let id = get_str(ae, "id");
+        let article_id = get_str(ae, "articleId");
+        let timestamp = get_str(ae, "timestamp");
+        let action = get_str(ae, "action");
+        let from_status = get_str_field(ae, "fromStatus", "from_status");
+        let to_status = get_str_field(ae, "toStatus", "to_status");
+        let details = get_str(ae, "details");
+        let source = get_str(ae, "source");
+        conn.execute(
+            "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![id, article_id, timestamp, action, from_status, to_status, details, source],
+        )?;
+    }
+
+    // Restore LLM config (without keys)
+    if let Some(ref llm_backup) = backup.llm_config {
+        conn.execute(
+            "INSERT INTO llm_config (id, provider, endpoint_url, model_name, \
              temperature, max_concurrent_requests, request_delay_ms, context_window_tokens) \
-             VALUES (1, ?1, ?2, ?3, ?4, 0.2, 3, 500, 50000)",
-            rusqlite::params![
-                llm_backup.provider,
-                llm_backup.endpoint_url,
-                re_encrypted,
-                llm_backup.model_name
-            ],
+             VALUES (1, ?1, ?2, ?3, 0.2, 3, 500, 50000)",
+            rusqlite::params![llm_backup.provider, llm_backup.endpoint_url, llm_backup.model_name],
         )?;
     }
 

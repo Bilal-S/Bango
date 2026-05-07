@@ -58,9 +58,8 @@ export function useDedup() {
       });
       mergedCount.value += count;
 
-      // Clear exact duplicates from result — they're now merged
-      result.value.autoMergedCount = 0;
-      result.value.exactDuplicates = [];
+      // Re-check from backend to get authoritative state after merge
+      await checkDuplicates();
 
       return count;
     } catch (e) {

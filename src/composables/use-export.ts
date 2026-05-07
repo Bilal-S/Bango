@@ -26,13 +26,11 @@ export function useExport() {
     }
   }
 
-  async function exportProject(password: string): Promise<void> {
+  async function exportProject(): Promise<void> {
     exporting.value = true;
     error.value = null;
     try {
-      const jsonContent = await tauriCommand<string>('export_project_backup', {
-        request: { password },
-      });
+      const jsonContent = await tauriCommand<string>('export_project_backup');
       const filePath = await save({
         defaultPath: 'bango-project.bango.json',
         filters: [
@@ -50,13 +48,13 @@ export function useExport() {
     }
   }
 
-  async function importProject(file: File, password: string): Promise<void> {
+  async function importProject(file: File): Promise<void> {
     exporting.value = true;
     error.value = null;
     try {
       const content = await file.text();
       await tauriCommand('import_project_backup', {
-        request: { jsonContent: content, password },
+        request: { jsonContent: content },
       });
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);

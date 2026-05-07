@@ -23,8 +23,6 @@ const { exportProject, importProject, resetProject } = useExport();
 const showImportDialog = ref(false);
 const showExportDialog = ref(false);
 const showDeleteDialog = ref(false);
-const importPassword = ref('');
-const exportPassword = ref('');
 const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
 
@@ -37,16 +35,14 @@ function handleImportFile(event: Event): void {
 
 async function doImportProject(): Promise<void> {
   if (!importFile.value) return;
-  await importProject(importFile.value, importPassword.value);
+  await importProject(importFile.value);
   showImportDialog.value = false;
-  importPassword.value = '';
   importFile.value = null;
 }
 
 async function doExportProject(): Promise<void> {
-  await exportProject(exportPassword.value);
+  await exportProject();
   showExportDialog.value = false;
-  exportPassword.value = '';
 }
 
 async function doDeleteProject(): Promise<void> {
@@ -424,7 +420,7 @@ watch(
     <div v-if="showImportDialog" class="dialog-overlay" @click.self="showImportDialog = false">
       <div class="dialog">
         <h2>Import Project Backup</h2>
-        <p class="dialog__desc">Select a <code>.bango.json</code> file and enter its password.</p>
+        <p class="dialog__desc">Select a <code>.bango.json</code> file to restore your project.</p>
         <div class="field">
           <label class="field__label">Backup File</label>
           <input
@@ -434,21 +430,8 @@ watch(
             @change="handleImportFile"
           />
         </div>
-        <div class="field">
-          <label class="field__label">Password</label>
-          <input
-            v-model="importPassword"
-            type="password"
-            class="field__input"
-            placeholder="Enter backup password"
-          />
-        </div>
         <div class="dialog__actions">
-          <button
-            class="btn btn--primary"
-            :disabled="!importFile || !importPassword"
-            @click="doImportProject"
-          >
+          <button class="btn btn--primary" :disabled="!importFile" @click="doImportProject">
             Import
           </button>
           <button class="btn btn--ghost" @click="showImportDialog = false">Cancel</button>
@@ -460,20 +443,12 @@ watch(
     <div v-if="showExportDialog" class="dialog-overlay" @click.self="showExportDialog = false">
       <div class="dialog">
         <h2>Export Project Backup</h2>
-        <p class="dialog__desc">Enter a password to encrypt your API keys in the backup.</p>
-        <div class="field">
-          <label class="field__label">Password</label>
-          <input
-            v-model="exportPassword"
-            type="password"
-            class="field__input"
-            placeholder="Encryption password"
-          />
-        </div>
+        <p class="dialog__desc">
+          Export your project data to a <code>.bango.json</code> file. Note: API keys are NOT
+          included in the backup.
+        </p>
         <div class="dialog__actions">
-          <button class="btn btn--primary" :disabled="!exportPassword" @click="doExportProject">
-            Export Backup
-          </button>
+          <button class="btn btn--primary" @click="doExportProject">Export Backup</button>
           <button class="btn btn--ghost" @click="showExportDialog = false">Cancel</button>
         </div>
       </div>

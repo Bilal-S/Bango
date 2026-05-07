@@ -4,7 +4,6 @@ import { useExport } from '@/composables/use-export';
 
 const emit = defineEmits<{ close: [] }>();
 const { exporting, error, exportRis, exportProject } = useExport();
-const password = ref('');
 const showBackup = ref(false);
 </script>
 
@@ -23,14 +22,12 @@ const showBackup = ref(false);
       </div>
 
       <div v-if="showBackup" class="dialog__backup">
-        <p>Enter a password to encrypt your API keys in the backup:</p>
-        <input v-model="password" type="password" placeholder="Password" class="input" />
+        <p>
+          Export your project data to a <code>.bango.json</code> file. Note: API keys are NOT
+          included in the backup.
+        </p>
         <div class="dialog__actions">
-          <button
-            class="btn btn--primary"
-            :disabled="exporting || !password"
-            @click="exportProject(password)"
-          >
+          <button class="btn btn--primary" :disabled="exporting" @click="exportProject()">
             {{ exporting ? 'Exporting...' : 'Export Backup' }}
           </button>
           <button class="btn btn--secondary" @click="showBackup = false">Back</button>

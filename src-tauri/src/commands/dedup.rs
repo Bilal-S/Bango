@@ -59,6 +59,7 @@ pub struct MergeRequest {
 }
 
 /// User-triggered: merge all high-confidence exact duplicates.
+/// Idempotent: skips pairs where either article is already merged.
 #[tauri::command]
 pub fn merge_exact_duplicates(
     db_state: State<'_, DbState>,
@@ -69,10 +70,32 @@ pub fn merge_exact_duplicates(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
+    let tx = conn.unchecked_transaction()?;
+
     let mut merged = 0usize;
     for pair in &request.pairs {
-        let count_a = article_repo::get_article_field_count(&conn, &pair.article_a_id).unwrap_or(0);
-        let count_b = article_repo::get_article_field_count(&conn, &pair.article_b_id).unwrap_or(0);
+        // Idempotency: skip if either article is already marked as a duplicate
+        let already_merged: bool = tx
+            .query_row(
+                "SELECT (duplicate_of IS NOT NULL) FROM articles WHERE id = ?1",
+                [&pair.article_a_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(true)
+            || tx
+                .query_row(
+                    "SELECT (duplicate_of IS NOT NULL) FROM articles WHERE id = ?1",
+                    [&pair.article_b_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(true);
+
+        if already_merged {
+            continue;
+        }
+
+        let count_a = article_repo::get_article_field_count(&tx, &pair.article_a_id).unwrap_or(0);
+        let count_b = article_repo::get_article_field_count(&tx, &pair.article_b_id).unwrap_or(0);
 
         let (surviving_id, duplicate_id) = if count_a >= count_b {
             (&pair.article_a_id, &pair.article_b_id)
@@ -80,18 +103,18 @@ pub fn merge_exact_duplicates(
             (&pair.article_b_id, &pair.article_a_id)
         };
 
-        article_repo::mark_as_duplicate(&conn, duplicate_id, surviving_id)?;
+        article_repo::mark_as_duplicate(&tx, duplicate_id, surviving_id)?;
 
         let audit_id = Uuid::new_v4().to_string();
-        conn.execute(
+        tx.execute(
             "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_merge', ?3, 'user')",
             rusqlite::params![audit_id, duplicate_id, format!("Merged into article {}", surviving_id)],
         )?;
 
-        article_repo::move_to_working(&conn, surviving_id)?;
+        article_repo::move_to_working(&tx, surviving_id)?;
 
         let audit_id2 = Uuid::new_v4().to_string();
-        conn.execute(
+        tx.execute(
             "INSERT INTO audit_entries (id, article_id, action, from_status, to_status, details, source) VALUES (?1, ?2, 'status_change', 'imported', 'working', 'Advanced after deduplication', 'system')",
             rusqlite::params![audit_id2, surviving_id],
         )?;
@@ -99,6 +122,7 @@ pub fn merge_exact_duplicates(
         merged += 1;
     }
 
+    tx.commit()?;
     Ok(merged)
 }
 

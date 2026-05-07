@@ -48,27 +48,21 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExportProjectRequest {
-    pub password: String,
-}
+pub struct ExportProjectRequest {}
 
 #[tauri::command]
-pub fn export_project_backup(
-    db_state: State<'_, DbState>,
-    request: ExportProjectRequest,
-) -> Result<String, AppError> {
+pub fn export_project_backup(db_state: State<'_, DbState>) -> Result<String, AppError> {
     let conn = db_state
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    project::export_project(&conn, &request.password)
+    project::export_project(&conn)
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportProjectRequest {
     pub json_content: String,
-    pub password: String,
 }
 
 #[tauri::command]
@@ -80,7 +74,7 @@ pub fn import_project_backup(
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    project::import_project(&conn, &request.json_content, &request.password)
+    project::import_project(&conn, &request.json_content)
 }
 
 #[tauri::command]
