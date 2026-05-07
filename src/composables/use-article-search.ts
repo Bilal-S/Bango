@@ -1,5 +1,6 @@
 import { ref, reactive, computed } from 'vue';
 import { tauriCommand } from './use-tauri-command';
+import { useArticlesStore } from '@/stores/articles';
 import type { Article, AuditEntry, ArticleStatus, ArticleCounts } from '@/types';
 
 export type TitleMatchType = 'starts_with' | 'contains' | 'ends_with' | 'exact';
@@ -39,6 +40,8 @@ const STATUS_TABS: readonly (ArticleStatus | 'all')[] = [
 export type StatusTab = (typeof STATUS_TABS)[number];
 
 export function useArticleSearch() {
+  const articlesStore = useArticlesStore();
+
   const articles = ref<Article[]>([]);
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -75,11 +78,13 @@ export function useArticleSearch() {
   });
 
   const statusCounts = ref<ArticleCounts>({
-    all: 0,
-    imported: 0,
-    working: 0,
-    included: 0,
-    rejected: 0,
+    // Seed from the pre-warmed store so counts render immediately
+    // without waiting for the get_article_counts IPC round-trip.
+    all: articlesStore.totalImported,
+    imported: articlesStore.byStatus.imported,
+    working: articlesStore.byStatus.working,
+    included: articlesStore.byStatus.included,
+    rejected: articlesStore.byStatus.rejected,
   });
 
   async function fetchCounts(): Promise<void> {
