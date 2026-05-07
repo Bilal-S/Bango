@@ -10,11 +10,12 @@
     "tauri": "tauri",
     "lint": "eslint . --fix",
     "lint:check": "eslint .",
+    "type-check": "vue-tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo clippy -- -D warnings",
     "format:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo fmt --check",
-    "check:all": "npm run lint:check && npm run format:check && npm run format:rust && npm run lint:rust",
+    "check:all": "npm run type-check && npm run lint:check && npm run format:check && npm run format:rust && npm run lint:rust",
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "simple-git-hooks || true"

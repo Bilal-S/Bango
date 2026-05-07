@@ -43,6 +43,10 @@ function toggleLabel(label: string): void {
 
 const showAuthorDropdown = ref(false);
 
+function hideAuthorDropdown(): void {
+  window.setTimeout(() => (showAuthorDropdown.value = false), 200);
+}
+
 const matchedAuthors = computed(() => {
   const text = props.filter.authorText.toLowerCase();
   if (!text) return [];
@@ -101,7 +105,7 @@ const matchedAuthors = computed(() => {
             class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.authorText"
             @focus="showAuthorDropdown = true"
-            @blur="setTimeout(() => (showAuthorDropdown = false), 200)"
+            @blur="hideAuthorDropdown()"
             @input="
               showAuthorDropdown = true;
               updateField('authorText', ($event.target as HTMLInputElement).value);
