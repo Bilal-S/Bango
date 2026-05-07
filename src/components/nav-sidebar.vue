@@ -11,6 +11,7 @@ const emit = defineEmits<{
 }>();
 
 const route = useRoute();
+const appVersion = __APP_VERSION__;
 
 interface NavItem {
   label: string;
@@ -47,7 +48,9 @@ function handleNavClick(): void {
   >
     <div class="sidebar__header">
       <span class="sidebar__logo">B</span>
-      <span v-if="!collapsed" class="sidebar__title">Bango</span>
+      <span v-if="!collapsed" class="sidebar__title"
+        >Bango <span class="sidebar__version">v{{ appVersion }}</span></span
+      >
     </div>
     <ul class="sidebar__nav">
       <li v-for="item in navItems" :key="item.route">
@@ -138,6 +141,12 @@ function handleNavClick(): void {
 .sidebar__title {
   font-weight: var(--font-weight-semibold);
   font-size: var(--font-size-h2);
+}
+
+.sidebar__version {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-regular);
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .sidebar__nav {
