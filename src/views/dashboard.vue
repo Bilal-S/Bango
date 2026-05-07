@@ -19,7 +19,7 @@ const statusTiles: StatusTile[] = [
     key: 'imported',
     label: 'Imported',
     icon: 'import_export',
-    description: 'Total citations in library',
+    description: 'Total articles in library',
     cssClass: 'status-tile--imported',
   },
   {
