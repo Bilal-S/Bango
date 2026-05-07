@@ -54,7 +54,7 @@ interface QuickAction {
 
 const quickActions: QuickAction[] = [
   {
-    label: 'Import RIS/BibTeX',
+    label: 'Import RIS',
     description: 'Add new references from search',
     icon: 'upload_file',
     route: '/import',
