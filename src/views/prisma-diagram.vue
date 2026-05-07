@@ -76,7 +76,7 @@ onMounted(loadDiagram);
   }
 
   .prisma-view__diagram {
-    overflow-x: auto;
+    padding: var(--space-2, 8px);
   }
 }
 .prisma-view__header {
@@ -101,6 +101,11 @@ onMounted(loadDiagram);
   background-color: white;
   border: 1px solid var(--color-border, #c7c4d8);
   border-radius: var(--radius-default, 0.25rem);
+  overflow: hidden;
+}
+.prisma-view__diagram :deep(svg) {
+  max-width: 100%;
+  height: auto;
 }
 .prisma-view__summary {
   margin-top: var(--space-4, 16px);

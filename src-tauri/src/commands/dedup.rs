@@ -111,13 +111,22 @@ pub fn merge_exact_duplicates(
             rusqlite::params![audit_id, duplicate_id, format!("Merged into article {}", surviving_id)],
         )?;
 
-        article_repo::move_to_working(&tx, surviving_id)?;
+        // Read actual status before advancing — survivor may already be 'working'
+        let current_status: String = tx
+            .query_row("SELECT status FROM articles WHERE id = ?1", [&surviving_id], |row| {
+                row.get(0)
+            })
+            .unwrap_or_else(|_| "imported".to_string());
 
-        let audit_id2 = Uuid::new_v4().to_string();
-        tx.execute(
-            "INSERT INTO audit_entries (id, article_id, action, from_status, to_status, details, source) VALUES (?1, ?2, 'status_change', 'imported', 'working', 'Advanced after deduplication', 'system')",
-            rusqlite::params![audit_id2, surviving_id],
-        )?;
+        if current_status != "working" {
+            article_repo::move_to_working(&tx, surviving_id)?;
+
+            let audit_id2 = Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO audit_entries (id, article_id, action, from_status, to_status, details, source) VALUES (?1, ?2, 'status_change', ?3, 'working', 'Advanced after deduplication', 'system')",
+                rusqlite::params![audit_id2, surviving_id, current_status],
+            )?;
+        }
 
         merged += 1;
     }

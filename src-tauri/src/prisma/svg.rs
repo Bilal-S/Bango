@@ -2,7 +2,7 @@ use super::data::PrismaData;
 
 #[must_use]
 pub fn render_prisma_svg(data: &PrismaData) -> String {
-    let width = 600;
+    let width = 800;
     let box_w = 280;
     let box_h = 50;
     let x_center = width / 2;

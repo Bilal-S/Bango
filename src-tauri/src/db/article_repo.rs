@@ -214,7 +214,7 @@ pub fn get_imported_articles(conn: &Connection) -> Result<Vec<Article>, AppError
 
 pub fn get_working_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let mut stmt =
-        conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'working' ORDER BY imported_at DESC")?;
+        conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'working' AND duplicate_of IS NULL ORDER BY imported_at DESC")?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
