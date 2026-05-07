@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
 
 const router = useRouter();
 const { counts, screeningProgress, groupedAudit, loading, error, hasArticles, refresh } =
   useDashboard();
+
+onMounted(() => refresh());
 
 interface StatusTile {
   key: 'imported' | 'working' | 'included' | 'rejected';
