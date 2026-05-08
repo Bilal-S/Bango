@@ -12,6 +12,38 @@ pub fn count_articles(conn: &Connection) -> Result<usize, AppError> {
     Ok(count)
 }
 
+/// Count unscreened articles in the working list (status = 'working' AND screened_at IS NULL).
+pub fn count_unscreened_working(conn: &Connection) -> Result<usize, AppError> {
+    let count: usize = conn.query_row(
+        "SELECT COUNT(*) FROM articles WHERE status = 'working' AND screened_at IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}
+
+/// Count all articles in the working list (status = 'working').
+pub fn count_working(conn: &Connection) -> Result<usize, AppError> {
+    let count: usize =
+        conn.query_row("SELECT COUNT(*) FROM articles WHERE status = 'working'", [], |row| {
+            row.get(0)
+        })?;
+    Ok(count)
+}
+
+/// Get the MAX character length (title + abstract) among unscreened working articles.
+/// Used for worst-case token estimation without materializing any rows.
+/// Returns 0 if no unscreened working articles exist.
+pub fn max_article_char_len(conn: &Connection) -> Result<usize, AppError> {
+    let max_len: usize = conn.query_row(
+        "SELECT COALESCE(MAX(LENGTH(COALESCE(title,'')) + LENGTH(COALESCE(abstract_text,''))), 0) \
+         FROM articles WHERE status = 'working' AND screened_at IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(max_len)
+}
+
 pub fn remaining_capacity(conn: &Connection) -> Result<usize, AppError> {
     let count = count_articles(conn)?;
     Ok(MAX_ARTICLES.saturating_sub(count))

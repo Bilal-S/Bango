@@ -61,6 +61,7 @@ void router.isReady().then(() => {
     import('@/views/llm-config.vue'),
     import('@/views/tag-label-management.vue'),
     import('@/views/import-ris.vue'),
+    import('@/views/screening-progress.vue'),
   ]);
 });
 

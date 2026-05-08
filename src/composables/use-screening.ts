@@ -13,11 +13,24 @@ export interface ScreeningProgress {
   estimatedRemainingMs: number | null;
 }
 
+export interface ScreeningReadiness {
+  totalWorking: number;
+  totalUnscreened: number;
+  hasAims: boolean;
+  hasInclusion: boolean;
+  hasExclusion: boolean;
+  hasLlmConfig: boolean;
+  tokenWarning: string | null;
+  progress: ScreeningProgress | null;
+}
+
 export function useScreening() {
   const progress = ref<ScreeningProgress | null>(null);
   const loading = ref(false);
+  const readinessLoading = ref(false);
   const error = ref<string | null>(null);
   const tokenWarning = ref<string | null>(null);
+  const readiness = ref<ScreeningReadiness | null>(null);
 
   const percentage = computed(() => {
     if (!progress.value || progress.value.total === 0) return 0;
@@ -33,11 +46,20 @@ export function useScreening() {
     return `${minutes}m ${remainingSeconds}s`;
   });
 
-  async function checkTokenEstimate(): Promise<void> {
+  /** Fetch readiness data on mount — replaces checkTokenEstimate + refreshProgress. */
+  async function fetchReadiness(): Promise<void> {
+    readinessLoading.value = true;
     try {
-      tokenWarning.value = await tauriCommand<string | null>('estimate_screening_tokens');
-    } catch {
-      // Ignore -- may not have config yet
+      const data = await tauriCommand<ScreeningReadiness>('get_screening_readiness');
+      readiness.value = data;
+      tokenWarning.value = data.tokenWarning;
+      if (data.progress) {
+        progress.value = data.progress;
+      }
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      readinessLoading.value = false;
     }
   }
 
@@ -88,13 +110,15 @@ export function useScreening() {
   return {
     progress,
     loading,
+    readinessLoading,
     error,
     tokenWarning,
+    readiness,
     percentage,
     estimatedTimeRemaining,
+    fetchReadiness,
     startScreening,
     refreshProgress,
-    checkTokenEstimate,
     pauseScreening,
     resumeScreening,
     stopScreening,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useScreening } from '@/composables/use-screening';
 import ScreeningProgressBar from '@/components/screening-progress-bar.vue';
 import ScreeningStats from '@/components/screening-stats.vue';
@@ -7,15 +7,17 @@ import ScreeningStats from '@/components/screening-stats.vue';
 const {
   progress,
   loading,
+  readinessLoading,
   error,
   tokenWarning,
+  readiness,
   percentage,
   estimatedTimeRemaining,
+  fetchReadiness,
   startScreening,
   pauseScreening,
   resumeScreening,
   stopScreening,
-  checkTokenEstimate,
   refreshProgress,
 } = useScreening();
 
@@ -24,14 +26,55 @@ const isPaused = ref(false);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
-  checkTokenEstimate();
-  refreshProgress();
+  fetchReadiness();
 });
 
 onUnmounted(() => {
   if (pollInterval) {
     clearInterval(pollInterval);
   }
+});
+
+/** Computed: can the user start screening? */
+const canStart = computed(() => {
+  const r = readiness.value;
+  if (!r) return false;
+  return r.totalUnscreened > 0 && r.hasAims && r.hasInclusion && r.hasExclusion && r.hasLlmConfig;
+});
+
+/** Computed: list of blocking reasons to show the user. */
+const blockingReasons = computed((): string[] => {
+  const r = readiness.value;
+  if (!r) return [];
+  const reasons: string[] = [];
+  if (r.totalUnscreened === 0) {
+    reasons.push(
+      'No unscreened articles in the working list. Import and deduplicate articles first.'
+    );
+  }
+  if (!r.hasAims) {
+    reasons.push('No research aims defined. Add aims in the Criteria Editor.');
+  }
+  if (!r.hasInclusion) {
+    reasons.push('No inclusion criteria defined. Add criteria in the Criteria Editor.');
+  }
+  if (!r.hasExclusion) {
+    reasons.push('No exclusion criteria defined. Add criteria in the Criteria Editor.');
+  }
+  if (!r.hasLlmConfig) {
+    reasons.push('LLM is not configured. Set up your LLM in Settings.');
+  }
+  return reasons;
+});
+
+/** Display count for the hero subtitle. */
+const displayTotal = computed((): number => {
+  if (progress.value && progress.value.total > 0) return progress.value.total;
+  return readiness.value?.totalUnscreened ?? 0;
+});
+
+const displayCompleted = computed((): number => {
+  return progress.value?.completed ?? 0;
 });
 
 function handleStart(): void {
@@ -50,99 +93,124 @@ function handleStart(): void {
 
 <template>
   <div class="screening-view">
-    <!-- Hero Progress Section -->
-    <section class="screening-view__hero">
-      <div class="screening-view__hero-header">
-        <div>
-          <h1 class="page-title">AI Screening</h1>
-          <p v-if="progress" class="screening-view__subtitle">
-            Processing: <strong>{{ progress.completed }}</strong> / {{ progress.total }} articles
-          </p>
-          <p v-else class="screening-view__subtitle">
-            Screen articles against your inclusion/exclusion criteria
-          </p>
+    <!-- Loading State -->
+    <div v-if="readinessLoading" class="screening-view__loading">
+      <div class="screening-view__spinner" />
+      <p>Loading screening data&hellip;</p>
+    </div>
+
+    <template v-else>
+      <!-- Hero Progress Section -->
+      <section class="screening-view__hero">
+        <div class="screening-view__hero-header">
+          <div>
+            <h1 class="page-title">AI Screening</h1>
+            <p v-if="displayTotal > 0" class="screening-view__subtitle">
+              Processing: <strong>{{ displayCompleted }}</strong> / {{ displayTotal }} articles
+            </p>
+            <p v-else class="screening-view__subtitle">
+              Screen articles against your inclusion/exclusion criteria
+            </p>
+          </div>
+          <div v-if="progress && progress.total > 0" class="screening-view__percent">
+            <span class="screening-view__percent-value">{{ percentage }}%</span>
+            <span class="screening-view__percent-label">Completion</span>
+          </div>
         </div>
-        <div v-if="progress && progress.total > 0" class="screening-view__percent">
-          <span class="screening-view__percent-value">{{ percentage }}%</span>
-          <span class="screening-view__percent-label">Completion</span>
-        </div>
+
+        <ScreeningProgressBar
+          v-if="progress && progress.total > 0"
+          :completed="progress.completed"
+          :total="progress.total"
+          :percentage="percentage"
+        />
+      </section>
+
+      <!-- Error Banner -->
+      <div v-if="error" class="screening-view__error">
+        {{ error }}
       </div>
 
-      <ScreeningProgressBar
+      <!-- Token Warning -->
+      <div v-if="tokenWarning" class="screening-view__warning">
+        {{ tokenWarning }}
+      </div>
+
+      <!-- Blocking Reasons (guardrails) -->
+      <div
+        v-if="blockingReasons.length > 0 && !progress?.isRunning"
+        class="screening-view__guardrails"
+      >
+        <p class="screening-view__guardrails-title">Before screening, address the following:</p>
+        <ul>
+          <li v-for="(reason, idx) in blockingReasons" :key="idx">{{ reason }}</li>
+        </ul>
+      </div>
+
+      <!-- Stats Grid -->
+      <ScreeningStats
         v-if="progress && progress.total > 0"
-        :completed="progress.completed"
-        :total="progress.total"
-        :percentage="percentage"
+        :included="progress.included"
+        :rejected="progress.rejected"
+        :errors="progress.errors"
+        :estimated-time="estimatedTimeRemaining"
       />
-    </section>
 
-    <!-- Error Banner -->
-    <div v-if="error" class="screening-view__error">
-      {{ error }}
-    </div>
-
-    <!-- Token Warning -->
-    <div v-if="tokenWarning" class="screening-view__warning">
-      {{ tokenWarning }}
-    </div>
-
-    <!-- Stats Grid -->
-    <ScreeningStats
-      v-if="progress && progress.total > 0"
-      :included="progress.included"
-      :rejected="progress.rejected"
-      :errors="progress.errors"
-      :estimated-time="estimatedTimeRemaining"
-    />
-
-    <!-- Current Article Indicator -->
-    <div v-if="progress?.currentArticleTitle" class="screening-view__current">
-      <span class="screening-view__current-dot" />
-      Screening: {{ progress.currentArticleTitle }}
-    </div>
-
-    <!-- Controls -->
-    <div class="screening-view__controls">
-      <div class="screening-view__actions">
-        <button
-          v-if="!progress?.isRunning && !loading"
-          class="btn btn--primary"
-          @click="handleStart"
-        >
-          Start Screening
-        </button>
-        <button v-if="loading" class="btn btn--primary" disabled>Starting...</button>
-        <button
-          v-if="progress?.isRunning && !isPaused"
-          class="btn btn--primary"
-          @click="
-            pauseScreening();
-            isPaused = true;
-          "
-        >
-          Pause
-        </button>
-        <button
-          v-if="progress?.isRunning && isPaused"
-          class="btn btn--primary"
-          @click="
-            resumeScreening();
-            isPaused = false;
-          "
-        >
-          Resume
-        </button>
-        <button v-if="progress?.isRunning" class="btn btn--danger" @click="stopScreening">
-          Stop
-        </button>
+      <!-- Current Article Indicator -->
+      <div v-if="progress?.currentArticleTitle" class="screening-view__current">
+        <span class="screening-view__current-dot" />
+        Screening: {{ progress.currentArticleTitle }}
       </div>
-    </div>
 
-    <!-- Empty State -->
-    <div v-if="!progress && !loading" class="screening-view__empty">
-      <p>Configure your criteria and LLM settings, then start screening.</p>
-      <button class="btn btn--secondary" @click="checkTokenEstimate">Estimate Token Usage</button>
-    </div>
+      <!-- Controls -->
+      <div class="screening-view__controls">
+        <div class="screening-view__actions">
+          <button
+            v-if="!progress?.isRunning && !loading"
+            class="btn btn--primary"
+            :disabled="!canStart"
+            @click="handleStart"
+          >
+            Start Screening
+          </button>
+          <button v-if="loading" class="btn btn--primary" disabled>
+            <span class="screening-view__btn-spinner" />
+            Starting&hellip;
+          </button>
+          <button
+            v-if="progress?.isRunning && !isPaused"
+            class="btn btn--primary"
+            @click="
+              pauseScreening();
+              isPaused = true;
+            "
+          >
+            Pause
+          </button>
+          <button
+            v-if="progress?.isRunning && isPaused"
+            class="btn btn--primary"
+            @click="
+              resumeScreening();
+              isPaused = false;
+            "
+          >
+            Resume
+          </button>
+          <button v-if="progress?.isRunning" class="btn btn--danger" @click="stopScreening">
+            Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- Empty State (when no progress and no guardrails — shouldn't normally show but fallback) -->
+      <div
+        v-if="!progress && !loading && readiness && blockingReasons.length === 0"
+        class="screening-view__empty"
+      >
+        <p>Configure your criteria and LLM settings, then start screening.</p>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -178,6 +246,31 @@ function handleStart(): void {
   }
 }
 
+.screening-view__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-16) 0;
+  color: var(--color-on-surface-variant);
+}
+
+.screening-view__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-surface-container-highest);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .screening-view__hero {
   display: flex;
   flex-direction: column;
@@ -188,15 +281,6 @@ function handleStart(): void {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-}
-
-.screening-view__title {
-  font-size: var(--font-size-display);
-  font-weight: var(--font-weight-semibold);
-  line-height: var(--line-height-display);
-  letter-spacing: var(--letter-spacing-display);
-  color: var(--color-on-surface);
-  margin: 0;
 }
 
 .screening-view__subtitle {
@@ -242,6 +326,29 @@ function handleStart(): void {
   border: 1px solid var(--color-priority-high);
 }
 
+.screening-view__guardrails {
+  padding: var(--space-4);
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-default);
+  border-left: 3px solid var(--color-priority-high);
+}
+
+.screening-view__guardrails-title {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin: 0 0 var(--space-2);
+}
+
+.screening-view__guardrails ul {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
 .screening-view__current {
   display: flex;
   align-items: center;
@@ -280,6 +387,16 @@ function handleStart(): void {
 .screening-view__actions {
   display: flex;
   gap: var(--space-3);
+}
+
+.screening-view__btn-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-on-primary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  display: inline-block;
 }
 
 .screening-view__empty {
