@@ -10,6 +10,116 @@ use crate::models::article::Article;
 
 use uuid::Uuid;
 
+/// Result of classifying newly imported articles.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassificationResult {
+    /// Articles moved to working (no duplicates found)
+    pub moved_to_working: usize,
+    /// Articles that are duplicates of existing ones
+    pub duplicates_found: usize,
+    /// Exact duplicates auto-merged
+    pub exact_duplicates: usize,
+    /// Fuzzy matches needing manual review
+    pub fuzzy_matches: usize,
+}
+
+/// After import, classify newly inserted articles:
+/// - Run dedup against ALL existing articles
+/// - Exact duplicates → mark `duplicate_of`, keep in `duplicate` status
+/// - Fuzzy matches → keep in `duplicate` for manual review
+/// - No match → move to `working`
+///
+/// **Key rule**: existing articles (working/included/rejected) are NEVER modified.
+pub fn classify_imported_articles(
+    conn: &rusqlite::Connection,
+    new_articles: &[Article],
+) -> Result<ClassificationResult, AppError> {
+    if new_articles.is_empty() {
+        return Ok(ClassificationResult {
+            moved_to_working: 0,
+            duplicates_found: 0,
+            exact_duplicates: 0,
+            fuzzy_matches: 0,
+        });
+    }
+
+    // Collect IDs of newly imported articles
+    let new_ids: std::collections::HashSet<String> =
+        new_articles.iter().map(|a| a.id.clone()).collect();
+
+    // Fetch ALL articles (including the newly imported ones) for dedup comparison
+    let all_articles = article_repo::get_all_articles(conn)?;
+
+    // Convert to DedupArticle for the engine
+    let all_dedup: Vec<DedupArticle> = all_articles
+        .iter()
+        .map(|a| DedupArticle {
+            id: a.id.clone(),
+            title: a.title.clone(),
+            authors: a.authors.clone(),
+            publication_year: a.publication_year,
+            doi: a.doi.clone(),
+            import_source: a.import_source.clone(),
+        })
+        .collect();
+
+    // Run dedup on everything
+    let result = engine::run_dedup(&all_dedup);
+
+    // Collect IDs of newly imported articles that are duplicates
+    let mut duplicate_new_ids = std::collections::HashSet::new();
+
+    // Process exact duplicates
+    for pair in &result.exact_duplicates {
+        // Figure out which (if any) of the pair is a newly imported article
+        let (duplicate_id, surviving_id) = if new_ids.contains(&pair.article_b_id) {
+            // B is new → B is the duplicate, A survives (regardless of A's status)
+            (pair.article_b_id.clone(), pair.article_a_id.clone())
+        } else if new_ids.contains(&pair.article_a_id) {
+            // A is new → A is the duplicate, B survives
+            (pair.article_a_id.clone(), pair.article_b_id.clone())
+        } else {
+            // Neither is new — skip (existing pair already handled)
+            continue;
+        };
+
+        // Mark the new article as a duplicate — do NOT change the surviving article
+        article_repo::mark_as_duplicate(conn, &duplicate_id, &surviving_id)?;
+        duplicate_new_ids.insert(duplicate_id.clone());
+
+        // Audit entry
+        let audit_id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_auto', ?3, 'system')",
+            rusqlite::params![audit_id, duplicate_id, format!("Auto-detected duplicate of article {}", surviving_id)],
+        )?;
+    }
+
+    // Process fuzzy matches — keep new articles in 'duplicate' for manual review
+    for pair in &result.fuzzy_matches {
+        if new_ids.contains(&pair.article_b_id) {
+            duplicate_new_ids.insert(pair.article_b_id.clone());
+        } else if new_ids.contains(&pair.article_a_id) {
+            duplicate_new_ids.insert(pair.article_a_id.clone());
+        }
+    }
+
+    let exact_count = result.exact_duplicates.len();
+    let fuzzy_count = result.fuzzy_matches.len();
+
+    // Move non-duplicate new articles to working
+    let to_move: Vec<String> = new_ids.difference(&duplicate_new_ids).cloned().collect();
+    let moved = article_repo::move_articles_to_working_batch(conn, &to_move)?;
+
+    Ok(ClassificationResult {
+        moved_to_working: moved,
+        duplicates_found: duplicate_new_ids.len(),
+        exact_duplicates: exact_count,
+        fuzzy_matches: fuzzy_count,
+    })
+}
+
 /// Detection only — returns duplicate pairs without modifying the database.
 #[tauri::command]
 pub fn check_duplicates(db_state: State<'_, DbState>) -> Result<DedupResult, AppError> {

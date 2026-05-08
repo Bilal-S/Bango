@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::commands::dedup::classify_imported_articles;
 use crate::db::article_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
@@ -183,13 +184,23 @@ pub fn import_ris_file(
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
     let imported = article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
+
+    // Classify: move non-duplicates to working, keep duplicates in 'duplicate'
+    let _classification = classify_imported_articles(&conn, &imported)?;
+
+    // Re-fetch articles to reflect updated statuses after classification
+    let updated_articles: Vec<Article> = imported
+        .iter()
+        .filter_map(|a| article_repo::get_article_by_id(&conn, &a.id).ok())
+        .collect();
+
     let remaining = article_repo::remaining_capacity(&conn)?;
 
     Ok(ImportResult {
-        imported_count: imported.len(),
+        imported_count: updated_articles.len(),
         skipped_count: skipped_validation,
         skipped_by_user,
-        articles: imported,
+        articles: updated_articles,
         remaining_capacity: remaining,
         validation_errors: errors
             .into_iter()

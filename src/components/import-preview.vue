@@ -7,6 +7,7 @@ const props = defineProps<{
   errorCount: number;
   errorGroups: ErrorGroup[];
   removedIndices: Set<number>;
+  totalValidCount: number;
 }>();
 
 defineEmits<{
@@ -82,7 +83,12 @@ function isExpanded(message: string): boolean {
         </tbody>
       </table>
       <p class="preview__note">
-        Showing {{ articles.length - props.removedIndices.size }} articles
+        <template v-if="totalValidCount > 10">
+          Showing first {{ articles.length - props.removedIndices.size }} articles as sample
+        </template>
+        <template v-else>
+          Showing {{ articles.length - props.removedIndices.size }} articles
+        </template>
       </p>
     </div>
   </div>

@@ -67,17 +67,29 @@ const hasDuplicates = () =>
         </div>
 
         <div class="import-view__summary">
-          <div class="import-view__stat">
-            <span class="import-view__stat-value">{{ preview.totalRecords }}</span>
-            <span class="import-view__stat-label">Total Records</span>
+          <div class="import-view__stats-group">
+            <div class="import-view__stat">
+              <span class="import-view__stat-value">{{ preview.totalRecords }}</span>
+              <span class="import-view__stat-label">Total Records</span>
+            </div>
+            <div class="import-view__stat">
+              <span class="import-view__stat-value">{{ visibleCount }}</span>
+              <span class="import-view__stat-label">Valid</span>
+            </div>
+            <div class="import-view__stat import-view__stat--error">
+              <span class="import-view__stat-value">{{ preview.errorCount }}</span>
+              <span class="import-view__stat-label">Skipped</span>
+            </div>
           </div>
-          <div class="import-view__stat">
-            <span class="import-view__stat-value">{{ visibleCount }}</span>
-            <span class="import-view__stat-label">Valid</span>
-          </div>
-          <div class="import-view__stat import-view__stat--error">
-            <span class="import-view__stat-value">{{ preview.errorCount }}</span>
-            <span class="import-view__stat-label">Skipped</span>
+          <div class="import-view__actions import-view__actions--inline">
+            <button class="btn btn--outline" @click="reset">Cancel</button>
+            <button
+              class="btn btn--primary"
+              :disabled="!canImport || loading"
+              @click="confirmImport"
+            >
+              {{ loading ? 'Importing...' : `Import ${visibleCount} Articles` }}
+            </button>
           </div>
         </div>
 
@@ -86,15 +98,9 @@ const hasDuplicates = () =>
           :error-count="preview.errorCount"
           :error-groups="preview.errorGroups"
           :removed-indices="removedIndices"
+          :total-valid-count="visibleCount"
           @remove="removeArticle"
         />
-
-        <div class="import-view__actions">
-          <button class="btn btn--outline" @click="reset">Cancel</button>
-          <button class="btn btn--primary" :disabled="!canImport || loading" @click="confirmImport">
-            {{ loading ? 'Importing...' : `Import ${visibleCount} Articles` }}
-          </button>
-        </div>
       </section>
 
       <!-- Step 4: Complete -->
@@ -188,8 +194,15 @@ const hasDuplicates = () =>
 
 .import-view__summary {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: var(--space-4);
   margin-bottom: var(--space-4);
+}
+
+.import-view__stats-group {
+  display: flex;
+  gap: var(--space-4);
 }
 
 .import-view__stat {
@@ -222,6 +235,11 @@ const hasDuplicates = () =>
   justify-content: flex-end;
   gap: var(--space-3);
   margin-top: var(--space-4);
+}
+
+.import-view__actions--inline {
+  margin-top: 0;
+  align-self: flex-end;
 }
 
 .import-view__success {

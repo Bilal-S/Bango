@@ -236,6 +236,25 @@ pub fn move_to_working(conn: &Connection, article_id: &str) -> Result<(), AppErr
     Ok(())
 }
 
+/// Move multiple articles to 'working' status in a single transaction.
+pub fn move_articles_to_working_batch(
+    conn: &Connection,
+    article_ids: &[String],
+) -> Result<usize, AppError> {
+    if article_ids.is_empty() {
+        return Ok(0);
+    }
+    let mut count = 0usize;
+    for id in article_ids {
+        let rows = conn.execute(
+            "UPDATE articles SET status = 'working' WHERE id = ?1 AND status = 'duplicate'",
+            params![id],
+        )?;
+        count += rows;
+    }
+    Ok(count)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArticleQuery {

@@ -22,7 +22,7 @@ const statusTiles: StatusTile[] = [
     key: 'duplicate',
     label: 'Duplicates',
     icon: 'content_copy',
-    description: 'Articles with potential duplicates',
+    description: 'Identified duplicates awaiting resolution',
     cssClass: 'status-tile--duplicate',
   },
   {
