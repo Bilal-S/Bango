@@ -32,6 +32,8 @@ const MATCH_TYPES: { value: TitleMatchType; label: string }[] = [
 const yearRangeInvalid = computed((): boolean => {
   const from = props.filter.yearFrom;
   const to = props.filter.yearTo;
+  if (from !== null && from < 1850) return true;
+  if (to !== null && to > 2100) return true;
   return from !== null && to !== null && from > to;
 });
 
@@ -80,11 +82,11 @@ const matchedAuthors = computed(() => {
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       <!-- Title -->
-      <div>
+      <div class="min-w-0">
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Title</label>
-        <div class="flex gap-2">
+        <div class="flex items-center gap-2 min-w-0">
           <select
-            class="shrink-0 w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="shrink-0 w-32 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.titleMatch"
             @change="
               updateField(
@@ -100,7 +102,7 @@ const matchedAuthors = computed(() => {
           <input
             type="text"
             placeholder="Filter by title..."
-            class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :value="filter.titleText"
             @input="updateField('titleText', ($event.target as HTMLInputElement).value)"
           />
@@ -108,9 +110,9 @@ const matchedAuthors = computed(() => {
       </div>
 
       <!-- Author -->
-      <div>
+      <div class="min-w-0">
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Author</label>
-        <div class="relative w-[70%]">
+        <div class="relative">
           <input
             type="text"
             placeholder="Filter by author..."
@@ -148,8 +150,9 @@ const matchedAuthors = computed(() => {
         <div class="flex items-center gap-2">
           <input
             type="number"
+            min="1850"
             placeholder="From"
-            class="flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="no-spinner flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :class="yearRangeInvalid ? 'border-red-300' : 'border-slate-200'"
             :value="filter.yearFrom ?? ''"
             @input="
@@ -164,8 +167,9 @@ const matchedAuthors = computed(() => {
           <span class="text-slate-400 text-sm">&ndash;</span>
           <input
             type="number"
+            max="2100"
             placeholder="To"
-            class="flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="no-spinner flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             :class="yearRangeInvalid ? 'border-red-300' : 'border-slate-200'"
             :value="filter.yearTo ?? ''"
             @input="
@@ -179,7 +183,7 @@ const matchedAuthors = computed(() => {
           />
         </div>
         <p v-if="yearRangeInvalid" class="mt-1.5 text-xs text-red-500">
-          From year must be ≤ To year
+          Year must be between 1850–2100 and From ≤ To
         </p>
       </div>
 
@@ -306,3 +310,14 @@ const matchedAuthors = computed(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.no-spinner::-webkit-inner-spin-button,
+.no-spinner::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
+}
+</style>
