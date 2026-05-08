@@ -431,10 +431,10 @@ watch(
           />
         </div>
         <div class="dialog__actions">
+          <button class="btn btn--outline" @click="showImportDialog = false">Cancel</button>
           <button class="btn btn--primary" :disabled="!importFile" @click="doImportProject">
             Import
           </button>
-          <button class="btn btn--ghost" @click="showImportDialog = false">Cancel</button>
         </div>
       </div>
     </div>
@@ -448,8 +448,8 @@ watch(
           included in the backup.
         </p>
         <div class="dialog__actions">
+          <button class="btn btn--outline" @click="showExportDialog = false">Cancel</button>
           <button class="btn btn--primary" @click="doExportProject">Export Backup</button>
-          <button class="btn btn--ghost" @click="showExportDialog = false">Cancel</button>
         </div>
       </div>
     </div>
@@ -477,20 +477,20 @@ watch(
         </div>
         <div class="dialog__actions">
           <button
-            class="btn btn--danger"
-            :disabled="deleteConfirmText !== 'DELETE'"
-            @click="doDeleteProject"
-          >
-            Delete Everything
-          </button>
-          <button
-            class="btn btn--ghost"
+            class="btn btn--outline"
             @click="
               showDeleteDialog = false;
               deleteConfirmText = '';
             "
           >
             Cancel
+          </button>
+          <button
+            class="btn btn--danger"
+            :disabled="deleteConfirmText !== 'DELETE'"
+            @click="doDeleteProject"
+          >
+            Delete Everything
           </button>
         </div>
       </div>
@@ -936,6 +936,22 @@ watch(
   background-color: #f0ecf9;
 }
 
+.btn--outline {
+  background: transparent;
+  color: #464555;
+  border: 1px solid #777587;
+  border-radius: 0.5rem;
+  padding: 0.625rem 1.5rem;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn--outline:hover:not(:disabled) {
+  background-color: #f0ecf9;
+}
+
 /* Dialog */
 .dialog-overlay {
   position: fixed;
@@ -978,6 +994,7 @@ watch(
 
 .dialog__actions {
   display: flex;
+  justify-content: flex-end;
   gap: 0.5rem;
 }
 

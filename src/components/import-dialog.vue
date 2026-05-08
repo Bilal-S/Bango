@@ -35,10 +35,10 @@ async function doImport(): Promise<void> {
       </div>
 
       <div class="dialog__actions">
+        <button class="btn btn--outline" @click="emit('close')">Cancel</button>
         <button class="btn btn--primary" :disabled="exporting || !selectedFile" @click="doImport">
           {{ exporting ? 'Importing...' : 'Import' }}
         </button>
-        <button class="btn btn--ghost" @click="emit('close')">Cancel</button>
       </div>
     </div>
   </div>
@@ -97,6 +97,7 @@ async function doImport(): Promise<void> {
 }
 .dialog__actions {
   display: flex;
+  justify-content: flex-end;
   gap: var(--space-2, 8px);
 }
 .btn {
@@ -112,6 +113,11 @@ async function doImport(): Promise<void> {
 }
 .btn--ghost {
   color: var(--color-on-surface-variant, #464555);
+}
+.btn--outline {
+  background: transparent;
+  color: var(--color-on-surface-variant, #464555);
+  border: 1px solid var(--color-outline, #777587);
 }
 .btn:disabled {
   opacity: 0.5;

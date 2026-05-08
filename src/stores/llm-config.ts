@@ -38,6 +38,7 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
   }
 
   function invalidate(): void {
+    config.value = { ...DEFAULT_CONFIG };
     initialized.value = false;
   }
 

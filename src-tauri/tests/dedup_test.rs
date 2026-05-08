@@ -14,6 +14,7 @@ fn make_article(
         authors: authors.iter().map(|a| a.to_string()).collect(),
         publication_year: year,
         doi: doi.map(|d| d.to_string()),
+        import_source: None,
     }
 }
 

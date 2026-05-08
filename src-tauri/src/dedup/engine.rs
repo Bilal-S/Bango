@@ -9,6 +9,7 @@ pub struct DedupArticle {
     pub authors: Vec<String>,
     pub publication_year: Option<i32>,
     pub doi: Option<String>,
+    pub import_source: Option<String>,
 }
 
 /// Runs all dedup strategies against a list of articles.
@@ -134,6 +135,8 @@ fn make_pair(
         article_b_authors: b.authors.clone(),
         article_a_year: a.publication_year,
         article_b_year: b.publication_year,
+        article_a_source: a.import_source.clone(),
+        article_b_source: b.import_source.clone(),
         similarity,
         match_type,
         strategy,

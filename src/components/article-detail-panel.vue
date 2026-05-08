@@ -305,7 +305,7 @@ const confidenceBarWidth = computed(() =>
           />
           <div class="flex gap-2 justify-end">
             <button
-              class="text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer px-3 py-1"
+              class="text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer px-3 py-1 border border-slate-300 rounded-lg"
               @click="cancelNotes"
             >
               Cancel

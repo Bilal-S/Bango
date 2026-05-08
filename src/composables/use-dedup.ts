@@ -10,6 +10,8 @@ export interface DuplicatePair {
   articleBAuthors: string[];
   articleAYear: number | null;
   articleBYear: number | null;
+  articleASource?: string;
+  articleBSource?: string;
   similarity: number;
   matchType: 'exactDuplicate' | 'fuzzyMatch';
   strategy: string;

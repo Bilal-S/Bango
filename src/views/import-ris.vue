@@ -52,7 +52,7 @@ const hasDuplicates = () =>
       <section v-if="step === 'parse'">
         <p class="import-view__file-name">Selected: {{ fileName }}</p>
         <div class="import-view__actions">
-          <button class="btn btn--secondary" @click="reset">Cancel</button>
+          <button class="btn btn--outline" @click="reset">Cancel</button>
           <button class="btn btn--primary" :disabled="loading" @click="parseFile">
             {{ loading ? 'Parsing...' : 'Parse File' }}
           </button>
@@ -90,7 +90,7 @@ const hasDuplicates = () =>
         />
 
         <div class="import-view__actions">
-          <button class="btn btn--secondary" @click="reset">Cancel</button>
+          <button class="btn btn--outline" @click="reset">Cancel</button>
           <button class="btn btn--primary" :disabled="!canImport || loading" @click="confirmImport">
             {{ loading ? 'Importing...' : `Import ${visibleCount} Articles` }}
           </button>
@@ -219,6 +219,7 @@ const hasDuplicates = () =>
 
 .import-view__actions {
   display: flex;
+  justify-content: flex-end;
   gap: var(--space-3);
   margin-top: var(--space-4);
 }
@@ -300,5 +301,10 @@ const hasDuplicates = () =>
 .btn--secondary {
   background-color: var(--color-surface-container-high);
   color: var(--color-on-surface);
+}
+.btn--outline {
+  background: transparent;
+  color: var(--color-on-surface-variant, #464555);
+  border: 1px solid var(--color-outline, #777587);
 }
 </style>

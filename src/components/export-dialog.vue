@@ -27,14 +27,16 @@ const showBackup = ref(false);
           included in the backup.
         </p>
         <div class="dialog__actions">
+          <button class="btn btn--secondary" @click="showBackup = false">Back</button>
           <button class="btn btn--primary" :disabled="exporting" @click="exportProject()">
             {{ exporting ? 'Exporting...' : 'Export Backup' }}
           </button>
-          <button class="btn btn--secondary" @click="showBackup = false">Back</button>
         </div>
       </div>
 
-      <button class="btn btn--ghost" @click="emit('close')">Cancel</button>
+      <div class="dialog__actions">
+        <button class="btn btn--outline" @click="emit('close')">Cancel</button>
+      </div>
     </div>
   </div>
 </template>
@@ -84,6 +86,7 @@ const showBackup = ref(false);
 }
 .dialog__actions {
   display: flex;
+  justify-content: flex-end;
   gap: var(--space-2, 8px);
 }
 .input {
@@ -110,6 +113,11 @@ const showBackup = ref(false);
 }
 .btn--ghost {
   color: var(--color-on-surface-variant, #464555);
+}
+.btn--outline {
+  background: transparent;
+  color: var(--color-on-surface-variant, #464555);
+  border: 1px solid var(--color-outline, #777587);
 }
 .btn:disabled {
   opacity: 0.5;

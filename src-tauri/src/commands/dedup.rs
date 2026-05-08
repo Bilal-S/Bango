@@ -30,6 +30,7 @@ pub fn check_duplicates(db_state: State<'_, DbState>) -> Result<DedupResult, App
             authors: a.authors.clone(),
             publication_year: a.publication_year,
             doi: a.doi.clone(),
+            import_source: a.import_source.clone(),
         })
         .collect();
 

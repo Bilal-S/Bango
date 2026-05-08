@@ -35,6 +35,7 @@ fn test_dedup_no_false_positives_on_real_data() {
             authors: r.authors.clone(),
             publication_year: r.publication_year,
             doi: r.doi.clone(),
+            import_source: None,
         })
         .collect();
 
@@ -59,6 +60,7 @@ fn test_dedup_detects_doi_duplicate_from_real_data() {
         authors: original.authors.clone(),
         publication_year: original.publication_year,
         doi: original.doi.clone(),
+        import_source: None,
     }];
 
     // Add a duplicate with same DOI but different title
@@ -68,6 +70,7 @@ fn test_dedup_detects_doi_duplicate_from_real_data() {
         authors: vec!["Other Author".to_string()],
         publication_year: Some(2020),
         doi: original.doi.clone(),
+        import_source: None,
     });
 
     let result = engine::run_dedup(&articles);

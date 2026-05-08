@@ -46,6 +46,7 @@ export const useTagsStore = defineStore('tags', () => {
   }
 
   function invalidate(): void {
+    tags.value = [];
     initialized.value = false;
   }
 

@@ -1,10 +1,25 @@
 import { ref } from 'vue';
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from './use-tauri-command';
+import { useArticlesStore } from '@/stores/articles';
+import { useCriteriaStore } from '@/stores/criteria';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
+import { useLlmConfigStore } from '@/stores/llm-config';
+import { useAuditStore } from '@/stores/audit';
 
 export function useExport() {
   const exporting = ref(false);
   const error = ref<string | null>(null);
+
+  function invalidateAllStores(): void {
+    useArticlesStore().invalidate();
+    useCriteriaStore().invalidate();
+    useTagsStore().invalidate();
+    useLabelsStore().invalidate();
+    useLlmConfigStore().invalidate();
+    useAuditStore().invalidate();
+  }
 
   async function exportRis(): Promise<void> {
     exporting.value = true;
@@ -53,6 +68,7 @@ export function useExport() {
       await tauriCommand('import_project_backup', {
         request: { jsonContent: content },
       });
+      invalidateAllStores();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -65,6 +81,7 @@ export function useExport() {
     error.value = null;
     try {
       await tauriCommand('reset_project');
+      invalidateAllStores();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {

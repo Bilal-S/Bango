@@ -43,6 +43,7 @@ export const useArticlesStore = defineStore('articles', () => {
   }
 
   function invalidate(): void {
+    articles.value = [];
     initialized.value = false;
   }
 

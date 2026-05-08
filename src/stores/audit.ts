@@ -38,6 +38,8 @@ export const useAuditStore = defineStore('audit', () => {
   }
 
   function invalidate(): void {
+    recentAudit.value = [];
+    importActivities.value = [];
     initialized.value = false;
   }
 

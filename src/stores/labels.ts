@@ -43,6 +43,7 @@ export const useLabelsStore = defineStore('labels', () => {
   }
 
   function invalidate(): void {
+    labels.value = [];
     initialized.value = false;
   }
 

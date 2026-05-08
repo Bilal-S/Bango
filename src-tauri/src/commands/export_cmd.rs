@@ -91,13 +91,18 @@ pub fn import_project_backup(
 
 #[tauri::command]
 pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
-    let conn = db_state
+    let mut conn = db_state
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    // Drop all data tables (child tables first due to FK constraints)
-    conn.execute_batch(
+    let tx = conn.transaction()?;
+
+    // Disable foreign keys temporarily to allow deleting articles with self-references (duplicate_of)
+    tx.execute("PRAGMA foreign_keys = OFF", [])?;
+
+    // Drop all data tables (child tables first for clarity, though FK is OFF)
+    tx.execute_batch(
         "DELETE FROM article_labels;
          DELETE FROM article_tags;
          DELETE FROM audit_entries;
@@ -110,9 +115,15 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
     )?;
 
     // Reset the auto-increment counter
-    conn.execute_batch("DELETE FROM sqlite_sequence;")?;
+    tx.execute_batch("DELETE FROM sqlite_sequence;")?;
+
+    // Re-enable foreign keys
+    tx.execute("PRAGMA foreign_keys = ON", [])?;
+
+    tx.commit()?;
 
     // Re-run migrations to ensure clean schema (idempotent)
+    // We lock again because the transaction was committed and tx is dropped
     drop(conn);
     let conn = db_state
         .conn

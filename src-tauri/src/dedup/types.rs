@@ -27,6 +27,8 @@ pub struct DuplicatePair {
     pub article_b_authors: Vec<String>,
     pub article_a_year: Option<i32>,
     pub article_b_year: Option<i32>,
+    pub article_a_source: Option<String>,
+    pub article_b_source: Option<String>,
     pub similarity: f64,
     pub match_type: MatchType,
     pub strategy: MatchStrategy,

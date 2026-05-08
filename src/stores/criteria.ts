@@ -35,6 +35,10 @@ export const useCriteriaStore = defineStore('criteria', () => {
   }
 
   function invalidate(): void {
+    aims.value = [];
+    criteria.value = [];
+    inclusionCriteria.value = [];
+    exclusionCriteria.value = [];
     initialized.value = false;
   }
 

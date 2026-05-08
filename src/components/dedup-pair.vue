@@ -14,6 +14,7 @@ const emit = defineEmits<{ resolve: [resolution: DedupResolution] }>();
         <p class="dedup-pair__title">{{ pair.articleATitle }}</p>
         <p class="dedup-pair__meta">{{ pair.articleAAuthors.join('; ') }}</p>
         <p class="dedup-pair__meta">{{ pair.articleAYear ?? 'No year' }}</p>
+        <p v-if="pair.articleASource" class="dedup-pair__source">{{ pair.articleASource }}</p>
       </div>
       <div class="dedup-pair__vs">vs</div>
       <div class="dedup-pair__record">
@@ -21,6 +22,7 @@ const emit = defineEmits<{ resolve: [resolution: DedupResolution] }>();
         <p class="dedup-pair__title">{{ pair.articleBTitle }}</p>
         <p class="dedup-pair__meta">{{ pair.articleBAuthors.join('; ') }}</p>
         <p class="dedup-pair__meta">{{ pair.articleBYear ?? 'No year' }}</p>
+        <p v-if="pair.articleBSource" class="dedup-pair__source">{{ pair.articleBSource }}</p>
       </div>
     </div>
     <div class="dedup-pair__actions">
@@ -78,6 +80,13 @@ const emit = defineEmits<{ resolve: [resolution: DedupResolution] }>();
 .dedup-pair__meta {
   font-size: var(--font-size-caption);
   color: var(--color-on-surface-variant);
+}
+
+.dedup-pair__source {
+  font-size: 0.7rem;
+  color: var(--color-outline);
+  margin-top: var(--space-1);
+  font-style: italic;
 }
 
 .dedup-pair__vs {
