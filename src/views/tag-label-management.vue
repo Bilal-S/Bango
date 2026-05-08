@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import TagChip from '@/components/tag-chip.vue';
@@ -7,6 +8,7 @@ import LabelChip from '@/components/label-chip.vue';
 import { formatArticleCount } from '@/utils/formatters';
 import { getColorScheme } from '@/utils/color';
 
+const router = useRouter();
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
 
@@ -95,6 +97,14 @@ function onTagColorChange(tagId: string, event: Event): void {
 function onLabelColorChange(labelId: string, event: Event): void {
   const input = event.target as HTMLInputElement;
   labelsStore.updateLabelColor(labelId, input.value);
+}
+
+function filterByTag(tagId: string): void {
+  router.push({ path: '/articles', query: { tags: tagId } });
+}
+
+function filterByLabel(labelId: string): void {
+  router.push({ path: '/articles', query: { labels: labelId } });
 }
 </script>
 
@@ -214,6 +224,14 @@ function onLabelColorChange(labelId: string, event: Event): void {
                 <div
                   class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
+                  <button
+                    class="p-1 text-outline hover:text-primary rounded hover:bg-surface-variant transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    :disabled="tag.articleCount === 0"
+                    :title="tag.articleCount > 0 ? 'see assigned' : 'not assigned'"
+                    @click="filterByTag(tag.id)"
+                  >
+                    <span class="material-symbols-outlined text-[16px]">link</span>
+                  </button>
                   <label
                     class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
                     :style="{ color: tag.color || getColorScheme(tag.name, null).base }"
@@ -339,6 +357,14 @@ function onLabelColorChange(labelId: string, event: Event): void {
                 <div
                   class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
+                  <button
+                    class="p-1 text-outline hover:text-secondary rounded hover:bg-surface-variant transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    :disabled="label.articleCount === 0"
+                    :title="label.articleCount > 0 ? 'see assigned' : 'not assigned'"
+                    @click="filterByLabel(label.id)"
+                  >
+                    <span class="material-symbols-outlined text-[16px]">link</span>
+                  </button>
                   <label
                     class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
                     :style="{ color: label.color || getColorScheme(label.name, null).base }"

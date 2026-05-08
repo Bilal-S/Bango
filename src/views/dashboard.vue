@@ -79,6 +79,10 @@ const quickActions: QuickAction[] = [
 function navigateTo(route: string): void {
   router.push(route);
 }
+
+function navigateToArticlesWithStatus(status: string): void {
+  router.push({ path: '/articles', query: { status } });
+}
 </script>
 
 <template>
@@ -127,11 +131,12 @@ function navigateTo(route: string): void {
       <template v-else>
         <!-- Status Count Tiles -->
         <section class="dashboard__stats">
-          <div
+          <button
             v-for="tile in statusTiles"
             :key="tile.key"
             class="status-tile"
             :class="tile.cssClass"
+            @click="navigateToArticlesWithStatus(tile.key)"
           >
             <div class="status-tile__top">
               <span class="material-symbols-outlined status-tile__icon">{{ tile.icon }}</span>
@@ -141,7 +146,7 @@ function navigateTo(route: string): void {
               {{ counts[tile.key].toLocaleString() }}
             </div>
             <p class="status-tile__desc">{{ tile.description }}</p>
-          </div>
+          </button>
         </section>
 
         <!-- Main Content Grid -->
@@ -448,16 +453,26 @@ function navigateTo(route: string): void {
 }
 
 .status-tile {
+  display: block;
+  width: 100%;
   background-color: #ffffff;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-5);
   box-shadow: var(--shadow-sm);
-  transition: border-color 0.2s;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
 }
 
 .status-tile:hover {
   border-color: #c7d2fe;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
 }
 
 .status-tile__top {

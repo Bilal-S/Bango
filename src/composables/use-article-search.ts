@@ -1,6 +1,8 @@
 import { ref, reactive, computed } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 import { useArticlesStore } from '@/stores/articles';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
 import type { Article, AuditEntry, ArticleStatus, ArticleCounts } from '@/types';
 
 export type TitleMatchType = 'starts_with' | 'contains' | 'ends_with' | 'exact';
@@ -45,6 +47,8 @@ export type StatusTab = (typeof STATUS_TABS)[number];
 
 export function useArticleSearch() {
   const articlesStore = useArticlesStore();
+  const tagsStore = useTagsStore();
+  const labelsStore = useLabelsStore();
 
   const articles = ref<Article[]>([]);
   const loading = ref(false);
@@ -114,23 +118,11 @@ export function useArticleSearch() {
   });
 
   const allTags = computed((): string[] => {
-    const tagSet = new Set<string>();
-    for (const article of articles.value) {
-      for (const tag of article.tags) {
-        tagSet.add(tag);
-      }
-    }
-    return Array.from(tagSet).sort();
+    return tagsStore.tags.map((t) => t.name).sort();
   });
 
   const allLabels = computed((): string[] => {
-    const labelSet = new Set<string>();
-    for (const article of articles.value) {
-      for (const label of article.labels) {
-        labelSet.add(label);
-      }
-    }
-    return Array.from(labelSet).sort();
+    return labelsStore.labels.map((l) => l.name).sort();
   });
 
   function setStatusTab(tab: StatusTab): void {
@@ -222,17 +214,53 @@ export function useArticleSearch() {
   async function updateTags(id: string, tagIds: string[]): Promise<void> {
     await tauriCommand('update_article_tags', { id, tagIds });
     await selectArticle(id);
+    await tagsStore.fetchTags();
   }
 
   async function updateLabels(id: string, labelIds: string[]): Promise<void> {
     await tauriCommand('update_article_labels', { id, labelIds });
     await selectArticle(id);
+    await labelsStore.fetchLabels();
   }
 
   function closeDetail(): void {
     showDetail.value = false;
     selectedArticle.value = null;
     auditTrail.value = [];
+  }
+
+  /**
+   * Apply an initial filter state derived from route query parameters.
+   * Sets the active status tab and/or tag/label filters, then searches.
+   */
+  async function applyRouteParams(params: {
+    status?: string;
+    tags?: string[];
+    labels?: string[];
+  }): Promise<void> {
+    if (params.status && STATUS_TABS.includes(params.status as StatusTab)) {
+      activeStatusTab.value = params.status as StatusTab;
+      query.status = params.status === 'all' ? null : params.status;
+    }
+    if (params.tags && params.tags.length > 0) {
+      // Resolve tag IDs to names for both display and query
+      const tagNames = params.tags
+        .map((id) => tagsStore.tags.find((t) => t.id === id)?.name)
+        .filter((n): n is string => !!n);
+      filter.tags = tagNames;
+      query.tags = tagNames;
+      showFilters.value = true;
+    }
+    if (params.labels && params.labels.length > 0) {
+      // Resolve label IDs to names for both display and query
+      const labelNames = params.labels
+        .map((id) => labelsStore.labels.find((l) => l.id === id)?.name)
+        .filter((n): n is string => !!n);
+      filter.labels = labelNames;
+      query.labels = labelNames;
+      showFilters.value = true;
+    }
+    await search();
   }
 
   return {
@@ -265,5 +293,6 @@ export function useArticleSearch() {
     toggleFilters,
     applyFilters,
     clearFilters,
+    applyRouteParams,
   };
 }

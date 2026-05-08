@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue';
+import { useRoute } from 'vue-router';
 import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import ArticleToolbar from '@/components/article-toolbar.vue';
@@ -7,6 +8,8 @@ import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import ArticleFilterPanel from '@/components/article-filter-panel.vue';
 import ExportDialog from '@/components/export-dialog.vue';
+
+const route = useRoute();
 
 const {
   articles,
@@ -36,9 +39,21 @@ const {
   toggleFilters,
   applyFilters,
   clearFilters,
+  applyRouteParams,
 } = useArticleSearch();
 
-onMounted(search);
+onMounted(() => {
+  const status = typeof route.query.status === 'string' ? route.query.status : undefined;
+  const tagsParam = typeof route.query.tags === 'string' ? route.query.tags.split(',') : undefined;
+  const labelsParam =
+    typeof route.query.labels === 'string' ? route.query.labels.split(',') : undefined;
+
+  if (status || tagsParam || labelsParam) {
+    void applyRouteParams({ status, tags: tagsParam, labels: labelsParam });
+  } else {
+    void search();
+  }
+});
 
 const selectedId = computed(() => selectedArticle.value?.id ?? null);
 
