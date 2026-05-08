@@ -26,7 +26,8 @@ const isPaused = ref(false);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
-  fetchReadiness();
+  // Silent background refresh
+  void fetchReadiness();
 });
 
 onUnmounted(() => {
@@ -93,13 +94,22 @@ function handleStart(): void {
 
 <template>
   <div class="screening-view">
-    <!-- Loading State -->
-    <div v-if="readinessLoading" class="screening-view__loading">
+    <!-- Non-blocking Loading Indicator (shown if refreshing in background) -->
+    <div
+      v-if="readinessLoading && readiness"
+      class="screening-view__refreshing-hint"
+      title="Refreshing screening readiness data..."
+    >
+      <div class="screening-view__spinner-sm" />
+    </div>
+
+    <!-- Initial Loading State (only if no data at all) -->
+    <div v-if="readinessLoading && !readiness" class="screening-view__loading">
       <div class="screening-view__spinner" />
       <p>Loading screening data&hellip;</p>
     </div>
 
-    <template v-else>
+    <template v-else-if="readiness">
       <!-- Hero Progress Section -->
       <section class="screening-view__hero">
         <div class="screening-view__hero-header">
@@ -269,6 +279,22 @@ function handleStart(): void {
   to {
     transform: rotate(360deg);
   }
+}
+
+.screening-view__refreshing-hint {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 10;
+}
+
+.screening-view__spinner-sm {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-surface-container-highest);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 .screening-view__hero {

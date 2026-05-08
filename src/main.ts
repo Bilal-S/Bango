@@ -9,6 +9,7 @@ import { useTagsStore } from './stores/tags';
 import { useLabelsStore } from './stores/labels';
 import { useLlmConfigStore } from './stores/llm-config';
 import { useAuditStore } from './stores/audit';
+import { useScreeningStore } from './stores/screening';
 
 const app = createApp(App);
 app.use(createPinia());
@@ -25,4 +26,5 @@ void Promise.all([
   useLabelsStore().fetchIfNeeded(),
   useLlmConfigStore().fetchIfNeeded(),
   useAuditStore().fetchIfNeeded(),
+  useScreeningStore().fetchIfNeeded(),
 ]);

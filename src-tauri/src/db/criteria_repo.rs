@@ -14,6 +14,12 @@ pub fn get_all_aims(conn: &Connection) -> Result<Vec<ResearchAim>, AppError> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+pub fn has_any_aims(conn: &Connection) -> Result<bool, AppError> {
+    let count: usize =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM research_aims)", [], |row| row.get(0))?;
+    Ok(count > 0)
+}
+
 pub fn create_aim(conn: &Connection, text: &str) -> Result<ResearchAim, AppError> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -44,6 +50,24 @@ pub fn get_all_criteria(conn: &Connection) -> Result<Vec<Criterion>, AppError> {
         .prepare("SELECT id, type, text, priority, created_at FROM criteria ORDER BY created_at")?;
     let rows = stmt.query_map([], row_to_criterion)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn has_inclusion_criteria(conn: &Connection) -> Result<bool, AppError> {
+    let count: usize = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM criteria WHERE type = 'inclusion')",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+pub fn has_exclusion_criteria(conn: &Connection) -> Result<bool, AppError> {
+    let count: usize = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM criteria WHERE type = 'exclusion')",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 pub fn get_criteria_by_type(

@@ -40,6 +40,14 @@ pub fn get_config(conn: &Connection) -> Result<Option<LlmConfig>, AppError> {
     }
 }
 
+pub fn has_config(conn: &Connection) -> Result<bool, AppError> {
+    let count: usize =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM llm_config WHERE id = 1)", [], |row| {
+            row.get(0)
+        })?;
+    Ok(count > 0)
+}
+
 pub fn save_config(conn: &Connection, config: &LlmConfig) -> Result<(), AppError> {
     let key = aes_gcm::derive_key_from_machine();
     let encrypted_api_key = config

@@ -152,3 +152,26 @@ export interface HealthCheck {
   status: string;
   articleCount: number;
 }
+
+export interface ScreeningProgress {
+  total: number;
+  completed: number;
+  included: number;
+  rejected: number;
+  errors: number;
+  isRunning: boolean;
+  currentArticleTitle: string | null;
+  elapsedMs: number;
+  estimatedRemainingMs: number | null;
+}
+
+export interface ScreeningReadiness {
+  totalWorking: number;
+  totalUnscreened: number;
+  hasAims: boolean;
+  hasInclusion: boolean;
+  hasExclusion: boolean;
+  hasLlmConfig: boolean;
+  tokenWarning: string | null;
+  progress: ScreeningProgress | null;
+}

@@ -58,17 +58,10 @@ pub async fn get_screening_readiness(
         })?;
 
         // 1. Check cheap prerequisites first
-        let aims = criteria_repo::get_all_aims(&conn)?;
-        let criteria = criteria_repo::get_all_criteria(&conn)?;
-
-        let has_aims = !aims.is_empty();
-        let has_inclusion = criteria.iter().any(|c| {
-            matches!(c.criterion_type, crate::models::criterion::CriterionType::Inclusion)
-        });
-        let has_exclusion = criteria.iter().any(|c| {
-            matches!(c.criterion_type, crate::models::criterion::CriterionType::Exclusion)
-        });
-        let has_llm_config = llm_config_repo::get_config(&conn)?.is_some();
+        let has_aims = criteria_repo::has_any_aims(&conn)?;
+        let has_inclusion = criteria_repo::has_inclusion_criteria(&conn)?;
+        let has_exclusion = criteria_repo::has_exclusion_criteria(&conn)?;
+        let has_llm_config = llm_config_repo::has_config(&conn)?;
 
         // Early exit: if prerequisites are missing, skip article queries entirely
         if !has_aims || !has_inclusion || !has_exclusion || !has_llm_config {
@@ -87,6 +80,7 @@ pub async fn get_screening_readiness(
             let total_unscreened = article_repo::count_unscreened_working(&conn)?;
 
             let token_warning = if total_unscreened > 0 {
+                // We still need the context window tokens from the config for estimation
                 let config = llm_config_repo::get_config(&conn)?
                     .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
