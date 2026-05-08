@@ -57,7 +57,7 @@ export function useLlmConfig() {
   }
 
   function isLocalProvider(): boolean {
-    return ['llama_cpp', 'ollama', 'lm_studio'].includes(store.config.provider);
+    return ['llamaCpp', 'ollama', 'lmStudio'].includes(store.config.provider);
   }
 
   async function fetchModels(): Promise<void> {

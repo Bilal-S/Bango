@@ -141,11 +141,11 @@ export type LlmProvider =
   | 'openai'
   | 'anthropic'
   | 'google'
-  | 'mistral_ai'
-  | 'z_ai'
-  | 'llama_cpp'
+  | 'mistralAi'
+  | 'zAi'
+  | 'llamaCpp'
   | 'ollama'
-  | 'lm_studio'
+  | 'lmStudio'
   | 'custom';
 
 export interface HealthCheck {

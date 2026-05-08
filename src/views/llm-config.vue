@@ -92,7 +92,7 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
       'gemini-3.1-pro-preview"',
     ],
   },
-  mistral_ai: {
+  mistralAi: {
     url: 'https://api.mistral.ai/v1',
     models: [
       'mistral-small-latest',
@@ -103,7 +103,7 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
       'codestral-mamba-latest',
     ],
   },
-  z_ai: {
+  zAi: {
     url: 'https://api.z.ai/api/paas/v4',
     models: ['glm-5-turbo', 'glm-4.7-flash', 'glm-5', 'glm-5.1'],
   },
@@ -111,11 +111,11 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
     url: 'http://localhost:11434/v1',
     models: [],
   },
-  lm_studio: {
+  lmStudio: {
     url: 'http://localhost:1234/v1',
     models: [],
   },
-  llama_cpp: {
+  llamaCpp: {
     url: 'http://localhost:8080/v1',
     models: [],
   },
@@ -191,11 +191,11 @@ watch(
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="google">Google Gemini</option>
-                <option value="mistral_ai">Mistral AI</option>
-                <option value="z_ai">z.ai</option>
-                <option value="llama_cpp">llama.cpp</option>
+                <option value="mistralAi">Mistral AI</option>
+                <option value="zAi">z.ai</option>
+                <option value="llamaCpp">llama.cpp</option>
                 <option value="ollama">Ollama</option>
-                <option value="lm_studio">LM Studio</option>
+                <option value="lmStudio">LM Studio</option>
                 <option value="custom">Custom</option>
               </select>
               <span class="material-symbols-outlined field__select-arrow">expand_more</span>
