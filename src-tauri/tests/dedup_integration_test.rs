@@ -13,11 +13,10 @@ fn asset_path(name: &str) -> PathBuf {
 
 #[test]
 fn test_dedup_no_false_positives_on_real_data() {
-    // 10A has 2 records (Toufaily + Schuetz), 11A has 1 record (Alibasic)
-    // All are distinct - no duplicates should be found
+    // Sugar.ris and Blue.ris contain distinct articles.
     let content1 =
-        fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
-    let content2 = fs::read_to_string(asset_path("11A-Resilience-Intersection-Capabilities.ris"))
+        fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
+    let content2 = fs::read_to_string(asset_path("Blue.ris"))
         .expect("fixture not found");
 
     let parsed1 = parse_ris(&content1).expect("Parse failed");
@@ -39,8 +38,8 @@ fn test_dedup_no_false_positives_on_real_data() {
         })
         .collect();
 
-    // 3 unique articles - no duplicates expected
-    assert_eq!(articles.len(), 3);
+    // Verify we have articles to test
+    assert!(articles.len() >= 16);
     let result = engine::run_dedup(&articles);
     assert_eq!(result.exact_duplicates.len(), 0, "Should not find exact duplicates in real data");
     assert_eq!(result.fuzzy_matches.len(), 0, "Should not find fuzzy matches in real data");
@@ -49,7 +48,7 @@ fn test_dedup_no_false_positives_on_real_data() {
 #[test]
 fn test_dedup_detects_doi_duplicate_from_real_data() {
     let content =
-        fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+        fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
     let parsed = parse_ris(&content).expect("Parse failed");
     let (valid, _) = validate_all(&parsed.records);
 

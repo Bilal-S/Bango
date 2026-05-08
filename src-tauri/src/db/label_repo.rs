@@ -18,6 +18,26 @@ pub fn get_all_labels(conn: &Connection) -> Result<Vec<Label>, AppError> {
 }
 
 pub fn create_label(conn: &Connection, name: &str, source: &str) -> Result<Label, AppError> {
+    // Check if label already exists (case-insensitive) to avoid UNIQUE constraint violation
+    let existing: Option<Label> = conn
+        .query_row(
+            "SELECT id, name, source FROM labels WHERE LOWER(name) = LOWER(?1)",
+            params![name],
+            |row| {
+                let source_str: String = row.get(2)?;
+                let source_enum = match source_str.as_str() {
+                    "ai_generated" => LabelSource::AiGenerated,
+                    _ => LabelSource::UserCreated,
+                };
+                Ok(Label { id: row.get(0)?, name: row.get(1)?, source: source_enum })
+            },
+        )
+        .ok();
+
+    if let Some(label) = existing {
+        return Ok(label);
+    }
+
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO labels (id, name, source) VALUES (?1, ?2, ?3)",

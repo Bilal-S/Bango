@@ -19,6 +19,27 @@ pub fn get_all_tags(conn: &Connection) -> Result<Vec<Tag>, AppError> {
 }
 
 pub fn create_tag(conn: &Connection, name: &str, source: &str) -> Result<Tag, AppError> {
+    // Check if tag already exists (case-insensitive) to avoid UNIQUE constraint violation
+    let existing: Option<Tag> = conn
+        .query_row(
+            "SELECT id, name, source FROM tags WHERE LOWER(name) = LOWER(?1)",
+            params![name],
+            |row| {
+                let source_str: String = row.get(2)?;
+                let source_enum = match source_str.as_str() {
+                    "ai_suggested" => TagSource::AiSuggested,
+                    "ris_keyword" => TagSource::RisKeyword,
+                    _ => TagSource::UserCreated,
+                };
+                Ok(Tag { id: row.get(0)?, name: row.get(1)?, source: source_enum })
+            },
+        )
+        .ok();
+
+    if let Some(tag) = existing {
+        return Ok(tag);
+    }
+
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO tags (id, name, source) VALUES (?1, ?2, ?3)",

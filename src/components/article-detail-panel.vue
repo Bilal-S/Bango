@@ -2,6 +2,9 @@
 import { ref, computed, watch } from 'vue';
 import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
+import SuggestInput from './suggest-input.vue';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
 
 const props = defineProps<{
   article: Article;
@@ -15,6 +18,12 @@ const emit = defineEmits<{
   updateTags: [id: string, tagIds: string[]];
   updateLabels: [id: string, labelIds: string[]];
 }>();
+
+const tagsStore = useTagsStore();
+const labelsStore = useLabelsStore();
+
+// Audit trail expand/collapse state
+const auditExpanded = ref(false);
 
 // Panel resizing logic
 const panelWidth = ref(parseInt(localStorage.getItem('bango-detail-panel-width') || '480'));
@@ -67,16 +76,45 @@ function cancelNotes(): void {
 const newTag = ref('');
 const newLabel = ref('');
 
+// Alphabetically sorted tags and labels (case-insensitive)
+const sortedTags = computed(() =>
+  [...props.article.tags].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+);
+const sortedLabels = computed(() =>
+  [...props.article.labels].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+);
+
+// Suggestions from global stores, excluding already-assigned values
+const tagSuggestions = computed(() => {
+  const assigned = new Set(props.article.tags.map((t) => t.toLowerCase()));
+  return tagsStore.tags
+    .map((t) => t.name)
+    .filter((name) => !assigned.has(name.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+});
+const labelSuggestions = computed(() => {
+  const assigned = new Set(props.article.labels.map((l) => l.toLowerCase()));
+  return labelsStore.labels
+    .map((l) => l.name)
+    .filter((name) => !assigned.has(name.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+});
+
 function removeTag(tag: string): void {
   const updated = props.article.tags.filter((t) => t !== tag);
   emit('updateTags', props.article.id, updated);
 }
 
-function addTag(): void {
-  const val = newTag.value.trim();
+async function addTag(val: string): Promise<void> {
   if (!val || props.article.tags.includes(val)) return;
   emit('updateTags', props.article.id, [...props.article.tags, val]);
   newTag.value = '';
+  // If the tag doesn't exist in the global store, create it
+  const existsInStore = tagsStore.tags.some((t) => t.name.toLowerCase() === val.toLowerCase());
+  if (!existsInStore) {
+    await tagsStore.createTag(val);
+    await tagsStore.fetchIfNeeded();
+  }
 }
 
 function removeLabel(label: string): void {
@@ -84,11 +122,16 @@ function removeLabel(label: string): void {
   emit('updateLabels', props.article.id, updated);
 }
 
-function addLabel(): void {
-  const val = newLabel.value.trim();
+async function addLabel(val: string): Promise<void> {
   if (!val || props.article.labels.includes(val)) return;
   emit('updateLabels', props.article.id, [...props.article.labels, val]);
   newLabel.value = '';
+  // If the label doesn't exist in the global store, create it
+  const existsInStore = labelsStore.labels.some((l) => l.name.toLowerCase() === val.toLowerCase());
+  if (!existsInStore) {
+    await labelsStore.createLabel(val);
+    await labelsStore.fetchIfNeeded();
+  }
 }
 
 const confidencePercentage = computed(() =>
@@ -257,12 +300,10 @@ const confidenceBarWidth = computed(() =>
 
       <!-- Tags -->
       <section>
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-xs font-label-caps text-slate-500 uppercase tracking-wider">Tags</h3>
-        </div>
+        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">Tags</h3>
         <div class="flex flex-wrap gap-2 mb-2">
           <span
-            v-for="tag in article.tags"
+            v-for="tag in sortedTags"
             :key="'tag-' + tag"
             class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 pl-3 pr-1.5 py-1 rounded-lg text-xs font-medium group"
           >
@@ -274,8 +315,25 @@ const confidenceBarWidth = computed(() =>
               close
             </button>
           </span>
+        </div>
+        <div class="flex gap-2">
+          <SuggestInput
+            v-model="newTag"
+            :suggestions="tagSuggestions"
+            placeholder="Add tag…"
+            class="flex-1"
+            @select="addTag"
+            @enter="addTag"
+          />
+        </div>
+      </section>
+
+      <!-- Labels -->
+      <section>
+        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">Labels</h3>
+        <div class="flex flex-wrap gap-2 mb-2">
           <span
-            v-for="label in article.labels"
+            v-for="label in sortedLabels"
             :key="'label-' + label"
             class="inline-flex items-center gap-1 border border-slate-200 text-slate-600 pl-3 pr-1.5 py-1 rounded-lg text-xs font-medium group"
           >
@@ -289,36 +347,14 @@ const confidenceBarWidth = computed(() =>
           </span>
         </div>
         <div class="flex gap-2">
-          <input
-            v-model="newTag"
-            type="text"
-            placeholder="Add tag…"
-            class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-            @keydown.enter="addTag"
-          />
-          <button
-            class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
-            :disabled="!newTag.trim()"
-            @click="addTag"
-          >
-            Add
-          </button>
-        </div>
-        <div class="flex gap-2 mt-2">
-          <input
+          <SuggestInput
             v-model="newLabel"
-            type="text"
+            :suggestions="labelSuggestions"
             placeholder="Add label…"
-            class="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-            @keydown.enter="addLabel"
+            class="flex-1"
+            @select="addLabel"
+            @enter="addLabel"
           />
-          <button
-            class="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
-            :disabled="!newLabel.trim()"
-            @click="addLabel"
-          >
-            Add
-          </button>
         </div>
       </section>
 
@@ -365,7 +401,22 @@ const confidenceBarWidth = computed(() =>
       </section>
 
       <!-- Audit Trail -->
-      <AuditTimeline :entries="auditTrail" />
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-label-caps text-slate-500 uppercase tracking-wider">
+            Audit Trail
+          </h3>
+          <button
+            class="material-symbols-outlined text-[18px] text-slate-400 hover:text-slate-700 cursor-pointer transition-colors"
+            @click="auditExpanded = !auditExpanded"
+          >
+            {{ auditExpanded ? 'expand_less' : 'expand_more' }}
+          </button>
+        </div>
+        <template v-if="auditExpanded">
+          <AuditTimeline :entries="auditTrail" :show-header="false" />
+        </template>
+      </section>
 
       <div class="pb-10" />
     </div>

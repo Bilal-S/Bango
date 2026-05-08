@@ -63,9 +63,12 @@ export const useTagsStore = defineStore('tags', () => {
         return;
       }
       await tauriCommand<Tag>('create_tag', { request: { name } });
+      invalidate();
       await fetchTags();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
+      invalidate();
+      await fetchTags();
     }
   }
 

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { AuditEntry, AuditAction } from '@/types';
 
-defineProps<{ entries: AuditEntry[] }>();
+withDefaults(defineProps<{ entries: AuditEntry[]; showHeader?: boolean }>(), {
+  showHeader: true,
+});
 
 const actionLabels: Record<AuditAction, string> = {
   import: 'Article Imported',
@@ -43,7 +45,10 @@ function getDotColor(action: AuditAction): string {
 
 <template>
   <section>
-    <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-6 tracking-wider">
+    <h3
+      v-if="showHeader"
+      class="text-xs font-label-caps text-slate-500 uppercase mb-6 tracking-wider"
+    >
       Audit Trail
     </h3>
     <div v-if="entries.length === 0" class="text-body-sm text-slate-400">

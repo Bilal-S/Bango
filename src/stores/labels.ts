@@ -60,9 +60,12 @@ export const useLabelsStore = defineStore('labels', () => {
         return;
       }
       await tauriCommand<Label>('create_label', { request: { name } });
+      invalidate();
       await fetchLabels();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
+      invalidate();
+      await fetchLabels();
     }
   }
 
