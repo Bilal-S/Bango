@@ -15,6 +15,7 @@ const emit = defineEmits<{
 
 const isOpen = ref(false);
 const containerRef = ref<HTMLDivElement | null>(null);
+const inputRef = ref<HTMLInputElement | null>(null);
 
 const filteredSuggestions = computed(() => {
   const query = props.modelValue.trim().toLowerCase();
@@ -36,6 +37,7 @@ function selectSuggestion(name: string): void {
   emit('select', name);
   emit('update:modelValue', '');
   isOpen.value = false;
+  inputRef.value?.blur();
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -46,6 +48,7 @@ function onKeydown(event: KeyboardEvent): void {
       emit('enter', val);
       emit('update:modelValue', '');
       isOpen.value = false;
+      (event.target as HTMLInputElement).blur();
     }
   } else if (event.key === 'Escape') {
     isOpen.value = false;
@@ -70,12 +73,14 @@ onUnmounted(() => {
 <template>
   <div ref="containerRef" class="relative">
     <input
+      ref="inputRef"
       :value="modelValue"
       type="text"
       :placeholder="placeholder"
       class="flex-1 w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
       @input="onInput"
       @focus="onFocus"
+      @click="isOpen = true"
       @keydown="onKeydown"
     />
     <ul
