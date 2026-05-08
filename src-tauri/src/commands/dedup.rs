@@ -18,10 +18,10 @@ pub fn check_duplicates(db_state: State<'_, DbState>) -> Result<DedupResult, App
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    let imported = article_repo::get_imported_articles(&conn)?;
+    let duplicates = article_repo::get_duplicate_articles(&conn)?;
     let working = article_repo::get_working_articles(&conn)?;
 
-    let dedup_articles: Vec<DedupArticle> = imported
+    let dedup_articles: Vec<DedupArticle> = duplicates
         .iter()
         .chain(working.iter())
         .map(|a| DedupArticle {
@@ -34,8 +34,8 @@ pub fn check_duplicates(db_state: State<'_, DbState>) -> Result<DedupResult, App
         })
         .collect();
 
-    let imported_count = imported.len();
-    let result = if imported_count > 0 {
+    let duplicate_count = duplicates.len();
+    let result = if duplicate_count > 0 {
         engine::run_dedup(&dedup_articles)
     } else {
         DedupResult {
@@ -117,7 +117,7 @@ pub fn merge_exact_duplicates(
             .query_row("SELECT status FROM articles WHERE id = ?1", [&surviving_id], |row| {
                 row.get(0)
             })
-            .unwrap_or_else(|_| "imported".to_string());
+            .unwrap_or_else(|_| "duplicate".to_string());
 
         if current_status != "working" {
             article_repo::move_to_working(&tx, surviving_id)?;

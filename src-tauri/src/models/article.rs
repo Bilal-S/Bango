@@ -51,7 +51,7 @@ pub struct Article {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ArticleStatus {
-    Imported,
+    Duplicate,
     Working,
     Included,
     Rejected,
@@ -61,7 +61,7 @@ impl ArticleStatus {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Imported => "imported",
+            Self::Duplicate => "duplicate",
             Self::Working => "working",
             Self::Included => "included",
             Self::Rejected => "rejected",
@@ -129,7 +129,7 @@ pub struct NewArticle {
 #[serde(rename_all = "camelCase")]
 pub struct ArticleCounts {
     pub all: usize,
-    pub imported: usize,
+    pub duplicate: usize,
     pub working: usize,
     pub included: usize,
     pub rejected: usize,

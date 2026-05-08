@@ -35,7 +35,7 @@ export type SortDirection = 'asc' | 'desc';
 
 const STATUS_TABS: readonly (ArticleStatus | 'all')[] = [
   'all',
-  'imported',
+  'duplicate',
   'working',
   'included',
   'rejected',
@@ -89,7 +89,7 @@ export function useArticleSearch() {
     // Seed from the pre-warmed store so counts render immediately
     // without waiting for the get_article_counts IPC round-trip.
     all: articlesStore.totalImported,
-    imported: articlesStore.byStatus.imported,
+    duplicate: articlesStore.byStatus.duplicate,
     working: articlesStore.byStatus.working,
     included: articlesStore.byStatus.included,
     rejected: articlesStore.byStatus.rejected,

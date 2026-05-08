@@ -33,7 +33,7 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             custom_field3, journal_abbreviation, journal_iso_abbreviation,
             notes, web_of_science_db, ris_extras, import_source
         ) VALUES (
-            ?1, 'imported', ?2, ?3, ?4, ?5, ?6,
+            ?1, 'duplicate', ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17, ?18,
             ?19, ?20, ?21, ?22,
@@ -115,7 +115,7 @@ pub fn insert_articles_batch(
                 custom_field3, journal_abbreviation, journal_iso_abbreviation,
                 notes, web_of_science_db, ris_extras, import_source
             ) VALUES (
-                ?1, 'imported', ?2, ?3, ?4, ?5, ?6,
+                ?1, 'duplicate', ?2, ?3, ?4, ?5, ?6,
                 ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18,
                 ?19, ?20, ?21, ?22,
@@ -204,9 +204,9 @@ pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Art
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-pub fn get_imported_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
+pub fn get_duplicate_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'imported' AND duplicate_of IS NULL ORDER BY imported_at DESC"
+        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'duplicate' ORDER BY imported_at DESC"
     )?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -256,12 +256,18 @@ pub struct ArticleQuery {
 }
 
 pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
-    let mut sql = String::from("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE duplicate_of IS NULL");
+    let is_duplicate_view = query.status.as_deref() == Some("duplicate");
+    let base_filter = if is_duplicate_view { "" } else { " WHERE duplicate_of IS NULL" };
+    let mut sql = format!("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles{base_filter}");
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ref status) = query.status {
         let idx = param_values.len() + 1;
-        sql.push_str(&format!(" AND status = ?{idx}"));
+        if is_duplicate_view {
+            sql.push_str(&format!(" WHERE status = ?{idx}"));
+        } else {
+            sql.push_str(&format!(" AND status = ?{idx}"));
+        }
         param_values.push(Box::new(status.clone()));
     }
 
@@ -541,11 +547,11 @@ pub fn get_article_field_count(conn: &Connection, id: &str) -> Result<usize, App
 fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
     let status_str: String = row.get("status")?;
     let status = match status_str.as_str() {
-        "imported" => ArticleStatus::Imported,
+        "duplicate" => ArticleStatus::Duplicate,
         "working" => ArticleStatus::Working,
         "included" => ArticleStatus::Included,
         "rejected" => ArticleStatus::Rejected,
-        _ => ArticleStatus::Imported,
+        _ => ArticleStatus::Duplicate,
     };
 
     let ai_decision_str: Option<String> = row.get("ai_decision")?;
@@ -641,7 +647,7 @@ pub fn get_article_counts(
 
     let mut counts = crate::models::article::ArticleCounts {
         all: 0,
-        imported: 0,
+        duplicate: 0,
         working: 0,
         included: 0,
         rejected: 0,
@@ -650,7 +656,7 @@ pub fn get_article_counts(
     for (status, count) in rows.flatten() {
         counts.all += count;
         match status.as_str() {
-            "imported" => counts.imported = count,
+            "duplicate" => counts.duplicate = count,
             "working" => counts.working = count,
             "included" => counts.included = count,
             "rejected" => counts.rejected = count,

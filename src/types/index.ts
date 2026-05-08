@@ -44,12 +44,12 @@ export interface Article {
   screenedAt: string | null;
 }
 
-export type ArticleStatus = 'imported' | 'working' | 'included' | 'rejected';
+export type ArticleStatus = 'duplicate' | 'working' | 'included' | 'rejected';
 export type AiDecision = 'include' | 'exclude';
 
 export interface ArticleCounts {
   all: number;
-  imported: number;
+  duplicate: number;
   working: number;
   included: number;
   rejected: number;

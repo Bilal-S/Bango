@@ -96,39 +96,33 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    let tx = conn.transaction()?;
+    // PRAGMA foreign_keys cannot be changed inside a transaction.
+    // Set it on the connection *before* starting one.
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
 
-    // Disable foreign keys temporarily to allow deleting articles with self-references (duplicate_of)
-    tx.execute("PRAGMA foreign_keys = OFF", [])?;
+    {
+        let tx = conn.transaction()?;
 
-    // Drop all data tables (child tables first for clarity, though FK is OFF)
-    tx.execute_batch(
-        "DELETE FROM article_labels;
-         DELETE FROM article_tags;
-         DELETE FROM audit_entries;
-         DELETE FROM articles;
-         DELETE FROM criteria;
-         DELETE FROM research_aims;
-         DELETE FROM tags;
-         DELETE FROM labels;
-         DELETE FROM llm_config;",
-    )?;
+        // Drop all data tables (child tables first for clarity, though FK is OFF)
+        tx.execute_batch(
+            "DELETE FROM article_labels;
+             DELETE FROM article_tags;
+             DELETE FROM audit_entries;
+             DELETE FROM articles;
+             DELETE FROM criteria;
+             DELETE FROM research_aims;
+             DELETE FROM tags;
+             DELETE FROM labels;
+             DELETE FROM llm_config;",
+        )?;
 
-    // Reset the auto-increment counter
-    tx.execute_batch("DELETE FROM sqlite_sequence;")?;
+        tx.commit()?;
+    }
 
-    // Re-enable foreign keys
-    tx.execute("PRAGMA foreign_keys = ON", [])?;
-
-    tx.commit()?;
+    // Re-enable foreign keys (outside transaction)
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
 
     // Re-run migrations to ensure clean schema (idempotent)
-    // We lock again because the transaction was committed and tx is dropped
-    drop(conn);
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     migration::run_migrations(&conn)?;
 
     Ok(())

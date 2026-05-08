@@ -11,7 +11,7 @@ export const useArticlesStore = defineStore('articles', () => {
 
   const byStatus = computed(() => {
     const counts: Record<ArticleStatus, number> = {
-      imported: 0,
+      duplicate: 0,
       working: 0,
       included: 0,
       rejected: 0,

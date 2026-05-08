@@ -38,7 +38,7 @@ fn test_database_stores_all_article_fields() {
     run_migrations(&conn).expect("Failed to run migrations");
 
     conn.execute(
-        "INSERT INTO articles (id, status, title, abstract_text, authors, doi, publication_year, journal, keywords) VALUES ('test-1', 'imported', 'Test Title', 'Test Abstract', '[\"Author, A\"]', '10.1234/test', 2024, 'Test Journal', '[\"keyword1\"]')",
+        "INSERT INTO articles (id, status, title, abstract_text, authors, doi, publication_year, journal, keywords) VALUES ('test-1', 'duplicate', 'Test Title', 'Test Abstract', '[\"Author, A\"]', '10.1234/test', 2024, 'Test Journal', '[\"keyword1\"]')",
         [],
     ).expect("Insert failed");
 

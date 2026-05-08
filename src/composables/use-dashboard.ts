@@ -5,7 +5,7 @@ import type { ArticleStatus } from '@/types';
 
 export interface StatusCounts {
   total: number;
-  imported: number;
+  duplicate: number;
   working: number;
   included: number;
   rejected: number;
@@ -38,7 +38,7 @@ export function useDashboard() {
     const all = articlesStore.articles;
     return {
       total: all.length,
-      imported: all.filter((a) => a.status === 'imported').length,
+      duplicate: all.filter((a) => a.status === 'duplicate').length,
       working: all.filter((a) => a.status === 'working').length,
       included: all.filter((a) => a.status === 'included').length,
       rejected: all.filter((a) => a.status === 'rejected').length,
@@ -106,7 +106,7 @@ export function useDashboard() {
 
 export function formatStatusLabel(status: ArticleStatus): string {
   const LABELS: Record<ArticleStatus, string> = {
-    imported: 'Imported',
+    duplicate: 'Duplicates',
     working: 'Working',
     included: 'Included',
     rejected: 'Rejected',

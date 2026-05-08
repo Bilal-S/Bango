@@ -76,14 +76,16 @@ export function useExport() {
     }
   }
 
-  async function resetProject(): Promise<void> {
+  async function resetProject(): Promise<boolean> {
     exporting.value = true;
     error.value = null;
     try {
       await tauriCommand('reset_project');
       invalidateAllStores();
+      return true;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
+      return false;
     } finally {
       exporting.value = false;
     }

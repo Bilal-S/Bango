@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { watch, ref, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
 import { useExport } from '@/composables/use-export';
 
@@ -18,6 +19,7 @@ const {
 } = useLlmConfig();
 
 const { exportProject, importProject, resetProject } = useExport();
+const router = useRouter();
 
 // Project management state
 const showImportDialog = ref(false);
@@ -47,9 +49,12 @@ async function doExportProject(): Promise<void> {
 
 async function doDeleteProject(): Promise<void> {
   if (deleteConfirmText.value !== 'DELETE') return;
-  await resetProject();
-  showDeleteDialog.value = false;
-  deleteConfirmText.value = '';
+  const success = await resetProject();
+  if (success) {
+    showDeleteDialog.value = false;
+    deleteConfirmText.value = '';
+    router.push('/');
+  }
 }
 
 const providerDefaults: Record<string, { url: string; models: string[] }> = {

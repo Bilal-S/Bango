@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS labels (
 
 CREATE TABLE IF NOT EXISTS articles (
     id TEXT PRIMARY KEY,
-    status TEXT NOT NULL DEFAULT 'imported' CHECK(status IN ('imported', 'working', 'included', 'rejected')),
+    status TEXT NOT NULL DEFAULT 'duplicate' CHECK(status IN ('duplicate', 'working', 'included', 'rejected')),
     screening_error INTEGER NOT NULL DEFAULT 0,
     title TEXT NOT NULL,
     abstract_text TEXT NOT NULL,

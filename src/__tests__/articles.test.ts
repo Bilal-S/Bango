@@ -14,7 +14,7 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 const mockArticles: Article[] = [
   {
     id: '1',
-    status: 'imported',
+    status: 'duplicate',
     title: 'Article 1',
     authors: ['Author A'],
     abstractText: 'Abstract 1',
@@ -135,7 +135,7 @@ describe('Articles Store', () => {
     await store.fetchArticles();
 
     expect(store.byStatus).toEqual({
-      imported: 1,
+      duplicate: 1,
       working: 0,
       included: 1,
       rejected: 0,

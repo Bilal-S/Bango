@@ -46,7 +46,7 @@ const showExport = ref(false);
 
 const STATUS_TAB_LABELS: Record<string, string> = {
   all: 'All',
-  imported: 'Imported',
+  duplicate: 'Duplicates',
   working: 'Working',
   included: 'Included',
   rejected: 'Rejected',

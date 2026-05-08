@@ -6,8 +6,8 @@ const props = defineProps<{ status: ArticleStatus }>();
 
 const statusConfig = computed(() => {
   switch (props.status) {
-    case 'imported':
-      return { label: 'Imported', classes: 'bg-blue-100 text-blue-800' };
+    case 'duplicate':
+      return { label: 'Duplicate', classes: 'bg-blue-100 text-blue-800' };
     case 'working':
       return { label: 'Working', classes: 'bg-amber-100 text-amber-800' };
     case 'included':

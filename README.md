@@ -37,7 +37,9 @@ All data stays on your machine in a local SQLite database - no cloud upload requ
 - Multi-strategy matching: DOI exact match, title+year exact (>=95% similarity), fuzzy title+year (70–94%), author+title partial
 - Levenshtein distance-based title comparison with normalization
 - Auto-merge exact duplicates; flag fuzzy matches for side-by-side manual review
-- Duplicates preserved in the Imported list as an audit trail with `duplicateOf` references
+- Non-duplicate articles are promoted directly to the Working list on import
+- Duplicates are placed in a separate Duplicates list (not a working list) with `duplicateOf` references
+- Cross-status dedup protection: articles already in Working, Included, or Rejected are never affected by new duplicate imports
 
 ### Criteria-Based Screening
 - Define research aims as a list of discrete text entries
@@ -88,17 +90,21 @@ All data stays on your machine in a local SQLite database - no cloud upload requ
 Articles flow through a strict state machine. An article exists in exactly one state at any time:
 
 ```
-Imported → (deduplication) → Working → (AI screening) → Included | Rejected
+Import → Working (non-duplicate) or Duplicate (flagged)
+Duplicate → (resolve) → Working
+Working → (AI screening or manual) → Included | Rejected
 ```
 
 | State | Description | Editable |
 |-------|-------------|----------|
-| **Imported** | Raw articles from the original RIS file(s) | Read-only (audit trail) |
-| **Working** | Deduplicated articles awaiting screening | Yes |
+| **Duplicate** | Articles flagged as duplicates during import. Read-only until resolved via side-by-side review. | No (until resolved) |
+| **Working** | Deduplicated articles awaiting screening. Non-duplicate articles arrive here directly on import. | Yes |
 | **Included** | Articles meeting inclusion criteria | Yes |
 | **Rejected** | Articles excluded based on criteria | Yes |
 
-Users can manually override AI decisions and move articles freely between Working, Included, and Rejected lists. The Imported list is read-only to preserve the audit trail.
+On import, deduplication runs against all existing articles. Non-duplicate articles are promoted directly to Working. Duplicate articles remain in the Duplicates list with `duplicateOf` references. If a newly imported article duplicates an article already in Working, Included, or Rejected, the existing article's status is never changed — the new article is placed in Duplicates referencing the accepted article.
+
+Users can manually override AI decisions and move articles freely between Working, Included, and Rejected lists. The Duplicates list is read-only until individual duplicates are resolved.
 
 ---
 

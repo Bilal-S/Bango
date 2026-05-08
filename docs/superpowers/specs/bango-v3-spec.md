@@ -55,7 +55,7 @@ The app manages a **single project** - there is no project selector or multi-pro
   },
   "Article": {
     "id": "uuid",
-    "status": "enum[imported, working, included, rejected]",
+    "status": "enum[duplicate, working, included, rejected]",
     "screeningError": "boolean (default: false)",
     "title": "string (required)",
     "abstract": "string (required)",
@@ -196,10 +196,11 @@ All unrecognized RIS tags are preserved as key-value pairs in `risExtras`.
 ### 4.4 Multiple Imports
 
 - Users can import **multiple RIS files** into the project.
-- Each import adds articles to the Imported list.
-- Deduplication re-runs across the **entire** Imported list after each new import.
-- Previously deduplicated articles (already in Working, Included, or Rejected) are **not** affected by subsequent imports.
-- Deduplication after a second import compares **only new articles** against existing Imported and Working articles. Previously merged duplicates are not re-evaluated.
+- On import, deduplication runs against **all existing articles** (regardless of status).
+- **Non-duplicate articles** are automatically promoted to `working` status.
+- **Duplicate articles** are placed in `duplicate` status with `duplicateOf` set to the surviving article.
+- If a newly imported article is a duplicate of an article already in `working`, `included`, or `rejected`, the **existing article's status is not changed**. The newly imported article is placed in `duplicate` status with `duplicateOf` referencing the accepted article. The UI displays a reference to the accepted article in the duplicate's detail view.
+- Previously resolved duplicates are not re-evaluated. Only new articles are compared against the full corpus.
 
 ---
 
@@ -230,9 +231,10 @@ Before comparison, titles are:
 
 ### 5.3 Merge Behavior
 
-- **Exact duplicates**: The article with the most complete metadata (highest non-null field count) is retained as the surviving article. The other is marked with `duplicateOf: <surviving_id>` and remains in the Imported list.
-- **Fuzzy matches**: Both articles remain in Imported. The user is presented a side-by-side comparison view and chooses: keep left, keep right, or keep both (not duplicates). The rejected article is marked with `duplicateOf`.
-- Surviving articles advance to the Working list. Duplicates remain in Imported (read-only audit trail).
+- **Exact duplicates**: The article with the most complete metadata (highest non-null field count) is retained as the surviving article and placed in `working` status. The other is marked with `duplicateOf: <surviving_id>` and placed in `duplicate` status.
+- **Fuzzy matches**: Both articles are placed in `duplicate` status. The user is presented a side-by-side comparison view and chooses: keep left, keep right, or keep both (not duplicates). The rejected article remains in `duplicate` with `duplicateOf` set. The surviving article moves to `working`.
+- **Cross-status dedup protection**: If a newly imported article duplicates an article already in `working`, `included`, or `rejected`, the existing article's status is **never changed**. The newly imported article is placed in `duplicate` with `duplicateOf` referencing the accepted article.
+- When a duplicate is resolved, only the surviving representative article moves to `working`.
 
 ---
 
@@ -272,8 +274,8 @@ This is deterministic logic applied by the app after the AI reports which criter
 
 | State | Description |
 |-------|-------------|
-| **Imported** | Raw article from RIS file. Read-only. |
-| **Working** | Deduplicated article awaiting or pending screening. |
+| **Duplicate** | Article flagged as a duplicate during import. Read-only until resolved. Not a working list — only duplicates reside here. |
+| **Working** | Deduplicated article awaiting or pending screening. Non-duplicate articles are promoted here directly on import. |
 | **Included** | Article meeting inclusion criteria. |
 | **Rejected** | Article excluded based on criteria. |
 
@@ -282,29 +284,31 @@ Articles in any state may have a `screeningError` flag set to `true`, which is d
 ### 7.2 State Transition Diagram
 
 ```
-                  ┌──────────────────────────────────┐
-                  │                                  │
-                  ▼                                  │
-  Imported ──(dedup)──► Working ◄────────────────────┤
-                          │  ▲                       │
-             ┌────────────┼────────────┐              │
-             ▼            ▼            │              │
-        Included     Rejected         │              │
-             │            │            │              │
-             └──────► Working ◄────────┘              │
-                          │  ▲                        │
-                          │  └────────────────────────┘
-                          │
-                    Manual moves:
-              Working ↔ Included ↔ Rejected
-              Imported: READ-ONLY
+  Import ──(non-dup)──► Working
+     │                      ▲  ▲
+     │                      │  │
+     ▼                  Manual moves:
+  Duplicate ──(resolve)──► Working
+     │
+     │               Working ↔ Included ↔ Rejected
+     │
+     Duplicate: READ-ONLY until resolved
 ```
+
+**Flow:**
+1. On import, non-duplicate articles go directly to `working`.
+2. Duplicate articles go to `duplicate` (read-only until resolved).
+3. When a duplicate is resolved, the surviving article moves to `working`.
+4. From `working`, articles move to `included` or `rejected` via AI screening or manual action.
+5. Manual moves are freely allowed between `working`, `included`, and `rejected`.
 
 ### 7.3 Allowed Transitions
 
 | From | To | Trigger | Notes |
 |------|----|---------|-------|
-| Imported | Working | Deduplication | Surviving articles only. Duplicates stay in Imported with `duplicateOf`. |
+| *(new import)* | Working | Import (non-duplicate) | Non-duplicate articles are promoted directly to Working on import. |
+| *(new import)* | Duplicate | Import (duplicate detected) | Duplicate articles placed in Duplicate with `duplicateOf` set. Existing accepted articles (in Working, Included, or Rejected) are never affected. |
+| Duplicate | Working | Duplicate resolution | User resolves duplicate pair; surviving article moves to Working. |
 | Working | Included | AI screening or manual | AI sets `aiDecision`, `aiReasoning`, `aiConfidence`, matched criteria. |
 | Working | Rejected | AI screening or manual | Same as above. |
 | Included | Working | Manual override | Sets `manualOverride: true`. |
@@ -332,8 +336,8 @@ When the LLM returns a malformed/invalid response for an article:
 Tag and label generation is an **optional, user-triggered** step. It is not required before screening.
 
 **Workflow sequence:**
-1. Import RIS → articles in Imported list
-2. Run deduplication → articles move to Working list
+1. Import RIS → non-duplicate articles go directly to Working list; duplicate articles go to Duplicates list
+2. User resolves duplicates in Duplicates list → surviving articles move to Working list
 3. User defines research aims, inclusion criteria, exclusion criteria (with priorities)
 4. **[Optional]** User clicks "Suggest Tags" and/or "Suggest Labels" → AI generates initial Tags and Labels (two separate buttons, two separate calls)
 5. User reviews and edits tags and labels
@@ -612,9 +616,9 @@ Return JSON exactly matching this schema:
 
 | PRISMA Box | Data Source |
 |------------|-------------|
-| Records identified | Total count of all Imported articles |
-| Duplicates removed | Count of articles where `duplicateOf IS NOT NULL` |
-| Records screened | Count of articles that entered Working status (total Imported minus duplicates) |
+| Records identified | Total count of all articles ever imported (all statuses combined) |
+| Duplicates removed | Count of articles in `duplicate` status (where `duplicateOf IS NOT NULL`) |
+| Records screened | Count of articles in Working, Included, or Rejected status (total articles minus duplicates) |
 | Records excluded (Screening) | Count of Rejected articles |
 | Studies included | Count of Included articles |
 
@@ -974,6 +978,7 @@ The following features are explicitly **out of scope** for v1:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v3.2 | 2026-05-08 | Article status model refactor: renamed `imported` status to `duplicate`. Non-duplicate articles now promote directly to `working` on import. Only true duplicates remain in `duplicate` status. Added cross-status dedup protection: articles already in `working`, `included`, or `rejected` are never affected by new imports. Updated state machine diagram, transitions, PRISMA data mapping, and workflow sequence. |
 | v3.1 | 2026-05-05 | Design implementation update: added Tailwind CSS v4 with @theme tokens, disabled preflight for custom-CSS compatibility, Material Symbols Outlined icons replacing all Unicode fallbacks, Inter font loading, dual styling approach (custom CSS + Tailwind utilities). Documented design reference files and implementation gaps. |
 | v3 | 2026-05-04 | Scope reductions: dropped mobile, single-project, simplified PRISMA exports, static VRAM warning, optional tag/label pass, no audit revert. Gap fills: screeningError as boolean flag, PRISMA data mapping, token estimation method, resume screening detail, export specVersion, import limit behavior, short-title dedup guard, multiple-import dedup scoping. Detail expansions: prompt templates for tag/label generation and AI summary, screening override note format, batch summary handling. |
 | v2 | Prior | Second Specification (superseded by v3). |

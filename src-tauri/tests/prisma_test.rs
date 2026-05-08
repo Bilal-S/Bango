@@ -22,7 +22,7 @@ fn test_prisma_counts_with_articles() {
 
     // Insert articles in various states
     conn.execute(
-        "INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('a1', 'imported', 'T1', 'A1', '[]')",
+        "INSERT INTO articles (id, status, title, abstract_text, authors) VALUES ('a1', 'duplicate', 'T1', 'A1', '[]')",
         [],
     )
     .unwrap();
@@ -42,7 +42,7 @@ fn test_prisma_counts_with_articles() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO articles (id, status, title, abstract_text, authors, duplicate_of) VALUES ('a5', 'imported', 'T5', 'A5', '[]', 'a1')",
+        "INSERT INTO articles (id, status, title, abstract_text, authors, duplicate_of) VALUES ('a5', 'duplicate', 'T5', 'A5', '[]', 'a1')",
         [],
     )
     .unwrap();

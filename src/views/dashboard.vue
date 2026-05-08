@@ -10,7 +10,7 @@ const { counts, screeningProgress, groupedAudit, loading, error, hasArticles, re
 onMounted(() => refresh());
 
 interface StatusTile {
-  key: 'imported' | 'working' | 'included' | 'rejected';
+  key: 'duplicate' | 'working' | 'included' | 'rejected';
   label: string;
   icon: string;
   description: string;
@@ -19,11 +19,11 @@ interface StatusTile {
 
 const statusTiles: StatusTile[] = [
   {
-    key: 'imported',
-    label: 'Imported',
-    icon: 'import_export',
-    description: 'Total articles in library',
-    cssClass: 'status-tile--imported',
+    key: 'duplicate',
+    label: 'Duplicates',
+    icon: 'content_copy',
+    description: 'Articles with potential duplicates',
+    cssClass: 'status-tile--duplicate',
   },
   {
     key: 'working',
@@ -495,7 +495,7 @@ function navigateTo(route: string): void {
 }
 
 /* Status tile color variants */
-.status-tile--imported .status-tile__badge {
+.status-tile--duplicate .status-tile__badge {
   background-color: #dbeafe;
   color: #1e40af;
 }

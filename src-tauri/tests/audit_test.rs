@@ -18,7 +18,7 @@ fn insert_test_article(conn: &rusqlite::Connection, id: &str, status: &str) {
 #[test]
 fn test_create_and_retrieve_audit_entry() {
     let conn = setup_db();
-    insert_test_article(&conn, "art-1", "imported");
+    insert_test_article(&conn, "art-1", "duplicate");
 
     audit_repo::create_entry(
         &conn,
@@ -47,7 +47,7 @@ fn test_audit_tracks_status_changes() {
         &conn,
         "art-2",
         "status_change",
-        Some("imported"),
+        Some("duplicate"),
         Some("working"),
         None,
         "system",
@@ -70,7 +70,7 @@ fn test_audit_tracks_status_changes() {
     // Most recent first (DESC order)
     assert_eq!(entries[0].action.as_str(), "ai_screen");
     assert_eq!(entries[0].source.as_str(), "ai");
-    assert_eq!(entries[1].from_status.as_deref(), Some("imported"));
+    assert_eq!(entries[1].from_status.as_deref(), Some("duplicate"));
 }
 
 #[test]
