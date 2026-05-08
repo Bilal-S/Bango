@@ -1,5 +1,5 @@
 {
-  "$schema": "file://../src/schema/tauri2.json",
+  "$schema": "./src/schema/tauri2.json",
   "productName": "Bango",
   "version": "0.4.0",
   "identifier": "com.bango.app",
