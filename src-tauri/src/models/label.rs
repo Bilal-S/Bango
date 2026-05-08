@@ -6,6 +6,7 @@ pub struct Label {
     pub id: String,
     pub name: String,
     pub source: LabelSource,
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

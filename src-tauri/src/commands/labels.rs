@@ -15,6 +15,7 @@ pub struct LabelWithCount {
     pub id: String,
     pub name: String,
     pub source: String,
+    pub color: Option<String>,
     pub article_count: usize,
 }
 
@@ -47,6 +48,7 @@ pub fn get_labels_with_counts(
                     crate::models::label::LabelSource::AiGenerated => "ai_generated".to_string(),
                     crate::models::label::LabelSource::UserCreated => "user_created".to_string(),
                 },
+                color: label.color,
                 article_count: count,
             }
         })
@@ -98,6 +100,25 @@ pub fn delete_label(db_state: State<'_, DbState>, id: String) -> Result<(), AppE
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     label_repo::delete_label(&conn, &id)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLabelColorRequest {
+    pub id: String,
+    pub color: Option<String>,
+}
+
+#[tauri::command]
+pub fn update_label_color(
+    db_state: State<'_, DbState>,
+    request: UpdateLabelColorRequest,
+) -> Result<Label, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    label_repo::update_label_color(&conn, &request.id, request.color.as_deref())
 }
 
 #[derive(Serialize)]

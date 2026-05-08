@@ -3,6 +3,8 @@ import { ref, computed, watch } from 'vue';
 import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
 import SuggestInput from './suggest-input.vue';
+import TagChip from './tag-chip.vue';
+import LabelChip from './label-chip.vue';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 
@@ -99,6 +101,16 @@ const labelSuggestions = computed(() => {
     .filter((name) => !assigned.has(name.toLowerCase()))
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 });
+
+/** Look up the color for a tag name from the global store */
+function tagColor(name: string): string | null {
+  return tagsStore.tags.find((t) => t.name === name)?.color ?? null;
+}
+
+/** Look up the color for a label name from the global store */
+function labelColor(name: string): string | null {
+  return labelsStore.labels.find((l) => l.name === name)?.color ?? null;
+}
 
 function removeTag(tag: string): void {
   const updated = props.article.tags.filter((t) => t !== tag);
@@ -305,11 +317,11 @@ const confidenceBarWidth = computed(() =>
           <span
             v-for="tag in sortedTags"
             :key="'tag-' + tag"
-            class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 pl-3 pr-1.5 py-1 rounded-lg text-xs font-medium group"
+            class="inline-flex items-center gap-1 group"
           >
-            {{ tag }}
+            <TagChip :name="tag" :color="tagColor(tag)" />
             <button
-              class="material-symbols-outlined text-[14px] text-indigo-400 hover:text-indigo-700 cursor-pointer rounded-full hover:bg-indigo-100 leading-none"
+              class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer rounded-full hover:bg-slate-100 leading-none opacity-0 group-hover:opacity-100 transition-opacity"
               @click="removeTag(tag)"
             >
               close
@@ -335,11 +347,11 @@ const confidenceBarWidth = computed(() =>
           <span
             v-for="label in sortedLabels"
             :key="'label-' + label"
-            class="inline-flex items-center gap-1 border border-slate-200 text-slate-600 pl-3 pr-1.5 py-1 rounded-lg text-xs font-medium group"
+            class="inline-flex items-center gap-1 group"
           >
-            {{ label }}
+            <LabelChip :name="label" :color="labelColor(label)" />
             <button
-              class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer rounded-full hover:bg-slate-100 leading-none"
+              class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer rounded-full hover:bg-slate-100 leading-none opacity-0 group-hover:opacity-100 transition-opacity"
               @click="removeLabel(label)"
             >
               close

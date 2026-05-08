@@ -1,20 +1,13 @@
-use bango_lib::screening::resolution::{resolve_decision, ScreeningInput, CriterionMatch};
 use bango_lib::models::criterion::{CriterionType, Priority};
+use bango_lib::screening::resolution::{resolve_decision, CriterionMatch, ScreeningInput};
 
 fn make_match(id: &str, c_type: CriterionType, priority: Priority) -> CriterionMatch {
-    CriterionMatch {
-        id: id.to_string(),
-        criterion_type: c_type,
-        priority,
-    }
+    CriterionMatch { id: id.to_string(), criterion_type: c_type, priority }
 }
 
 #[test]
 fn test_resolve_no_matches_excludes() {
-    let input = ScreeningInput {
-        inclusion_matches: vec![],
-        exclusion_matches: vec![],
-    };
+    let input = ScreeningInput { inclusion_matches: vec![], exclusion_matches: vec![] };
     assert_eq!(resolve_decision(&input), "exclude");
 }
 

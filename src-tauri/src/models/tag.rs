@@ -6,6 +6,7 @@ pub struct Tag {
     pub id: String,
     pub name: String,
     pub source: TagSource,
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

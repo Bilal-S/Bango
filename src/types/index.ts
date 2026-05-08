@@ -76,6 +76,7 @@ export interface Tag {
   id: string;
   name: string;
   source: TagSource;
+  color: string | null;
 }
 
 export type TagSource = 'ai_suggested' | 'user_created' | 'ris_keyword';
@@ -88,6 +89,7 @@ export interface Label {
   id: string;
   name: string;
   source: LabelSource;
+  color: string | null;
 }
 
 export type LabelSource = 'ai_generated' | 'user_created';

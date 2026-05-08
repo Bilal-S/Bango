@@ -16,6 +16,7 @@ pub struct TagWithCount {
     pub id: String,
     pub name: String,
     pub source: String,
+    pub color: Option<String>,
     pub article_count: usize,
 }
 
@@ -47,6 +48,7 @@ pub fn get_tags_with_counts(db_state: State<'_, DbState>) -> Result<Vec<TagWithC
                     crate::models::tag::TagSource::RisKeyword => "ris_keyword".to_string(),
                     crate::models::tag::TagSource::UserCreated => "user_created".to_string(),
                 },
+                color: tag.color,
                 article_count: count,
             }
         })
@@ -98,6 +100,25 @@ pub fn delete_tag(db_state: State<'_, DbState>, id: String) -> Result<(), AppErr
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     tag_repo::delete_tag(&conn, &id)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTagColorRequest {
+    pub id: String,
+    pub color: Option<String>,
+}
+
+#[tauri::command]
+pub fn update_tag_color(
+    db_state: State<'_, DbState>,
+    request: UpdateTagColorRequest,
+) -> Result<Tag, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    tag_repo::update_tag_color(&conn, &request.id, request.color.as_deref())
 }
 
 #[derive(Serialize)]

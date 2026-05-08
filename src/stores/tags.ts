@@ -4,14 +4,20 @@ import type { Tag, TagWithCount } from '@/types';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
 const DEMO_TAGS: TagWithCount[] = [
-  { id: '1', name: 'machine-learning', source: 'user_created', articleCount: 142 },
-  { id: '2', name: 'clinical-trial', source: 'user_created', articleCount: 89 },
-  { id: '3', name: 'nlp-models', source: 'ai_suggested', articleCount: 56 },
-  { id: '4', name: 'deep-learning', source: 'user_created', articleCount: 34 },
-  { id: '5', name: 'systematic-review', source: 'ris_keyword', articleCount: 67 },
-  { id: '6', name: 'meta-analysis', source: 'ai_suggested', articleCount: 23 },
-  { id: '7', name: 'data-extraction', source: 'user_created', articleCount: 45 },
-  { id: '8', name: 'bias-assessment', source: 'ai_suggested', articleCount: 18 },
+  {
+    id: '1',
+    name: 'machine-learning',
+    source: 'user_created',
+    color: '#3b82f6',
+    articleCount: 142,
+  },
+  { id: '2', name: 'clinical-trial', source: 'user_created', color: '#10b981', articleCount: 89 },
+  { id: '3', name: 'nlp-models', source: 'ai_suggested', color: '#8b5cf6', articleCount: 56 },
+  { id: '4', name: 'deep-learning', source: 'user_created', color: '#f59e0b', articleCount: 34 },
+  { id: '5', name: 'systematic-review', source: 'ris_keyword', color: '#ef4444', articleCount: 67 },
+  { id: '6', name: 'meta-analysis', source: 'ai_suggested', color: '#ec4899', articleCount: 23 },
+  { id: '7', name: 'data-extraction', source: 'user_created', color: '#06b6d4', articleCount: 45 },
+  { id: '8', name: 'bias-assessment', source: 'ai_suggested', color: '#84cc16', articleCount: 18 },
 ];
 
 export const useTagsStore = defineStore('tags', () => {
@@ -57,6 +63,7 @@ export const useTagsStore = defineStore('tags', () => {
           id: String(Date.now()),
           name,
           source: 'user_created',
+          color: null,
           articleCount: 0,
         };
         tags.value = [...tags.value, newTag];
@@ -98,6 +105,19 @@ export const useTagsStore = defineStore('tags', () => {
     }
   }
 
+  async function updateTagColor(id: string, color: string | null): Promise<void> {
+    try {
+      if (!isTauri()) {
+        tags.value = tags.value.map((t) => (t.id === id ? { ...t, color } : t));
+        return;
+      }
+      await tauriCommand<Tag>('update_tag_color', { request: { id, color } });
+      await fetchTags();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   async function suggestTags(): Promise<void> {
     suggesting.value = true;
     error.value = null;
@@ -106,9 +126,27 @@ export const useTagsStore = defineStore('tags', () => {
         // Simulate AI suggestion in demo mode
         await new Promise((r) => setTimeout(r, 1500));
         const suggested: TagWithCount[] = [
-          { id: 's1', name: 'neural-network', source: 'ai_suggested', articleCount: 0 },
-          { id: 's2', name: 'sentiment-analysis', source: 'ai_suggested', articleCount: 0 },
-          { id: 's3', name: 'knowledge-graph', source: 'ai_suggested', articleCount: 0 },
+          {
+            id: 's1',
+            name: 'neural-network',
+            source: 'ai_suggested',
+            color: null,
+            articleCount: 0,
+          },
+          {
+            id: 's2',
+            name: 'sentiment-analysis',
+            source: 'ai_suggested',
+            color: null,
+            articleCount: 0,
+          },
+          {
+            id: 's3',
+            name: 'knowledge-graph',
+            source: 'ai_suggested',
+            color: null,
+            articleCount: 0,
+          },
         ];
         tags.value = [...tags.value, ...suggested];
         return;
@@ -133,6 +171,7 @@ export const useTagsStore = defineStore('tags', () => {
     createTag,
     renameTag,
     deleteTag,
+    updateTagColor,
     suggestTags,
     invalidate,
   };

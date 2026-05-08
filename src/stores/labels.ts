@@ -4,12 +4,24 @@ import type { Label, LabelWithCount } from '@/types';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
 const DEMO_LABELS: LabelWithCount[] = [
-  { id: 'l1', name: 'priority-read', source: 'user_created', articleCount: 12 },
-  { id: 'l2', name: 'disputed', source: 'user_created', articleCount: 4 },
-  { id: 'l3', name: 'needs-review', source: 'ai_generated', articleCount: 38 },
-  { id: 'l4', name: 'strong-methodology', source: 'ai_generated', articleCount: 21 },
-  { id: 'l5', name: 'needs-full-text', source: 'user_created', articleCount: 7 },
-  { id: 'l6', name: 'exclude-candidate', source: 'user_created', articleCount: 15 },
+  { id: 'l1', name: 'priority-read', source: 'user_created', color: '#ef4444', articleCount: 12 },
+  { id: 'l2', name: 'disputed', source: 'user_created', color: '#f59e0b', articleCount: 4 },
+  { id: 'l3', name: 'needs-review', source: 'ai_generated', color: '#3b82f6', articleCount: 38 },
+  {
+    id: 'l4',
+    name: 'strong-methodology',
+    source: 'ai_generated',
+    color: '#10b981',
+    articleCount: 21,
+  },
+  { id: 'l5', name: 'needs-full-text', source: 'user_created', color: '#8b5cf6', articleCount: 7 },
+  {
+    id: 'l6',
+    name: 'exclude-candidate',
+    source: 'user_created',
+    color: '#6b7280',
+    articleCount: 15,
+  },
 ];
 
 export const useLabelsStore = defineStore('labels', () => {
@@ -54,6 +66,7 @@ export const useLabelsStore = defineStore('labels', () => {
           id: String(Date.now()),
           name,
           source: 'user_created',
+          color: null,
           articleCount: 0,
         };
         labels.value = [...labels.value, newLabel];
@@ -95,6 +108,19 @@ export const useLabelsStore = defineStore('labels', () => {
     }
   }
 
+  async function updateLabelColor(id: string, color: string | null): Promise<void> {
+    try {
+      if (!isTauri()) {
+        labels.value = labels.value.map((l) => (l.id === id ? { ...l, color } : l));
+        return;
+      }
+      await tauriCommand<Label>('update_label_color', { request: { id, color } });
+      await fetchLabels();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   async function suggestLabels(): Promise<void> {
     suggesting.value = true;
     error.value = null;
@@ -102,8 +128,14 @@ export const useLabelsStore = defineStore('labels', () => {
       if (!isTauri()) {
         await new Promise((r) => setTimeout(r, 1500));
         const suggested: LabelWithCount[] = [
-          { id: 's1', name: 'high-relevance', source: 'ai_generated', articleCount: 0 },
-          { id: 's2', name: 'low-quality', source: 'ai_generated', articleCount: 0 },
+          {
+            id: 's1',
+            name: 'high-relevance',
+            source: 'ai_generated',
+            color: null,
+            articleCount: 0,
+          },
+          { id: 's2', name: 'low-quality', source: 'ai_generated', color: null, articleCount: 0 },
         ];
         labels.value = [...labels.value, ...suggested];
         return;
@@ -128,6 +160,7 @@ export const useLabelsStore = defineStore('labels', () => {
     createLabel,
     renameLabel,
     deleteLabel,
+    updateLabelColor,
     suggestLabels,
     invalidate,
   };

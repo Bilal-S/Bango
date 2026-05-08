@@ -247,6 +247,12 @@ pub struct ArticleQuery {
     pub year_to: Option<i32>,
     pub manual_override_only: bool,
     pub screening_errors_only: bool,
+    pub author: Option<String>,
+    pub journal: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
@@ -286,6 +292,36 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
 
     if query.screening_errors_only {
         sql.push_str(" AND screening_error = 1");
+    }
+
+    if let Some(ref author) = query.author {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(" AND LOWER(authors) LIKE ?{idx}"));
+        let pattern = format!("%{}%", author.to_lowercase());
+        param_values.push(Box::new(pattern));
+    }
+
+    if let Some(ref journal) = query.journal {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(" AND LOWER(journal) LIKE ?{idx}"));
+        let pattern = format!("%{}%", journal.to_lowercase());
+        param_values.push(Box::new(pattern));
+    }
+
+    for tag in &query.tags {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(
+            " AND articles.id IN (SELECT at.article_id FROM article_tags at JOIN tags t ON at.tag_id = t.id WHERE LOWER(t.name) = ?{idx})"
+        ));
+        param_values.push(Box::new(tag.to_lowercase()));
+    }
+
+    for label in &query.labels {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(
+            " AND articles.id IN (SELECT al.article_id FROM article_labels al JOIN labels l ON al.label_id = l.id WHERE LOWER(l.name) = ?{idx})"
+        ));
+        param_values.push(Box::new(label.to_lowercase()));
     }
 
     let sort_by = query.sort_by.as_deref().unwrap_or("imported_at");

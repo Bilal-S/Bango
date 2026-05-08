@@ -25,6 +25,10 @@ export interface ArticleQuery {
   yearTo: number | null;
   manualOverrideOnly: boolean;
   screeningErrorsOnly: boolean;
+  author: string | null;
+  journal: string | null;
+  tags: string[];
+  labels: string[];
 }
 
 export type SortDirection = 'asc' | 'desc';
@@ -75,6 +79,10 @@ export function useArticleSearch() {
     yearTo: null,
     manualOverrideOnly: false,
     screeningErrorsOnly: false,
+    author: null,
+    journal: null,
+    tags: [],
+    labels: [],
   });
 
   const statusCounts = ref<ArticleCounts>({
@@ -151,6 +159,10 @@ export function useArticleSearch() {
     query.search = filter.titleText || null;
     query.yearFrom = filter.yearFrom;
     query.yearTo = filter.yearTo;
+    query.author = filter.authorText || null;
+    query.journal = filter.journal || null;
+    query.tags = [...filter.tags];
+    query.labels = [...filter.labels];
     void search();
   }
 
@@ -166,6 +178,10 @@ export function useArticleSearch() {
     query.search = null;
     query.yearFrom = null;
     query.yearTo = null;
+    query.author = null;
+    query.journal = null;
+    query.tags = [];
+    query.labels = [];
     void search();
   }
 

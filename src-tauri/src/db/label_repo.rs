@@ -5,14 +5,14 @@ use crate::error::AppError;
 use crate::models::label::{Label, LabelSource};
 
 pub fn get_all_labels(conn: &Connection) -> Result<Vec<Label>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, name, source FROM labels ORDER BY name")?;
+    let mut stmt = conn.prepare("SELECT id, name, source, color FROM labels ORDER BY name")?;
     let rows = stmt.query_map([], |row| {
         let source_str: String = row.get(2)?;
         let source = match source_str.as_str() {
             "ai_generated" => LabelSource::AiGenerated,
             _ => LabelSource::UserCreated,
         };
-        Ok(Label { id: row.get(0)?, name: row.get(1)?, source })
+        Ok(Label { id: row.get(0)?, name: row.get(1)?, source, color: row.get(3)? })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -21,7 +21,7 @@ pub fn create_label(conn: &Connection, name: &str, source: &str) -> Result<Label
     // Check if label already exists (case-insensitive) to avoid UNIQUE constraint violation
     let existing: Option<Label> = conn
         .query_row(
-            "SELECT id, name, source FROM labels WHERE LOWER(name) = LOWER(?1)",
+            "SELECT id, name, source, color FROM labels WHERE LOWER(name) = LOWER(?1)",
             params![name],
             |row| {
                 let source_str: String = row.get(2)?;
@@ -29,7 +29,12 @@ pub fn create_label(conn: &Connection, name: &str, source: &str) -> Result<Label
                     "ai_generated" => LabelSource::AiGenerated,
                     _ => LabelSource::UserCreated,
                 };
-                Ok(Label { id: row.get(0)?, name: row.get(1)?, source: source_enum })
+                Ok(Label {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    source: source_enum,
+                    color: row.get(3)?,
+                })
             },
         )
         .ok();
@@ -47,7 +52,7 @@ pub fn create_label(conn: &Connection, name: &str, source: &str) -> Result<Label
         "ai_generated" => LabelSource::AiGenerated,
         _ => LabelSource::UserCreated,
     };
-    Ok(Label { id, name: name.to_string(), source: source_enum })
+    Ok(Label { id, name: name.to_string(), source: source_enum, color: None })
 }
 
 pub fn rename_label(conn: &Connection, id: &str, new_name: &str) -> Result<Label, AppError> {
@@ -61,6 +66,18 @@ pub fn rename_label(conn: &Connection, id: &str, new_name: &str) -> Result<Label
 pub fn delete_label(conn: &Connection, id: &str) -> Result<(), AppError> {
     conn.execute("DELETE FROM labels WHERE id = ?1", params![id])?;
     Ok(())
+}
+
+pub fn update_label_color(
+    conn: &Connection,
+    id: &str,
+    color: Option<&str>,
+) -> Result<Label, AppError> {
+    conn.execute("UPDATE labels SET color = ?1 WHERE id = ?2", params![color, id])?;
+    get_all_labels(conn)?
+        .into_iter()
+        .find(|l| l.id == id)
+        .ok_or_else(|| AppError::NotFound(format!("Label {} not found", id)))
 }
 
 pub fn merge_labels(

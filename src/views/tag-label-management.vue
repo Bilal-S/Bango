@@ -5,6 +5,7 @@ import { useLabelsStore } from '@/stores/labels';
 import TagChip from '@/components/tag-chip.vue';
 import LabelChip from '@/components/label-chip.vue';
 import { formatArticleCount } from '@/utils/formatters';
+import { getColorScheme } from '@/utils/color';
 
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
@@ -84,6 +85,16 @@ async function saveLabelEdit(): Promise<void> {
 function cancelLabelEdit(): void {
   editingLabelId.value = null;
   editingLabelName.value = '';
+}
+
+function onTagColorChange(tagId: string, event: Event): void {
+  const input = event.target as HTMLInputElement;
+  tagsStore.updateTagColor(tagId, input.value);
+}
+
+function onLabelColorChange(labelId: string, event: Event): void {
+  const input = event.target as HTMLInputElement;
+  labelsStore.updateLabelColor(labelId, input.value);
 }
 </script>
 
@@ -193,14 +204,28 @@ function cancelLabelEdit(): void {
                   />
                 </template>
                 <template v-else>
-                  <TagChip :name="tag.name" />
+                  <TagChip :name="tag.name" :color="tag.color" />
                 </template>
               </div>
               <div class="flex items-center gap-4">
                 <span class="font-body-sm text-body-sm text-on-surface-variant">{{
                   formatArticleCount(tag.articleCount)
                 }}</span>
-                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div
+                  class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <label
+                    class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
+                    :style="{ color: tag.color || getColorScheme(tag.name, null).base }"
+                  >
+                    <span class="material-symbols-outlined text-[16px]">palette</span>
+                    <input
+                      type="color"
+                      class="absolute inset-0 opacity-0 cursor-pointer"
+                      :value="tag.color || getColorScheme(tag.name, null).base"
+                      @input="onTagColorChange(tag.id, $event)"
+                    />
+                  </label>
                   <template v-if="editingTagId === tag.id">
                     <button
                       class="p-1 text-primary hover:bg-surface-variant rounded transition-colors"
@@ -304,14 +329,28 @@ function cancelLabelEdit(): void {
                   />
                 </template>
                 <template v-else>
-                  <LabelChip :name="label.name" />
+                  <LabelChip :name="label.name" :color="label.color" />
                 </template>
               </div>
               <div class="flex items-center gap-4">
                 <span class="font-body-sm text-body-sm text-on-surface-variant">{{
                   formatArticleCount(label.articleCount)
                 }}</span>
-                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div
+                  class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <label
+                    class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
+                    :style="{ color: label.color || getColorScheme(label.name, null).base }"
+                  >
+                    <span class="material-symbols-outlined text-[16px]">palette</span>
+                    <input
+                      type="color"
+                      class="absolute inset-0 opacity-0 cursor-pointer"
+                      :value="label.color || getColorScheme(label.name, null).base"
+                      @input="onLabelColorChange(label.id, $event)"
+                    />
+                  </label>
                   <template v-if="editingLabelId === label.id">
                     <button
                       class="p-1 text-secondary hover:bg-surface-variant rounded transition-colors"

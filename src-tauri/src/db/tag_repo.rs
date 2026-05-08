@@ -5,7 +5,7 @@ use crate::error::AppError;
 use crate::models::tag::{Tag, TagSource};
 
 pub fn get_all_tags(conn: &Connection) -> Result<Vec<Tag>, AppError> {
-    let mut stmt = conn.prepare("SELECT id, name, source FROM tags ORDER BY name")?;
+    let mut stmt = conn.prepare("SELECT id, name, source, color FROM tags ORDER BY name")?;
     let rows = stmt.query_map([], |row| {
         let source_str: String = row.get(2)?;
         let source = match source_str.as_str() {
@@ -13,7 +13,7 @@ pub fn get_all_tags(conn: &Connection) -> Result<Vec<Tag>, AppError> {
             "ris_keyword" => TagSource::RisKeyword,
             _ => TagSource::UserCreated,
         };
-        Ok(Tag { id: row.get(0)?, name: row.get(1)?, source })
+        Ok(Tag { id: row.get(0)?, name: row.get(1)?, source, color: row.get(3)? })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -22,7 +22,7 @@ pub fn create_tag(conn: &Connection, name: &str, source: &str) -> Result<Tag, Ap
     // Check if tag already exists (case-insensitive) to avoid UNIQUE constraint violation
     let existing: Option<Tag> = conn
         .query_row(
-            "SELECT id, name, source FROM tags WHERE LOWER(name) = LOWER(?1)",
+            "SELECT id, name, source, color FROM tags WHERE LOWER(name) = LOWER(?1)",
             params![name],
             |row| {
                 let source_str: String = row.get(2)?;
@@ -31,7 +31,12 @@ pub fn create_tag(conn: &Connection, name: &str, source: &str) -> Result<Tag, Ap
                     "ris_keyword" => TagSource::RisKeyword,
                     _ => TagSource::UserCreated,
                 };
-                Ok(Tag { id: row.get(0)?, name: row.get(1)?, source: source_enum })
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    source: source_enum,
+                    color: row.get(3)?,
+                })
             },
         )
         .ok();
@@ -50,7 +55,7 @@ pub fn create_tag(conn: &Connection, name: &str, source: &str) -> Result<Tag, Ap
         "ris_keyword" => TagSource::RisKeyword,
         _ => TagSource::UserCreated,
     };
-    Ok(Tag { id, name: name.to_string(), source: source_enum })
+    Ok(Tag { id, name: name.to_string(), source: source_enum, color: None })
 }
 
 pub fn rename_tag(conn: &Connection, id: &str, new_name: &str) -> Result<Tag, AppError> {
@@ -64,6 +69,14 @@ pub fn rename_tag(conn: &Connection, id: &str, new_name: &str) -> Result<Tag, Ap
 pub fn delete_tag(conn: &Connection, id: &str) -> Result<(), AppError> {
     conn.execute("DELETE FROM tags WHERE id = ?1", params![id])?;
     Ok(())
+}
+
+pub fn update_tag_color(conn: &Connection, id: &str, color: Option<&str>) -> Result<Tag, AppError> {
+    conn.execute("UPDATE tags SET color = ?1 WHERE id = ?2", params![color, id])?;
+    get_all_tags(conn)?
+        .into_iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| AppError::NotFound(format!("Tag {} not found", id)))
 }
 
 pub fn merge_tags(conn: &Connection, source_id: &str, target_id: &str) -> Result<Tag, AppError> {

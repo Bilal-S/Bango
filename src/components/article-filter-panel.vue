@@ -2,6 +2,12 @@
 import { ref, computed } from 'vue';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import type { TitleMatchType } from '@/composables/use-article-search';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
+import { getColorScheme } from '@/utils/color';
+
+const tagsStore = useTagsStore();
+const labelsStore = useLabelsStore();
 
 const props = defineProps<{
   filter: ArticleFilter;
@@ -22,6 +28,12 @@ const MATCH_TYPES: { value: TitleMatchType; label: string }[] = [
   { value: 'ends_with', label: 'Ends with' },
   { value: 'exact', label: 'Exact' },
 ];
+
+const yearRangeInvalid = computed((): boolean => {
+  const from = props.filter.yearFrom;
+  const to = props.filter.yearTo;
+  return from !== null && to !== null && from > to;
+});
 
 function updateField(key: keyof ArticleFilter, value: unknown): void {
   emit('update:filter', key, value);
@@ -137,7 +149,8 @@ const matchedAuthors = computed(() => {
           <input
             type="number"
             placeholder="From"
-            class="flex-1 w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            :class="yearRangeInvalid ? 'border-red-300' : 'border-slate-200'"
             :value="filter.yearFrom ?? ''"
             @input="
               updateField(
@@ -152,7 +165,8 @@ const matchedAuthors = computed(() => {
           <input
             type="number"
             placeholder="To"
-            class="flex-1 w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            :class="yearRangeInvalid ? 'border-red-300' : 'border-slate-200'"
             :value="filter.yearTo ?? ''"
             @input="
               updateField(
@@ -164,6 +178,9 @@ const matchedAuthors = computed(() => {
             "
           />
         </div>
+        <p v-if="yearRangeInvalid" class="mt-1.5 text-xs text-red-500">
+          From year must be ≤ To year
+        </p>
       </div>
 
       <!-- Journal -->
@@ -185,11 +202,31 @@ const matchedAuthors = computed(() => {
           <button
             v-for="tag in allTags"
             :key="tag"
-            class="px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors"
-            :class="
+            class="px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors border"
+            :style="
               filter.tags.includes(tag)
-                ? 'bg-indigo-100 text-indigo-700'
-                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                ? {
+                    backgroundColor: getColorScheme(
+                      tag,
+                      tagsStore.tags.find((t) => t.name === tag)?.color
+                    ).bg,
+                    color: getColorScheme(tag, tagsStore.tags.find((t) => t.name === tag)?.color)
+                      .text,
+                    borderColor: getColorScheme(
+                      tag,
+                      tagsStore.tags.find((t) => t.name === tag)?.color
+                    ).base,
+                    boxShadow: `0 0 0 2px ${getColorScheme(tag, tagsStore.tags.find((t) => t.name === tag)?.color).border}`,
+                  }
+                : {
+                    backgroundColor: getColorScheme(
+                      tag,
+                      tagsStore.tags.find((t) => t.name === tag)?.color
+                    ).bg,
+                    color: getColorScheme(tag, tagsStore.tags.find((t) => t.name === tag)?.color)
+                      .text,
+                    borderColor: 'transparent',
+                  }
             "
             @click="toggleTag(tag)"
           >
@@ -209,10 +246,37 @@ const matchedAuthors = computed(() => {
             v-for="label in allLabels"
             :key="label"
             class="px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors border"
-            :class="
+            :style="
               filter.labels.includes(label)
-                ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'
+                ? {
+                    backgroundColor: getColorScheme(
+                      label,
+                      labelsStore.labels.find((l) => l.name === label)?.color
+                    ).bg,
+                    color: getColorScheme(
+                      label,
+                      labelsStore.labels.find((l) => l.name === label)?.color
+                    ).text,
+                    borderColor: getColorScheme(
+                      label,
+                      labelsStore.labels.find((l) => l.name === label)?.color
+                    ).base,
+                    boxShadow: `0 0 0 2px ${getColorScheme(label, labelsStore.labels.find((l) => l.name === label)?.color).border}`,
+                  }
+                : {
+                    backgroundColor: getColorScheme(
+                      label,
+                      labelsStore.labels.find((l) => l.name === label)?.color
+                    ).bg,
+                    color: getColorScheme(
+                      label,
+                      labelsStore.labels.find((l) => l.name === label)?.color
+                    ).text,
+                    borderColor: getColorScheme(
+                      label,
+                      labelsStore.labels.find((l) => l.name === label)?.color
+                    ).border,
+                  }
             "
             @click="toggleLabel(label)"
           >
@@ -228,7 +292,13 @@ const matchedAuthors = computed(() => {
     <!-- Apply button -->
     <div class="flex justify-end mt-4 pt-4 border-t border-slate-100">
       <button
-        class="px-4 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors active:scale-95"
+        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors active:scale-95"
+        :class="
+          yearRangeInvalid
+            ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+            : 'bg-indigo-600 text-white hover:bg-indigo-700'
+        "
+        :disabled="yearRangeInvalid"
         @click="emit('apply')"
       >
         Apply Filters
