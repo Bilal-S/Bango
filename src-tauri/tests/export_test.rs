@@ -93,9 +93,9 @@ fn test_multiple_articles_to_ris() {
 #[test]
 fn test_ris_roundtrip_with_real_data() {
     let content =
-        fs::read_to_string(asset_path("10A_Lewicki_Stages.ris")).expect("fixture not found");
+        fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
     let parsed = parse_ris(&content).expect("Parse failed");
-    let record = &parsed.records[0];
+    let record = &parsed.records[1]; // Using second record which has a DOI
 
     // Verify key fields exist before roundtrip
     assert!(record.title.is_some());
