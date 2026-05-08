@@ -64,10 +64,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
 <template>
   <div class="h-full flex">
     <!-- Main content area -->
-    <div
-      class="flex-1 p-container-padding overflow-y-auto"
-      :class="{ 'opacity-40 pointer-events-none': showDetail }"
-    >
+    <div class="flex-1 p-container-padding overflow-y-auto">
       <!-- Header -->
       <div class="mb-6">
         <h1 class="page-title">Articles</h1>

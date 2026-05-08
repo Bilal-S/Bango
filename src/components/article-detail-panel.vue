@@ -16,6 +16,36 @@ const emit = defineEmits<{
   updateLabels: [id: string, labelIds: string[]];
 }>();
 
+// Panel resizing logic
+const panelWidth = ref(parseInt(localStorage.getItem('bango-detail-panel-width') || '480'));
+const isResizing = ref(false);
+
+function startResize(e: MouseEvent): void {
+  e.preventDefault();
+  isResizing.value = true;
+  const startX = e.clientX;
+  const startWidth = panelWidth.value;
+
+  function doResize(moveEvent: MouseEvent): void {
+    const delta = startX - moveEvent.clientX;
+    // Limit width between 320px and 900px
+    const newWidth = Math.max(320, Math.min(900, startWidth + delta));
+    panelWidth.value = newWidth;
+    localStorage.setItem('bango-detail-panel-width', newWidth.toString());
+  }
+
+  function stopResize(): void {
+    isResizing.value = false;
+    window.removeEventListener('mousemove', doResize);
+    window.removeEventListener('mouseup', stopResize);
+    document.body.style.cursor = '';
+  }
+
+  window.addEventListener('mousemove', doResize);
+  window.addEventListener('mouseup', stopResize);
+  document.body.style.cursor = 'col-resize';
+}
+
 // Notes editing
 const editingNotes = ref(false);
 const noteDraft = ref('');
@@ -98,7 +128,14 @@ const confidenceBarWidth = computed(() =>
 <template>
   <aside
     class="detail-panel h-full bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] border-l border-slate-200 flex flex-col z-50 relative"
+    :class="{ 'transition-none': isResizing }"
+    :style="{ '--detail-panel-width': panelWidth + 'px' }"
   >
+    <!-- Resize Handle (desktop only) -->
+    <div
+      class="resizer hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-indigo-400/50 active:bg-indigo-600 transition-colors"
+      @mousedown="startResize"
+    />
     <!-- Header -->
     <div class="p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
       <div class="flex items-center justify-between mb-4">

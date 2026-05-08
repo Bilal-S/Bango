@@ -87,10 +87,13 @@ function formatDate(dateStr: string | null): string {
             v-for="(article, index) in articles"
             :key="article.id"
             class="hover:bg-slate-50/80 transition-colors group cursor-pointer"
-            :class="{ 'bg-indigo-50/60': selectedId === article.id }"
+            :class="{ 'bg-indigo-50': selectedId === article.id }"
             @click="$emit('select', article.id)"
           >
-            <td class="col-index py-5 px-2 text-body-sm text-slate-500 font-mono">
+            <td
+              class="col-index py-5 px-2 text-body-sm text-slate-500 font-mono border-l-4 transition-colors"
+              :class="selectedId === article.id ? 'border-l-indigo-600' : 'border-l-transparent'"
+            >
               {{ index + 1 }}
             </td>
             <td class="py-5 px-2 max-w-xs">
