@@ -37,12 +37,13 @@ export interface ArticleQuery {
 
 export type SortDirection = 'asc' | 'desc';
 
-const STATUS_TABS: readonly (ArticleStatus | 'all')[] = [
+const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error')[] = [
   'all',
   'duplicate',
   'working',
   'included',
   'rejected',
+  'error',
 ] as const;
 
 export type StatusTab = (typeof STATUS_TABS)[number];
@@ -104,6 +105,7 @@ export function useArticleSearch() {
     working: articlesStore.byStatus.working,
     included: articlesStore.byStatus.included,
     rejected: articlesStore.byStatus.rejected,
+    error: 0,
   });
 
   async function fetchCounts(): Promise<void> {
@@ -139,7 +141,14 @@ export function useArticleSearch() {
 
   function setStatusTab(tab: StatusTab): void {
     activeStatusTab.value = tab;
-    query.status = tab === 'all' ? null : tab;
+    // "error" tab: show working articles that have screening errors
+    if (tab === 'error') {
+      query.status = 'working';
+      query.screeningErrorsOnly = true;
+    } else {
+      query.status = tab === 'all' ? null : tab;
+      query.screeningErrorsOnly = false;
+    }
     resetPage();
     void search();
   }
@@ -300,7 +309,13 @@ export function useArticleSearch() {
   }): Promise<void> {
     if (params.status && STATUS_TABS.includes(params.status as StatusTab)) {
       activeStatusTab.value = params.status as StatusTab;
-      query.status = params.status === 'all' ? null : params.status;
+      if (params.status === 'error') {
+        query.status = 'working';
+        query.screeningErrorsOnly = true;
+      } else {
+        query.status = params.status === 'all' ? null : params.status;
+        query.screeningErrorsOnly = false;
+      }
     }
     if (params.tags && params.tags.length > 0) {
       // Resolve tag IDs to names for both display and query

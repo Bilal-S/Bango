@@ -271,14 +271,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         let screened_at = get_str_field(a, "screenedAt", "screened_at");
         // Preserve sequence_id from backup; old backups lack it, so assign 1-based index
-        let sequence_id = a
-            .get("sequenceId")
-            .and_then(|v| v.as_i64())
-            .unwrap_or_else(|| {
-                // Old backup — assign based on import order
-                let sid = (i as i64) + 1;
-                sid
-            });
+        let sequence_id = a.get("sequenceId").and_then(|v| v.as_i64()).unwrap_or_else(|| {
+            // Old backup — assign based on import order
+            (i as i64) + 1
+        });
         conn.execute(
             "INSERT INTO articles (
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,

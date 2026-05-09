@@ -52,7 +52,7 @@ pub fn get_next_unscreened_working_batch(
     limit: usize,
 ) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
-         "SELECT id, sequence_id, title, abstract_text, authors, publication_year FROM articles \
+        "SELECT id, sequence_id, title, abstract_text, authors, publication_year FROM articles \
           WHERE status = 'working' AND screened_at IS NULL \
           ORDER BY sequence_id ASC LIMIT ?1",
     )?;
@@ -118,9 +118,7 @@ pub fn remaining_capacity(conn: &Connection) -> Result<usize, AppError> {
 
 fn next_sequence_id(conn: &Connection) -> Result<i64, AppError> {
     let max_id: i64 =
-        conn.query_row("SELECT COALESCE(MAX(sequence_id), 0) FROM articles", [], |row| {
-            row.get(0)
-        })?;
+        conn.query_row("SELECT COALESCE(MAX(sequence_id), 0) FROM articles", [], |row| row.get(0))?;
     Ok(max_id + 1)
 }
 
@@ -214,9 +212,9 @@ pub fn insert_articles_batch(
     let tx = conn.unchecked_transaction()?;
 
     // Get base sequence_id once, then increment per article
-    let mut seq_id = next_sequence_id(&tx)?;
+    let base_seq = next_sequence_id(&tx)?;
 
-    for article in articles {
+    for (seq_offset, article) in articles.iter().enumerate() {
         let mut article_with_source = article.clone();
         article_with_source.import_source = Some(import_source.to_string());
         let id = Uuid::new_v4().to_string();
@@ -253,7 +251,7 @@ pub fn insert_articles_batch(
             )",
             params![
                 id,
-                seq_id,
+                base_seq + seq_offset as i64,
                 article_with_source.title,
                 article_with_source.abstract_text,
                 authors_json,
@@ -286,8 +284,6 @@ pub fn insert_articles_batch(
                 token_estimate,
             ],
         )?;
-
-        seq_id += 1;
 
         // Insert audit entry for import
         let audit_id = Uuid::new_v4().to_string();
@@ -452,7 +448,8 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
     }
 
     if query.screening_errors_only {
-        sql.push_str(" AND screening_error = 1");
+        // Error = working article that was screened but didn't get a status change
+        sql.push_str(" AND status = 'working' AND screened_at IS NOT NULL");
     }
 
     if let Some(ref author) = query.author {
@@ -811,11 +808,11 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
 }
 
 /// Reset screening errors: clear `screened_at` and `screening_error` for all working articles
-/// that have screening errors, so they can be re-screened.
+/// that were screened but didn't get a status change, so they can be re-screened.
 pub fn reset_screening_errors(conn: &Connection) -> Result<usize, AppError> {
     let rows = conn.execute(
         "UPDATE articles SET screened_at = NULL, screening_error = 0 \
-         WHERE status = 'working' AND screening_error = 1",
+         WHERE status = 'working' AND screened_at IS NOT NULL",
         [],
     )?;
     Ok(rows)
@@ -844,6 +841,7 @@ pub fn get_article_counts(
         working: 0,
         included: 0,
         rejected: 0,
+        error: 0,
     };
 
     for (status, count) in rows.flatten() {
@@ -856,5 +854,16 @@ pub fn get_article_counts(
             _ => {}
         }
     }
+
+    // Count screening errors: working articles that were screened but didn't get a status change
+    let error_count: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM articles WHERE status = 'working' AND screened_at IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    counts.error = error_count;
+
     Ok(counts)
 }

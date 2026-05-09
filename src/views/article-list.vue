@@ -74,6 +74,7 @@ const STATUS_TAB_LABELS: Record<string, string> = {
   working: 'Working',
   included: 'Included',
   rejected: 'Rejected',
+  error: 'Errors',
 };
 
 async function handleMoveArticle(id: string, newStatus: string): Promise<void> {

@@ -36,9 +36,19 @@ pub struct ScreeningProgress {
 pub struct LlmScreeningResponse {
     pub decision: String,
     pub reasoning: String,
-    #[serde(default, alias = "matched_inclusion_criteria", alias = "inclusionCriteria", alias = "inclusion_criteria")]
+    #[serde(
+        default,
+        alias = "matched_inclusion_criteria",
+        alias = "inclusionCriteria",
+        alias = "inclusion_criteria"
+    )]
     pub matched_inclusion_criteria: Vec<String>,
-    #[serde(default, alias = "matched_exclusion_criteria", alias = "exclusionCriteria", alias = "exclusion_criteria")]
+    #[serde(
+        default,
+        alias = "matched_exclusion_criteria",
+        alias = "exclusionCriteria",
+        alias = "exclusion_criteria"
+    )]
     pub matched_exclusion_criteria: Vec<String>,
     #[serde(default, alias = "suggested_tags", alias = "tags")]
     pub suggested_tags: Vec<String>,
@@ -318,11 +328,13 @@ impl ScreeningEngine {
                             continue;
                         }
 
-                        // Apply priority resolution
+                        // Apply priority resolution — match by UUID or by criterion text
                         let inc_matches: Vec<CriterionMatch> = screening
                             .matched_inclusion_criteria
                             .iter()
-                            .filter_map(|id| criteria.iter().find(|c| c.id == *id))
+                            .filter_map(|key| {
+                                criteria.iter().find(|c| c.id == *key || c.text == *key)
+                            })
                             .map(|c| CriterionMatch {
                                 id: c.id.clone(),
                                 criterion_type: c.criterion_type.clone(),
@@ -333,11 +345,32 @@ impl ScreeningEngine {
                         let exc_matches: Vec<CriterionMatch> = screening
                             .matched_exclusion_criteria
                             .iter()
-                            .filter_map(|id| criteria.iter().find(|c| c.id == *id))
+                            .filter_map(|key| {
+                                criteria.iter().find(|c| c.id == *key || c.text == *key)
+                            })
                             .map(|c| CriterionMatch {
                                 id: c.id.clone(),
                                 criterion_type: c.criterion_type.clone(),
                                 priority: c.priority,
+                            })
+                            .collect();
+
+                        // Collect auto-label info before the matches are moved
+                        let auto_label_criteria: Vec<(String, String)> = inc_matches
+                            .iter()
+                            .chain(exc_matches.iter())
+                            .filter_map(|m| {
+                                criteria.iter().find(|cr| cr.id == m.id).map(|cr| {
+                                    (
+                                        if matches!(cr.criterion_type, CriterionType::Inclusion) {
+                                            "Inclusion"
+                                        } else {
+                                            "Exclusion"
+                                        }
+                                        .to_string(),
+                                        cr.text.clone(),
+                                    )
+                                })
                             })
                             .collect();
 
@@ -380,6 +413,12 @@ impl ScreeningEngine {
                             // Create/update tags from suggested_tags
                             for tag_name in &screening.suggested_tags {
                                 let _ = create_or_match_tag(&c, tag_name, &article.id);
+                            }
+
+                            // Auto-label: apply labels from matched criteria
+                            for (prefix, text) in &auto_label_criteria {
+                                let label_name = format!("{}: {}", prefix, text);
+                                let _ = create_or_match_label(&c, &label_name, &article.id);
                             }
                         }
 
@@ -455,7 +494,10 @@ fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, A
     let json_str = extract_json(raw);
 
     eprintln!("[screening] extract_json produced {} bytes", json_str.len());
-    eprintln!("[screening] extracted JSON first 300 chars: {}", &json_str[..json_str.len().min(300)]);
+    eprintln!(
+        "[screening] extracted JSON first 300 chars: {}",
+        &json_str[..json_str.len().min(300)]
+    );
 
     match serde_json::from_str::<Vec<LlmScreeningResponse>>(&json_str) {
         Ok(results) => {
@@ -464,14 +506,20 @@ fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, A
         }
         Err(e) => {
             eprintln!("[screening] FAILED to parse screening response: {e}");
-            eprintln!("[screening] attempted JSON (first 500 chars): {}", &json_str[..json_str.len().min(500)]);
+            eprintln!(
+                "[screening] attempted JSON (first 500 chars): {}",
+                &json_str[..json_str.len().min(500)]
+            );
 
             // Try truncated JSON repair: find last complete `}` and add missing `]`
             if let Some(repaired) = repair_truncated_json_array(&json_str) {
                 eprintln!("[screening] attempting truncated JSON repair...");
                 match serde_json::from_str::<Vec<LlmScreeningResponse>>(&repaired) {
                     Ok(results) => {
-                        eprintln!("[screening] repair succeeded! Recovered {} results", results.len());
+                        eprintln!(
+                            "[screening] repair succeeded! Recovered {} results",
+                            results.len()
+                        );
                         return Ok(results);
                     }
                     Err(repair_err) => {
@@ -844,8 +892,8 @@ mod tests {
     }
 
     #[test]
-fn test_parse_response_with_surrounding_text() {
-// LLM sometimes wraps JSON in explanatory text — extract_json now handles this
+    fn test_parse_response_with_surrounding_text() {
+        // LLM sometimes wraps JSON in explanatory text — extract_json now handles this
         let raw = r#"Here are the screening results:
     [
     {"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}
@@ -1034,6 +1082,37 @@ fn create_or_match_tag(
     conn.execute(
         "INSERT OR IGNORE INTO article_tags (article_id, tag_id) VALUES (?1, ?2)",
         rusqlite::params![article_id, tag_id],
+    )?;
+
+    Ok(())
+}
+
+fn create_or_match_label(
+    conn: &Connection,
+    label_name: &str,
+    article_id: &str,
+) -> Result<(), AppError> {
+    // Check if label exists (case-insensitive)
+    let existing_id: Option<String> = conn
+        .query_row("SELECT id FROM labels WHERE LOWER(name) = ?1", [label_name], |row| row.get(0))
+        .ok();
+
+    let label_id = match existing_id {
+        Some(id) => id,
+        None => {
+            let id = uuid::Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO labels (id, name, source) VALUES (?1, ?2, 'ai_generated')",
+                rusqlite::params![id, label_name],
+            )?;
+            id
+        }
+    };
+
+    // Link label to article (ignore if already linked)
+    conn.execute(
+        "INSERT OR IGNORE INTO article_labels (article_id, label_id) VALUES (?1, ?2)",
+        rusqlite::params![article_id, label_id],
     )?;
 
     Ok(())

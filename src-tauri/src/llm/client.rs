@@ -384,11 +384,12 @@ async fn send_openai_compatible(
     let value: serde_json::Value = serde_json::from_str(&body_text)
         .map_err(|e| AppError::Import(format!("Failed to parse LLM response as JSON: {e}")))?;
 
-    let content = extract_content_from_response(&value)
-        .ok_or_else(|| AppError::Import(format!(
+    let content = extract_content_from_response(&value).ok_or_else(|| {
+        AppError::Import(format!(
             "Could not extract content from LLM response. Raw body (first 500 chars): {}",
             &body_text[..body_text.len().min(500)]
-        )))?;
+        ))
+    })?;
 
     // Try to get token count from the envelope
     let total_tokens = extract_total_tokens(&value);
@@ -424,16 +425,11 @@ fn extract_content_from_response(value: &serde_json::Value) -> Option<String> {
                 let collected: String = arr
                     .iter()
                     .filter_map(|item| {
-                        // Objects with "text" field (e.g., {"type":"text","text":"..."})
-                        item["text"].as_str().map(String::from)
-                            .or_else(|| {
-                                // Objects with "reasoning" field — skip those, only take text
-                                None
-                            })
-                            .or_else(|| {
-                                // Fallback: plain string items in the array
-                                item.as_str().map(String::from)
-                            })
+                        // Objects with "text" field; skip objects with "reasoning" field
+                        item["text"]
+                            .as_str()
+                            .map(String::from)
+                            .or_else(|| item.as_str().map(String::from))
                     })
                     .collect::<Vec<_>>()
                     .join("");
@@ -452,7 +448,8 @@ fn extract_content_from_response(value: &serde_json::Value) -> Option<String> {
                         let collected: String = arr
                             .iter()
                             .filter_map(|item| {
-                                item["text"].as_str()
+                                item["text"]
+                                    .as_str()
                                     .map(String::from)
                                     .or_else(|| item.as_str().map(String::from))
                             })
@@ -473,7 +470,5 @@ fn extract_content_from_response(value: &serde_json::Value) -> Option<String> {
 /// Try to extract total_tokens from an arbitrary response JSON.
 fn extract_total_tokens(value: &serde_json::Value) -> usize {
     // Standard OpenAI path
-    value["usage"]["total_tokens"]
-        .as_u64()
-        .unwrap_or(0) as usize
+    value["usage"]["total_tokens"].as_u64().unwrap_or(0) as usize
 }

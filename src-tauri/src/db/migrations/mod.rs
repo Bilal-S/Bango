@@ -21,9 +21,6 @@ pub fn get_migrations() -> Vec<Migration> {
             version: v004_screening_optimization::VERSION,
             up_sql: v004_screening_optimization::UP_SQL,
         },
-        Migration {
-            version: v005_sequence_id::VERSION,
-            up_sql: v005_sequence_id::UP_SQL,
-        },
+        Migration { version: v005_sequence_id::VERSION, up_sql: v005_sequence_id::UP_SQL },
     ]
 }

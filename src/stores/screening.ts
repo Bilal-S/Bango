@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { ScreeningProgress, ScreeningReadiness } from '@/types';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
+import { useArticlesStore } from '@/stores/articles';
+import { useAuditStore } from '@/stores/audit';
 
 type UnlistenFn = () => void;
 
@@ -77,6 +79,12 @@ export const useScreeningStore = defineStore('screening', () => {
           stopListening();
           // Refresh readiness after run completes
           void fetchReadiness();
+          // Invalidate articles + audit stores so dashboard summary refreshes
+          const articlesStore = useArticlesStore();
+          const auditStore = useAuditStore();
+          articlesStore.invalidate();
+          auditStore.invalidate();
+          void Promise.all([articlesStore.fetchIfNeeded(), auditStore.fetchIfNeeded()]);
         }
       });
     } catch {

@@ -66,8 +66,7 @@ fn seed_articles(conn: &rusqlite::Connection, count: usize) -> Vec<String> {
         })
         .collect();
 
-    let inserted =
-        article_repo::insert_articles_batch(conn, &articles, "test").expect("insert");
+    let inserted = article_repo::insert_articles_batch(conn, &articles, "test").expect("insert");
     let ids: Vec<String> = inserted.iter().map(|a| a.id.clone()).collect();
 
     // Move to 'working' status so they're eligible for screening
@@ -77,20 +76,11 @@ fn seed_articles(conn: &rusqlite::Connection, count: usize) -> Vec<String> {
 
 fn seed_criteria(conn: &rusqlite::Connection) -> (Vec<Criterion>, Vec<ResearchAim>) {
     let aim = criteria_repo::create_aim(conn, "Study AI in healthcare").expect("aim");
-    let inc = criteria_repo::create_criterion(
-        conn,
-        "inclusion",
-        "Must be about ML",
-        "standard",
-    )
-    .expect("inc criterion");
-    let exc = criteria_repo::create_criterion(
-        conn,
-        "exclusion",
-        "Not about healthcare",
-        "standard",
-    )
-    .expect("exc criterion");
+    let inc = criteria_repo::create_criterion(conn, "inclusion", "Must be about ML", "standard")
+        .expect("inc criterion");
+    let exc =
+        criteria_repo::create_criterion(conn, "exclusion", "Not about healthcare", "standard")
+            .expect("exc criterion");
     (vec![inc, exc], vec![aim])
 }
 
@@ -128,10 +118,7 @@ struct MockLlmClient {
 
 impl MockLlmClient {
     fn new(responses: Vec<String>) -> Self {
-        Self {
-            responses,
-            call_count: AtomicUsize::new(0),
-        }
+        Self { responses, call_count: AtomicUsize::new(0) }
     }
 }
 
@@ -152,10 +139,7 @@ struct PartialErrorMock {
 
 impl PartialErrorMock {
     fn new(error_indices: Vec<usize>) -> Self {
-        Self {
-            error_indices,
-            call_count: AtomicUsize::new(0),
-        }
+        Self { error_indices, call_count: AtomicUsize::new(0) }
     }
 }
 
@@ -181,12 +165,7 @@ struct CancelAwareMock {
 
 impl CancelAwareMock {
     fn new(total_articles: usize, batch_size: usize, delay_ms: u64) -> Self {
-        Self {
-            total_articles,
-            batch_size,
-            call_count: AtomicUsize::new(0),
-            delay_ms,
-        }
+        Self { total_articles, batch_size, call_count: AtomicUsize::new(0), delay_ms }
     }
 }
 
@@ -212,18 +191,12 @@ async fn test_happy_path_bare_array_batch2() {
     let (criteria, aims) = seed_criteria(&conn);
     drop(conn);
 
-    let responses = vec![
-        make_batch_response(2, 0),
-        make_batch_response(2, 2),
-        make_batch_response(2, 4),
-    ];
+    let responses =
+        vec![make_batch_response(2, 0), make_batch_response(2, 2), make_batch_response(2, 4)];
     let mock = MockLlmClient::new(responses);
     let engine = ScreeningEngine::with_batch_size(2);
 
-    engine
-        .run_sync(&db, &mock, 0, criteria, aims, None)
-        .await
-        .expect("run_sync");
+    engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run_sync");
 
     let progress = engine.get_progress().await;
     assert_eq!(progress.total, 6);
@@ -244,17 +217,11 @@ async fn test_envelope_format() {
     let (criteria, aims) = seed_criteria(&conn);
     drop(conn);
 
-    let responses = vec![
-        make_envelope_response(2, 0),
-        make_envelope_response(2, 2),
-    ];
+    let responses = vec![make_envelope_response(2, 0), make_envelope_response(2, 2)];
     let mock = MockLlmClient::new(responses);
     let engine = ScreeningEngine::with_batch_size(2);
 
-    engine
-        .run_sync(&db, &mock, 0, criteria, aims, None)
-        .await
-        .expect("run_sync");
+    engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run_sync");
 
     let progress = engine.get_progress().await;
     assert_eq!(progress.completed, 4);
@@ -276,24 +243,15 @@ async fn test_partial_error_one_batch_malformed() {
     let mock = PartialErrorMock::new(vec![1]);
     let engine = ScreeningEngine::with_batch_size(2);
 
-    engine
-        .run_sync(&db, &mock, 0, criteria, aims, None)
-        .await
-        .expect("run_sync");
+    engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run_sync");
 
     let progress = engine.get_progress().await;
-    assert_eq!(
-        progress.completed, 6,
-        "All articles should be completed (success + error)"
-    );
+    assert_eq!(progress.completed, 6, "All articles should be completed (success + error)");
     assert_eq!(progress.errors, 2, "Batch 1 (2 articles) should be errors");
 
     let conn = db.lock().unwrap();
     let unscreened = article_repo::count_unscreened_working(&conn).unwrap();
-    assert_eq!(
-        unscreened, 0,
-        "Error articles should still have screened_at set"
-    );
+    assert_eq!(unscreened, 0, "Error articles should still have screened_at set");
 }
 
 #[tokio::test]
@@ -314,18 +272,12 @@ async fn test_cancel_mid_run() {
     });
 
     let mock = CancelAwareMock::new(6, 2, 100);
-    engine_clone
-        .run_sync(&db, &mock, 10, criteria, aims, None)
-        .await
-        .expect("run_sync");
+    engine_clone.run_sync(&db, &mock, 10, criteria, aims, None).await.expect("run_sync");
 
     let progress = engine_clone.get_progress().await;
     assert!(!progress.is_running);
     assert!(progress.completed >= 2, "At least first batch completed");
-    assert!(
-        progress.completed < 6,
-        "Not all articles screened due to cancel"
-    );
+    assert!(progress.completed < 6, "Not all articles screened due to cancel");
 }
 
 #[tokio::test]
@@ -376,10 +328,7 @@ async fn test_resume_after_cancel() {
         let mock = MockLlmClient::new(responses);
         let engine = ScreeningEngine::with_batch_size(2);
 
-        engine
-            .run_sync(&db, &mock, 0, criteria, aims, None)
-            .await
-            .expect("run 2");
+        engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run 2");
 
         let progress = engine.get_progress().await;
         assert_eq!(progress.completed, remaining, "Remaining articles screened");

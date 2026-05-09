@@ -74,18 +74,17 @@ export function useDashboard() {
       articlesStore.articles.filter((a) => a.status === 'duplicate').length
   );
 
-  /** Articles screened by AI (has aiDecision, no manual override) */
+  /** Articles screened by AI (any non-duplicate with an AI decision, including overridden ones) */
   const screenedByAi = computed(
-    () => articlesStore.articles.filter((a) => a.aiDecision !== null && !a.manualOverride).length
+    () =>
+      articlesStore.articles.filter((a) => a.aiDecision !== null && a.status !== 'duplicate').length
   );
 
-  /** Articles screened by user (manually included/rejected, or overrode AI) */
+  /** Articles screened by user (manually included/rejected without any AI decision) */
   const screenedByUser = computed(
     () =>
       articlesStore.articles.filter(
-        (a) =>
-          (a.status === 'included' || a.status === 'rejected') &&
-          (a.manualOverride || a.aiDecision === null)
+        (a) => (a.status === 'included' || a.status === 'rejected') && a.aiDecision === null
       ).length
   );
 

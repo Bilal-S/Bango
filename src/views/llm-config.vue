@@ -48,7 +48,7 @@ async function doExportProject(): Promise<void> {
 }
 
 async function doDeleteProject(): Promise<void> {
-  if (deleteConfirmText.value !== 'DELETE') return;
+  if (deleteConfirmText.value.toUpperCase() !== 'DELETE') return;
   const success = await resetProject();
   if (success) {
     showDeleteDialog.value = false;
@@ -492,7 +492,7 @@ watch(
           </button>
           <button
             class="btn btn--danger"
-            :disabled="deleteConfirmText !== 'DELETE'"
+            :disabled="deleteConfirmText.toUpperCase() !== 'DELETE'"
             @click="doDeleteProject"
           >
             Delete Everything

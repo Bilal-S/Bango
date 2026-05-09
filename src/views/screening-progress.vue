@@ -235,6 +235,10 @@ async function handleResetWorkingList(): Promise<void> {
             <span class="screening-view__btn-spinner" />
             Starting&hellip;
           </button>
+          <span v-if="progress?.isRunning" class="screening-view__activity-spinner">
+            <span class="screening-view__btn-spinner screening-view__btn-spinner--inline" />
+            <span class="screening-view__activity-label">Screening&hellip;</span>
+          </span>
           <button
             v-if="progress?.isRunning && !isPaused"
             class="btn btn--primary"
@@ -478,6 +482,23 @@ async function handleResetWorkingList(): Promise<void> {
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
   display: inline-block;
+}
+
+.screening-view__btn-spinner--inline {
+  border-color: var(--color-primary);
+  border-top-color: transparent;
+}
+
+.screening-view__activity-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.screening-view__activity-label {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  font-weight: var(--font-weight-medium);
 }
 
 .screening-view__empty {

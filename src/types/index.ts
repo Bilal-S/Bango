@@ -54,6 +54,7 @@ export interface ArticleCounts {
   working: number;
   included: number;
   rejected: number;
+  error: number;
 }
 
 export interface ResearchAim {
