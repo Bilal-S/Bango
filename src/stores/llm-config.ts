@@ -3,6 +3,11 @@ import { ref } from 'vue';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 import type { LlmConfig } from '@/types';
 
+export interface TestResult {
+  success: boolean;
+  message: string;
+}
+
 const DEFAULT_CONFIG: LlmConfig = {
   provider: 'openai',
   endpointUrl: '',
@@ -18,6 +23,7 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
   const config = ref<LlmConfig>({ ...DEFAULT_CONFIG });
   const loading = ref(false);
   const initialized = ref(false);
+  const testResult = ref<TestResult | null>(null);
 
   async function fetchIfNeeded(): Promise<void> {
     if (initialized.value || !isTauri()) return;
@@ -42,5 +48,18 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
     initialized.value = false;
   }
 
-  return { config, loading, initialized, fetchIfNeeded, fetch, invalidate };
+  function clearTestResult(): void {
+    testResult.value = null;
+  }
+
+  return {
+    config,
+    loading,
+    initialized,
+    testResult,
+    fetchIfNeeded,
+    fetch,
+    invalidate,
+    clearTestResult,
+  };
 });

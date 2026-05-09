@@ -1,26 +1,40 @@
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { tauriCommand } from './use-tauri-command';
 import { useLlmConfigStore } from '@/stores/llm-config';
+import type { TestResult } from '@/stores/llm-config';
 
-interface TestResult {
-  success: boolean;
-  message: string;
-}
+export type { TestResult };
 
 export function useLlmConfig() {
   const store = useLlmConfigStore();
 
-  // storeToRefs gives us config as a writable Ref<LlmConfig> so
-  // config.value.xxx reads and writes work unchanged in the view.
-  const { config } = storeToRefs(store);
+  // storeToRefs gives us config and testResult as reactive Refs backed by
+  // the Pinia store, so the connection status persists across route changes.
+  const { config, testResult } = storeToRefs(store);
   const loading = ref(false);
   const saving = ref(false);
   const testing = ref(false);
-  const testResult = ref<TestResult | null>(null);
   const showApiKey = ref(false);
   const fetchingModels = ref(false);
   const fetchedModels = ref<string[] | null>(null);
+
+  // Clear connection status whenever any LLM setting changes
+  watch(
+    () => ({
+      provider: config.value.provider,
+      endpointUrl: config.value.endpointUrl,
+      apiKeyEncrypted: config.value.apiKeyEncrypted,
+      modelName: config.value.modelName,
+      temperature: config.value.temperature,
+      maxConcurrentRequests: config.value.maxConcurrentRequests,
+      requestDelayMs: config.value.requestDelayMs,
+      contextWindowTokens: config.value.contextWindowTokens,
+    }),
+    () => {
+      store.clearTestResult();
+    }
+  );
 
   async function loadConfig(): Promise<void> {
     await store.fetch();
@@ -37,13 +51,13 @@ export function useLlmConfig() {
 
   async function testConnection(): Promise<void> {
     testing.value = true;
-    testResult.value = null;
+    store.clearTestResult();
     try {
       await save();
-      testResult.value = await tauriCommand<TestResult>('test_llm_connection');
+      store.testResult = await tauriCommand<TestResult>('test_llm_connection');
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      testResult.value = { success: false, message };
+      store.testResult = { success: false, message };
     } finally {
       testing.value = false;
     }
@@ -52,7 +66,7 @@ export function useLlmConfig() {
   function revert(): void {
     store.invalidate();
     void store.fetch();
-    testResult.value = null;
+    store.clearTestResult();
     fetchedModels.value = null;
   }
 
@@ -72,7 +86,7 @@ export function useLlmConfig() {
       });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      testResult.value = { success: false, message: `Failed to fetch models: ${message}` };
+      store.testResult = { success: false, message: `Failed to fetch models: ${message}` };
     } finally {
       fetchingModels.value = false;
     }
