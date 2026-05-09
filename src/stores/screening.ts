@@ -108,6 +108,13 @@ export const useScreeningStore = defineStore('screening', () => {
     return count;
   }
 
+  /** Mark data as stale so next access re-fetches from backend. */
+  function invalidate(): void {
+    initialized.value = false;
+    readiness.value = null;
+    progress.value = null;
+  }
+
   /** Reset the working list: clear screened_at for all working articles so they can be re-screened. */
   async function resetWorkingList(): Promise<number> {
     const count = await tauriCommand<number>('reset_working_list');
@@ -129,6 +136,7 @@ export const useScreeningStore = defineStore('screening', () => {
     setProgress,
     startListening,
     stopListening,
+    invalidate,
     resetScreeningErrors,
     resetWorkingList,
   };

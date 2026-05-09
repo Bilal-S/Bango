@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
@@ -11,6 +11,11 @@ import { getColorScheme } from '@/utils/color';
 const router = useRouter();
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
+
+// Re-fetch on mount in case stores were invalidated (e.g. after project backup import)
+onMounted(() => {
+  Promise.all([tagsStore.fetchIfNeeded(), labelsStore.fetchIfNeeded()]);
+});
 
 const newTagName = ref('');
 const newLabelName = ref('');

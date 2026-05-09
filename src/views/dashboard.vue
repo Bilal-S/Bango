@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
 
@@ -15,6 +16,11 @@ const {
   screeningPercentage,
   refresh,
 } = useDashboard();
+
+// Re-fetch data every time dashboard is mounted (e.g. after import + invalidation)
+onMounted(() => {
+  refresh();
+});
 
 interface StatusTile {
   key: 'duplicate' | 'working' | 'included' | 'rejected';

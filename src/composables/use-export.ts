@@ -7,6 +7,7 @@ import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import { useAuditStore } from '@/stores/audit';
+import { useScreeningStore } from '@/stores/screening';
 
 export function useExport() {
   const exporting = ref(false);
@@ -19,6 +20,7 @@ export function useExport() {
     useLabelsStore().invalidate();
     useLlmConfigStore().invalidate();
     useAuditStore().invalidate();
+    useScreeningStore().invalidate();
   }
 
   async function exportRis(): Promise<void> {
