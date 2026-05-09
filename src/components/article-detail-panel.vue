@@ -11,10 +11,14 @@ import { useLabelsStore } from '@/stores/labels';
 const props = defineProps<{
   article: Article;
   auditTrail: AuditEntry[];
+  hasPrevious: boolean;
+  hasNext: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  navigatePrev: [];
+  navigateNext: [];
   moveArticle: [id: string, newStatus: string];
   updateNotes: [id: string, notes: string];
   updateTags: [id: string, tagIds: string[]];
@@ -434,27 +438,45 @@ const confidenceBarWidth = computed(() =>
     </div>
 
     <!-- Footer Actions -->
-    <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50">
+    <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50 items-center">
       <button
-        v-if="article.status !== 'included'"
-        class="flex-1 bg-emerald-600 text-white py-2 rounded-lg font-semibold text-sm hover:bg-emerald-700 active:scale-95 transition-all shadow-sm cursor-pointer"
-        @click="emit('moveArticle', article.id, 'included')"
+        v-if="hasPrevious"
+        class="material-symbols-outlined text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors p-1 rounded-lg hover:bg-indigo-50"
+        title="Previous article"
+        @click="emit('navigatePrev')"
       >
-        Include
+        chevron_left
       </button>
+      <div class="flex gap-3 flex-1">
+        <button
+          v-if="article.status !== 'included'"
+          class="flex-1 bg-emerald-600 text-white py-2 rounded-lg font-semibold text-sm hover:bg-emerald-700 active:scale-95 transition-all shadow-sm cursor-pointer"
+          @click="emit('moveArticle', article.id, 'included')"
+        >
+          Include
+        </button>
+        <button
+          v-if="article.status !== 'rejected'"
+          class="flex-1 bg-white border border-slate-200 text-rose-700 py-2 rounded-lg font-semibold text-sm hover:bg-rose-50 transition-colors shadow-sm cursor-pointer"
+          @click="emit('moveArticle', article.id, 'rejected')"
+        >
+          Reject
+        </button>
+        <button
+          v-if="article.status !== 'working'"
+          class="flex-1 bg-white border border-slate-200 text-slate-700 py-2 rounded-lg font-semibold text-sm hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
+          @click="emit('moveArticle', article.id, 'working')"
+        >
+          Move to Working
+        </button>
+      </div>
       <button
-        v-if="article.status !== 'rejected'"
-        class="flex-1 bg-white border border-slate-200 text-rose-700 py-2 rounded-lg font-semibold text-sm hover:bg-rose-50 transition-colors shadow-sm cursor-pointer"
-        @click="emit('moveArticle', article.id, 'rejected')"
+        v-if="hasNext"
+        class="material-symbols-outlined text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors p-1 rounded-lg hover:bg-indigo-50"
+        title="Next article"
+        @click="emit('navigateNext')"
       >
-        Reject
-      </button>
-      <button
-        v-if="article.status !== 'working'"
-        class="flex-1 bg-white border border-slate-200 text-slate-700 py-2 rounded-lg font-semibold text-sm hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
-        @click="emit('moveArticle', article.id, 'working')"
-      >
-        Move to Working
+        chevron_right
       </button>
     </div>
   </aside>

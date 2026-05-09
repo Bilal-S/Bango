@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct Article {
     pub id: String,
+    pub sequence_id: i64,
     pub status: ArticleStatus,
     pub screening_error: bool,
     pub title: String,

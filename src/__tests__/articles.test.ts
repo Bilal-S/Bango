@@ -14,6 +14,7 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 const mockArticles: Article[] = [
   {
     id: '1',
+    sequenceId: 1,
     status: 'duplicate',
     title: 'Article 1',
     authors: ['Author A'],
@@ -59,6 +60,7 @@ const mockArticles: Article[] = [
   },
   {
     id: '2',
+    sequenceId: 2,
     status: 'included',
     title: 'Article 2',
     authors: ['Author B'],

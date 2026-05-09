@@ -31,6 +31,8 @@ export interface ArticleQuery {
   journal: string | null;
   tags: string[];
   labels: string[];
+  limit: number;
+  offset: number;
 }
 
 export type SortDirection = 'asc' | 'desc';
@@ -74,6 +76,9 @@ export function useArticleSearch() {
     labels: [],
   });
 
+  const pageSize = 100;
+  const currentPage = ref(1);
+
   const query = reactive<ArticleQuery>({
     status: null,
     search: null,
@@ -87,6 +92,8 @@ export function useArticleSearch() {
     journal: null,
     tags: [],
     labels: [],
+    limit: pageSize,
+    offset: 0,
   });
 
   const statusCounts = ref<ArticleCounts>({
@@ -125,9 +132,15 @@ export function useArticleSearch() {
     return labelsStore.labels.map((l) => l.name).sort();
   });
 
+  function resetPage(): void {
+    currentPage.value = 1;
+    query.offset = 0;
+  }
+
   function setStatusTab(tab: StatusTab): void {
     activeStatusTab.value = tab;
     query.status = tab === 'all' ? null : tab;
+    resetPage();
     void search();
   }
 
@@ -140,6 +153,7 @@ export function useArticleSearch() {
     }
     query.sortBy = sortColumn.value;
     query.sortDir = sortDirection.value;
+    resetPage();
     void search();
   }
 
@@ -155,6 +169,7 @@ export function useArticleSearch() {
     query.journal = filter.journal || null;
     query.tags = [...filter.tags];
     query.labels = [...filter.labels];
+    resetPage();
     void search();
   }
 
@@ -174,6 +189,7 @@ export function useArticleSearch() {
     query.journal = null;
     query.tags = [];
     query.labels = [];
+    resetPage();
     void search();
   }
 
@@ -202,8 +218,15 @@ export function useArticleSearch() {
 
   async function moveArticle(id: string, newStatus: string): Promise<void> {
     await tauriCommand('update_article_status', { id, newStatus });
+    // Update the article in-place in the local list to avoid a full table redraw / scroll reset
+    const idx = articles.value.findIndex((a) => a.id === id);
+    if (idx >= 0) {
+      const updated: Article = { ...articles.value[idx]!, status: newStatus as ArticleStatus };
+      articles.value.splice(idx, 1, updated);
+    }
     await selectArticle(id);
-    await search();
+    // Refresh counts in the background (e.g. tab badges)
+    void fetchCounts();
   }
 
   async function updateNotes(id: string, notes: string): Promise<void> {
@@ -222,6 +245,43 @@ export function useArticleSearch() {
     await selectArticle(id);
     await labelsStore.fetchLabels();
   }
+
+  const selectedIndex = computed(() => {
+    if (!selectedArticle.value) return -1;
+    return articles.value.findIndex((a) => a.id === selectedArticle.value!.id);
+  });
+
+  const hasPrevious = computed(() => selectedIndex.value > 0);
+  const hasNext = computed(() => {
+    const idx = selectedIndex.value;
+    return idx >= 0 && idx < articles.value.length - 1;
+  });
+
+  async function navigatePrev(): Promise<void> {
+    if (!hasPrevious.value) return;
+    const prev = articles.value[selectedIndex.value - 1];
+    if (prev) await selectArticle(prev.id);
+  }
+
+  async function navigateNext(): Promise<void> {
+    if (!hasNext.value) return;
+    const next = articles.value[selectedIndex.value + 1];
+    if (next) await selectArticle(next.id);
+  }
+
+  function goToPage(page: number): void {
+    currentPage.value = page;
+    query.offset = (page - 1) * pageSize;
+    void search();
+  }
+
+  const totalPages = computed(() => {
+    const total = statusCounts.value.all;
+    return Math.max(1, Math.ceil(total / pageSize));
+  });
+
+  const canGoPrev = computed(() => currentPage.value > 1);
+  const canGoNext = computed(() => currentPage.value < totalPages.value);
 
   function closeDetail(): void {
     showDetail.value = false;
@@ -287,6 +347,10 @@ export function useArticleSearch() {
     updateNotes,
     updateTags,
     updateLabels,
+    hasPrevious,
+    hasNext,
+    navigatePrev,
+    navigateNext,
     closeDetail,
     setStatusTab,
     toggleSort,
@@ -294,5 +358,11 @@ export function useArticleSearch() {
     applyFilters,
     clearFilters,
     applyRouteParams,
+    pageSize,
+    currentPage,
+    totalPages,
+    canGoPrev,
+    canGoNext,
+    goToPage,
   };
 }

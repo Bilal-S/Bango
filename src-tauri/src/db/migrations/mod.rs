@@ -2,6 +2,7 @@ pub mod v001_initial;
 pub mod v002_tag_label_color;
 pub mod v003_duplicate_status;
 pub mod v004_screening_optimization;
+pub mod v005_sequence_id;
 
 pub struct Migration {
     pub version: i32,
@@ -19,6 +20,10 @@ pub fn get_migrations() -> Vec<Migration> {
         Migration {
             version: v004_screening_optimization::VERSION,
             up_sql: v004_screening_optimization::UP_SQL,
+        },
+        Migration {
+            version: v005_sequence_id::VERSION,
+            up_sql: v005_sequence_id::UP_SQL,
         },
     ]
 }

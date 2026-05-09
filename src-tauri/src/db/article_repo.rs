@@ -52,17 +52,18 @@ pub fn get_next_unscreened_working_batch(
     limit: usize,
 ) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, abstract_text, authors, publication_year FROM articles \
+        "SELECT id, sequence_id, title, abstract_text, authors, publication_year FROM articles \
          WHERE status = 'working' AND screened_at IS NULL \
          ORDER BY imported_at ASC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], |row| {
         Ok(Article {
             id: row.get(0)?,
-            title: row.get(1)?,
-            abstract_text: row.get(2)?,
-            authors: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
-            publication_year: row.get(4)?,
+            sequence_id: row.get(1)?,
+            title: row.get(2)?,
+            abstract_text: row.get(3)?,
+            authors: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
+            publication_year: row.get(5)?,
             // Fill other fields with defaults as they aren't needed for the screening prompt
             status: crate::models::article::ArticleStatus::Working,
             screening_error: false,
@@ -115,8 +116,17 @@ pub fn remaining_capacity(conn: &Connection) -> Result<usize, AppError> {
     Ok(MAX_ARTICLES.saturating_sub(count))
 }
 
+fn next_sequence_id(conn: &Connection) -> Result<i64, AppError> {
+    let max_id: i64 =
+        conn.query_row("SELECT COALESCE(MAX(sequence_id), 0) FROM articles", [], |row| {
+            row.get(0)
+        })?;
+    Ok(max_id + 1)
+}
+
 pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article, AppError> {
     let id = Uuid::new_v4().to_string();
+    let seq_id = next_sequence_id(conn)?;
     let authors_json = serde_json::to_string(&article.authors)?;
     let keywords_json = serde_json::to_string(&article.keywords)?;
     let ris_extras_json =
@@ -129,7 +139,7 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
 
     conn.execute(
         "INSERT INTO articles (
-            id, status, title, abstract_text, authors, publication_year, doi,
+            id, sequence_id, status, title, abstract_text, authors, publication_year, doi,
             journal, volume, issue, start_page, end_page, keywords, url,
             language, publisher, publisher_city, publisher_address, issn,
             reference_type, date, author_address, accession_number,
@@ -137,16 +147,17 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             notes, web_of_science_db, ris_extras, import_source,
             data_length, token_estimate
         ) VALUES (
-            ?1, 'duplicate', ?2, ?3, ?4, ?5, ?6,
-            ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18,
-            ?19, ?20, ?21, ?22,
-            ?23, ?24, ?25,
-            ?26, ?27, ?28, ?29,
-            ?30, ?31
+            ?1, ?2, 'duplicate', ?3, ?4, ?5, ?6, ?7,
+            ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+            ?15, ?16, ?17, ?18, ?19,
+            ?20, ?21, ?22, ?23,
+            ?24, ?25, ?26,
+            ?27, ?28, ?29, ?30,
+            ?31, ?32
         )",
         params![
             id,
+            seq_id,
             article.title,
             article.abstract_text,
             authors_json,
@@ -202,6 +213,9 @@ pub fn insert_articles_batch(
     let mut inserted = Vec::with_capacity(articles.len());
     let tx = conn.unchecked_transaction()?;
 
+    // Get base sequence_id once, then increment per article
+    let mut seq_id = next_sequence_id(&tx)?;
+
     for article in articles {
         let mut article_with_source = article.clone();
         article_with_source.import_source = Some(import_source.to_string());
@@ -221,7 +235,7 @@ pub fn insert_articles_batch(
 
         tx.execute(
             "INSERT INTO articles (
-                id, status, title, abstract_text, authors, publication_year, doi,
+                id, sequence_id, status, title, abstract_text, authors, publication_year, doi,
                 journal, volume, issue, start_page, end_page, keywords, url,
                 language, publisher, publisher_city, publisher_address, issn,
                 reference_type, date, author_address, accession_number,
@@ -229,16 +243,17 @@ pub fn insert_articles_batch(
                 notes, web_of_science_db, ris_extras, import_source,
                 data_length, token_estimate
             ) VALUES (
-                ?1, 'duplicate', ?2, ?3, ?4, ?5, ?6,
-                ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                ?14, ?15, ?16, ?17, ?18,
-                ?19, ?20, ?21, ?22,
-                ?23, ?24, ?25,
-                ?26, ?27, ?28, ?29,
-                ?30, ?31
+                ?1, ?2, 'duplicate', ?3, ?4, ?5, ?6, ?7,
+                ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                ?15, ?16, ?17, ?18, ?19,
+                ?20, ?21, ?22, ?23,
+                ?24, ?25, ?26,
+                ?27, ?28, ?29, ?30,
+                ?31, ?32
             )",
             params![
                 id,
+                seq_id,
                 article_with_source.title,
                 article_with_source.abstract_text,
                 authors_json,
@@ -271,6 +286,8 @@ pub fn insert_articles_batch(
                 token_estimate,
             ],
         )?;
+
+        seq_id += 1;
 
         // Insert audit entry for import
         let audit_id = Uuid::new_v4().to_string();
@@ -389,6 +406,8 @@ pub struct ArticleQuery {
     pub tags: Vec<String>,
     #[serde(default)]
     pub labels: Vec<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
@@ -479,6 +498,18 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
         _ => format!(" ORDER BY imported_at {sort_dir}"),
     };
     sql.push_str(&order_clause);
+
+    // Pagination: LIMIT / OFFSET
+    if let Some(limit) = query.limit {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(" LIMIT ?{idx}"));
+        param_values.push(Box::new(limit));
+        if let Some(offset) = query.offset {
+            let idx = param_values.len() + 1;
+            sql.push_str(&format!(" OFFSET ?{idx}"));
+            param_values.push(Box::new(offset));
+        }
+    }
 
     let params: Vec<&dyn rusqlite::types::ToSql> =
         param_values.iter().map(|p| p.as_ref()).collect();
@@ -720,6 +751,7 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
 
     Ok(Article {
         id: row.get("id")?,
+        sequence_id: row.get("sequence_id")?,
         status,
         screening_error: screening_error_int != 0,
         title: row.get("title")?,

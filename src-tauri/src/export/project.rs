@@ -214,7 +214,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     }
 
     // Restore articles
-    for a in &backup.articles {
+    for (i, a) in backup.articles.iter().enumerate() {
         let id = get_str(a, "id");
         let status = get_str(a, "status");
         let screening_error = a.get("screeningError").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -270,10 +270,18 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let imported_at = get_str_field(a, "importedAt", "imported_at")
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         let screened_at = get_str_field(a, "screenedAt", "screened_at");
-
+        // Preserve sequence_id from backup; old backups lack it, so assign 1-based index
+        let sequence_id = a
+            .get("sequenceId")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_else(|| {
+                // Old backup — assign based on import order
+                let sid = (i as i64) + 1;
+                sid
+            });
         conn.execute(
             "INSERT INTO articles (
-                id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
+                id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
                 volume, issue, start_page, end_page, keywords, url, language, publisher, publisher_city,
                 publisher_address, issn, reference_type, date, author_address, accession_number,
                 custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
@@ -283,10 +291,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38,
-                ?39, ?40, ?41
+                ?39, ?40, ?41, ?42
             )",
             rusqlite::params![
-                id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
+                id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
                 volume, issue, start_page, end_page, keywords, url, language, publisher, publisher_city,
                 publisher_address, issn, reference_type, date, author_address, accession_number,
                 custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
@@ -296,6 +304,9 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             ],
         )?;
     }
+
+    // next_sequence_id() uses SELECT MAX(sequence_id) FROM articles,
+    // so it will naturally return the correct value after import — no extra work needed.
 
     // Restore article_tags
     for at in &backup.article_tags {

@@ -20,10 +20,11 @@ interface ColumnDef {
   label: string;
   width?: string;
   responsiveClass?: string;
+  sortable?: boolean;
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'index', label: '#', width: 'w-12', responsiveClass: 'col-index' },
+  { key: 'index', label: '#', width: 'w-12', responsiveClass: 'col-index', sortable: false },
   { key: 'title', label: 'Title' },
   { key: 'authors', label: 'Authors' },
   { key: 'publicationYear', label: 'Year', width: 'w-16' },
@@ -66,6 +67,7 @@ function formatDate(dateStr: string | null): string {
               :class="[col.width, col.responsiveClass]"
             >
               <button
+                v-if="col.sortable !== false"
                 class="flex items-center gap-1 hover:text-slate-700 transition-colors"
                 @click="$emit('sort', col.key)"
               >
@@ -79,12 +81,13 @@ function formatDate(dateStr: string | null): string {
                   <span class="material-symbols-outlined text-[16px]">arrow_upward</span>
                 </span>
               </button>
+              <span v-else>{{ col.label }}</span>
             </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
           <tr
-            v-for="(article, index) in articles"
+            v-for="article in articles"
             :key="article.id"
             class="hover:bg-slate-50/80 transition-colors group cursor-pointer"
             :class="{ 'bg-indigo-50': selectedId === article.id }"
@@ -94,7 +97,7 @@ function formatDate(dateStr: string | null): string {
               class="col-index py-5 px-2 text-body-sm text-slate-500 font-mono border-l-4 transition-colors"
               :class="selectedId === article.id ? 'border-l-indigo-600' : 'border-l-transparent'"
             >
-              {{ index + 1 }}
+              {{ article.sequenceId }}
             </td>
             <td class="py-5 px-2 max-w-xs">
               <p class="text-body-main font-semibold text-slate-900 truncate">

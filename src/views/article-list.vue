@@ -29,6 +29,10 @@ const {
   STATUS_TABS,
   search,
   selectArticle,
+  hasPrevious,
+  hasNext,
+  navigatePrev,
+  navigateNext,
   moveArticle,
   updateNotes,
   updateTags,
@@ -40,6 +44,11 @@ const {
   applyFilters,
   clearFilters,
   applyRouteParams,
+  currentPage,
+  totalPages,
+  canGoPrev,
+  canGoNext,
+  goToPage,
 } = useArticleSearch();
 
 onMounted(() => {
@@ -133,15 +142,39 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
 
       <!-- Article Table -->
       <div v-if="loading" class="text-center py-16 text-slate-400 text-sm">Loading...</div>
-      <ArticleTable
-        v-else
-        :articles="articles"
-        :selected-id="selectedId"
-        :sort-column="sortColumn"
-        :sort-direction="sortDirection"
-        @select="selectArticle"
-        @sort="toggleSort"
-      />
+      <template v-else>
+        <ArticleTable
+          :articles="articles"
+          :selected-id="selectedId"
+          :sort-column="sortColumn"
+          :sort-direction="sortDirection"
+          @select="selectArticle"
+          @sort="toggleSort"
+        />
+        <!-- Pagination -->
+        <div
+          v-if="totalPages > 1"
+          class="flex items-center justify-between py-3 border-t border-slate-200 mt-2"
+        >
+          <span class="text-xs text-slate-500"> Page {{ currentPage }} of {{ totalPages }} </span>
+          <div class="flex items-center gap-2">
+            <button
+              class="px-3 py-1 text-xs rounded border border-slate-300 disabled:opacity-40"
+              :disabled="!canGoPrev"
+              @click="goToPage(currentPage - 1)"
+            >
+              Prev
+            </button>
+            <button
+              class="px-3 py-1 text-xs rounded border border-slate-300 disabled:opacity-40"
+              :disabled="!canGoNext"
+              @click="goToPage(currentPage + 1)"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Export Dialog -->
@@ -152,7 +185,11 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       v-if="showDetail && selectedArticle"
       :article="selectedArticle"
       :audit-trail="auditTrail"
+      :has-previous="hasPrevious"
+      :has-next="hasNext"
       @close="closeDetail"
+      @navigate-prev="navigatePrev"
+      @navigate-next="navigateNext"
       @move-article="handleMoveArticle"
       @update-notes="updateNotes"
       @update-tags="updateTags"

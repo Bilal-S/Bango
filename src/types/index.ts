@@ -1,5 +1,6 @@
 export interface Article {
   id: string;
+  sequenceId: number;
   status: ArticleStatus;
   screeningError: boolean;
   title: string;
