@@ -100,12 +100,6 @@ export const useScreeningStore = defineStore('screening', () => {
     }
   }
 
-  function invalidate(): void {
-    readiness.value = null;
-    progress.value = null;
-    initialized.value = false;
-  }
-
   /** Reset screening errors so errored articles can be re-screened. */
   async function resetScreeningErrors(): Promise<number> {
     const count = await tauriCommand<number>('reset_screening_errors');
@@ -135,7 +129,6 @@ export const useScreeningStore = defineStore('screening', () => {
     setProgress,
     startListening,
     stopListening,
-    invalidate,
     resetScreeningErrors,
     resetWorkingList,
   };
