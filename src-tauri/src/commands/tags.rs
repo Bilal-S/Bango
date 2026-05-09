@@ -3,7 +3,6 @@ use tauri::State;
 
 use crate::db::article_repo;
 use crate::db::connection::DbState;
-use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::db::tag_repo;
 use crate::error::AppError;
@@ -129,7 +128,7 @@ pub struct SuggestTagsResult {
 
 #[tauri::command]
 pub async fn suggest_tags(db_state: State<'_, DbState>) -> Result<SuggestTagsResult, AppError> {
-    let (config, keywords, inclusion_criteria, exclusion_criteria) = {
+    let (config, keywords) = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
@@ -142,35 +141,19 @@ pub async fn suggest_tags(db_state: State<'_, DbState>) -> Result<SuggestTagsRes
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let inc = criteria_repo::get_criteria_by_type(&conn, "inclusion")?;
-        let exc = criteria_repo::get_criteria_by_type(&conn, "exclusion")?;
-        (config, keywords, inc, exc)
+        (config, keywords)
     };
 
     let keywords_str = keywords.join(", ");
-    let inc_list: Vec<String> = inclusion_criteria
-        .iter()
-        .enumerate()
-        .map(|(i, c)| format!("{}. {}", i + 1, c.text))
-        .collect();
-    let exc_list: Vec<String> = exclusion_criteria
-        .iter()
-        .enumerate()
-        .map(|(i, c)| format!("{}. {}", i + 1, c.text))
-        .collect();
 
     let user_prompt = format!(
         r#"## Task
-Generate a concise set of content-category tags for organizing articles in a systematic literature review. Tags should represent meaningful topic, methodology, or relevance categories.
+Generate a concise set of content-category tags for organizing articles in a systematic literature review.
+Tags should represent meaningful topic, methodology, or relevance categories derived from the keywords
+found in article abstracts and titles.
 
-## Article Keywords
+## Article Keywords (extracted from abstracts)
 {keywords}
-
-## Inclusion Criteria
-{inclusion}
-
-## Exclusion Criteria
-{exclusion}
 
 ## Response Format
 Return JSON exactly matching this schema:
@@ -181,11 +164,9 @@ Return JSON exactly matching this schema:
 Rules:
 - Generate 10-30 tags.
 - Each tag should be a short, lowercase, hyphenated string (e.g., "machine-learning", "clinical-trial").
-- Tags should be derived from the keywords and criteria provided.
+- Tags should be derived from the keywords found in article abstracts and titles.
 - Do not duplicate or overlap concepts."#,
         keywords = keywords_str,
-        inclusion = inc_list.join("\n"),
-        exclusion = exc_list.join("\n"),
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of content-category tags for organizing articles in a literature review.";

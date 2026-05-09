@@ -148,7 +148,10 @@ export const useTagsStore = defineStore('tags', () => {
             articleCount: 0,
           },
         ];
-        tags.value = [...tags.value, ...suggested];
+        // Merge case-insensitive: skip suggestions that already exist
+        const existingLower = new Set(tags.value.map((t) => t.name.toLowerCase()));
+        const newTags = suggested.filter((s) => !existingLower.has(s.name.toLowerCase()));
+        tags.value = [...tags.value, ...newTags];
         return;
       }
       await tauriCommand('suggest_tags');

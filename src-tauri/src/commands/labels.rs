@@ -129,17 +129,23 @@ pub struct SuggestLabelsResult {
 
 #[tauri::command]
 pub async fn suggest_labels(db_state: State<'_, DbState>) -> Result<SuggestLabelsResult, AppError> {
-    let (config, inclusion_criteria, exclusion_criteria) = {
+    let (config, research_aims, inclusion_criteria, exclusion_criteria) = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+        let aims = criteria_repo::get_all_aims(&conn)?;
         let inc = criteria_repo::get_criteria_by_type(&conn, "inclusion")?;
         let exc = criteria_repo::get_criteria_by_type(&conn, "exclusion")?;
-        (config, inc, exc)
+        (config, aims, inc, exc)
     };
 
+    let aims_list: Vec<String> = research_aims
+        .iter()
+        .enumerate()
+        .map(|(i, a)| format!("{}. {}", i + 1, a.text))
+        .collect();
     let inc_list: Vec<String> = inclusion_criteria
         .iter()
         .enumerate()
@@ -153,7 +159,12 @@ pub async fn suggest_labels(db_state: State<'_, DbState>) -> Result<SuggestLabel
 
     let user_prompt = format!(
         r#"## Task
-Generate a set of workflow labels for tracking articles through the screening process. Labels should represent organizational or process categories (e.g., "priority-read", "disputed", "needs-full-text", "strong-methodology").
+Generate a set of workflow labels for tracking articles through a systematic literature review screening process.
+Labels should represent process states, quality indicators, and decision categories that help researchers organize
+their workflow based on the review's research aims and screening criteria.
+
+## Research Aims
+{research_aims}
 
 ## Inclusion Criteria
 {inclusion}
@@ -169,14 +180,18 @@ Return JSON exactly matching this schema:
 
 Rules:
 - Generate 5-15 labels.
-- Each label should be a short, descriptive string.
-- Labels should help categorize articles by their screening status or quality indicators.
-- Do not duplicate or overlap concepts."#,
-        inclusion = inc_list.join("\n"),
-        exclusion = exc_list.join("\n"),
+- Each label should be a short, lowercase, hyphenated string (e.g., "priority-read", "strong-methodology", "needs-full-text").
+- Labels should be oriented around the research aims and screening criteria — reflecting the types of decisions and
+  categorizations a reviewer would need when screening articles against these specific criteria.
+- Do not duplicate or overlap concepts.
+- Labels should capture workflow states (e.g., review stages), quality assessments (e.g., methodology strength),
+  and relevance indicators (e.g., alignment with specific aims)."#,
+        research_aims = if aims_list.is_empty() { "No research aims defined.".to_string() } else { aims_list.join("\n") },
+        inclusion = if inc_list.is_empty() { "No inclusion criteria defined.".to_string() } else { inc_list.join("\n") },
+        exclusion = if exc_list.is_empty() { "No exclusion criteria defined.".to_string() } else { exc_list.join("\n") },
     );
 
-    let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process.";
+    let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process based on research aims and screening criteria.";
     let (response, _) = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
 
     let json_str = response

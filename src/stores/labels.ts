@@ -137,7 +137,10 @@ export const useLabelsStore = defineStore('labels', () => {
           },
           { id: 's2', name: 'low-quality', source: 'ai_generated', color: null, articleCount: 0 },
         ];
-        labels.value = [...labels.value, ...suggested];
+        // Merge case-insensitive: skip suggestions that already exist
+        const existingLower = new Set(labels.value.map((l) => l.name.toLowerCase()));
+        const newLabels = suggested.filter((s) => !existingLower.has(s.name.toLowerCase()));
+        labels.value = [...labels.value, ...newLabels];
         return;
       }
       await tauriCommand('suggest_labels');

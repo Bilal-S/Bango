@@ -198,7 +198,11 @@ function filterByLabel(labelId: string): void {
                 :disabled="tagsStore.suggesting"
                 @click="tagsStore.suggestTags()"
               >
-                <span class="material-symbols-outlined text-[18px]">auto_awesome</span>
+                <span
+                  class="material-symbols-outlined text-[18px]"
+                  :class="{ 'animate-spin': tagsStore.suggesting }"
+                  >auto_awesome</span
+                >
                 {{ tagsStore.suggesting ? 'Generating...' : 'Generate from AI' }}
               </button>
             </div>
@@ -331,7 +335,11 @@ function filterByLabel(labelId: string): void {
                 :disabled="labelsStore.suggesting"
                 @click="labelsStore.suggestLabels()"
               >
-                <span class="material-symbols-outlined text-[18px]">auto_awesome</span>
+                <span
+                  class="material-symbols-outlined text-[18px]"
+                  :class="{ 'animate-spin': labelsStore.suggesting }"
+                  >auto_awesome</span
+                >
                 {{ labelsStore.suggesting ? 'Generating...' : 'Generate from AI' }}
               </button>
             </div>
