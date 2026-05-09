@@ -124,6 +124,9 @@ export function useImport() {
     error.value = null;
 
     try {
+      // Reset the project DB before importing — every import starts fresh
+      await tauriCommand<void>('reset_project');
+
       importResult.value = await tauriCommand<ImportResult>('import_ris_file', {
         request: {
           content: fileContent.value,

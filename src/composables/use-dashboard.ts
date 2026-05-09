@@ -2,6 +2,10 @@ import { computed, ref } from 'vue';
 import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
+import { useCriteriaStore } from '@/stores/criteria';
+import { useLlmConfigStore } from '@/stores/llm-config';
 import type { ArticleStatus } from '@/types';
 
 export interface StatusCounts {
@@ -130,11 +134,31 @@ export function useDashboard() {
     return merged;
   });
 
-  /** Force a full refresh of articles + audit from the DB */
+  /** Force a full refresh of all stores from the DB */
   async function refresh(): Promise<void> {
+    const tagsStore = useTagsStore();
+    const labelsStore = useLabelsStore();
+    const criteriaStore = useCriteriaStore();
+    const llmConfigStore = useLlmConfigStore();
+
+    // Invalidate all stores so they re-fetch
     articlesStore.invalidate();
     auditStore.invalidate();
-    await Promise.all([articlesStore.fetchIfNeeded(), auditStore.fetchIfNeeded()]);
+    screeningStore.invalidate();
+    tagsStore.invalidate();
+    labelsStore.invalidate();
+    criteriaStore.invalidate();
+    llmConfigStore.invalidate();
+
+    await Promise.all([
+      articlesStore.fetchIfNeeded(),
+      auditStore.fetchIfNeeded(),
+      screeningStore.fetchIfNeeded(),
+      tagsStore.fetchIfNeeded(),
+      labelsStore.fetchIfNeeded(),
+      criteriaStore.fetchIfNeeded(),
+      llmConfigStore.fetchIfNeeded(),
+    ]);
     initialDataLoaded.value = true;
   }
 

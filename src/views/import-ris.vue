@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
 import { useImport } from '@/composables/use-import';
+import { useArticlesStore } from '@/stores/articles';
+import { useAuditStore } from '@/stores/audit';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
+import { useScreeningStore } from '@/stores/screening';
+import { useCriteriaStore } from '@/stores/criteria';
+import { useLlmConfigStore } from '@/stores/llm-config';
 import ImportDropZone from '@/components/import-drop-zone.vue';
 import ImportStepper from '@/components/import-stepper.vue';
 import ImportPreview from '@/components/import-preview.vue';
@@ -17,7 +24,6 @@ const {
   canImport,
   removedIndices,
   visibleCount,
-  dedupSummary,
   loadFile,
   loadFilePath,
   parseFile,
@@ -26,9 +32,27 @@ const {
   reset,
 } = useImport();
 
-const hasDuplicates = () =>
-  dedupSummary.value &&
-  (dedupSummary.value.autoMergedCount > 0 || dedupSummary.value.needsReviewCount > 0);
+/** Invalidate all Pinia stores so data is re-fetched after import. */
+function invalidateAllStores(): void {
+  useArticlesStore().invalidate();
+  useAuditStore().invalidate();
+  useTagsStore().invalidate();
+  useLabelsStore().invalidate();
+  useScreeningStore().invalidate();
+  useCriteriaStore().invalidate();
+  useLlmConfigStore().invalidate();
+}
+
+/** Confirm import, then auto-navigate to dashboard with fresh data. */
+async function handleImport(): Promise<void> {
+  await confirmImport();
+  if (importResult.value) {
+    // Import succeeded — reset state, invalidate stores, go to dashboard
+    reset();
+    invalidateAllStores();
+    router.push('/');
+  }
+}
 </script>
 
 <template>
@@ -86,7 +110,7 @@ const hasDuplicates = () =>
             <button
               class="btn btn--primary"
               :disabled="!canImport || loading"
-              @click="confirmImport"
+              @click="handleImport"
             >
               {{ loading ? 'Importing...' : `Import ${visibleCount} Articles` }}
             </button>
@@ -101,48 +125,6 @@ const hasDuplicates = () =>
           :total-valid-count="visibleCount"
           @remove="removeArticle"
         />
-      </section>
-
-      <!-- Step 4: Complete -->
-      <section v-if="step === 'complete' && importResult">
-        <div class="import-view__success">
-          <h2>Import Complete</h2>
-          <p>{{ importResult.importedCount }} articles imported successfully.</p>
-          <p v-if="importResult.skippedCount > 0" class="import-view__skipped">
-            {{ importResult.skippedCount }} record{{ importResult.skippedCount !== 1 ? 's' : '' }}
-            skipped due to validation issues.
-          </p>
-          <p v-if="importResult.skippedByUser > 0" class="import-view__skipped">
-            {{ importResult.skippedByUser }} record{{ importResult.skippedByUser !== 1 ? 's' : '' }}
-            excluded by user.
-          </p>
-          <p class="import-view__capacity">
-            Remaining capacity: {{ importResult.remainingCapacity }} articles
-          </p>
-        </div>
-
-        <!-- Dedup summary -->
-        <div v-if="hasDuplicates()" class="import-view__dedup">
-          <h3>Duplicate Check</h3>
-          <p v-if="dedupSummary!.autoMergedCount > 0">
-            🔍 {{ dedupSummary!.autoMergedCount }} high-confidence duplicate{{
-              dedupSummary!.autoMergedCount !== 1 ? 's' : ''
-            }}
-            detected.
-          </p>
-          <p v-if="dedupSummary!.needsReviewCount > 0">
-            ⚠️ {{ dedupSummary!.needsReviewCount }} potential duplicate{{
-              dedupSummary!.needsReviewCount !== 1 ? 's' : ''
-            }}
-            need manual review.
-          </p>
-          <button class="btn btn--primary" @click="router.push('/dedup')">Review Duplicates</button>
-        </div>
-
-        <div class="import-view__actions">
-          <button class="btn btn--secondary" @click="reset">Import Another File</button>
-          <button class="btn btn--primary" @click="router.push('/')">Go to Dashboard</button>
-        </div>
       </section>
     </div>
   </div>
