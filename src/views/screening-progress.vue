@@ -22,6 +22,8 @@ const {
 } = useScreening();
 
 const isPaused = ref(false);
+const batchSize = ref(1);
+const showBatchWarning = computed(() => batchSize.value > 4);
 
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -79,7 +81,7 @@ const displayCompleted = computed((): number => {
 });
 
 function handleStart(): void {
-  startScreening();
+  startScreening(batchSize.value);
   // Poll progress while running
   pollInterval = setInterval(() => {
     if (progress.value?.isRunning) {
@@ -170,6 +172,30 @@ function handleStart(): void {
       <div v-if="progress?.currentArticleTitle" class="screening-view__current">
         <span class="screening-view__current-dot" />
         Screening: {{ progress.currentArticleTitle }}
+      </div>
+
+      <!-- Batch Size Control (only when not running) -->
+      <div v-if="!progress?.isRunning && !loading" class="screening-view__batch">
+        <div class="screening-view__batch-header">
+          <label class="screening-view__batch-label" for="batch-slider"> Batch Size </label>
+          <span class="screening-view__batch-value">{{ batchSize }}</span>
+        </div>
+        <input
+          id="batch-slider"
+          v-model.number="batchSize"
+          type="range"
+          min="1"
+          max="15"
+          step="1"
+          class="screening-view__batch-slider"
+        />
+        <div class="screening-view__batch-range">
+          <span>1</span>
+          <span>15</span>
+        </div>
+        <div v-if="showBatchWarning" class="screening-view__batch-warning">
+          ⚠ High batch sizes might not be supported by your LLM and may lead to failures.
+        </div>
       </div>
 
       <!-- Controls -->
@@ -476,5 +502,83 @@ function handleStart(): void {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── Batch Size Slider ── */
+.screening-view__batch {
+  padding: var(--space-4);
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-default);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.screening-view__batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.screening-view__batch-label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.screening-view__batch-value {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-primary);
+  min-width: 2ch;
+  text-align: right;
+}
+
+.screening-view__batch-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-surface-container-highest);
+  outline: none;
+  cursor: pointer;
+}
+
+.screening-view__batch-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+  border: 2px solid var(--color-on-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.screening-view__batch-slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+  border: 2px solid var(--color-on-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.screening-view__batch-range {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+}
+
+.screening-view__batch-warning {
+  font-size: var(--font-size-caption);
+  color: var(--color-priority-high);
+  margin-top: var(--space-1);
 }
 </style>

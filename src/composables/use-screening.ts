@@ -19,11 +19,12 @@ export function useScreening() {
     await store.fetchReadiness();
   }
 
-  async function startScreening(): Promise<void> {
+  async function startScreening(batchSize?: number): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
-      const result = await tauriCommand<ScreeningProgress>('start_screening');
+      const args = batchSize ? { batchSize } : undefined;
+      const result = await tauriCommand<ScreeningProgress>('start_screening', args);
       store.setProgress(result);
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);

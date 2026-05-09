@@ -506,6 +506,310 @@ fn update_article_after_screening(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── extract_json tests ──
+
+    #[test]
+    fn test_extract_json_plain_array() {
+        let input = r#"[{"decision":"include","reasoning":"ok","matched_inclusion_criteria":[],"matched_exclusion_criteria":[],"suggested_tags":[],"confidence":0.9}]"#;
+        assert_eq!(extract_json(input), input.trim());
+    }
+
+    #[test]
+    fn test_extract_json_json_code_fence() {
+        let inner = r#"[{"decision":"include"}]"#;
+        let input = format!("```json\n{inner}\n```");
+        assert_eq!(extract_json(&input), inner);
+    }
+
+    #[test]
+    fn test_extract_json_plain_code_fence() {
+        let inner = r#"[{"decision":"include"}]"#;
+        let input = format!("```\n{inner}\n```");
+        assert_eq!(extract_json(&input), inner);
+    }
+
+    #[test]
+    fn test_extract_json_whitespace() {
+        let inner = r#"[{"decision":"include"}]"#;
+        let input = format!("  \n{inner}\n  ");
+        assert_eq!(extract_json(&input), inner);
+    }
+
+    #[test]
+    fn test_extract_json_empty_string() {
+        assert_eq!(extract_json(""), "");
+    }
+
+    // ── process_screening_responses tests ──
+
+    #[test]
+    fn test_parse_single_response() {
+        let raw = r#"[
+            {
+                "decision": "include",
+                "reasoning": "Meets inclusion criteria.",
+                "matchedInclusionCriteria": ["c1"],
+                "matchedExclusionCriteria": [],
+                "suggestedTags": ["ml"],
+                "confidence": 0.92
+            }
+        ]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].decision, "include");
+        assert_eq!(results[0].matched_inclusion_criteria, vec!["c1"]);
+        assert_eq!(results[0].confidence, 0.92);
+    }
+
+    #[test]
+    fn test_parse_batch_of_three() {
+        let raw = r#"[
+            {
+                "decision": "include",
+                "reasoning": "R1",
+                "matchedInclusionCriteria": ["c1"],
+                "matchedExclusionCriteria": [],
+                "suggestedTags": ["ml"],
+                "confidence": 0.9
+            },
+            {
+                "decision": "exclude",
+                "reasoning": "R2",
+                "matchedInclusionCriteria": [],
+                "matchedExclusionCriteria": ["c2"],
+                "suggestedTags": [],
+                "confidence": 0.85
+            },
+            {
+                "decision": "include",
+                "reasoning": "R3",
+                "matchedInclusionCriteria": ["c1", "c3"],
+                "matchedExclusionCriteria": ["c2"],
+                "suggestedTags": ["dl", "medical"],
+                "confidence": 0.75
+            }
+        ]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].decision, "include");
+        assert_eq!(results[1].decision, "exclude");
+        assert_eq!(results[2].decision, "include");
+        assert_eq!(results[2].matched_inclusion_criteria, vec!["c1", "c3"]);
+        assert_eq!(results[2].suggested_tags, vec!["dl", "medical"]);
+    }
+
+    #[test]
+    fn test_parse_batch_of_fifteen() {
+        let items: Vec<String> = (0..15)
+            .map(|i| {
+                format!(
+                    r#"{{"decision":"{}","reasoning":"Article {}","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.{:02}}}"#,
+                    if i % 2 == 0 { "include" } else { "exclude" },
+                    i,
+                    50 + i
+                )
+            })
+            .collect();
+        let raw = format!("[{}]", items.join(","));
+        let results = process_screening_responses(&raw).unwrap();
+        assert_eq!(results.len(), 15);
+        assert_eq!(results[0].decision, "include");
+        assert_eq!(results[1].decision, "exclude");
+        assert_eq!(results[14].decision, "include"); // 14 % 2 == 0 → include
+    }
+
+    #[test]
+    fn test_parse_error_decision() {
+        let raw = r#"[{
+            "decision": "error",
+            "reasoning": "Abstract too short to evaluate",
+            "matchedInclusionCriteria": [],
+            "matchedExclusionCriteria": [],
+            "suggestedTags": [],
+            "confidence": 0.0
+        }]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].decision, "error");
+        assert_eq!(results[0].reasoning, "Abstract too short to evaluate");
+    }
+
+    #[test]
+    fn test_parse_response_with_all_fields_populated() {
+        let raw = r#"[{
+            "decision": "include",
+            "reasoning": "Meets criteria c1 and c3.",
+            "matchedInclusionCriteria": ["c1", "c3"],
+            "matchedExclusionCriteria": ["c2"],
+            "suggestedTags": ["machine-learning", "healthcare", "systematic-review"],
+            "confidence": 0.95
+        }]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert_eq!(results[0].matched_inclusion_criteria, vec!["c1", "c3"]);
+        assert_eq!(results[0].matched_exclusion_criteria, vec!["c2"]);
+        assert_eq!(
+            results[0].suggested_tags,
+            vec!["machine-learning", "healthcare", "systematic-review"]
+        );
+    }
+
+    #[test]
+    fn test_parse_response_with_empty_arrays() {
+        let raw = r#"[{
+            "decision": "exclude",
+            "reasoning": "No criteria matched",
+            "matchedInclusionCriteria": [],
+            "matchedExclusionCriteria": [],
+            "suggestedTags": [],
+            "confidence": 0.3
+        }]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert!(results[0].matched_inclusion_criteria.is_empty());
+        assert!(results[0].matched_exclusion_criteria.is_empty());
+        assert!(results[0].suggested_tags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_response_wrapped_in_code_fence() {
+        let inner = r#"[{"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}]"#;
+        let raw = format!("```json\n{inner}\n```");
+        let results = process_screening_responses(&raw).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].decision, "include");
+    }
+
+    #[test]
+    fn test_parse_response_with_surrounding_text() {
+        // LLM sometimes wraps JSON in explanatory text
+        let raw = r#"Here are the screening results:
+    [
+    {"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}
+]
+Hope this helps!"#;
+        // This should fail because extract_json only handles code fences, not arbitrary surrounding text
+        assert!(process_screening_responses(raw).is_err());
+    }
+
+    #[test]
+    fn test_parse_invalid_json_returns_error() {
+        let raw = "this is not json";
+        let result = process_screening_responses(raw);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Malformed LLM response"), "Got: {err_msg}");
+    }
+
+    #[test]
+    fn test_parse_json_object_instead_of_array_returns_error() {
+        let raw = r#"{"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}"#;
+        let result = process_screening_responses(raw);
+        assert!(result.is_err(), "Single object should fail — engine expects array");
+    }
+
+    #[test]
+    fn test_parse_missing_required_field_returns_error() {
+        let raw = r#"[{"decision":"include"}]"#;
+        let result = process_screening_responses(raw);
+        assert!(result.is_err(), "Missing fields should fail deserialization");
+    }
+
+    #[test]
+    fn test_parse_extra_unknown_fields_ignored() {
+        let raw = r#"[{
+            "decision": "include",
+            "reasoning": "ok",
+            "matchedInclusionCriteria": [],
+            "matchedExclusionCriteria": [],
+            "suggestedTags": [],
+            "confidence": 0.9,
+            "extra_field": "should be ignored"
+        }]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_empty_array() {
+        let raw = "[]";
+        let results = process_screening_responses(raw).unwrap();
+        assert!(results.is_empty());
+    }
+
+    // ── ScreeningEngine::with_batch_size tests ──
+
+    #[test]
+    fn test_with_batch_size_zero_clamps_to_one() {
+        let engine = ScreeningEngine::with_batch_size(0);
+        assert_eq!(engine.batch_size, 1);
+    }
+
+    #[test]
+    fn test_with_batch_size_one_stays() {
+        let engine = ScreeningEngine::with_batch_size(1);
+        assert_eq!(engine.batch_size, 1);
+    }
+
+    #[test]
+    fn test_with_batch_size_five() {
+        let engine = ScreeningEngine::with_batch_size(5);
+        assert_eq!(engine.batch_size, 5);
+    }
+
+    #[test]
+    fn test_with_batch_size_fifteen() {
+        let engine = ScreeningEngine::with_batch_size(15);
+        assert_eq!(engine.batch_size, 15);
+    }
+
+    #[test]
+    fn test_default_batch_size_is_one() {
+        let engine = ScreeningEngine::new();
+        assert_eq!(engine.batch_size, 1);
+    }
+
+    // ── Response count mismatch validation ──
+    // These simulate the engine's count check without needing a real DB.
+
+    #[test]
+    fn test_response_count_mismatch_detected() {
+        // Simulate: 3 articles fetched, but LLM returns 2 results
+        let raw = r#"[
+            {"decision":"include","reasoning":"R1","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9},
+            {"decision":"exclude","reasoning":"R2","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.8}
+        ]"#;
+        let results = process_screening_responses(raw).unwrap();
+        let batch_len = 3;
+        assert_ne!(results.len(), batch_len, "Should detect mismatch: 2 results for 3 articles");
+    }
+
+    #[test]
+    fn test_response_count_matches_batch() {
+        let raw = r#"[
+            {"decision":"include","reasoning":"R1","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9},
+            {"decision":"exclude","reasoning":"R2","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.8},
+            {"decision":"include","reasoning":"R3","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.7}
+        ]"#;
+        let results = process_screening_responses(raw).unwrap();
+        let batch_len = 3;
+        assert_eq!(results.len(), batch_len, "Count should match");
+    }
+
+    #[test]
+    fn test_response_more_results_than_articles() {
+        let raw = r#"[
+            {"decision":"include","reasoning":"R1","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9},
+            {"decision":"exclude","reasoning":"R2","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.8}
+        ]"#;
+        let results = process_screening_responses(raw).unwrap();
+        let batch_len = 1;
+        assert_ne!(results.len(), batch_len, "Should detect: 2 results for 1 article");
+    }
+}
+
 fn create_or_match_tag(
     conn: &Connection,
     tag_name: &str,

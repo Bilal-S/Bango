@@ -119,6 +119,7 @@ pub async fn get_screening_readiness(
 pub async fn start_screening(
     db_state: State<'_, DbState>,
     screening_state: State<'_, ScreeningState>,
+    batch_size: Option<u32>,
 ) -> Result<ScreeningProgress, AppError> {
     let config = {
         let conn = db_state.conn.lock().map_err(|e| {
@@ -182,8 +183,9 @@ pub async fn start_screening(
         ));
     }
 
-    // Create and store engine in state
-    let engine = Arc::new(ScreeningEngine::new());
+    // Create and store engine in state (clamp batch_size to 1–15)
+    let effective_batch_size = batch_size.unwrap_or(1).clamp(1, 15) as usize;
+    let engine = Arc::new(ScreeningEngine::with_batch_size(effective_batch_size));
     {
         let mut state_engine = screening_state.engine.write().await;
         *state_engine = Some(engine.clone());
