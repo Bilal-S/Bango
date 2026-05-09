@@ -22,12 +22,34 @@ export function useScreening() {
   async function startScreening(batchSize?: number): Promise<void> {
     loading.value = true;
     error.value = null;
+
+    // Optimistically show progress bar immediately (before IPC returns)
+    store.setProgress({
+      total: store.readiness?.totalUnscreened ?? 0,
+      completed: 0,
+      included: 0,
+      rejected: 0,
+      errors: 0,
+      isRunning: true,
+      currentArticleTitle: null,
+      elapsedMs: 0,
+      estimatedRemainingMs: null,
+    });
+
+    // Start listening for live progress events immediately
+    store.startListening();
+
     try {
       const args = batchSize ? { batchSize } : undefined;
       const result = await tauriCommand<ScreeningProgress>('start_screening', args);
-      store.setProgress(result);
+      // Replace optimistic progress with real initial progress (may have total=0 if engine
+      // hasn't counted yet — that's fine, the next event will correct it)
+      if (result.total > 0) {
+        store.setProgress(result);
+      }
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
+      store.setProgress(null); // Clear optimistic progress on error
     } finally {
       loading.value = false;
     }
@@ -61,6 +83,22 @@ export function useScreening() {
     }
   }
 
+  async function startListening(): Promise<void> {
+    await store.startListening();
+  }
+
+  function stopListening(): void {
+    store.stopListening();
+  }
+
+  async function resetScreeningErrors(): Promise<number> {
+    return await store.resetScreeningErrors();
+  }
+
+  async function resetWorkingList(): Promise<number> {
+    return await store.resetWorkingList();
+  }
+
   return {
     progress,
     loading,
@@ -76,5 +114,9 @@ export function useScreening() {
     pauseScreening,
     resumeScreening,
     stopScreening,
+    startListening,
+    stopListening,
+    resetScreeningErrors,
+    resetWorkingList,
   };
 }

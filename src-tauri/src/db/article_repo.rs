@@ -52,9 +52,9 @@ pub fn get_next_unscreened_working_batch(
     limit: usize,
 ) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, sequence_id, title, abstract_text, authors, publication_year FROM articles \
-         WHERE status = 'working' AND screened_at IS NULL \
-         ORDER BY imported_at ASC LIMIT ?1",
+         "SELECT id, sequence_id, title, abstract_text, authors, publication_year FROM articles \
+          WHERE status = 'working' AND screened_at IS NULL \
+          ORDER BY sequence_id ASC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], |row| {
         Ok(Article {
@@ -808,6 +808,28 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         token_estimate: row.get("token_estimate")?,
         actual_tokens: row.get("actual_tokens")?,
     })
+}
+
+/// Reset screening errors: clear `screened_at` and `screening_error` for all working articles
+/// that have screening errors, so they can be re-screened.
+pub fn reset_screening_errors(conn: &Connection) -> Result<usize, AppError> {
+    let rows = conn.execute(
+        "UPDATE articles SET screened_at = NULL, screening_error = 0 \
+         WHERE status = 'working' AND screening_error = 1",
+        [],
+    )?;
+    Ok(rows)
+}
+
+/// Reset the working list: clear `screened_at` and `screening_error` for all working articles
+/// that have been previously screened, so they can be re-screened.
+pub fn reset_working_list(conn: &Connection) -> Result<usize, AppError> {
+    let rows = conn.execute(
+        "UPDATE articles SET screened_at = NULL, screening_error = 0 \
+         WHERE status = 'working' AND screened_at IS NOT NULL",
+        [],
+    )?;
+    Ok(rows)
 }
 
 pub fn get_article_counts(

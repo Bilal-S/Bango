@@ -3,12 +3,15 @@ import { ref, computed } from 'vue';
 import type { ScreeningProgress, ScreeningReadiness } from '@/types';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
+type UnlistenFn = () => void;
+
 export const useScreeningStore = defineStore('screening', () => {
   const readiness = ref<ScreeningReadiness | null>(null);
   const progress = ref<ScreeningProgress | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
   const initialized = ref(false);
+  let unlistenProgress: UnlistenFn | null = null;
 
   const percentage = computed(() => {
     if (!progress.value || progress.value.total === 0) return 0;
@@ -63,6 +66,47 @@ export const useScreeningStore = defineStore('screening', () => {
     progress.value = newProgress;
   }
 
+  /** Start listening for `screening:progress` events from the backend engine. */
+  async function startListening(): Promise<void> {
+    if (unlistenProgress || !isTauri()) return;
+    try {
+      const { listen } = await import('@tauri-apps/api/event');
+      unlistenProgress = await listen<ScreeningProgress>('screening:progress', (event) => {
+        progress.value = event.payload;
+        if (!event.payload.isRunning) {
+          stopListening();
+          // Refresh readiness after run completes
+          void fetchReadiness();
+        }
+      });
+    } catch {
+      // Tauri event system unavailable — fall back gracefully
+    }
+  }
+
+  /** Stop listening for progress events. */
+  function stopListening(): void {
+    if (unlistenProgress) {
+      unlistenProgress();
+      unlistenProgress = null;
+    }
+  }
+
+  /** Reset screening errors so errored articles can be re-screened. */
+  async function resetScreeningErrors(): Promise<number> {
+    const count = await tauriCommand<number>('reset_screening_errors');
+    // Refresh readiness to reflect the new unscreened count
+    await fetchReadiness();
+    return count;
+  }
+
+  /** Reset the working list: clear screened_at for all working articles so they can be re-screened. */
+  async function resetWorkingList(): Promise<number> {
+    const count = await tauriCommand<number>('reset_working_list');
+    await fetchReadiness();
+    return count;
+  }
+
   return {
     readiness,
     progress,
@@ -75,5 +119,9 @@ export const useScreeningStore = defineStore('screening', () => {
     fetchReadiness,
     refreshProgress,
     setProgress,
+    startListening,
+    stopListening,
+    resetScreeningErrors,
+    resetWorkingList,
   };
 });

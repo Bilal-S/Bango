@@ -101,6 +101,8 @@ pub fn run() {
             commands::screening::pause_screening,
             commands::screening::resume_screening,
             commands::screening::stop_screening,
+            commands::screening::reset_screening_errors,
+            commands::screening::reset_working_list,
             commands::screening::estimate_screening_tokens,
             commands::summary::generate_summary,
             commands::prisma::get_prisma_data,

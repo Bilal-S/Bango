@@ -6,10 +6,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
+use tauri::Emitter;
+
 use crate::db::article_repo;
 use crate::error::AppError;
-use crate::llm::client;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
+use crate::screening::llm_client::LlmClient;
 use crate::screening::prompt::{
     self, AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput,
 };
@@ -34,9 +36,13 @@ pub struct ScreeningProgress {
 pub struct LlmScreeningResponse {
     pub decision: String,
     pub reasoning: String,
+    #[serde(default, alias = "matched_inclusion_criteria", alias = "inclusionCriteria", alias = "inclusion_criteria")]
     pub matched_inclusion_criteria: Vec<String>,
+    #[serde(default, alias = "matched_exclusion_criteria", alias = "exclusionCriteria", alias = "exclusion_criteria")]
     pub matched_exclusion_criteria: Vec<String>,
+    #[serde(default, alias = "suggested_tags", alias = "tags")]
     pub suggested_tags: Vec<String>,
+    #[serde(default)]
     pub confidence: f64,
 }
 
@@ -90,12 +96,16 @@ impl ScreeningEngine {
     }
 
     /// Run the screening engine using the std::sync::Mutex<Connection> from DbState.
+    /// If `app_handle` is provided, emits `screening:progress` events after each article.
+    /// Accepts an `LlmClient` trait object so tests can inject mocks.
     pub async fn run_sync(
         &self,
         conn_mutex: &std::sync::Mutex<Connection>,
-        config: crate::models::llm_config::LlmConfig,
+        llm: &dyn LlmClient,
+        request_delay_ms: u64,
         criteria: Vec<Criterion>,
         aims: Vec<ResearchAim>,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Result<(), AppError> {
         // Reset state
         *self.cancel_token.lock().await = false;
@@ -217,7 +227,7 @@ impl ScreeningEngine {
             let mut retry_count: u32 = 0;
 
             while retry_count <= max_retries {
-                match client::send_chat_completion(&config, system_prompt, &user_prompt).await {
+                match llm.send(system_prompt, &user_prompt).await {
                     Ok((text, tokens)) => {
                         response_data = Some((text, tokens));
                         break;
@@ -235,7 +245,7 @@ impl ScreeningEngine {
                             ))
                         })?;
                         for article in &batch {
-                            set_screening_error(&c, &article.id, &e.to_string())?;
+                            set_screening_error(&c, &article.id, &e.to_string(), None)?;
                         }
                         break;
                     }
@@ -243,7 +253,7 @@ impl ScreeningEngine {
             }
 
             // Apply delay between requests
-            sleep(Duration::from_millis(config.request_delay_ms as u64)).await;
+            sleep(Duration::from_millis(request_delay_ms)).await;
 
             let (response_text, total_tokens) = match response_data {
                 Some(data) => data,
@@ -251,6 +261,7 @@ impl ScreeningEngine {
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();
                     progress.completed += batch.len();
+                    self.emit_progress(&app_handle, &progress);
                     continue;
                 }
             };
@@ -278,12 +289,14 @@ impl ScreeningEngine {
                                         screenings.len(),
                                         batch.len()
                                     ),
+                                    Some(&response_text),
                                 )?;
                             }
                         }
                         let mut progress = self.progress.lock().await;
                         progress.errors += batch.len();
                         progress.completed += batch.len();
+                        self.emit_progress(&app_handle, &progress);
                         continue;
                     }
 
@@ -297,7 +310,7 @@ impl ScreeningEngine {
                                         e2.to_string(),
                                     ))
                                 })?;
-                                set_screening_error(&c, &article.id, &screening.reasoning)?;
+                                set_screening_error(&c, &article.id, &screening.reasoning, None)?;
                             }
                             let mut progress = self.progress.lock().await;
                             progress.errors += 1;
@@ -389,8 +402,9 @@ impl ScreeningEngine {
                         let remaining = (total - progress.completed) as u64;
                         progress.estimated_remaining_ms = Some(avg_per_article * remaining);
                     }
+                    self.emit_progress(&app_handle, &progress);
                 }
-                Err(_) => {
+                Err(parse_err) => {
                     {
                         let c = conn_mutex.lock().map_err(|e2| {
                             AppError::Database(rusqlite::Error::InvalidParameterName(
@@ -398,59 +412,206 @@ impl ScreeningEngine {
                             ))
                         })?;
                         for article in &batch {
-                            set_screening_error(&c, &article.id, &response_text)?;
+                            set_screening_error(
+                                &c,
+                                &article.id,
+                                &format!("Malformed LLM response: {parse_err}"),
+                                Some(&response_text),
+                            )?;
                         }
                     }
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();
                     progress.completed += batch.len();
+                    self.emit_progress(&app_handle, &progress);
                 }
             }
         }
 
-        // Mark as done
+        // Mark as done and emit final event
         {
             let mut progress = self.progress.lock().await;
             progress.is_running = false;
             progress.current_article_title = None;
+            self.emit_progress(&app_handle, &progress);
         }
 
         Ok(())
+    }
+
+    /// Emit a `screening:progress` event if an app handle is available.
+    fn emit_progress(&self, handle: &Option<tauri::AppHandle>, snapshot: &ScreeningProgress) {
+        if let Some(h) = handle {
+            let _ = h.emit("screening:progress", snapshot);
+        }
     }
 }
 
 /// Parse the LLM response as a JSON array of screening results.
 fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, AppError> {
+    eprintln!("[screening] process_screening_responses received {} bytes", raw.len());
+    eprintln!("[screening] raw first 300 chars: {}", &raw[..raw.len().min(300)]);
+
     let json_str = extract_json(raw);
-    serde_json::from_str::<Vec<LlmScreeningResponse>>(&json_str)
-        .map_err(|e| AppError::Import(format!("Malformed LLM response: {e}")))
+
+    eprintln!("[screening] extract_json produced {} bytes", json_str.len());
+    eprintln!("[screening] extracted JSON first 300 chars: {}", &json_str[..json_str.len().min(300)]);
+
+    match serde_json::from_str::<Vec<LlmScreeningResponse>>(&json_str) {
+        Ok(results) => {
+            eprintln!("[screening] successfully parsed {} screening results", results.len());
+            Ok(results)
+        }
+        Err(e) => {
+            eprintln!("[screening] FAILED to parse screening response: {e}");
+            eprintln!("[screening] attempted JSON (first 500 chars): {}", &json_str[..json_str.len().min(500)]);
+
+            // Try truncated JSON repair: find last complete `}` and add missing `]`
+            if let Some(repaired) = repair_truncated_json_array(&json_str) {
+                eprintln!("[screening] attempting truncated JSON repair...");
+                match serde_json::from_str::<Vec<LlmScreeningResponse>>(&repaired) {
+                    Ok(results) => {
+                        eprintln!("[screening] repair succeeded! Recovered {} results", results.len());
+                        return Ok(results);
+                    }
+                    Err(repair_err) => {
+                        eprintln!("[screening] repair also failed: {repair_err}");
+                    }
+                }
+            }
+
+            Err(AppError::Import(format!("Malformed LLM response: {e}")))
+        }
+    }
+}
+
+/// Attempt to repair a truncated JSON array by finding the last complete object
+/// and closing the array with `]`.
+fn repair_truncated_json_array(json: &str) -> Option<String> {
+    // Only attempt if it looks like an incomplete array
+    let trimmed = json.trim();
+    if !trimmed.starts_with('[') {
+        return None;
+    }
+    // If it already ends with `]`, it's not truncated (or is valid)
+    if trimmed.ends_with(']') {
+        return None;
+    }
+
+    // Find the last occurrence of `}` — the end of the last complete object
+    let last_brace = trimmed.rfind('}')?;
+    let candidate = &trimmed[..=last_brace];
+
+    // Close the array
+    let repaired = format!("{}]", candidate);
+
+    // Quick sanity: must still start with `[`
+    if !repaired.starts_with('[') {
+        return None;
+    }
+
+    Some(repaired)
 }
 
 fn extract_json(raw: &str) -> String {
     let trimmed = raw.trim();
+
+    // Strategy 1: Code-fence stripping
     if trimmed.starts_with("```") {
         let without_start = trimmed.trim_start_matches("```json").trim_start_matches("```");
         let without_end = without_start.trim_end_matches("```");
-        return without_end.trim().to_string();
+        let inner = without_end.trim();
+        // If the code-fence content is already a bare array, return it
+        if inner.starts_with('[') {
+            return inner.to_string();
+        }
+        // If it's a JSON object, try to extract an embedded array
+        if inner.starts_with('{') {
+            if let Some(arr) = extract_array_from_object(inner) {
+                return arr;
+            }
+        }
+        return inner.to_string();
     }
+
+    // Strategy 2: Bare array (already correct)
+    if trimmed.starts_with('[') {
+        return trimmed.to_string();
+    }
+
+    // Strategy 3: JSON object wrapping an array — extract the array
+    if trimmed.starts_with('{') {
+        if let Some(arr) = extract_array_from_object(trimmed) {
+            return arr;
+        }
+    }
+
+    // Strategy 4: Try to find a JSON array anywhere in the text
+    if let Some(start) = trimmed.find('[') {
+        if let Some(end) = trimmed.rfind(']') {
+            if end > start {
+                let candidate = &trimmed[start..=end];
+                // Validate it parses as JSON
+                if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
+                    return candidate.to_string();
+                }
+            }
+        }
+    }
+
     trimmed.to_string()
+}
+
+/// Given a JSON object string, find and extract the first JSON array value
+/// at the first two levels of nesting that contains objects (screening results).
+fn extract_array_from_object(obj_str: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(obj_str).ok()?;
+    extract_array_from_value(&value)
+}
+
+/// Recursively search for a non-empty array whose first element is an object.
+fn extract_array_from_value(value: &serde_json::Value) -> Option<String> {
+    if let Some(obj) = value.as_object() {
+        // Level 1: scan top-level keys for arrays containing objects
+        for (_, v) in obj {
+            if let Some(arr) = v.as_array() {
+                if arr.first().is_some_and(|el| el.is_object()) {
+                    return Some(v.to_string());
+                }
+            }
+        }
+        // Level 2: scan nested objects
+        for (_, v) in obj {
+            if let Some(result) = extract_array_from_value(v) {
+                return Some(result);
+            }
+        }
+    }
+    None
 }
 
 fn set_screening_error(
     conn: &Connection,
     article_id: &str,
-    raw_response: &str,
+    error_message: &str,
+    raw_response: Option<&str>,
 ) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE articles SET screening_error = 1 WHERE id = ?1",
+        "UPDATE articles SET screening_error = 1, screened_at = datetime('now') WHERE id = ?1",
         rusqlite::params![article_id],
     )?;
 
     let audit_id = uuid::Uuid::new_v4().to_string();
-    let truncated = &raw_response[..raw_response.len().min(500)];
+    let details = match raw_response {
+        Some(raw) => {
+            let truncated = &raw[..raw.len().min(300)];
+            format!("Screening error: {error_message}\n\nRaw LLM response (first 300 chars): {truncated}")
+        }
+        None => format!("Screening error: {error_message}"),
+    };
     conn.execute(
         "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'ai_screen', ?3, 'ai')",
-        rusqlite::params![audit_id, article_id, format!("Screening error. Raw response: {truncated}")],
+        rusqlite::params![audit_id, article_id, details],
     )?;
 
     Ok(())
@@ -683,15 +844,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_response_with_surrounding_text() {
-        // LLM sometimes wraps JSON in explanatory text
+fn test_parse_response_with_surrounding_text() {
+// LLM sometimes wraps JSON in explanatory text — extract_json now handles this
         let raw = r#"Here are the screening results:
     [
     {"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}
 ]
 Hope this helps!"#;
-        // This should fail because extract_json only handles code fences, not arbitrary surrounding text
-        assert!(process_screening_responses(raw).is_err());
+        // extract_json finds the embedded JSON array even with surrounding text
+        let result = process_screening_responses(raw);
+        assert!(result.is_ok(), "Should extract JSON from surrounding text");
+        let responses = result.unwrap();
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].decision, "include");
     }
 
     #[test]
@@ -730,6 +895,35 @@ Hope this helps!"#;
         }]"#;
         let results = process_screening_responses(raw).unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_snake_case_field_names() {
+        let raw = r#"[
+            {
+                "decision": "include",
+                "reasoning": "Meets criteria.",
+                "matched_inclusion_criteria": ["c1"],
+                "matched_exclusion_criteria": [],
+                "suggested_tags": ["ml"],
+                "confidence": 0.9
+            }
+        ]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].matched_inclusion_criteria, vec!["c1"]);
+    }
+
+    #[test]
+    fn test_parse_missing_optional_fields_default() {
+        // decision + reasoning are required; everything else defaults
+        let raw = r#"[{"decision":"include","reasoning":"ok"}]"#;
+        let results = process_screening_responses(raw).unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].matched_inclusion_criteria.is_empty());
+        assert!(results[0].matched_exclusion_criteria.is_empty());
+        assert!(results[0].suggested_tags.is_empty());
+        assert_eq!(results[0].confidence, 0.0);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { computed } from 'vue';
 import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
+import { useScreeningStore } from '@/stores/screening';
 import type { ArticleStatus } from '@/types';
 
 export interface StatusCounts {
@@ -33,6 +34,7 @@ export interface GroupedAuditEntry {
 export function useDashboard() {
   const articlesStore = useArticlesStore();
   const auditStore = useAuditStore();
+  const screeningStore = useScreeningStore();
 
   const counts = computed<StatusCounts>(() => {
     const all = articlesStore.articles;
@@ -46,10 +48,50 @@ export function useDashboard() {
   });
 
   const screeningProgress = computed<ScreeningProgress>(() => {
+    // Use live engine progress when a screening run is active
+    const live = screeningStore.progress;
+    if (live && live.isRunning) {
+      return {
+        screened: live.completed,
+        total: live.total,
+        percentage: screeningStore.percentage,
+      };
+    }
+    // Fall back to article-count snapshot
     const total = articlesStore.articles.length;
     const screened = articlesStore.articles.filter((a) => a.aiDecision !== null).length;
     const percentage = total > 0 ? Math.round((screened / total) * 100) : 0;
     return { screened, total, percentage };
+  });
+
+  /** Non-duplicate article count (Total Articles in summary) */
+  const totalNonDuplicate = computed(
+    () =>
+      articlesStore.articles.length -
+      articlesStore.articles.filter((a) => a.status === 'duplicate').length
+  );
+
+  /** Articles screened by AI (has aiDecision, no manual override) */
+  const screenedByAi = computed(
+    () => articlesStore.articles.filter((a) => a.aiDecision !== null && !a.manualOverride).length
+  );
+
+  /** Articles screened by user (manually included/rejected, or overrode AI) */
+  const screenedByUser = computed(
+    () =>
+      articlesStore.articles.filter(
+        (a) =>
+          (a.status === 'included' || a.status === 'rejected') &&
+          (a.manualOverride || a.aiDecision === null)
+      ).length
+  );
+
+  /** Screening progress percentage: (screenedByAi + screenedByUser) / totalNonDuplicate */
+  const screeningPercentage = computed(() => {
+    const total = totalNonDuplicate.value;
+    if (total === 0) return 0;
+    const screened = screenedByAi.value + screenedByUser.value;
+    return Math.round((screened / total) * 100);
   });
 
   const hasArticles = computed(() => articlesStore.articles.length > 0);
@@ -96,10 +138,14 @@ export function useDashboard() {
   return {
     counts,
     screeningProgress,
+    totalNonDuplicate,
+    screenedByAi,
+    screenedByUser,
     groupedAudit,
     loading,
     error,
     hasArticles,
+    screeningPercentage,
     refresh,
   };
 }

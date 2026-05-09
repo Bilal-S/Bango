@@ -18,24 +18,29 @@ const {
   pauseScreening,
   resumeScreening,
   stopScreening,
-  refreshProgress,
+  stopListening,
+  startListening,
+  resetScreeningErrors,
+  resetWorkingList,
 } = useScreening();
+
+const resettingWorkingList = ref(false);
 
 const isPaused = ref(false);
 const batchSize = ref(1);
 const showBatchWarning = computed(() => batchSize.value > 4);
 
-let pollInterval: ReturnType<typeof setInterval> | null = null;
-
-onMounted(() => {
+onMounted(async () => {
   // Silent background refresh
-  void fetchReadiness();
+  await fetchReadiness();
+  // If a screening run is already in progress, start listening for events
+  if (progress.value?.isRunning) {
+    await startListening();
+  }
 });
 
 onUnmounted(() => {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-  }
+  stopListening();
 });
 
 /** Computed: can the user start screening? */
@@ -45,29 +50,24 @@ const canStart = computed(() => {
   return r.totalUnscreened > 0 && r.hasAims && r.hasInclusion && r.hasExclusion && r.hasLlmConfig;
 });
 
-/** Computed: list of blocking reasons to show the user. */
+/** Computed: list of blocking reasons to show the user (cascading: prerequisites first). */
 const blockingReasons = computed((): string[] => {
   const r = readiness.value;
-  if (!r) return [];
-  const reasons: string[] = [];
-  if (r.totalUnscreened === 0) {
-    reasons.push(
-      'No unscreened articles in the working list. Import and deduplicate articles first.'
-    );
+  if (!r) return []; // still loading — show spinner, not warnings
+
+  const prereqReasons: string[] = [];
+  if (!r.hasAims) prereqReasons.push('No research aims defined. Add aims in the Criteria Editor.');
+  if (!r.hasInclusion)
+    prereqReasons.push('No inclusion criteria defined. Add criteria in the Criteria Editor.');
+  if (!r.hasExclusion)
+    prereqReasons.push('No exclusion criteria defined. Add criteria in the Criteria Editor.');
+  if (!r.hasLlmConfig) prereqReasons.push('LLM is not configured. Set up your LLM in Settings.');
+
+  // Only surface the "no articles" warning once prerequisites are satisfied
+  if (prereqReasons.length === 0 && r.totalUnscreened === 0) {
+    return ['No unscreened articles in the working list. Import and deduplicate articles first.'];
   }
-  if (!r.hasAims) {
-    reasons.push('No research aims defined. Add aims in the Criteria Editor.');
-  }
-  if (!r.hasInclusion) {
-    reasons.push('No inclusion criteria defined. Add criteria in the Criteria Editor.');
-  }
-  if (!r.hasExclusion) {
-    reasons.push('No exclusion criteria defined. Add criteria in the Criteria Editor.');
-  }
-  if (!r.hasLlmConfig) {
-    reasons.push('LLM is not configured. Set up your LLM in Settings.');
-  }
-  return reasons;
+  return prereqReasons;
 });
 
 /** Display count for the hero subtitle. */
@@ -80,17 +80,26 @@ const displayCompleted = computed((): number => {
   return progress.value?.completed ?? 0;
 });
 
+/** Computed: true when all prerequisites are met but no unscreened articles exist. */
+const isWorkingListScreened = computed((): boolean => {
+  const r = readiness.value;
+  if (!r) return false;
+  return r.hasAims && r.hasInclusion && r.hasExclusion && r.hasLlmConfig && r.totalUnscreened === 0;
+});
+
 function handleStart(): void {
   startScreening(batchSize.value);
-  // Poll progress while running
-  pollInterval = setInterval(() => {
-    if (progress.value?.isRunning) {
-      refreshProgress();
-    } else if (pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
-    }
-  }, 2000);
+}
+
+async function handleResetWorkingList(): Promise<void> {
+  resettingWorkingList.value = true;
+  try {
+    await resetWorkingList();
+  } catch {
+    // Error is handled by the composable
+  } finally {
+    resettingWorkingList.value = false;
+  }
 }
 </script>
 
@@ -209,6 +218,19 @@ function handleStart(): void {
           >
             Start Screening
           </button>
+          <button
+            v-if="
+              !progress?.isRunning && !loading && isWorkingListScreened && !resettingWorkingList
+            "
+            class="btn btn--secondary"
+            @click="handleResetWorkingList"
+          >
+            Refresh from Working List
+          </button>
+          <button v-if="resettingWorkingList" class="btn btn--secondary" disabled>
+            <span class="screening-view__btn-spinner" />
+            Refreshing&hellip;
+          </button>
           <button v-if="loading" class="btn btn--primary" disabled>
             <span class="screening-view__btn-spinner" />
             Starting&hellip;
@@ -235,6 +257,13 @@ function handleStart(): void {
           </button>
           <button v-if="progress?.isRunning" class="btn btn--danger" @click="stopScreening">
             Stop
+          </button>
+          <button
+            v-if="!progress?.isRunning && !loading && progress?.errors && progress.errors > 0"
+            class="btn btn--secondary"
+            @click="resetScreeningErrors"
+          >
+            Clear Errors ({{ progress.errors }}) & Re-screen
           </button>
         </div>
       </div>

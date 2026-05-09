@@ -363,17 +363,117 @@ async fn send_openai_compatible(
         return Err(AppError::Import(format!("LLM request failed ({status}): {body}")));
     }
 
-    let chat_response: ChatResponse = response
-        .json()
+    // Read raw body text so we can try multiple deserialization strategies
+    let body_text = response
+        .text()
         .await
-        .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
+        .map_err(|e| AppError::Import(format!("Failed to read LLM response body: {e}")))?;
 
-    let content = chat_response
-        .choices
-        .first()
-        .map(|c| c.message.content.clone())
-        .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
+    // Strategy 1: Try standard ChatResponse (OpenAI format)
+    if let Ok(chat_response) = serde_json::from_str::<ChatResponse>(&body_text) {
+        let content = chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
+        let total_tokens = chat_response.usage.and_then(|u| u.total_tokens).unwrap_or(0);
+        return Ok((content, total_tokens));
+    }
 
-    let total_tokens = chat_response.usage.and_then(|u| u.total_tokens).unwrap_or(0);
+    // Strategy 2: Fallback — extract content from arbitrary JSON envelope
+    let value: serde_json::Value = serde_json::from_str(&body_text)
+        .map_err(|e| AppError::Import(format!("Failed to parse LLM response as JSON: {e}")))?;
+
+    let content = extract_content_from_response(&value)
+        .ok_or_else(|| AppError::Import(format!(
+            "Could not extract content from LLM response. Raw body (first 500 chars): {}",
+            &body_text[..body_text.len().min(500)]
+        )))?;
+
+    // Try to get token count from the envelope
+    let total_tokens = extract_total_tokens(&value);
     Ok((content, total_tokens))
+}
+
+/// Attempt to extract text content from an arbitrary LLM response JSON value.
+///
+/// Handles:
+/// - Standard OpenAI: `choices[0].message.content` (string)
+/// - z.ai / non-standard: `message.content` (string or array of text objects)
+/// - Any provider with a `content` key at the first two levels
+fn extract_content_from_response(value: &serde_json::Value) -> Option<String> {
+    // Level 0: is value itself a string?
+    if let Some(s) = value.as_str() {
+        return Some(s.to_string());
+    }
+
+    // Level 1: standard OpenAI path
+    if let Some(s) = value["choices"][0]["message"]["content"].as_str() {
+        return Some(s.to_string());
+    }
+
+    // Scan all top-level keys for a "content" field
+    if let Some(obj) = value.as_object() {
+        for (_, v) in obj {
+            // Direct string content
+            if let Some(s) = v["content"].as_str() {
+                return Some(s.to_string());
+            }
+            // Array content (e.g., z.ai returns content as array of objects)
+            if let Some(arr) = v["content"].as_array() {
+                let collected: String = arr
+                    .iter()
+                    .filter_map(|item| {
+                        // Objects with "text" field (e.g., {"type":"text","text":"..."})
+                        item["text"].as_str().map(String::from)
+                            .or_else(|| {
+                                // Objects with "reasoning" field — skip those, only take text
+                                None
+                            })
+                            .or_else(|| {
+                                // Fallback: plain string items in the array
+                                item.as_str().map(String::from)
+                            })
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                if !collected.is_empty() {
+                    return Some(collected);
+                }
+            }
+
+            // Level 2: check nested object keys for content
+            if let Some(nested) = v.as_object() {
+                for (_, inner) in nested {
+                    if let Some(s) = inner["content"].as_str() {
+                        return Some(s.to_string());
+                    }
+                    if let Some(arr) = inner["content"].as_array() {
+                        let collected: String = arr
+                            .iter()
+                            .filter_map(|item| {
+                                item["text"].as_str()
+                                    .map(String::from)
+                                    .or_else(|| item.as_str().map(String::from))
+                            })
+                            .collect::<Vec<_>>()
+                            .join("");
+                        if !collected.is_empty() {
+                            return Some(collected);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Try to extract total_tokens from an arbitrary response JSON.
+fn extract_total_tokens(value: &serde_json::Value) -> usize {
+    // Standard OpenAI path
+    value["usage"]["total_tokens"]
+        .as_u64()
+        .unwrap_or(0) as usize
 }

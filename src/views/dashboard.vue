@@ -4,8 +4,18 @@ import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
 
 const router = useRouter();
-const { counts, screeningProgress, groupedAudit, loading, error, hasArticles, refresh } =
-  useDashboard();
+const {
+  counts,
+  totalNonDuplicate,
+  screenedByAi,
+  screenedByUser,
+  groupedAudit,
+  loading,
+  error,
+  hasArticles,
+  screeningPercentage,
+  refresh,
+} = useDashboard();
 
 onMounted(() => refresh());
 
@@ -207,24 +217,6 @@ function navigateToArticlesWithStatus(status: string): void {
                 </div>
               </div>
             </div>
-
-            <!-- Screening Progress -->
-            <div v-if="screeningProgress.total > 0" class="dashboard__card">
-              <div class="dashboard__card-header">
-                <h3 class="dashboard__card-title">Screening Progress</h3>
-                <span class="dashboard__progress-pct"> {{ screeningProgress.percentage }}% </span>
-              </div>
-              <div class="dashboard__progress-track">
-                <div
-                  class="dashboard__progress-fill"
-                  :style="{ width: screeningProgress.percentage + '%' }"
-                ></div>
-              </div>
-              <p class="dashboard__progress-text">
-                {{ screeningProgress.screened.toLocaleString() }} of
-                {{ screeningProgress.total.toLocaleString() }} articles screened
-              </p>
-            </div>
           </div>
 
           <!-- Right Column: Quick Actions -->
@@ -251,18 +243,32 @@ function navigateToArticlesWithStatus(status: string): void {
               <div class="dashboard__summary-row">
                 <span class="dashboard__summary-label">Total Articles</span>
                 <span class="dashboard__summary-value">
-                  {{ counts.total.toLocaleString() }}
+                  {{ totalNonDuplicate.toLocaleString() }}
                 </span>
               </div>
               <div class="dashboard__summary-row">
-                <span class="dashboard__summary-label">Screened</span>
+                <span class="dashboard__summary-label">Screened by AI</span>
                 <span class="dashboard__summary-value">
-                  {{ screeningProgress.screened.toLocaleString() }}
+                  {{ screenedByAi.toLocaleString() }}
                 </span>
               </div>
               <div class="dashboard__summary-row">
-                <span class="dashboard__summary-label">Completion</span>
-                <span class="dashboard__summary-value"> {{ screeningProgress.percentage }}% </span>
+                <span class="dashboard__summary-label">Screened by User</span>
+                <span class="dashboard__summary-value">
+                  {{ screenedByUser.toLocaleString() }}
+                </span>
+              </div>
+              <div class="dashboard__progress">
+                <div class="dashboard__progress-header">
+                  <span class="dashboard__progress-label">Screening Progress</span>
+                  <span class="dashboard__progress-pct">{{ screeningPercentage }}%</span>
+                </div>
+                <div class="dashboard__progress-track">
+                  <div
+                    class="dashboard__progress-fill"
+                    :style="{ width: screeningPercentage + '%' }"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -666,34 +672,6 @@ function navigateToArticlesWithStatus(status: string): void {
   margin-top: 2px;
 }
 
-/* Screening Progress */
-.dashboard__progress-pct {
-  font-size: var(--font-size-body);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-primary-container);
-}
-
-.dashboard__progress-track {
-  height: 12px;
-  background-color: #e2e8f0;
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-  margin: var(--space-4);
-}
-
-.dashboard__progress-fill {
-  height: 100%;
-  background-color: var(--color-primary-container);
-  border-radius: var(--radius-pill);
-  transition: width 0.6s ease;
-}
-
-.dashboard__progress-text {
-  padding: 0 var(--space-4) var(--space-4);
-  font-size: var(--font-size-caption);
-  color: var(--color-on-surface-variant);
-}
-
 /* Sidebar */
 .dashboard__sidebar {
   display: flex;
@@ -802,5 +780,44 @@ function navigateToArticlesWithStatus(status: string): void {
   font-weight: var(--font-weight-semibold);
   color: #ffffff;
   font-family: var(--font-family-mono);
+}
+
+.dashboard__progress {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dashboard__progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.dashboard__progress-label {
+  font-size: var(--font-size-caption);
+  color: #94a3b8;
+}
+
+.dashboard__progress-pct {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: #ffffff;
+  font-family: var(--font-family-mono);
+}
+
+.dashboard__progress-track {
+  width: 100%;
+  height: 6px;
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.dashboard__progress-fill {
+  height: 100%;
+  background-color: #818cf8;
+  border-radius: 3px;
+  transition: width 0.4s ease;
 }
 </style>

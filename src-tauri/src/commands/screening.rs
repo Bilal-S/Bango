@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
 
 use crate::db::article_repo;
@@ -9,6 +9,7 @@ use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::screening::engine::{ScreeningEngine, ScreeningProgress};
+use crate::screening::llm_client::HttpLlmClient;
 use crate::screening::token_estimation;
 
 /// Global screening engine state managed by Tauri.
@@ -117,10 +118,22 @@ pub async fn get_screening_readiness(
 
 #[tauri::command]
 pub async fn start_screening(
+    app_handle: AppHandle,
     db_state: State<'_, DbState>,
     screening_state: State<'_, ScreeningState>,
     batch_size: Option<u32>,
 ) -> Result<ScreeningProgress, AppError> {
+    // ── Concurrent-start guard ──
+    {
+        let guard = screening_state.engine.read().await;
+        if let Some(ref existing) = *guard {
+            let progress = existing.get_progress().await;
+            if progress.is_running {
+                return Ok(progress);
+            }
+        }
+    }
+
     let config = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -186,22 +199,28 @@ pub async fn start_screening(
     // Create and store engine in state (clamp batch_size to 1–15)
     let effective_batch_size = batch_size.unwrap_or(1).clamp(1, 15) as usize;
     let engine = Arc::new(ScreeningEngine::with_batch_size(effective_batch_size));
-    {
+    let initial_progress = {
         let mut state_engine = screening_state.engine.write().await;
         *state_engine = Some(engine.clone());
-    }
+        engine.get_progress().await
+    };
 
-    // Run screening without holding the state lock
-    engine.run_sync(&db_state.conn, config, criteria, aims).await?;
+    // ── Non-blocking: spawn engine in background task ──
+    let delay_ms = config.request_delay_ms as u64;
+    let llm: HttpLlmClient = HttpLlmClient { config };
+    tokio::spawn(async move {
+        let db = app_handle.state::<DbState>();
+        let screening = app_handle.state::<ScreeningState>();
+        let _ = engine
+            .run_sync(&db.conn, &llm, delay_ms, criteria, aims, Some(app_handle.clone()))
+            .await;
 
-    // Clear engine after completion
-    {
-        let mut state_engine = screening_state.engine.write().await;
+        // Clear engine from state after completion
+        let mut state_engine = screening.engine.write().await;
         *state_engine = None;
-    }
+    });
 
-    // Return final progress
-    Ok(engine.get_progress().await)
+    Ok(initial_progress)
 }
 
 #[tauri::command]
@@ -246,6 +265,26 @@ pub async fn stop_screening(screening_state: State<'_, ScreeningState>) -> Resul
     } else {
         Err(AppError::Validation("No screening in progress".to_string()))
     }
+}
+
+#[tauri::command]
+pub fn reset_screening_errors(db_state: State<'_, DbState>) -> Result<usize, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let count = article_repo::reset_screening_errors(&conn)?;
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn reset_working_list(db_state: State<'_, DbState>) -> Result<usize, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let count = article_repo::reset_working_list(&conn)?;
+    Ok(count)
 }
 
 #[tauri::command]
