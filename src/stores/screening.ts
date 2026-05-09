@@ -30,7 +30,10 @@ export const useScreeningStore = defineStore('screening', () => {
   }
 
   async function fetchReadiness(): Promise<void> {
-    loading.value = true;
+    const isFirstLoad = !initialized.value;
+    if (isFirstLoad) {
+      loading.value = true;
+    }
     error.value = null;
     try {
       const data = await tauriCommand<ScreeningReadiness>('get_screening_readiness');
@@ -42,7 +45,9 @@ export const useScreeningStore = defineStore('screening', () => {
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
-      loading.value = false;
+      if (isFirstLoad) {
+        loading.value = false;
+      }
     }
   }
 

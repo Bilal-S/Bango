@@ -49,7 +49,7 @@ pub fn run() {
 
             Ok(())
         })
-        .manage(ScreeningState { engine: tokio::sync::Mutex::new(None) })
+        .manage(ScreeningState { engine: tokio::sync::RwLock::new(None) })
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::import::parse_ris_file,

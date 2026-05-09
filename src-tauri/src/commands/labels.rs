@@ -177,7 +177,7 @@ Rules:
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process.";
-    let response = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
+    let (response, _) = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
 
     let json_str = response
         .trim()

@@ -7,11 +7,7 @@ use bango_lib::screening::resolution::{resolve_decision, CriterionMatch, Screeni
 use bango_lib::screening::token_estimation::estimate_tokens;
 
 fn make_match(id: &str, ctype: CriterionType, priority: Priority) -> CriterionMatch {
-    CriterionMatch {
-        id: id.to_string(),
-        criterion_type: ctype,
-        priority,
-    }
+    CriterionMatch { id: id.to_string(), criterion_type: ctype, priority }
 }
 
 fn make_single_article_input() -> ScreeningPromptInput {
@@ -59,10 +55,7 @@ fn test_tied_priority_favors_inclusion() {
 
 #[test]
 fn test_no_criteria_matches_exclude() {
-    let input = ScreeningInput {
-        inclusion_matches: vec![],
-        exclusion_matches: vec![],
-    };
+    let input = ScreeningInput { inclusion_matches: vec![], exclusion_matches: vec![] };
     assert_eq!(resolve_decision(&input), "exclude");
 }
 
@@ -142,9 +135,7 @@ fn test_critical_exclusion_overrides_all() {
 #[test]
 fn test_build_prompt_contains_research_aims() {
     let input = ScreeningPromptInput {
-        aims: vec![AimEntry {
-            text: "Study ML in healthcare".to_string(),
-        }],
+        aims: vec![AimEntry { text: "Study ML in healthcare".to_string() }],
         ..make_single_article_input()
     };
     let prompt = build_screening_prompt(&input);
@@ -273,10 +264,7 @@ fn test_build_prompt_priority_ordering_when_mixed() {
     // Critical inc should come before Low inc (sorted by priority descending)
     let critical_pos = prompt.find("Critical inc").expect("should contain critical");
     let low_pos = prompt.find("Low inc").expect("should contain low");
-    assert!(
-        critical_pos < low_pos,
-        "Critical should appear before Low in prompt"
-    );
+    assert!(critical_pos < low_pos, "Critical should appear before Low in prompt");
 }
 
 #[test]
@@ -327,9 +315,7 @@ fn test_estimate_tokens_unicode() {
 #[test]
 fn test_prompt_token_estimation() {
     let input = ScreeningPromptInput {
-        aims: vec![AimEntry {
-            text: "Study AI".to_string(),
-        }],
+        aims: vec![AimEntry { text: "Study AI".to_string() }],
         articles: vec![ArticleEntry {
             title: "Test Article Title".to_string(),
             authors: "Author".to_string(),

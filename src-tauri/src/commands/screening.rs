@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tauri::State;
+use tokio::sync::RwLock;
 
 use crate::db::article_repo;
 use crate::db::connection::DbState;
@@ -11,7 +13,7 @@ use crate::screening::token_estimation;
 
 /// Global screening engine state managed by Tauri.
 pub struct ScreeningState {
-    pub engine: tokio::sync::Mutex<Option<ScreeningEngine>>,
+    pub engine: RwLock<Option<Arc<ScreeningEngine>>>,
 }
 
 /// Readiness check returned on mount — lightweight, single DB lock.
@@ -41,100 +43,74 @@ pub async fn get_screening_readiness(
     db_state: State<'_, DbState>,
     screening_state: State<'_, ScreeningState>,
 ) -> Result<ScreeningReadiness, AppError> {
-    // ── Single DB lock scope: check prerequisites, then counts if needed ──
-    struct ReadinessData {
-        total_working: usize,
-        total_unscreened: usize,
-        has_aims: bool,
-        has_inclusion: bool,
-        has_exclusion: bool,
-        has_llm_config: bool,
-        token_warning: Option<String>,
-    }
-
-    let data = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-
-        // 1. Check cheap prerequisites first
-        let has_aims = criteria_repo::has_any_aims(&conn)?;
-        let has_inclusion = criteria_repo::has_inclusion_criteria(&conn)?;
-        let has_exclusion = criteria_repo::has_exclusion_criteria(&conn)?;
-        let has_llm_config = llm_config_repo::has_config(&conn)?;
-
-        // Early exit: if prerequisites are missing, skip article queries entirely
-        if !has_aims || !has_inclusion || !has_exclusion || !has_llm_config {
-            ReadinessData {
-                total_working: 0,
-                total_unscreened: 0,
-                has_aims,
-                has_inclusion,
-                has_exclusion,
-                has_llm_config,
-                token_warning: None,
-            }
-        } else {
-            // 2. All prerequisites met — get counts + token warning in same lock scope
-            let total_working = article_repo::count_working(&conn)?;
-            let total_unscreened = article_repo::count_unscreened_working(&conn)?;
-
-            let token_warning = if total_unscreened > 0 {
-                // We still need the context window tokens from the config for estimation
-                let config = llm_config_repo::get_config(&conn)?
-                    .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
-
-                let max_chars = article_repo::max_article_char_len(&conn)?;
-                let worst_case_tokens = max_chars / 4; // chars/4 heuristic
-
-                let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
-                let template_tokens = token_estimation::estimate_tokens(&template_text);
-                let threshold = (config.context_window_tokens as f64 * 0.8) as usize;
-
-                let total = worst_case_tokens + template_tokens;
-                if total > threshold {
-                    Some(format!(
-                        "Estimated worst-case per-article tokens ({}) exceed 80% of context window ({}). \
-                         Articles with large abstracts may produce truncated responses.",
-                        total, threshold,
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            ReadinessData {
-                total_working,
-                total_unscreened,
-                has_aims,
-                has_inclusion,
-                has_exclusion,
-                has_llm_config,
-                token_warning,
-            }
-        }
-        // conn dropped here — single lock acquisition
-    };
-
     // ── Check screening engine (no DB lock held) ──
     let progress = {
-        let guard = screening_state.engine.lock().await;
+        let guard = screening_state.engine.read().await;
         match guard.as_ref() {
             Some(engine) => Some(engine.get_progress().await),
             None => None,
         }
     };
 
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    // 1. Check cheap prerequisites first
+    let has_aims = criteria_repo::has_any_aims(&conn)?;
+    let has_inclusion = criteria_repo::has_inclusion_criteria(&conn)?;
+    let has_exclusion = criteria_repo::has_exclusion_criteria(&conn)?;
+    let has_llm_config = llm_config_repo::has_config(&conn)?;
+
+    let (total_working, total_unscreened, token_warning) = if !has_aims
+        || !has_inclusion
+        || !has_exclusion
+        || !has_llm_config
+    {
+        (0, 0, None)
+    } else {
+        // 2. All prerequisites met — get counts + token warning in same lock scope
+        let total_working = article_repo::count_working(&conn)?;
+        let total_unscreened = article_repo::count_unscreened_working(&conn)?;
+
+        let token_warning = if total_unscreened > 0 {
+            // We still need the context window tokens from the config for estimation
+            let config = llm_config_repo::get_config(&conn)?
+                .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+
+            let max_chars = article_repo::max_article_char_len(&conn)?;
+            let worst_case_tokens = max_chars / 4; // chars/4 heuristic
+
+            let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
+            let template_tokens = token_estimation::estimate_tokens(&template_text);
+            let threshold = (config.context_window_tokens as f64 * 0.8) as usize;
+
+            let total = worst_case_tokens + template_tokens;
+            if total > threshold {
+                Some(format!(
+                    "Estimated worst-case per-article tokens ({}) exceed 80% of context window ({}). \
+                         Articles with large abstracts may produce truncated responses.",
+                    total, threshold,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        (total_working, total_unscreened, token_warning)
+    };
+
     Ok(ScreeningReadiness {
-        total_working: data.total_working,
-        total_unscreened: data.total_unscreened,
-        has_aims: data.has_aims,
-        has_inclusion: data.has_inclusion,
-        has_exclusion: data.has_exclusion,
-        has_llm_config: data.has_llm_config,
-        token_warning: data.token_warning,
+        total_working,
+        total_unscreened,
+        has_aims,
+        has_inclusion,
+        has_exclusion,
+        has_llm_config,
+        token_warning,
         progress,
     })
 }
@@ -206,35 +182,31 @@ pub async fn start_screening(
         ));
     }
 
-    let engine = ScreeningEngine::new();
-
-    // Store engine in state for progress/control queries
+    // Create and store engine in state
+    let engine = Arc::new(ScreeningEngine::new());
     {
-        let mut state_engine = screening_state.engine.lock().await;
-        *state_engine = Some(engine);
+        let mut state_engine = screening_state.engine.write().await;
+        *state_engine = Some(engine.clone());
     }
 
-    // Run screening using the engine stored in state
+    // Run screening without holding the state lock
+    engine.run_sync(&db_state.conn, config, criteria, aims).await?;
+
+    // Clear engine after completion
     {
-        let guard = screening_state.engine.lock().await;
-        if let Some(ref engine) = *guard {
-            engine.run_sync(&db_state.conn, config, criteria, aims).await?;
-        }
+        let mut state_engine = screening_state.engine.write().await;
+        *state_engine = None;
     }
 
     // Return final progress
-    let guard = screening_state.engine.lock().await;
-    match guard.as_ref() {
-        Some(engine) => Ok(engine.get_progress().await),
-        None => Ok(ScreeningProgress::default()),
-    }
+    Ok(engine.get_progress().await)
 }
 
 #[tauri::command]
 pub async fn get_screening_progress(
     screening_state: State<'_, ScreeningState>,
 ) -> Result<ScreeningProgress, AppError> {
-    let guard = screening_state.engine.lock().await;
+    let guard = screening_state.engine.read().await;
     match guard.as_ref() {
         Some(engine) => Ok(engine.get_progress().await),
         None => Ok(ScreeningProgress::default()),
@@ -243,37 +215,34 @@ pub async fn get_screening_progress(
 
 #[tauri::command]
 pub async fn pause_screening(screening_state: State<'_, ScreeningState>) -> Result<(), AppError> {
-    let guard = screening_state.engine.lock().await;
-    match guard.as_ref() {
-        Some(engine) => {
-            engine.pause().await;
-            Ok(())
-        }
-        None => Err(AppError::Validation("No screening in progress".to_string())),
+    let guard = screening_state.engine.read().await;
+    if let Some(ref engine) = *guard {
+        engine.pause().await;
+        Ok(())
+    } else {
+        Err(AppError::Validation("No screening in progress".to_string()))
     }
 }
 
 #[tauri::command]
 pub async fn resume_screening(screening_state: State<'_, ScreeningState>) -> Result<(), AppError> {
-    let guard = screening_state.engine.lock().await;
-    match guard.as_ref() {
-        Some(engine) => {
-            engine.resume().await;
-            Ok(())
-        }
-        None => Err(AppError::Validation("No screening in progress".to_string())),
+    let guard = screening_state.engine.read().await;
+    if let Some(ref engine) = *guard {
+        engine.resume().await;
+        Ok(())
+    } else {
+        Err(AppError::Validation("No screening in progress".to_string()))
     }
 }
 
 #[tauri::command]
 pub async fn stop_screening(screening_state: State<'_, ScreeningState>) -> Result<(), AppError> {
-    let guard = screening_state.engine.lock().await;
-    match guard.as_ref() {
-        Some(engine) => {
-            engine.cancel().await;
-            Ok(())
-        }
-        None => Err(AppError::Validation("No screening in progress".to_string())),
+    let guard = screening_state.engine.read().await;
+    if let Some(ref engine) = *guard {
+        engine.cancel().await;
+        Ok(())
+    } else {
+        Err(AppError::Validation("No screening in progress".to_string()))
     }
 }
 
@@ -287,29 +256,18 @@ pub fn estimate_screening_tokens(db_state: State<'_, DbState>) -> Result<Option<
     let config = llm_config_repo::get_config(&conn)?
         .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
-    let articles = article_repo::get_articles_by_status(&conn, "working")?;
-    let working: Vec<_> = articles.iter().filter(|a| a.screened_at.is_none()).collect();
-
-    if working.is_empty() {
+    let max_len = article_repo::max_article_char_len(&conn)?;
+    if max_len == 0 {
         return Ok(None);
     }
 
-    // Estimate template tokens
     let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
     let template_tokens = token_estimation::estimate_tokens(&template_text);
-
-    // Estimate per-article tokens
-    let article_tokens: Vec<usize> = working
-        .iter()
-        .map(|a| {
-            let text = format!("{}{}{}", a.title, a.authors.join(""), a.abstract_text);
-            token_estimation::estimate_tokens(&text)
-        })
-        .collect();
+    let worst_case_article_tokens = max_len / 4;
 
     Ok(token_estimation::check_context_window(
         template_tokens,
-        &article_tokens,
+        &[worst_case_article_tokens],
         config.context_window_tokens as usize,
     ))
 }

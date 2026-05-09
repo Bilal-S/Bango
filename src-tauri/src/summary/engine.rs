@@ -96,7 +96,7 @@ async fn summarize_batch(
     let input =
         SummaryPromptInput { aims: aims.to_vec(), target_length, articles: articles.to_vec() };
     let user_prompt = prompt::build_summary_prompt(&input);
-    let response =
+    let (response, _tokens) =
         client::send_chat_completion(config, prompt::SYSTEM_PROMPT, &user_prompt).await?;
     parse_summary_response(&response)
 }
@@ -160,7 +160,7 @@ Return JSON exactly matching this schema:
         b_gaps = b.gaps_in_literature,
     );
 
-    let response =
+    let (response, _tokens) =
         client::send_chat_completion(config, prompt::SYSTEM_PROMPT, &synthesis_prompt).await?;
     parse_summary_response(&response)
 }

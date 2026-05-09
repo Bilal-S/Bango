@@ -20,8 +20,14 @@ pub struct ChatMessage {
 }
 
 #[derive(Debug, Deserialize)]
+struct Usage {
+    total_tokens: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
+    usage: Option<Usage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,8 +74,16 @@ struct GoogleRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GoogleResponse {
     candidates: Vec<GoogleCandidate>,
+    usage_metadata: Option<GoogleUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoogleUsage {
+    total_token_count: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,7 +229,7 @@ pub async fn send_chat_completion(
     config: &LlmConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<String, AppError> {
+) -> Result<(String, usize), AppError> {
     match config.provider {
         LlmProvider::Google => send_google(config, system_prompt, user_prompt).await,
         _ => send_openai_compatible(config, system_prompt, user_prompt).await,
@@ -228,7 +242,7 @@ async fn send_google(
     config: &LlmConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<String, AppError> {
+) -> Result<(String, usize), AppError> {
     let client = Client::new();
     let request = GoogleRequest {
         system_instruction: GoogleSystemInstruction {
@@ -277,12 +291,15 @@ async fn send_google(
         .await
         .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
 
-    google_response
+    let content = google_response
         .candidates
         .first()
         .and_then(|c| c.content.parts.first())
         .map(|p| p.text.clone())
-        .ok_or_else(|| AppError::Import("No response from LLM".to_string()))
+        .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
+
+    let total_tokens = google_response.usage_metadata.map(|u| u.total_token_count).unwrap_or(0);
+    Ok((content, total_tokens))
 }
 
 // ── OpenAI-compatible path ───────────────────────────────────────────
@@ -291,7 +308,7 @@ async fn send_openai_compatible(
     config: &LlmConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<String, AppError> {
+) -> Result<(String, usize), AppError> {
     let client = Client::new();
     let request = ChatRequest {
         model: config.model_name.clone(),
@@ -351,9 +368,12 @@ async fn send_openai_compatible(
         .await
         .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
 
-    chat_response
+    let content = chat_response
         .choices
         .first()
         .map(|c| c.message.content.clone())
-        .ok_or_else(|| AppError::Import("No response from LLM".to_string()))
+        .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
+
+    let total_tokens = chat_response.usage.and_then(|u| u.total_tokens).unwrap_or(0);
+    Ok((content, total_tokens))
 }

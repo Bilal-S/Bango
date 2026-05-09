@@ -10,7 +10,9 @@ use crate::db::article_repo;
 use crate::error::AppError;
 use crate::llm::client;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
-use crate::screening::prompt::{self, AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput};
+use crate::screening::prompt::{
+    self, AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput,
+};
 use crate::screening::resolution::{self, CriterionMatch};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -99,18 +101,18 @@ impl ScreeningEngine {
         *self.cancel_token.lock().await = false;
         *self.pause_token.lock().await = false;
 
-        // Get unscreened working articles
-        let articles = {
+        // Get total count of unscreened working articles for progress tracking
+        let total = {
             let c = conn_mutex.lock().map_err(|e| {
                 AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
             })?;
-            article_repo::get_articles_by_status(&c, "working")?
-                .into_iter()
-                .filter(|a| a.screened_at.is_none())
-                .collect::<Vec<_>>()
+            article_repo::count_unscreened_working(&c)?
         };
 
-        let total = articles.len();
+        if total == 0 {
+            return Ok(());
+        }
+
         let inclusion_criteria: Vec<&Criterion> = criteria
             .iter()
             .filter(|c| matches!(c.criterion_type, CriterionType::Inclusion))
@@ -121,7 +123,8 @@ impl ScreeningEngine {
             .collect();
 
         // Build shared prompt parts (aims, criteria)
-        let aim_entries: Vec<AimEntry> = aims.iter().map(|a| AimEntry { text: a.text.clone() }).collect();
+        let aim_entries: Vec<AimEntry> =
+            aims.iter().map(|a| AimEntry { text: a.text.clone() }).collect();
         let inc_entries: Vec<CriterionEntry> = inclusion_criteria
             .iter()
             .map(|c| CriterionEntry {
@@ -153,13 +156,7 @@ impl ScreeningEngine {
         let start = Instant::now();
         let max_retries: u32 = 3;
 
-        // Chunk articles into batches
-        let batches: Vec<Vec<_>> = articles
-            .chunks(self.batch_size)
-            .map(|chunk| chunk.to_vec())
-            .collect();
-
-        for batch in &batches {
+        loop {
             // Check cancellation
             if *self.cancel_token.lock().await {
                 break;
@@ -173,6 +170,18 @@ impl ScreeningEngine {
                 }
             }
             if *self.cancel_token.lock().await {
+                break;
+            }
+
+            // 1. Fetch next batch from DB
+            let batch = {
+                let c = conn_mutex.lock().map_err(|e| {
+                    AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+                })?;
+                article_repo::get_next_unscreened_working_batch(&c, self.batch_size)?
+            };
+
+            if batch.is_empty() {
                 break;
             }
 
@@ -204,13 +213,13 @@ impl ScreeningEngine {
             let system_prompt = prompt::SYSTEM_PROMPT;
 
             // Send to LLM with retry on 429
-            let mut response_text = None;
+            let mut response_data = None;
             let mut retry_count: u32 = 0;
 
             while retry_count <= max_retries {
                 match client::send_chat_completion(&config, system_prompt, &user_prompt).await {
-                    Ok(text) => {
-                        response_text = Some(text);
+                    Ok((text, tokens)) => {
+                        response_data = Some((text, tokens));
                         break;
                     }
                     Err(e) if e.to_string().contains("429") => {
@@ -225,7 +234,7 @@ impl ScreeningEngine {
                                 e2.to_string(),
                             ))
                         })?;
-                        for article in batch {
+                        for article in &batch {
                             set_screening_error(&c, &article.id, &e.to_string())?;
                         }
                         break;
@@ -236,8 +245,8 @@ impl ScreeningEngine {
             // Apply delay between requests
             sleep(Duration::from_millis(config.request_delay_ms as u64)).await;
 
-            let response_text = match response_text {
-                Some(t) => t,
+            let (response_text, total_tokens) = match response_data {
+                Some(data) => data,
                 None => {
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();
@@ -245,6 +254,9 @@ impl ScreeningEngine {
                     continue;
                 }
             };
+
+            // Calculate pro-rated tokens per article
+            let tokens_per_article = total_tokens / batch.len();
 
             // Parse array response
             match process_screening_responses(&response_text) {
@@ -257,7 +269,7 @@ impl ScreeningEngine {
                                     e2.to_string(),
                                 ))
                             })?;
-                            for article in batch {
+                            for article in &batch {
                                 set_screening_error(
                                     &c,
                                     &article.id,
@@ -341,12 +353,15 @@ impl ScreeningEngine {
                             })?;
                             update_article_after_screening(
                                 &c,
-                                &article.id,
-                                final_decision,
-                                &reasoning,
-                                screening.confidence,
-                                &screening.matched_inclusion_criteria,
-                                &screening.matched_exclusion_criteria,
+                                ScreeningUpdate {
+                                    article_id: &article.id,
+                                    decision: final_decision,
+                                    reasoning: &reasoning,
+                                    confidence: screening.confidence,
+                                    matched_inc: &screening.matched_inclusion_criteria,
+                                    matched_exc: &screening.matched_exclusion_criteria,
+                                    actual_tokens: Some(tokens_per_article),
+                                },
                             )?;
 
                             // Create/update tags from suggested_tags
@@ -382,7 +397,7 @@ impl ScreeningEngine {
                                 e2.to_string(),
                             ))
                         })?;
-                        for article in batch {
+                        for article in &batch {
                             set_screening_error(&c, &article.id, &response_text)?;
                         }
                     }
@@ -441,31 +456,38 @@ fn set_screening_error(
     Ok(())
 }
 
+struct ScreeningUpdate<'a> {
+    article_id: &'a str,
+    decision: &'a str,
+    reasoning: &'a str,
+    confidence: f64,
+    matched_inc: &'a [String],
+    matched_exc: &'a [String],
+    actual_tokens: Option<usize>,
+}
+
 fn update_article_after_screening(
     conn: &Connection,
-    article_id: &str,
-    decision: &str,
-    reasoning: &str,
-    confidence: f64,
-    matched_inc: &[String],
-    matched_exc: &[String],
+    update: ScreeningUpdate,
 ) -> Result<(), AppError> {
-    let new_status = if decision == "include" { "included" } else { "rejected" };
-    let matched_inc_json = serde_json::to_string(matched_inc)?;
-    let matched_exc_json = serde_json::to_string(matched_exc)?;
+    let new_status = if update.decision == "include" { "included" } else { "rejected" };
+    let matched_inc_json = serde_json::to_string(update.matched_inc)?;
+    let matched_exc_json = serde_json::to_string(update.matched_exc)?;
 
     conn.execute(
         "UPDATE articles SET status = ?1, ai_decision = ?2, ai_reasoning = ?3, ai_confidence = ?4, \
-         matched_inclusion_criteria = ?5, matched_exclusion_criteria = ?6, screened_at = datetime('now') \
-         WHERE id = ?7",
+         matched_inclusion_criteria = ?5, matched_exclusion_criteria = ?6, screened_at = datetime('now'), \
+         actual_tokens = ?7 \
+         WHERE id = ?8",
         rusqlite::params![
             new_status,
-            decision,
-            reasoning,
-            confidence,
+            update.decision,
+            update.reasoning,
+            update.confidence,
             matched_inc_json,
             matched_exc_json,
-            article_id
+            update.actual_tokens,
+            update.article_id
         ],
     )?;
 
@@ -475,9 +497,9 @@ fn update_article_after_screening(
          VALUES (?1, ?2, 'ai_screen', 'working', ?3, ?4, 'ai')",
         rusqlite::params![
             audit_id,
-            article_id,
+            update.article_id,
             new_status,
-            format!("AI screened: {decision} (confidence: {confidence:.2})")
+            format!("AI screened: {} (confidence: {:.2})", update.decision, update.confidence)
         ],
     )?;
 

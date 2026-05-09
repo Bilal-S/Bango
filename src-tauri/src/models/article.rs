@@ -46,6 +46,9 @@ pub struct Article {
     pub import_source: Option<String>,
     pub imported_at: String,
     pub screened_at: Option<String>,
+    pub data_length: Option<usize>,
+    pub token_estimate: Option<usize>,
+    pub actual_tokens: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +126,8 @@ pub struct NewArticle {
     pub web_of_science_db: Option<String>,
     pub ris_extras: Option<serde_json::Value>,
     pub import_source: Option<String>,
+    pub data_length: Option<usize>,
+    pub token_estimate: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

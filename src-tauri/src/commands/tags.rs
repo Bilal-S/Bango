@@ -189,7 +189,7 @@ Rules:
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of content-category tags for organizing articles in a literature review.";
-    let response = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
+    let (response, _) = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
 
     // Parse response
     let json_str = response

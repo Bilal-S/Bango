@@ -33,15 +33,81 @@ pub fn count_working(conn: &Connection) -> Result<usize, AppError> {
 
 /// Get the MAX character length (title + abstract) among unscreened working articles.
 /// Used for worst-case token estimation without materializing any rows.
+/// Uses the pre-computed `data_length` column to avoid per-query LENGTH() calculations.
 /// Returns 0 if no unscreened working articles exist.
 pub fn max_article_char_len(conn: &Connection) -> Result<usize, AppError> {
     let max_len: usize = conn.query_row(
-        "SELECT COALESCE(MAX(LENGTH(COALESCE(title,'')) + LENGTH(COALESCE(abstract_text,''))), 0) \
-         FROM articles WHERE status = 'working' AND screened_at IS NULL",
+        "SELECT COALESCE(MAX(data_length), 0) FROM articles \
+         WHERE status = 'working' AND screened_at IS NULL",
         [],
         |row| row.get(0),
     )?;
     Ok(max_len)
+}
+
+/// Fetch a small batch of unscreened working articles.
+/// Optimized to fetch only necessary fields for screening.
+pub fn get_next_unscreened_working_batch(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<Article>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, abstract_text, authors, publication_year FROM articles \
+         WHERE status = 'working' AND screened_at IS NULL \
+         ORDER BY imported_at ASC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], |row| {
+        Ok(Article {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            abstract_text: row.get(2)?,
+            authors: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
+            publication_year: row.get(4)?,
+            // Fill other fields with defaults as they aren't needed for the screening prompt
+            status: crate::models::article::ArticleStatus::Working,
+            screening_error: false,
+            doi: None,
+            journal: None,
+            volume: None,
+            issue: None,
+            start_page: None,
+            end_page: None,
+            keywords: vec![],
+            url: None,
+            language: None,
+            publisher: None,
+            publisher_city: None,
+            publisher_address: None,
+            issn: None,
+            reference_type: None,
+            date: None,
+            author_address: None,
+            accession_number: None,
+            custom_field3: None,
+            journal_abbreviation: None,
+            journal_iso_abbreviation: None,
+            notes: None,
+            web_of_science_db: None,
+            user_notes: None,
+            ris_extras: None,
+            duplicate_of: None,
+            ai_decision: None,
+            ai_reasoning: None,
+            ai_confidence: None,
+            matched_inclusion_criteria: vec![],
+            matched_exclusion_criteria: vec![],
+            tags: vec![],
+            labels: vec![],
+            manual_override: false,
+            import_source: None,
+            imported_at: "".to_string(),
+            screened_at: None,
+            data_length: None,
+            token_estimate: None,
+            actual_tokens: None,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn remaining_capacity(conn: &Connection) -> Result<usize, AppError> {
@@ -56,6 +122,11 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
     let ris_extras_json =
         article.ris_extras.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default());
 
+    let data_length = article
+        .data_length
+        .unwrap_or_else(|| article.title.chars().count() + article.abstract_text.chars().count());
+    let token_estimate = article.token_estimate.unwrap_or(data_length / 4);
+
     conn.execute(
         "INSERT INTO articles (
             id, status, title, abstract_text, authors, publication_year, doi,
@@ -63,14 +134,16 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             language, publisher, publisher_city, publisher_address, issn,
             reference_type, date, author_address, accession_number,
             custom_field3, journal_abbreviation, journal_iso_abbreviation,
-            notes, web_of_science_db, ris_extras, import_source
+            notes, web_of_science_db, ris_extras, import_source,
+            data_length, token_estimate
         ) VALUES (
             ?1, 'duplicate', ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17, ?18,
             ?19, ?20, ?21, ?22,
             ?23, ?24, ?25,
-            ?26, ?27, ?28, ?29
+            ?26, ?27, ?28, ?29,
+            ?30, ?31
         )",
         params![
             id,
@@ -102,6 +175,8 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             article.web_of_science_db,
             ris_extras_json,
             article.import_source,
+            data_length,
+            token_estimate,
         ],
     )?;
 
@@ -138,6 +213,12 @@ pub fn insert_articles_batch(
             .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_default());
 
+        let data_length = article_with_source.data_length.unwrap_or_else(|| {
+            article_with_source.title.chars().count()
+                + article_with_source.abstract_text.chars().count()
+        });
+        let token_estimate = article_with_source.token_estimate.unwrap_or(data_length / 4);
+
         tx.execute(
             "INSERT INTO articles (
                 id, status, title, abstract_text, authors, publication_year, doi,
@@ -145,14 +226,16 @@ pub fn insert_articles_batch(
                 language, publisher, publisher_city, publisher_address, issn,
                 reference_type, date, author_address, accession_number,
                 custom_field3, journal_abbreviation, journal_iso_abbreviation,
-                notes, web_of_science_db, ris_extras, import_source
+                notes, web_of_science_db, ris_extras, import_source,
+                data_length, token_estimate
             ) VALUES (
                 ?1, 'duplicate', ?2, ?3, ?4, ?5, ?6,
                 ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                 ?14, ?15, ?16, ?17, ?18,
                 ?19, ?20, ?21, ?22,
                 ?23, ?24, ?25,
-                ?26, ?27, ?28, ?29
+                ?26, ?27, ?28, ?29,
+                ?30, ?31
             )",
             params![
                 id,
@@ -184,6 +267,8 @@ pub fn insert_articles_batch(
                 article_with_source.web_of_science_db,
                 ris_extras_json,
                 article_with_source.import_source,
+                data_length,
+                token_estimate,
             ],
         )?;
 
@@ -687,6 +772,9 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         import_source: row.get("import_source")?,
         imported_at: row.get("imported_at")?,
         screened_at: row.get("screened_at")?,
+        data_length: row.get("data_length")?,
+        token_estimate: row.get("token_estimate")?,
+        actual_tokens: row.get("actual_tokens")?,
     })
 }
 

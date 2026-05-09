@@ -49,11 +49,8 @@ pub struct ScreeningPromptInput {
 /// Returns true when all criteria (both inclusion and exclusion) share the same priority,
 /// or when there are zero or one criteria total.
 fn all_same_priority(inclusion: &[CriterionEntry], exclusion: &[CriterionEntry]) -> bool {
-    let all_priorities: Vec<Priority> = inclusion
-        .iter()
-        .chain(exclusion.iter())
-        .map(|c| c.priority)
-        .collect();
+    let all_priorities: Vec<Priority> =
+        inclusion.iter().chain(exclusion.iter()).map(|c| c.priority).collect();
 
     if all_priorities.len() <= 1 {
         return true;
@@ -82,7 +79,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         input.inclusion_criteria.iter().collect()
     } else {
         let mut v: Vec<&CriterionEntry> = input.inclusion_criteria.iter().collect();
-        v.sort_by(|a, b| b.priority.cmp(&a.priority));
+        v.sort_by_key(|b| std::cmp::Reverse(b.priority));
         v
     };
 
@@ -90,7 +87,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         input.exclusion_criteria.iter().collect()
     } else {
         let mut v: Vec<&CriterionEntry> = input.exclusion_criteria.iter().collect();
-        v.sort_by(|a, b| b.priority.cmp(&a.priority));
+        v.sort_by_key(|b| std::cmp::Reverse(b.priority));
         v
     };
 
@@ -144,10 +141,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
             .articles
             .iter()
             .map(|a| {
-                let year_val = a
-                    .year
-                    .map(|y| y.to_string())
-                    .unwrap_or_else(|| "null".to_string());
+                let year_val = a.year.map(|y| y.to_string()).unwrap_or_else(|| "null".to_string());
                 format!(
                     r#"{{"title": {}, "authors": {}, "year": {}, "abstract": {}}}"#,
                     escape_json_str(&a.title),
@@ -187,5 +181,8 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
 
 /// Escape a string for embedding inside a JSON string value (without surrounding quotes).
 fn escape_json_str(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
+    format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r")
+    )
 }

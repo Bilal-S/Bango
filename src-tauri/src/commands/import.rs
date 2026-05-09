@@ -106,9 +106,14 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
         Some(serde_json::to_value(&record.extras).unwrap_or(serde_json::Value::Null))
     };
 
+    let title = record.title.clone().unwrap_or_default();
+    let abstract_text = record.abstract_text.clone().unwrap_or_default();
+    let data_length = title.chars().count() + abstract_text.chars().count();
+    let token_estimate = data_length / 4;
+
     NewArticle {
-        title: record.title.clone().unwrap_or_default(),
-        abstract_text: record.abstract_text.clone().unwrap_or_default(),
+        title,
+        abstract_text,
         authors: record.authors.clone(),
         publication_year: record.publication_year,
         doi: record.doi.clone(),
@@ -135,6 +140,8 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
         web_of_science_db: record.web_of_science_db.clone(),
         ris_extras: extras,
         import_source: None,
+        data_length: Some(data_length),
+        token_estimate: Some(token_estimate),
     }
 }
 
