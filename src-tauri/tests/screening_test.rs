@@ -1,12 +1,31 @@
 use bango_lib::models::criterion::{CriterionType, Priority};
 use bango_lib::screening::prompt::{
-    build_screening_prompt, AimEntry, CriterionEntry, ScreeningPromptInput,
+    build_screening_prompt, AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput,
+    SYSTEM_PROMPT,
 };
 use bango_lib::screening::resolution::{resolve_decision, CriterionMatch, ScreeningInput};
 use bango_lib::screening::token_estimation::estimate_tokens;
 
 fn make_match(id: &str, ctype: CriterionType, priority: Priority) -> CriterionMatch {
-    CriterionMatch { id: id.to_string(), criterion_type: ctype, priority }
+    CriterionMatch {
+        id: id.to_string(),
+        criterion_type: ctype,
+        priority,
+    }
+}
+
+fn make_single_article_input() -> ScreeningPromptInput {
+    ScreeningPromptInput {
+        aims: vec![],
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
+        articles: vec![ArticleEntry {
+            title: "Test".to_string(),
+            authors: "Author".to_string(),
+            year: None,
+            abstract_text: "Abstract".to_string(),
+        }],
+    }
 }
 
 // --- Resolution tests ---
@@ -40,7 +59,10 @@ fn test_tied_priority_favors_inclusion() {
 
 #[test]
 fn test_no_criteria_matches_exclude() {
-    let input = ScreeningInput { inclusion_matches: vec![], exclusion_matches: vec![] };
+    let input = ScreeningInput {
+        inclusion_matches: vec![],
+        exclusion_matches: vec![],
+    };
     assert_eq!(resolve_decision(&input), "exclude");
 }
 
@@ -120,22 +142,18 @@ fn test_critical_exclusion_overrides_all() {
 #[test]
 fn test_build_prompt_contains_research_aims() {
     let input = ScreeningPromptInput {
-        aims: vec![AimEntry { text: "Study ML in healthcare".to_string() }],
-        inclusion_criteria: vec![],
-        exclusion_criteria: vec![],
-        article_title: "Test".to_string(),
-        article_authors: "Smith, John".to_string(),
-        article_year: Some(2023),
-        article_abstract: "Abstract text".to_string(),
+        aims: vec![AimEntry {
+            text: "Study ML in healthcare".to_string(),
+        }],
+        ..make_single_article_input()
     };
     let prompt = build_screening_prompt(&input);
     assert!(prompt.contains("Study ML in healthcare"));
 }
 
 #[test]
-fn test_build_prompt_contains_criteria_with_priority() {
+fn test_build_prompt_contains_criteria() {
     let input = ScreeningPromptInput {
-        aims: vec![],
         inclusion_criteria: vec![CriterionEntry {
             id: "c1".to_string(),
             text: "Must be about ML".to_string(),
@@ -146,30 +164,25 @@ fn test_build_prompt_contains_criteria_with_priority() {
             text: "Not a review".to_string(),
             priority: Priority::High,
         }],
-        article_title: "Test".to_string(),
-        article_authors: "Author".to_string(),
-        article_year: None,
-        article_abstract: "Abstract".to_string(),
+        ..make_single_article_input()
     };
     let prompt = build_screening_prompt(&input);
-    assert!(prompt.contains("c1"));
+    assert!(prompt.contains("[c1]"));
     assert!(prompt.contains("Must be about ML"));
-    assert!(prompt.contains("critical"));
-    assert!(prompt.contains("c2"));
+    assert!(prompt.contains("[c2]"));
     assert!(prompt.contains("Not a review"));
-    assert!(prompt.contains("high"));
 }
 
 #[test]
 fn test_build_prompt_contains_article_fields() {
     let input = ScreeningPromptInput {
-        aims: vec![],
-        inclusion_criteria: vec![],
-        exclusion_criteria: vec![],
-        article_title: "Deep Learning for Medical Imaging".to_string(),
-        article_authors: "Doe, Jane; Smith, John".to_string(),
-        article_year: Some(2024),
-        article_abstract: "This paper reviews deep learning methods.".to_string(),
+        articles: vec![ArticleEntry {
+            title: "Deep Learning for Medical Imaging".to_string(),
+            authors: "Doe, Jane; Smith, John".to_string(),
+            year: Some(2024),
+            abstract_text: "This paper reviews deep learning methods.".to_string(),
+        }],
+        ..make_single_article_input()
     };
     let prompt = build_screening_prompt(&input);
     assert!(prompt.contains("Deep Learning for Medical Imaging"));
@@ -179,23 +192,117 @@ fn test_build_prompt_contains_article_fields() {
 }
 
 #[test]
-fn test_build_prompt_response_format() {
+fn test_system_prompt_contains_response_format() {
+    assert!(SYSTEM_PROMPT.contains("\"decision\""));
+    assert!(SYSTEM_PROMPT.contains("\"reasoning\""));
+    assert!(SYSTEM_PROMPT.contains("\"matched_inclusion_criteria\""));
+    assert!(SYSTEM_PROMPT.contains("\"matched_exclusion_criteria\""));
+    assert!(SYSTEM_PROMPT.contains("\"suggested_tags\""));
+    assert!(SYSTEM_PROMPT.contains("\"confidence\""));
+    assert!(SYSTEM_PROMPT.contains("\"error\""));
+}
+
+#[test]
+fn test_build_prompt_no_response_format_in_user_prompt() {
+    let input = make_single_article_input();
+    let prompt = build_screening_prompt(&input);
+    // User prompt should NOT contain response format schema
+    assert!(!prompt.contains("## Response Format"));
+    assert!(!prompt.contains("Return JSON exactly matching this schema"));
+}
+
+#[test]
+fn test_build_prompt_simplified_priority_when_all_same() {
     let input = ScreeningPromptInput {
-        aims: vec![],
-        inclusion_criteria: vec![],
-        exclusion_criteria: vec![],
-        article_title: "Test".to_string(),
-        article_authors: "Author".to_string(),
-        article_year: None,
-        article_abstract: "Abstract".to_string(),
+        inclusion_criteria: vec![
+            CriterionEntry {
+                id: "c1".to_string(),
+                text: "Inc 1".to_string(),
+                priority: Priority::Standard,
+            },
+            CriterionEntry {
+                id: "c2".to_string(),
+                text: "Inc 2".to_string(),
+                priority: Priority::Standard,
+            },
+        ],
+        exclusion_criteria: vec![CriterionEntry {
+            id: "c3".to_string(),
+            text: "Exc 1".to_string(),
+            priority: Priority::Standard,
+        }],
+        ..make_single_article_input()
     };
     let prompt = build_screening_prompt(&input);
-    assert!(prompt.contains("\"decision\""));
-    assert!(prompt.contains("\"reasoning\""));
-    assert!(prompt.contains("\"matched_inclusion_criteria\""));
-    assert!(prompt.contains("\"matched_exclusion_criteria\""));
-    assert!(prompt.contains("\"suggested_tags\""));
-    assert!(prompt.contains("\"confidence\""));
+    // Should use simplified priority rule
+    assert!(prompt.contains("If conflict between criteria favor inclusion rules."));
+    assert!(!prompt.contains("in order of priority"));
+    // Headers should NOT mention priority
+    assert!(prompt.contains("## Inclusion Criteria\n"));
+    assert!(prompt.contains("## Exclusion Criteria\n"));
+}
+
+#[test]
+fn test_build_prompt_priority_ordering_when_mixed() {
+    let input = ScreeningPromptInput {
+        inclusion_criteria: vec![
+            CriterionEntry {
+                id: "c1".to_string(),
+                text: "Low inc".to_string(),
+                priority: Priority::Low,
+            },
+            CriterionEntry {
+                id: "c2".to_string(),
+                text: "Critical inc".to_string(),
+                priority: Priority::Critical,
+            },
+        ],
+        exclusion_criteria: vec![CriterionEntry {
+            id: "c3".to_string(),
+            text: "High exc".to_string(),
+            priority: Priority::High,
+        }],
+        ..make_single_article_input()
+    };
+    let prompt = build_screening_prompt(&input);
+    // Should use detailed priority rules
+    assert!(prompt.contains("Higher priority rules always outweigh lower priority rules."));
+    // Headers should mention priority
+    assert!(prompt.contains("## Inclusion Criteria (in order of priority)"));
+    assert!(prompt.contains("## Exclusion Criteria (in order of priority)"));
+    // Critical inc should come before Low inc (sorted by priority descending)
+    let critical_pos = prompt.find("Critical inc").expect("should contain critical");
+    let low_pos = prompt.find("Low inc").expect("should contain low");
+    assert!(
+        critical_pos < low_pos,
+        "Critical should appear before Low in prompt"
+    );
+}
+
+#[test]
+fn test_build_prompt_multiple_articles() {
+    let input = ScreeningPromptInput {
+        articles: vec![
+            ArticleEntry {
+                title: "Article One".to_string(),
+                authors: "Author A".to_string(),
+                year: Some(2023),
+                abstract_text: "Abstract one.".to_string(),
+            },
+            ArticleEntry {
+                title: "Article Two".to_string(),
+                authors: "Author B".to_string(),
+                year: Some(2024),
+                abstract_text: "Abstract two.".to_string(),
+            },
+        ],
+        ..make_single_article_input()
+    };
+    let prompt = build_screening_prompt(&input);
+    assert!(prompt.contains("Article One"));
+    assert!(prompt.contains("Article Two"));
+    assert!(prompt.contains("Abstract one"));
+    assert!(prompt.contains("Abstract two"));
 }
 
 // --- Token estimation tests ---
@@ -220,13 +327,16 @@ fn test_estimate_tokens_unicode() {
 #[test]
 fn test_prompt_token_estimation() {
     let input = ScreeningPromptInput {
-        aims: vec![AimEntry { text: "Study AI".to_string() }],
-        inclusion_criteria: vec![],
-        exclusion_criteria: vec![],
-        article_title: "Test Article Title".to_string(),
-        article_authors: "Author".to_string(),
-        article_year: Some(2023),
-        article_abstract: "a".repeat(200),
+        aims: vec![AimEntry {
+            text: "Study AI".to_string(),
+        }],
+        articles: vec![ArticleEntry {
+            title: "Test Article Title".to_string(),
+            authors: "Author".to_string(),
+            year: Some(2023),
+            abstract_text: "a".repeat(200),
+        }],
+        ..make_single_article_input()
     };
     let prompt = build_screening_prompt(&input);
     let tokens = estimate_tokens(&prompt);

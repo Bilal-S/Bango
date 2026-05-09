@@ -10,7 +10,7 @@ use crate::db::article_repo;
 use crate::error::AppError;
 use crate::llm::client;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
-use crate::screening::prompt::{self, AimEntry, CriterionEntry, ScreeningPromptInput};
+use crate::screening::prompt::{self, AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput};
 use crate::screening::resolution::{self, CriterionMatch};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -42,6 +42,7 @@ pub struct ScreeningEngine {
     progress: Arc<Mutex<ScreeningProgress>>,
     cancel_token: Arc<Mutex<bool>>,
     pause_token: Arc<Mutex<bool>>,
+    batch_size: usize,
 }
 
 impl Default for ScreeningEngine {
@@ -56,6 +57,17 @@ impl ScreeningEngine {
             progress: Arc::new(Mutex::new(ScreeningProgress::default())),
             cancel_token: Arc::new(Mutex::new(false)),
             pause_token: Arc::new(Mutex::new(false)),
+            batch_size: 1,
+        }
+    }
+
+    /// Create engine with a specific batch size.
+    pub fn with_batch_size(batch_size: usize) -> Self {
+        Self {
+            progress: Arc::new(Mutex::new(ScreeningProgress::default())),
+            cancel_token: Arc::new(Mutex::new(false)),
+            pause_token: Arc::new(Mutex::new(false)),
+            batch_size: batch_size.max(1),
         }
     }
 
@@ -108,6 +120,25 @@ impl ScreeningEngine {
             .filter(|c| matches!(c.criterion_type, CriterionType::Exclusion))
             .collect();
 
+        // Build shared prompt parts (aims, criteria)
+        let aim_entries: Vec<AimEntry> = aims.iter().map(|a| AimEntry { text: a.text.clone() }).collect();
+        let inc_entries: Vec<CriterionEntry> = inclusion_criteria
+            .iter()
+            .map(|c| CriterionEntry {
+                id: c.id.clone(),
+                text: c.text.clone(),
+                priority: c.priority,
+            })
+            .collect();
+        let exc_entries: Vec<CriterionEntry> = exclusion_criteria
+            .iter()
+            .map(|c| CriterionEntry {
+                id: c.id.clone(),
+                text: c.text.clone(),
+                priority: c.priority,
+            })
+            .collect();
+
         // Initialize progress
         {
             let mut progress = self.progress.lock().await;
@@ -122,7 +153,13 @@ impl ScreeningEngine {
         let start = Instant::now();
         let max_retries: u32 = 3;
 
-        for article in &articles {
+        // Chunk articles into batches
+        let batches: Vec<Vec<_>> = articles
+            .chunks(self.batch_size)
+            .map(|chunk| chunk.to_vec())
+            .collect();
+
+        for batch in &batches {
             // Check cancellation
             if *self.cancel_token.lock().await {
                 break;
@@ -139,35 +176,28 @@ impl ScreeningEngine {
                 break;
             }
 
-            // Update current article
+            // Update current article title (show first in batch)
             {
                 let mut progress = self.progress.lock().await;
-                progress.current_article_title = Some(article.title.clone());
+                progress.current_article_title = Some(batch[0].title.clone());
             }
 
-            // Build prompt
+            // Build prompt with batch of articles
+            let article_entries: Vec<ArticleEntry> = batch
+                .iter()
+                .map(|a| ArticleEntry {
+                    title: a.title.clone(),
+                    authors: a.authors.join("; "),
+                    year: a.publication_year,
+                    abstract_text: a.abstract_text.clone(),
+                })
+                .collect();
+
             let prompt_input = ScreeningPromptInput {
-                aims: aims.iter().map(|a| AimEntry { text: a.text.clone() }).collect(),
-                inclusion_criteria: inclusion_criteria
-                    .iter()
-                    .map(|c| CriterionEntry {
-                        id: c.id.clone(),
-                        text: c.text.clone(),
-                        priority: c.priority,
-                    })
-                    .collect(),
-                exclusion_criteria: exclusion_criteria
-                    .iter()
-                    .map(|c| CriterionEntry {
-                        id: c.id.clone(),
-                        text: c.text.clone(),
-                        priority: c.priority,
-                    })
-                    .collect(),
-                article_title: article.title.clone(),
-                article_authors: article.authors.join("; "),
-                article_year: article.publication_year,
-                article_abstract: article.abstract_text.clone(),
+                aims: aim_entries.clone(),
+                inclusion_criteria: inc_entries.clone(),
+                exclusion_criteria: exc_entries.clone(),
+                articles: article_entries,
             };
 
             let user_prompt = prompt::build_screening_prompt(&prompt_input);
@@ -189,12 +219,15 @@ impl ScreeningEngine {
                         sleep(Duration::from_secs(delay_secs)).await;
                     }
                     Err(e) => {
+                        // Mark all articles in batch as errors
                         let c = conn_mutex.lock().map_err(|e2| {
                             AppError::Database(rusqlite::Error::InvalidParameterName(
                                 e2.to_string(),
                             ))
                         })?;
-                        set_screening_error(&c, &article.id, &e.to_string())?;
+                        for article in batch {
+                            set_screening_error(&c, &article.id, &e.to_string())?;
+                        }
                         break;
                     }
                 }
@@ -207,85 +240,133 @@ impl ScreeningEngine {
                 Some(t) => t,
                 None => {
                     let mut progress = self.progress.lock().await;
-                    progress.errors += 1;
-                    progress.completed += 1;
+                    progress.errors += batch.len();
+                    progress.completed += batch.len();
                     continue;
                 }
             };
 
-            // Parse response
-            match process_screening_response(&response_text) {
-                Ok(screening) => {
-                    // Apply priority resolution
-                    let inc_matches: Vec<CriterionMatch> = screening
-                        .matched_inclusion_criteria
-                        .iter()
-                        .filter_map(|id| criteria.iter().find(|c| c.id == *id))
-                        .map(|c| CriterionMatch {
-                            id: c.id.clone(),
-                            criterion_type: c.criterion_type.clone(),
-                            priority: c.priority,
-                        })
-                        .collect();
-
-                    let exc_matches: Vec<CriterionMatch> = screening
-                        .matched_exclusion_criteria
-                        .iter()
-                        .filter_map(|id| criteria.iter().find(|c| c.id == *id))
-                        .map(|c| CriterionMatch {
-                            id: c.id.clone(),
-                            criterion_type: c.criterion_type.clone(),
-                            priority: c.priority,
-                        })
-                        .collect();
-
-                    let resolution_input = resolution::ScreeningInput {
-                        inclusion_matches: inc_matches,
-                        exclusion_matches: exc_matches,
-                    };
-                    let final_decision = resolution::resolve_decision(&resolution_input);
-
-                    // Check for override
-                    let ai_decision_str = screening.decision.as_str();
-                    let mut reasoning = screening.reasoning;
-                    if ai_decision_str != final_decision {
-                        reasoning.push_str(&format!(
-                            "\n\n[App override: {} favored due to priority resolution]",
-                            if final_decision == "include" { "inclusion" } else { "exclusion" }
-                        ));
+            // Parse array response
+            match process_screening_responses(&response_text) {
+                Ok(screenings) => {
+                    // Validate response count matches batch size
+                    if screenings.len() != batch.len() {
+                        {
+                            let c = conn_mutex.lock().map_err(|e2| {
+                                AppError::Database(rusqlite::Error::InvalidParameterName(
+                                    e2.to_string(),
+                                ))
+                            })?;
+                            for article in batch {
+                                set_screening_error(
+                                    &c,
+                                    &article.id,
+                                    &format!(
+                                        "LLM returned {} results for {} articles",
+                                        screenings.len(),
+                                        batch.len()
+                                    ),
+                                )?;
+                            }
+                        }
+                        let mut progress = self.progress.lock().await;
+                        progress.errors += batch.len();
+                        progress.completed += batch.len();
+                        continue;
                     }
 
-                    // Update article in DB
-                    {
-                        let c = conn_mutex.lock().map_err(|e2| {
-                            AppError::Database(rusqlite::Error::InvalidParameterName(
-                                e2.to_string(),
-                            ))
-                        })?;
-                        update_article_after_screening(
-                            &c,
-                            &article.id,
-                            final_decision,
-                            &reasoning,
-                            screening.confidence,
-                            &screening.matched_inclusion_criteria,
-                            &screening.matched_exclusion_criteria,
-                        )?;
+                    // Process each article/result pair
+                    for (article, screening) in batch.iter().zip(screenings.iter()) {
+                        // Handle error decision from LLM
+                        if screening.decision == "error" {
+                            {
+                                let c = conn_mutex.lock().map_err(|e2| {
+                                    AppError::Database(rusqlite::Error::InvalidParameterName(
+                                        e2.to_string(),
+                                    ))
+                                })?;
+                                set_screening_error(&c, &article.id, &screening.reasoning)?;
+                            }
+                            let mut progress = self.progress.lock().await;
+                            progress.errors += 1;
+                            progress.completed += 1;
+                            continue;
+                        }
 
-                        // Create/update tags from suggested_tags
-                        for tag_name in &screening.suggested_tags {
-                            let _ = create_or_match_tag(&c, tag_name, &article.id);
+                        // Apply priority resolution
+                        let inc_matches: Vec<CriterionMatch> = screening
+                            .matched_inclusion_criteria
+                            .iter()
+                            .filter_map(|id| criteria.iter().find(|c| c.id == *id))
+                            .map(|c| CriterionMatch {
+                                id: c.id.clone(),
+                                criterion_type: c.criterion_type.clone(),
+                                priority: c.priority,
+                            })
+                            .collect();
+
+                        let exc_matches: Vec<CriterionMatch> = screening
+                            .matched_exclusion_criteria
+                            .iter()
+                            .filter_map(|id| criteria.iter().find(|c| c.id == *id))
+                            .map(|c| CriterionMatch {
+                                id: c.id.clone(),
+                                criterion_type: c.criterion_type.clone(),
+                                priority: c.priority,
+                            })
+                            .collect();
+
+                        let resolution_input = resolution::ScreeningInput {
+                            inclusion_matches: inc_matches,
+                            exclusion_matches: exc_matches,
+                        };
+                        let final_decision = resolution::resolve_decision(&resolution_input);
+
+                        // Check for override
+                        let ai_decision_str = screening.decision.as_str();
+                        let mut reasoning = screening.reasoning.clone();
+                        if ai_decision_str != final_decision {
+                            reasoning.push_str(&format!(
+                                "\n\n[App override: {} favored due to priority resolution]",
+                                if final_decision == "include" { "inclusion" } else { "exclusion" }
+                            ));
+                        }
+
+                        // Update article in DB
+                        {
+                            let c = conn_mutex.lock().map_err(|e2| {
+                                AppError::Database(rusqlite::Error::InvalidParameterName(
+                                    e2.to_string(),
+                                ))
+                            })?;
+                            update_article_after_screening(
+                                &c,
+                                &article.id,
+                                final_decision,
+                                &reasoning,
+                                screening.confidence,
+                                &screening.matched_inclusion_criteria,
+                                &screening.matched_exclusion_criteria,
+                            )?;
+
+                            // Create/update tags from suggested_tags
+                            for tag_name in &screening.suggested_tags {
+                                let _ = create_or_match_tag(&c, tag_name, &article.id);
+                            }
+                        }
+
+                        // Update progress
+                        let mut progress = self.progress.lock().await;
+                        progress.completed += 1;
+                        if final_decision == "include" {
+                            progress.included += 1;
+                        } else {
+                            progress.rejected += 1;
                         }
                     }
 
-                    // Update progress
+                    // Update elapsed time after entire batch
                     let mut progress = self.progress.lock().await;
-                    progress.completed += 1;
-                    if final_decision == "include" {
-                        progress.included += 1;
-                    } else {
-                        progress.rejected += 1;
-                    }
                     let elapsed = start.elapsed().as_millis() as u64;
                     progress.elapsed_ms = elapsed;
                     if progress.completed > 0 {
@@ -301,11 +382,13 @@ impl ScreeningEngine {
                                 e2.to_string(),
                             ))
                         })?;
-                        set_screening_error(&c, &article.id, &response_text)?;
+                        for article in batch {
+                            set_screening_error(&c, &article.id, &response_text)?;
+                        }
                     }
                     let mut progress = self.progress.lock().await;
-                    progress.errors += 1;
-                    progress.completed += 1;
+                    progress.errors += batch.len();
+                    progress.completed += batch.len();
                 }
             }
         }
@@ -321,9 +404,10 @@ impl ScreeningEngine {
     }
 }
 
-fn process_screening_response(raw: &str) -> Result<LlmScreeningResponse, AppError> {
+/// Parse the LLM response as a JSON array of screening results.
+fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, AppError> {
     let json_str = extract_json(raw);
-    serde_json::from_str::<LlmScreeningResponse>(&json_str)
+    serde_json::from_str::<Vec<LlmScreeningResponse>>(&json_str)
         .map_err(|e| AppError::Import(format!("Malformed LLM response: {e}")))
 }
 
