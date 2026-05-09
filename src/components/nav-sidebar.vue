@@ -31,6 +31,8 @@ const navItems: NavItem[] = [
   { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
 
+const helpItem: NavItem = { label: 'Help Guide', icon: 'help', route: '/help' };
+
 function handleNavClick(): void {
   if (props.mobileOpen) {
     emit('closeMobile');
@@ -69,6 +71,22 @@ function handleNavClick(): void {
         </router-link>
       </li>
     </ul>
+    <div class="sidebar__divider" />
+    <div class="sidebar__footer">
+      <router-link
+        :to="helpItem.route"
+        class="sidebar__link"
+        :class="{
+          'sidebar__link--active': route.path === helpItem.route,
+          'sidebar__link--collapsed': collapsed,
+        }"
+        :title="collapsed ? helpItem.label : undefined"
+        @click="handleNavClick"
+      >
+        <span class="material-symbols-outlined sidebar__icon">{{ helpItem.icon }}</span>
+        <span v-if="!collapsed" class="sidebar__label">{{ helpItem.label }}</span>
+      </router-link>
+    </div>
   </nav>
 </template>
 
@@ -209,5 +227,19 @@ function handleNavClick(): void {
 .sidebar__label {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.sidebar__divider {
+  margin: 0 var(--space-4);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.sidebar--collapsed .sidebar__divider {
+  margin: 0 var(--space-2);
+}
+
+.sidebar__footer {
+  margin-top: auto;
+  padding: var(--space-2) 0 var(--space-4);
 }
 </style>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { provide, ref, watch } from 'vue';
+import { onMounted, provide, ref, watch } from 'vue';
 import { useViewport } from '@/composables/use-viewport';
+import { initialDataLoaded, useDashboard } from '@/composables/use-dashboard';
 import NavSidebar from './nav-sidebar.vue';
 
 const { isBelowMd } = useViewport();
@@ -38,10 +39,54 @@ function closeMobileSidebar(): void {
 
 provide('sidebarCollapsed', sidebarCollapsed);
 provide('toggleSidebar', toggleSidebar);
+
+// Initial loading overlay — triggers the first data load
+const { refresh } = useDashboard();
+const showOverlay = ref(true);
+const fadingOut = ref(false);
+
+function dismissOverlay(): void {
+  fadingOut.value = true;
+  setTimeout(() => {
+    showOverlay.value = false;
+  }, 300);
+}
+
+// Handle case where data is already loaded (e.g. hot reload) or loads later
+watch(
+  initialDataLoaded,
+  (loaded) => {
+    if (loaded && showOverlay.value) {
+      dismissOverlay();
+    }
+  },
+  { immediate: true }
+);
+
+onMounted(() => {
+  refresh().catch(() => {
+    // Even on error, dismiss the overlay so the user isn't stuck
+    dismissOverlay();
+  });
+});
 </script>
 
 <template>
   <div class="app-shell">
+    <!-- Initial Loading Overlay -->
+    <Transition name="loading-fade">
+      <div
+        v-if="showOverlay"
+        class="loading-overlay"
+        :class="{ 'loading-overlay--fading': fadingOut }"
+      >
+        <div class="loading-content">
+          <div class="loading-spinner"></div>
+          <p class="loading-text">Loading Project Data</p>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Mobile backdrop -->
     <div v-if="sidebarMobileOpen" class="app-shell__backdrop" @click="closeMobileSidebar" />
 
@@ -130,5 +175,59 @@ provide('toggleSidebar', toggleSidebar);
 .app-shell__content {
   flex: 1;
   overflow-y: auto;
+}
+
+/* Loading Overlay */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-surface);
+  transition: opacity 0.3s ease;
+}
+
+.loading-overlay--fading {
+  opacity: 0;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.loading-text {
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.loading-spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 3px solid var(--color-outline-variant);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Transition */
+.loading-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.loading-fade-leave-to {
+  opacity: 0;
 }
 </style>

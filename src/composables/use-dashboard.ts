@@ -1,4 +1,4 @@
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
@@ -30,6 +30,9 @@ export interface GroupedAuditEntry {
   /** For grouped imports: how many articles were imported */
   count?: number;
 }
+
+/** Module-level singleton — true once the first dashboard data load completes */
+export const initialDataLoaded = ref(false);
 
 export function useDashboard() {
   const articlesStore = useArticlesStore();
@@ -133,6 +136,7 @@ export function useDashboard() {
     articlesStore.invalidate();
     auditStore.invalidate();
     await Promise.all([articlesStore.fetchIfNeeded(), auditStore.fetchIfNeeded()]);
+    initialDataLoaded.value = true;
   }
 
   return {

@@ -13,6 +13,7 @@ const TagLabelManagement = () => import('@/views/tag-label-management.vue');
 const ScreeningProgress = () => import('@/views/screening-progress.vue');
 const SummaryView = () => import('@/views/summary-view.vue');
 const PrismaDiagram = () => import('@/views/prisma-diagram.vue');
+const HelpGuide = () => import('@/views/help-guide.vue');
 
 const routes = [
   { path: '/', name: 'dashboard', component: Dashboard },
@@ -45,6 +46,7 @@ const routes = [
     component: SummaryView,
   },
   { path: '/settings', name: 'settings', component: LlmConfigView },
+  { path: '/help', name: 'help', component: HelpGuide },
 ];
 
 const router = createRouter({

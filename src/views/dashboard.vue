@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
 
@@ -16,8 +15,6 @@ const {
   screeningPercentage,
   refresh,
 } = useDashboard();
-
-onMounted(() => refresh());
 
 interface StatusTile {
   key: 'duplicate' | 'working' | 'included' | 'rejected';

@@ -46,19 +46,22 @@ The app manages a **single project** - there is no project selector or multi-pro
   "Tag": {
     "id": "uuid",
     "name": "string",
-    "source": "enum[ai_suggested, user_created, ris_keyword]"
+    "source": "enum[ai_suggested, user_created, ris_keyword]",
+    "color": "string | null"
   },
   "Label": {
     "id": "uuid",
     "name": "string",
-    "source": "enum[ai_generated, user_created]"
+    "source": "enum[ai_generated, user_created]",
+    "color": "string | null"
   },
   "Article": {
     "id": "uuid",
+    "sequence_id": "integer (auto-incrementing)",
     "status": "enum[duplicate, working, included, rejected]",
     "screeningError": "boolean (default: false)",
     "title": "string (required)",
-    "abstract": "string (required)",
+    "abstractText": "string (required)",
     "authors": ["string"] (required, min 1)",
     "publicationYear": "integer | null",
     "doi": "string | null",
@@ -96,10 +99,13 @@ The app manages a **single project** - there is no project selector or multi-pro
     "manualOverride": "boolean (default: false)",
     "importSource": "string (filename of originating RIS file)",
     "importedAt": "ISO-8601 timestamp",
-    "screenedAt": "ISO-8601 timestamp | null"
+    "screenedAt": "ISO-8601 timestamp | null",
+    "dataLength": "integer | null (total character count for estimation)",
+    "tokenEstimate": "integer | null (heuristic tokens)",
+    "actualTokens": "integer | null (actual tokens consumed)"
   },
   "LLMConfig": {
-    "provider": "enum[openai, google, z_ai, llama_cpp, ollama, lm_studio, custom]",
+    "provider": "enum[openai, anthropic, google, mistral_ai, z_ai, llama_cpp, ollama, lm_studio, custom]",
     "endpointUrl": "string (full URL provided by user, app does not append paths)",
     "apiKey": "string (encrypted)",
     "modelName": "string",
@@ -128,9 +134,9 @@ The app manages a **single project** - there is no project selector or multi-pro
 ```
 
 **Changes from v2:**
-- Removed `Project` as a top-level entity. The app is a single-project workspace.
-- `screeningError` is now a boolean flag on Article, not a separate status value. Articles with errors remain in `working` status with `screeningError: true`.
-- Removed `inclusionExclusionLabels` from Article - this is redundant with the `labels[]` relationship. Inclusion/exclusion label groupings are derived at export time.
+- Added `sequence_id`, `dataLength`, `tokenEstimate`, and `actualTokens` to Article for performance and progress tracking.
+- Added `color` to Tag and Label models.
+- Expanded `LLMProvider` enum to include `anthropic` and `mistral_ai`.
 - Added `ExportMetadata` schema for forward-compatible exports.
 
 ---
@@ -326,6 +332,7 @@ When the LLM returns a malformed/invalid response for an article:
 - The article displays a visible error indicator in the UI.
 - User can retry the article individually or re-run screening for all errored articles.
 - Retrying clears the `screeningError` flag before resubmitting.
+- **Explicit Error Decisions**: If the LLM returns `decision: "error"`, the app treats this as a screening error and logs the reasoning provided by the AI.
 
 ---
 
@@ -427,44 +434,47 @@ Rules:
 
 ## 9. AI Screening Process
 
-### 9.1 Per-Article Screening
+### 9.1 Batch Screening Process
 
-Each article is sent to the LLM as a **separate API call**. The prompt includes:
+Articles are sent to the LLM in **batches** (configurable size, default 1-5 articles) to optimize throughput. The prompt includes:
 
 **System prompt:**
-> You are a systematic literature review screening assistant. Evaluate the provided article abstract against the research aims, inclusion criteria, and exclusion criteria. Return your evaluation as structured JSON matching the required schema.
+> Act as a systematic literature review screening assistant. Critically evaluate article abstracts against research aims and criteria. Cite specific sentences from the text to justify your decision. Follow priority rules when criteria overlap or conflict. Return only a JSON array matching the required schema, one object per article, in the same order as submitted.
 
 **User prompt:**
 ```
 ## Research Aims
 {numbered list of aim entries}
 
-## Inclusion Criteria
-{numbered list with id, text, priority}
+## Inclusion Criteria (in order of priority)
+{numbered list with [id] and text}
 
-## Exclusion Criteria
-{numbered list with id, text, priority}
+## Exclusion Criteria (in order of priority)
+{numbered list with [id] and text}
 
 ## Priority Rules
 - Higher priority rules always outweigh lower priority rules.
 - If inclusion and exclusion criteria of equal priority both match, favor inclusion.
 
-## Article
-Title: {title}
-Authors: {authors}
-Year: {publicationYear}
-Abstract: {abstract}
+## Articles
+[
+  {"title": "{title}", "authors": "{authors}", "year": {year}, "abstract": "{abstract_text}"},
+  ...
+]
+```
 
-## Response Format
-Return JSON exactly matching this schema:
-{
-  "decision": "include" | "exclude",
-  "reasoning": "A paragraph citing specific sentences from the abstract to justify the decision.",
-  "matched_inclusion_criteria": ["criteria-id-1", ...],
-  "matched_exclusion_criteria": ["criteria-id-3", ...],
-  "suggested_tags": ["tag-name-1", ...],
-  "confidence": 0.0-1.0
-}
+**Response schema:**
+```json
+[
+  {
+    "decision": "include" | "exclude" | "error",
+    "reasoning": "A paragraph citing specific sentences from the abstract to justify the decision.",
+    "matched_inclusion_criteria": ["criteria-id-1", ...],
+    "matched_exclusion_criteria": ["criteria-id-3", ...],
+    "suggested_tags": ["tag-name-1", ...],
+    "confidence": 0.0-1.0
+  }
+]
 ```
 
 ### 9.2 Response Processing
@@ -478,6 +488,7 @@ Return JSON exactly matching this schema:
 ### 9.3 Batch Processing
 
 - **Concurrency**: Configurable, default 3 concurrent requests.
+- **Batch Size**: Configurable, default 1-5 articles per request.
 - **Delay**: Configurable, default 500ms between requests (applied between starting each new request, not between batches).
 - **On HTTP 429 (rate limit)**: Exponential backoff with max 3 retries (delay: 1s, 2s, 4s).
 - **On malformed JSON**: Article stays in Working with `screeningError: true`. Raw response logged in audit trail.
@@ -490,13 +501,15 @@ Return JSON exactly matching this schema:
 - **Pause** button: stops after the current article completes.
 - **Cancel** button: stops immediately. Partially screened articles remain in Working.
 
-### 9.5 Resume Screening
+### 9.5 Resume Screening and Readiness
 
-When resuming a paused or interrupted screening job:
-1. Query all Working-list articles where `screenedAt IS NULL`.
-2. Skip any articles that already have a non-null `screenedAt`.
-3. Continue batch processing from the next unscreened article.
-4. The UI displays "Resuming: X articles remaining" before starting.
+When resuming or starting a screening job, the app performs a **Readiness Check**:
+1. Checks for at least one research aim, one inclusion criterion, and one exclusion criterion.
+2. Verifies LLM configuration is complete.
+3. Counts unscreened Working articles (`screenedAt IS NULL`).
+4. Performs token estimation to warn if any article might exceed context window limits.
+
+The UI displays "Resuming: X articles remaining" or "Ready: X articles to screen" before starting. Continuing a job skips any articles that already have a non-null `screenedAt`.
 
 ### 9.6 Token Estimation
 
@@ -517,7 +530,9 @@ Before starting screening, the app estimates total token usage:
 | Provider | Config | Default Endpoint (suggestion only) |
 |----------|--------|-----------------------------------|
 | OpenAI | API key required | `https://api.openai.com/v1/chat/completions` |
+| Anthropic | API key required | `https://api.anthropic.com/v1/messages` |
 | Google | API key required | Gemini API endpoint |
+| Mistral AI | API key required | `https://api.mistral.ai/v1/chat/completions` |
 | z.ai | API key + full URL | User provides full URL (e.g., `https://api.z.ai/api/coding/paas/v4`) |
 | Ollama | No auth | `http://localhost:11434/v1/chat/completions` |
 | llama.cpp | No auth | `http://localhost:8080/v1/chat/completions` |
