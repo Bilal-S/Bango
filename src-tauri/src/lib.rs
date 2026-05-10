@@ -107,6 +107,8 @@ pub fn run() {
             commands::summary::generate_summary,
             commands::prisma::get_prisma_data,
             commands::prisma::get_prisma_svg,
+            commands::prisma::export_prisma_svg_to_file,
+            commands::prisma::export_prisma_png_to_file,
             commands::export_cmd::export_ris,
             commands::export_cmd::export_ris_to_file,
             commands::export_cmd::export_project_backup,

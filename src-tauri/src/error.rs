@@ -19,6 +19,9 @@ pub enum AppError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Rendering error: {0}")]
+    Rendering(String),
 }
 
 impl Serialize for AppError {

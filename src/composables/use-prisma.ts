@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from './use-tauri-command';
 
 export interface ExclusionReason {
@@ -21,7 +22,6 @@ export interface PrismaData {
 }
 
 export function usePrisma() {
-  const svgContent = ref<string | null>(null);
   const data = ref<PrismaData | null>(null);
   const loading = ref(false);
   const error = ref<string | null>(null);
@@ -31,12 +31,7 @@ export function usePrisma() {
     loading.value = true;
     error.value = null;
     try {
-      const [svg, prismaData] = await Promise.all([
-        tauriCommand<string>('get_prisma_svg'),
-        tauriCommand<PrismaData>('get_prisma_data'),
-      ]);
-      svgContent.value = svg;
-      data.value = prismaData;
+      data.value = await tauriCommand<PrismaData>('get_prisma_data');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load PRISMA data';
       error.value = msg;
@@ -46,46 +41,26 @@ export function usePrisma() {
   }
 
   async function exportSvg(): Promise<void> {
-    if (!svgContent.value) return;
-    const blob = new Blob([svgContent.value], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'prisma-flow-diagram.svg';
-    a.click();
-    URL.revokeObjectURL(url);
+    const filePath = await save({
+      defaultPath: 'bango-prisma-diagram.svg',
+      filters: [{ name: 'SVG', extensions: ['svg'] }],
+    });
+    if (filePath) {
+      await tauriCommand('export_prisma_svg_to_file', { path: filePath });
+    }
   }
 
   async function exportPng(): Promise<void> {
-    if (!svgContent.value) return;
-    const blob = new Blob([svgContent.value], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth * 2;
-      canvas.height = img.naturalHeight * 2;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((pngBlob) => {
-          if (pngBlob) {
-            const pngUrl = URL.createObjectURL(pngBlob);
-            const a = document.createElement('a');
-            a.href = pngUrl;
-            a.download = 'prisma-flow-diagram.png';
-            a.click();
-            URL.revokeObjectURL(pngUrl);
-          }
-        });
-      }
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
+    const filePath = await save({
+      defaultPath: 'bango-prisma-diagram.png',
+      filters: [{ name: 'PNG', extensions: ['png'] }],
+    });
+    if (filePath) {
+      await tauriCommand('export_prisma_png_to_file', { path: filePath });
+    }
   }
 
   return {
-    svgContent,
     data,
     loading,
     error,
