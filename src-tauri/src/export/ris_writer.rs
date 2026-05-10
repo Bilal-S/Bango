@@ -24,6 +24,8 @@ pub struct RisExportArticle {
     pub user_notes: Option<String>,
     pub ai_decision: Option<String>,
     pub labels: Vec<String>,
+    pub matched_inclusion_criteria: Vec<String>,
+    pub matched_exclusion_criteria: Vec<String>,
 }
 
 #[must_use]
@@ -64,7 +66,10 @@ pub fn article_to_ris(article: &RisExportArticle) -> String {
         lines.push(format!("KW  - {}", kw));
     }
     for tag in &article.tags {
-        lines.push(format!("KW  - {}", tag));
+        lines.push(format!("KW  - Bango:{}", tag));
+    }
+    for label in &article.labels {
+        lines.push(format!("KW  - Bango:{}", label));
     }
 
     if let Some(ref url) = article.url {
@@ -86,17 +91,14 @@ pub fn article_to_ris(article: &RisExportArticle) -> String {
         lines.push(format!("NO  - {}", notes));
     }
 
-    // Labels grouped by decision
-    if !article.labels.is_empty() {
-        let decision = article.ai_decision.as_deref().unwrap_or("include");
-        let (inc, exc): (Vec<_>, Vec<_>) = if decision == "include" {
-            (article.labels.clone(), vec![])
-        } else {
-            (vec![], article.labels.clone())
-        };
-
-        let inc_json = serde_json::to_string(&inc).unwrap_or_default();
-        let exc_json = serde_json::to_string(&exc).unwrap_or_default();
+    // Matched criteria as C1 field (resolved criterion text, not UUIDs)
+    if !article.matched_inclusion_criteria.is_empty()
+        || !article.matched_exclusion_criteria.is_empty()
+    {
+        let inc_json =
+            serde_json::to_string(&article.matched_inclusion_criteria).unwrap_or_default();
+        let exc_json =
+            serde_json::to_string(&article.matched_exclusion_criteria).unwrap_or_default();
         lines.push(format!("C1  - {{\"inc\":{},\"exc\":{}}}", inc_json, exc_json));
     }
 

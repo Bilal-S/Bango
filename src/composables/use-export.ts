@@ -23,7 +23,7 @@ export function useExport() {
     useScreeningStore().invalidate();
   }
 
-  async function exportRis(): Promise<void> {
+  async function exportRis(): Promise<boolean> {
     exporting.value = true;
     error.value = null;
     try {
@@ -33,15 +33,18 @@ export function useExport() {
       });
       if (filePath) {
         await tauriCommand('export_ris_to_file', { path: filePath });
+        return true;
       }
+      return false;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
+      return false;
     } finally {
       exporting.value = false;
     }
   }
 
-  async function exportProject(): Promise<void> {
+  async function exportProject(): Promise<boolean> {
     exporting.value = true;
     error.value = null;
     try {
@@ -54,9 +57,12 @@ export function useExport() {
       });
       if (filePath) {
         await tauriCommand('export_project_to_file', { path: filePath });
+        return true;
       }
+      return false;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
+      return false;
     } finally {
       exporting.value = false;
     }

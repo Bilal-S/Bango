@@ -1,8 +1,11 @@
 use serde::Deserialize;
 use tauri::State;
 
+use std::collections::HashMap;
+
 use crate::db::article_repo;
 use crate::db::connection::DbState;
+use crate::db::criteria_repo;
 use crate::db::migration;
 use crate::error::AppError;
 use crate::export::project;
@@ -15,6 +18,14 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     let articles = article_repo::get_articles_by_status(&conn, "included")?;
+
+    // Build criteria lookup: id → text
+    let criteria_map: HashMap<String, String> =
+        criteria_repo::get_all_criteria(&conn)?.into_iter().map(|c| (c.id, c.text)).collect();
+
+    let resolve_criteria = |ids: &[String]| -> Vec<String> {
+        ids.iter().filter_map(|id| criteria_map.get(id).cloned()).collect()
+    };
 
     let export_articles: Vec<RisExportArticle> = articles
         .iter()
@@ -31,7 +42,7 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
             start_page: a.start_page.clone(),
             end_page: a.end_page.clone(),
             keywords: a.keywords.clone(),
-            tags: vec![], // TODO: load from article_tags join
+            tags: a.tags.clone(),
             url: a.url.clone(),
             language: a.language.clone(),
             publisher: a.publisher.clone(),
@@ -39,7 +50,9 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
             ai_reasoning: a.ai_reasoning.clone(),
             user_notes: a.user_notes.clone(),
             ai_decision: a.ai_decision.as_ref().map(|d| d.as_str().to_string()),
-            labels: vec![], // TODO: load from article_labels join
+            labels: a.labels.clone(),
+            matched_inclusion_criteria: resolve_criteria(&a.matched_inclusion_criteria),
+            matched_exclusion_criteria: resolve_criteria(&a.matched_exclusion_criteria),
         })
         .collect();
 

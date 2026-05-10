@@ -15,7 +15,15 @@ const showBackup = ref(false);
       <div v-if="error" class="dialog__error">{{ error }}</div>
 
       <div v-if="!showBackup" class="dialog__options">
-        <button class="btn btn--primary" :disabled="exporting" @click="exportRis()">
+        <button
+          class="btn btn--primary"
+          :disabled="exporting"
+          @click="
+            async () => {
+              if (await exportRis()) emit('close');
+            }
+          "
+        >
           Export Included Articles (RIS)
         </button>
         <button class="btn btn--secondary" @click="showBackup = true">Export Project Backup</button>
@@ -28,7 +36,15 @@ const showBackup = ref(false);
         </p>
         <div class="dialog__actions">
           <button class="btn btn--secondary" @click="showBackup = false">Back</button>
-          <button class="btn btn--primary" :disabled="exporting" @click="exportProject()">
+          <button
+            class="btn btn--primary"
+            :disabled="exporting"
+            @click="
+              async () => {
+                if (await exportProject()) emit('close');
+              }
+            "
+          >
             {{ exporting ? 'Exporting...' : 'Export Backup' }}
           </button>
         </div>

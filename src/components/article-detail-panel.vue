@@ -7,6 +7,7 @@ import TagChip from './tag-chip.vue';
 import LabelChip from './label-chip.vue';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
+import { useCriteriaStore } from '@/stores/criteria';
 
 const props = defineProps<{
   article: Article;
@@ -27,6 +28,10 @@ const emit = defineEmits<{
 
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
+const criteriaStore = useCriteriaStore();
+
+// Ensure criteria are loaded so we can resolve UUID → text
+void criteriaStore.fetchIfNeeded();
 
 // Audit trail expand/collapse state
 const auditExpanded = ref(false);
@@ -182,6 +187,19 @@ const aiDecisionColors = computed(() => {
 const confidenceBarWidth = computed(() =>
   props.article.aiConfidence !== null ? `${Math.round(props.article.aiConfidence * 100)}%` : '0%'
 );
+
+/** Resolve a criterion UUID to its human-readable text */
+const criteriaTextMap = computed(() => {
+  const map = new Map<string, string>();
+  for (const c of criteriaStore.criteria) {
+    map.set(c.id, c.text);
+  }
+  return map;
+});
+
+function criterionText(id: string): string {
+  return criteriaTextMap.value.get(id) ?? id;
+}
 </script>
 
 <template>
@@ -291,7 +309,7 @@ const confidenceBarWidth = computed(() =>
             class="flex items-center gap-3 text-body-sm"
           >
             <span class="material-symbols-outlined text-emerald-500 text-lg">check_circle</span>
-            <span>{{ criterion }}</span>
+            <span>{{ criterionText(criterion) }}</span>
           </li>
           <li
             v-for="criterion in article.matchedExclusionCriteria"
@@ -299,7 +317,7 @@ const confidenceBarWidth = computed(() =>
             class="flex items-center gap-3 text-body-sm text-slate-400"
           >
             <span class="material-symbols-outlined text-lg">cancel</span>
-            <span class="line-through">{{ criterion }}</span>
+            <span class="line-through">{{ criterionText(criterion) }}</span>
           </li>
         </ul>
       </section>

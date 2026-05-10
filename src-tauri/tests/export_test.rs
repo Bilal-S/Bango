@@ -34,6 +34,8 @@ fn make_export_article() -> RisExportArticle {
         user_notes: None,
         ai_decision: Some("include".to_string()),
         labels: vec!["priority-read".to_string(), "strong-methodology".to_string()],
+        matched_inclusion_criteria: vec!["uses RCT methodology".to_string()],
+        matched_exclusion_criteria: vec!["non-English language".to_string()],
     }
 }
 
@@ -52,11 +54,16 @@ fn test_article_to_ris_basic_fields() {
 }
 
 #[test]
-fn test_ris_includes_tags_as_keywords() {
+fn test_ris_includes_tags_as_bango_keywords() {
     let article = make_export_article();
     let ris = article_to_ris(&article);
+    // Original keywords are exported without prefix
     assert!(ris.contains("KW  - ml"));
-    assert!(ris.contains("KW  - machine-learning"));
+    // Tags are exported with Bango: prefix
+    assert!(ris.contains("KW  - Bango:machine-learning"));
+    // Labels are also exported with Bango: prefix
+    assert!(ris.contains("KW  - Bango:priority-read"));
+    assert!(ris.contains("KW  - Bango:strong-methodology"));
 }
 
 #[test]
@@ -67,12 +74,13 @@ fn test_ris_includes_ai_reasoning_as_notes() {
 }
 
 #[test]
-fn test_ris_includes_labels() {
+fn test_ris_includes_matched_criteria_as_c1() {
     let article = make_export_article();
     let ris = article_to_ris(&article);
     assert!(ris.contains("C1  -"));
-    assert!(ris.contains("priority-read"));
-    assert!(ris.contains("strong-methodology"));
+    // C1 should contain resolved criterion text, not label names
+    assert!(ris.contains("uses RCT methodology"));
+    assert!(ris.contains("non-English language"));
 }
 
 #[test]
@@ -125,6 +133,8 @@ fn test_ris_roundtrip_with_real_data() {
         user_notes: None,
         ai_decision: None,
         labels: vec![],
+        matched_inclusion_criteria: vec![],
+        matched_exclusion_criteria: vec![],
     };
 
     let exported = article_to_ris(&export_article);
