@@ -4,6 +4,38 @@ use crate::crypto::aes_gcm;
 use crate::error::AppError;
 use crate::models::llm_config::{LlmConfig, LlmProvider};
 
+/// Get config without decrypting the API key.
+/// Use this when only `context_window_tokens`, `request_delay_ms`, etc. are needed
+/// (e.g., screening readiness checks). Avoids the expensive PBKDF2 key derivation.
+pub fn get_config_no_decrypt(conn: &Connection) -> Result<Option<LlmConfig>, AppError> {
+    let result = conn.query_row(
+        "SELECT provider, endpoint_url, model_name, temperature, \
+         skip_temperature, max_concurrent_requests, request_delay_ms, context_window_tokens FROM llm_config WHERE id = 1",
+        [],
+        |row| {
+            let provider_str: String = row.get(0)?;
+            let provider = parse_provider(&provider_str);
+            Ok(LlmConfig {
+                provider,
+                endpoint_url: row.get(1)?,
+                api_key_encrypted: None, // intentionally skipped — no decryption
+                model_name: row.get(2)?,
+                temperature: row.get(3)?,
+                skip_temperature: row.get::<_, i32>(4)? != 0,
+                max_concurrent_requests: row.get(5)?,
+                request_delay_ms: row.get(6)?,
+                context_window_tokens: row.get(7)?,
+            })
+        },
+    );
+
+    match result {
+        Ok(config) => Ok(Some(config)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(AppError::Database(e)),
+    }
+}
+
 pub fn get_config(conn: &Connection) -> Result<Option<LlmConfig>, AppError> {
     let result = conn.query_row(
         "SELECT provider, endpoint_url, api_key_encrypted, model_name, temperature, \

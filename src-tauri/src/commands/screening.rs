@@ -76,8 +76,7 @@ pub async fn get_screening_readiness(
         let total_unscreened = article_repo::count_unscreened_working(&conn)?;
 
         let token_warning = if total_unscreened > 0 {
-            // We still need the context window tokens from the config for estimation
-            let config = llm_config_repo::get_config(&conn)?
+            let config = llm_config_repo::get_config_no_decrypt(&conn)?
                 .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
             let max_chars = article_repo::max_article_char_len(&conn)?;
@@ -85,9 +84,10 @@ pub async fn get_screening_readiness(
 
             let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
             let template_tokens = token_estimation::estimate_tokens(&template_text);
-            let threshold = (config.context_window_tokens as f64 * 0.8) as usize;
 
+            let threshold = (config.context_window_tokens as f64 * 0.8) as usize;
             let total = worst_case_tokens + template_tokens;
+
             if total > threshold {
                 Some(format!(
                     "Estimated worst-case per-article tokens ({}) exceed 80% of context window ({}). \
@@ -294,21 +294,25 @@ pub fn estimate_screening_tokens(db_state: State<'_, DbState>) -> Result<Option<
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    let config = llm_config_repo::get_config(&conn)?
+    let config = llm_config_repo::get_config_no_decrypt(&conn)?
         .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
     let max_len = article_repo::max_article_char_len(&conn)?;
+
     if max_len == 0 {
         return Ok(None);
     }
 
     let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
     let template_tokens = token_estimation::estimate_tokens(&template_text);
+
     let worst_case_article_tokens = max_len / 4;
 
-    Ok(token_estimation::check_context_window(
+    let result = token_estimation::check_context_window(
         template_tokens,
         &[worst_case_article_tokens],
         config.context_window_tokens as usize,
-    ))
+    );
+
+    Ok(result)
 }
