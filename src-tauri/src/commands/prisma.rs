@@ -44,9 +44,13 @@ pub fn export_prisma_png_to_file(
 ) -> Result<(), AppError> {
     let svg_content = render_svg(&db_state)?;
 
-    // Load system fonts so text renders in the PNG output
+    // Load system fonts so text renders in the PNG output.
+    // Must set generic family mappings because Linux lacks Arial/Times New Roman.
     let mut fontdb = fontdb::Database::new();
     fontdb.load_system_fonts();
+    fontdb.set_sans_serif_family("Liberation Sans");
+    fontdb.set_serif_family("DejaVu Serif");
+    fontdb.set_monospace_family("DejaVu Sans Mono");
 
     let opts = resvg::usvg::Options { fontdb: std::sync::Arc::new(fontdb), ..Default::default() };
 

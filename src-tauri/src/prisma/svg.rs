@@ -181,7 +181,7 @@ pub fn render_prisma_svg(data: &PrismaData) -> String {
 
     let mut svg = String::new();
     svg.push_str(&format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{WIDTH}\" height=\"{height}\" viewBox=\"0 0 {WIDTH} {height}\" font-family=\"Inter, system-ui, -apple-system, sans-serif\">\n"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{WIDTH}\" height=\"{height}\" viewBox=\"0 0 {WIDTH} {height}\" font-family=\"Liberation Sans, DejaVu Sans, Inter, system-ui, sans-serif\">\n"
     ));
     svg.push_str(&format!("  <rect width=\"{WIDTH}\" height=\"{height}\" fill=\"#ffffff\"/>\n"));
 
