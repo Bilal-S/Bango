@@ -66,14 +66,13 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
     url: 'https://api.openai.com/v1',
     models: [
       'gpt-5-mini',
-      'gpt-5',
-      'gpt-4.1-latest',
-      'gpt-5-chat-latest',
-      'gpt-5.3-codex',
+      'chat-latest',
+      'gpt-5.1-chat-latest',
       'gpt-5.4',
       'gpt-5.4-pro',
       'gpt-5.4-mini',
       'gpt-5.4-nano',
+      'gpt-5.5',
     ],
   },
   anthropic: {
@@ -144,6 +143,7 @@ watch(
   (newProvider, oldProvider) => {
     if (oldProvider && newProvider !== oldProvider) {
       resetFetchedModels();
+      config.value.skipTemperature = false;
       const defaults = providerDefaults[newProvider];
       if (defaults) {
         config.value.endpointUrl = defaults.url;
@@ -154,6 +154,16 @@ watch(
         config.value.modelName = '';
         isOtherModel.value = true;
       }
+    }
+  }
+);
+
+// Clear temperature skip flag when model changes (within same provider)
+watch(
+  () => config.value.modelName,
+  (newModel, oldModel) => {
+    if (oldModel && newModel !== oldModel) {
+      config.value.skipTemperature = false;
     }
   }
 );
@@ -208,7 +218,7 @@ watch(
 
           <!-- Endpoint URL -->
           <div class="field">
-            <label class="field__label">Endpoint URL</label>
+            <label class="field__label">Endpoint Base URL</label>
             <input
               v-model="config.endpointUrl"
               type="url"

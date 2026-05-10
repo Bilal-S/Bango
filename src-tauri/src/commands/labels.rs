@@ -141,11 +141,8 @@ pub async fn suggest_labels(db_state: State<'_, DbState>) -> Result<SuggestLabel
         (config, aims, inc, exc)
     };
 
-    let aims_list: Vec<String> = research_aims
-        .iter()
-        .enumerate()
-        .map(|(i, a)| format!("{}. {}", i + 1, a.text))
-        .collect();
+    let aims_list: Vec<String> =
+        research_aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
     let inc_list: Vec<String> = inclusion_criteria
         .iter()
         .enumerate()
@@ -186,9 +183,21 @@ Rules:
 - Do not duplicate or overlap concepts.
 - Labels should capture workflow states (e.g., review stages), quality assessments (e.g., methodology strength),
   and relevance indicators (e.g., alignment with specific aims)."#,
-        research_aims = if aims_list.is_empty() { "No research aims defined.".to_string() } else { aims_list.join("\n") },
-        inclusion = if inc_list.is_empty() { "No inclusion criteria defined.".to_string() } else { inc_list.join("\n") },
-        exclusion = if exc_list.is_empty() { "No exclusion criteria defined.".to_string() } else { exc_list.join("\n") },
+        research_aims = if aims_list.is_empty() {
+            "No research aims defined.".to_string()
+        } else {
+            aims_list.join("\n")
+        },
+        inclusion = if inc_list.is_empty() {
+            "No inclusion criteria defined.".to_string()
+        } else {
+            inc_list.join("\n")
+        },
+        exclusion = if exc_list.is_empty() {
+            "No exclusion criteria defined.".to_string()
+        } else {
+            exc_list.join("\n")
+        },
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process based on research aims and screening criteria.";

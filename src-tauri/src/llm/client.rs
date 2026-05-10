@@ -10,7 +10,8 @@ use crate::models::llm_config::{LlmConfig, LlmProvider};
 struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
-    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -62,7 +63,8 @@ struct GooglePart {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GoogleGenerationConfig {
-    temperature: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,6 +125,69 @@ struct OpenAiModelsResponse {
 #[derive(Debug, Deserialize)]
 struct OpenAiModelEntry {
     id: String,
+}
+
+// ── Model filtering ──────────────────────────────────────────────────
+
+/// Determine whether an OpenAI model ID is a chat-completion model.
+///
+/// Uses a deny-list approach so that new chat models are automatically
+/// included without code changes.
+fn is_chat_model(id: &str) -> bool {
+    let id_lower = id.to_lowercase();
+
+    // Embedding models
+    if id_lower.starts_with("text-embedding-") {
+        return false;
+    }
+    // TTS / speech synthesis
+    if id_lower.starts_with("tts-") || id_lower.contains("-tts") {
+        return false;
+    }
+    // Image generation
+    if id_lower.starts_with("dall-e-")
+        || id_lower.starts_with("gpt-image-")
+        || id_lower.starts_with("chatgpt-image-")
+    {
+        return false;
+    }
+    // Video generation
+    if id_lower.starts_with("sora-") {
+        return false;
+    }
+    // Speech / transcription
+    if id_lower.starts_with("whisper-") || id_lower.contains("transcribe") {
+        return false;
+    }
+    // Realtime API models
+    if id_lower.starts_with("gpt-realtime") || id_lower.contains("realtime-preview") {
+        return false;
+    }
+    // Audio models
+    if id_lower.contains("audio-preview") || id_lower.starts_with("gpt-audio") {
+        return false;
+    }
+    // Search-specific endpoints
+    if id_lower.contains("search-preview") || id_lower.contains("search-api") {
+        return false;
+    }
+    // Codex / code execution
+    if id_lower.contains("codex") {
+        return false;
+    }
+    // Moderation
+    if id_lower.starts_with("omni-moderation-") {
+        return false;
+    }
+    // Legacy completion-only models
+    if id_lower.starts_with("babbage-")
+        || id_lower.starts_with("davinci-")
+        || id_lower.contains("-instruct")
+    {
+        return false;
+    }
+
+    true
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -220,7 +285,18 @@ pub async fn list_models(
                 .json()
                 .await
                 .map_err(|e| AppError::Import(format!("Failed to parse models response: {e}")))?;
-            Ok(models.data.into_iter().map(|m| m.id).collect())
+
+            let should_filter = matches!(provider, LlmProvider::Openai);
+            let mut ids: Vec<String> = models
+                .data
+                .into_iter()
+                .map(|m| m.id)
+                .filter(|id| !should_filter || is_chat_model(id))
+                .collect();
+            if should_filter {
+                ids.sort();
+            }
+            Ok(ids)
         }
     }
 }
@@ -244,6 +320,7 @@ async fn send_google(
     user_prompt: &str,
 ) -> Result<(String, usize), AppError> {
     let client = Client::new();
+    let temp = if config.skip_temperature { None } else { Some(config.temperature) };
     let request = GoogleRequest {
         system_instruction: GoogleSystemInstruction {
             parts: GoogleSystemPart { text: system_prompt.to_string() },
@@ -252,7 +329,7 @@ async fn send_google(
             role: "user".to_string(),
             parts: vec![GooglePart { text: user_prompt.to_string() }],
         }],
-        generation_config: GoogleGenerationConfig { temperature: config.temperature },
+        generation_config: GoogleGenerationConfig { temperature: temp },
     };
 
     let api_key = config
@@ -310,31 +387,34 @@ async fn send_openai_compatible(
     user_prompt: &str,
 ) -> Result<(String, usize), AppError> {
     let client = Client::new();
+    let temp = if config.skip_temperature { None } else { Some(config.temperature) };
     let request = ChatRequest {
         model: config.model_name.clone(),
         messages: vec![
             ChatMessage { role: "system".to_string(), content: system_prompt.to_string() },
             ChatMessage { role: "user".to_string(), content: user_prompt.to_string() },
         ],
-        temperature: config.temperature,
+        temperature: temp,
     };
 
     let api_key = config.api_key_encrypted.as_deref().unwrap_or("");
 
     let base_url = config.endpoint_url.trim_end_matches('/');
     let endpoint = match config.provider {
-        crate::models::llm_config::LlmProvider::LlamaCpp
-        | crate::models::llm_config::LlmProvider::Ollama
-        | crate::models::llm_config::LlmProvider::LmStudio
-        | crate::models::llm_config::LlmProvider::MistralAi
-        | crate::models::llm_config::LlmProvider::ZAi => {
+        LlmProvider::Openai
+        | LlmProvider::LlamaCpp
+        | LlmProvider::Ollama
+        | LlmProvider::LmStudio
+        | LlmProvider::MistralAi
+        | LlmProvider::ZAi
+        | LlmProvider::Custom => {
             if base_url.ends_with("/chat/completions") {
                 base_url.to_string()
             } else {
                 format!("{base_url}/chat/completions")
             }
         }
-        crate::models::llm_config::LlmProvider::Anthropic => {
+        LlmProvider::Anthropic => {
             if base_url.ends_with("/messages") {
                 base_url.to_string()
             } else {

@@ -14,6 +14,7 @@ const DEFAULT_CONFIG: LlmConfig = {
   apiKeyEncrypted: null,
   modelName: '',
   temperature: 0.2,
+  skipTemperature: false,
   maxConcurrentRequests: 3,
   requestDelayMs: 500,
   contextWindowTokens: 50000,

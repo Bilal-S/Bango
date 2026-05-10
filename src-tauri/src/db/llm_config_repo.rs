@@ -7,7 +7,7 @@ use crate::models::llm_config::{LlmConfig, LlmProvider};
 pub fn get_config(conn: &Connection) -> Result<Option<LlmConfig>, AppError> {
     let result = conn.query_row(
         "SELECT provider, endpoint_url, api_key_encrypted, model_name, temperature, \
-         max_concurrent_requests, request_delay_ms, context_window_tokens FROM llm_config WHERE id = 1",
+         skip_temperature, max_concurrent_requests, request_delay_ms, context_window_tokens FROM llm_config WHERE id = 1",
         [],
         |row| {
             let provider_str: String = row.get(0)?;
@@ -26,9 +26,10 @@ pub fn get_config(conn: &Connection) -> Result<Option<LlmConfig>, AppError> {
                 api_key_encrypted: api_key_decrypted,
                 model_name: row.get(3)?,
                 temperature: row.get(4)?,
-                max_concurrent_requests: row.get(5)?,
-                request_delay_ms: row.get(6)?,
-                context_window_tokens: row.get(7)?,
+                skip_temperature: row.get::<_, i32>(5)? != 0,
+                max_concurrent_requests: row.get(6)?,
+                request_delay_ms: row.get(7)?,
+                context_window_tokens: row.get(8)?,
             })
         },
     );
@@ -61,14 +62,15 @@ pub fn save_config(conn: &Connection, config: &LlmConfig) -> Result<(), AppError
 
     conn.execute(
         "INSERT INTO llm_config (id, provider, endpoint_url, api_key_encrypted, model_name, \
-         temperature, max_concurrent_requests, request_delay_ms, context_window_tokens) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         temperature, skip_temperature, max_concurrent_requests, request_delay_ms, context_window_tokens) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             config.provider.as_str(),
             config.endpoint_url,
             encrypted_api_key,
             config.model_name,
             config.temperature,
+            config.skip_temperature as i32,
             config.max_concurrent_requests,
             config.request_delay_ms,
             config.context_window_tokens,

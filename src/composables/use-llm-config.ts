@@ -6,6 +6,18 @@ import type { TestResult } from '@/stores/llm-config';
 
 export type { TestResult };
 
+const providerDisplayNames: Record<string, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  google: 'Google Gemini',
+  mistralAi: 'Mistral AI',
+  zAi: 'Z.AI',
+  ollama: 'Ollama',
+  lmStudio: 'LM Studio',
+  llamaCpp: 'llama.cpp',
+  custom: 'Custom',
+};
+
 export function useLlmConfig() {
   const store = useLlmConfigStore();
 
@@ -52,9 +64,17 @@ export function useLlmConfig() {
   async function testConnection(): Promise<void> {
     testing.value = true;
     store.clearTestResult();
+    // Use requestAnimationFrame (macrotask) to guarantee the browser paints the spinner
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     try {
       await save();
-      store.testResult = await tauriCommand<TestResult>('test_llm_connection');
+      const result = await tauriCommand<TestResult>('test_llm_connection');
+      // Refresh config BEFORE setting testResult so the watch on config
+      // doesn't wipe the "Connected" status we are about to set.
+      if (result.success) {
+        await store.fetch();
+      }
+      store.testResult = result;
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       store.testResult = { success: false, message };
@@ -84,6 +104,11 @@ export function useLlmConfig() {
           apiKey: store.config.apiKeyEncrypted,
         },
       });
+      const providerName = providerDisplayNames[store.config.provider] ?? store.config.provider;
+      store.testResult = {
+        success: true,
+        message: `Updated models list for ${providerName}`,
+      };
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       store.testResult = { success: false, message: `Failed to fetch models: ${message}` };

@@ -134,6 +134,7 @@ export interface LlmConfig {
   apiKeyEncrypted: string | null;
   modelName: string;
   temperature: number;
+  skipTemperature: boolean;
   maxConcurrentRequests: number;
   requestDelayMs: number;
   contextWindowTokens: number;

@@ -43,13 +43,47 @@ pub async fn test_llm_connection(
             .ok_or_else(|| AppError::Validation("No LLM config found".to_string()))?
     };
 
+    // First attempt: use config as-is (temperature included unless already skipped)
     match client::send_chat_completion(&config, "You are a test.", "Say hello.").await {
         Ok(_) => Ok(TestConnectionResult {
             success: true,
             message: "Connection successful!".to_string(),
         }),
         Err(e) => {
-            Ok(TestConnectionResult { success: false, message: format!("Connection failed: {e}") })
+            let err_msg = format!("{e}");
+
+            // Check if the error is temperature-related
+            if err_msg.contains("temperature") && !config.skip_temperature {
+                // Retry without temperature
+                let mut retry_config = config.clone();
+                retry_config.skip_temperature = true;
+
+                match client::send_chat_completion(&retry_config, "You are a test.", "Say hello.")
+                    .await
+                {
+                    Ok(_) => {
+                        // Save the updated config so future calls skip temperature
+                        let conn = db_state.conn.lock().map_err(|e| {
+                            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+                        })?;
+                        llm_config_repo::save_config(&conn, &retry_config)?;
+
+                        Ok(TestConnectionResult {
+                            success: true,
+                            message: "Connection successful! (temperature not supported by this model — auto-adjusted)".to_string(),
+                        })
+                    }
+                    Err(retry_err) => Ok(TestConnectionResult {
+                        success: false,
+                        message: format!("Connection failed: {retry_err}"),
+                    }),
+                }
+            } else {
+                Ok(TestConnectionResult {
+                    success: false,
+                    message: format!("Connection failed: {e}"),
+                })
+            }
         }
     }
 }
