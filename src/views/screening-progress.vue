@@ -127,7 +127,8 @@ async function handleResetWorkingList(): Promise<void> {
           <div>
             <h1 class="page-title">AI Screening</h1>
             <p v-if="displayTotal > 0" class="screening-view__subtitle">
-              Processing: <strong>{{ displayCompleted }}</strong> / {{ displayTotal }} articles
+              Processing: <strong>{{ displayCompleted }}</strong> of
+              <strong>{{ displayTotal }}</strong> article(s)
             </p>
             <p v-else class="screening-view__subtitle">
               Screen articles against your inclusion/exclusion criteria
