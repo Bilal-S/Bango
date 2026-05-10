@@ -612,6 +612,21 @@ pub fn update_user_notes(conn: &Connection, article_id: &str, notes: &str) -> Re
     Ok(())
 }
 
+pub fn update_article_criteria(
+    conn: &Connection,
+    article_id: &str,
+    inclusion_ids: &[String],
+    exclusion_ids: &[String],
+) -> Result<(), AppError> {
+    let inc_json = serde_json::to_string(inclusion_ids)?;
+    let exc_json = serde_json::to_string(exclusion_ids)?;
+    conn.execute(
+        "UPDATE articles SET matched_inclusion_criteria = ?1, matched_exclusion_criteria = ?2 WHERE id = ?3",
+        params![inc_json, exc_json, article_id],
+    )?;
+    Ok(())
+}
+
 pub fn override_ai_decision(
     conn: &Connection,
     article_id: &str,

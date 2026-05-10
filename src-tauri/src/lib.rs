@@ -94,6 +94,7 @@ pub fn run() {
             commands::articles::update_article_tags,
             commands::articles::update_article_labels,
             commands::articles::override_ai_decision,
+            commands::articles::update_article_criteria,
             commands::articles::get_import_activities,
             commands::screening::get_screening_readiness,
             commands::screening::start_screening,

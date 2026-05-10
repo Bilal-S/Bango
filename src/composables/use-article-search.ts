@@ -255,6 +255,15 @@ export function useArticleSearch() {
     await labelsStore.fetchLabels();
   }
 
+  async function updateCriteria(
+    id: string,
+    inclusionIds: string[],
+    exclusionIds: string[]
+  ): Promise<void> {
+    await tauriCommand('update_article_criteria', { id, inclusionIds, exclusionIds });
+    await selectArticle(id);
+  }
+
   const selectedIndex = computed(() => {
     if (!selectedArticle.value) return -1;
     return articles.value.findIndex((a) => a.id === selectedArticle.value!.id);
@@ -362,6 +371,7 @@ export function useArticleSearch() {
     updateNotes,
     updateTags,
     updateLabels,
+    updateCriteria,
     hasPrevious,
     hasNext,
     navigatePrev,

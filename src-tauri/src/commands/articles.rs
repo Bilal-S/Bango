@@ -162,6 +162,34 @@ pub fn override_ai_decision(
 }
 
 #[tauri::command]
+pub fn update_article_criteria(
+    db_state: State<'_, DbState>,
+    id: String,
+    inclusion_ids: Vec<String>,
+    exclusion_ids: Vec<String>,
+) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    article_repo::update_article_criteria(&conn, &id, &inclusion_ids, &exclusion_ids)?;
+    audit_repo::create_entry(
+        &conn,
+        &id,
+        "criteria_match",
+        None,
+        None,
+        Some(&format!(
+            "Criteria updated: {} inclusion, {} exclusion",
+            inclusion_ids.len(),
+            exclusion_ids.len()
+        )),
+        "user",
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_import_activities(
     db_state: State<'_, DbState>,
     limit: Option<usize>,

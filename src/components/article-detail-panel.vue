@@ -5,6 +5,7 @@ import AuditTimeline from './audit-timeline.vue';
 import SuggestInput from './suggest-input.vue';
 import TagChip from './tag-chip.vue';
 import LabelChip from './label-chip.vue';
+import CriteriaEditDialog from './criteria-edit-dialog.vue';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import { useCriteriaStore } from '@/stores/criteria';
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   updateNotes: [id: string, notes: string];
   updateTags: [id: string, tagIds: string[]];
   updateLabels: [id: string, labelIds: string[]];
+  updateCriteria: [id: string, inclusionIds: string[], exclusionIds: string[]];
 }>();
 
 const tagsStore = useTagsStore();
@@ -200,6 +202,21 @@ const criteriaTextMap = computed(() => {
 function criterionText(id: string): string {
   return criteriaTextMap.value.get(id) ?? id;
 }
+
+// Criteria edit dialog
+const showCriteriaDialog = ref(false);
+
+function truncate(text: string, max = 20): string {
+  return text.length > max ? text.slice(0, max) + '…' : text;
+}
+
+function handleCriteriaSave(
+  _articleId: string,
+  inclusionIds: string[],
+  exclusionIds: string[]
+): void {
+  emit('updateCriteria', props.article.id, inclusionIds, exclusionIds);
+}
 </script>
 
 <template>
@@ -294,33 +311,61 @@ function criterionText(id: string): string {
       </section>
 
       <!-- Matched Criteria -->
-      <section
-        v-if="
-          article.matchedInclusionCriteria.length > 0 || article.matchedExclusionCriteria.length > 0
-        "
-      >
-        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
-          Matched Criteria
-        </h3>
-        <ul class="space-y-2">
-          <li
-            v-for="criterion in article.matchedInclusionCriteria"
-            :key="criterion"
-            class="flex items-center gap-3 text-body-sm"
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-label-caps text-slate-500 uppercase tracking-wider">
+            Matched Criteria
+          </h3>
+          <button
+            class="material-symbols-outlined text-[16px] text-slate-400 hover:text-indigo-600 cursor-pointer"
+            title="Edit matched criteria"
+            @click="showCriteriaDialog = true"
           >
-            <span class="material-symbols-outlined text-emerald-500 text-lg">check_circle</span>
-            <span>{{ criterionText(criterion) }}</span>
-          </li>
-          <li
-            v-for="criterion in article.matchedExclusionCriteria"
-            :key="criterion"
-            class="flex items-center gap-3 text-body-sm text-slate-400"
-          >
-            <span class="material-symbols-outlined text-lg">cancel</span>
-            <span class="line-through">{{ criterionText(criterion) }}</span>
-          </li>
-        </ul>
+            edit
+          </button>
+        </div>
+        <template
+          v-if="
+            article.matchedInclusionCriteria.length > 0 ||
+            article.matchedExclusionCriteria.length > 0
+          "
+        >
+          <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <div
+              v-for="criterion in article.matchedInclusionCriteria"
+              :key="'inc-' + criterion"
+              class="flex items-center gap-1.5 text-body-sm"
+              :title="criterionText(criterion)"
+            >
+              <span class="material-symbols-outlined text-emerald-500 text-sm">check_circle</span>
+              <span class="truncate">{{ truncate(criterionText(criterion)) }}</span>
+            </div>
+            <div
+              v-for="criterion in article.matchedExclusionCriteria"
+              :key="'exc-' + criterion"
+              class="flex items-center gap-1.5 text-body-sm text-slate-400"
+              :title="criterionText(criterion)"
+            >
+              <span class="material-symbols-outlined text-rose-400 text-sm">cancel</span>
+              <span class="truncate line-through">{{ truncate(criterionText(criterion)) }}</span>
+            </div>
+          </div>
+        </template>
+        <p v-else class="text-xs text-slate-400 italic">
+          No criteria matched. Click edit to assign.
+        </p>
       </section>
+
+      <!-- Criteria Edit Dialog -->
+      <CriteriaEditDialog
+        v-model="showCriteriaDialog"
+        :article-id="article.id"
+        :matched-inclusion-ids="article.matchedInclusionCriteria"
+        :matched-exclusion-ids="article.matchedExclusionCriteria"
+        :inclusion-criteria="criteriaStore.inclusionCriteria"
+        :exclusion-criteria="criteriaStore.exclusionCriteria"
+        @save="handleCriteriaSave"
+      />
 
       <!-- Abstract -->
       <section v-if="article.abstractText">

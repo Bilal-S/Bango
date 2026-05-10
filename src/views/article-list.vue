@@ -37,6 +37,7 @@ const {
   updateNotes,
   updateTags,
   updateLabels,
+  updateCriteria,
   closeDetail,
   setStatusTab,
   toggleSort,
@@ -195,6 +196,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       @update-notes="updateNotes"
       @update-tags="updateTags"
       @update-labels="updateLabels"
+      @update-criteria="updateCriteria"
     />
   </div>
 </template>
