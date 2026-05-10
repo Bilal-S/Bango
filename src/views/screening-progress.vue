@@ -160,7 +160,7 @@ async function handleResetWorkingList(): Promise<void> {
 
       <!-- Blocking Reasons (guardrails) -->
       <div
-        v-if="blockingReasons.length > 0 && !progress?.isRunning"
+        v-if="blockingReasons.length > 0 && !progress?.isRunning && !isWorkingListScreened"
         class="screening-view__guardrails"
       >
         <p class="screening-view__guardrails-title">Before screening, address the following:</p>
