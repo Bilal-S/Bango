@@ -10,6 +10,7 @@ import { useLabelsStore } from './stores/labels';
 import { useLlmConfigStore } from './stores/llm-config';
 import { useAuditStore } from './stores/audit';
 import { useScreeningStore } from './stores/screening';
+import { initialDataLoaded } from './composables/use-dashboard';
 
 const app = createApp(App);
 app.use(createPinia());
@@ -19,6 +20,7 @@ app.mount('#app');
 // Bootstrap all stores in parallel after mount.
 // This pre-warms every Pinia store with data from the DB so that
 // navigating to any view is instant — no per-view onMounted IPC wait.
+// Once complete, signal the loading overlay to dismiss.
 void Promise.all([
   useArticlesStore().fetchIfNeeded(),
   useCriteriaStore().fetchIfNeeded(),
@@ -27,4 +29,6 @@ void Promise.all([
   useLlmConfigStore().fetchIfNeeded(),
   useAuditStore().fetchIfNeeded(),
   useScreeningStore().fetchIfNeeded(),
-]);
+]).finally(() => {
+  initialDataLoaded.value = true;
+});

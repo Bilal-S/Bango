@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, provide, ref, watch } from 'vue';
+import { provide, ref, watch } from 'vue';
 import { useViewport } from '@/composables/use-viewport';
-import { initialDataLoaded, useDashboard } from '@/composables/use-dashboard';
+import { initialDataLoaded } from '@/composables/use-dashboard';
 import NavSidebar from './nav-sidebar.vue';
 
 const { isBelowMd } = useViewport();
@@ -40,8 +40,8 @@ function closeMobileSidebar(): void {
 provide('sidebarCollapsed', sidebarCollapsed);
 provide('toggleSidebar', toggleSidebar);
 
-// Initial loading overlay — triggers the first data load
-const { refresh } = useDashboard();
+// Initial loading overlay — data is bootstrapped in main.ts;
+// this overlay shows a transparent spinner until that completes.
 const showOverlay = ref(true);
 const fadingOut = ref(false);
 
@@ -52,7 +52,7 @@ function dismissOverlay(): void {
   }, 300);
 }
 
-// Handle case where data is already loaded (e.g. hot reload) or loads later
+// Dismiss overlay once main.ts signals that initial data is loaded
 watch(
   initialDataLoaded,
   (loaded) => {
@@ -62,13 +62,6 @@ watch(
   },
   { immediate: true }
 );
-
-onMounted(() => {
-  refresh().catch(() => {
-    // Even on error, dismiss the overlay so the user isn't stuck
-    dismissOverlay();
-  });
-});
 </script>
 
 <template>
@@ -177,7 +170,7 @@ onMounted(() => {
   overflow-y: auto;
 }
 
-/* Loading Overlay */
+/* Loading Overlay — semi-transparent so app shell is faintly visible */
 .loading-overlay {
   position: fixed;
   inset: 0;
@@ -185,7 +178,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--color-surface);
+  background-color: rgba(252, 248, 255, 0.85);
+  backdrop-filter: blur(4px);
   transition: opacity 0.3s ease;
 }
 

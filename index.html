@@ -13,9 +13,27 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
     />
     <title>Bango</title>
+    <style>
+      /* Pre-Vue loading indicator — active instantly while JS bootstraps */
+      #pre-vue-loader {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(252, 248, 255, 0.9);
+        z-index: 99999;
+        font-family: Inter, system-ui, sans-serif;
+        font-size: 1.125rem;
+        font-weight: 500;
+        color: #464555;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div id="pre-vue-loader">Loading&hellip;</div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
