@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router';
+import appIcon from '@/assets/app-icon.png';
 
 const props = defineProps<{
   collapsed?: boolean;
@@ -49,7 +50,7 @@ function handleNavClick(): void {
     }"
   >
     <div class="sidebar__header">
-      <span class="sidebar__logo">B</span>
+      <img class="sidebar__logo" :src="appIcon" alt="Bango" />
       <span v-if="!collapsed" class="sidebar__title"
         >Bango <span class="sidebar__version">v{{ appVersion }}</span></span
       >
@@ -145,14 +146,8 @@ function handleNavClick(): void {
 .sidebar__logo {
   width: 32px;
   height: 32px;
-  background-color: var(--color-primary);
   border-radius: var(--radius-default);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: var(--font-weight-semibold);
-  font-size: var(--font-size-h1);
-  color: var(--color-on-primary);
+  object-fit: contain;
   flex-shrink: 0;
 }
 
