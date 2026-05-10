@@ -1,6 +1,8 @@
 pub const VERSION: i32 = 1;
 
 pub const UP_SQL: &str = r#"
+-- ── Core tables ──────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS research_aims (
     id TEXT PRIMARY KEY,
     text TEXT NOT NULL,
@@ -18,14 +20,18 @@ CREATE TABLE IF NOT EXISTS criteria (
 CREATE TABLE IF NOT EXISTS tags (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    source TEXT NOT NULL CHECK(source IN ('ai_suggested', 'user_created', 'ris_keyword'))
+    source TEXT NOT NULL CHECK(source IN ('ai_suggested', 'user_created', 'ris_keyword')),
+    color TEXT
 );
 
 CREATE TABLE IF NOT EXISTS labels (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    source TEXT NOT NULL CHECK(source IN ('ai_generated', 'user_created'))
+    source TEXT NOT NULL CHECK(source IN ('ai_generated', 'user_created')),
+    color TEXT
 );
+
+-- ── Articles ─────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS articles (
     id TEXT PRIMARY KEY,
@@ -69,8 +75,14 @@ CREATE TABLE IF NOT EXISTS articles (
     import_source TEXT,
     imported_at TEXT NOT NULL DEFAULT (datetime('now')),
     screened_at TEXT,
+    data_length INTEGER,
+    token_estimate INTEGER,
+    actual_tokens INTEGER,
+    sequence_id INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (duplicate_of) REFERENCES articles(id)
 );
+
+-- ── Article ↔ tags / labels ─────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS article_tags (
     article_id TEXT NOT NULL,
@@ -88,6 +100,8 @@ CREATE TABLE IF NOT EXISTS article_labels (
     FOREIGN KEY (label_id) REFERENCES labels(id) ON DELETE CASCADE
 );
 
+-- ── Audit trail ─────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS audit_entries (
     id TEXT PRIMARY KEY,
     article_id TEXT NOT NULL,
@@ -104,21 +118,28 @@ CREATE TABLE IF NOT EXISTS audit_entries (
     FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
 );
 
+-- ── LLM configuration (single-row via CHECK) ────────────────
+
 CREATE TABLE IF NOT EXISTS llm_config (
     id INTEGER PRIMARY KEY CHECK(id = 1),
-    provider TEXT NOT NULL CHECK(provider IN ('openai', 'google', 'z_ai', 'llama_cpp', 'ollama', 'lm_studio', 'custom')),
+    provider TEXT NOT NULL CHECK(provider IN ('openai', 'anthropic', 'google', 'mistral_ai', 'z_ai', 'llama_cpp', 'ollama', 'lm_studio', 'custom')),
     endpoint_url TEXT NOT NULL,
     api_key_encrypted TEXT,
     model_name TEXT NOT NULL,
     temperature REAL NOT NULL DEFAULT 0.2,
     max_concurrent_requests INTEGER NOT NULL DEFAULT 3,
     request_delay_ms INTEGER NOT NULL DEFAULT 500,
-    context_window_tokens INTEGER NOT NULL DEFAULT 50000
+    context_window_tokens INTEGER NOT NULL DEFAULT 50000,
+    skip_temperature INTEGER NOT NULL DEFAULT 0
 );
+
+-- ── Indexes ──────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_articles_status ON articles(status);
 CREATE INDEX IF NOT EXISTS idx_articles_duplicate_of ON articles(duplicate_of);
 CREATE INDEX IF NOT EXISTS idx_articles_screened_at ON articles(screened_at);
+CREATE INDEX IF NOT EXISTS idx_articles_data_length ON articles(data_length);
+CREATE INDEX IF NOT EXISTS idx_articles_sequence_id ON articles(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_audit_entries_article_id ON audit_entries(article_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_type ON criteria(type);
 "#;

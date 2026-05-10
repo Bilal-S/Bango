@@ -28,7 +28,7 @@ const resettingWorkingList = ref(false);
 
 const isPaused = ref(false);
 const batchSize = ref(1);
-const showBatchWarning = computed(() => batchSize.value > 4);
+const showBatchWarning = computed(() => batchSize.value > 1);
 
 onMounted(async () => {
   // Silent background refresh
@@ -204,7 +204,7 @@ async function handleResetWorkingList(): Promise<void> {
           <span>15</span>
         </div>
         <div v-if="showBatchWarning" class="screening-view__batch-warning">
-          ⚠ High batch sizes might not be supported by your LLM and may lead to failures.
+          ⚠ Batching may not be supported by your LLM and may lead to failures.
         </div>
       </div>
 
