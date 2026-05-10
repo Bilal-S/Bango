@@ -12,6 +12,10 @@ export interface PrismaData {
   duplicatesRemoved: number;
   recordsScreened: number;
   recordsExcluded: number;
+  recordsExcludedGeneral: number;
+  recordsExcludedWithReasons: number;
+  recordsAssessed: number;
+  recordsInProgress: number;
   studiesIncluded: number;
   exclusionReasons: ExclusionReason[];
 }
@@ -20,9 +24,12 @@ export function usePrisma() {
   const svgContent = ref<string | null>(null);
   const data = ref<PrismaData | null>(null);
   const loading = ref(false);
+  const error = ref<string | null>(null);
+  const showExclusionReasons = ref(false);
 
   async function loadDiagram(): Promise<void> {
     loading.value = true;
+    error.value = null;
     try {
       const [svg, prismaData] = await Promise.all([
         tauriCommand<string>('get_prisma_svg'),
@@ -30,6 +37,9 @@ export function usePrisma() {
       ]);
       svgContent.value = svg;
       data.value = prismaData;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to load PRISMA data';
+      error.value = msg;
     } finally {
       loading.value = false;
     }
@@ -74,5 +84,14 @@ export function usePrisma() {
     img.src = url;
   }
 
-  return { svgContent, data, loading, loadDiagram, exportSvg, exportPng };
+  return {
+    svgContent,
+    data,
+    loading,
+    error,
+    showExclusionReasons,
+    loadDiagram,
+    exportSvg,
+    exportPng,
+  };
 }

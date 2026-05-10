@@ -10,6 +10,10 @@ pub struct PrismaData {
     pub duplicates_removed: usize,
     pub records_screened: usize,
     pub records_excluded: usize,
+    pub records_excluded_general: usize,
+    pub records_excluded_with_reasons: usize,
+    pub records_assessed: usize,
+    pub records_in_progress: usize,
     pub studies_included: usize,
     pub exclusion_reasons: Vec<ExclusionReason>,
 }
@@ -36,6 +40,29 @@ pub fn compute_prisma_data(conn: &Connection) -> Result<PrismaData, AppError> {
 
     let records_excluded: usize = conn
         .query_row("SELECT COUNT(*) FROM articles WHERE status = 'rejected'", [], |row| row.get(0))
+        .unwrap_or(0);
+
+    let records_excluded_general: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM articles WHERE status = 'rejected' AND (matched_exclusion_criteria IS NULL OR matched_exclusion_criteria = '[]')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let records_excluded_with_reasons: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM articles WHERE status = 'rejected' AND matched_exclusion_criteria IS NOT NULL AND matched_exclusion_criteria != '[]'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    // Records actually assessed at full-text = screened minus those generally excluded at screening
+    let records_assessed = records_screened.saturating_sub(records_excluded_general);
+
+    let records_in_progress: usize = conn
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'working'", [], |row| row.get(0))
         .unwrap_or(0);
 
     let studies_included: usize = conn
@@ -78,6 +105,10 @@ pub fn compute_prisma_data(conn: &Connection) -> Result<PrismaData, AppError> {
         duplicates_removed,
         records_screened,
         records_excluded,
+        records_excluded_general,
+        records_excluded_with_reasons,
+        records_assessed,
+        records_in_progress,
         studies_included,
         exclusion_reasons,
     })
