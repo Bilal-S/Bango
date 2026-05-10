@@ -64,8 +64,10 @@ export function useLlmConfig() {
   async function testConnection(): Promise<void> {
     testing.value = true;
     store.clearTestResult();
-    // Use requestAnimationFrame (macrotask) to guarantee the browser paints the spinner
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    // Use double requestAnimationFrame (macrotask) to guarantee the browser paints the spinner
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
     try {
       await save();
       const result = await tauriCommand<TestResult>('test_llm_connection');

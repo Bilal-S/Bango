@@ -377,7 +377,7 @@ watch(
           :class="testResult?.success ? 'llm-config__status-dot--ok' : ''"
         ></span>
         <span class="llm-config__status-label">
-          {{ testResult?.success ? 'Connected' : 'Disconnected' }}
+          {{ testResult?.success ? 'Connection Succeeded' : 'Not Tested' }}
         </span>
       </div>
       <div class="llm-config__actions">
