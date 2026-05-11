@@ -121,6 +121,7 @@ fn parse_action(s: &str) -> AuditAction {
         "ai_screen" => AuditAction::AiScreen,
         "manual_override" => AuditAction::ManualOverride,
         "ai_summary" => AuditAction::AiSummary,
+        "error" => AuditAction::Error,
         _ => AuditAction::StatusChange,
     }
 }
@@ -131,4 +132,27 @@ fn parse_source(s: &str) -> AuditSource {
         "user" => AuditSource::User,
         _ => AuditSource::System,
     }
+}
+
+/// Log a generic/system error to the audit table (not connected to any article).
+pub fn log_error(conn: &Connection, details: &str) -> Result<(), AppError> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
+         VALUES (?1, '', ?2, 'error', NULL, NULL, ?3, 'system')",
+        params![id, now, details],
+    )?;
+    Ok(())
+}
+
+/// Clear all generic audit entries (those not connected to any article).
+/// These are entries with empty article_id, typically system errors.
+pub fn clear_generic_entries(conn: &Connection) -> Result<usize, AppError> {
+    let count =
+        conn.query_row("SELECT COUNT(*) FROM audit_entries WHERE article_id = ''", [], |row| {
+            row.get::<_, usize>(0)
+        })?;
+    conn.execute("DELETE FROM audit_entries WHERE article_id = ''", [])?;
+    Ok(count)
 }

@@ -30,6 +30,7 @@ pub enum AuditAction {
     AiScreen,
     ManualOverride,
     AiSummary,
+    Error,
 }
 
 impl AuditAction {
@@ -48,6 +49,7 @@ impl AuditAction {
             Self::AiScreen => "ai_screen",
             Self::ManualOverride => "manual_override",
             Self::AiSummary => "ai_summary",
+            Self::Error => "error",
         }
     }
 }

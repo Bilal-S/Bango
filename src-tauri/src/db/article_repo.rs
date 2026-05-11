@@ -483,7 +483,10 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
     }
 
     let sort_by = query.sort_by.as_deref().unwrap_or("imported_at");
-    let sort_dir = query.sort_dir.as_deref().unwrap_or("DESC");
+    let sort_dir = match query.sort_dir.as_deref() {
+        Some("ASC") => "ASC",
+        _ => "DESC",
+    };
     let order_clause = match sort_by {
         "title" => format!(" ORDER BY title COLLATE NOCASE {sort_dir}"),
         "authors" => format!(" ORDER BY authors COLLATE NOCASE {sort_dir} NULLS LAST"),

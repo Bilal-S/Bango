@@ -8,7 +8,17 @@ use tokio::time::sleep;
 
 use tauri::Emitter;
 
-use crate::db::article_repo;
+/// Debug-only logging macro. Compiles to a no-op in release builds.
+/// Prevents LLM response content (which may contain PII from article abstracts)
+/// from leaking to stderr in production.
+macro_rules! debug_log {
+    ($($arg:tt)*) => {
+        #[cfg(debug_assertions)]
+        { eprintln!($($arg)*); }
+    };
+}
+
+use crate::db::{article_repo, audit_repo};
 use crate::error::AppError;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
 use crate::screening::llm_client::LlmClient;
@@ -242,7 +252,10 @@ impl ScreeningEngine {
                         response_data = Some((text, tokens));
                         break;
                     }
-                    Err(e) if e.to_string().contains("429") => {
+                    Err(e)
+                        if e.to_string().contains("429")
+                            || e.to_string().to_lowercase().contains("rate limit") =>
+                    {
                         retry_count += 1;
                         let delay_secs = 2u64.pow(retry_count);
                         sleep(Duration::from_secs(delay_secs)).await;
@@ -257,6 +270,8 @@ impl ScreeningEngine {
                         for article in &batch {
                             set_screening_error(&c, &article.id, &e.to_string(), None)?;
                         }
+                        // Log system error to audit trail
+                        let _ = audit_repo::log_error(&c, &format!("LLM request failed: {}", e));
                         break;
                     }
                 }
@@ -458,6 +473,11 @@ impl ScreeningEngine {
                                 Some(&response_text),
                             )?;
                         }
+                        // Log system error to audit trail
+                        let _ = audit_repo::log_error(
+                            &c,
+                            &format!("Malformed LLM response: {parse_err}"),
+                        );
                     }
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();
@@ -488,42 +508,78 @@ impl ScreeningEngine {
 
 /// Parse the LLM response as a JSON array of screening results.
 fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, AppError> {
-    eprintln!("[screening] process_screening_responses received {} bytes", raw.len());
-    eprintln!("[screening] raw first 300 chars: {}", &raw[..raw.len().min(300)]);
+    debug_log!("[screening] process_screening_responses received {} bytes", raw.len());
+    debug_log!("[screening] raw first 300 chars: {}", &raw[..raw.len().min(300)]);
 
     let json_str = extract_json(raw);
 
-    eprintln!("[screening] extract_json produced {} bytes", json_str.len());
-    eprintln!(
+    debug_log!("[screening] extract_json produced {} bytes", json_str.len());
+    debug_log!(
         "[screening] extracted JSON first 300 chars: {}",
         &json_str[..json_str.len().min(300)]
     );
 
     match serde_json::from_str::<Vec<LlmScreeningResponse>>(&json_str) {
-        Ok(results) => {
-            eprintln!("[screening] successfully parsed {} screening results", results.len());
+        Ok(mut results) => {
+            // M9: Validate and normalize LLM decision values
+            for r in &mut results {
+                let d = r.decision.to_lowercase();
+                match d.as_str() {
+                    "include" | "exclude" | "error" => {
+                        r.decision = d;
+                    }
+                    _ => {
+                        debug_log!(
+                            "[screening] Unexpected decision '{}', treating as error",
+                            r.decision
+                        );
+                        r.reasoning = format!(
+                            "Unexpected LLM decision: '{}'. Original reasoning: {}",
+                            r.decision, r.reasoning
+                        );
+                        r.decision = "error".to_string();
+                    }
+                }
+            }
+            debug_log!("[screening] successfully parsed {} screening results", results.len());
             Ok(results)
         }
         Err(e) => {
-            eprintln!("[screening] FAILED to parse screening response: {e}");
-            eprintln!(
+            debug_log!("[screening] FAILED to parse screening response: {e}");
+            debug_log!(
                 "[screening] attempted JSON (first 500 chars): {}",
                 &json_str[..json_str.len().min(500)]
             );
 
             // Try truncated JSON repair: find last complete `}` and add missing `]`
             if let Some(repaired) = repair_truncated_json_array(&json_str) {
-                eprintln!("[screening] attempting truncated JSON repair...");
+                debug_log!("[screening] attempting truncated JSON repair...");
                 match serde_json::from_str::<Vec<LlmScreeningResponse>>(&repaired) {
-                    Ok(results) => {
-                        eprintln!(
+                    Ok(mut results) => {
+                        // M9: Validate repaired results too
+                        for r in &mut results {
+                            let d = r.decision.to_lowercase();
+                            match d.as_str() {
+                                "include" | "exclude" | "error" => {
+                                    r.decision = d;
+                                }
+                                _ => {
+                                    r.reasoning = format!(
+                                        "Unexpected LLM decision: '{}'. Original reasoning: {}",
+                                        r.decision, r.reasoning
+                                    );
+                                    r.decision = "error".to_string();
+                                }
+                            }
+                        }
+                        debug_log!(
                             "[screening] repair succeeded! Recovered {} results",
                             results.len()
                         );
                         return Ok(results);
                     }
-                    Err(repair_err) => {
-                        eprintln!("[screening] repair also failed: {repair_err}");
+                    Err(_repair_err) => {
+                        debug_log!("[screening] repair also failed: {_repair_err}");
                     }
                 }
             }

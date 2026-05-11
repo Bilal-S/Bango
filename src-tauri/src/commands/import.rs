@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+/// Maximum RIS file size: 100 MB. Prevents OOM from accidentally importing huge files.
+const MAX_RIS_FILE_SIZE: u64 = 100 * 1024 * 1024;
+
 use crate::commands::dedup::classify_imported_articles;
 use crate::db::article_repo;
 use crate::db::connection::DbState;
@@ -65,6 +68,15 @@ pub fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppErro
     let content = if let Some(c) = request.content {
         c
     } else if let Some(p) = request.file_path {
+        let metadata = std::fs::metadata(&p)
+            .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
+        if metadata.len() > MAX_RIS_FILE_SIZE {
+            return Err(AppError::Import(format!(
+                "File too large: {:.1} MB (maximum is {:.0} MB)",
+                metadata.len() as f64 / (1024.0 * 1024.0),
+                MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
+            )));
+        }
         std::fs::read_to_string(p)
             .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
     } else {
@@ -153,6 +165,15 @@ pub fn import_ris_file(
     let content = if let Some(c) = request.content {
         c
     } else if let Some(p) = request.file_path {
+        let metadata = std::fs::metadata(&p)
+            .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
+        if metadata.len() > MAX_RIS_FILE_SIZE {
+            return Err(AppError::Import(format!(
+                "File too large: {:.1} MB (maximum is {:.0} MB)",
+                metadata.len() as f64 / (1024.0 * 1024.0),
+                MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
+            )));
+        }
         std::fs::read_to_string(p)
             .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
     } else {

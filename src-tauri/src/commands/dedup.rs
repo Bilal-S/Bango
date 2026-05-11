@@ -64,36 +64,29 @@ pub fn classify_imported_articles(
         })
         .collect();
 
-    // Run dedup on everything
+    // Run dedup on everything (read-only operation, no transaction needed)
     let result = engine::run_dedup(&all_dedup);
 
     // Collect IDs of newly imported articles that are duplicates
     let mut duplicate_new_ids = std::collections::HashSet::new();
 
-    // Process exact duplicates
-    for pair in &result.exact_duplicates {
-        // Figure out which (if any) of the pair is a newly imported article
-        let (duplicate_id, surviving_id) = if new_ids.contains(&pair.article_b_id) {
-            // B is new → B is the duplicate, A survives (regardless of A's status)
-            (pair.article_b_id.clone(), pair.article_a_id.clone())
-        } else if new_ids.contains(&pair.article_a_id) {
-            // A is new → A is the duplicate, B survives
-            (pair.article_a_id.clone(), pair.article_b_id.clone())
-        } else {
-            // Neither is new — skip (existing pair already handled)
-            continue;
-        };
+    // Pre-compute exact duplicate pairs for processing
+    let exact_pairs: Vec<(String, String)> = result
+        .exact_duplicates
+        .iter()
+        .filter_map(|pair| {
+            if new_ids.contains(&pair.article_b_id) {
+                Some((pair.article_b_id.clone(), pair.article_a_id.clone()))
+            } else if new_ids.contains(&pair.article_a_id) {
+                Some((pair.article_a_id.clone(), pair.article_b_id.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
 
-        // Mark the new article as a duplicate — do NOT change the surviving article
-        article_repo::mark_as_duplicate(conn, &duplicate_id, &surviving_id)?;
+    for (duplicate_id, _) in &exact_pairs {
         duplicate_new_ids.insert(duplicate_id.clone());
-
-        // Audit entry
-        let audit_id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_auto', ?3, 'system')",
-            rusqlite::params![audit_id, duplicate_id, format!("Auto-detected duplicate of article {}", surviving_id)],
-        )?;
     }
 
     // Process fuzzy matches — keep new articles in 'duplicate' for manual review
@@ -110,10 +103,30 @@ pub fn classify_imported_articles(
 
     // Move non-duplicate new articles to working
     let to_move: Vec<String> = new_ids.difference(&duplicate_new_ids).cloned().collect();
-    let moved = article_repo::move_articles_to_working_batch(conn, &to_move)?;
+
+    // Wrap all writes in a transaction for data integrity
+    let tx = conn.unchecked_transaction()?;
+
+    for (duplicate_id, surviving_id) in &exact_pairs {
+        article_repo::mark_as_duplicate(&tx, duplicate_id, surviving_id)?;
+        let audit_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_auto', ?3, 'system')",
+            rusqlite::params![audit_id, duplicate_id, format!("Auto-detected duplicate of article {}", surviving_id)],
+        )?;
+    }
+
+    for id in &to_move {
+        tx.execute(
+            "UPDATE articles SET status = 'working' WHERE id = ?1 AND status = 'duplicate'",
+            rusqlite::params![id],
+        )?;
+    }
+
+    tx.commit()?;
 
     Ok(ClassificationResult {
-        moved_to_working: moved,
+        moved_to_working: to_move.len(),
         duplicates_found: duplicate_new_ids.len(),
         exact_duplicates: exact_count,
         fuzzy_matches: fuzzy_count,

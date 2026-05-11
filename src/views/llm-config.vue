@@ -3,6 +3,7 @@ import { watch, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
 import { useExport } from '@/composables/use-export';
+import { invoke } from '@tauri-apps/api/core';
 
 const {
   config,
@@ -27,6 +28,7 @@ const showExportDialog = ref(false);
 const showDeleteDialog = ref(false);
 const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
+const clearLogsStatus = ref<string | null>(null);
 
 function handleImportFile(event: Event): void {
   const target = event.target as HTMLInputElement;
@@ -49,6 +51,18 @@ async function doImportProject(): Promise<void> {
 async function doExportProject(): Promise<void> {
   await exportProject();
   showExportDialog.value = false;
+}
+
+async function doClearSystemLogs(): Promise<void> {
+  try {
+    const count = await invoke<number>('clear_generic_audit');
+    clearLogsStatus.value = `Cleared ${count} system log entry(ies).`;
+    setTimeout(() => {
+      clearLogsStatus.value = null;
+    }, 3000);
+  } catch (e) {
+    clearLogsStatus.value = `Failed to clear logs: ${e}`;
+  }
 }
 
 async function doDeleteProject(): Promise<void> {
@@ -419,6 +433,7 @@ watch(
         Project Management
       </h2>
       <p class="pm-card__desc">Import, export, or reset your project data.</p>
+      <p v-if="clearLogsStatus" class="pm-card__status">{{ clearLogsStatus }}</p>
       <div class="pm-card__actions">
         <button class="btn btn--secondary" @click="showImportDialog = true">
           <span class="material-symbols-outlined btn__icon">upload_file</span>
@@ -427,6 +442,10 @@ watch(
         <button class="btn btn--secondary" @click="showExportDialog = true">
           <span class="material-symbols-outlined btn__icon">download</span>
           Export Backup
+        </button>
+        <button class="btn btn--secondary" @click="doClearSystemLogs">
+          <span class="material-symbols-outlined btn__icon">mop</span>
+          Clear System Logs
         </button>
         <button class="btn btn--danger" @click="showDeleteDialog = true">
           <span class="material-symbols-outlined btn__icon">delete_forever</span>
@@ -928,6 +947,15 @@ watch(
   font-size: 13px;
   color: #464555;
   margin-bottom: 1rem;
+}
+
+.pm-card__status {
+  font-size: 13px;
+  color: #166534;
+  background-color: #f0fdf4;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  margin-bottom: 0.75rem;
 }
 
 .pm-card__actions {

@@ -201,3 +201,12 @@ pub fn get_import_activities(
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     audit_repo::get_import_activities(&conn, limit)
 }
+
+#[tauri::command]
+pub fn clear_generic_audit(db_state: State<'_, DbState>) -> Result<usize, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    audit_repo::clear_generic_entries(&conn)
+}

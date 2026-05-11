@@ -96,6 +96,7 @@ pub fn run() {
             commands::articles::override_ai_decision,
             commands::articles::update_article_criteria,
             commands::articles::get_import_activities,
+            commands::articles::clear_generic_audit,
             commands::screening::get_screening_readiness,
             commands::screening::start_screening,
             commands::screening::get_screening_progress,
