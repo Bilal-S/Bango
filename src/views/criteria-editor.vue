@@ -6,7 +6,7 @@ import type { Priority } from '@/types';
 
 const criteriaStore = useCriteriaStore();
 
-// Read directly from store — pre-warmed at startup, no onMounted fetch needed.
+// Read directly from store - pre-warmed at startup, no onMounted fetch needed.
 const aims = computed(() => criteriaStore.aims);
 const criteria = computed(() => criteriaStore.criteria);
 

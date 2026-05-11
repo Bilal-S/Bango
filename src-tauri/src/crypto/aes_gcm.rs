@@ -11,11 +11,11 @@ const SALT: &[u8; 16] = b"bango-app-salt16";
 const ITERATIONS: u32 = 600_000;
 
 /// Process-wide cached key derived from machine identity.
-/// PBKDF2 with 600K iterations takes ~2.75s — we compute it once and reuse.
+/// PBKDF2 with 600K iterations takes ~2.75s - we compute it once and reuse.
 static CACHED_MACHINE_KEY: OnceLock<[u8; 32]> = OnceLock::new();
 
 /// Derives a 256-bit key from machine identity (hostname + username + app salt).
-/// Result is cached for the process lifetime — first call pays the PBKDF2 cost,
+/// Result is cached for the process lifetime - first call pays the PBKDF2 cost,
 /// all subsequent calls return instantly.
 #[must_use]
 pub fn derive_key_from_machine() -> [u8; 32] {

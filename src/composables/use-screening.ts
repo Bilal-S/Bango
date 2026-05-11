@@ -43,7 +43,7 @@ export function useScreening() {
       const args = batchSize ? { batchSize } : undefined;
       const result = await tauriCommand<ScreeningProgress>('start_screening', args);
       // Replace optimistic progress with real initial progress (may have total=0 if engine
-      // hasn't counted yet — that's fine, the next event will correct it)
+      // hasn't counted yet - that's fine, the next event will correct it)
       if (result.total > 0) {
         store.setProgress(result);
       }

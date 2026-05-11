@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 import type { DedupResult } from './use-dedup';
+import { nextPaint } from '@/utils/next-paint';
 
 export interface ErrorGroup {
   message: string;
@@ -123,6 +124,9 @@ export function useImport() {
     loading.value = true;
     error.value = null;
 
+    // Yield to the browser so the spinner paints before the blocking IPC call
+    await nextPaint();
+
     try {
       importResult.value = await tauriCommand<ImportResult>('import_ris_file', {
         request: {
@@ -137,7 +141,7 @@ export function useImport() {
       try {
         dedupSummary.value = await tauriCommand<DedupResult>('check_duplicates');
       } catch {
-        // Non-fatal — dedup summary is optional
+        // Non-fatal - dedup summary is optional
       }
 
       step.value = 'complete';

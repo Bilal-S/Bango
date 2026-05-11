@@ -70,7 +70,7 @@ pub async fn test_llm_connection(
 
                         Ok(TestConnectionResult {
                             success: true,
-                            message: "Connection successful! (temperature not supported by this model — auto-adjusted)".to_string(),
+                            message: "Connection successful! (temperature not supported by this model - auto-adjusted)".to_string(),
                         })
                     }
                     Err(retry_err) => Ok(TestConnectionResult {

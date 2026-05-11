@@ -343,7 +343,7 @@ impl ScreeningEngine {
                             continue;
                         }
 
-                        // Apply priority resolution — match by UUID or by criterion text
+                        // Apply priority resolution - match by UUID or by criterion text
                         let inc_matches: Vec<CriterionMatch> = screening
                             .matched_inclusion_criteria
                             .iter()
@@ -602,7 +602,7 @@ fn repair_truncated_json_array(json: &str) -> Option<String> {
         return None;
     }
 
-    // Find the last occurrence of `}` — the end of the last complete object
+    // Find the last occurrence of `}` - the end of the last complete object
     let last_brace = trimmed.rfind('}')?;
     let candidate = &trimmed[..=last_brace];
 
@@ -643,7 +643,7 @@ fn extract_json(raw: &str) -> String {
         return trimmed.to_string();
     }
 
-    // Strategy 3: JSON object wrapping an array — extract the array
+    // Strategy 3: JSON object wrapping an array - extract the array
     if trimmed.starts_with('{') {
         if let Some(arr) = extract_array_from_object(trimmed) {
             return arr;
@@ -949,7 +949,7 @@ mod tests {
 
     #[test]
     fn test_parse_response_with_surrounding_text() {
-        // LLM sometimes wraps JSON in explanatory text — extract_json now handles this
+        // LLM sometimes wraps JSON in explanatory text - extract_json now handles this
         let raw = r#"Here are the screening results:
     [
     {"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}
@@ -976,7 +976,7 @@ Hope this helps!"#;
     fn test_parse_json_object_instead_of_array_returns_error() {
         let raw = r#"{"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}"#;
         let result = process_screening_responses(raw);
-        assert!(result.is_err(), "Single object should fail — engine expects array");
+        assert!(result.is_err(), "Single object should fail - engine expects array");
     }
 
     #[test]

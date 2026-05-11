@@ -460,7 +460,7 @@ async fn send_openai_compatible(
         return Ok((content, total_tokens));
     }
 
-    // Strategy 2: Fallback — extract content from arbitrary JSON envelope
+    // Strategy 2: Fallback - extract content from arbitrary JSON envelope
     let value: serde_json::Value = serde_json::from_str(&body_text)
         .map_err(|e| AppError::Import(format!("Failed to parse LLM response as JSON: {e}")))?;
 

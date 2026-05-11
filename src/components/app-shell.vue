@@ -40,7 +40,7 @@ function closeMobileSidebar(): void {
 provide('sidebarCollapsed', sidebarCollapsed);
 provide('toggleSidebar', toggleSidebar);
 
-// Initial loading overlay — data is bootstrapped in main.ts;
+// Initial loading overlay - data is bootstrapped in main.ts;
 // this overlay shows a transparent spinner until that completes.
 const showOverlay = ref(true);
 const fadingOut = ref(false);
@@ -170,7 +170,7 @@ watch(
   overflow-y: auto;
 }
 
-/* Loading Overlay — semi-transparent so app shell is faintly visible */
+/* Loading Overlay - semi-transparent so app shell is faintly visible */
 .loading-overlay {
   position: fixed;
   inset: 0;

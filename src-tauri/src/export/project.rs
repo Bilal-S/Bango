@@ -272,7 +272,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let screened_at = get_str_field(a, "screenedAt", "screened_at");
         // Preserve sequence_id from backup; old backups lack it, so assign 1-based index
         let sequence_id = a.get("sequenceId").and_then(|v| v.as_i64()).unwrap_or_else(|| {
-            // Old backup — assign based on import order
+            // Old backup - assign based on import order
             (i as i64) + 1
         });
         conn.execute(
@@ -302,7 +302,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     }
 
     // next_sequence_id() uses SELECT MAX(sequence_id) FROM articles,
-    // so it will naturally return the correct value after import — no extra work needed.
+    // so it will naturally return the correct value after import - no extra work needed.
 
     // Restore article_tags
     for at in &backup.article_tags {

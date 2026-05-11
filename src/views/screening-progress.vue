@@ -53,7 +53,7 @@ const canStart = computed(() => {
 /** Computed: list of blocking reasons to show the user (cascading: prerequisites first). */
 const blockingReasons = computed((): string[] => {
   const r = readiness.value;
-  if (!r) return []; // still loading — show spinner, not warnings
+  if (!r) return []; // still loading - show spinner, not warnings
 
   const prereqReasons: string[] = [];
   if (!r.hasAims) prereqReasons.push('No research aims defined. Add aims in the Criteria Editor.');
@@ -273,7 +273,7 @@ async function handleResetWorkingList(): Promise<void> {
         </div>
       </div>
 
-      <!-- Empty State (when no progress and no guardrails — shouldn't normally show but fallback) -->
+      <!-- Empty State (when no progress and no guardrails - shouldn't normally show but fallback) -->
       <div
         v-if="!progress && !loading && readiness && blockingReasons.length === 0"
         class="screening-view__empty"

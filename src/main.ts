@@ -19,7 +19,7 @@ app.mount('#app');
 
 // Bootstrap all stores in parallel after mount.
 // This pre-warms every Pinia store with data from the DB so that
-// navigating to any view is instant — no per-view onMounted IPC wait.
+// navigating to any view is instant - no per-view onMounted IPC wait.
 // Once complete, signal the loading overlay to dismiss.
 void Promise.all([
   useArticlesStore().fetchIfNeeded(),

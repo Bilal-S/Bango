@@ -17,7 +17,7 @@ pub struct ScreeningState {
     pub engine: RwLock<Option<Arc<ScreeningEngine>>>,
 }
 
-/// Readiness check returned on mount — lightweight, single DB lock.
+/// Readiness check returned on mount - lightweight, single DB lock.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreeningReadiness {
@@ -71,7 +71,7 @@ pub async fn get_screening_readiness(
     {
         (0, 0, None)
     } else {
-        // 2. All prerequisites met — get counts + token warning in same lock scope
+        // 2. All prerequisites met - get counts + token warning in same lock scope
         let total_working = article_repo::count_working(&conn)?;
         let total_unscreened = article_repo::count_unscreened_working(&conn)?;
 

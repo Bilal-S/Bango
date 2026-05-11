@@ -88,7 +88,7 @@ export const useScreeningStore = defineStore('screening', () => {
         }
       });
     } catch {
-      // Tauri event system unavailable — fall back gracefully
+      // Tauri event system unavailable - fall back gracefully
     }
   }
 

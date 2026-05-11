@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { tauriCommand } from './use-tauri-command';
+import { nextPaint } from '@/utils/next-paint';
 
 export interface DuplicatePair {
   articleAId: string;
@@ -33,10 +34,14 @@ export function useDedup() {
   const resolvedCount = ref(0);
   const mergedCount = ref(0);
 
-  /** Detection only — does NOT modify the database. */
+  /** Detection only - does NOT modify the database. */
   async function checkDuplicates(): Promise<DedupResult | null> {
     loading.value = true;
     error.value = null;
+
+    // Yield to the browser so the spinner paints before the blocking IPC call
+    await nextPaint();
+
     try {
       result.value = await tauriCommand<DedupResult>('check_duplicates');
       return result.value;

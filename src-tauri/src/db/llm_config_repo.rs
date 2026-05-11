@@ -18,7 +18,7 @@ pub fn get_config_no_decrypt(conn: &Connection) -> Result<Option<LlmConfig>, App
             Ok(LlmConfig {
                 provider,
                 endpoint_url: row.get(1)?,
-                api_key_encrypted: None, // intentionally skipped — no decryption
+                api_key_encrypted: None, // intentionally skipped - no decryption
                 model_name: row.get(2)?,
                 temperature: row.get(3)?,
                 skip_temperature: row.get::<_, i32>(4)? != 0,

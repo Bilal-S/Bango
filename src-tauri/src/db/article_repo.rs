@@ -336,7 +336,7 @@ pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Art
 
 pub fn get_duplicate_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'duplicate' ORDER BY imported_at DESC"
+        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'duplicate' AND duplicate_of IS NULL ORDER BY imported_at DESC"
     )?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())

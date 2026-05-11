@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 /// Maximum RIS file size: 100 MB. Prevents OOM from accidentally importing huge files.
 const MAX_RIS_FILE_SIZE: u64 = 100 * 1024 * 1024;
@@ -64,51 +64,55 @@ pub struct ParseRisRequest {
 }
 
 #[tauri::command]
-pub fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppError> {
-    let content = if let Some(c) = request.content {
-        c
-    } else if let Some(p) = request.file_path {
-        let metadata = std::fs::metadata(&p)
-            .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
-        if metadata.len() > MAX_RIS_FILE_SIZE {
-            return Err(AppError::Import(format!(
-                "File too large: {:.1} MB (maximum is {:.0} MB)",
-                metadata.len() as f64 / (1024.0 * 1024.0),
-                MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
-            )));
-        }
-        std::fs::read_to_string(p)
-            .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
-    } else {
-        return Err(AppError::Import("No content or file path provided".into()));
-    };
+pub async fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let content = if let Some(c) = request.content {
+            c
+        } else if let Some(p) = request.file_path {
+            let metadata = std::fs::metadata(&p)
+                .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
+            if metadata.len() > MAX_RIS_FILE_SIZE {
+                return Err(AppError::Import(format!(
+                    "File too large: {:.1} MB (maximum is {:.0} MB)",
+                    metadata.len() as f64 / (1024.0 * 1024.0),
+                    MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
+                )));
+            }
+            std::fs::read_to_string(p)
+                .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+        } else {
+            return Err(AppError::Import("No content or file path provided".into()));
+        };
 
-    let parse_result = parse_ris(&content)?;
-    let (valid, errors, error_groups) = validate_all_grouped(&parse_result.records);
+        let parse_result = parse_ris(&content)?;
+        let (valid, errors, error_groups) = validate_all_grouped(&parse_result.records);
 
-    let preview_articles: Vec<PreviewArticle> = valid
-        .iter()
-        .take(10)
-        .map(|r| PreviewArticle {
-            title: r.title.clone().unwrap_or_default(),
-            authors: r.authors.clone(),
-            publication_year: r.publication_year,
-            journal: r.journal.clone(),
-            doi: r.doi.clone(),
+        let preview_articles: Vec<PreviewArticle> = valid
+            .iter()
+            .take(10)
+            .map(|r| PreviewArticle {
+                title: r.title.clone().unwrap_or_default(),
+                authors: r.authors.clone(),
+                publication_year: r.publication_year,
+                journal: r.journal.clone(),
+                doi: r.doi.clone(),
+            })
+            .collect();
+
+        Ok(ImportPreview {
+            total_records: parse_result.records.len(),
+            valid_records: valid.len(),
+            error_count: errors.len(),
+            errors: errors
+                .into_iter()
+                .map(|e| ImportError { record_index: e.record_index, message: e.message })
+                .collect(),
+            error_groups,
+            preview_articles,
         })
-        .collect();
-
-    Ok(ImportPreview {
-        total_records: parse_result.records.len(),
-        valid_records: valid.len(),
-        error_count: errors.len(),
-        errors: errors
-            .into_iter()
-            .map(|e| ImportError { record_index: e.record_index, message: e.message })
-            .collect(),
-        error_groups,
-        preview_articles,
     })
+    .await
+    .map_err(|e| AppError::Import(format!("Task panicked: {}", e)))?
 }
 
 pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
@@ -158,84 +162,90 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
 }
 
 #[tauri::command]
-pub fn import_ris_file(
-    db_state: State<'_, DbState>,
+pub async fn import_ris_file(
+    app: AppHandle,
     request: ParseRisRequest,
 ) -> Result<ImportResult, AppError> {
-    let content = if let Some(c) = request.content {
-        c
-    } else if let Some(p) = request.file_path {
-        let metadata = std::fs::metadata(&p)
-            .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
-        if metadata.len() > MAX_RIS_FILE_SIZE {
-            return Err(AppError::Import(format!(
-                "File too large: {:.1} MB (maximum is {:.0} MB)",
-                metadata.len() as f64 / (1024.0 * 1024.0),
-                MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
-            )));
+    tokio::task::spawn_blocking(move || {
+        let db_state = app.state::<DbState>();
+
+        let content = if let Some(c) = request.content {
+            c
+        } else if let Some(p) = request.file_path {
+            let metadata = std::fs::metadata(&p)
+                .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
+            if metadata.len() > MAX_RIS_FILE_SIZE {
+                return Err(AppError::Import(format!(
+                    "File too large: {:.1} MB (maximum is {:.0} MB)",
+                    metadata.len() as f64 / (1024.0 * 1024.0),
+                    MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
+                )));
+            }
+            std::fs::read_to_string(p)
+                .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+        } else {
+            return Err(AppError::Import("No content or file path provided".into()));
+        };
+
+        let parse_result = parse_ris(&content)?;
+        let (valid, errors, error_groups) = validate_all_grouped(&parse_result.records);
+
+        let excluded_set: std::collections::HashSet<usize> =
+            request.excluded_indices.iter().copied().collect();
+
+        // Filter out user-excluded articles (by valid-record index)
+        let to_import: Vec<&RisRecord> = valid
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !excluded_set.contains(i))
+            .map(|(_, r)| r)
+            .collect();
+
+        let skipped_by_user = excluded_set.len();
+        let skipped_validation = parse_result.records.len() - valid.len();
+
+        if to_import.is_empty() {
+            return Err(AppError::Import(
+                "No articles to import. All records were either excluded or failed validation."
+                    .to_string(),
+            ));
         }
-        std::fs::read_to_string(p)
-            .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
-    } else {
-        return Err(AppError::Import("No content or file path provided".into()));
-    };
 
-    let parse_result = parse_ris(&content)?;
-    let (valid, errors, error_groups) = validate_all_grouped(&parse_result.records);
+        let new_articles: Vec<NewArticle> =
+            to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
 
-    let excluded_set: std::collections::HashSet<usize> =
-        request.excluded_indices.iter().copied().collect();
+        let imported =
+            article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
 
-    // Filter out user-excluded articles (by valid-record index)
-    let to_import: Vec<&RisRecord> = valid
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !excluded_set.contains(i))
-        .map(|(_, r)| r)
-        .collect();
+        // Classify: move non-duplicates to working, keep duplicates in 'duplicate'
+        let _classification = classify_imported_articles(&conn, &imported)?;
 
-    let skipped_by_user = excluded_set.len();
-    let skipped_validation = parse_result.records.len() - valid.len();
+        // Re-fetch articles to reflect updated statuses after classification
+        let updated_articles: Vec<Article> = imported
+            .iter()
+            .filter_map(|a| article_repo::get_article_by_id(&conn, &a.id).ok())
+            .collect();
 
-    if to_import.is_empty() {
-        return Err(AppError::Import(
-            "No articles to import. All records were either excluded or failed validation."
-                .to_string(),
-        ));
-    }
+        let remaining = article_repo::remaining_capacity(&conn)?;
 
-    let new_articles: Vec<NewArticle> =
-        to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-
-    let imported = article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
-
-    // Classify: move non-duplicates to working, keep duplicates in 'duplicate'
-    let _classification = classify_imported_articles(&conn, &imported)?;
-
-    // Re-fetch articles to reflect updated statuses after classification
-    let updated_articles: Vec<Article> = imported
-        .iter()
-        .filter_map(|a| article_repo::get_article_by_id(&conn, &a.id).ok())
-        .collect();
-
-    let remaining = article_repo::remaining_capacity(&conn)?;
-
-    Ok(ImportResult {
-        imported_count: updated_articles.len(),
-        skipped_count: skipped_validation,
-        skipped_by_user,
-        articles: updated_articles,
-        remaining_capacity: remaining,
-        validation_errors: errors
-            .into_iter()
-            .map(|e| ImportError { record_index: e.record_index, message: e.message })
-            .collect(),
-        error_groups,
+        Ok(ImportResult {
+            imported_count: updated_articles.len(),
+            skipped_count: skipped_validation,
+            skipped_by_user,
+            articles: updated_articles,
+            remaining_capacity: remaining,
+            validation_errors: errors
+                .into_iter()
+                .map(|e| ImportError { record_index: e.record_index, message: e.message })
+                .collect(),
+            error_groups,
+        })
     })
+    .await
+    .map_err(|e| AppError::Import(format!("Task panicked: {}", e)))?
 }
 
 #[tauri::command]

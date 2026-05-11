@@ -31,7 +31,7 @@ export interface GroupedAuditEntry {
   count?: number;
 }
 
-/** Module-level singleton — true once the first dashboard data load completes */
+/** Module-level singleton - true once the first dashboard data load completes */
 export const initialDataLoaded = ref(false);
 
 export function useDashboard() {

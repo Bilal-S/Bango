@@ -142,7 +142,7 @@ pub fn render_prisma_svg(data: &PrismaData) -> String {
         &data.exclusion_reasons,
     );
 
-    // Phase 4.5: Ongoing (in progress) — only if > 0
+    // Phase 4.5: Ongoing (in progress) - only if > 0
     let ongoing_svg = if data.records_in_progress > 0 {
         let arrow4_start = y + BOX_H;
         y += BOX_H + GAP;

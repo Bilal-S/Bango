@@ -1,10 +1,10 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
-// Core views are statically imported — their JS is bundled into the main chunk
+// Core views are statically imported - their JS is bundled into the main chunk
 // and parsed immediately, so navigating to Dashboard or Articles is always instant.
 import Dashboard from '@/views/dashboard.vue';
 import ArticleList from '@/views/article-list.vue';
 
-// Secondary views remain lazy — they'll be prefetched after the app is ready.
+// Secondary views remain lazy - they'll be prefetched after the app is ready.
 const ImportRis = () => import('@/views/import-ris.vue');
 const DedupReview = () => import('@/views/dedup-review.vue');
 const CriteriaEditor = () => import('@/views/criteria-editor.vue');

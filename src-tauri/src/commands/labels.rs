@@ -178,7 +178,7 @@ Return JSON exactly matching this schema:
 Rules:
 - Generate 5-15 labels.
 - Each label should be a short, lowercase, hyphenated string (e.g., "priority-read", "strong-methodology", "needs-full-text").
-- Labels should be oriented around the research aims and screening criteria — reflecting the types of decisions and
+- Labels should be oriented around the research aims and screening criteria - reflecting the types of decisions and
   categorizations a reviewer would need when screening articles against these specific criteria.
 - Do not duplicate or overlap concepts.
 - Labels should capture workflow states (e.g., review stages), quality assessments (e.g., methodology strength),

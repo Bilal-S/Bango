@@ -21,11 +21,11 @@ const steps: HelpStep[] = [
     route: '/',
     routeLabel: 'Dashboard',
     summary:
-      'Your project overview — see how many articles you have and track your progress at a glance.',
+      'Your project overview - see how many articles you have and track your progress at a glance.',
     details: [
       'The dashboard shows you a summary of where things stand: how many articles are waiting to be reviewed, how many have been included or excluded, and any recent activity.',
       'From here you can jump to any part of the workflow using the sidebar or the quick action buttons.',
-      'Think of it as your home base — you can always come back here to see the big picture.',
+      'Think of it as your home base - you can always come back here to see the big picture.',
     ],
   },
   {
@@ -38,7 +38,7 @@ const steps: HelpStep[] = [
       'Tell Bango exactly what you are looking for by writing your inclusion and exclusion rules.',
     details: [
       'Before importing any articles, you define the rules for your review. These are the inclusion and exclusion criteria you would normally write in your review protocol.',
-      'Each criterion can be given a priority level — from "Critical" (must be met) down to "Optional" (nice to have). This helps the AI make better decisions when rules conflict.',
+      'Each criterion can be given a priority level - from "Critical" (must be met) down to "Optional" (nice to have). This helps the AI make better decisions when rules conflict.',
       'You can also write your research aims here, so the AI understands the broader context of your study.',
     ],
   },
@@ -52,7 +52,7 @@ const steps: HelpStep[] = [
       'Bring in your search results from databases like PubMed, Scopus, Web of Science, or any source that exports RIS files.',
     details: [
       'Most academic databases let you export your search results as an RIS file. Bango reads these files and pulls in the title, abstract, authors, journal, year, and keywords for each article.',
-      'You can import multiple files — for example, one from PubMed and one from Scopus — and Bango will combine them into a single project.',
+      'You can import multiple files - for example, one from PubMed and one from Scopus - and Bango will combine them into a single project.',
       'After import, Bango automatically checks for duplicate records (the same article found in more than one database) and flags them for your review.',
     ],
   },
@@ -94,7 +94,7 @@ const steps: HelpStep[] = [
       'Once your criteria and tags are set, you start the AI screening. The AI reads the title and abstract of each article and evaluates it against your rules.',
       'For each article, the AI provides a decision (include or exclude), a written explanation, which criteria it matched, suggested tags, and a confidence score.',
       'You can watch the progress in real time. If the AI encounters a problem (like a rate limit from the server), it will retry automatically.',
-      'You will need to configure an AI connection in Settings before screening. Bango supports several providers — both cloud-based and locally run models.',
+      'You will need to configure an AI connection in Settings before screening. Bango supports several providers - both cloud-based and locally run models.',
     ],
   },
   {
@@ -107,7 +107,7 @@ const steps: HelpStep[] = [
       'Browse all articles, read abstracts, and override any AI decisions you disagree with.',
     details: [
       'After screening, every article has a status: Included, Excluded, or still in the Working list. You can browse, search, and filter to find specific articles.',
-      'You have the final say — if you think the AI made a mistake, you can change any decision with one click. All changes are logged in the audit trail.',
+      'You have the final say - if you think the AI made a mistake, you can change any decision with one click. All changes are logged in the audit trail.',
       'Use the search bar to find articles by title or keyword. Filter by status, tags, confidence score, or year to focus on what matters most.',
     ],
   },
@@ -132,7 +132,7 @@ const steps: HelpStep[] = [
     route: '/summary',
     routeLabel: 'Summary',
     summary:
-      'View a synthesis of your included articles — key themes, research trends, methodological patterns, and gaps in the literature.',
+      'View a synthesis of your included articles - key themes, research trends, methodological patterns, and gaps in the literature.',
     details: [
       'Once you have a final set of included articles, Bango can produce a structured summary of the body of literature you have identified.',
       'The summary covers recurring themes, common research methods, strengths and weaknesses across studies, and areas where further research is needed.',

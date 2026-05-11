@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use tauri::State;
+use tauri::{AppHandle, Manager};
 
 use crate::db::article_repo;
 use crate::db::connection::DbState;
@@ -89,7 +89,7 @@ pub fn classify_imported_articles(
         duplicate_new_ids.insert(duplicate_id.clone());
     }
 
-    // Process fuzzy matches — keep new articles in 'duplicate' for manual review
+    // Process fuzzy matches - keep new articles in 'duplicate' for manual review
     for pair in &result.fuzzy_matches {
         if new_ids.contains(&pair.article_b_id) {
             duplicate_new_ids.insert(pair.article_b_id.clone());
@@ -133,47 +133,51 @@ pub fn classify_imported_articles(
     })
 }
 
-/// Detection only — returns duplicate pairs without modifying the database.
+/// Detection only - returns duplicate pairs without modifying the database.
 #[tauri::command]
-pub fn check_duplicates(db_state: State<'_, DbState>) -> Result<DedupResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+pub async fn check_duplicates(app: AppHandle) -> Result<DedupResult, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let db_state = app.state::<DbState>();
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
 
-    let duplicates = article_repo::get_duplicate_articles(&conn)?;
-    let working = article_repo::get_working_articles(&conn)?;
+        let duplicates = article_repo::get_duplicate_articles(&conn)?;
+        let working = article_repo::get_working_articles(&conn)?;
 
-    let dedup_articles: Vec<DedupArticle> = duplicates
-        .iter()
-        .chain(working.iter())
-        .map(|a| DedupArticle {
-            id: a.id.clone(),
-            title: a.title.clone(),
-            authors: a.authors.clone(),
-            publication_year: a.publication_year,
-            doi: a.doi.clone(),
-            import_source: a.import_source.clone(),
-        })
-        .collect();
+        let dedup_articles: Vec<DedupArticle> = duplicates
+            .iter()
+            .chain(working.iter())
+            .map(|a| DedupArticle {
+                id: a.id.clone(),
+                title: a.title.clone(),
+                authors: a.authors.clone(),
+                publication_year: a.publication_year,
+                doi: a.doi.clone(),
+                import_source: a.import_source.clone(),
+            })
+            .collect();
 
-    let duplicate_count = duplicates.len();
-    let result = if duplicate_count > 0 {
-        engine::run_dedup(&dedup_articles)
-    } else {
-        DedupResult {
-            exact_duplicates: vec![],
-            fuzzy_matches: vec![],
-            auto_merged_count: 0,
-            needs_review_count: 0,
-        }
-    };
+        let duplicate_count = duplicates.len();
+        let result = if duplicate_count > 0 {
+            engine::run_dedup(&dedup_articles)
+        } else {
+            DedupResult {
+                exact_duplicates: vec![],
+                fuzzy_matches: vec![],
+                auto_merged_count: 0,
+                needs_review_count: 0,
+            }
+        };
 
-    // Report counts but do NOT merge — that's for merge_exact_duplicates
-    let mut report = result;
-    report.auto_merged_count = report.exact_duplicates.len();
-    report.needs_review_count = report.fuzzy_matches.len();
-    Ok(report)
+        // Report counts but do NOT merge - that's for merge_exact_duplicates
+        let mut report = result;
+        report.auto_merged_count = report.exact_duplicates.len();
+        report.needs_review_count = report.fuzzy_matches.len();
+        Ok(report)
+    })
+    .await
+    .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?
 }
 
 #[derive(Deserialize)]
@@ -185,14 +189,16 @@ pub struct MergeRequest {
 /// User-triggered: merge all high-confidence exact duplicates.
 /// Idempotent: skips pairs where either article is already merged.
 #[tauri::command]
-pub fn merge_exact_duplicates(
-    db_state: State<'_, DbState>,
+pub async fn merge_exact_duplicates(
+    app: AppHandle,
     request: MergeRequest,
 ) -> Result<usize, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    tokio::task::spawn_blocking(move || {
+        let db_state = app.state::<DbState>();
+        let conn = db_state
+            .conn
+            .lock()
+            .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
     let tx = conn.unchecked_transaction()?;
 
@@ -235,7 +241,7 @@ pub fn merge_exact_duplicates(
             rusqlite::params![audit_id, duplicate_id, format!("Merged into article {}", surviving_id)],
         )?;
 
-        // Read actual status before advancing — survivor may already be 'working'
+        // Read actual status before advancing - survivor may already be 'working'
         let current_status: String = tx
             .query_row("SELECT status FROM articles WHERE id = ?1", [&surviving_id], |row| {
                 row.get(0)
@@ -257,12 +263,15 @@ pub fn merge_exact_duplicates(
 
     tx.commit()?;
     Ok(merged)
+    })
+    .await
+    .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?
 }
 
-// Legacy command kept for backward compatibility — now just delegates to check_duplicates.
+// Legacy command kept for backward compatibility - now just delegates to check_duplicates.
 #[tauri::command]
-pub fn run_deduplication(db_state: State<'_, DbState>) -> Result<DedupResult, AppError> {
-    check_duplicates(db_state)
+pub async fn run_deduplication(app: AppHandle) -> Result<DedupResult, AppError> {
+    check_duplicates(app).await
 }
 
 #[derive(Deserialize)]
@@ -275,53 +284,58 @@ pub struct ResolveFuzzyRequest {
 }
 
 #[tauri::command]
-pub fn resolve_fuzzy_match(
-    db_state: State<'_, DbState>,
+pub async fn resolve_fuzzy_match(
+    app: AppHandle,
     request: ResolveFuzzyRequest,
 ) -> Result<Article, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    tokio::task::spawn_blocking(move || {
+        let db_state = app.state::<DbState>();
+        let conn = db_state
+            .conn
+            .lock()
+            .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    match request.resolution {
-        DedupResolution::KeepA => {
-            article_repo::mark_as_duplicate(&conn, &request.article_b_id, &request.article_a_id)?;
-            article_repo::move_to_working(&conn, &request.article_a_id)?;
-            let audit_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_merge', ?3, 'user')",
-                rusqlite::params![
-                    audit_id,
-                    request.article_b_id,
-                    format!("User chose to keep article A ({})", request.article_a_id)
-                ],
-            )?;
-            article_repo::get_article_by_id(&conn, &request.article_a_id)
+        match request.resolution {
+            DedupResolution::KeepA => {
+                article_repo::mark_as_duplicate(&conn, &request.article_b_id, &request.article_a_id)?;
+                article_repo::move_to_working(&conn, &request.article_a_id)?;
+                let audit_id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_merge', ?3, 'user')",
+                    rusqlite::params![
+                        audit_id,
+                        request.article_b_id,
+                        format!("User chose to keep article A ({})", request.article_a_id)
+                    ],
+                )?;
+                article_repo::get_article_by_id(&conn, &request.article_a_id)
+            }
+            DedupResolution::KeepB => {
+                article_repo::mark_as_duplicate(&conn, &request.article_a_id, &request.article_b_id)?;
+                article_repo::move_to_working(&conn, &request.article_b_id)?;
+                let audit_id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_merge', ?3, 'user')",
+                    rusqlite::params![
+                        audit_id,
+                        request.article_a_id,
+                        format!("User chose to keep article B ({})", request.article_b_id)
+                    ],
+                )?;
+                article_repo::get_article_by_id(&conn, &request.article_b_id)
+            }
+            DedupResolution::KeepBoth => {
+                article_repo::move_to_working(&conn, &request.article_a_id)?;
+                article_repo::move_to_working(&conn, &request.article_b_id)?;
+                let audit_id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_flag', 'User marked as not duplicates', 'user')",
+                    rusqlite::params![audit_id, request.article_a_id],
+                )?;
+                article_repo::get_article_by_id(&conn, &request.article_a_id)
+            }
         }
-        DedupResolution::KeepB => {
-            article_repo::mark_as_duplicate(&conn, &request.article_a_id, &request.article_b_id)?;
-            article_repo::move_to_working(&conn, &request.article_b_id)?;
-            let audit_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_merge', ?3, 'user')",
-                rusqlite::params![
-                    audit_id,
-                    request.article_a_id,
-                    format!("User chose to keep article B ({})", request.article_b_id)
-                ],
-            )?;
-            article_repo::get_article_by_id(&conn, &request.article_b_id)
-        }
-        DedupResolution::KeepBoth => {
-            article_repo::move_to_working(&conn, &request.article_a_id)?;
-            article_repo::move_to_working(&conn, &request.article_b_id)?;
-            let audit_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT INTO audit_entries (id, article_id, action, details, source) VALUES (?1, ?2, 'dedup_flag', 'User marked as not duplicates', 'user')",
-                rusqlite::params![audit_id, request.article_a_id],
-            )?;
-            article_repo::get_article_by_id(&conn, &request.article_a_id)
-        }
-    }
+    })
+    .await
+    .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?
 }

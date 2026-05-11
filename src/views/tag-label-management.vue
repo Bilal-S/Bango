@@ -28,7 +28,7 @@ const isLoading = computed(() => tagsStore.loading && labelsStore.loading);
 const hasError = computed(() => tagsStore.error || labelsStore.error);
 const errorMessage = computed(() => tagsStore.error || labelsStore.error || 'Unknown error');
 
-// Stores are pre-warmed at startup — no onMounted fetch needed.
+// Stores are pre-warmed at startup - no onMounted fetch needed.
 // Only refetch if something went wrong (error state) or store was invalidated.
 async function retry(): Promise<void> {
   tagsStore.invalidate();
