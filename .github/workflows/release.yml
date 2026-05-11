@@ -42,8 +42,16 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
-      - name: Sync version to package.json, tauri.conf.json, and Cargo.toml
-        run: npx tauri version "${{ steps.version.outputs.version }}"
+      - name: Sync version across config files
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # package.json
+          jq --arg v "$VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          # src-tauri/tauri.conf.json
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          # src-tauri/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
 
       - name: Commit and push version changes
         run: |
