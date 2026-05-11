@@ -11,7 +11,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-orange.svg)](https://tauri.app/)
 [![Status](https://img.shields.io/badge/status-active%20development-yellow.svg)]()
 
-Bango is a cross-platform desktop application that automates and accelerates the screening phase of systematic literature reviews, scoping reviews, and meta-analyses. Researchers import RIS bibliography files, define inclusion/exclusion criteria, and let AI screen abstracts — producing a rigorously categorized set of articles ready for full-text review.
+Bango is a cross-platform desktop application that automates and accelerates the screening phase of systematic literature reviews, scoping reviews, and meta-analyses. Researchers import RIS bibliography files, define inclusion/exclusion criteria, and let AI screen abstracts - producing a rigorously categorized set of articles ready for full-text review.
 
 Built with [Tauri 2.x](https://tauri.app/) · All data stays on your machine · No cloud dependency
 
@@ -89,7 +89,7 @@ Import → Working (non-duplicate) or Duplicate (flagged)
 | **Included** | Articles meeting inclusion criteria. | Yes |
 | **Rejected** | Articles excluded based on criteria. | Yes |
 
-On import, deduplication runs against all existing articles. Non-duplicates are promoted directly to Working. If a newly imported article duplicates one already in Working, Included, or Rejected, the existing article's status is never changed — the new article is placed in Duplicates referencing the accepted article.
+On import, deduplication runs against all existing articles. Non-duplicates are promoted directly to Working. If a newly imported article duplicates one already in Working, Included, or Rejected, the existing article's status is never changed - the new article is placed in Duplicates referencing the accepted article.
 
 Users can manually override AI decisions and move articles freely between Working, Included, and Rejected.
 
@@ -144,10 +144,10 @@ Users can manually override AI decisions and move articles freely between Workin
 <details>
 <summary><strong>🏷️ Tag & Label Management</strong></summary>
 
-- **Tags**: content-category labels (e.g., "machine-learning", "clinical-trial") — AI suggests from RIS keywords and user criteria; user can add, edit, delete
-- **Labels**: workflow markers (e.g., "priority-read", "disputed") — AI generates from inclusion/exclusion criteria; user can expand and modify
+- **Tags**: content-category labels (e.g., "machine-learning", "clinical-trial") - AI suggests from RIS keywords and user criteria; user can add, edit, delete
+- **Labels**: workflow markers (e.g., "priority-read", "disputed") - AI generates from inclusion/exclusion criteria; user can expand and modify
 - Tags and labels generated in a pre-screening pass; user reviews before AI screening begins
-- Full manual editing — override any AI decision, adjust tags and labels, move articles between lists
+- Full manual editing - override any AI decision, adjust tags and labels, move articles between lists
 
 </details>
 
@@ -177,12 +177,12 @@ Users can manually override AI decisions and move articles freely between Workin
 
 | Layer | Technology |
 |-------|------------|
-| **Framework** | [Tauri 2.x](https://tauri.app/) — lightweight cross-platform runtime |
+| **Framework** | [Tauri 2.x](https://tauri.app/) - lightweight cross-platform runtime |
 | **Frontend** | [Vue 3](https://vuejs.org/) + TypeScript |
 | **Styling** | [Tailwind CSS v4](https://tailwindcss.com/) (`@theme` design tokens) + CSS custom properties |
-| **Backend** | [Rust](https://www.rust-lang.org/) — memory-safe, non-blocking background processing |
-| **Database** | Local [SQLite](https://www.sqlite.org/) — portable, offline-first |
-| **AI** | REST API client in Rust — async requests to external or local LLM endpoints |
+| **Backend** | [Rust](https://www.rust-lang.org/) - memory-safe, non-blocking background processing |
+| **Database** | Local [SQLite](https://www.sqlite.org/) - portable, offline-first |
+| **AI** | REST API client in Rust - async requests to external or local LLM endpoints |
 | **Encryption** | AES-256-GCM with PBKDF2 key derivation |
 
 ---
@@ -191,7 +191,7 @@ Users can manually override AI decisions and move articles freely between Workin
 
 Bango supports a range of LLM providers to fit different budgets and privacy requirements.
 
-All providers use a **user-provided full endpoint URL** — the app does not append paths. API keys are encrypted locally with AES-256-GCM using a machine-derived key. Project exports do not include keys; collaborators must provide their own.
+All providers use a **user-provided full endpoint URL** - the app does not append paths. API keys are encrypted locally with AES-256-GCM using a machine-derived key. Project exports do not include keys; collaborators must provide their own.
 
 **Hosted Providers:** OpenAI · Anthropic · Google (Gemini) · Mistral AI · z.ai
 
@@ -213,7 +213,7 @@ Pre-built installers for all major platforms are available on the [GitHub Releas
 
 | File | Best For |
 |------|----------|
-| `Bango_<version>_amd64.AppImage` | **Recommended.** Portable — no installation required. Works on any modern Linux distribution. |
+| `Bango_<version>_amd64.AppImage` | **Recommended.** Portable - no installation required. Works on any modern Linux distribution. |
 | `Bango_<version>_amd64.deb` | Debian, Ubuntu, and derivatives. Installs via the system package manager. |
 | `Bango-<version>.x86_64.rpm` | Fedora, RHEL, CentOS, openSUSE, and other RPM-based distributions. |
 
@@ -237,8 +237,8 @@ Pre-built installers for all major platforms are available on the [GitHub Releas
 
 Bango binaries are **not code-signed**. This means:
 
-- **The application has not been verified by Apple or Microsoft** — you will see security warnings on first launch.
-- **The binaries are safe to run** — they are built from the open-source code in this repository via [GitHub Actions CI](.github/workflows/release.yml). You can verify this by examining the workflow and building from source yourself.
+- **The application has not been verified by Apple or Microsoft** - you will see security warnings on first launch.
+- **The binaries are safe to run** - they are built from the open-source code in this repository via [GitHub Actions CI](.github/workflows/release.yml). You can verify this by examining the workflow and building from source yourself.
 - **We do not hold Apple or Microsoft developer certificates**, which are required for signed distribution.
 
 If you prefer not to bypass OS security prompts, you can [build from source](#getting-started) instead.
@@ -311,7 +311,7 @@ After bypassing once, the app will launch normally on subsequent opens.
 
 ### Build from Source
 
-If you prefer to build Bango yourself — or need to run on an architecture without pre-built binaries — follow the instructions in [Getting Started](#getting-started) below.
+If you prefer to build Bango yourself - or need to run on an architecture without pre-built binaries - follow the instructions in [Getting Started](#getting-started) below.
 
 ---
 
@@ -321,7 +321,7 @@ If you prefer to build Bango yourself — or need to run on an architecture with
 
 | Tool | Version | Install |
 |------|---------|---------|
-| **Node.js** | 18+ | [nodejs.org](https://nodejs.org/) |
+| **Node.js** | 22+ | [nodejs.org](https://nodejs.org/) |
 | **Rust** | Latest stable | [rustup.rs](https://rustup.rs/) |
 | **Tauri CLI** | v2.x | Included via `@tauri-apps/cli` in devDependencies |
 
@@ -444,7 +444,7 @@ The UI follows the **Scholarly Precision** design system defined in [`DESIGN.md`
 This project is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 ```
-Copyright 2024-2026 Bango Contributors
+Copyright 2025-2026 BonCode (Bilal Soylu)
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
