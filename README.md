@@ -44,20 +44,16 @@ It took some time and help of a multitude of AIs, manual reviews, manual and aut
 
 ## 📸 Screenshots
 
-<!-- Uncomment when ready to add screenshots:
 <table>
   <tr>
-    <td><img src="screenshots/dashboard.png" alt="Dashboard" width="400" /></td>
-    <td><img src="screenshots/screening.png" alt="Screening Progress" width="400" /></td>
+    <td><img src="screenshots/Bango-Dashboard.png" alt="Dashboard" width="400" /></td>
+    <td><img src="screenshots/Bango-Tags.png" alt="Tags & Labels" width="400" /></td>
   </tr>
   <tr>
     <td align="center"><em>Dashboard</em></td>
-    <td align="center"><em>Screening Progress</em></td>
+    <td align="center"><em>Tags & Labels</em></td>
   </tr>
 </table>
--->
-
-*Screenshots coming soon.*
 
 ---
 
