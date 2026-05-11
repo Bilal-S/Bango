@@ -122,6 +122,7 @@ fn parse_action(s: &str) -> AuditAction {
         "manual_override" => AuditAction::ManualOverride,
         "ai_summary" => AuditAction::AiSummary,
         "error" => AuditAction::Error,
+        "dedup_auto" => AuditAction::DedupAuto,
         _ => AuditAction::StatusChange,
     }
 }
@@ -144,6 +145,21 @@ pub fn log_error(conn: &Connection, details: &str) -> Result<(), AppError> {
         params![id, now, details],
     )?;
     Ok(())
+}
+
+/// Get generic audit entries (system errors with empty article_id).
+pub fn get_generic_audit_entries(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<AuditEntry>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
+         ae.details, ae.source, NULL as article_title \
+         FROM audit_entries ae \
+         WHERE ae.article_id = '' ORDER BY ae.timestamp DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map([limit], row_to_audit_entry)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 /// Clear all generic audit entries (those not connected to any article).

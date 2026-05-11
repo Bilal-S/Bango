@@ -203,6 +203,19 @@ pub fn get_import_activities(
 }
 
 #[tauri::command]
+pub fn get_generic_audit_entries(
+    db_state: State<'_, DbState>,
+    limit: Option<usize>,
+) -> Result<Vec<AuditEntry>, AppError> {
+    let limit = limit.unwrap_or(10);
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    audit_repo::get_generic_audit_entries(&conn, limit)
+}
+
+#[tauri::command]
 pub fn clear_generic_audit(db_state: State<'_, DbState>) -> Result<usize, AppError> {
     let conn = db_state
         .conn

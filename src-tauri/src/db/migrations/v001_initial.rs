@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS audit_entries (
     action TEXT NOT NULL CHECK(action IN (
         'import', 'dedup_merge', 'dedup_flag', 'status_change',
         'tag_add', 'tag_remove', 'label_add', 'label_remove',
-        'criteria_match', 'ai_screen', 'manual_override', 'ai_summary'
+        'criteria_match', 'ai_screen', 'manual_override', 'ai_summary', 'error', 'dedup_auto'
     )),
     from_status TEXT,
     to_status TEXT,

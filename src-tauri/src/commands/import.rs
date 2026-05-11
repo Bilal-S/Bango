@@ -6,6 +6,7 @@ const MAX_RIS_FILE_SIZE: u64 = 100 * 1024 * 1024;
 
 use crate::commands::dedup::classify_imported_articles;
 use crate::db::article_repo;
+use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::article::{Article, NewArticle};
@@ -166,7 +167,10 @@ pub async fn import_ris_file(
     app: AppHandle,
     request: ParseRisRequest,
 ) -> Result<ImportResult, AppError> {
-    tokio::task::spawn_blocking(move || {
+    let app_for_logging = app.clone();
+    let file_name = request.file_name.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
         let db_state = app.state::<DbState>();
 
         let content = if let Some(c) = request.content {
@@ -244,8 +248,31 @@ pub async fn import_ris_file(
             error_groups,
         })
     })
-    .await
-    .map_err(|e| AppError::Import(format!("Task panicked: {}", e)))?
+    .await;
+
+    match result {
+        Ok(Ok(res)) => Ok(res),
+        Ok(Err(e)) => {
+            eprintln!("[import] error in '{}': {e}", file_name);
+            log_import_error(&app_for_logging, &format!("Import error ({}): {e}", file_name));
+            Err(e)
+        }
+        Err(e) => {
+            let err = AppError::Import(format!("Task panicked: {e}"));
+            eprintln!("[import] panic in '{}': {err}", file_name);
+            log_import_error(&app_for_logging, &format!("Import panic ({}): {err}", file_name));
+            Err(err)
+        }
+    }
+}
+
+/// Log an import error to both the audit table and stderr.
+fn log_import_error(app: &AppHandle, message: &str) {
+    if let Some(db_state) = app.try_state::<DbState>() {
+        if let Ok(conn) = db_state.conn.lock() {
+            let _ = audit_repo::log_error(&conn, message);
+        }
+    }
 }
 
 #[tauri::command]

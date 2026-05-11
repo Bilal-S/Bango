@@ -83,7 +83,8 @@ export function useImport() {
       filePath.value = null;
       step.value = 'parse';
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to read file';
+      console.error('[import] loadFile failed:', e);
+      error.value = e instanceof Error ? e.message : String(e) || 'Failed to read file';
     } finally {
       loading.value = false;
     }
@@ -112,7 +113,8 @@ export function useImport() {
       });
       step.value = 'import';
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Parse failed';
+      console.error('[import] parseFile failed:', e);
+      error.value = e instanceof Error ? e.message : String(e) || 'Parse failed';
     } finally {
       loading.value = false;
     }
@@ -146,7 +148,8 @@ export function useImport() {
 
       step.value = 'complete';
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Import failed';
+      console.error('[import] confirmImport failed:', e);
+      error.value = e instanceof Error ? e.message : String(e) || 'Import failed';
     } finally {
       loading.value = false;
     }

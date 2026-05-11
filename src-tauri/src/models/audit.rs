@@ -31,6 +31,7 @@ pub enum AuditAction {
     ManualOverride,
     AiSummary,
     Error,
+    DedupAuto,
 }
 
 impl AuditAction {
@@ -50,6 +51,7 @@ impl AuditAction {
             Self::ManualOverride => "manual_override",
             Self::AiSummary => "ai_summary",
             Self::Error => "error",
+            Self::DedupAuto => "dedup_auto",
         }
     }
 }
