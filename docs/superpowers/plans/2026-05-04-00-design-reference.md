@@ -244,7 +244,7 @@ The document structure:
 ```markdown
 # Bango Design Patterns Reference
 
-> Source: Google Stitch project "Bango AI Literature Reviewer" (4799487491058521486)
+> Source: project "Bango AI Literature Reviewer" (4799487491058521486)
 > Spec: v3 (bango-v3-spec.md)
 > This document extracts shared UI patterns from Stitch screens for consistent implementation.
 > **IMPLEMENT ONLY elements listed as "v3 scope". Ignore Stitch elements marked "outdated/skip".**

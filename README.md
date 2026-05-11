@@ -15,9 +15,14 @@ Bango is a cross-platform desktop application that automates and accelerates the
 
 Built with [Tauri 2.x](https://tauri.app/) · All data stays on your machine · No cloud dependency
 
-**Author:** [Bilal Soylu (BonCode)](https://github.com/Bilal-S)
+
 
 </div>
+
+**Author:** [Bilal Soylu (BonCode)](https://github.com/Bilal-S)
+
+It took some time and help of a multitude of AIs, manual reviews, manual and automated testing to make this tool. If you see any issues please post on github issues for this project. If you want to contribute feel free to submit a PR.
+
 
 ---
 
@@ -62,6 +67,7 @@ Built with [Tauri 2.x](https://tauri.app/) · All data stays on your machine · 
 - [Key Features](#key-features)
 - [Tech Stack](#tech-stack)
 - [AI Integration](#ai-integration)
+- [Download & Installation](#download--installation)
 - [Getting Started](#getting-started)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
@@ -201,6 +207,118 @@ All providers use a **user-provided full endpoint URL** — the app does not app
 
 ---
 
+## 📥 Download & Installation
+
+Pre-built installers for all major platforms are available on the [GitHub Releases](https://github.com/Bilal-S/Bango/releases) page. Download the file that matches your operating system and architecture.
+
+### Available Builds
+
+#### Linux
+
+| File | Best For |
+|------|----------|
+| `Bango_<version>_amd64.AppImage` | **Recommended.** Portable — no installation required. Works on any modern Linux distribution. |
+| `Bango_<version>_amd64.deb` | Debian, Ubuntu, and derivatives. Installs via the system package manager. |
+| `Bango-<version>.x86_64.rpm` | Fedora, RHEL, CentOS, openSUSE, and other RPM-based distributions. |
+
+#### Windows
+
+| File | Best For |
+|------|----------|
+| `Bango_<version>_x64-setup.exe` | **Recommended.** Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. |
+| `Bango_<version>_x64_en-US.msi` | Enterprise or automated deployments. Windows Installer package suitable for group policy distribution. |
+
+#### macOS
+
+| File | Best For |
+|------|----------|
+| `Bango_<version>_aarch64.dmg` | **Recommended.** For Apple Silicon (M1/M2/M3/M4) Macs. Drag-and-drop install to Applications. |
+| `Bango_aarch64.app.tar.gz` | Portable or custom deployment. Extract and run from any location. |
+
+> **Note:** macOS builds are for **Apple Silicon (ARM64)** only. Intel (x86_64) Macs are not supported in the current release.
+
+### ⚠️ Unsigned Build Notice
+
+Bango binaries are **not code-signed**. This means:
+
+- **The application has not been verified by Apple or Microsoft** — you will see security warnings on first launch.
+- **The binaries are safe to run** — they are built from the open-source code in this repository via [GitHub Actions CI](.github/workflows/release.yml). You can verify this by examining the workflow and building from source yourself.
+- **We do not hold Apple or Microsoft developer certificates**, which are required for signed distribution.
+
+If you prefer not to bypass OS security prompts, you can [build from source](#getting-started) instead.
+
+### Platform-Specific Instructions
+
+<details>
+<summary><strong>🐧 Linux</strong></summary>
+
+**AppImage (recommended):**
+
+```bash
+chmod +x Bango_*_amd64.AppImage
+./Bango_*_amd64.AppImage
+```
+
+> If AppImage won't launch, ensure FUSE is installed: `sudo apt install libfuse2` (Debian/Ubuntu) or the equivalent for your distribution.
+
+**DEB package:**
+
+```bash
+sudo dpkg -i Bango_*_amd64.deb
+sudo apt-get install -f   # resolve any missing dependencies
+```
+
+**RPM package:**
+
+```bash
+sudo rpm -i Bango-*.x86_64.rpm
+```
+
+Linux does not enforce code signing, so no additional security bypass steps are needed.
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows</strong></summary>
+
+1. Download `Bango_<version>_x64-setup.exe` (or the `.msi` for enterprise installs).
+2. Double-click to run the installer.
+3. **Windows SmartScreen** will show a warning: *"Windows protected your PC"*
+   - Click **"More info"**
+   - Click **"Run anyway"**
+4. Follow the setup wizard to complete installation.
+
+If your organization blocks unsigned installers via Group Policy, use the MSI package or build from source.
+
+</details>
+
+<details>
+<summary><strong>🍎 macOS</strong></summary>
+
+1. Download `Bango_<version>_aarch64.dmg`.
+2. Double-click the `.dmg` file to open it.
+3. Drag **Bango** to the **Applications** folder.
+4. On first launch, **macOS Gatekeeper** will block the app: *"Bango cannot be opened because the developer cannot be verified."*
+
+**To bypass Gatekeeper:**
+
+- **Option A:** Right-click (or Control-click) the app → select **"Open"** → click **"Open"** again in the confirmation dialog.
+- **Option B:** Run the following command in Terminal:
+
+```bash
+xattr -cr /Applications/Bango.app
+```
+
+After bypassing once, the app will launch normally on subsequent opens.
+
+</details>
+
+### Build from Source
+
+If you prefer to build Bango yourself — or need to run on an architecture without pre-built binaries — follow the instructions in [Getting Started](#getting-started) below.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -304,7 +422,7 @@ npm run check:all
 │   │   └── crypto/             # AES-256-GCM encryption for API keys
 │   └── tests/                  # Rust integration tests
 ├── docs/
-│   ├── design-reference/       # 10 Stitch HTML reference screens + patterns doc
+│   ├── design-reference/       # 10 HTML reference screens + patterns doc
 │   └── superpowers/
 │       ├── specs/              # v3 specification
 │       └── plans/              # Implementation plans + gaps doc

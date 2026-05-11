@@ -1,6 +1,6 @@
 # Bango Design Patterns Reference
 
-> Source: Google Stitch project "Bango AI Literature Reviewer" (4799487491058521486)
+> Source: project "Bango AI Literature Reviewer" (4799487491058521486)
 > Spec: v3 (bango-v3-spec.md)
 
 > **IMPLEMENT ONLY elements listed as "v3 scope". Ignore Stitch elements marked "outdated/skip".**
@@ -579,7 +579,7 @@ From screens 03, 04, 08:
 - Recent Activity feed with timeline items
 - Screening Progress bar/chart area
 
-**Stitch elements to skip:**
+**elements to skip:**
 - Top app bar with Projects/Archive/Team tabs (v3 is single-project, no workspace tabs)
 - Collaboration Sync card with team member avatars (multi-user is out of scope)
 - Screening Progress "Over Time" chart with bar visualization (v3 spec only requires simple progress bar)
@@ -597,7 +597,7 @@ From screens 03, 04, 08:
 - "Add to Project" and "Cancel" action buttons
 - File count badge: `10 of 1,240 rows shown`
 
-**Stitch elements to skip:**
+**elements to skip:**
 - Sidebar nav items "Sources" and "Library" (v3 uses Dashboard/Articles/Criteria/Screening/Settings)
 - Header breadcrumb "Project Alpha" (v3 is single-project)
 - Sidebar "New Project" button label (v3 uses "New Search" pattern or no button at all since single-project)
@@ -615,7 +615,7 @@ From screens 03, 04, 08:
 - Pagination footer
 - Sidebar with article status counts (112 Included, 678 Rejected)
 
-**Stitch elements to skip:**
+**elements to skip:**
 - Top header nav tabs (Projects/Archive/Team)
 - Sidebar nav item labels differ slightly from v3 canonical set (should use: Dashboard, Articles, Criteria, Screening, Settings)
 - "Export Results" button placement in header (keep but may move per view)
@@ -636,7 +636,7 @@ From screens 03, 04, 08:
 - Audit Trail timeline with vertical line and dot indicators
 - Footer actions: "Move to Archive", "Export Analysis"
 
-**Stitch elements to skip:**
+**elements to skip:**
 - AI Decision card uses hardcoded hex colors (`#ECFDF5`, `#059669`, etc.) -- implement with design tokens or Tailwind `emerald-*` classes
 - "Move to Archive" footer button (no archive concept in v3)
 - Background list skeleton placeholders are reference only
@@ -656,7 +656,7 @@ From screens 03, 04, 08:
 - Control buttons: Pause (primary), Stop (secondary with red icon)
 - "View Current Results" link
 
-**Stitch elements to skip:**
+**elements to skip:**
 - Background decorative blurred circles (`bg-indigo-50/50 rounded-tl-full blur-3xl`)
 - Header nav tabs (Projects/Archive/Team)
 
@@ -680,7 +680,7 @@ From screens 03, 04, 08:
 - Low: gray (`border-slate-400 bg-slate-50/50`)
 - Optional: gray dashed (`border-slate-300 border-dashed bg-white`)
 
-**Stitch elements to skip:**
+**elements to skip:**
 - FAB button at bottom-right (not in v3 spec for this screen)
 - Sidebar icon variations across screens (use canonical set: Dashboard, Articles, Criteria, Screening, Settings)
 
@@ -698,7 +698,7 @@ From screens 03, 04, 08:
 - Sticky bottom action bar: "Keep Both (Unique)", "Keep Record A", "Keep Record B"
 - Keyboard shortcut hint: `kbd` styled keys
 
-**Stitch elements to skip:**
+**elements to skip:**
 - Sidebar nav items differ from canonical set (uses Library, Deduplication, Synthesis)
 - "New Project" sidebar button label (v3 uses canonical sidebar)
 - Sidebar background `bg-slate-900` differs from standard `bg-slate-800`
@@ -717,7 +717,7 @@ From screens 03, 04, 08:
 - Search input within each panel header
 - Count badges: `bg-surface-variant text-on-surface-variant px-2 py-0.5 rounded-full font-label-caps text-label-caps`
 
-**Stitch elements to skip:**
+**elements to skip:**
 - Sidebar nav items differ from canonical set (uses Library, Research, Tags & Labels, Collections)
 - "AI Assistant" button in header (not a v3 feature)
 - Header search is bare input (no standard search component wrapper)
@@ -735,7 +735,7 @@ From screens 03, 04, 08:
 - Export buttons: SVG, PNG (v3 does not include PDF export)
 - Final "Included" box uses `bg-primary-fixed` highlighting
 
-**Stitch elements to skip:**
+**elements to skip:**
 - "Export as PDF" button (v3 spec: SVG and PNG only)
 - Sidebar nav items differ from canonical set (uses Library, PRISMA Flow, Data Extraction, Synthesis, Project Settings)
 - "ResearchStream" in title tag (should be "Bango")
@@ -759,7 +759,7 @@ From screens 03, 04, 08:
 - Connection status indicator: dot + label ("Disconnected")
 - Footer: Revert button, Test Connection button
 
-**Stitch elements to skip:**
+**elements to skip:**
 - Sidebar "New Project" button (v3 is single-project)
 - Sidebar active state uses `border-l-4 border-indigo-500` variant (use standard `bg-slate-700` active pattern)
 - Header search placement (some screens show search on left, others on right -- standardize)
