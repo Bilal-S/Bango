@@ -101,3 +101,42 @@ jobs:
             **Changes:** See the commit history since the last release for details.
           releaseDraft: false
           prerelease: false
+
+  # ──────────────────────────────────────────────
+  # Post-build: commit version-synced config files
+  # ──────────────────────────────────────────────
+  sync-version:
+    name: Sync version to config files
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync version across config files
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # package.json
+          jq --arg v "$VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+          # src-tauri/tauri.conf.json
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          # src-tauri/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+
+      - name: Commit and push version sync
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          git commit -m "chore(release): sync version to $VERSION"
+          git push
