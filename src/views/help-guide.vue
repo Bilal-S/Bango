@@ -227,7 +227,7 @@ function navigateTo(route: string): void {
           <h4 class="help-guide__about-title">About Bango</h4>
           <p class="help-guide__about-desc">
             Developed by <strong>BonCode (Bilal Soylu)</strong> with permission from
-            <strong>Startup Strategy Advisors</strong>. Released as open source under the
+            <strong>Startup Strategy Advisors LLC</strong>. Released as open source under the
             <strong>Apache License 2.0</strong>.
           </p>
           <ul class="help-guide__about-links">

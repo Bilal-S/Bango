@@ -50,6 +50,14 @@ const {
   canGoPrev,
   canGoNext,
   goToPage,
+  searchText,
+  activeTotalCount,
+  rangeStart,
+  rangeEnd,
+  pageSize,
+  changePageSize,
+  executeToolbarSearch,
+  clearSearch,
 } = useArticleSearch();
 
 onMounted(() => {
@@ -123,11 +131,22 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
 
       <!-- Toolbar -->
       <ArticleToolbar
-        :article-count="articles.length"
+        :search-text="searchText"
         :show-filters="showFilters"
+        :page-size="pageSize"
+        :range-start="rangeStart"
+        :range-end="rangeEnd"
+        :total-count="activeTotalCount"
+        :can-go-prev="canGoPrev"
+        :can-go-next="canGoNext"
         @toggle-filters="toggleFilters"
-        @search="search"
+        @update:search-text="searchText = $event"
+        @search="executeToolbarSearch"
+        @clear-search="clearSearch"
         @export-ris="showExport = true"
+        @change-page-size="changePageSize"
+        @go-prev="goToPage(currentPage - 1)"
+        @go-next="goToPage(currentPage + 1)"
       />
 
       <!-- Filter Panel (collapsible) -->
@@ -153,28 +172,40 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
           @select="selectArticle"
           @sort="toggleSort"
         />
-        <!-- Pagination -->
-        <div
-          v-if="totalPages > 1"
-          class="flex items-center justify-between py-3 border-t border-slate-200 mt-2"
-        >
-          <span class="text-xs text-slate-500"> Page {{ currentPage }} of {{ totalPages }} </span>
-          <div class="flex items-center gap-2">
-            <button
-              class="px-3 py-1 text-xs rounded border border-slate-300 disabled:opacity-40"
-              :disabled="!canGoPrev"
-              @click="goToPage(currentPage - 1)"
-            >
-              Prev
-            </button>
-            <button
-              class="px-3 py-1 text-xs rounded border border-slate-300 disabled:opacity-40"
-              :disabled="!canGoNext"
-              @click="goToPage(currentPage + 1)"
-            >
-              Next
-            </button>
-          </div>
+
+        <!-- Bottom pagination -->
+        <div v-if="activeTotalCount > 0" class="flex items-center justify-center gap-2 mt-4 pb-4">
+          <button
+            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+            :disabled="!canGoPrev"
+            @click="goToPage(1)"
+          >
+            First
+          </button>
+          <button
+            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+            :disabled="!canGoPrev"
+            @click="goToPage(currentPage - 1)"
+          >
+            &laquo; Prev
+          </button>
+          <span class="text-xs text-slate-600 min-w-[6rem] text-center">
+            Page {{ currentPage }} of {{ totalPages }}
+          </span>
+          <button
+            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+            :disabled="!canGoNext"
+            @click="goToPage(currentPage + 1)"
+          >
+            Next &raquo;
+          </button>
+          <button
+            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+            :disabled="!canGoNext"
+            @click="goToPage(totalPages)"
+          >
+            Last
+          </button>
         </div>
       </template>
     </div>

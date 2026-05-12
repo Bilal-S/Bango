@@ -77,8 +77,9 @@ export function useArticleSearch() {
     labels: [],
   });
 
-  const pageSize = 100;
+  const pageSize = ref(25);
   const currentPage = ref(1);
+  const searchText = ref('');
 
   const query = reactive<ArticleQuery>({
     status: null,
@@ -93,7 +94,7 @@ export function useArticleSearch() {
     journal: null,
     tags: [],
     labels: [],
-    limit: pageSize,
+    limit: pageSize.value,
     offset: 0,
   });
 
@@ -287,19 +288,61 @@ export function useArticleSearch() {
     if (next) await selectArticle(next.id);
   }
 
+  /** Total article count for the currently active status tab. */
+  const activeTotalCount = computed(() => {
+    const tab = activeStatusTab.value;
+    if (tab === 'all') return statusCounts.value.all;
+    if (tab === 'error') return statusCounts.value.error;
+    return statusCounts.value[tab as ArticleStatus] ?? 0;
+  });
+
+  /** 1-based index of the first displayed article on the current page. */
+  const rangeStart = computed(() => {
+    if (activeTotalCount.value === 0) return 0;
+    return (currentPage.value - 1) * pageSize.value + 1;
+  });
+
+  /** 1-based index of the last displayed article on the current page. */
+  const rangeEnd = computed(() => {
+    return Math.min(currentPage.value * pageSize.value, activeTotalCount.value);
+  });
+
   function goToPage(page: number): void {
     currentPage.value = page;
-    query.offset = (page - 1) * pageSize;
+    query.offset = (page - 1) * pageSize.value;
     void search();
   }
 
   const totalPages = computed(() => {
-    const total = statusCounts.value.all;
-    return Math.max(1, Math.ceil(total / pageSize));
+    const total = activeTotalCount.value;
+    return Math.max(1, Math.ceil(total / pageSize.value));
   });
 
   const canGoPrev = computed(() => currentPage.value > 1);
   const canGoNext = computed(() => currentPage.value < totalPages.value);
+
+  /** Change page size and reset to page 1. */
+  function changePageSize(size: number): void {
+    pageSize.value = size;
+    query.limit = size;
+    resetPage();
+    void search();
+  }
+
+  /** Execute a quick search from the toolbar search box. */
+  function executeToolbarSearch(): void {
+    query.search = searchText.value || null;
+    resetPage();
+    void search();
+  }
+
+  /** Clear the toolbar search and refresh results. */
+  function clearSearch(): void {
+    searchText.value = '';
+    query.search = null;
+    resetPage();
+    void search();
+  }
 
   function closeDetail(): void {
     showDetail.value = false;
@@ -389,5 +432,12 @@ export function useArticleSearch() {
     canGoPrev,
     canGoNext,
     goToPage,
+    searchText,
+    activeTotalCount,
+    rangeStart,
+    rangeEnd,
+    changePageSize,
+    executeToolbarSearch,
+    clearSearch,
   };
 }

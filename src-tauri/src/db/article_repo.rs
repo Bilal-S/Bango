@@ -879,11 +879,7 @@ pub fn get_article_counts(
     // Count duplicates: all articles with status = 'duplicate' (no duplicate_of filter,
     // matching the duplicate tab view in query_articles which uses no base_filter).
     let dup_count: usize = conn
-        .query_row(
-            "SELECT COUNT(*) FROM articles WHERE status = 'duplicate'",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'duplicate'", [], |row| row.get(0))
         .unwrap_or(0);
     counts.duplicate = dup_count;
     counts.all += dup_count;
