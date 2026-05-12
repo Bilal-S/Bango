@@ -218,6 +218,34 @@ function navigateTo(route: string): void {
         </button>
       </div>
     </section>
+
+    <!-- Developer & License -->
+    <section class="help-guide__about">
+      <div class="help-guide__about-card">
+        <span class="material-symbols-outlined help-guide__about-icon">info</span>
+        <div class="help-guide__about-body">
+          <h4 class="help-guide__about-title">About Bango</h4>
+          <p class="help-guide__about-desc">
+            Developed by <strong>BonCode (Bilal Soylu)</strong> with permission from
+            <strong>Startup Strategy Advisors</strong>. Released as open source under the
+            <strong>Apache License 2.0</strong>.
+          </p>
+          <ul class="help-guide__about-links">
+            <li>
+              <span class="material-symbols-outlined help-guide__about-link-icon">bug_report</span>
+              <a
+                class="help-guide__about-link"
+                href="https://github.com/Bilal-S/Bango/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Report Issues & Get Support
+              </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -508,5 +536,93 @@ function navigateTo(route: string): void {
     align-items: flex-start;
     gap: var(--space-3);
   }
+
+  .help-guide__about-card {
+    flex-direction: column;
+  }
+}
+
+/* About / License Section */
+.help-guide__about {
+  margin-bottom: var(--space-8);
+}
+
+.help-guide__about-card {
+  display: flex;
+  gap: var(--space-4);
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+
+.help-guide__about-icon {
+  font-size: 22px;
+  color: #16a34a;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.help-guide__about-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.help-guide__about-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.help-guide__about-desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.help-guide__about-links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.help-guide__about-links li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+}
+
+.help-guide__about-link-icon {
+  font-size: 16px;
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+.help-guide__about-link {
+  color: #4f46e5;
+  text-decoration: none;
+  font-weight: var(--font-weight-semibold);
+}
+
+.help-guide__about-link:hover {
+  text-decoration: underline;
+}
+
+.help-guide__about-text {
+  line-height: var(--line-height-body);
+}
+
+.help-guide__about-text code {
+  background-color: #eef2ff;
+  padding: 1px 6px;
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
 }
 </style>

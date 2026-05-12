@@ -850,7 +850,11 @@ pub fn reset_working_list(conn: &Connection) -> Result<usize, AppError> {
 pub fn get_article_counts(
     conn: &Connection,
 ) -> Result<crate::models::article::ArticleCounts, AppError> {
-    let mut stmt = conn.prepare("SELECT status, COUNT(*) FROM articles GROUP BY status")?;
+    // Count non-duplicate statuses, excluding merged-away articles (duplicate_of IS NOT NULL).
+    // This matches the base_filter applied in query_articles for non-duplicate views.
+    let mut stmt = conn.prepare(
+        "SELECT status, COUNT(*) FROM articles WHERE duplicate_of IS NULL AND status != 'duplicate' GROUP BY status"
+    )?;
     let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?)))?;
 
     let mut counts = crate::models::article::ArticleCounts {
@@ -865,7 +869,6 @@ pub fn get_article_counts(
     for (status, count) in rows.flatten() {
         counts.all += count;
         match status.as_str() {
-            "duplicate" => counts.duplicate = count,
             "working" => counts.working = count,
             "included" => counts.included = count,
             "rejected" => counts.rejected = count,
@@ -873,10 +876,23 @@ pub fn get_article_counts(
         }
     }
 
-    // Count screening errors: working articles that were screened but didn't get a status change
+    // Count duplicates: all articles with status = 'duplicate' (no duplicate_of filter,
+    // matching the duplicate tab view in query_articles which uses no base_filter).
+    let dup_count: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM articles WHERE status = 'duplicate'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    counts.duplicate = dup_count;
+    counts.all += dup_count;
+
+    // Count screening errors: working articles that were screened but didn't get a status change,
+    // excluding merged-away articles.
     let error_count: usize = conn
         .query_row(
-            "SELECT COUNT(*) FROM articles WHERE status = 'working' AND screened_at IS NOT NULL",
+            "SELECT COUNT(*) FROM articles WHERE status = 'working' AND screened_at IS NOT NULL AND duplicate_of IS NULL",
             [],
             |row| row.get(0),
         )
