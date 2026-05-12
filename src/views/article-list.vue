@@ -58,6 +58,8 @@ const {
   changePageSize,
   executeToolbarSearch,
   clearSearch,
+  hasReturnTarget,
+  navigateToArticle,
 } = useArticleSearch();
 
 onMounted(() => {
@@ -220,6 +222,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       :audit-trail="auditTrail"
       :has-previous="hasPrevious"
       :has-next="hasNext"
+      :has-return-target="hasReturnTarget"
       @close="closeDetail"
       @navigate-prev="navigatePrev"
       @navigate-next="navigateNext"
@@ -228,6 +231,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       @update-tags="updateTags"
       @update-labels="updateLabels"
       @update-criteria="updateCriteria"
+      @navigate-to-article="navigateToArticle"
     />
   </div>
 </template>

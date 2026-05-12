@@ -5,6 +5,10 @@ withDefaults(defineProps<{ entries: AuditEntry[]; showHeader?: boolean }>(), {
   showHeader: true,
 });
 
+const emit = defineEmits<{
+  navigateToArticle: [id: string];
+}>();
+
 const actionLabels: Record<AuditAction, string> = {
   import: 'Article Imported',
   dedup_merge: 'Duplicate Merged',
@@ -40,6 +44,23 @@ function getDotColor(action: AuditAction): string {
   if (action === 'ai_screen') return 'bg-indigo-500';
   if (action === 'manual_override') return 'bg-emerald-500';
   return 'bg-slate-300';
+}
+
+/** Match "Auto-detected duplicate of article <uuid>" or "Merged into article <uuid>" */
+const DUPLICATE_REF_RE =
+  /^(.+ article )([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+interface ParsedDetail {
+  prefix: string;
+  articleId: string | null;
+}
+
+function parseDuplicateRef(details: string): ParsedDetail {
+  const match = details.match(DUPLICATE_REF_RE);
+  if (match && match[1] && match[2]) {
+    return { prefix: match[1], articleId: match[2] };
+  }
+  return { prefix: details, articleId: null };
 }
 </script>
 
@@ -82,7 +103,16 @@ function getDotColor(action: AuditAction): string {
             <span v-if="entry.toStatus">{{ entry.toStatus }}</span>
           </div>
           <p v-if="entry.details" class="mt-1 text-[12px] text-slate-500">
-            {{ entry.details }}
+            <template v-if="parseDuplicateRef(entry.details).articleId">
+              {{ parseDuplicateRef(entry.details).prefix }}
+              <button
+                class="text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                @click="emit('navigateToArticle', parseDuplicateRef(entry.details).articleId!)"
+              >
+                {{ parseDuplicateRef(entry.details).articleId }}
+              </button>
+            </template>
+            <template v-else>{{ entry.details }}</template>
           </p>
         </div>
       </div>

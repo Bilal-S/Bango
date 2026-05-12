@@ -15,6 +15,7 @@ const props = defineProps<{
   auditTrail: AuditEntry[];
   hasPrevious: boolean;
   hasNext: boolean;
+  hasReturnTarget: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -26,7 +27,38 @@ const emit = defineEmits<{
   updateTags: [id: string, tagIds: string[]];
   updateLabels: [id: string, labelIds: string[]];
   updateCriteria: [id: string, inclusionIds: string[], exclusionIds: string[]];
+  navigateToArticle: [id: string];
 }>();
+
+/** Status badge config for the header display */
+const statusDisplay = computed(() => {
+  const status = props.article.status;
+  if (status === 'duplicate') {
+    return {
+      label: 'DUPLICATE',
+      bg: 'bg-amber-100',
+      text: 'text-amber-800',
+      border: 'border-amber-300',
+    };
+  }
+  if (status === 'included') {
+    return {
+      label: 'INCLUDED',
+      bg: 'bg-emerald-100',
+      text: 'text-emerald-800',
+      border: 'border-emerald-300',
+    };
+  }
+  if (status === 'rejected') {
+    return {
+      label: 'REJECTED',
+      bg: 'bg-rose-100',
+      text: 'text-rose-800',
+      border: 'border-rose-300',
+    };
+  }
+  return { label: 'WORKING', bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300' };
+});
 
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
@@ -233,21 +265,38 @@ function handleCriteriaSave(
     <!-- Header -->
     <div class="p-6 border-b border-slate-100 sticky top-0 bg-white z-10">
       <div class="flex items-center justify-between mb-4">
-        <span
-          class="text-xs font-label-caps text-primary uppercase bg-primary/5 px-2 py-0.5 rounded"
-        >
-          Current Selection
-        </span>
+        <div class="flex items-center gap-2">
+          <span
+            class="text-xs font-label-caps text-primary uppercase bg-primary/5 px-2 py-0.5 rounded"
+          >
+            Current Selection
+          </span>
+          <span
+            class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border"
+            :class="[statusDisplay.bg, statusDisplay.text, statusDisplay.border]"
+          >
+            {{ statusDisplay.label }}
+          </span>
+        </div>
         <button
           class="material-symbols-outlined text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
           @click="emit('close')"
         >
-          close
+          {{ hasReturnTarget ? 'arrow_back' : 'close' }}
         </button>
       </div>
       <h2 class="font-h1 text-h1 text-on-surface leading-tight mb-4">
         {{ article.title }}
       </h2>
+      <div
+        v-if="article.authors.length > 0"
+        class="flex flex-col gap-1 mb-3 text-body-sm font-body-sm"
+      >
+        <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+          >Authors</span
+        >
+        <span class="text-on-surface">{{ article.authors.join(', ') }}</span>
+      </div>
       <div class="grid grid-cols-2 gap-4 text-body-sm font-body-sm">
         <div class="flex flex-col gap-1">
           <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
@@ -493,7 +542,11 @@ function handleCriteriaSave(
           </button>
         </div>
         <template v-if="auditExpanded">
-          <AuditTimeline :entries="auditTrail" :show-header="false" />
+          <AuditTimeline
+            :entries="auditTrail"
+            :show-header="false"
+            @navigate-to-article="emit('navigateToArticle', $event)"
+          />
         </template>
       </section>
 

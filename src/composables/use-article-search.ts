@@ -59,6 +59,7 @@ export function useArticleSearch() {
   const selectedArticle = ref<Article | null>(null);
   const auditTrail = ref<AuditEntry[]>([]);
   const showDetail = ref(false);
+  const returnToArticleId = ref<string | null>(null);
 
   const activeStatusTab = ref<StatusTab>('all');
   const showFilters = ref(false);
@@ -344,7 +345,24 @@ export function useArticleSearch() {
     void search();
   }
 
+  const hasReturnTarget = computed(() => returnToArticleId.value !== null);
+
+  /** Navigate to an article while saving the current one as a return target. */
+  async function navigateToArticle(targetId: string): Promise<void> {
+    if (selectedArticle.value) {
+      returnToArticleId.value = selectedArticle.value.id;
+    }
+    await selectArticle(targetId);
+  }
+
   function closeDetail(): void {
+    if (returnToArticleId.value) {
+      // Navigate back to the previous article instead of closing
+      const returnId = returnToArticleId.value;
+      returnToArticleId.value = null;
+      void selectArticle(returnId);
+      return;
+    }
     showDetail.value = false;
     selectedArticle.value = null;
     auditTrail.value = [];
@@ -439,5 +457,7 @@ export function useArticleSearch() {
     changePageSize,
     executeToolbarSearch,
     clearSearch,
+    hasReturnTarget,
+    navigateToArticle,
   };
 }
