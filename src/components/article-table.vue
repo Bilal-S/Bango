@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { watch, nextTick } from 'vue';
 import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
 import ConfidenceBar from './confidence-bar.vue';
@@ -50,6 +51,18 @@ function formatDate(dateStr: string | null): string {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+
+// Auto-scroll to keep the selected row visible when navigating via prev/next
+watch(
+  () => props.selectedId,
+  (newId) => {
+    if (!newId) return;
+    void nextTick(() => {
+      const row = document.querySelector<HTMLElement>(`tr[data-article-id="${newId}"]`);
+      row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }
+);
 </script>
 
 <template>
@@ -89,6 +102,7 @@ function formatDate(dateStr: string | null): string {
           <tr
             v-for="article in articles"
             :key="article.id"
+            :data-article-id="article.id"
             class="hover:bg-slate-50/80 transition-colors group cursor-pointer"
             :class="{ 'bg-indigo-50': selectedId === article.id }"
             @click="$emit('select', article.id)"

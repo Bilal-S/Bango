@@ -67,6 +67,13 @@ const criteriaStore = useCriteriaStore();
 // Ensure criteria are loaded so we can resolve UUID → text
 void criteriaStore.fetchIfNeeded();
 
+// Metadata expand/collapse state (persisted)
+const metadataExpanded = ref(localStorage.getItem('bango-metadata-expanded') !== 'false');
+function toggleMetadata(): void {
+  metadataExpanded.value = !metadataExpanded.value;
+  localStorage.setItem('bango-metadata-expanded', String(metadataExpanded.value));
+}
+
 // Audit trail expand/collapse state
 const auditExpanded = ref(false);
 
@@ -288,34 +295,63 @@ function handleCriteriaSave(
       <h2 class="font-h1 text-h1 text-on-surface leading-tight mb-4">
         {{ article.title }}
       </h2>
-      <div
-        v-if="article.authors.length > 0"
-        class="flex flex-col gap-1 mb-3 text-body-sm font-body-sm"
-      >
-        <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
-          >Authors</span
+      <!-- Collapsible Metadata -->
+      <div class="border border-slate-200 rounded-lg overflow-hidden">
+        <button
+          class="w-full flex items-center justify-between px-3 py-2 text-xs font-label-caps text-slate-500 uppercase tracking-wider hover:bg-slate-50 cursor-pointer transition-colors"
+          @click="toggleMetadata"
         >
-        <span class="text-on-surface">{{ article.authors.join(', ') }}</span>
-      </div>
-      <div class="grid grid-cols-2 gap-4 text-body-sm font-body-sm">
-        <div class="flex flex-col gap-1">
-          <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
-            >Journal</span
+          <span>Metadata</span>
+          <span
+            class="material-symbols-outlined text-[16px] transition-transform duration-200"
+            :class="{ 'rotate-180': metadataExpanded }"
           >
-          <span class="text-on-surface truncate">{{ article.journal ?? '---' }}</span>
-        </div>
-        <div class="flex flex-col gap-1">
-          <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
-            >Year</span
+            expand_more
+          </span>
+        </button>
+        <div v-show="metadataExpanded" class="px-3 pb-3 space-y-3">
+          <div
+            v-if="article.authors.length > 0"
+            class="flex flex-col gap-1 text-body-sm font-body-sm"
           >
-          <span class="text-on-surface">{{ article.publicationYear ?? '---' }}</span>
-        </div>
-        <div v-if="article.doi" class="flex flex-col gap-1 col-span-2">
-          <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold">DOI</span>
-          <a class="text-primary hover:underline flex items-center gap-1" href="#" @click.prevent>
-            {{ article.doi }}
-            <span class="material-symbols-outlined text-[14px]">open_in_new</span>
-          </a>
+            <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+              >Authors</span
+            >
+            <span class="text-on-surface">{{ article.authors.join(', ') }}</span>
+          </div>
+          <div class="grid grid-cols-2 gap-4 text-body-sm font-body-sm">
+            <div class="flex flex-col gap-1">
+              <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+                >Journal</span
+              >
+              <span class="text-on-surface truncate">{{ article.journal ?? '---' }}</span>
+            </div>
+            <div class="flex flex-col gap-1">
+              <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+                >Year</span
+              >
+              <span class="text-on-surface">{{ article.publicationYear ?? '---' }}</span>
+            </div>
+            <div v-if="article.doi" class="flex flex-col gap-1 col-span-2">
+              <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+                >DOI</span
+              >
+              <a
+                class="text-primary hover:underline flex items-center gap-1"
+                href="#"
+                @click.prevent
+              >
+                {{ article.doi }}
+                <span class="material-symbols-outlined text-[14px]">open_in_new</span>
+              </a>
+            </div>
+            <div v-if="article.keywords.length > 0" class="flex flex-col gap-1 col-span-2">
+              <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+                >Keywords</span
+              >
+              <span class="text-on-surface">{{ article.keywords.join(', ') }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
