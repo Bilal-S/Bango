@@ -1,7 +1,7 @@
 {
   "$schema": "./src/schema/tauri2.json",
   "productName": "Bango",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "identifier": "com.bango.app",
   "build": {
     "beforeDevCommand": "npm run dev",
