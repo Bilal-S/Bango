@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────
-  # Single job: version sync + build & release
+  # Build standard bundles (NSIS, deb, AppImage, dmg)
   # ──────────────────────────────────────────────
   build:
     name: Build (${{ matrix.platform }})
@@ -103,11 +103,92 @@ jobs:
           prerelease: false
 
   # ──────────────────────────────────────────────
+  # Build MSIX for Microsoft Store
+  # ──────────────────────────────────────────────
+  build-msix:
+    name: Build MSIX (Microsoft Store)
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync version across config files
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const v = process.env.VERSION;
+
+            // package.json
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.version = v;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+
+            // src-tauri/tauri.conf.json
+            const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
+            conf.version = v;
+            fs.writeFileSync("src-tauri/tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
+
+            // src-tauri/Cargo.toml
+            let cargo = fs.readFileSync("src-tauri/Cargo.toml", "utf8");
+            cargo = cargo.replace(/^version = ".*"/m, "version = \"" + v + "\"");
+            fs.writeFileSync("src-tauri/Cargo.toml", cargo);
+          '
+
+      # TODO: Add Windows code signing step when certificate is available
+      # - name: Import Windows certificate
+      #   if: matrix.platform == 'windows-latest'
+      #   env:
+      #     WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      #     WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      #   run: |
+      #     New-Item -ItemType directory -Path certificate
+      #     Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+      #     certutil -decode certificate/tempCert.txt certificate/certificate.pfx
+      #     Remove-Item -path certificate -include tempCert.txt
+      #     Import-PfxCertificate -FilePath certificate/certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build app (no bundle)
+        run: npm run tauri build -- --no-bundle
+
+      - name: Bundle MSIX with Microsoft Store config
+        run: npm run tauri bundle -- --config src-tauri/tauri.microsoftstore.conf.json
+
+      - name: Upload MSIX to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/release/bundle/msix/*.msix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ──────────────────────────────────────────────
   # Post-build: commit version-synced config files
   # ──────────────────────────────────────────────
   sync-version:
     name: Sync version to config files
-    needs: build
+    needs: [build, build-msix]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
