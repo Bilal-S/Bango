@@ -112,7 +112,6 @@ jobs:
   build-msix:
     name: Build MSIX (Microsoft Store)
     runs-on: windows-latest
-    needs: build
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -168,12 +167,17 @@ jobs:
         run: cargo install msixbundle-cli
 
       - name: Bundle MSIX
-        run: npm run tauri:windows:build
+        run: npm run tauri:windows:build -- --runner npm
 
       - name: Upload MSIX to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: src-tauri/target/msix/*.msixbundle
+          name: 'Bango ${{ github.ref_name }}'
+          body: |
+            See the assets below to download the installer for your platform.
+
+            **Changes:** See the commit history since the last release for details.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
