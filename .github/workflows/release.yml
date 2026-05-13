@@ -85,6 +85,10 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
+      - name: Install macOS build dependencies
+        if: matrix.platform == 'macos-latest'
+        run: brew install create-dmg
+
       - name: Install JS dependencies
         run: npm ci
 
