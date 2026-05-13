@@ -158,34 +158,41 @@ jobs:
             fs.writeFileSync("src-tauri/Cargo.toml", cargo);
           '
 
-      # TODO: Add Windows code signing step when certificate is available
-      # - name: Import Windows certificate
-      #   if: matrix.platform == 'windows-latest'
-      #   env:
-      #     WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      #     WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-      #   run: |
-      #     New-Item -ItemType directory -Path certificate
-      #     Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
-      #     certutil -decode certificate/tempCert.txt certificate/certificate.pfx
-      #     Remove-Item -path certificate -include tempCert.txt
-      #     Import-PfxCertificate -FilePath certificate/certificate.pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
-
       - name: Install JS dependencies
         run: npm ci
 
       - name: Build app (no bundle)
         run: npm run tauri build -- --no-bundle
 
-      - name: Bundle MSIX with Microsoft Store config
-        run: npm run tauri bundle -- --config src-tauri/tauri.microsoftstore.conf.json
+      - name: Bundle MSIX
+        run: npm run tauri:windows:build
 
       - name: Upload MSIX to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/target/release/bundle/msix/*.msix
+          files: src-tauri/gen/windows/target/**/*.msix
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup msstore CLI
+        run: dotnet tool install --global Microsoft.Store.PartnerCenter.CLI
+
+      - name: Publish to Microsoft Store
+        env:
+          MS_STORE_TENANT_ID: ${{ secrets.MS_STORE_TENANT_ID }}
+          MS_STORE_CLIENT_ID: ${{ secrets.MS_STORE_CLIENT_ID }}
+          MS_STORE_CLIENT_SECRET: ${{ secrets.MS_STORE_CLIENT_SECRET }}
+          MS_STORE_SELLER_ID: ${{ secrets.MS_STORE_SELLER_ID }}
+          MS_STORE_APP_ID: ${{ secrets.MS_STORE_APP_ID }}
+        run: |
+          $msix = Get-ChildItem -Path "src-tauri/gen/windows/target" -Filter "*.msix" -Recurse | Select-Object -First 1
+          if ($msix) {
+            Write-Host "Publishing $($msix.FullName) to Microsoft Store..."
+            msstore publish --appId $env:MS_STORE_APP_ID --packagePath $msix.FullName
+          } else {
+            Write-Error "MSIX package not found!"
+            exit 1
+          }
 
   # ──────────────────────────────────────────────
   # Post-build: commit version-synced config files

@@ -18,7 +18,8 @@
     "check:all": "npm run type-check && npm run lint:check && npm run format:check && npm run format:rust && npm run lint:rust",
     "test": "vitest run",
     "test:watch": "vitest",
-    "postinstall": "simple-git-hooks || true"
+    "postinstall": "simple-git-hooks || true",
+    "tauri:windows:build": "tauri-windows-bundle build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
@@ -49,7 +50,8 @@
     "typescript-eslint": "^8.59.1",
     "vite": "^8.0.10",
     "vitest": "^4.1.5",
-    "vue-tsc": "^3.2.7"
+    "vue-tsc": "^3.2.7",
+    "@choochmeque/tauri-windows-bundle": "^0.1.18"
   },
   "simple-git-hooks": {
     "pre-commit": "npx lint-staged"

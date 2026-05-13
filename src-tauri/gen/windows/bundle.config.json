@@ -1,0 +1,22 @@
+{
+  "publisher": "CN=6A41398C-286A-45C1-A8DF-76B4217CB918",
+  "publisherDisplayName": "BonCode",
+  "capabilities": {
+    "general": [
+      "internetClient"
+    ]
+  },
+  "extensions": {
+    "shareTarget": false,
+    "fileAssociations": [],
+    "protocolHandlers": []
+  },
+  "signing": {
+    "pfx": null,
+    "pfxPassword": null
+  },
+  "resourceIndex": {
+    "enabled": false,
+    "keepConfig": false
+  }
+}

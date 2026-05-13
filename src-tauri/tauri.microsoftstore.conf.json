@@ -4,11 +4,6 @@
     "windows": {
       "webviewInstallMode": {
         "type": "offlineInstaller"
-      },
-      "msix": {
-        "identityName": "BonCode.Bango",
-        "publisher": "CN=6A41398C-286A-45C1-A8DF-76B4217CB918",
-        "publisherDisplayName": "BonCode"
       }
     }
   }
