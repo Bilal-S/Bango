@@ -164,18 +164,21 @@ jobs:
       - name: Build app (no bundle)
         run: npm run tauri build -- --no-bundle
 
+      - name: Install msixbundle-cli
+        run: cargo install msixbundle-cli
+
       - name: Bundle MSIX
         run: npm run tauri:windows:build
 
       - name: Upload MSIX to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/gen/windows/target/**/*.msix
+          files: src-tauri/target/msix/*.msixbundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup msstore CLI
-        run: dotnet tool install --global Microsoft.Store.PartnerCenter.CLI
+        run: winget install Microsoft.msstore-cli
 
       - name: Publish to Microsoft Store
         env:
@@ -185,7 +188,7 @@ jobs:
           MS_STORE_SELLER_ID: ${{ secrets.MS_STORE_SELLER_ID }}
           MS_STORE_APP_ID: ${{ secrets.MS_STORE_APP_ID }}
         run: |
-          $msix = Get-ChildItem -Path "src-tauri/gen/windows/target" -Filter "*.msix" -Recurse | Select-Object -First 1
+          $msix = Get-ChildItem -Path "src-tauri/target/msix" -Filter "*.msixbundle" -Recurse | Select-Object -First 1
           if ($msix) {
             Write-Host "Publishing $($msix.FullName) to Microsoft Store..."
             msstore publish --appId $env:MS_STORE_APP_ID --packagePath $msix.FullName
