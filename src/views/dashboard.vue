@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
+import { tauriCommand, isTauri } from '@/composables/use-tauri-command';
+import { ask } from '@tauri-apps/plugin-dialog';
+import demoProjectJson from '@/assets/demo-project.bango.json?raw';
+import { useArticlesStore } from '@/stores/articles';
+import { useCriteriaStore } from '@/stores/criteria';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
+import { useLlmConfigStore } from '@/stores/llm-config';
+import { useAuditStore } from '@/stores/audit';
+import { useScreeningStore } from '@/stores/screening';
 
 const router = useRouter();
 const {
@@ -96,6 +106,50 @@ function navigateTo(route: string): void {
 function navigateToArticlesWithStatus(status: string): void {
   router.push({ path: '/articles', query: { status } });
 }
+
+const demoLoading = ref(false);
+const demoError = ref<string | null>(null);
+
+async function loadDemo(): Promise<void> {
+  if (demoLoading.value) return;
+  if (!isTauri()) {
+    demoError.value = 'Demo requires the desktop app.';
+    return;
+  }
+
+  const confirmed = await ask(
+    'Loading the demo project will replace all your current data ' +
+      '(articles, criteria, tags, labels). This cannot be undone.',
+    { title: 'Load Demo Project', kind: 'warning', okLabel: 'Load Demo', cancelLabel: 'Cancel' }
+  );
+  if (!confirmed) return;
+
+  demoLoading.value = true;
+  demoError.value = null;
+  try {
+    await tauriCommand('import_project_backup', {
+      request: { jsonContent: demoProjectJson },
+    });
+    const stores = [
+      useArticlesStore(),
+      useCriteriaStore(),
+      useTagsStore(),
+      useLabelsStore(),
+      useLlmConfigStore(),
+      useAuditStore(),
+      useScreeningStore(),
+    ];
+    for (const store of stores) {
+      store.invalidate();
+    }
+    await Promise.all(stores.map((s) => s.fetchIfNeeded()));
+    router.push('/');
+  } catch (e: unknown) {
+    demoError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    demoLoading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -135,9 +189,27 @@ function navigateToArticlesWithStatus(status: string): void {
             Import a RIS file to get started with your systematic review. You will have to convert
             your BibTeX files first.
           </p>
-          <button class="dashboard__empty-cta" @click="navigateTo('/import')">
-            Import References
-          </button>
+          <div class="dashboard__empty-actions">
+            <button class="dashboard__empty-cta" @click="navigateTo('/import')">
+              <span class="material-symbols-outlined dashboard__empty-cta-icon">upload_file</span>
+              Import References
+            </button>
+            <span class="dashboard__empty-or">or</span>
+            <button
+              class="dashboard__empty-cta dashboard__empty-cta--secondary"
+              :disabled="demoLoading"
+              @click="loadDemo()"
+            >
+              <span v-if="demoLoading" class="material-symbols-outlined dashboard__empty-cta-icon"
+                >progress_activity</span
+              >
+              <span v-else class="material-symbols-outlined dashboard__empty-cta-icon"
+                >science</span
+              >
+              {{ demoLoading ? 'Loading…' : 'Load Demo Project' }}
+            </button>
+          </div>
+          <p v-if="demoError" class="dashboard__empty-error">{{ demoError }}</p>
         </div>
       </section>
 
@@ -433,6 +505,19 @@ function navigateToArticlesWithStatus(status: string): void {
   margin-bottom: var(--space-6);
 }
 
+.dashboard__empty-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.dashboard__empty-or {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+  text-transform: lowercase;
+}
+
 .dashboard__empty-cta {
   display: inline-flex;
   align-items: center;
@@ -445,6 +530,33 @@ function navigateToArticlesWithStatus(status: string): void {
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-semibold);
   cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.dashboard__empty-cta-icon {
+  font-size: 18px;
+}
+
+.dashboard__empty-cta--secondary {
+  background-color: #ffffff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+}
+
+.dashboard__empty-cta--secondary:hover:not(:disabled) {
+  background-color: #eef2ff;
+}
+
+.dashboard__empty-cta--secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dashboard__empty-error {
+  color: var(--color-error, #dc2626);
+  font-size: var(--font-size-caption);
+  margin-top: var(--space-3);
 }
 
 /* Status Tiles */
