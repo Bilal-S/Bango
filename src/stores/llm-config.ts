@@ -10,9 +10,9 @@ export interface TestResult {
 
 const DEFAULT_CONFIG: LlmConfig = {
   provider: 'openai',
-  endpointUrl: '',
+  endpointUrl: 'https://api.openai.com/v1',
   apiKeyEncrypted: null,
-  modelName: '',
+  modelName: 'gpt-5-mini',
   temperature: 0.2,
   skipTemperature: false,
   maxConcurrentRequests: 3,
@@ -47,6 +47,7 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
   function invalidate(): void {
     config.value = { ...DEFAULT_CONFIG };
     initialized.value = false;
+    testResult.value = null;
   }
 
   function clearTestResult(): void {

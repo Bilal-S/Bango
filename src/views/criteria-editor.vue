@@ -24,8 +24,7 @@ const exclusionCriteria = computed(() =>
 );
 
 async function refetch(): Promise<void> {
-  criteriaStore.invalidate();
-  await criteriaStore.fetchIfNeeded();
+  await criteriaStore.refresh();
 }
 
 async function addAim(): Promise<void> {

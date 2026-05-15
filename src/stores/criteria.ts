@@ -42,6 +42,24 @@ export const useCriteriaStore = defineStore('criteria', () => {
     initialized.value = false;
   }
 
+  /** Re-fetch from backend without clearing arrays first (preserves scroll position). */
+  async function refresh(): Promise<void> {
+    loading.value = true;
+    try {
+      const [aimsResult, criteriaResult] = await Promise.all([
+        tauriCommand<ResearchAim[]>('get_research_aims'),
+        tauriCommand<Criterion[]>('get_criteria'),
+      ]);
+      aims.value = aimsResult;
+      criteria.value = criteriaResult;
+      inclusionCriteria.value = criteriaResult.filter((c) => c.criterionType === 'inclusion');
+      exclusionCriteria.value = criteriaResult.filter((c) => c.criterionType === 'exclusion');
+      initialized.value = true;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   return {
     aims,
     criteria,
@@ -52,5 +70,6 @@ export const useCriteriaStore = defineStore('criteria', () => {
     fetchIfNeeded,
     fetchAll,
     invalidate,
+    refresh,
   };
 });

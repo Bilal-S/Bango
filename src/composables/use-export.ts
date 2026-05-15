@@ -23,6 +23,20 @@ export function useExport() {
     useScreeningStore().invalidate();
   }
 
+  /** Invalidate all stores and then proactively re-fetch so data is immediately available. */
+  async function refreshAllStores(): Promise<void> {
+    invalidateAllStores();
+    await Promise.all([
+      useArticlesStore().fetchIfNeeded(),
+      useCriteriaStore().fetchIfNeeded(),
+      useTagsStore().fetchIfNeeded(),
+      useLabelsStore().fetchIfNeeded(),
+      useLlmConfigStore().fetchIfNeeded(),
+      useAuditStore().fetchIfNeeded(),
+      useScreeningStore().fetchIfNeeded(),
+    ]);
+  }
+
   async function exportRis(): Promise<boolean> {
     exporting.value = true;
     error.value = null;
@@ -76,7 +90,7 @@ export function useExport() {
       await tauriCommand('import_project_backup', {
         request: { jsonContent: content },
       });
-      invalidateAllStores();
+      await refreshAllStores();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {

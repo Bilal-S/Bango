@@ -84,10 +84,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Univ Malaysia Sabah, Fac Engn, Kota Kinabalu, Sabah, Malaysia",
-      "authors": [
-        "Pagukuman, BND",
-        "Ibrahim, MKW"
-      ],
+      "authors": ["Pagukuman, BND", "Ibrahim, MKW"],
       "customField3": "Universiti Malaysia Sabah",
       "dataLength": 3697,
       "date": null,
@@ -120,9 +117,7 @@
       "publisherCity": "BINGLEY",
       "referenceType": "JOUR",
       "risExtras": {
-        "C6": [
-          "AUG 2021"
-        ]
+        "C6": ["AUG 2021"]
       },
       "screenedAt": null,
       "screeningError": 0,
@@ -144,12 +139,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Purdue Univ, W Lafayette, IN 47907 USA",
-      "authors": [
-        "Stevens, LJ",
-        "Burgess, JR",
-        "Stochelski, MA",
-        "Kuczek, T"
-      ],
+      "authors": ["Stevens, LJ", "Burgess, JR", "Stochelski, MA", "Kuczek, T"],
       "customField3": "Purdue University",
       "dataLength": 993,
       "date": "APR",
@@ -214,10 +204,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Univ Malaysia Sabah, Fac Engn, Kota Kinabalu, Sabah, Malaysia",
-      "authors": [
-        "Pagukuman, BND",
-        "Ibrahim, MKW"
-      ],
+      "authors": ["Pagukuman, BND", "Ibrahim, MKW"],
       "customField3": "Universiti Malaysia Sabah",
       "dataLength": 3697,
       "date": null,
@@ -250,9 +237,7 @@
       "publisherCity": "BINGLEY",
       "referenceType": "JOUR",
       "risExtras": {
-        "C6": [
-          "AUG 2021"
-        ]
+        "C6": ["AUG 2021"]
       },
       "screenedAt": null,
       "screeningError": 0,
@@ -274,12 +259,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Purdue Univ, W Lafayette, IN 47907 USA",
-      "authors": [
-        "Stevens, LJ",
-        "Burgess, JR",
-        "Stochelski, MA",
-        "Kuczek, T"
-      ],
+      "authors": ["Stevens, LJ", "Burgess, JR", "Stochelski, MA", "Kuczek, T"],
       "customField3": "Purdue University",
       "dataLength": 993,
       "date": "APR",
@@ -344,11 +324,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "UNICAMP Univ Campinas, LASEFI DEA FEA Sch Food Engn, Rua Monteiro Lobato 80, BR-13083862 Campinas, SP, Brazil",
-      "authors": [
-        "Neves, MIL",
-        "Silva, EK",
-        "Meireles, MAA"
-      ],
+      "authors": ["Neves, MIL", "Silva, EK", "Meireles, MAA"],
       "customField3": "Universidade Estadual de Campinas",
       "dataLength": 615,
       "date": "JUN",
@@ -393,12 +369,8 @@
       "publisherCity": "LONDON",
       "referenceType": "JOUR",
       "risExtras": {
-        "C6": [
-          "APR 2021"
-        ],
-        "FU": [
-          "CAPES at the University of Campinas [001]; CNPq [309825/2020-2]; CAPES [001]"
-        ],
+        "C6": ["APR 2021"],
+        "FU": ["CAPES at the University of Campinas [001]; CNPq [309825/2020-2]; CAPES [001]"],
         "FX": [
           "Maria Isabel L. Neves thanks CAPES (Financial Code 001) for her doctoral assistantship. Eric Keven Silva thanks CAPES (Financial Code 001) for his postdoctoral assistantship at the University of Campinas. Maria Angela A. Meireles thanks CNPq (309825/2020-2) for her productivity grant."
         ]
@@ -474,12 +446,8 @@
       "publisherCity": "SAN DIEGO",
       "referenceType": "JOUR",
       "risExtras": {
-        "C6": [
-          "JUN 2022"
-        ],
-        "FU": [
-          "Office of Environmental Health Hazard Assessment, California EPA [18-E0035]"
-        ],
+        "C6": ["JUN 2022"],
+        "FU": ["Office of Environmental Health Hazard Assessment, California EPA [18-E0035]"],
         "FX": [
           "This research was funded by the Office of Environmental Health Hazard Assessment, California EPA (contract #18-E0035) ."
         ]
@@ -504,10 +472,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Univ Malaysia Sabah, Fac Engn, Kota Kinabalu, Sabah, Malaysia",
-      "authors": [
-        "Pagukuman, BND",
-        "Ibrahim, MKW"
-      ],
+      "authors": ["Pagukuman, BND", "Ibrahim, MKW"],
       "customField3": "Universiti Malaysia Sabah",
       "dataLength": 3697,
       "date": null,
@@ -540,9 +505,7 @@
       "publisherCity": "BINGLEY",
       "referenceType": "JOUR",
       "risExtras": {
-        "C6": [
-          "AUG 2021"
-        ]
+        "C6": ["AUG 2021"]
       },
       "screenedAt": null,
       "screeningError": 0,
@@ -564,12 +527,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Purdue Univ, W Lafayette, IN 47907 USA",
-      "authors": [
-        "Stevens, LJ",
-        "Burgess, JR",
-        "Stochelski, MA",
-        "Kuczek, T"
-      ],
+      "authors": ["Stevens, LJ", "Burgess, JR", "Stochelski, MA", "Kuczek, T"],
       "customField3": "Purdue University",
       "dataLength": 993,
       "date": "APR",
@@ -711,13 +669,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Univ Cesumar, Inst Cesumar Ciencia Tecnol & Inovacao ICETI, Programa Posgrad Tecnol Limpas, BR-87050390 Maringa, Brazil",
-      "authors": [
-        "Molina, AK",
-        "Corrêa, RCG",
-        "Prieto, MA",
-        "Pereira, C",
-        "Barros, L"
-      ],
+      "authors": ["Molina, AK", "Corrêa, RCG", "Prieto, MA", "Pereira, C", "Barros, L"],
       "customField3": "Universidade de Vigo",
       "dataLength": 1302,
       "date": "FEB",
@@ -788,9 +740,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Sarka Pikhartova Vysoka Skola Ekon Praze, Narodohospodarska Fak, Prague, Czech Republic",
-      "authors": [
-        "Pikhart, Z"
-      ],
+      "authors": ["Pikhart, Z"],
       "customField3": null,
       "dataLength": 849,
       "date": "MAY-JUN",
@@ -805,11 +755,7 @@
       "journal": "LISTY CUKROVARNICKE A REPARSKE",
       "journalAbbreviation": "LISTY CUKROV REPAR",
       "journalIsoAbbreviation": "Lis. Cukrov. Repar.",
-      "keywords": [
-        "sugar",
-        "household consumption",
-        "index of consumer prices"
-      ],
+      "keywords": ["sugar", "household consumption", "index of consumer prices"],
       "language": "Czech",
       "manualOverride": 0,
       "matchedExclusionCriteria": null,
@@ -890,9 +836,7 @@
       "publisherCity": "NEW YORK",
       "referenceType": "JOUR",
       "risExtras": {
-        "C6": [
-          "JAN 2022"
-        ]
+        "C6": ["JAN 2022"]
       },
       "screenedAt": null,
       "screeningError": 0,
@@ -914,9 +858,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": null,
-      "authors": [
-        "KUBLER, W"
-      ],
+      "authors": ["KUBLER, W"],
       "customField3": null,
       "dataLength": 749,
       "date": null,
@@ -969,11 +911,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Ceska Zemedelska Univ Praze, Prague, Czech Republic",
-      "authors": [
-        "Veselá, K",
-        "Krízek, D",
-        "Severová, L"
-      ],
+      "authors": ["Veselá, K", "Krízek, D", "Severová, L"],
       "customField3": "Czech University of Life Sciences Prague",
       "dataLength": 751,
       "date": "SEP-OCT",
@@ -988,13 +926,7 @@
       "journal": "LISTY CUKROVARNICKE A REPARSKE",
       "journalAbbreviation": "LISTY CUKROV REPAR",
       "journalIsoAbbreviation": "Lis. Cukrov. Repar.",
-      "keywords": [
-        "demand",
-        "elasticity",
-        "price",
-        "production",
-        "sugar"
-      ],
+      "keywords": ["demand", "elasticity", "price", "production", "sugar"],
       "language": "Czech",
       "manualOverride": 0,
       "matchedExclusionCriteria": null,
@@ -1026,11 +958,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "AG Barr, Cumbernauld, Scotland",
-      "authors": [
-        "Dickson, A",
-        "Gehrsitz, M",
-        "Kemp, J"
-      ],
+      "authors": ["Dickson, A", "Gehrsitz, M", "Kemp, J"],
       "customField3": "University of Strathclyde",
       "dataLength": 754,
       "date": "NOV 25",
@@ -1045,11 +973,7 @@
       "journal": "REVIEW OF ECONOMICS AND STATISTICS",
       "journalAbbreviation": "REV ECON STAT",
       "journalIsoAbbreviation": "Rev. Econ. Stat.",
-      "keywords": [
-        "SWEETENED BEVERAGES",
-        "PASS-THROUGH",
-        "TAXES"
-      ],
+      "keywords": ["SWEETENED BEVERAGES", "PASS-THROUGH", "TAXES"],
       "language": "English",
       "manualOverride": 0,
       "matchedExclusionCriteria": null,
@@ -1081,9 +1005,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Slezska Univ Opave, Obchodne Podnikatelska Fak Karvine, Univ Namesti 1934-3, Karvina 73340, Czech Republic",
-      "authors": [
-        "Sobotovicová, S"
-      ],
+      "authors": ["Sobotovicová, S"],
       "customField3": "Silesian University Opava",
       "dataLength": 589,
       "date": "APR",
@@ -1098,13 +1020,7 @@
       "journal": "LISTY CUKROVARNICKE A REPARSKE",
       "journalAbbreviation": "LISTY CUKROV REPAR",
       "journalIsoAbbreviation": "Lis. Cukrov. Repar.",
-      "keywords": [
-        "price",
-        "sugar",
-        "value added tax",
-        "inflation",
-        "consumption"
-      ],
+      "keywords": ["price", "sugar", "value added tax", "inflation", "consumption"],
       "language": "Czech",
       "manualOverride": 0,
       "matchedExclusionCriteria": null,
@@ -1136,10 +1052,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": null,
-      "authors": [
-        "MULLER, W",
-        "JOHNSEN, D"
-      ],
+      "authors": ["MULLER, W", "JOHNSEN, D"],
       "customField3": null,
       "dataLength": 859,
       "date": "FEB",
@@ -1186,10 +1099,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Ceska Zemedelska Univ Praze, Katedra Ekon Teorii, Prague, Czech Republic",
-      "authors": [
-        "Veselá, K",
-        "Severová, L"
-      ],
+      "authors": ["Veselá, K", "Severová, L"],
       "customField3": "Czech University of Life Sciences Prague",
       "dataLength": 677,
       "date": "JUL-AUG",
@@ -1244,9 +1154,7 @@
       "aiDecision": null,
       "aiReasoning": null,
       "authorAddress": "Natl Res Inst, Inst Agr & Food Econ, Warsaw, Poland",
-      "authors": [
-        "Szajner, P"
-      ],
+      "authors": ["Szajner, P"],
       "customField3": "Institute of Agricultural & Food Economy",
       "dataLength": 742,
       "date": "MAY",
@@ -1261,12 +1169,7 @@
       "journal": "SUGAR INDUSTRY-ZUCKERINDUSTRIE",
       "journalAbbreviation": "SUGAR IND",
       "journalIsoAbbreviation": "Sugar Ind.",
-      "keywords": [
-        "sugar",
-        "consumption",
-        "demand",
-        "market"
-      ],
+      "keywords": ["sugar", "consumption", "demand", "market"],
       "language": "English",
       "manualOverride": 0,
       "matchedExclusionCriteria": null,
@@ -1343,9 +1246,7 @@
       "publisherCity": "CAMBRIDGE",
       "referenceType": "JOUR",
       "risExtras": {
-        "C6": [
-          "OCT 2024"
-        ],
+        "C6": ["OCT 2024"],
         "FU": [
           "Nestle; STOP project; European Union [774548]; MRC; BBSRC; NIHR; Integrative Mammalian Biology (IMB) Capacity Building Award; NIHR Biomedical Research Centre Funding Scheme"
         ],

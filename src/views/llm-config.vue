@@ -214,6 +214,19 @@ watch(
   }
 );
 
+// Detect imported model names that don't match available select options.
+// When the loaded model isn't in the provider's default list, switch to
+// the custom text input so the user can see and edit their imported model name.
+watch(
+  () => config.value.modelName,
+  (name) => {
+    if (name && availableModels.value.length > 0 && !availableModels.value.includes(name)) {
+      isOtherModel.value = true;
+    }
+  },
+  { immediate: true }
+);
+
 // Clear temperature skip flag when model changes (within same provider)
 watch(
   () => config.value.modelName,
