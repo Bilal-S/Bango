@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useScreening } from '@/composables/use-screening';
+import { formatLlmError } from '@/utils/llm-error';
 import ScreeningProgressBar from '@/components/screening-progress-bar.vue';
 import ScreeningStats from '@/components/screening-stats.vue';
 
@@ -25,6 +26,13 @@ const {
 } = useScreening();
 
 const resettingWorkingList = ref(false);
+
+const screeningErrorInfo = computed(() => {
+  if (!error.value) {
+    return { prefix: '', details: '', helpLink: '', matched: false, anchorId: null };
+  }
+  return formatLlmError(error.value);
+});
 
 const isPaused = ref(false);
 const batchSize = ref(1);
@@ -150,7 +158,16 @@ async function handleResetWorkingList(): Promise<void> {
 
       <!-- Error Banner -->
       <div v-if="error" class="screening-view__error">
-        {{ error }}
+        <div class="screening-view__error-block">
+          <p class="screening-view__error-prefix">{{ screeningErrorInfo.prefix }}</p>
+          <p class="screening-view__error-details">{{ screeningErrorInfo.details }}</p>
+          <a class="screening-view__error-link" :href="screeningErrorInfo.helpLink">
+            <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
+              >open_in_new</span
+            >
+            View Troubleshooting Guide
+          </a>
+        </div>
       </div>
 
       <!-- Token Warning -->
@@ -401,6 +418,40 @@ async function handleResetWorkingList(): Promise<void> {
   color: var(--color-error);
   border-radius: var(--radius-default);
   font-size: var(--font-size-caption);
+}
+
+.screening-view__error-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.screening-view__error-prefix {
+  font-weight: 500;
+  margin: 0;
+}
+
+.screening-view__error-details {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  background-color: rgba(153, 27, 27, 0.08);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  margin: 0;
+  word-break: break-word;
+}
+
+.screening-view__error-link {
+  display: inline-flex;
+  align-items: center;
+  color: #4f46e5;
+  font-weight: 500;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.screening-view__error-link:hover {
+  text-decoration: underline;
 }
 
 .screening-view__warning {

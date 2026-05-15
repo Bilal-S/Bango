@@ -35,7 +35,7 @@ const statusTiles: StatusTile[] = [
     key: 'duplicate',
     label: 'Duplicates',
     icon: 'content_copy',
-    description: 'Identified duplicates awaiting resolution',
+    description: 'Resolved duplicates',
     cssClass: 'status-tile--duplicate',
   },
   {
@@ -132,7 +132,7 @@ function navigateToArticlesWithStatus(status: string): void {
           <div class="dashboard__empty-icon material-symbols-outlined">import_export</div>
           <h2 class="dashboard__empty-title">No articles yet</h2>
           <p class="dashboard__empty-desc">
-            Import an RIS file to get started with your systematic review. You will have to convert
+            Import a RIS file to get started with your systematic review. You will have to convert
             your BibTeX files first.
           </p>
           <button class="dashboard__empty-cta" @click="navigateTo('/import')">
