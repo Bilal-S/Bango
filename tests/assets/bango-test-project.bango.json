@@ -1,72 +1,77 @@
 {
   "metadata": {
     "specVersion": "3.0",
-    "exportedAt": "2026-05-15T15:14:02.353155600+00:00",
+    "exportedAt": "2026-05-15T16:15:33.793983800+00:00",
     "appName": "Bango",
     "appVersion": "1.0.10"
   },
   "researchAims": [
     {
-      "createdAt": "2026-05-15T14:56:56.916944600+00:00",
-      "id": "0d9fdb60-9d92-4a5d-9463-a348b5015c4c",
-      "text": "Investigate the effectiveness of French national guidelines (such as those by ANSES) and economic interventions like sugar taxes in curbing consumption among prosperous post-war demographics, analyzing the gap between policy intent and actual dietary shifts."
+      "createdAt": "2026-05-15T16:06:44.551552700+00:00",
+      "id": "60e1d58e-dc2e-4b82-a4df-3d97d16d2b3e",
+      "text": "Evaluate the impact of national food policies - including taxation, labeling, and voluntary guidelines - on the prevalence of added sugars and artificial additives in ultra-processed foods, and their subsequent effects on public health and consumer purchasing behavior."
+    },
+    {
+      "createdAt": "2026-05-15T16:07:40.319141800+00:00",
+      "id": "f993f73d-e8d9-4e68-ace3-bf9cb7c5140f",
+      "text": "United Kingdom"
     }
   ],
   "criteria": [
     {
-      "createdAt": "2026-05-15T15:00:18.056208500+00:00",
-      "id": "63cda6eb-96c6-40c9-9c35-a0fafd9315b9",
+      "createdAt": "2026-05-15T16:08:30.554994100+00:00",
+      "id": "df37f32b-3c5b-44aa-8344-ee30cc2a06c3",
       "priority": "high",
-      "text": "Geography is France",
+      "text": "Geography United Kingdom",
       "type": "inclusion"
     },
     {
-      "createdAt": "2026-05-15T15:00:30.497219500+00:00",
-      "id": "98b0c7d8-79a6-4081-be04-db80fc8c7af2",
-      "priority": "standard",
-      "text": "Focus on post-war period (1945 onward), with clear relevance to rising prosperity and dietary shifts in France",
-      "type": "inclusion"
-    },
-    {
-      "createdAt": "2026-05-15T15:00:42.065147600+00:00",
-      "id": "7e05b7f8-14d2-4b4f-bdfd-d4c09666e8d3",
-      "priority": "standard",
-      "text": "Include studies evaluating ANSES guidelines or French national nutrition policies (PNNS) on sugar consumption",
-      "type": "inclusion"
-    },
-    {
-      "createdAt": "2026-05-15T15:00:54.809265700+00:00",
-      "id": "488cda22-57a8-4ed1-9b88-99fa10a80cca",
+      "createdAt": "2026-05-15T16:09:03.235574300+00:00",
+      "id": "81607668-8cf6-48a3-8359-3ef5d4425ea3",
       "priority": "low",
-      "text": "Favor peer-reviewed studies using robust methodologies (e.g., longitudinal data, difference-in-differences analysis)",
+      "text": "Temporal Scope: Post-war era research (1945–Present) to capture the rise of industrial food processing and modern regulatory frameworks.",
       "type": "inclusion"
     },
     {
-      "createdAt": "2026-05-15T15:01:35.584517200+00:00",
-      "id": "37ef00d9-754a-4bbb-a8dd-5f68ba663481",
+      "createdAt": "2026-05-15T16:12:43.269131400+00:00",
+      "id": "ec894e8d-efa6-4f17-bd55-df90e1857e50",
       "priority": "standard",
-      "text": "Pre war period before 1945",
+      "text": "Policy Focus: Studies evaluating the effectiveness of government-led interventions such as sugar taxes (e.g., UK Soft Drinks Industry Levy) or nutritional guidelines (e.g., PNNS/ANSES).",
+      "type": "inclusion"
+    },
+    {
+      "createdAt": "2026-05-15T16:12:56.106332600+00:00",
+      "id": "4046172c-679e-409a-8484-7d6b5b6a98ba",
+      "priority": "standard",
+      "text": "Substance Scope: Research specifically measuring levels of added sugars, artificial food colors (AFCs), or natural bioactive pigments in consumer products.",
+      "type": "inclusion"
+    },
+    {
+      "createdAt": "2026-05-15T16:13:20.179695600+00:00",
+      "id": "2be37ae6-2022-4a3c-a625-b520e63581df",
+      "priority": "standard",
+      "text": "Non-Food Technology: Studies focused primarily on industrial processing machinery (e.g., solar dryer thermal efficiency) without a direct link to nutritional policy or dietary health.",
       "type": "exclusion"
     },
     {
-      "createdAt": "2026-05-15T15:01:44.649094600+00:00",
-      "id": "8f822b1e-b4c3-4356-a498-ae7241753a98",
-      "priority": "standard",
-      "text": "Studies limited to specific clinical populations (e.g., pregnant women, infants, or patients with metabolic diseases)",
+      "createdAt": "2026-05-15T16:14:26.389037200+00:00",
+      "id": "b501e6cc-ad0b-4a7b-9ab0-748e1f0ebe8f",
+      "priority": "high",
+      "text": "Not United Kingdom",
       "type": "exclusion"
     },
     {
-      "createdAt": "2026-05-15T15:01:53.135932700+00:00",
-      "id": "f913c217-57e8-4da8-861b-67b723f9a629",
+      "createdAt": "2026-05-15T16:14:56.423649700+00:00",
+      "id": "0fd853b5-4226-4ed0-831d-e44960c2cb4c",
       "priority": "standard",
-      "text": "Studies using unreliable dietary assessment methods (e.g., food frequency questionnaires without validation)",
+      "text": "Pre-Industrial Data: Any studies focusing on dietary patterns or food trade data prior to 1945.",
       "type": "exclusion"
     },
     {
-      "createdAt": "2026-05-15T15:02:02.033229900+00:00",
-      "id": "110e5021-20be-4c8c-b0dc-d009ee33294c",
+      "createdAt": "2026-05-15T16:15:11.805300600+00:00",
+      "id": "723abd2a-9438-4415-b4e2-01625a2ce9aa",
       "priority": "standard",
-      "text": "Animal studies, cell culture research, or non-human trials",
+      "text": "Clinical/Non-Human Trials: Research limited to animal models, cell cultures, or specific clinical cohorts (infants/patients) that cannot be generalized to broader public health policy.",
       "type": "exclusion"
     }
   ],
