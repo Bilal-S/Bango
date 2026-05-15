@@ -3,6 +3,7 @@ import { watch, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
 import { useExport } from '@/composables/use-export';
+import { formatLlmError } from '@/utils/llm-error';
 import { invoke } from '@tauri-apps/api/core';
 
 const {
@@ -163,6 +164,13 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
 
 const isOtherModel = ref(false);
 
+const llmErrorInfo = computed(() => {
+  if (!testResult.value || testResult.value.success) {
+    return { prefix: '', details: '', helpLink: '', matched: false, anchorId: null };
+  }
+  return formatLlmError(testResult.value.message);
+});
+
 const availableModels = computed(() => {
   if (fetchedModels.value && fetchedModels.value.length > 0) {
     return fetchedModels.value;
@@ -171,9 +179,20 @@ const availableModels = computed(() => {
 });
 
 const canFetchModels = computed(() => {
+  if (!config.value.endpointUrl.trim()) return false;
+  if (!config.value.modelName.trim()) return false;
   if (isLocalProvider()) return true;
   return !!config.value.apiKeyEncrypted;
 });
+
+const canTestConnection = computed(() => {
+  if (!config.value.endpointUrl.trim()) return false;
+  if (!config.value.modelName.trim()) return false;
+  if (isLocalProvider()) return true;
+  return !!config.value.apiKeyEncrypted;
+});
+
+const needsApiKey = computed(() => !isLocalProvider());
 
 watch(
   () => config.value.provider,
@@ -260,6 +279,7 @@ watch(
               v-model="config.endpointUrl"
               type="url"
               class="field__input field__input--mono"
+              :class="{ 'field__input--required-halo': !config.endpointUrl.trim() }"
               placeholder="https://api.openai.com/v1/chat/completions"
             />
           </div>
@@ -272,6 +292,7 @@ watch(
                 <select
                   v-model="config.modelName"
                   class="field__select field__select--mono"
+                  :class="{ 'field__select--required-halo': !config.modelName.trim() }"
                   @change="
                     (e) => {
                       if ((e.target as HTMLSelectElement).value === 'other') {
@@ -293,6 +314,7 @@ watch(
                   v-model="config.modelName"
                   type="text"
                   class="field__input field__input--mono"
+                  :class="{ 'field__input--required-halo': !config.modelName.trim() }"
                   placeholder="e.g. custom-model-v1"
                   style="flex: 1"
                 />
@@ -317,6 +339,7 @@ watch(
                   v-model="config.apiKeyEncrypted"
                   :type="showApiKey ? 'text' : 'password'"
                   class="field__input field__input--mono field__input--password"
+                  :class="{ 'field__input--required-halo': needsApiKey && !config.apiKeyEncrypted }"
                   placeholder="sk-..."
                 />
                 <button class="field__toggle-visibility" @click="showApiKey = !showApiKey">
@@ -430,7 +453,11 @@ watch(
           <span v-else class="material-symbols-outlined btn__icon">cloud_download</span>
           {{ fetchingModels ? 'Fetching...' : 'Get Models' }}
         </button>
-        <button class="btn btn--primary" :disabled="testing" @click="testConnection">
+        <button
+          class="btn btn--primary"
+          :disabled="testing || !canTestConnection"
+          @click="testConnection"
+        >
           <span v-if="testing" class="material-symbols-outlined btn__icon spinner"
             >progress_activity</span
           >
@@ -446,7 +473,21 @@ watch(
       class="llm-config__test-result"
       :class="{ 'llm-config__test-result--success': testResult.success }"
     >
-      {{ testResult.message }}
+      <template v-if="testResult.success">
+        {{ testResult.message }}
+      </template>
+      <template v-else>
+        <div class="llm-config__error-block">
+          <p class="llm-config__error-prefix">{{ llmErrorInfo.prefix }}</p>
+          <p class="llm-config__error-details">{{ llmErrorInfo.details }}</p>
+          <a class="llm-config__error-link" :href="llmErrorInfo.helpLink">
+            <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
+              >open_in_new</span
+            >
+            View Troubleshooting Guide
+          </a>
+        </div>
+      </template>
     </div>
 
     <!-- Project Management -->
@@ -772,6 +813,40 @@ watch(
   padding-right: 2.5rem;
 }
 
+/* Required-field halo (pulsing amber glow for empty required fields) */
+.field__input--required-halo {
+  border-color: #d97706;
+  animation: required-halo-pulse 2s ease-in-out infinite;
+}
+
+@keyframes required-halo-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.45);
+  }
+}
+
+.field__input--required-halo:focus {
+  border-color: #3525cd;
+  box-shadow: 0 0 0 1px #3525cd;
+  animation: none;
+}
+
+/* Required-field halo for select elements */
+.field__select--required-halo {
+  border-color: #d97706;
+  animation: required-halo-pulse 2s ease-in-out infinite;
+}
+
+.field__select--required-halo:focus {
+  border-color: #3525cd;
+  box-shadow: 0 0 0 1px #3525cd;
+  animation: none;
+}
+
 .field__password-wrapper {
   position: relative;
 }
@@ -981,6 +1056,41 @@ watch(
 .llm-config__test-result--success {
   background-color: #f0fdf4;
   color: #166534;
+}
+
+/* LLM Error Block */
+.llm-config__error-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.llm-config__error-prefix {
+  font-weight: 500;
+  margin: 0;
+}
+
+.llm-config__error-details {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  background-color: rgba(153, 27, 27, 0.08);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  margin: 0;
+  word-break: break-word;
+}
+
+.llm-config__error-link {
+  display: inline-flex;
+  align-items: center;
+  color: #4f46e5;
+  font-weight: 500;
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.llm-config__error-link:hover {
+  text-decoration: underline;
 }
 
 .spinner {

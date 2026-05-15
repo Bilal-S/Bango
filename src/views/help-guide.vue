@@ -1,9 +1,25 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
+const route = useRoute();
 const router = useRouter();
 const activeTab = ref<'guide' | 'troubleshoot' | 'local-ai'>('guide');
+
+// Deep-link: /help?tab=troubleshoot#error-id
+onMounted(() => {
+  const tab = route.query.tab as string | undefined;
+  if (tab === 'troubleshoot' || tab === 'local-ai' || tab === 'guide') {
+    activeTab.value = tab;
+  }
+  // Scroll to anchor after DOM update
+  if (route.hash) {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(route.hash.slice(1));
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+});
 
 interface HelpStep {
   step: number;
@@ -144,6 +160,7 @@ const steps: HelpStep[] = [
 ];
 
 interface TroubleshootItem {
+  anchorId: string;
   icon: string;
   error: string;
   providers: string;
@@ -153,6 +170,7 @@ interface TroubleshootItem {
 
 const troubleshootItems: TroubleshootItem[] = [
   {
+    anchorId: 'location-not-supported',
     icon: 'public',
     error: 'User location is not supported for the API use',
     providers: 'Google Gemini',
@@ -162,24 +180,27 @@ const troubleshootItems: TroubleshootItem[] = [
       'Upgrade to a paid Gemini API key (pay-as-you-go), use a VPN to connect from a supported region, or switch to a different provider such as OpenAI or Anthropic.',
   },
   {
+    anchorId: 'rate-limited',
     icon: 'speed',
     error: 'Rate limited (HTTP 429)',
     providers: 'All cloud providers',
     cause:
       'You have exceeded the number of requests allowed per minute by your API plan. Free tiers have very low limits.',
     solution:
-      'Reduce the concurrency setting and increase the request delay in Settings. Bango automatically retries with exponential backoff, but lowering throughput helps avoid hitting limits entirely.',
+      'Reduce the concurrency setting and increase the request delay in Settings. Bango automatically retries with exponential backoff, but lowering throughput helps avoid hitting limits entirely. Alternatly, you can purchase higher limits with your provider. Please note some provider (Z.AI) also issue this message when you are using the wrong endpoint (Base URL). Please ensure you use the correct Base URL for your subscription. Bango prefills the most common one, yours might be different.',
   },
   {
+    anchorId: 'auth-failed',
     icon: 'key',
     error: 'Authentication failed (HTTP 401 / 403)',
     providers: 'All providers',
     cause:
       'The API key is missing, incorrect, revoked, or does not have permission for the requested model.',
     solution:
-      'Go to Settings and verify your API key is correct. If you recently regenerated the key, paste the new one. Check that your account has access to the model you selected.',
+      'Go to Settings and verify your API key is correct. Also check with your provider whether this key is still active. If you recently regenerated the key, paste the new one. Check that your account has access to the model you selected.',
   },
   {
+    anchorId: 'connection-refused',
     icon: 'wifi_off',
     error: 'Connection refused / timeout',
     providers: 'Ollama, llama.cpp, LM Studio',
@@ -188,15 +209,17 @@ const troubleshootItems: TroubleshootItem[] = [
       'Make sure the local server is started (e.g., run `ollama serve`). Verify the endpoint URL and port in Settings match your server configuration. Check that no firewall is blocking the connection.',
   },
   {
+    anchorId: 'model-not-found',
     icon: 'search_off',
     error: 'Model not found (HTTP 404)',
-    providers: 'OpenAI, Anthropic, Google',
+    providers: 'All providers',
     cause:
       'The model name in your configuration does not match any available model on the provider.',
     solution:
-      'Check the model name for typos. Use the model picker in Settings to see available models for your provider. Model names change over time - make sure you are using the current identifier.',
+      'Check the model name for typos. Use the model picker in Settings to see available models for your provider. Model names change over time - make sure you are using the current identifier. For local AI check your tools documentation on how to provide the name and where you can look it up.',
   },
   {
+    anchorId: 'token-limit',
     icon: 'data_array',
     error: 'Token / context window limit exceeded',
     providers: 'All providers',
@@ -206,6 +229,7 @@ const troubleshootItems: TroubleshootItem[] = [
       'Reduce the batch size in Settings, shorten your criteria text, or switch to a model with a larger context window (e.g., 128K or 200K token models).',
   },
   {
+    anchorId: 'malformed-json',
     icon: 'broken_image',
     error: 'Malformed JSON / screening errors',
     providers: 'All providers',
@@ -215,6 +239,7 @@ const troubleshootItems: TroubleshootItem[] = [
       'Retry the individual article. If the problem persists, try a different model or a larger quantization. Cloud providers (GPT-4, Claude) produce more reliable structured output.',
   },
   {
+    anchorId: 'api-key-missing',
     icon: 'vpn_key_off',
     error: 'API key not found / empty key',
     providers: 'All providers',
@@ -223,6 +248,7 @@ const troubleshootItems: TroubleshootItem[] = [
       'Go to Settings, select your provider, and enter a valid API key. Click Save to persist the configuration.',
   },
   {
+    anchorId: 'ssl-error',
     icon: 'lock',
     error: 'SSL / TLS certificate error',
     providers: 'Self-hosted endpoints',
@@ -232,6 +258,7 @@ const troubleshootItems: TroubleshootItem[] = [
       'For local providers, use `http://localhost` instead of `https://localhost`. For remote self-hosted servers, ensure a valid certificate is installed.',
   },
   {
+    anchorId: 'slow-inference',
     icon: 'hourglass_empty',
     error: 'Slow inference / timeouts',
     providers: 'Local providers',
@@ -241,6 +268,7 @@ const troubleshootItems: TroubleshootItem[] = [
       'Reduce the context window setting, use a smaller quantized model (Q4_K_M), lower concurrency to 1, and close other applications to free memory.',
   },
   {
+    anchorId: 'out-of-memory',
     icon: 'memory',
     error: 'Out of memory (OOM)',
     providers: 'Local providers',
@@ -535,7 +563,12 @@ function navigateTo(route: string): void {
       </section>
 
       <div class="ts-list">
-        <div v-for="(item, idx) in troubleshootItems" :key="idx" class="ts-card">
+        <div
+          v-for="(item, idx) in troubleshootItems"
+          :id="item.anchorId"
+          :key="idx"
+          class="ts-card"
+        >
           <div class="ts-card__header">
             <span class="material-symbols-outlined ts-card__icon">{{ item.icon }}</span>
             <div class="ts-card__header-text">
