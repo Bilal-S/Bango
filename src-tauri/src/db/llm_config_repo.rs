@@ -74,11 +74,29 @@ pub fn get_config(conn: &Connection) -> Result<Option<LlmConfig>, AppError> {
 }
 
 pub fn has_config(conn: &Connection) -> Result<bool, AppError> {
-    let count: usize =
-        conn.query_row("SELECT EXISTS(SELECT 1 FROM llm_config WHERE id = 1)", [], |row| {
-            row.get(0)
-        })?;
-    Ok(count > 0)
+    let result = conn.query_row(
+        "SELECT provider, endpoint_url, model_name, api_key_encrypted FROM llm_config WHERE id = 1",
+        [],
+        |row| {
+            let provider: String = row.get(0)?;
+            let endpoint_url: String = row.get(1)?;
+            let model_name: String = row.get(2)?;
+            let api_key: Option<String> = row.get(3)?;
+            Ok((provider, endpoint_url, model_name, api_key))
+        },
+    );
+
+    match result {
+        Ok((provider, endpoint_url, model_name, api_key)) => {
+            if endpoint_url.trim().is_empty() || model_name.trim().is_empty() {
+                return Ok(false);
+            }
+            let is_local = matches!(provider.as_str(), "ollama" | "lm_studio" | "llama_cpp");
+            Ok(is_local || api_key.is_some())
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+        Err(e) => Err(AppError::Database(e)),
+    }
 }
 
 pub fn save_config(conn: &Connection, config: &LlmConfig) -> Result<(), AppError> {

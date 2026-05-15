@@ -31,6 +31,7 @@ const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
 const clearLogsStatus = ref<string | null>(null);
 const showErrorLog = ref(false);
+const showRawError = ref(false);
 const errorLogEntries = ref<Array<{ id: string; timestamp: string; details: string | null }>>([]);
 const errorLogLoading = ref(false);
 
@@ -166,7 +167,15 @@ const isOtherModel = ref(false);
 
 const llmErrorInfo = computed(() => {
   if (!testResult.value || testResult.value.success) {
-    return { prefix: '', details: '', helpLink: '', matched: false, anchorId: null };
+    return {
+      prefix: '',
+      details: '',
+      helpLink: '',
+      matched: false,
+      anchorId: null,
+      solution: null,
+      cause: null,
+    };
   }
   return formatLlmError(testResult.value.message);
 });
@@ -490,7 +499,38 @@ watch(
         {{ testResult.message }}
       </template>
       <template v-else>
-        <div class="llm-config__error-block">
+        <!-- Matched error: show inline solution with collapsible raw response -->
+        <div v-if="llmErrorInfo.matched" class="llm-config__error-block">
+          <div class="llm-config__error-solution">
+            <div class="llm-config__solution-header">
+              <span class="material-symbols-outlined llm-config__solution-icon">checklist</span>
+              <strong>AI Configuration Problem (this is generally not a bug)</strong>
+            </div>
+            <p class="llm-config__solution-cause">
+              <span class="llm-config__solution-label">Cause:</span> {{ llmErrorInfo.cause }}
+            </p>
+            <p class="llm-config__solution-text">
+              <span class="llm-config__solution-label">Solution:</span> {{ llmErrorInfo.solution }}
+            </p>
+          </div>
+          <button class="llm-config__raw-toggle" @click="showRawError = !showRawError">
+            <span class="material-symbols-outlined" style="font-size: 16px">
+              {{ showRawError ? 'expand_less' : 'expand_more' }}
+            </span>
+            {{ showRawError ? 'Hide raw response' : 'Show raw LLM response' }}
+          </button>
+          <div v-if="showRawError" class="llm-config__error-details">
+            {{ llmErrorInfo.details }}
+          </div>
+          <a class="llm-config__error-link" :href="llmErrorInfo.helpLink">
+            <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
+              >open_in_new</span
+            >
+            View in Troubleshooting Guide
+          </a>
+        </div>
+        <!-- Unmatched error: show raw response directly -->
+        <div v-else class="llm-config__error-block">
           <p class="llm-config__error-prefix">{{ llmErrorInfo.prefix }}</p>
           <p class="llm-config__error-details">{{ llmErrorInfo.details }}</p>
           <a class="llm-config__error-link" :href="llmErrorInfo.helpLink">
@@ -1103,6 +1143,60 @@ watch(
 }
 
 .llm-config__error-link:hover {
+  text-decoration: underline;
+}
+
+/* Inline solution for matched errors */
+.llm-config__error-solution {
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 0.375rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.llm-config__solution-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-bottom: 0.375rem;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.llm-config__solution-icon {
+  font-size: 18px;
+  color: #d97706;
+}
+
+.llm-config__solution-cause,
+.llm-config__solution-text {
+  font-size: 13px;
+  line-height: 18px;
+  color: #78350f;
+  margin: 0 0 0.25rem 0;
+}
+
+.llm-config__solution-label {
+  font-weight: 600;
+  color: #92400e;
+}
+
+.llm-config__raw-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: none;
+  border: none;
+  color: #991b1b;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  opacity: 0.8;
+}
+
+.llm-config__raw-toggle:hover {
+  opacity: 1;
   text-decoration: underline;
 }
 

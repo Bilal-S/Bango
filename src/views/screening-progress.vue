@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useScreening } from '@/composables/use-screening';
 import { formatLlmError } from '@/utils/llm-error';
 import ScreeningProgressBar from '@/components/screening-progress-bar.vue';
@@ -25,6 +26,7 @@ const {
   resetWorkingList,
 } = useScreening();
 
+const router = useRouter();
 const resettingWorkingList = ref(false);
 
 const screeningErrorInfo = computed(() => {
@@ -97,6 +99,10 @@ const isWorkingListScreened = computed((): boolean => {
 
 function handleStart(): void {
   startScreening(batchSize.value);
+}
+
+function navigateTo(route: string): void {
+  router.push(route);
 }
 
 async function handleResetWorkingList(): Promise<void> {
@@ -184,6 +190,48 @@ async function handleResetWorkingList(): Promise<void> {
         <ul>
           <li v-for="(reason, idx) in blockingReasons" :key="idx">{{ reason }}</li>
         </ul>
+        <!-- Actionable LLM config guidance -->
+        <div v-if="readiness && !readiness.hasLlmConfig" class="screening-view__llm-setup-card">
+          <span class="material-symbols-outlined screening-view__llm-setup-icon">smart_toy</span>
+          <div class="screening-view__llm-setup-body">
+            <p class="screening-view__llm-setup-text">
+              Set up an AI provider and API key in <strong>Settings</strong> to enable screening.
+              Both cloud providers (OpenAI, Anthropic, Google) and local models (Ollama, LM Studio)
+              are supported.
+            </p>
+            <div class="screening-view__llm-setup-actions">
+              <button class="btn btn--primary" @click="navigateTo('/settings')">
+                <span class="material-symbols-outlined" style="font-size: 16px">settings</span>
+                Open Settings
+              </button>
+              <button class="btn btn--secondary" @click="navigateTo('/help?tab=local-ai')">
+                <span class="material-symbols-outlined" style="font-size: 16px">help</span>
+                Setup Guide
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- Actionable criteria guidance -->
+        <div
+          v-if="
+            readiness && (!readiness.hasAims || !readiness.hasInclusion || !readiness.hasExclusion)
+          "
+          class="screening-view__llm-setup-card"
+        >
+          <span class="material-symbols-outlined screening-view__llm-setup-icon">rule</span>
+          <div class="screening-view__llm-setup-body">
+            <p class="screening-view__llm-setup-text">
+              Define your research aims and inclusion/exclusion criteria in the
+              <strong>Criteria Editor</strong>.
+            </p>
+            <div class="screening-view__llm-setup-actions">
+              <button class="btn btn--primary" @click="navigateTo('/criteria')">
+                <span class="material-symbols-outlined" style="font-size: 16px">edit</span>
+                Open Criteria Editor
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Stats Grid -->
@@ -484,6 +532,42 @@ async function handleResetWorkingList(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+/* ── Actionable Setup Cards (inside guardrails) ── */
+.screening-view__llm-setup-card {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-default);
+}
+
+.screening-view__llm-setup-icon {
+  font-size: 20px;
+  color: #d97706;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.screening-view__llm-setup-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.screening-view__llm-setup-text {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.screening-view__llm-setup-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
 }
 
 .screening-view__current {

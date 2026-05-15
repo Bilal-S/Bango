@@ -1,10 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { tauriCommand, isTauri } from '@/composables/use-tauri-command';
+import { ask } from '@tauri-apps/plugin-dialog';
+import demoProjectJson from '@/assets/demo-project.bango.json?raw';
+import { useArticlesStore } from '@/stores/articles';
+import { useCriteriaStore } from '@/stores/criteria';
+import { useTagsStore } from '@/stores/tags';
+import { useLabelsStore } from '@/stores/labels';
+import { useLlmConfigStore } from '@/stores/llm-config';
+import { useAuditStore } from '@/stores/audit';
+import { useScreeningStore } from '@/stores/screening';
 
 const route = useRoute();
 const router = useRouter();
 const activeTab = ref<'guide' | 'troubleshoot' | 'local-ai'>('guide');
+const demoLoading = ref(false);
+const demoError = ref<string | null>(null);
 
 // Deep-link: /help?tab=troubleshoot#error-id
 onMounted(() => {
@@ -175,9 +187,9 @@ const troubleshootItems: TroubleshootItem[] = [
     error: 'User location is not supported for the API use',
     providers: 'Google Gemini',
     cause:
-      'The Gemini free tier restricts API access from certain regions. This is a geographic limitation enforced by Google.',
+      'Google blocks Gemini API access from the IP address location making the request. Google restricts API availability in certain regions for regulatory reasons. The FAILED_PRECONDITION status confirms your environment fails to meet service requirements. Common causes: the device is in an unsupported country, a VPN routes traffic through a restricted region, or cloud infrastructure (AWS, GCP) operates in a restricted data center zone.',
     solution:
-      'Upgrade to a paid Gemini API key (pay-as-you-go), use a VPN to connect from a supported region, or switch to a different provider such as OpenAI or Anthropic.',
+      'Ensure the machine executing the API call uses an IP address from a supported region. Verify the current list of allowed countries in the Google Gemini API documentation. Options: upgrade to a paid Gemini API key (pay-as-you-go), connect through a VPN in a supported region, move cloud workloads to a supported zone, or switch to a different provider such as OpenAI or Anthropic.',
   },
   {
     anchorId: 'rate-limited',
@@ -188,6 +200,16 @@ const troubleshootItems: TroubleshootItem[] = [
       'You have exceeded the number of requests allowed per minute by your API plan. Free tiers have very low limits.',
     solution:
       'Reduce the concurrency setting and increase the request delay in Settings. Bango automatically retries with exponential backoff, but lowering throughput helps avoid hitting limits entirely. Alternatly, you can purchase higher limits with your provider. Please note some provider (Z.AI) also issue this message when you are using the wrong endpoint (Base URL). Please ensure you use the correct Base URL for your subscription. Bango prefills the most common one, yours might be different.',
+  },
+  {
+    anchorId: 'api-key-invalid-400',
+    icon: 'key_off',
+    error: 'API key not valid (HTTP 400 Bad Request)',
+    providers: 'Google Gemini',
+    cause:
+      'The API key is invalid, malformed, or has been revoked. Google Gemini returns HTTP 400 instead of the more common 401 for invalid keys.',
+    solution:
+      'Go to Settings and verify your API key is correct. For Google Gemini, ensure the key was generated from Google AI Studio and has not expired. If you recently regenerated the key, paste the new one. This error can also occur if the key belongs to a different Google Cloud project or service.',
   },
   {
     anchorId: 'auth-failed',
@@ -410,6 +432,49 @@ function copyCode(code: string): void {
 function navigateTo(route: string): void {
   router.push(route);
 }
+
+async function loadDemo(): Promise<void> {
+  if (demoLoading.value) return;
+  if (!isTauri()) {
+    demoError.value = 'Demo requires the desktop app.';
+    return;
+  }
+
+  // Always confirm via native dialog — this is destructive (replaces all project data)
+  const confirmed = await ask(
+    'Loading the demo project will replace all your current data ' +
+      '(articles, criteria, tags, labels). This cannot be undone.',
+    { title: 'Load Demo Project', kind: 'warning', okLabel: 'Load Demo', cancelLabel: 'Cancel' }
+  );
+  if (!confirmed) return;
+
+  demoLoading.value = true;
+  demoError.value = null;
+  try {
+    await tauriCommand('import_project_backup', {
+      request: { jsonContent: demoProjectJson },
+    });
+    // Invalidate and re-fetch all stores
+    const stores = [
+      useArticlesStore(),
+      useCriteriaStore(),
+      useTagsStore(),
+      useLabelsStore(),
+      useLlmConfigStore(),
+      useAuditStore(),
+      useScreeningStore(),
+    ];
+    for (const store of stores) {
+      store.invalidate();
+    }
+    await Promise.all(stores.map((s) => s.fetchIfNeeded()));
+    router.push('/');
+  } catch (e: unknown) {
+    demoError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    demoLoading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -517,6 +582,31 @@ function navigateTo(route: string): void {
           </div>
           <button class="help-guide__footer-btn" @click="navigateTo('/settings')">
             Open Settings
+          </button>
+        </div>
+      </section>
+
+      <!-- Demo Tile -->
+      <section class="help-guide__demo">
+        <div class="help-guide__demo-card">
+          <span class="material-symbols-outlined help-guide__demo-icon">science</span>
+          <div class="help-guide__demo-body">
+            <h4 class="help-guide__demo-title">Try the Demo</h4>
+            <p class="help-guide__demo-desc">
+              Load a sample project with articles, criteria, and research aims to explore Bango's
+              features without setting up your own data. This will replace any existing project
+              data.
+            </p>
+            <p v-if="demoError" class="help-guide__demo-error">{{ demoError }}</p>
+          </div>
+          <button class="help-guide__demo-btn" :disabled="demoLoading" @click="loadDemo()">
+            <span v-if="demoLoading" class="material-symbols-outlined help-guide__demo-spinner">
+              progress_activity
+            </span>
+            <span v-else class="material-symbols-outlined help-guide__demo-btn-icon"
+              >play_circle</span
+            >
+            {{ demoLoading ? 'Loading…' : 'Load Demo Project' }}
           </button>
         </div>
       </section>
@@ -1286,6 +1376,97 @@ function navigateTo(route: string): void {
   background-color: #b45309;
 }
 
+/* Demo Tile */
+.help-guide__demo {
+  margin-bottom: var(--space-8);
+}
+
+.help-guide__demo-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  background-color: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+}
+
+.help-guide__demo-icon {
+  font-size: 22px;
+  color: #4f46e5;
+  flex-shrink: 0;
+}
+
+.help-guide__demo-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.help-guide__demo-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-bottom: 2px;
+}
+
+.help-guide__demo-desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0;
+}
+
+.help-guide__demo-error {
+  font-size: var(--font-size-caption);
+  color: #dc2626;
+  margin: var(--space-1) 0 0 0;
+}
+
+.help-guide__demo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background-color: #4f46e5;
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: background-color 0.15s;
+}
+
+.help-guide__demo-btn:hover:not(:disabled) {
+  background-color: #4338ca;
+}
+
+.help-guide__demo-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.help-guide__demo-btn-icon,
+.help-guide__demo-spinner {
+  font-size: 16px;
+}
+
+.help-guide__demo-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 767px) {
   .help-guide__overview-card {
     flex-direction: column;
@@ -1297,6 +1478,12 @@ function navigateTo(route: string): void {
   }
 
   .help-guide__footer-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .help-guide__demo-card {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-3);
