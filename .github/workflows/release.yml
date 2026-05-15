@@ -197,7 +197,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup msstore CLI
-        run: winget install Microsoft.msstore-cli
+        run: winget install Microsoft.msstore-cli --accept-source-agreements --silent
 
       - name: Publish to Microsoft Store
         env:
