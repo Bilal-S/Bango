@@ -22,6 +22,7 @@ src-tauri/Cargo.lock
 # Bango project exports
 *.bango.json
 !tests/assets/bango-test-project.bango.json
+!src/assets/demo-project.bango.json
 
 # Logs
 *.log
