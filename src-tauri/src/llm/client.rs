@@ -198,7 +198,7 @@ pub async fn list_models(
     api_key: Option<&str>,
 ) -> Result<Vec<String>, AppError> {
     let client = Client::new();
-    let base_url = endpoint_url.trim_end_matches('/');
+    let base_url = endpoint_url.trim_end_matches('/').trim_end_matches("/models");
 
     match provider {
         LlmProvider::Google => {
