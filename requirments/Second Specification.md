@@ -706,7 +706,7 @@ The following screens are designed in the Stitch project "Bango AI Literature Re
 
 ### 20.1 Overview
 
-The project uses [Google Stitch](https://stitch.withgoogle.com/) for UI design and the `@_davideast/stitch-mcp` package as the MCP bridge between Stitch and Claude Code. This enables a direct design-to-code pipeline without manual handoff.
+The project uses [Google Stitch](https://stitch.withgoogle.com/) for UI design and the `@_davideast/stitch-mcp` package as the MCP bridge between Stitch and code agent. This enables a direct design-to-code pipeline without manual handoff.
 
 ### 20.2 Stitch Project
 
@@ -750,7 +750,7 @@ Authentication uses the `STITCH_API_KEY` environment variable (no browser-based 
 ```
 Google Stitch (generate / iterate designs)
     → DESIGN.md (export design system tokens)
-    → Claude Code reads DESIGN.md + pulls screen code via MCP
+    → Code agent reads DESIGN.md + pulls screen code via MCP
     → Generate Vue 3 components matching design tokens
     → Iterate in Stitch for visual refinements
     → Re-sync via DESIGN.md + MCP
@@ -759,7 +759,7 @@ Google Stitch (generate / iterate designs)
 **Step-by-step:**
 1. Generate or refine designs in Google Stitch using the prompts in the Stitch prompt plan.
 2. Export the updated design system as `DESIGN.md` (replaces the file in the project root).
-3. Use Claude Code with the Stitch MCP to pull screen HTML/CSS and generate matching Vue components.
+3. Use Code Agent with the Stitch MCP to pull screen HTML/CSS and generate matching Vue components.
 4. DESIGN.md provides the design token contract (colors, typography, spacing) - components reference these tokens rather than hardcoding values.
 5. All design changes are version-controlled alongside code via `DESIGN.md`.
 
