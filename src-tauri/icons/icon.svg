@@ -1,4 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="64" fill="#1a1a2e"/>
-  <text x="256" y="320" font-family="sans-serif" font-size="280" font-weight="bold" fill="#e94560" text-anchor="middle">B</text>
+  <defs>
+    <clipPath id="bg">
+      <rect width="512" height="512" rx="100"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#bg)">
+    <rect width="512" height="512" fill="#46505A"/>
+    <g fill="#fff">
+      <path d="M128,100 L128,412 L300,412 C400,412 400,330 355,310 C400,290 400,200 300,200 L240,200 L240,100 Z M240,200 L300,200 C340,200 340,260 300,260 L240,260 Z M240,260 L300,260 C340,260 340,320 300,320 L240,320 Z M240,320 L300,320 C370,320 370,400 300,400 L240,400 Z"/>
+    </g>
+  </g>
 </svg>
