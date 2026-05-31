@@ -163,7 +163,7 @@ export interface ScreeningProgress {
   rejected: number;
   errors: number;
   isRunning: boolean;
-  currentArticleTitle: string | null;
+  currentArticleTitles: string[];
   elapsedMs: number;
   estimatedRemainingMs: number | null;
 }

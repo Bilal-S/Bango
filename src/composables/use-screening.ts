@@ -31,7 +31,7 @@ export function useScreening() {
       rejected: 0,
       errors: 0,
       isRunning: true,
-      currentArticleTitle: null,
+      currentArticleTitles: [],
       elapsedMs: 0,
       estimatedRemainingMs: null,
     });

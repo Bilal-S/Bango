@@ -8,12 +8,12 @@ import { useLlmConfigStore } from '@/stores/llm-config';
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
-const { summaryText, loading, error, loadSaved, generate, formatGeneratedAt } = useSummary();
+const { summaryText, loading, error, citationStyle, loadSaved, generate, formatGeneratedAt } =
+  useSummary();
 const articlesStore = useArticlesStore();
 const criteriaStore = useCriteriaStore();
 const llmConfigStore = useLlmConfigStore();
 
-const citationStyle = ref<CitationStyle>('APA');
 const copied = ref(false);
 
 const CITATION_STYLES: CitationStyle[] = ['APA', 'MLA', 'Chicago', 'IEEE', 'AMA'];

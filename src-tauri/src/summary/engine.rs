@@ -53,12 +53,22 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
         let batch_a = &input.articles[..batch_size];
         let batch_b = &input.articles[batch_size..];
 
-        let summary_a =
-            summarize_batch(&input.config, &input.aim_texts, &input.screening_data, &input.citation_style, batch_a)
-                .await?;
-        let summary_b =
-            summarize_batch(&input.config, &input.aim_texts, &input.screening_data, &input.citation_style, batch_b)
-                .await?;
+        let summary_a = summarize_batch(
+            &input.config,
+            &input.aim_texts,
+            &input.screening_data,
+            &input.citation_style,
+            batch_a,
+        )
+        .await?;
+        let summary_b = summarize_batch(
+            &input.config,
+            &input.aim_texts,
+            &input.screening_data,
+            &input.citation_style,
+            batch_b,
+        )
+        .await?;
 
         // Synthesize
         synthesize_batches(
@@ -71,8 +81,14 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
         )
         .await?
     } else {
-        summarize_batch(&input.config, &input.aim_texts, &input.screening_data, &input.citation_style, &input.articles)
-            .await?
+        summarize_batch(
+            &input.config,
+            &input.aim_texts,
+            &input.screening_data,
+            &input.citation_style,
+            &input.articles,
+        )
+        .await?
     };
 
     Ok(response)

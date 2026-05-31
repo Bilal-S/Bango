@@ -8,6 +8,7 @@ import { useLabelsStore } from '@/stores/labels';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
+import { useSummary } from './use-summary';
 
 export function useExport() {
   const exporting = ref(false);
@@ -91,6 +92,7 @@ export function useExport() {
         request: { jsonContent: content },
       });
       await refreshAllStores();
+      useSummary().clearSummary();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -104,6 +106,7 @@ export function useExport() {
     try {
       await tauriCommand('reset_project');
       invalidateAllStores();
+      useSummary().clearSummary();
       return true;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);

@@ -45,20 +45,16 @@ pub async fn generate_summary(
 
         // AI-screened: articles that have an ai_decision set
         let ai_screened: usize = conn
-            .query_row(
-                "SELECT COUNT(*) FROM articles WHERE ai_decision IS NOT NULL",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM articles WHERE ai_decision IS NOT NULL", [], |row| {
+                row.get(0)
+            })
             .unwrap_or(0);
 
         // Manual review: articles where manual_override = 1
         let manual_reviewed: usize = conn
-            .query_row(
-                "SELECT COUNT(*) FROM articles WHERE manual_override = 1",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM articles WHERE manual_override = 1", [], |row| {
+                row.get(0)
+            })
             .unwrap_or(0);
 
         let screening_data = ScreeningData {
@@ -97,7 +93,9 @@ pub async fn generate_summary(
 }
 
 #[tauri::command]
-pub fn get_saved_summary(db_state: State<'_, DbState>) -> Result<Option<summary_repo::SavedSummary>, AppError> {
+pub fn get_saved_summary(
+    db_state: State<'_, DbState>,
+) -> Result<Option<summary_repo::SavedSummary>, AppError> {
     let conn = db_state
         .conn
         .lock()

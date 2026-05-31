@@ -417,21 +417,27 @@ function handleCriteriaSave(
         >
           <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <div
-              v-for="criterion in article.matchedInclusionCriteria"
+              v-for="(criterion, idx) in article.matchedInclusionCriteria"
               :key="'inc-' + criterion"
               class="flex items-center gap-1.5 text-body-sm"
               :title="criterionText(criterion)"
             >
-              <span class="material-symbols-outlined text-emerald-500 text-sm">check_circle</span>
+              <span
+                class="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded px-1 leading-tight"
+                >{{ idx + 1 }}</span
+              >
               <span class="truncate">{{ truncate(criterionText(criterion)) }}</span>
             </div>
             <div
-              v-for="criterion in article.matchedExclusionCriteria"
+              v-for="(criterion, idx) in article.matchedExclusionCriteria"
               :key="'exc-' + criterion"
               class="flex items-center gap-1.5 text-body-sm text-slate-400"
               :title="criterionText(criterion)"
             >
-              <span class="material-symbols-outlined text-rose-400 text-sm">cancel</span>
+              <span
+                class="text-[10px] font-bold text-rose-500 bg-rose-50 rounded px-1 leading-tight"
+                >{{ article.matchedInclusionCriteria.length + idx + 1 }}</span
+              >
               <span class="truncate line-through">{{ truncate(criterionText(criterion)) }}</span>
             </div>
           </div>

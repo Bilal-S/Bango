@@ -36,7 +36,7 @@ pub struct ScreeningProgress {
     pub rejected: usize,
     pub errors: usize,
     pub is_running: bool,
-    pub current_article_title: Option<String>,
+    pub current_article_titles: Vec<String>,
     pub elapsed_ms: u64,
     pub estimated_remaining_ms: Option<u64>,
 }
@@ -215,10 +215,12 @@ impl ScreeningEngine {
                 break;
             }
 
-            // Update current article title (show first in batch)
+            // Set all current article titles and emit immediately so the UI
+            // shows what is being screened before the LLM call completes.
             {
                 let mut progress = self.progress.lock().await;
-                progress.current_article_title = Some(batch[0].title.clone());
+                progress.current_article_titles = batch.iter().map(|a| a.title.clone()).collect();
+                self.emit_progress(&app_handle, &progress);
             }
 
             // Build prompt with batch of articles
@@ -395,9 +397,15 @@ impl ScreeningEngine {
                         };
                         let final_decision = resolution::resolve_decision(&resolution_input);
 
+                        // Replace criterion UUIDs in reasoning with numbered references [1], [2]...
+                        let mut reasoning = replace_criteria_uuids(
+                            &screening.reasoning,
+                            &screening.matched_inclusion_criteria,
+                            &screening.matched_exclusion_criteria,
+                        );
+
                         // Check for override
                         let ai_decision_str = screening.decision.as_str();
-                        let mut reasoning = screening.reasoning.clone();
                         if ai_decision_str != final_decision {
                             reasoning.push_str(&format!(
                                 "\n\n[App override: {} favored due to priority resolution]",
@@ -491,7 +499,7 @@ impl ScreeningEngine {
         {
             let mut progress = self.progress.lock().await;
             progress.is_running = false;
-            progress.current_article_title = None;
+            progress.current_article_titles = vec![];
             self.emit_progress(&app_handle, &progress);
         }
 
@@ -1172,4 +1180,37 @@ fn create_or_match_label(
     )?;
 
     Ok(())
+}
+
+/// Replace criterion UUIDs in reasoning text with sequential reference numbers `[n]`.
+///
+/// The LLM prompt sends criteria with UUIDs, and the LLM often references them in its
+/// reasoning. This function replaces each UUID with a numbered reference like `[1]`, `[2]`,
+/// etc. The numbering follows the order of matched inclusion criteria first, then matched
+/// exclusion criteria — matching the order displayed in the "Matched Criteria" table in the UI.
+fn replace_criteria_uuids(
+    text: &str,
+    matched_inclusion_ids: &[String],
+    matched_exclusion_ids: &[String],
+) -> String {
+    let mut result = text.to_string();
+    let mut n = 1usize;
+
+    // Number inclusion matches first
+    for id in matched_inclusion_ids {
+        if result.contains(id.as_str()) {
+            result = result.replace(id, &format!("[{}]", n));
+            n += 1;
+        }
+    }
+
+    // Then number exclusion matches
+    for id in matched_exclusion_ids {
+        if result.contains(id.as_str()) {
+            result = result.replace(id, &format!("[{}]", n));
+            n += 1;
+        }
+    }
+
+    result
 }

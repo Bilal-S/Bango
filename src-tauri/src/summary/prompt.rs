@@ -41,8 +41,7 @@ pub fn format_screening_summary(data: &ScreeningData) -> String {
     if data.duplicates_removed > 0 {
         lines.push(format!(
             "Duplicates removed: {} ({} unique records after deduplication)",
-            data.duplicates_removed,
-            data.records_screened
+            data.duplicates_removed, data.records_screened
         ));
     }
 

@@ -243,10 +243,25 @@ async function handleResetWorkingList(): Promise<void> {
         :estimated-time="estimatedTimeRemaining"
       />
 
-      <!-- Current Article Indicator -->
-      <div v-if="progress?.currentArticleTitle" class="screening-view__current">
+      <!-- Currently Screening Indicator -->
+      <div v-if="progress?.currentArticleTitles?.length" class="screening-view__current">
         <span class="screening-view__current-dot" />
-        Screening: {{ progress.currentArticleTitle }}
+        <div class="flex flex-col gap-0.5 min-w-0">
+          <span class="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
+            {{
+              progress.currentArticleTitles.length === 1
+                ? 'Screening'
+                : `Screening (${progress.currentArticleTitles.length} articles)`
+            }}
+          </span>
+          <span
+            v-for="(title, idx) in progress.currentArticleTitles"
+            :key="idx"
+            class="text-sm text-slate-700 truncate"
+          >
+            {{ title }}
+          </span>
+        </div>
       </div>
 
       <!-- Batch Size Control (only when not running) -->
@@ -580,6 +595,8 @@ async function handleResetWorkingList(): Promise<void> {
 }
 
 .screening-view__current-dot {
+  align-self: flex-start;
+  margin-top: 4px;
   width: 8px;
   height: 8px;
   border-radius: 50%;

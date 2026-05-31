@@ -9,30 +9,43 @@ export interface SavedSummary {
   generatedAt: string;
 }
 
-export function useSummary() {
-  const summaryText = ref<string | null>(null);
-  const loading = ref(false);
-  const error = ref<string | null>(null);
-  const generatedAt = ref<string | null>(null);
+/* ── Module-level singleton state (shared across all callers) ── */
+const summaryText = ref<string | null>(null);
+const loading = ref(false);
+const error = ref<string | null>(null);
+const generatedAt = ref<string | null>(null);
+const citationStyle = ref<CitationStyle>('APA');
 
+export function useSummary() {
   async function loadSaved(): Promise<void> {
     try {
       const saved = await tauriCommand<SavedSummary | null>('get_saved_summary', {});
       if (saved) {
         summaryText.value = saved.summaryText;
         generatedAt.value = saved.generatedAt;
+        if (saved.citationStyle) {
+          citationStyle.value = saved.citationStyle as CitationStyle;
+        }
       }
     } catch {
       // Silently ignore - saved summary is optional
     }
   }
 
-  async function generate(citationStyle: CitationStyle = 'APA'): Promise<void> {
+  /** Reset all summary state (called on import or project reset) */
+  function clearSummary(): void {
+    summaryText.value = null;
+    generatedAt.value = null;
+    citationStyle.value = 'APA';
+    error.value = null;
+  }
+
+  async function generate(style: CitationStyle = 'APA'): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
       const result = await tauriCommand<string>('generate_summary', {
-        citationStyle,
+        citationStyle: style,
       });
       summaryText.value = result;
       // The backend saves with timestamp; reload to get the exact server timestamp
@@ -58,5 +71,15 @@ export function useSummary() {
     }
   }
 
-  return { summaryText, loading, error, generatedAt, loadSaved, generate, formatGeneratedAt };
+  return {
+    summaryText,
+    loading,
+    error,
+    generatedAt,
+    citationStyle,
+    loadSaved,
+    generate,
+    clearSummary,
+    formatGeneratedAt,
+  };
 }

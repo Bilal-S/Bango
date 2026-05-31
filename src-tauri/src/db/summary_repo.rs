@@ -38,9 +38,8 @@ pub fn save_summary(
 }
 
 pub fn get_summary(conn: &Connection) -> Result<Option<SavedSummary>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT summary_text, citation_style, generated_at FROM summary WHERE id = 1",
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT summary_text, citation_style, generated_at FROM summary WHERE id = 1")?;
 
     let result = stmt.query_row([], |row| {
         Ok(SavedSummary {
