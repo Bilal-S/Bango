@@ -23,6 +23,19 @@ const exclusionCriteria = computed(() =>
   criteria.value.filter((c) => c.criterionType === 'exclusion')
 );
 
+/** Global criterion numbering: inclusion [1]..[N], exclusion [N+1]..[N+M] */
+const criterionIndexMap = computed(() => {
+  const map = new Map<string, number>();
+  let n = 1;
+  for (const c of inclusionCriteria.value) {
+    map.set(c.id, n++);
+  }
+  for (const c of exclusionCriteria.value) {
+    map.set(c.id, n++);
+  }
+  return map;
+});
+
 async function refetch(): Promise<void> {
   await criteriaStore.refresh();
 }
@@ -192,6 +205,9 @@ function priorityLabel(priority: Priority): string {
           class="criterion-card group"
           :class="priorityBorderClass(c.priority)"
         >
+          <span class="criterion-card__index criterion-card__index--inc">
+            {{ criterionIndexMap.get(c.id) }}
+          </span>
           <div class="flex-1">
             <label class="criterion-card__label" :class="priorityLabelClass(c.priority)">
               {{ priorityLabel(c.priority) }}
@@ -259,6 +275,9 @@ function priorityLabel(priority: Priority): string {
           class="criterion-card group"
           :class="priorityBorderClass(c.priority)"
         >
+          <span class="criterion-card__index criterion-card__index--exc">
+            {{ criterionIndexMap.get(c.id) }}
+          </span>
           <div class="flex-1">
             <label class="criterion-card__label" :class="priorityLabelClass(c.priority)">
               {{ priorityLabel(c.priority) }}
@@ -497,6 +516,29 @@ function priorityLabel(priority: Priority): string {
     align-items: center;
     width: 100%;
   }
+}
+
+.criterion-card__index {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 0.375rem;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.criterion-card__index--inc {
+  background-color: #ecfdf5;
+  color: #059669;
+}
+
+.criterion-card__index--exc {
+  background-color: #fff1f2;
+  color: #e11d48;
 }
 
 .criterion-card__label {

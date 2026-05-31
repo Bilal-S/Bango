@@ -192,8 +192,8 @@ onMounted(async () => {
       {{ error }}
     </div>
 
-    <!-- Output toolbar + content -->
-    <div v-if="summaryText" class="summary-view__output">
+    <!-- Output toolbar + content (always visible when requirements met) -->
+    <div v-if="canGenerate" class="summary-view__output">
       <div class="summary-toolbar">
         <!-- Left: Citation style -->
         <div class="summary-toolbar__style">
@@ -214,22 +214,22 @@ onMounted(async () => {
         </div>
         <!-- Right: Export buttons -->
         <div class="summary-toolbar__exports">
-          <button class="btn btn--secondary" @click="copyToClipboard">
+          <button class="btn btn--secondary" :disabled="!summaryText" @click="copyToClipboard">
             <span class="material-symbols-outlined btn__icon">content_copy</span>
             {{ copied ? 'Copied!' : 'Copy' }}
           </button>
-          <button class="btn btn--secondary" @click="exportMarkdown">
+          <button class="btn btn--secondary" :disabled="!summaryText" @click="exportMarkdown">
             <span class="material-symbols-outlined btn__icon">description</span>
             Export Markdown
           </button>
-          <button class="btn btn--secondary" @click="exportPdf">
+          <button class="btn btn--secondary" :disabled="!summaryText" @click="exportPdf">
             <span class="material-symbols-outlined btn__icon">picture_as_pdf</span>
             Export PDF
           </button>
         </div>
       </div>
       <!-- eslint-disable-next-line vue/no-v-html -- trusted LLM output rendered via marked -->
-      <div class="summary-view__markdown markdown-body" v-html="renderedHtml" />
+      <div v-if="summaryText" class="summary-view__markdown markdown-body" v-html="renderedHtml" />
     </div>
   </div>
 </template>

@@ -229,6 +229,19 @@ const confidenceBarWidth = computed(() =>
   props.article.aiConfidence !== null ? `${Math.round(props.article.aiConfidence * 100)}%` : '0%'
 );
 
+/** Compute global criterion index: inclusion [1]..[N], exclusion [N+1]..[N+M] */
+const criterionIndexMap = computed(() => {
+  const map = new Map<string, number>();
+  let n = 1;
+  for (const c of criteriaStore.inclusionCriteria) {
+    map.set(c.id, n++);
+  }
+  for (const c of criteriaStore.exclusionCriteria) {
+    map.set(c.id, n++);
+  }
+  return map;
+});
+
 /** Resolve a criterion UUID to its human-readable text */
 const criteriaTextMap = computed(() => {
   const map = new Map<string, string>();
@@ -241,6 +254,34 @@ const criteriaTextMap = computed(() => {
 function criterionText(id: string): string {
   return criteriaTextMap.value.get(id) ?? id;
 }
+
+/**
+ * Replace criterion UUIDs in reasoning text with global numbered references `[n]`.
+ * Done dynamically at display time so numbering stays correct when criteria are added/removed.
+ * Also collapses double brackets `[[n]]` → `[n]` from LLM echoing prompt format.
+ */
+const displayReasoning = computed(() => {
+  const raw = props.article.aiReasoning;
+  if (!raw) return '';
+  let result = raw;
+
+  // Replace each known criterion UUID with its current global [n]
+  const map = criterionIndexMap.value;
+  for (const [uuid, n] of map) {
+    if (result.includes(uuid)) {
+      result = result.replaceAll(uuid, `[${n}]`);
+    }
+  }
+
+  // Collapse double brackets: [[n]] → [n]
+  let prev = '';
+  while (prev !== result) {
+    prev = result;
+    result = result.replaceAll('[[', '[').replaceAll(']]', ']');
+  }
+
+  return result;
+});
 
 // Criteria edit dialog
 const showCriteriaDialog = ref(false);
@@ -390,7 +431,7 @@ function handleCriteriaSave(
             class="text-body-sm leading-relaxed"
             :class="aiDecisionColors.text"
           >
-            <span class="font-semibold">Reasoning:</span> {{ article.aiReasoning }}
+            <span class="font-semibold">Reasoning:</span> {{ displayReasoning }}
           </p>
         </div>
       </section>
@@ -417,26 +458,26 @@ function handleCriteriaSave(
         >
           <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <div
-              v-for="(criterion, idx) in article.matchedInclusionCriteria"
+              v-for="criterion in article.matchedInclusionCriteria"
               :key="'inc-' + criterion"
               class="flex items-center gap-1.5 text-body-sm"
               :title="criterionText(criterion)"
             >
               <span
                 class="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded px-1 leading-tight"
-                >{{ idx + 1 }}</span
+                >{{ criterionIndexMap.get(criterion) ?? '-' }}</span
               >
               <span class="truncate">{{ truncate(criterionText(criterion)) }}</span>
             </div>
             <div
-              v-for="(criterion, idx) in article.matchedExclusionCriteria"
+              v-for="criterion in article.matchedExclusionCriteria"
               :key="'exc-' + criterion"
               class="flex items-center gap-1.5 text-body-sm text-slate-400"
               :title="criterionText(criterion)"
             >
               <span
                 class="text-[10px] font-bold text-rose-500 bg-rose-50 rounded px-1 leading-tight"
-                >{{ article.matchedInclusionCriteria.length + idx + 1 }}</span
+                >{{ criterionIndexMap.get(criterion) ?? '-' }}</span
               >
               <span class="truncate line-through">{{ truncate(criterionText(criterion)) }}</span>
             </div>

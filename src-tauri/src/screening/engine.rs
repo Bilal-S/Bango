@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -151,6 +152,9 @@ impl ScreeningEngine {
             .iter()
             .filter(|c| matches!(c.criterion_type, CriterionType::Exclusion))
             .collect();
+
+        // Build global criterion numbering: inclusion [1]..[N], then exclusion [N+1]..[N+M]
+        let global_numbering = build_global_criterion_numbering(&inclusion_criteria, &exclusion_criteria);
 
         // Build shared prompt parts (aims, criteria)
         let aim_entries: Vec<AimEntry> =
@@ -397,12 +401,19 @@ impl ScreeningEngine {
                         };
                         let final_decision = resolution::resolve_decision(&resolution_input);
 
-                        // Replace criterion UUIDs in reasoning with numbered references [1], [2]...
-                        let mut reasoning = replace_criteria_uuids(
+                        // Augment matched arrays with any criteria UUIDs mentioned in reasoning
+                        // but missing from the LLM's matched arrays
+                        let inclusion_count = inclusion_criteria.len();
+                        let (augmented_inc, augmented_exc) = augment_matched_from_reasoning(
                             &screening.reasoning,
                             &screening.matched_inclusion_criteria,
                             &screening.matched_exclusion_criteria,
+                            &global_numbering,
+                            inclusion_count,
                         );
+
+                        // Keep raw reasoning with UUIDs — frontend replaces dynamically at display time
+                        let mut reasoning = screening.reasoning.clone();
 
                         // Check for override
                         let ai_decision_str = screening.decision.as_str();
@@ -427,8 +438,8 @@ impl ScreeningEngine {
                                     decision: final_decision,
                                     reasoning: &reasoning,
                                     confidence: screening.confidence,
-                                    matched_inc: &screening.matched_inclusion_criteria,
-                                    matched_exc: &screening.matched_exclusion_criteria,
+                                    matched_inc: &augmented_inc,
+                                    matched_exc: &augmented_exc,
                                     actual_tokens: Some(tokens_per_article),
                                 },
                             )?;
@@ -1182,35 +1193,67 @@ fn create_or_match_label(
     Ok(())
 }
 
-/// Replace criterion UUIDs in reasoning text with sequential reference numbers `[n]`.
+/// Build a global criterion numbering map: UUID → 1-based index.
 ///
-/// The LLM prompt sends criteria with UUIDs, and the LLM often references them in its
-/// reasoning. This function replaces each UUID with a numbered reference like `[1]`, `[2]`,
-/// etc. The numbering follows the order of matched inclusion criteria first, then matched
-/// exclusion criteria — matching the order displayed in the "Matched Criteria" table in the UI.
-fn replace_criteria_uuids(
-    text: &str,
+/// Inclusion criteria are numbered `[1]..[N]`, then exclusion criteria continue `[N+1]..[N+M]`.
+/// This ensures `[3]` always refers to the same criterion regardless of which article is displayed.
+fn build_global_criterion_numbering(
+    inclusion_criteria: &[&Criterion],
+    exclusion_criteria: &[&Criterion],
+) -> HashMap<String, usize> {
+    let mut map = HashMap::new();
+    let mut n = 1usize;
+    for c in inclusion_criteria {
+        map.insert(c.id.clone(), n);
+        n += 1;
+    }
+    for c in exclusion_criteria {
+        map.insert(c.id.clone(), n);
+        n += 1;
+    }
+    map
+}
+
+/// Scan reasoning text for criterion UUIDs mentioned but missing from matched arrays,
+/// and return augmented (inclusion, exclusion) tuples.
+///
+/// The LLM sometimes references criteria in reasoning without listing them in the
+/// matched arrays. This ensures every referenced criterion appears in the UI table.
+///
+/// `inclusion_count` is the number of inclusion criteria in the global numbering,
+/// used to distinguish inclusion UUIDs (indices 1..N) from exclusion UUIDs (N+1..M).
+fn augment_matched_from_reasoning(
+    reasoning: &str,
     matched_inclusion_ids: &[String],
     matched_exclusion_ids: &[String],
-) -> String {
-    let mut result = text.to_string();
-    let mut n = 1usize;
+    global_map: &HashMap<String, usize>,
+    inclusion_count: usize,
+) -> (Vec<String>, Vec<String>) {
+    let inc_set: HashSet<&str> = matched_inclusion_ids.iter().map(|s| s.as_str()).collect();
+    let exc_set: HashSet<&str> = matched_exclusion_ids.iter().map(|s| s.as_str()).collect();
 
-    // Number inclusion matches first
-    for id in matched_inclusion_ids {
-        if result.contains(id.as_str()) {
-            result = result.replace(id, &format!("[{}]", n));
-            n += 1;
+    let mut extra_inclusion = Vec::new();
+    let mut extra_exclusion = Vec::new();
+
+    for (uuid, &idx) in global_map {
+        if inc_set.contains(uuid.as_str()) || exc_set.contains(uuid.as_str()) {
+            continue; // Already in matched arrays
+        }
+        if reasoning.contains(uuid.as_str()) {
+            // Inclusion criteria have indices 1..inclusion_count
+            if idx <= inclusion_count {
+                extra_inclusion.push(uuid.clone());
+            } else {
+                extra_exclusion.push(uuid.clone());
+            }
         }
     }
 
-    // Then number exclusion matches
-    for id in matched_exclusion_ids {
-        if result.contains(id.as_str()) {
-            result = result.replace(id, &format!("[{}]", n));
-            n += 1;
-        }
-    }
+    let mut augmented_inc = matched_inclusion_ids.to_vec();
+    let mut augmented_exc = matched_exclusion_ids.to_vec();
+    augmented_inc.extend(extra_inclusion);
+    augmented_exc.extend(extra_exclusion);
 
-    result
+    (augmented_inc, augmented_exc)
 }
+
