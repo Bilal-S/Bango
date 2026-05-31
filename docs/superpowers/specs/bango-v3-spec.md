@@ -280,7 +280,7 @@ This is deterministic logic applied by the app after the AI reports which criter
 
 | State | Description |
 |-------|-------------|
-| **Duplicate** | Article flagged as a duplicate during import. Read-only until resolved. Not a working list — only duplicates reside here. |
+| **Duplicate** | Article flagged as a duplicate during import. Read-only until resolved. Not a working list - only duplicates reside here. |
 | **Working** | Deduplicated article awaiting or pending screening. Non-duplicate articles are promoted here directly on import. |
 | **Included** | Article meeting inclusion criteria. |
 | **Rejected** | Article excluded based on criteria. |

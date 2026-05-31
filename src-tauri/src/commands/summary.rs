@@ -4,15 +4,19 @@ use crate::db::article_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
+use crate::db::summary_repo;
 use crate::error::AppError;
-use crate::summary::engine::{self, SummaryInput, SummaryOutput};
-use crate::summary::prompt::ArticleSummary;
+use crate::prisma::data;
+use crate::summary::engine::{self, SummaryInput};
+use crate::summary::prompt::{ArticleSummary, ScreeningData};
 
 #[tauri::command]
 pub async fn generate_summary(
     db_state: State<'_, DbState>,
-    target_length: Option<usize>,
-) -> Result<SummaryOutput, AppError> {
+    citation_style: Option<String>,
+) -> Result<String, AppError> {
+    let style = citation_style.unwrap_or_else(|| "APA".to_string());
+
     // Extract all DB data synchronously while holding the lock
     let summary_input = {
         let conn = db_state.conn.lock().map_err(|e| {
@@ -36,9 +40,67 @@ pub async fn generate_summary(
             })
             .collect();
 
-        let length = target_length.unwrap_or(1000);
-        SummaryInput::new(config, aim_texts, articles, length)
+        // PRISMA / screening statistics
+        let prisma = data::compute_prisma_data(&conn)?;
+
+        // AI-screened: articles that have an ai_decision set
+        let ai_screened: usize = conn
+            .query_row(
+                "SELECT COUNT(*) FROM articles WHERE ai_decision IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Manual review: articles where manual_override = 1
+        let manual_reviewed: usize = conn
+            .query_row(
+                "SELECT COUNT(*) FROM articles WHERE manual_override = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        let screening_data = ScreeningData {
+            records_identified: prisma.records_identified,
+            duplicates_removed: prisma.duplicates_removed,
+            records_screened: prisma.records_screened,
+            records_excluded: prisma.records_excluded,
+            records_excluded_with_reasons: prisma.records_excluded_with_reasons,
+            records_assessed: prisma.records_assessed,
+            records_in_progress: prisma.records_in_progress,
+            studies_included: prisma.studies_included,
+            ai_screened,
+            manual_reviewed,
+            exclusion_reasons: prisma
+                .exclusion_reasons
+                .iter()
+                .map(|r| (r.criterion_text.clone(), r.count))
+                .collect(),
+        };
+
+        SummaryInput::new(config, aim_texts, articles, screening_data, style.clone())
     }; // conn lock released here
 
-    engine::generate_summary(summary_input).await
+    let result = engine::generate_summary(summary_input).await?;
+
+    // Save to DB after successful generation
+    let generated_at = chrono::Utc::now().to_rfc3339();
+    {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        summary_repo::save_summary(&conn, &result, &style, &generated_at)?;
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn get_saved_summary(db_state: State<'_, DbState>) -> Result<Option<summary_repo::SavedSummary>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    summary_repo::get_summary(&conn)
 }

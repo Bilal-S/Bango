@@ -108,6 +108,7 @@ pub fn run() {
             commands::screening::reset_working_list,
             commands::screening::estimate_screening_tokens,
             commands::summary::generate_summary,
+            commands::summary::get_saved_summary,
             commands::prisma::get_prisma_data,
             commands::prisma::get_prisma_svg,
             commands::prisma::export_prisma_svg_to_file,
@@ -117,6 +118,7 @@ pub fn run() {
             commands::export_cmd::export_project_backup,
             commands::export_cmd::export_project_to_file,
             commands::export_cmd::import_project_backup,
+            commands::export_cmd::write_text_to_file,
             commands::export_cmd::reset_project,
         ]);
 

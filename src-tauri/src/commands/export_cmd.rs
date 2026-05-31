@@ -103,6 +103,11 @@ pub fn import_project_backup(
 }
 
 #[tauri::command]
+pub fn write_text_to_file(path: String, content: String) -> Result<(), AppError> {
+    std::fs::write(path, content).map_err(AppError::Io)
+}
+
+#[tauri::command]
 pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
     let mut conn = db_state
         .conn
@@ -126,7 +131,8 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
              DELETE FROM research_aims;
              DELETE FROM tags;
              DELETE FROM labels;
-             DELETE FROM llm_config;",
+             DELETE FROM llm_config;
+             DELETE FROM summary;",
         )?;
 
         tx.commit()?;

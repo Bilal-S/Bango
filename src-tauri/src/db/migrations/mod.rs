@@ -1,4 +1,5 @@
 pub mod v001_initial;
+pub mod v002_summary;
 
 pub struct Migration {
     pub version: i32,
@@ -6,5 +7,8 @@ pub struct Migration {
 }
 
 pub fn get_migrations() -> Vec<Migration> {
-    vec![Migration { version: v001_initial::VERSION, up_sql: v001_initial::UP_SQL }]
+    vec![
+        Migration { version: v001_initial::VERSION, up_sql: v001_initial::UP_SQL },
+        Migration { version: v002_summary::VERSION, up_sql: v002_summary::UP_SQL },
+    ]
 }

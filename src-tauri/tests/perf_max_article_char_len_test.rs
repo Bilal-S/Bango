@@ -83,7 +83,7 @@ fn bench_at_scale(
     // v3 spec Section 16.1: UI operations < 200ms
     assert!(
         max < 200.0,
-        "max_article_char_len took {max:.3}ms at {label} articles — exceeds 200ms target"
+        "max_article_char_len took {max:.3}ms at {label} articles - exceeds 200ms target"
     );
 
     times
@@ -141,7 +141,7 @@ fn test_max_article_char_len_excludes_non_working() {
     let conn = create_connection().expect("create connection");
     run_migrations(&conn).expect("run migrations");
 
-    // Insert articles in various statuses — only 'working' with screened_at NULL should count
+    // Insert articles in various statuses - only 'working' with screened_at NULL should count
     for (i, status) in ["duplicate", "included", "rejected", "working"].iter().enumerate() {
         let id = format!("status-art-{i}");
         let data_length = 10000 + i * 1000;
@@ -155,7 +155,7 @@ fn test_max_article_char_len_excludes_non_working() {
         .expect("insert");
     }
 
-    // Also insert a screened working article — should be excluded
+    // Also insert a screened working article - should be excluded
     conn.execute(
         "INSERT INTO articles (
             id, sequence_id, status, title, abstract_text, authors,

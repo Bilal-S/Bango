@@ -1,28 +1,17 @@
-use serde::{Deserialize, Serialize};
-
 use crate::error::AppError;
 use crate::llm::client;
 use crate::models::llm_config::LlmConfig;
-use crate::summary::prompt::{self, SummaryPromptInput};
+use crate::summary::prompt::{self, ScreeningData, SummaryPromptInput};
 
 pub use crate::summary::prompt::ArticleSummary;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SummaryOutput {
-    pub key_themes: String,
-    pub research_trends: String,
-    pub methodological_strengths: String,
-    pub common_weaknesses: String,
-    pub gaps_in_literature: String,
-}
 
 /// Input data extracted from DB synchronously, passed to async processing.
 pub struct SummaryInput {
     pub config: LlmConfig,
     pub aim_texts: Vec<String>,
     pub articles: Vec<ArticleSummary>,
-    pub target_length: usize,
+    pub screening_data: ScreeningData,
+    pub citation_style: String,
 }
 
 impl SummaryInput {
@@ -30,13 +19,14 @@ impl SummaryInput {
         config: LlmConfig,
         aim_texts: Vec<String>,
         articles: Vec<ArticleSummary>,
-        target_length: usize,
+        screening_data: ScreeningData,
+        citation_style: String,
     ) -> Self {
-        Self { config, aim_texts, articles, target_length }
+        Self { config, aim_texts, articles, screening_data, citation_style }
     }
 }
 
-pub async fn generate_summary(input: SummaryInput) -> Result<SummaryOutput, AppError> {
+pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
     if input.articles.is_empty() {
         return Err(AppError::Validation("No included articles to summarize".to_string()));
     }
@@ -64,23 +54,24 @@ pub async fn generate_summary(input: SummaryInput) -> Result<SummaryOutput, AppE
         let batch_b = &input.articles[batch_size..];
 
         let summary_a =
-            summarize_batch(&input.config, &input.aim_texts, input.target_length / 2, batch_a)
+            summarize_batch(&input.config, &input.aim_texts, &input.screening_data, &input.citation_style, batch_a)
                 .await?;
         let summary_b =
-            summarize_batch(&input.config, &input.aim_texts, input.target_length / 2, batch_b)
+            summarize_batch(&input.config, &input.aim_texts, &input.screening_data, &input.citation_style, batch_b)
                 .await?;
 
         // Synthesize
         synthesize_batches(
             &input.config,
             &input.aim_texts,
-            input.target_length,
+            &input.screening_data,
+            &input.citation_style,
             &summary_a,
             &summary_b,
         )
         .await?
     } else {
-        summarize_batch(&input.config, &input.aim_texts, input.target_length, &input.articles)
+        summarize_batch(&input.config, &input.aim_texts, &input.screening_data, &input.citation_style, &input.articles)
             .await?
     };
 
@@ -90,88 +81,83 @@ pub async fn generate_summary(input: SummaryInput) -> Result<SummaryOutput, AppE
 async fn summarize_batch(
     config: &LlmConfig,
     aims: &[String],
-    target_length: usize,
+    screening: &ScreeningData,
+    citation_style: &str,
     articles: &[ArticleSummary],
-) -> Result<SummaryOutput, AppError> {
-    let input =
-        SummaryPromptInput { aims: aims.to_vec(), target_length, articles: articles.to_vec() };
+) -> Result<String, AppError> {
+    let input = SummaryPromptInput {
+        aims: aims.to_vec(),
+        screening_data: screening.clone(),
+        citation_style: citation_style.to_string(),
+        articles: articles.to_vec(),
+    };
     let user_prompt = prompt::build_summary_prompt(&input);
     let (response, _tokens) =
         client::send_chat_completion(config, prompt::SYSTEM_PROMPT, &user_prompt).await?;
-    parse_summary_response(&response)
+    Ok(response.trim().to_string())
 }
 
 async fn synthesize_batches(
     config: &LlmConfig,
     aims: &[String],
-    target_length: usize,
-    a: &SummaryOutput,
-    b: &SummaryOutput,
-) -> Result<SummaryOutput, AppError> {
+    screening: &ScreeningData,
+    citation_style: &str,
+    a: &str,
+    b: &str,
+) -> Result<String, AppError> {
+    let aims_text = aims
+        .iter()
+        .enumerate()
+        .map(|(i, aim)| format!("{}. {}", i + 1, aim))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let screening_summary = prompt::format_screening_summary(screening);
+
     let synthesis_prompt = format!(
         r#"## Task
-Combine two partial summaries into a single coherent summary. Maintain focus on the research aims.
+Combine two partial literature reviews into a single coherent review. Maintain focus on the research aims.
+Use {citation_style} citation style throughout. Do NOT invent references that do not appear in either section.
 
 ## Research Aims
 {aims}
 
-## Target Length
-Approximately {target_length} words.
+## Search Methodology Summary
+{screening}
 
-## Partial Summary A
-Key Themes: {a_themes}
-Research Trends: {a_trends}
-Methodological Strengths: {a_methods}
-Common Weaknesses: {a_weaknesses}
-Gaps in Literature: {a_gaps}
+## Citation Style
+{citation_style}
 
-## Partial Summary B
-Key Themes: {b_themes}
-Research Trends: {b_trends}
-Methodological Strengths: {b_methods}
-Common Weaknesses: {b_weaknesses}
-Gaps in Literature: {b_gaps}
+## Partial Review A
+{a}
 
-## Response Format
-Return JSON exactly matching this schema:
-{{
-  "key_themes": "...",
-  "research_trends": "...",
-  "methodological_strengths": "...",
-  "common_weaknesses": "...",
-  "gaps_in_literature": "..."
-}}"#,
-        aims = aims
-            .iter()
-            .enumerate()
-            .map(|(i, aim)| format!("{}. {}", i + 1, aim))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        target_length = target_length,
-        a_themes = a.key_themes,
-        a_trends = a.research_trends,
-        a_methods = a.methodological_strengths,
-        a_weaknesses = a.common_weaknesses,
-        a_gaps = a.gaps_in_literature,
-        b_themes = b.key_themes,
-        b_trends = b.research_trends,
-        b_methods = b.methodological_strengths,
-        b_weaknesses = b.common_weaknesses,
-        b_gaps = b.gaps_in_literature,
+## Partial Review B
+{b}
+
+## Instructions
+Produce a single unified literature review with these sections:
+- Title
+- Abstract
+- Introduction
+- Methodology
+- Results
+- Discussion
+- Conclusion
+- References
+
+## Writing Style Rules
+- Do NOT use em dashes anywhere. Use commas, parentheses, or split into separate sentences instead.
+- Write in formal academic prose with varied sentence lengths. Mix shorter declarative sentences with longer complex ones to reflect natural academic writing.
+
+Return only the plain text of the literature review. Do not wrap it in code fences."#,
+        citation_style = citation_style,
+        aims = aims_text,
+        screening = screening_summary,
+        a = a,
+        b = b,
     );
 
     let (response, _tokens) =
         client::send_chat_completion(config, prompt::SYSTEM_PROMPT, &synthesis_prompt).await?;
-    parse_summary_response(&response)
-}
-
-fn parse_summary_response(raw: &str) -> Result<SummaryOutput, AppError> {
-    let json_str = raw
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    serde_json::from_str::<SummaryOutput>(json_str)
-        .map_err(|e| AppError::Import(format!("Failed to parse summary response: {}", e)))
+    Ok(response.trim().to_string())
 }

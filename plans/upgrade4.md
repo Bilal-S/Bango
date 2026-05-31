@@ -1,4 +1,4 @@
-# Upgrade 4 — UX Optimization & Enhancement Plan
+# Upgrade 4 - UX Optimization & Enhancement Plan
 
 > Based on analysis of Bango v3 codebase against spec (`docs/superpowers/specs/bango-v3-spec.md`) and development rules (`CLAUDE.md`).
 > Covers 8 selected UX improvements + 2 new AI-powered features.
@@ -38,9 +38,9 @@ Users must interact with articles one at a time. There is no way to select multi
 #### 3.1 Multi-Select in Article Table
 
 **Files to modify:**
-- `src/components/article-table.vue` — Add checkbox column, multi-select state
-- `src/views/article-list.vue` — Wire bulk selection state
-- `src/composables/use-article-search.ts` — Add `selectedIds` ref, bulk methods
+- `src/components/article-table.vue` - Add checkbox column, multi-select state
+- `src/views/article-list.vue` - Wire bulk selection state
+- `src/composables/use-article-search.ts` - Add `selectedIds` ref, bulk methods
 
 **Approach:**
 
@@ -103,8 +103,8 @@ defineEmits<{
 #### 3.3 Bulk Store Operations
 
 **Files to modify:**
-- `src/stores/articles.ts` — Add `bulkUpdateStatus(ids, newStatus)`, `bulkAddTag(ids, tagId)`, `bulkAddLabel(ids, labelId)`
-- `src-tauri/src/` — New Tauri commands for bulk operations (Rust backend)
+- `src/stores/articles.ts` - Add `bulkUpdateStatus(ids, newStatus)`, `bulkAddTag(ids, tagId)`, `bulkAddLabel(ids, labelId)`
+- `src-tauri/src/` - New Tauri commands for bulk operations (Rust backend)
 
 **New Tauri commands (Rust):**
 - `bulk_update_article_status { ids: Vec<String>, new_status: String }` → updates multiple articles
@@ -177,8 +177,8 @@ export function useFilterPresets() {
 #### 4.2 Filter Preset UI
 
 **Files to modify:**
-- `src/components/article-toolbar.vue` — Add preset dropdown button next to Filter toggle
-- `src/components/article-filter-panel.vue` — Add "Save Current Filters" button and preset list
+- `src/components/article-toolbar.vue` - Add preset dropdown button next to Filter toggle
+- `src/components/article-filter-panel.vue` - Add "Save Current Filters" button and preset list
 
 **UI pattern:**
 - A dropdown button labeled "Saved Filters" with a bookmark icon
@@ -189,8 +189,8 @@ export function useFilterPresets() {
 #### 4.3 URL-Synced Filter State
 
 **Files to modify:**
-- `src/views/article-list.vue` — Read/write filter params from URL query string
-- `src/composables/use-article-search.ts` — Add `serializeFilters()` and `deserializeFilters()`
+- `src/views/article-list.vue` - Read/write filter params from URL query string
+- `src/composables/use-article-search.ts` - Add `serializeFilters()` and `deserializeFilters()`
 
 **URL format:**
 ```
@@ -209,7 +209,7 @@ Accidental screening decisions, tag changes, or status moves cannot be undone. T
 
 ### Current State
 
-- `article-detail-panel.vue` emits `moveArticle`, `updateTags`, `updateLabels` — these are one-way
+- `article-detail-panel.vue` emits `moveArticle`, `updateTags`, `updateLabels` - these are one-way
 - Stores call Tauri commands directly with no rollback mechanism
 - No toast/notification system currently exists in the app
 
@@ -255,10 +255,10 @@ Rather than a full undo stack, use **toast-based undo** for specific reversible 
 4. If user clicks "Undo", reverse the action using the snapshot
 
 **Files to modify:**
-- `src/stores/articles.ts` — Wrap `moveArticle`-like operations with undo context
-- `src/components/article-detail-panel.vue` — Trigger undo-aware actions
+- `src/stores/articles.ts` - Wrap `moveArticle`-like operations with undo context
+- `src/components/article-detail-panel.vue` - Trigger undo-aware actions
 
-**Example — Status change undo:**
+**Example - Status change undo:**
 ```typescript
 // In article-list.vue or composable
 async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
@@ -295,8 +295,8 @@ Error handling exists (`llm-error.ts` has pattern matching, `screening-progress.
 
 ### Current State
 
-- `llm-error.ts` — Pattern-matches LLM errors with troubleshooting links ✅
-- `screening-progress.vue` — Shows error banner with help link ✅
+- `llm-error.ts` - Pattern-matches LLM errors with troubleshooting links ✅
+- `screening-progress.vue` - Shows error banner with help link ✅
 - Stores set `error` ref on failure ✅
 - No retry mechanism on individual operations
 - No global error boundary
@@ -307,9 +307,9 @@ Error handling exists (`llm-error.ts` has pattern matching, `screening-progress.
 #### 8.1 Inline Retry Buttons
 
 **Files to modify:**
-- `src/views/dashboard.vue` — Add inline retry on error state (already has retry button ✅)
-- `src/views/screening-progress.vue` — Add "Retry" button inline in error banner
-- `src/stores/screening.ts` — Add `retryLastScreening()` method
+- `src/views/dashboard.vue` - Add inline retry on error state (already has retry button ✅)
+- `src/views/screening-progress.vue` - Add "Retry" button inline in error banner
+- `src/stores/screening.ts` - Add `retryLastScreening()` method
 
 **Pattern:** Every error display should have a contextual retry action:
 
@@ -347,7 +347,7 @@ export function useNetworkStatus() {
 ```
 
 **Files to modify:**
-- `src/components/app-shell.vue` — Show a small "Offline" banner at the top when `isOnline` is false
+- `src/components/app-shell.vue` - Show a small "Offline" banner at the top when `isOnline` is false
 - Use the existing `useViewport` pattern as a guide
 
 **UI:** A thin yellow/amber bar below the mobile header (or below the sidebar top) that reads: "You are offline. Some features may be unavailable."
@@ -408,9 +408,9 @@ The sidebar already has responsive behavior (collapse on desktop, drawer on mobi
 
 ### Current State
 
-- `nav-sidebar.vue` — 260px sidebar with 9 nav items + Help ✅
-- `app-shell.vue` — Collapse/expand toggle, mobile drawer with backdrop ✅
-- `use-viewport.ts` — `isBelowMd` reactive breakpoint ✅
+- `nav-sidebar.vue` - 260px sidebar with 9 nav items + Help ✅
+- `app-shell.vue` - Collapse/expand toggle, mobile drawer with backdrop ✅
+- `use-viewport.ts` - `isBelowMd` reactive breakpoint ✅
 - Active route highlighting ✅
 - Collapsed icon-only mode ✅
 
@@ -419,7 +419,7 @@ The sidebar already has responsive behavior (collapse on desktop, drawer on mobi
 #### 9.1 Workflow Section Grouping
 
 **Files to modify:**
-- `src/components/nav-sidebar.vue` — Add section headers between nav groups
+- `src/components/nav-sidebar.vue` - Add section headers between nav groups
 
 Group the nav items into logical workflow sections:
 
@@ -460,7 +460,7 @@ Add small section headers in the sidebar (`text-[10px] uppercase tracking-widest
 #### 9.2 Article Count Badges in Sidebar
 
 **Files to modify:**
-- `src/components/nav-sidebar.vue` — Import `useArticlesStore` and show working count
+- `src/components/nav-sidebar.vue` - Import `useArticlesStore` and show working count
 
 Show a small count badge next to "Articles" when there are unscreened working articles:
 
@@ -485,15 +485,15 @@ Similarly, show a count next to "Deduplicate" if there are unresolved duplicate 
 
 ### Problem
 
-The screening view (`screening-progress.vue`) is a "fire and monitor" experience — users start screening and watch progress. There's no way to review individual screening decisions inline during the process, and no live decision feed.
+The screening view (`screening-progress.vue`) is a "fire and monitor" experience - users start screening and watch progress. There's no way to review individual screening decisions inline during the process, and no live decision feed.
 
 ### Current State
 
-- `screening-progress.vue` — Progress bar, stats, pause/resume/stop ✅
-- `screening-progress-bar.vue` — Visual progress bar ✅
-- `screening-stats.vue` — Included/rejected/error counts ✅
-- `use-screening.ts` — Manages screening lifecycle via Tauri events ✅
-- `screening store` — Listens for `screening:progress` events ✅
+- `screening-progress.vue` - Progress bar, stats, pause/resume/stop ✅
+- `screening-progress-bar.vue` - Visual progress bar ✅
+- `screening-stats.vue` - Included/rejected/error counts ✅
+- `use-screening.ts` - Manages screening lifecycle via Tauri events ✅
+- `screening store` - Listens for `screening:progress` events ✅
 - No live decision feed (noted as implementation gap in `implementation-gaps.md`)
 
 ### Solution
@@ -547,7 +547,7 @@ defineProps<{
 #### 11.2 Screening Decision Type
 
 **Files to modify:**
-- `src/types/index.ts` — Add `ScreeningDecision` interface
+- `src/types/index.ts` - Add `ScreeningDecision` interface
 
 ```typescript
 export interface ScreeningDecision {
@@ -562,8 +562,8 @@ export interface ScreeningDecision {
 #### 11.3 Event Integration
 
 **Files to modify:**
-- `src/stores/screening.ts` — Listen for a new `screening:decision` event from the Rust backend
-- `src/views/screening-progress.vue` — Render the `ScreeningDecisionFeed` component
+- `src/stores/screening.ts` - Listen for a new `screening:decision` event from the Rust backend
+- `src/views/screening-progress.vue` - Render the `ScreeningDecisionFeed` component
 
 The Rust backend should emit individual decision events alongside the existing `screening:progress` events:
 
@@ -575,7 +575,7 @@ app.emit("screening:decision", ScreeningDecisionPayload { ... })?;
 #### 11.4 Auto-Advance Article Detail
 
 **Files to modify:**
-- `src/components/article-detail-panel.vue` — After a status change (include/reject), optionally advance to the next article automatically
+- `src/components/article-detail-panel.vue` - After a status change (include/reject), optionally advance to the next article automatically
 
 Add a setting/auto-behavior: when the user clicks "Include" or "Reject" in the detail panel footer, automatically navigate to the next article in the list after a brief 300ms delay (to show the status change confirmation).
 
@@ -598,7 +598,7 @@ The application has basic HTML semantics but lacks comprehensive ARIA labels, fo
 #### 12.1 Skip-to-Content Link
 
 **Files to modify:**
-- `src/components/app-shell.vue` — Add hidden skip link
+- `src/components/app-shell.vue` - Add hidden skip link
 
 ```vue
 <a href="#main-content" class="skip-link">Skip to main content</a>
@@ -676,8 +676,8 @@ export function useFocusTrap(containerRef: Ref<HTMLElement | null>) {
 #### 12.4 Live Regions for Dynamic Content
 
 **Files to modify:**
-- `src/views/screening-progress.vue` — Add `aria-live="polite"` region for progress updates
-- `src/components/screening-stats.vue` — Add `aria-live="polite"` for stat changes
+- `src/views/screening-progress.vue` - Add `aria-live="polite"` region for progress updates
+- `src/components/screening-stats.vue` - Add `aria-live="polite"` for stat changes
 
 ```vue
 <div aria-live="polite" aria-atomic="true" class="sr-only">
@@ -728,18 +728,18 @@ No dark mode exists. The app uses hardcoded light colors throughout. Users worki
 
 ### Current State
 
-- `tokens.css` — All colors defined as CSS custom properties on `:root` (light only)
-- `base.css` — Tailwind `@theme` block with light colors
+- `tokens.css` - All colors defined as CSS custom properties on `:root` (light only)
+- `base.css` - Tailwind `@theme` block with light colors
 - Components use both CSS custom properties and hardcoded Tailwind classes
-- `DESIGN.md` — No dark mode tokens defined
+- `DESIGN.md` - No dark mode tokens defined
 
 ### Solution
 
 #### 13.1 Dark Mode Token Set
 
 **Files to modify:**
-- `src/styles/tokens.css` — Add `[data-theme="dark"]` block with dark color values
-- `src/styles/base.css` — Add dark mode Tailwind theme variants
+- `src/styles/tokens.css` - Add `[data-theme="dark"]` block with dark color values
+- `src/styles/base.css` - Add dark mode Tailwind theme variants
 
 **Dark mode color palette** (derived from Scholarly Precision, inverted):
 
@@ -816,8 +816,8 @@ function loadTheme(): Theme {
 #### 13.3 Theme Toggle in Settings
 
 **Files to modify:**
-- `src/views/llm-config.vue` — Add theme selection (Settings view)
-- `src/components/nav-sidebar.vue` — Add quick theme toggle icon in footer (sun/moon icon)
+- `src/views/llm-config.vue` - Add theme selection (Settings view)
+- `src/components/nav-sidebar.vue` - Add quick theme toggle icon in footer (sun/moon icon)
 
 **Settings UI:** Three radio buttons: Light / Dark / System (follows OS)
 
@@ -836,15 +836,15 @@ Many components use hardcoded Tailwind colors (e.g., `bg-white`, `text-slate-500
 ```
 
 **Files needing audit (hardcoded Tailwind colors):**
-- `article-toolbar.vue` — `bg-white`, `bg-slate-100`, `border-slate-200`
-- `article-filter-panel.vue` — `bg-white`, `bg-slate-50`, `border-slate-200`
-- `article-table.vue` — `bg-white`, `bg-slate-50/50`, `border-slate-200`
-- `article-detail-panel.vue` — Extensive hardcoded colors
-- `criteria-editor.vue` — `#ffffff`, `#e2e8f0` inline
-- `tag-label-management.vue` — Uses Tailwind theme tokens (better)
-- `dashboard.vue` — Uses CSS custom properties (good) with some hardcoded values
+- `article-toolbar.vue` - `bg-white`, `bg-slate-100`, `border-slate-200`
+- `article-filter-panel.vue` - `bg-white`, `bg-slate-50`, `border-slate-200`
+- `article-table.vue` - `bg-white`, `bg-slate-50/50`, `border-slate-200`
+- `article-detail-panel.vue` - Extensive hardcoded colors
+- `criteria-editor.vue` - `#ffffff`, `#e2e8f0` inline
+- `tag-label-management.vue` - Uses Tailwind theme tokens (better)
+- `dashboard.vue` - Uses CSS custom properties (good) with some hardcoded values
 
-**Approach:** Incremental migration — start with the most-used components and replace hardcoded values with token references.
+**Approach:** Incremental migration - start with the most-used components and replace hardcoded values with token references.
 
 #### 13.5 Transition
 
@@ -866,8 +866,8 @@ Defining inclusion and exclusion criteria is one of the most time-consuming step
 
 ### Current State
 
-- `criteria-editor.vue` — Manual text entry for aims, inclusion, and exclusion criteria
-- `criteria store` — CRUD operations for aims and criteria via Tauri commands
+- `criteria-editor.vue` - Manual text entry for aims, inclusion, and exclusion criteria
+- `criteria store` - CRUD operations for aims and criteria via Tauri commands
 - Tag/label management already has "Suggest from AI" buttons ✅ (pattern to follow)
 - No AI-powered criteria generation
 
@@ -876,8 +876,8 @@ Defining inclusion and exclusion criteria is one of the most time-consuming step
 #### A.1 "Suggest Criteria" Button
 
 **Files to modify:**
-- `src/views/criteria-editor.vue` — Add "Suggest Criteria" button to both inclusion and exclusion sections
-- `src/stores/criteria.ts` — Add `suggestCriteria(criterionType)` method
+- `src/views/criteria-editor.vue` - Add "Suggest Criteria" button to both inclusion and exclusion sections
+- `src/stores/criteria.ts` - Add `suggestCriteria(criterionType)` method
 
 **UI:** Following the same pattern as `tag-label-management.vue`'s "Generate from AI" button:
 
@@ -921,7 +921,7 @@ Generate a set of {inclusion/exclusion} criteria for a systematic literature rev
 {numbered list of aim entries}
 
 ## Existing {Inclusion/Exclusion} Criteria
-{numbered list of already-defined criteria — do not duplicate}
+{numbered list of already-defined criteria - do not duplicate}
 
 ## Article Keywords (from working list)
 {aggregated unique keywords, comma-separated}
@@ -945,7 +945,7 @@ Rules:
 #### A.3 Store Integration
 
 **Files to modify:**
-- `src/stores/criteria.ts` — Add:
+- `src/stores/criteria.ts` - Add:
 
 ```typescript
 const suggesting = ref(false);
@@ -987,19 +987,19 @@ The current AI summary (`summary-view.vue`) generates plain text paragraphs orga
 
 ### Current State
 
-- `summary-view.vue` — Standalone view with 5 sections (Key Themes, Research Trends, Methodological Strengths, Common Weaknesses, Gaps in Literature) ✅
-- `use-summary.ts` — Calls `generate_summary` Tauri command ✅
-- `prisma-diagram.vue` — PRISMA flow diagram with export ✅
-- Summary output is plain text — no article citations, no referencing style
-- Summary and PRISMA views are separate — no integration
+- `summary-view.vue` - Standalone view with 5 sections (Key Themes, Research Trends, Methodological Strengths, Common Weaknesses, Gaps in Literature) ✅
+- `use-summary.ts` - Calls `generate_summary` Tauri command ✅
+- `prisma-diagram.vue` - PRISMA flow diagram with export ✅
+- Summary output is plain text - no article citations, no referencing style
+- Summary and PRISMA views are separate - no integration
 
 ### Solution
 
 #### B.1 Enhanced Summary with Citations
 
 **Files to modify:**
-- `src/composables/use-summary.ts` — Add `SummaryCitation` type, update `SummaryOutput`
-- `src/views/summary-view.vue` — Render citations inline, add reference list
+- `src/composables/use-summary.ts` - Add `SummaryCitation` type, update `SummaryOutput`
+- `src/views/summary-view.vue` - Render citations inline, add reference list
 
 **Updated types:**
 
@@ -1077,7 +1077,7 @@ Rules:
 #### B.3 Summary Rendering with Citations
 
 **Files to modify:**
-- `src/views/summary-view.vue` — Enhanced rendering
+- `src/views/summary-view.vue` - Enhanced rendering
 
 ```vue
 <section class="summary-section">
@@ -1114,7 +1114,7 @@ function renderCitations(content: string): string {
 #### B.4 Summary Integration in PRISMA View
 
 **Files to modify:**
-- `src/views/prisma-diagram.vue` — Add "View AI Summary" button and inline summary panel
+- `src/views/prisma-diagram.vue` - Add "View AI Summary" button and inline summary panel
 
 Add a collapsible summary section below the PRISMA diagram:
 
@@ -1143,8 +1143,8 @@ defineProps<{
 #### B.5 Export Summary with PRISMA
 
 **Files to modify:**
-- `src/composables/use-export.ts` — Add `exportSummary()` method
-- `src/components/export-dialog.vue` — Add "Export Summary" button
+- `src/composables/use-export.ts` - Add `exportSummary()` method
+- `src/components/export-dialog.vue` - Add "Export Summary" button
 
 Export the enhanced summary as a formatted HTML document that includes:
 - PRISMA flow diagram (as embedded SVG)
@@ -1160,7 +1160,7 @@ Export the enhanced summary as a formatted HTML document that includes:
 
 | Phase | Features | Estimated Effort | Dependencies |
 |-------|----------|-----------------|--------------|
-| **Phase 1** | 8 (Error Handling & Retry), 12 (Accessibility basics) | 1–2 weeks | None — foundational |
+| **Phase 1** | 8 (Error Handling & Retry), 12 (Accessibility basics) | 1–2 weeks | None - foundational |
 | **Phase 2** | 7 (Undo/Toast System), 9 (Sidebar Enhancements) | 1–2 weeks | Toast system needed for undo |
 | **Phase 3** | 3 (Batch Operations), 4 (Filter Presets) | 2–3 weeks | Batch ops need Rust backend |
 | **Phase 4** | 11 (Enhanced Screening), A (AI-Generated Criteria) | 2–3 weeks | Rust backend for new events + commands |
@@ -1172,12 +1172,12 @@ Export the enhanced summary as a formatted HTML document that includes:
 
 | Risk | Mitigation |
 |------|------------|
-| **Bundle size increase** | Toast, filter presets, and focus trap are lightweight — no external dependencies |
+| **Bundle size increase** | Toast, filter presets, and focus trap are lightweight - no external dependencies |
 | **Dark mode hardcoded colors** | Incremental migration; start with token-referencing views |
-| **Batch operations API** | Requires new Rust backend commands — coordinate with backend development |
+| **Batch operations API** | Requires new Rust backend commands - coordinate with backend development |
 | **AI-generated criteria quality** | Show review dialog before committing; user can edit/delete any suggestion |
-| **Summary citations** | AI may hallucinate citations — validate references against actual included articles in Rust backend |
-| **Feature A & B require LLM** | Both features need an active LLM connection — show appropriate guidance when not configured |
+| **Summary citations** | AI may hallucinate citations - validate references against actual included articles in Rust backend |
+| **Feature A & B require LLM** | Both features need an active LLM connection - show appropriate guidance when not configured |
 | **Accessibility regression** | Test with screen reader (NVDA/JAWS) after changes |
 | **Scope creep** | Each phase should be independently shippable |
 
@@ -1256,4 +1256,4 @@ Export the enhanced summary as a formatted HTML document that includes:
 
 | Date | Author | Changes |
 |------|--------|---------|
-| 2026-05-30 | Code Agent | Initial plan — 10 features (8 UX + 2 AI), 5 implementation phases |
+| 2026-05-30 | Code Agent | Initial plan - 10 features (8 UX + 2 AI), 5 implementation phases |

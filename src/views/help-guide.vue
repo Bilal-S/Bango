@@ -440,7 +440,7 @@ async function loadDemo(): Promise<void> {
     return;
   }
 
-  // Always confirm via native dialog — this is destructive (replaces all project data)
+  // Always confirm via native dialog - this is destructive (replaces all project data)
   const confirmed = await ask(
     'Loading the demo project will replace all your current data ' +
       '(articles, criteria, tags, labels). This cannot be undone.',

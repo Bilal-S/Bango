@@ -1951,7 +1951,7 @@
           "type": "boolean"
         },
         "externalBin": {
-          "description": "A list of—either absolute or relative—paths to binaries to embed with your application.\n\n Note that Tauri will look for system-specific binaries following the pattern \"binary-name{-target-triple}{.system-extension}\".\n\n E.g. for the external binary \"my-binary\", Tauri looks for:\n\n - \"my-binary-x86_64-pc-windows-msvc.exe\" for Windows\n - \"my-binary-x86_64-apple-darwin\" for macOS\n - \"my-binary-x86_64-unknown-linux-gnu\" for Linux\n\n so don't forget to provide binaries for all targeted platforms.",
+          "description": "A list of-either absolute or relative-paths to binaries to embed with your application.\n\n Note that Tauri will look for system-specific binaries following the pattern \"binary-name{-target-triple}{.system-extension}\".\n\n E.g. for the external binary \"my-binary\", Tauri looks for:\n\n - \"my-binary-x86_64-pc-windows-msvc.exe\" for Windows\n - \"my-binary-x86_64-apple-darwin\" for macOS\n - \"my-binary-x86_64-unknown-linux-gnu\" for Linux\n\n so don't forget to provide binaries for all targeted platforms.",
           "type": ["array", "null"],
           "items": {
             "type": "string"

@@ -1,4 +1,4 @@
-# Security Audit Report — Bango
+# Security Audit Report - Bango
 
 **Scope:** Full codebase (Rust backend, TypeScript/Vue frontend, database, LLM client, RIS parser)
 **Date:** 2026-05-10
@@ -46,7 +46,7 @@
 
 ### M1. Weak API key encryption scheme
 - **File:** `src-tauri/src/crypto/aes_gcm.rs:10`
-- **Details:** PBKDF2 uses a hardcoded static salt (`b"bango-app-salt16"`) and derives the encryption key from `hostname:username` — both are easily guessable. Anyone who knows the target's hostname can reconstruct the AES-256-GCM key and decrypt stored API keys from the SQLite DB. The 600k PBKDF2 iterations are strong, but the key material is not secret.
+- **Details:** PBKDF2 uses a hardcoded static salt (`b"bango-app-salt16"`) and derives the encryption key from `hostname:username` - both are easily guessable. Anyone who knows the target's hostname can reconstruct the AES-256-GCM key and decrypt stored API keys from the SQLite DB. The 600k PBKDF2 iterations are strong, but the key material is not secret.
 
 ### M2. No HTTPS enforcement on custom LLM endpoints
 - **File:** `src-tauri/src/llm/client.rs:195-477`
@@ -54,11 +54,11 @@
 
 ### M3. Prompt injection via article content
 - **File:** `src-tauri/src/screening/prompt.rs:140-155`
-- **Details:** Article title, authors, and abstract text from imported RIS files are inserted directly into LLM prompts. The `escape_json_str` function only handles basic JSON escaping — it doesn't mitigate prompt injection. A maliciously crafted RIS file could manipulate screening decisions.
+- **Details:** Article title, authors, and abstract text from imported RIS files are inserted directly into LLM prompts. The `escape_json_str` function only handles basic JSON escaping - it doesn't mitigate prompt injection. A maliciously crafted RIS file could manipulate screening decisions.
 
 ### M4. No cumulative token budget for screening runs
 - **File:** `src-tauri/src/screening/engine.rs`
-- **Details:** Per-article token counts are recorded but no running total is checked against a maximum. Large screening runs consume tokens proportionally with no cap — a cost control risk for expensive API providers.
+- **Details:** Per-article token counts are recorded but no running total is checked against a maximum. Large screening runs consume tokens proportionally with no cap - a cost control risk for expensive API providers.
 
 ### M5. API error response bodies leaked to frontend
 - **File:** `src-tauri/src/llm/client.rs:362-363, 442-443`
@@ -74,7 +74,7 @@
 
 ### M8. Frontend IPC data trusted without runtime validation
 - **Files:** All stores and composables
-- **Details:** Data from Rust backend via `tauriCommand<T>()` is directly assigned to reactive state. TypeScript generics provide compile-time assertions only — no runtime validation (e.g., Zod) protects against version skew or corrupted DB state.
+- **Details:** Data from Rust backend via `tauriCommand<T>()` is directly assigned to reactive state. TypeScript generics provide compile-time assertions only - no runtime validation (e.g., Zod) protects against version skew or corrupted DB state.
 
 ### M9. LLM decision values not strictly validated
 - **File:** `src-tauri/src/screening/engine.rs:314-432`
@@ -102,31 +102,31 @@
 
 | Area | Status |
 |------|--------|
-| XSS protection | **Clean** — zero `v-html`/`innerHTML` usage, all rendering via Vue text interpolation |
-| Code injection | **Clean** — zero `eval()`/`new Function()` usage |
-| TypeScript `any` types | **Clean** — zero instances, enforced by ESLint |
-| `unwrap()`/`expect()` in non-test code | **Clean** — none found |
-| `unsafe {}` blocks | **Clean** — none found |
-| npm dependency vulnerabilities | **Clean** — 0 vulnerabilities across 376 packages |
-| Console logging of secrets | **Clean** — only one `console.error` for non-sensitive data |
-| API keys in localStorage | **Clean** — only UI preferences stored |
-| API keys in exports/backups | **Clean** — explicitly excluded |
-| Data minimization for LLM | **Clean** — only title/authors/year/abstract sent, not addresses/emails/URLs |
-| TLS certificate validation | **Clean** — reqwest uses default TLS with no bypass flags |
-| Parameterized SQL (general) | **Clean** — all other queries use parameterized statements |
-| `serde_json::Value` without validation | **Clean** — all deserialization uses typed structs |
+| XSS protection | **Clean** - zero `v-html`/`innerHTML` usage, all rendering via Vue text interpolation |
+| Code injection | **Clean** - zero `eval()`/`new Function()` usage |
+| TypeScript `any` types | **Clean** - zero instances, enforced by ESLint |
+| `unwrap()`/`expect()` in non-test code | **Clean** - none found |
+| `unsafe {}` blocks | **Clean** - none found |
+| npm dependency vulnerabilities | **Clean** - 0 vulnerabilities across 376 packages |
+| Console logging of secrets | **Clean** - only one `console.error` for non-sensitive data |
+| API keys in localStorage | **Clean** - only UI preferences stored |
+| API keys in exports/backups | **Clean** - explicitly excluded |
+| Data minimization for LLM | **Clean** - only title/authors/year/abstract sent, not addresses/emails/URLs |
+| TLS certificate validation | **Clean** - reqwest uses default TLS with no bypass flags |
+| Parameterized SQL (general) | **Clean** - all other queries use parameterized statements |
+| `serde_json::Value` without validation | **Clean** - all deserialization uses typed structs |
 
 ---
 
 ## Recommended Remediation Priority
 
-1. **H1** — Whitelist-validate `sort_dir` to `"ASC"` or `"DESC"` (one-line fix)
-2. **H2** — Restructure `get_llm_config` to return the key as masked/redacted to the frontend
-3. **H4** — Use Tauri's scoped filesystem API instead of raw `std::fs` calls, or at minimum canonicalize and restrict paths
-4. **H3** — Enable CSP in `tauri.conf.json` (may require adjusting inline styles)
-5. **H5** — Gate `eprintln!` behind `#[cfg(debug_assertions)]` or a proper logging framework
-6. **M1** — Generate a random per-installation secret on first launch; use per-encryption random salts
-7. **M2** — Validate URL scheme; reject `http://` for non-localhost endpoints
-8. **M6** — Wrap `classify_imported_articles` in a transaction
-9. **M7** — Add file size check before reading/parsing RIS files
-10. **M3** — Add prompt boundaries (XML tags) and length limits for article fields
+1. **H1** - Whitelist-validate `sort_dir` to `"ASC"` or `"DESC"` (one-line fix)
+2. **H2** - Restructure `get_llm_config` to return the key as masked/redacted to the frontend
+3. **H4** - Use Tauri's scoped filesystem API instead of raw `std::fs` calls, or at minimum canonicalize and restrict paths
+4. **H3** - Enable CSP in `tauri.conf.json` (may require adjusting inline styles)
+5. **H5** - Gate `eprintln!` behind `#[cfg(debug_assertions)]` or a proper logging framework
+6. **M1** - Generate a random per-installation secret on first launch; use per-encryption random salts
+7. **M2** - Validate URL scheme; reject `http://` for non-localhost endpoints
+8. **M6** - Wrap `classify_imported_articles` in a transaction
+9. **M7** - Add file size check before reading/parsing RIS files
+10. **M3** - Add prompt boundaries (XML tags) and length limits for article fields

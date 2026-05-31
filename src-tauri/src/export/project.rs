@@ -143,6 +143,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     conn.execute("DELETE FROM tags", [])?;
     conn.execute("DELETE FROM labels", [])?;
     conn.execute("DELETE FROM llm_config", [])?;
+    // Clear any previously generated summary (it was for different articles)
+    conn.execute("DELETE FROM summary", [])?;
 
     // Restore research aims
     for aim in &backup.research_aims {

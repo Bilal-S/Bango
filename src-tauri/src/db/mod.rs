@@ -6,4 +6,5 @@ pub mod label_repo;
 pub mod llm_config_repo;
 pub mod migration;
 pub mod migrations;
+pub mod summary_repo;
 pub mod tag_repo;

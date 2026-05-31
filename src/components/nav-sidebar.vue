@@ -9,6 +9,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   closeMobile: [];
+  toggleCollapse: [];
 }>();
 
 const route = useRoute();
@@ -29,6 +30,7 @@ const navItems: NavItem[] = [
   { label: 'Screening', icon: 'analytics', route: '/screening' },
   { label: 'Articles', icon: 'description', route: '/articles' },
   { label: 'PRISMA', icon: 'account_tree', route: '/prisma' },
+  { label: 'AI Summary', icon: 'auto_awesome', route: '/summary' },
   { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
 
@@ -87,6 +89,18 @@ function handleNavClick(): void {
         <span class="material-symbols-outlined sidebar__icon">{{ helpItem.icon }}</span>
         <span v-if="!collapsed" class="sidebar__label">{{ helpItem.label }}</span>
       </router-link>
+      <div class="sidebar__divider sidebar__divider--footer" />
+      <button
+        class="sidebar__link sidebar__collapse-btn"
+        :class="{ 'sidebar__link--collapsed': collapsed }"
+        :title="collapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        @click="emit('toggleCollapse')"
+      >
+        <span class="material-symbols-outlined sidebar__icon">
+          {{ collapsed ? 'chevron_right' : 'chevron_left' }}
+        </span>
+        <span v-if="!collapsed" class="sidebar__label">Collapse</span>
+      </button>
     </div>
   </nav>
 </template>
@@ -236,5 +250,22 @@ function handleNavClick(): void {
 .sidebar__footer {
   margin-top: auto;
   padding: var(--space-2) 0 var(--space-4);
+}
+
+.sidebar__divider--footer {
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.sidebar__collapse-btn {
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.sidebar__collapse-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
 }
 </style>

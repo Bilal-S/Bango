@@ -1,4 +1,4 @@
-# Screening Screen: Stale-Data Window — Analysis & Plan
+# Screening Screen: Stale-Data Window - Analysis & Plan
 
 ## Problem Statement
 
@@ -6,7 +6,7 @@ When the user navigates to the Screening screen the Vue component mounts and
 immediately calls `fetchReadiness()`, which fires the IPC command
 `get_screening_readiness` to the Rust backend.  
 Until that IPC call resolves the screen renders **stale / default state**:
-counts of 0, no guardrails, incorrect "Ready" signal — all of which can confuse
+counts of 0, no guardrails, incorrect "Ready" signal - all of which can confuse
 or mislead the user.
 
 ---
@@ -33,12 +33,12 @@ User clicks Screening nav
 
 | Reactive value | State during IPC gap | What user sees |
 |---|---|---|
-| `readinessLoading` | `true` | Small spinner in top-right corner — **only if `readiness` is already populated** (second+ visits) |
+| `readinessLoading` | `true` | Small spinner in top-right corner - **only if `readiness` is already populated** (second+ visits) |
 | `readiness` | `null` | The whole `<template v-else-if="readiness">` block is **hidden** |
 | First-visit (`!initialized`) | `loading = true` | A centered spinner + "Loading screening data…" message ✓ |
 | Subsequent visits (`initialized`) | `loading = false` immediately | **The full old content renders from stale `readiness` data**, only a tiny corner spinner appears |
 
-### 3. The real pain point — second+ visits
+### 3. The real pain point - second+ visits
 
 On **first visit** the fullscreen spinner works correctly because `initialized`
 starts `false` and `loading` is set to `true` before the IPC call.
@@ -62,10 +62,10 @@ long enough to be clearly perceptible.
 
 ### 5. What is already in place
 
-- **First-visit fullscreen spinner** — works correctly.
-- **Optimistic progress on `startScreening()`** — already sets `progress`
+- **First-visit fullscreen spinner** - works correctly.
+- **Optimistic progress on `startScreening()`** - already sets `progress`
   before the IPC call returns; this part is fine.
-- **Small corner refresh hint** — present but easy to miss (16 px spinner,
+- **Small corner refresh hint** - present but easy to miss (16 px spinner,
   absolute positioned top-right). Users don't associate it with stale data
   below.
 
@@ -73,7 +73,7 @@ long enough to be clearly perceptible.
 
 ## Options
 
-### Option A — Loading Overlay on Re-Navigation (Recommended)
+### Option A - Loading Overlay on Re-Navigation (Recommended)
 
 **Idea:** When the component mounts and `readiness` is stale (i.e.,
 `initialized` is `true` but we are re-navigating), immediately set
@@ -123,7 +123,7 @@ fully rendered (e.g., after a run completes):
 ```diff
 - <!-- Initial Loading State (only if no data at all) -->
 - <div v-if="readinessLoading && !readiness" class="screening-view__loading">
-+ <!-- Loading overlay — shown any time readiness is being fetched (first or repeat visit) -->
++ <!-- Loading overlay - shown any time readiness is being fetched (first or repeat visit) -->
 + <div v-if="readinessLoading" class="screening-view__loading">
     <div class="screening-view__spinner" />
     <p>Loading screening data&hellip;</p>
@@ -146,17 +146,17 @@ background refreshes that users don't need to be aware of:
 
 **Pros:**
 - Minimal change (2 files, ~8 lines).
-- Zero stale data visible — user always sees a clear loading state.
+- Zero stale data visible - user always sees a clear loading state.
 - Consistent UX with first-visit behavior (same spinner).
 - No backend changes needed.
 
 **Cons:**
-- A brief (100–500 ms) fullscreen spinner on every navigation — may feel
+- A brief (100–500 ms) fullscreen spinner on every navigation - may feel
   slightly slower than Option B.
 
 ---
 
-### Option B — Speed Up the Backend Query (Complementary)
+### Option B - Speed Up the Backend Query (Complementary)
 
 **Idea:** Make `get_screening_readiness` faster so the window is imperceptible.
 
@@ -197,7 +197,7 @@ which blocks any concurrent DB access. It could be moved **outside** the lock:
 
 **Cons:**
 - Requires a new DB migration (`v005_data_length_index.rs`).
-- Does not eliminate the stale-data window — just makes it shorter.
+- Does not eliminate the stale-data window - just makes it shorter.
 - Does not help if the DB is under write pressure (e.g., during import).
 
 ---
@@ -206,9 +206,9 @@ which blocks any concurrent DB access. It could be moved **outside** the lock:
 
 **Do both, in order:**
 
-1. **Option A first** (the overlay) — it's tiny, safe, and immediately fixes
+1. **Option A first** (the overlay) - it's tiny, safe, and immediately fixes
    the UX problem with zero risk of regression.
-2. **Option B after** (the index + lock scope) — it makes the overlay disappear
+2. **Option B after** (the index + lock scope) - it makes the overlay disappear
    faster and is a general performance improvement.
 
 Together they give: *instant visual feedback* + *fast data retrieval*.

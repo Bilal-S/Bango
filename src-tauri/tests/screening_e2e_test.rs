@@ -1,11 +1,11 @@
 //! E2E integration tests for the screening engine with a mock LLM client.
 //!
 //! Scenarios:
-//! 1. Happy path — bare array response, batch=2, 6 articles → 3 batches, 6 screened.
-//! 2. Envelope format — `message.content` wrapper → same result.
-//! 3. Partial error — one batch returns malformed JSON → those articles get error, rest succeed.
-//! 4. Cancel mid-run — cancel after first batch → only first batch screened.
-//! 5. Resume — after cancellation, re-run → remaining articles processed.
+//! 1. Happy path - bare array response, batch=2, 6 articles → 3 batches, 6 screened.
+//! 2. Envelope format - `message.content` wrapper → same result.
+//! 3. Partial error - one batch returns malformed JSON → those articles get error, rest succeed.
+//! 4. Cancel mid-run - cancel after first batch → only first batch screened.
+//! 5. Resume - after cancellation, re-run → remaining articles processed.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -155,7 +155,7 @@ impl LlmClient for PartialErrorMock {
     }
 }
 
-/// Mock that returns good responses with a per-call delay — used for cancel tests.
+/// Mock that returns good responses with a per-call delay - used for cancel tests.
 struct CancelAwareMock {
     total_articles: usize,
     batch_size: usize,

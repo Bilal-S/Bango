@@ -87,6 +87,7 @@ watch(
       :collapsed="sidebarCollapsed && !isBelowMd"
       :mobile-open="sidebarMobileOpen"
       @close-mobile="closeMobileSidebar"
+      @toggle-collapse="toggleSidebar"
     />
     <main class="app-shell__main">
       <header v-if="isBelowMd" class="app-shell__mobile-bar">
