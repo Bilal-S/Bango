@@ -351,6 +351,14 @@ async function handleResetWorkingList(): Promise<void> {
             Clear Errors ({{ progress.errors }}) & Re-screen
           </button>
         </div>
+        <button
+          v-if="!progress?.isRunning && !loading && isWorkingListScreened"
+          class="btn btn--primary"
+          @click="navigateTo('/articles')"
+        >
+          Goto articles
+          <span class="material-symbols-outlined" style="font-size: 16px">arrow_forward</span>
+        </button>
       </div>
 
       <!-- Empty State (when no progress and no guardrails - shouldn't normally show but fallback) -->

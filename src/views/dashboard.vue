@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
 import { tauriCommand, isTauri } from '@/composables/use-tauri-command';
@@ -21,16 +21,56 @@ const {
   screenedByUser,
   groupedAudit,
   loading,
+  loadingMoreActivities,
+  hasMoreActivities,
   error,
   hasArticles,
   screeningPercentage,
   refresh,
+  loadMoreActivities,
 } = useDashboard();
 
 // Re-fetch data every time dashboard is mounted (e.g. after import + invalidation)
 onMounted(() => {
   refresh();
+  setupInfiniteScroll();
 });
+
+onBeforeUnmount(() => {
+  teardownInfiniteScroll();
+});
+
+// --- Infinite scroll via IntersectionObserver ---
+const scrollSentinel = ref<HTMLElement | null>(null);
+const activityListEl = ref<HTMLElement | null>(null);
+let observer: IntersectionObserver | null = null;
+
+function setupInfiniteScroll(): void {
+  if (!window.IntersectionObserver) return;
+  // Use the activity list container as the scroll root
+  const root = activityListEl.value;
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting && hasMoreActivities.value && !loadingMoreActivities.value) {
+        loadMoreActivities();
+      }
+    },
+    { root: root ?? undefined, rootMargin: '100px' }
+  );
+  // Observe on next tick so the sentinel element exists in DOM
+  setTimeout(() => {
+    if (scrollSentinel.value && observer) {
+      observer.observe(scrollSentinel.value);
+    }
+  }, 0);
+}
+
+function teardownInfiniteScroll(): void {
+  if (observer) {
+    observer.disconnect();
+    observer = null;
+  }
+}
 
 interface StatusTile {
   key: 'duplicate' | 'working' | 'included' | 'rejected';
@@ -246,7 +286,7 @@ async function loadDemo(): Promise<void> {
               <div v-if="groupedAudit.length === 0" class="dashboard__no-activity">
                 <p>No recent activity to display.</p>
               </div>
-              <div v-else class="dashboard__activity-list">
+              <div v-else ref="activityListEl" class="dashboard__activity-list">
                 <div v-for="entry in groupedAudit" :key="entry.id" class="activity-item">
                   <div
                     class="activity-item__icon"
@@ -275,20 +315,35 @@ async function loadDemo(): Promise<void> {
                         <template v-else-if="entry.source === 'user'"> by User</template>
                       </span>
                       <span v-if="entry.articleTitle" class="activity-item__title">
-                        &mdash; {{ entry.articleTitle
-                        }}{{ entry.articleTitle.length >= 40 ? '...' : '' }}
+                        - {{ entry.articleTitle }}{{ entry.articleTitle.length >= 40 ? '...' : '' }}
                       </span>
                       <span v-if="entry.count && entry.count > 1" class="activity-item__count">
                         {{ entry.count }} articles
                       </span>
                       <span v-if="entry.details" class="activity-item__details">
-                        &mdash; {{ entry.details }}
+                        - {{ entry.details }}
                       </span>
                     </p>
                     <p class="activity-item__time">
                       {{ formatRelativeTime(entry.timestamp) }}
                     </p>
                   </div>
+                </div>
+
+                <!-- Infinite scroll sentinel inside scroll container -->
+                <div
+                  v-if="hasMoreActivities && groupedAudit.length > 0"
+                  ref="scrollSentinel"
+                  class="dashboard__scroll-sentinel"
+                >
+                  <span
+                    v-if="loadingMoreActivities"
+                    class="material-symbols-outlined dashboard__scroll-spinner"
+                    >progress_activity</span
+                  >
+                  <span v-if="loadingMoreActivities" class="dashboard__scroll-text"
+                    >Loading more&hellip;</span
+                  >
                 </div>
               </div>
             </div>
@@ -704,6 +759,8 @@ async function loadDemo(): Promise<void> {
 .dashboard__activity-list {
   display: flex;
   flex-direction: column;
+  max-height: 640px;
+  overflow-y: auto;
 }
 
 .activity-item {
@@ -785,6 +842,36 @@ async function loadDemo(): Promise<void> {
   font-size: 12px;
   color: var(--color-outline);
   margin-top: 2px;
+}
+
+/* Infinite scroll sentinel */
+.dashboard__scroll-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+}
+
+.dashboard__scroll-spinner {
+  font-size: 18px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.dashboard__scroll-text {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
 }
 
 /* Sidebar */

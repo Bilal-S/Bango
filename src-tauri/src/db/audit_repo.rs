@@ -18,6 +18,7 @@ pub fn get_audit_trail(conn: &Connection, article_id: &str) -> Result<Vec<AuditE
 pub fn get_recent_audit_entries(
     conn: &Connection,
     limit: usize,
+    offset: usize,
 ) -> Result<Vec<AuditEntry>, AppError> {
     // Exclude 'import' entries - those are served by get_import_activities instead
     let mut stmt = conn.prepare(
@@ -25,9 +26,9 @@ pub fn get_recent_audit_entries(
          ae.details, ae.source, SUBSTR(a.title, 1, 40) as article_title \
          FROM audit_entries ae \
          LEFT JOIN articles a ON a.id = ae.article_id \
-         WHERE ae.action != 'import' ORDER BY ae.timestamp DESC LIMIT ?1",
+         WHERE ae.action != 'import' ORDER BY ae.timestamp DESC LIMIT ?1 OFFSET ?2",
     )?;
-    let rows = stmt.query_map([limit], row_to_audit_entry)?;
+    let rows = stmt.query_map(params![limit, offset], row_to_audit_entry)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -36,15 +37,16 @@ pub fn get_recent_audit_entries(
 pub fn get_import_activities(
     conn: &Connection,
     limit: usize,
+    offset: usize,
 ) -> Result<Vec<ImportActivity>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT MIN(id) as id, MIN(timestamp) as timestamp, \
          REPLACE(details, 'Imported from ', '') as filename, COUNT(*) as count \
          FROM audit_entries WHERE action = 'import' \
          GROUP BY details \
-         ORDER BY MIN(timestamp) DESC LIMIT ?1",
+         ORDER BY MIN(timestamp) DESC LIMIT ?1 OFFSET ?2",
     )?;
-    let rows = stmt.query_map([limit], |row| {
+    let rows = stmt.query_map(params![limit, offset], |row| {
         Ok(ImportActivity {
             id: row.get(0)?,
             timestamp: row.get(1)?,

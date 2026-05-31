@@ -68,13 +68,15 @@ pub fn get_audit_trail(
 pub fn get_recent_audit_entries(
     db_state: State<'_, DbState>,
     limit: Option<usize>,
+    offset: Option<usize>,
 ) -> Result<Vec<AuditEntry>, AppError> {
     let limit = limit.unwrap_or(10);
+    let offset = offset.unwrap_or(0);
     let conn = db_state
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    audit_repo::get_recent_audit_entries(&conn, limit)
+    audit_repo::get_recent_audit_entries(&conn, limit, offset)
 }
 
 #[tauri::command]
@@ -193,13 +195,15 @@ pub fn update_article_criteria(
 pub fn get_import_activities(
     db_state: State<'_, DbState>,
     limit: Option<usize>,
+    offset: Option<usize>,
 ) -> Result<Vec<ImportActivity>, AppError> {
     let limit = limit.unwrap_or(10);
+    let offset = offset.unwrap_or(0);
     let conn = db_state
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    audit_repo::get_import_activities(&conn, limit)
+    audit_repo::get_import_activities(&conn, limit, offset)
 }
 
 #[tauri::command]

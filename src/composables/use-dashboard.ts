@@ -99,6 +99,8 @@ export function useDashboard() {
   const hasArticles = computed(() => articlesStore.articles.length > 0);
 
   const loading = computed(() => articlesStore.loading || auditStore.loading);
+  const loadingMoreActivities = computed(() => auditStore.loadingMore);
+  const hasMoreActivities = computed(() => auditStore.hasMoreAudit || auditStore.hasMoreImports);
   const error = computed(() => articlesStore.error);
 
   /** Merged timeline: import activities + other audit entries */
@@ -130,6 +132,11 @@ export function useDashboard() {
     return merged;
   });
 
+  /** Load more activity entries (pagination) */
+  async function loadMoreActivities(): Promise<void> {
+    await auditStore.loadMore();
+  }
+
   /** Force a full refresh of articles + audit from the DB */
   async function refresh(): Promise<void> {
     articlesStore.invalidate();
@@ -146,10 +153,13 @@ export function useDashboard() {
     screenedByUser,
     groupedAudit,
     loading,
+    loadingMoreActivities,
+    hasMoreActivities,
     error,
     hasArticles,
     screeningPercentage,
     refresh,
+    loadMoreActivities,
   };
 }
 
