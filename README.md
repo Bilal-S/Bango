@@ -6,7 +6,7 @@
 
 **AI-accelerated systematic literature review screening**
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/Bilal-S/Bango)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/Bilal-S/Bango)](https://github.com/Bilal-S/Bango/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-orange.svg)](https://tauri.app/)
 [![Status](https://img.shields.io/badge/status-active%20development-yellow.svg)]()
