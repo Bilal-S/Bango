@@ -31,12 +31,21 @@ pub async fn generate_summary(
 
         let articles: Vec<ArticleSummary> = included
             .iter()
-            .map(|a| ArticleSummary {
-                title: a.title.clone(),
-                authors: a.authors.clone(),
-                year: a.publication_year,
-                abstract_text: a.abstract_text.clone(),
-                ai_reasoning: a.ai_reasoning.clone(),
+            .map(|a| {
+                // Combine RIS-imported keywords and user/AI-added tags into one deduplicated CSV list
+                let mut combined: Vec<String> = a.keywords.clone();
+                for tag in &a.tags {
+                    if !combined.iter().any(|k| k.eq_ignore_ascii_case(tag)) {
+                        combined.push(tag.clone());
+                    }
+                }
+                ArticleSummary {
+                    title: a.title.clone(),
+                    authors: a.authors.clone(),
+                    year: a.publication_year,
+                    abstract_text: a.abstract_text.clone(),
+                    keywords: combined,
+                }
             })
             .collect();
 

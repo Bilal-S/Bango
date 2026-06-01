@@ -4,7 +4,7 @@ pub struct ArticleSummary {
     pub authors: Vec<String>,
     pub year: Option<i32>,
     pub abstract_text: String,
-    pub ai_reasoning: Option<String>,
+    pub keywords: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -103,18 +103,18 @@ pub fn build_summary_prompt(input: &SummaryPromptInput) -> String {
         .iter()
         .map(|a| {
             let year_str = a.year.map(|y| y.to_string()).unwrap_or_else(|| "Unknown".to_string());
-            let reasoning = a
-                .ai_reasoning
-                .as_ref()
-                .map(|r| format!("\nAI Reasoning: {}", r))
-                .unwrap_or_default();
+            let keywords = if a.keywords.is_empty() {
+                String::new()
+            } else {
+                format!("\nKeywords: {}", a.keywords.join(", "))
+            };
             format!(
                 "---\nTitle: {}\nAuthors: {}\nYear: {}\nAbstract: {}{}\n---",
                 a.title,
                 a.authors.join("; "),
                 year_str,
                 a.abstract_text,
-                reasoning
+                keywords
             )
         })
         .collect::<Vec<_>>()

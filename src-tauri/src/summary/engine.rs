@@ -42,7 +42,7 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
             a.title.len()
                 + a.abstract_text.len()
                 + a.authors.join("; ").len()
-                + a.ai_reasoning.as_ref().map(|r| r.len()).unwrap_or(0)
+                + a.keywords.join(", ").len()
         })
         .sum();
     let estimated_tokens = total_chars / 4;

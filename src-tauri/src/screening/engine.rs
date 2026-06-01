@@ -154,7 +154,8 @@ impl ScreeningEngine {
             .collect();
 
         // Build global criterion numbering: inclusion [1]..[N], then exclusion [N+1]..[N+M]
-        let global_numbering = build_global_criterion_numbering(&inclusion_criteria, &exclusion_criteria);
+        let global_numbering =
+            build_global_criterion_numbering(&inclusion_criteria, &exclusion_criteria);
 
         // Fetch existing tags and labels for the prompt so the LLM prefers matching them
         let (existing_tag_names, existing_label_names) = {
@@ -1144,8 +1145,7 @@ Hope this helps!"#;
     // ── create_or_match_tag / create_or_match_label tests ──
 
     fn setup_test_db() -> Connection {
-        let conn =
-            crate::db::connection::create_connection().expect("DB connection failed");
+        let conn = crate::db::connection::create_connection().expect("DB connection failed");
         crate::db::migration::run_migrations(&conn).expect("Migration failed");
         conn
     }
@@ -1155,7 +1155,8 @@ Hope this helps!"#;
             "INSERT INTO articles (id, title, authors, abstract_text, status, import_source) \
              VALUES (?1, 'Test Article', 'Author', 'Abstract text', 'working', 'test.ris')",
             rusqlite::params![id],
-        ).expect("Insert article failed");
+        )
+        .expect("Insert article failed");
     }
 
     #[test]
@@ -1168,22 +1169,24 @@ Hope this helps!"#;
         conn.execute(
             "INSERT INTO tags (id, name, source) VALUES ('t1', 'machine-learning', 'user_created')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // LLM suggests same tag with different case
         create_or_match_tag(&conn, "Machine-Learning", article_id).unwrap();
 
         // Should NOT create a new tag — still only 1
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 1, "Should reuse existing tag, not create a new one");
 
         // Article should be linked to the existing tag
-        let linked: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM article_tags WHERE article_id = ?1 AND tag_id = 't1'",
-            rusqlite::params![article_id],
-            |r| r.get(0),
-        ).unwrap();
+        let linked: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM article_tags WHERE article_id = ?1 AND tag_id = 't1'",
+                rusqlite::params![article_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(linked, 1);
     }
 
@@ -1195,18 +1198,18 @@ Hope this helps!"#;
 
         create_or_match_tag(&conn, "deep-learning", article_id).unwrap();
 
-        let name: String = conn.query_row(
-            "SELECT name FROM tags WHERE source = 'ai_suggested'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let name: String = conn
+            .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(name, "deep-learning");
 
-        let linked: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM article_tags WHERE article_id = ?1",
-            rusqlite::params![article_id],
-            |r| r.get(0),
-        ).unwrap();
+        let linked: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM article_tags WHERE article_id = ?1",
+                rusqlite::params![article_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(linked, 1);
     }
 
@@ -1219,11 +1222,9 @@ Hope this helps!"#;
         let long_tag = "this-is-a-very-long-tag-name-that-exceeds-thirty-chars";
         create_or_match_tag(&conn, long_tag, article_id).unwrap();
 
-        let name: String = conn.query_row(
-            "SELECT name FROM tags WHERE source = 'ai_suggested'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let name: String = conn
+            .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(name.len(), 30, "New tag should be trimmed to 30 chars");
         assert_eq!(name, "this-is-a-very-long-tag-name-t");
     }
@@ -1238,11 +1239,9 @@ Hope this helps!"#;
         assert_eq!(exact_tag.len(), 30);
         create_or_match_tag(&conn, exact_tag, article_id).unwrap();
 
-        let name: String = conn.query_row(
-            "SELECT name FROM tags WHERE source = 'ai_suggested'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let name: String = conn
+            .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(name, exact_tag);
     }
 
@@ -1254,11 +1253,9 @@ Hope this helps!"#;
 
         create_or_match_tag(&conn, "ml", article_id).unwrap();
 
-        let name: String = conn.query_row(
-            "SELECT name FROM tags WHERE source = 'ai_suggested'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let name: String = conn
+            .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(name, "ml");
     }
 
@@ -1271,19 +1268,21 @@ Hope this helps!"#;
         conn.execute(
             "INSERT INTO labels (id, name, source) VALUES ('l1', 'priority-read', 'user_created')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         create_or_match_label(&conn, "Priority-Read", article_id).unwrap();
 
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM labels", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM labels", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 1, "Should reuse existing label, not create a new one");
 
-        let linked: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM article_labels WHERE article_id = ?1 AND label_id = 'l1'",
-            rusqlite::params![article_id],
-            |r| r.get(0),
-        ).unwrap();
+        let linked: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM article_labels WHERE article_id = ?1 AND label_id = 'l1'",
+                rusqlite::params![article_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(linked, 1);
     }
 
@@ -1295,11 +1294,9 @@ Hope this helps!"#;
 
         create_or_match_label(&conn, "strong-methodology", article_id).unwrap();
 
-        let name: String = conn.query_row(
-            "SELECT name FROM labels WHERE source = 'ai_generated'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let name: String = conn
+            .query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(name, "strong-methodology");
     }
 
@@ -1312,11 +1309,9 @@ Hope this helps!"#;
         let long_label = "Inclusion: this is a very long criterion text that exceeds limit";
         create_or_match_label(&conn, long_label, article_id).unwrap();
 
-        let name: String = conn.query_row(
-            "SELECT name FROM labels WHERE source = 'ai_generated'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let name: String = conn
+            .query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(name.len(), 30, "New label should be trimmed to 30 chars");
     }
 }
@@ -1369,7 +1364,9 @@ fn create_or_match_label(
     // Check if label exists (case-insensitive)
     let label_name_lower = label_name.to_lowercase();
     let existing_id: Option<String> = conn
-        .query_row("SELECT id FROM labels WHERE LOWER(name) = ?1", [&label_name_lower], |row| row.get(0))
+        .query_row("SELECT id FROM labels WHERE LOWER(name) = ?1", [&label_name_lower], |row| {
+            row.get(0)
+        })
         .ok();
 
     let label_id = match existing_id {
@@ -1458,4 +1455,3 @@ fn augment_matched_from_reasoning(
 
     (augmented_inc, augmented_exc)
 }
-
