@@ -19,7 +19,7 @@ macro_rules! debug_log {
     };
 }
 
-use crate::db::{article_repo, audit_repo};
+use crate::db::{article_repo, audit_repo, label_repo, tag_repo};
 use crate::error::AppError;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
 use crate::screening::llm_client::LlmClient;
@@ -156,6 +156,19 @@ impl ScreeningEngine {
         // Build global criterion numbering: inclusion [1]..[N], then exclusion [N+1]..[N+M]
         let global_numbering = build_global_criterion_numbering(&inclusion_criteria, &exclusion_criteria);
 
+        // Fetch existing tags and labels for the prompt so the LLM prefers matching them
+        let (existing_tag_names, existing_label_names) = {
+            let c = conn_mutex.lock().map_err(|e| {
+                AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
+            let tags = tag_repo::get_all_tags(&c)?;
+            let labels = label_repo::get_all_labels(&c)?;
+            (
+                tags.into_iter().map(|t| t.name).collect::<Vec<_>>(),
+                labels.into_iter().map(|l| l.name).collect::<Vec<_>>(),
+            )
+        };
+
         // Build shared prompt parts (aims, criteria)
         let aim_entries: Vec<AimEntry> =
             aims.iter().map(|a| AimEntry { text: a.text.clone() }).collect();
@@ -243,6 +256,8 @@ impl ScreeningEngine {
                 inclusion_criteria: inc_entries.clone(),
                 exclusion_criteria: exc_entries.clone(),
                 articles: article_entries,
+                existing_tags: existing_tag_names.clone(),
+                existing_labels: existing_label_names.clone(),
             };
 
             let user_prompt = prompt::build_screening_prompt(&prompt_input);
@@ -1125,7 +1140,189 @@ Hope this helps!"#;
         let batch_len = 1;
         assert_ne!(results.len(), batch_len, "Should detect: 2 results for 1 article");
     }
+
+    // ── create_or_match_tag / create_or_match_label tests ──
+
+    fn setup_test_db() -> Connection {
+        let conn =
+            crate::db::connection::create_connection().expect("DB connection failed");
+        crate::db::migration::run_migrations(&conn).expect("Migration failed");
+        conn
+    }
+
+    fn insert_test_article(conn: &Connection, id: &str) {
+        conn.execute(
+            "INSERT INTO articles (id, title, authors, abstract_text, status, import_source) \
+             VALUES (?1, 'Test Article', 'Author', 'Abstract text', 'working', 'test.ris')",
+            rusqlite::params![id],
+        ).expect("Insert article failed");
+    }
+
+    #[test]
+    fn test_tag_matches_existing_case_insensitive() {
+        let conn = setup_test_db();
+        let article_id = "art-tag-match";
+        insert_test_article(&conn, article_id);
+
+        // Pre-create a tag
+        conn.execute(
+            "INSERT INTO tags (id, name, source) VALUES ('t1', 'machine-learning', 'user_created')",
+            [],
+        ).unwrap();
+
+        // LLM suggests same tag with different case
+        create_or_match_tag(&conn, "Machine-Learning", article_id).unwrap();
+
+        // Should NOT create a new tag — still only 1
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1, "Should reuse existing tag, not create a new one");
+
+        // Article should be linked to the existing tag
+        let linked: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM article_tags WHERE article_id = ?1 AND tag_id = 't1'",
+            rusqlite::params![article_id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(linked, 1);
+    }
+
+    #[test]
+    fn test_tag_creates_new_when_no_match() {
+        let conn = setup_test_db();
+        let article_id = "art-tag-new";
+        insert_test_article(&conn, article_id);
+
+        create_or_match_tag(&conn, "deep-learning", article_id).unwrap();
+
+        let name: String = conn.query_row(
+            "SELECT name FROM tags WHERE source = 'ai_suggested'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(name, "deep-learning");
+
+        let linked: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM article_tags WHERE article_id = ?1",
+            rusqlite::params![article_id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(linked, 1);
+    }
+
+    #[test]
+    fn test_tag_trimmed_to_30_chars() {
+        let conn = setup_test_db();
+        let article_id = "art-tag-trim";
+        insert_test_article(&conn, article_id);
+
+        let long_tag = "this-is-a-very-long-tag-name-that-exceeds-thirty-chars";
+        create_or_match_tag(&conn, long_tag, article_id).unwrap();
+
+        let name: String = conn.query_row(
+            "SELECT name FROM tags WHERE source = 'ai_suggested'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(name.len(), 30, "New tag should be trimmed to 30 chars");
+        assert_eq!(name, "this-is-a-very-long-tag-name-t");
+    }
+
+    #[test]
+    fn test_tag_exactly_30_chars_not_trimmed() {
+        let conn = setup_test_db();
+        let article_id = "art-tag-exact";
+        insert_test_article(&conn, article_id);
+
+        let exact_tag = "123456789012345678901234567890"; // exactly 30 chars
+        assert_eq!(exact_tag.len(), 30);
+        create_or_match_tag(&conn, exact_tag, article_id).unwrap();
+
+        let name: String = conn.query_row(
+            "SELECT name FROM tags WHERE source = 'ai_suggested'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(name, exact_tag);
+    }
+
+    #[test]
+    fn test_tag_short_name_unchanged() {
+        let conn = setup_test_db();
+        let article_id = "art-tag-short";
+        insert_test_article(&conn, article_id);
+
+        create_or_match_tag(&conn, "ml", article_id).unwrap();
+
+        let name: String = conn.query_row(
+            "SELECT name FROM tags WHERE source = 'ai_suggested'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(name, "ml");
+    }
+
+    #[test]
+    fn test_label_matches_existing_case_insensitive() {
+        let conn = setup_test_db();
+        let article_id = "art-label-match";
+        insert_test_article(&conn, article_id);
+
+        conn.execute(
+            "INSERT INTO labels (id, name, source) VALUES ('l1', 'priority-read', 'user_created')",
+            [],
+        ).unwrap();
+
+        create_or_match_label(&conn, "Priority-Read", article_id).unwrap();
+
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM labels", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1, "Should reuse existing label, not create a new one");
+
+        let linked: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM article_labels WHERE article_id = ?1 AND label_id = 'l1'",
+            rusqlite::params![article_id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(linked, 1);
+    }
+
+    #[test]
+    fn test_label_creates_new_when_no_match() {
+        let conn = setup_test_db();
+        let article_id = "art-label-new";
+        insert_test_article(&conn, article_id);
+
+        create_or_match_label(&conn, "strong-methodology", article_id).unwrap();
+
+        let name: String = conn.query_row(
+            "SELECT name FROM labels WHERE source = 'ai_generated'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(name, "strong-methodology");
+    }
+
+    #[test]
+    fn test_label_trimmed_to_30_chars() {
+        let conn = setup_test_db();
+        let article_id = "art-label-trim";
+        insert_test_article(&conn, article_id);
+
+        let long_label = "Inclusion: this is a very long criterion text that exceeds limit";
+        create_or_match_label(&conn, long_label, article_id).unwrap();
+
+        let name: String = conn.query_row(
+            "SELECT name FROM labels WHERE source = 'ai_generated'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(name.len(), 30, "New label should be trimmed to 30 chars");
+    }
 }
+
+/// Maximum character length for newly created tags or labels that don't match existing ones.
+const MAX_NEW_TAG_LABEL_LEN: usize = 30;
 
 fn create_or_match_tag(
     conn: &Connection,
@@ -1144,10 +1341,12 @@ fn create_or_match_tag(
     let tag_id = match existing_id {
         Some(id) => id,
         None => {
+            // Trim new tag name to MAX_NEW_TAG_LABEL_LEN characters
+            let trimmed: String = tag_name_lower.chars().take(MAX_NEW_TAG_LABEL_LEN).collect();
             let id = uuid::Uuid::new_v4().to_string();
             conn.execute(
                 "INSERT INTO tags (id, name, source) VALUES (?1, ?2, 'ai_suggested')",
-                rusqlite::params![id, tag_name_lower],
+                rusqlite::params![id, trimmed],
             )?;
             id
         }
@@ -1168,17 +1367,20 @@ fn create_or_match_label(
     article_id: &str,
 ) -> Result<(), AppError> {
     // Check if label exists (case-insensitive)
+    let label_name_lower = label_name.to_lowercase();
     let existing_id: Option<String> = conn
-        .query_row("SELECT id FROM labels WHERE LOWER(name) = ?1", [label_name], |row| row.get(0))
+        .query_row("SELECT id FROM labels WHERE LOWER(name) = ?1", [&label_name_lower], |row| row.get(0))
         .ok();
 
     let label_id = match existing_id {
         Some(id) => id,
         None => {
+            // Trim new label name to MAX_NEW_TAG_LABEL_LEN characters
+            let trimmed: String = label_name_lower.chars().take(MAX_NEW_TAG_LABEL_LEN).collect();
             let id = uuid::Uuid::new_v4().to_string();
             conn.execute(
                 "INSERT INTO labels (id, name, source) VALUES (?1, ?2, 'ai_generated')",
-                rusqlite::params![id, label_name],
+                rusqlite::params![id, trimmed],
             )?;
             id
         }

@@ -21,6 +21,8 @@ fn make_single_article_input() -> ScreeningPromptInput {
             year: None,
             abstract_text: "Abstract".to_string(),
         }],
+        existing_tags: vec![],
+        existing_labels: vec![],
     }
 }
 

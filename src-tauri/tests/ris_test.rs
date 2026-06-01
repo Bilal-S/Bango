@@ -16,7 +16,7 @@ fn asset_path(name: &str) -> PathBuf {
 
 #[test]
 fn test_parse_sugar_ris() {
-    let content = fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("10-valid-Sugar.ris")).expect("fixture not found");
     let result = parse_ris(&content).expect("Parse failed");
     assert_eq!(result.records.len(), 10);
     assert_eq!(result.errors.len(), 0);
@@ -43,7 +43,7 @@ fn test_parse_sugar_ris() {
 
 #[test]
 fn test_parse_blue_ris() {
-    let content = fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("6-valid-7-invalid-Blue.ris")).expect("fixture not found");
     let result = parse_ris(&content).expect("Parse failed");
     assert_eq!(result.records.len(), 13);
     assert_eq!(result.errors.len(), 0);
@@ -148,7 +148,7 @@ fn test_validate_n2_abstract_fallback() {
 
 #[test]
 fn test_full_import_pipeline_with_sugar_ris() {
-    let content = fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("10-valid-Sugar.ris")).expect("fixture not found");
     let parse_result = parse_ris(&content).expect("Parse failed");
     let (valid, errors) = validate_all(&parse_result.records);
 
@@ -171,7 +171,7 @@ fn test_full_import_pipeline_with_sugar_ris() {
 #[test]
 fn test_partial_import_blue_ris() {
     // Blue.ris has 13 records; some are missing abstracts
-    let content = fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("6-valid-7-invalid-Blue.ris")).expect("fixture not found");
     let parse_result = parse_ris(&content).expect("Parse failed");
     let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
 
@@ -195,7 +195,7 @@ fn test_partial_import_blue_ris() {
 #[test]
 fn test_partial_import_green_ris() {
     // Green.ris has 7 records; some are missing abstracts
-    let content = fs::read_to_string(asset_path("Green.ris")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("2-valid-5-invalid-Green.ris")).expect("fixture not found");
     let parse_result = parse_ris(&content).expect("Parse failed");
     let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
 

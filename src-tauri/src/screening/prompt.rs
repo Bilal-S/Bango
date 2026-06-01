@@ -44,6 +44,8 @@ pub struct ScreeningPromptInput {
     pub inclusion_criteria: Vec<CriterionEntry>,
     pub exclusion_criteria: Vec<CriterionEntry>,
     pub articles: Vec<ArticleEntry>,
+    pub existing_tags: Vec<String>,
+    pub existing_labels: Vec<String>,
 }
 
 /// Returns true when all criteria (both inclusion and exclusion) share the same priority,
@@ -154,6 +156,35 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         format!("[\n{}\n]", entries.join(",\n"))
     };
 
+    // Build existing tags/labels section
+    let existing_tags_section = if input.existing_tags.is_empty() {
+        String::new()
+    } else {
+        let tags_list = input.existing_tags.join(", ");
+        format!(
+            "## Existing Tags\n\
+             The following tags already exist in the project. \
+             Prefer selecting from these tags when they are relevant. \
+             Only suggest new tags if no existing tag fits.\n\
+             [{}]",
+            tags_list
+        )
+    };
+
+    let existing_labels_section = if input.existing_labels.is_empty() {
+        String::new()
+    } else {
+        let labels_list = input.existing_labels.join(", ");
+        format!(
+            "## Existing Labels\n\
+             The following labels already exist in the project. \
+             Prefer selecting from these when applicable. \
+             Only suggest new labels if no existing label fits.\n\
+             [{}]",
+            labels_list
+        )
+    };
+
     format!(
         r#"## Research Aims
 {aims_list}
@@ -166,7 +197,8 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
 
 ## Priority Rules
 {priority_rules}
-
+{existing_tags_section}
+{existing_labels_section}
 ## Articles
 {articles_json}"#,
         aims_list = aims_list,
@@ -175,6 +207,8 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         exclusion_header = exclusion_header,
         exclusion_list = exclusion_list,
         priority_rules = priority_rules,
+        existing_tags_section = existing_tags_section,
+        existing_labels_section = existing_labels_section,
         articles_json = articles_json,
     )
 }

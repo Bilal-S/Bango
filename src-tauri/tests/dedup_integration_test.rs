@@ -14,8 +14,8 @@ fn asset_path(name: &str) -> PathBuf {
 #[test]
 fn test_dedup_no_false_positives_on_real_data() {
     // Sugar.ris and Blue.ris contain distinct articles.
-    let content1 = fs::read_to_string(asset_path("Sugar.ris")).expect("fixture not found");
-    let content2 = fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
+    let content1 = fs::read_to_string(asset_path("10-valid-Sugar.ris")).expect("fixture not found");
+    let content2 = fs::read_to_string(asset_path("6-valid-7-invalid-Blue.ris")).expect("fixture not found");
 
     let parsed1 = parse_ris(&content1).expect("Parse failed");
     let parsed2 = parse_ris(&content2).expect("Parse failed");
@@ -45,7 +45,7 @@ fn test_dedup_no_false_positives_on_real_data() {
 
 #[test]
 fn test_dedup_detects_doi_duplicate_from_real_data() {
-    let content = fs::read_to_string(asset_path("Blue.ris")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("6-valid-7-invalid-Blue.ris")).expect("fixture not found");
     let parsed = parse_ris(&content).expect("Parse failed");
     let (valid, _) = validate_all(&parsed.records);
 

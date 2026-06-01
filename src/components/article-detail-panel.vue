@@ -464,7 +464,7 @@ function handleCriteriaSave(
               :title="criterionText(criterion)"
             >
               <span
-                class="text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded px-1 leading-tight"
+                class="text-[12px] font-bold text-emerald-600 bg-emerald-50 rounded px-1 leading-tight"
                 >{{ criterionIndexMap.get(criterion) ?? '-' }}</span
               >
               <span class="truncate">{{ truncate(criterionText(criterion)) }}</span>
@@ -476,7 +476,7 @@ function handleCriteriaSave(
               :title="criterionText(criterion)"
             >
               <span
-                class="text-[10px] font-bold text-rose-500 bg-rose-50 rounded px-1 leading-tight"
+                class="text-[12px] font-bold text-rose-500 bg-rose-50 rounded px-1 leading-tight"
                 >{{ criterionIndexMap.get(criterion) ?? '-' }}</span
               >
               <span class="truncate line-through">{{ truncate(criterionText(criterion)) }}</span>
