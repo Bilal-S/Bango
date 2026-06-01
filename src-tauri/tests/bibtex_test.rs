@@ -17,8 +17,8 @@ fn asset_path(name: &str) -> PathBuf {
 
 #[test]
 fn test_parse_sugar_bibtex() {
-    let content =
-        fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex"))
+        .expect("fixture not found");
     let result = parse_bibtex(&content);
 
     assert_eq!(result.entries.len(), 10, "Should parse 10 entries");
@@ -30,11 +30,8 @@ fn test_parse_sugar_bibtex() {
     }
 
     // Entry 6 (EBSCO quotes) — key 2854824120170701
-    let ebsco_entry = result
-        .entries
-        .iter()
-        .find(|e| e.key == "2854824120170701")
-        .expect("EBSCO entry not found");
+    let ebsco_entry =
+        result.entries.iter().find(|e| e.key == "2854824120170701").expect("EBSCO entry not found");
     let title_field: Option<&str> =
         ebsco_entry.fields.iter().find(|(k, _)| k == "title").map(|(_, v)| v.as_str());
     assert!(
@@ -47,15 +44,18 @@ fn test_parse_sugar_bibtex() {
 
 #[test]
 fn test_convert_sugar_bibtex() {
-    let content =
-        fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex"))
+        .expect("fixture not found");
     let parse_result = parse_bibtex(&content);
     let records = convert_bibtex_entries(&parse_result.entries);
 
     assert_eq!(records.len(), 10);
 
     // Entry 2 (Bossie, Andrew and Kuehn, Daniel) — multi-author
-    let bossie = records.iter().find(|r| r.title.as_deref() == Some("WWII contract spending and inequality.")).expect("Bossie entry");
+    let bossie = records
+        .iter()
+        .find(|r| r.title.as_deref() == Some("WWII contract spending and inequality."))
+        .expect("Bossie entry");
     assert_eq!(bossie.authors, vec!["Bossie, Andrew", "Kuehn, Daniel"]);
     assert_eq!(bossie.publication_year, Some(2021));
     assert_eq!(bossie.journal.as_deref(), Some("Applied Economics Letters"));
@@ -69,7 +69,10 @@ fn test_convert_sugar_bibtex() {
     // Entry 1 (Sweet Surprise) — ISSN with "; Print" suffix, pages "13-null"
     let sweet = records
         .iter()
-        .find(|r| r.title.as_deref() == Some("Sweet Surprise: WWII sugar rationing boosted kids' health decades later."))
+        .find(|r| {
+            r.title.as_deref()
+                == Some("Sweet Surprise: WWII sugar rationing boosted kids' health decades later.")
+        })
         .expect("Sweet entry");
     assert_eq!(sweet.issn.as_deref(), Some("0036-8733"), "ISSN should be cleaned");
     assert_eq!(sweet.start_page.as_deref(), Some("13"));
@@ -78,7 +81,12 @@ fn test_convert_sugar_bibtex() {
     // Entry 5 (Glaesmer) — many authors, semicolon keywords
     let glaesmer = records
         .iter()
-        .find(|r| r.title.as_deref().unwrap().contains("Childhood maltreatment in children born of occupation"))
+        .find(|r| {
+            r.title
+                .as_deref()
+                .unwrap()
+                .contains("Childhood maltreatment in children born of occupation")
+        })
         .expect("Glaesmer entry");
     assert!(glaesmer.authors.len() >= 4, "Should have 4+ authors");
     assert!(glaesmer.keywords.len() >= 10, "Should have many keywords from semicolons");
@@ -93,7 +101,10 @@ fn test_convert_sugar_bibtex() {
     // Entry 8 — empty abstract, empty keywords
     let geophys = records
         .iter()
-        .find(|r| r.title.as_deref() == Some("Geophysical investigations of WWII air-raid shelters in the UK."))
+        .find(|r| {
+            r.title.as_deref()
+                == Some("Geophysical investigations of WWII air-raid shelters in the UK.")
+        })
         .expect("Geophys entry");
     assert_eq!(geophys.abstract_text.as_deref(), Some(""), "Abstract should be empty string");
     assert!(geophys.keywords.is_empty(), "Empty keywords should produce no entries");
@@ -109,8 +120,8 @@ fn test_convert_sugar_bibtex() {
 
 #[test]
 fn test_validate_sugar_bibtex() {
-    let content =
-        fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex"))
+        .expect("fixture not found");
     let parse_result = parse_bibtex(&content);
     let records = convert_bibtex_entries(&parse_result.entries);
     let (valid, errors, groups) = validate_all_grouped(&records);
@@ -144,8 +155,8 @@ fn test_validate_sugar_bibtex() {
 
 #[test]
 fn test_full_import_pipeline_sugar_bibtex() {
-    let content =
-        fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex"))
+        .expect("fixture not found");
     let parse_result = parse_bibtex(&content);
     assert_eq!(parse_result.entries.len(), 10);
     assert_eq!(parse_result.errors.len(), 0);
@@ -191,8 +202,8 @@ fn test_full_import_pipeline_sugar_bibtex() {
 
 #[test]
 fn test_bibtex_ebsco_quotes_preserved() {
-    let content =
-        fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex")).expect("fixture not found");
+    let content = fs::read_to_string(asset_path("8-valid-2-invalid-sugar.bibtex"))
+        .expect("fixture not found");
     let parse_result = parse_bibtex(&content);
     let records = convert_bibtex_entries(&parse_result.entries);
 
