@@ -598,7 +598,7 @@ Title: {title}
 Authors: {authors}
 Year: {publicationYear}
 Abstract: {abstract}
-AI Reasoning: {aiReasoning}
+Keywords: {comma-separated tag names associated with the article}
 ---
 {end for}
 
@@ -993,6 +993,7 @@ The following features are explicitly **out of scope** for v1:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v3.3 | 2026-06-01 | AI Summary prompt update: replaced `AI Reasoning: {aiReasoning}` with `Keywords: {comma-separated tag names associated with the article}` in the per-article data sent to the LLM. The summary now receives article tags as keywords instead of AI screening reasoning, grounding the summary in content categorization rather than screening decisions. |
 | v3.2 | 2026-05-08 | Article status model refactor: renamed `imported` status to `duplicate`. Non-duplicate articles now promote directly to `working` on import. Only true duplicates remain in `duplicate` status. Added cross-status dedup protection: articles already in `working`, `included`, or `rejected` are never affected by new imports. Updated state machine diagram, transitions, PRISMA data mapping, and workflow sequence. |
 | v3.1 | 2026-05-05 | Design implementation update: added Tailwind CSS v4 with @theme tokens, disabled preflight for custom-CSS compatibility, Material Symbols Outlined icons replacing all Unicode fallbacks, Inter font loading, dual styling approach (custom CSS + Tailwind utilities). Documented design reference files and implementation gaps. |
 | v3 | 2026-05-04 | Scope reductions: dropped mobile, single-project, simplified PRISMA exports, static VRAM warning, optional tag/label pass, no audit revert. Gap fills: screeningError as boolean flag, PRISMA data mapping, token estimation method, resume screening detail, export specVersion, import limit behavior, short-title dedup guard, multiple-import dedup scoping. Detail expansions: prompt templates for tag/label generation and AI summary, screening override note format, batch summary handling. |
