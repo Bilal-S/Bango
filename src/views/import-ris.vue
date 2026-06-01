@@ -34,7 +34,7 @@ const hasDuplicates = () =>
 <template>
   <div class="import-view">
     <div class="import-view__header">
-      <h1 class="page-title">Import RIS File</h1>
+      <h1 class="page-title">Import Articles</h1>
       <ImportStepper :current-step="step" />
     </div>
 

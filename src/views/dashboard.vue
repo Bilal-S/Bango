@@ -120,7 +120,7 @@ interface QuickAction {
 
 const quickActions: QuickAction[] = [
   {
-    label: 'Import RIS',
+    label: 'Import Articles',
     description: 'Add new references from search',
     icon: 'upload_file',
     route: '/import',
@@ -226,8 +226,7 @@ async function loadDemo(): Promise<void> {
           <div class="dashboard__empty-icon material-symbols-outlined">import_export</div>
           <h2 class="dashboard__empty-title">No articles yet</h2>
           <p class="dashboard__empty-desc">
-            Import a RIS file to get started with your systematic review. You will have to convert
-            your BibTeX files first.
+            Import a RIS or BibTex file to get started with your systematic review.
           </p>
           <div class="dashboard__empty-actions">
             <button class="dashboard__empty-cta" @click="navigateTo('/import')">

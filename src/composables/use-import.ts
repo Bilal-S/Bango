@@ -41,7 +41,15 @@ export interface ImportResult {
   errorGroups: ErrorGroup[];
 }
 
+export type ImportFormat = 'ris' | 'bibtex';
 export type ImportStep = 'upload' | 'parse' | 'import' | 'complete';
+
+/** Detect import format from file extension. */
+function detectFormat(fileName: string): ImportFormat {
+  const ext = fileName.toLowerCase();
+  if (ext.endsWith('.bib') || ext.endsWith('.bibtex')) return 'bibtex';
+  return 'ris';
+}
 
 export function useImport() {
   const step = ref<ImportStep>('upload');
@@ -104,7 +112,9 @@ export function useImport() {
     error.value = null;
 
     try {
-      preview.value = await tauriCommand<ImportPreview>('parse_ris_file', {
+      const cmd =
+        detectFormat(fileName.value) === 'bibtex' ? 'parse_bibtex_file' : 'parse_ris_file';
+      preview.value = await tauriCommand<ImportPreview>(cmd, {
         request: {
           content: fileContent.value,
           filePath: filePath.value,
@@ -130,7 +140,9 @@ export function useImport() {
     await nextPaint();
 
     try {
-      importResult.value = await tauriCommand<ImportResult>('import_ris_file', {
+      const cmd =
+        detectFormat(fileName.value) === 'bibtex' ? 'import_bibtex_file' : 'import_ris_file';
+      importResult.value = await tauriCommand<ImportResult>(cmd, {
         request: {
           content: fileContent.value,
           filePath: filePath.value,

@@ -24,7 +24,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Dashboard', icon: 'dashboard', route: '/' },
   { label: 'Criteria', icon: 'rule', route: '/criteria' },
-  { label: 'Import RIS', icon: 'upload_file', route: '/import' },
+  { label: 'Import', icon: 'upload_file', route: '/import' },
   { label: 'Tags & Labels', icon: 'sell', route: '/tags' },
   { label: 'Deduplicate', icon: 'science', route: '/dedup' },
   { label: 'Screening', icon: 'analytics', route: '/screening' },

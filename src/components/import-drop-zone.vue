@@ -14,7 +14,7 @@ onMounted(async () => {
   unlisten = await listen<{ paths: string[] }>('tauri://drag-drop', (event) => {
     isDragging.value = false;
     const path = event.payload.paths?.[0];
-    if (path && path.toLowerCase().endsWith('.ris')) {
+    if (path && isSupportedFile(path)) {
       const name = path.split(/[/\\]/).pop() || 'Unknown.ris';
       emit('fileDropped', path, name);
     }
@@ -62,9 +62,14 @@ function onDrop(event: DragEvent): void {
     file = event.dataTransfer.files[0] ?? null;
   }
 
-  if (file && file.name.toLowerCase().endsWith('.ris')) {
+  if (file && isSupportedFile(file.name)) {
     emit('fileSelected', file);
   }
+}
+
+function isSupportedFile(name: string): boolean {
+  const ext = name.toLowerCase();
+  return ext.endsWith('.ris') || ext.endsWith('.bib') || ext.endsWith('.bibtex');
 }
 
 function onFileInput(event: Event): void {
@@ -87,11 +92,16 @@ function onFileInput(event: Event): void {
   >
     <div class="drop-zone__content">
       <div class="drop-zone__icon">↑</div>
-      <p class="drop-zone__text">Drag and drop an RIS file here</p>
+      <p class="drop-zone__text">Drag and drop an RIS or BibTeX file here</p>
       <p class="drop-zone__subtext">or</p>
       <label class="drop-zone__button">
         Browse Files
-        <input type="file" accept=".ris" class="drop-zone__input" @change="onFileInput" />
+        <input
+          type="file"
+          accept=".ris,.bib,.bibtex"
+          class="drop-zone__input"
+          @change="onFileInput"
+        />
       </label>
     </div>
   </div>

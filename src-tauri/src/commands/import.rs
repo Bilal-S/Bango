@@ -4,6 +4,8 @@ use tauri::{AppHandle, Manager, State};
 /// Maximum RIS file size: 100 MB. Prevents OOM from accidentally importing huge files.
 const MAX_RIS_FILE_SIZE: u64 = 100 * 1024 * 1024;
 
+use crate::bibtex::converter::convert_bibtex_entries;
+use crate::bibtex::parser::parse_bibtex;
 use crate::commands::dedup::classify_imported_articles;
 use crate::db::article_repo;
 use crate::db::audit_repo;
@@ -271,6 +273,161 @@ fn log_import_error(app: &AppHandle, message: &str) {
     if let Some(db_state) = app.try_state::<DbState>() {
         if let Ok(conn) = db_state.conn.lock() {
             let _ = audit_repo::log_error(&conn, message);
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn parse_bibtex_file(request: ParseRisRequest) -> Result<ImportPreview, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let content = if let Some(c) = request.content {
+            c
+        } else if let Some(p) = request.file_path {
+            let metadata = std::fs::metadata(&p)
+                .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
+            if metadata.len() > MAX_RIS_FILE_SIZE {
+                return Err(AppError::Import(format!(
+                    "File too large: {:.1} MB (maximum is {:.0} MB)",
+                    metadata.len() as f64 / (1024.0 * 1024.0),
+                    MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
+                )));
+            }
+            std::fs::read_to_string(p)
+                .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+        } else {
+            return Err(AppError::Import("No content or file path provided".into()));
+        };
+
+        let bibtex_result = parse_bibtex(&content);
+        let records: Vec<RisRecord> = convert_bibtex_entries(&bibtex_result.entries);
+        let (valid, errors, error_groups) = validate_all_grouped(&records);
+
+        let preview_articles: Vec<PreviewArticle> = valid
+            .iter()
+            .take(10)
+            .map(|r| PreviewArticle {
+                title: r.title.clone().unwrap_or_default(),
+                authors: r.authors.clone(),
+                publication_year: r.publication_year,
+                journal: r.journal.clone(),
+                doi: r.doi.clone(),
+            })
+            .collect();
+
+        Ok(ImportPreview {
+            total_records: records.len(),
+            valid_records: valid.len(),
+            error_count: errors.len(),
+            errors: errors
+                .into_iter()
+                .map(|e| ImportError { record_index: e.record_index, message: e.message })
+                .collect(),
+            error_groups,
+            preview_articles,
+        })
+    })
+    .await
+    .map_err(|e| AppError::Import(format!("Task panicked: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn import_bibtex_file(
+    app: AppHandle,
+    request: ParseRisRequest,
+) -> Result<ImportResult, AppError> {
+    let app_for_logging = app.clone();
+    let file_name = request.file_name.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let db_state = app.state::<DbState>();
+
+        let content = if let Some(c) = request.content {
+            c
+        } else if let Some(p) = request.file_path {
+            let metadata = std::fs::metadata(&p)
+                .map_err(|e| AppError::Import(format!("Failed to read file metadata: {}", e)))?;
+            if metadata.len() > MAX_RIS_FILE_SIZE {
+                return Err(AppError::Import(format!(
+                    "File too large: {:.1} MB (maximum is {:.0} MB)",
+                    metadata.len() as f64 / (1024.0 * 1024.0),
+                    MAX_RIS_FILE_SIZE as f64 / (1024.0 * 1024.0)
+                )));
+            }
+            std::fs::read_to_string(p)
+                .map_err(|e| AppError::Import(format!("Failed to read file: {}", e)))?
+        } else {
+            return Err(AppError::Import("No content or file path provided".into()));
+        };
+
+        let bibtex_result = parse_bibtex(&content);
+        let records: Vec<RisRecord> = convert_bibtex_entries(&bibtex_result.entries);
+        let (valid, errors, error_groups) = validate_all_grouped(&records);
+
+        let excluded_set: std::collections::HashSet<usize> =
+            request.excluded_indices.iter().copied().collect();
+
+        let to_import: Vec<&RisRecord> = valid
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !excluded_set.contains(i))
+            .map(|(_, r)| r)
+            .collect();
+
+        let skipped_by_user = excluded_set.len();
+        let skipped_validation = records.len() - valid.len();
+
+        if to_import.is_empty() {
+            return Err(AppError::Import(
+                "No articles to import. All records were either excluded or failed validation."
+                    .to_string(),
+            ));
+        }
+
+        let new_articles: Vec<NewArticle> =
+            to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+
+        let imported =
+            article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
+
+        let _classification = classify_imported_articles(&conn, &imported)?;
+
+        let updated_articles: Vec<Article> = imported
+            .iter()
+            .filter_map(|a| article_repo::get_article_by_id(&conn, &a.id).ok())
+            .collect();
+
+        let remaining = article_repo::remaining_capacity(&conn)?;
+
+        Ok(ImportResult {
+            imported_count: updated_articles.len(),
+            skipped_count: skipped_validation,
+            skipped_by_user,
+            articles: updated_articles,
+            remaining_capacity: remaining,
+            validation_errors: errors
+                .into_iter()
+                .map(|e| ImportError { record_index: e.record_index, message: e.message })
+                .collect(),
+            error_groups,
+        })
+    })
+    .await;
+
+    match result {
+        Ok(Ok(res)) => Ok(res),
+        Ok(Err(e)) => {
+            eprintln!("[import] error in '{}': {e}", file_name);
+            log_import_error(&app_for_logging, &format!("Import error ({}): {e}", file_name));
+            Err(e)
+        }
+        Err(e) => {
+            let err = AppError::Import(format!("Task panicked: {e}"));
+            eprintln!("[import] panic in '{}': {err}", file_name);
+            log_import_error(&app_for_logging, &format!("Import panic ({}): {err}", file_name));
+            Err(err)
         }
     }
 }

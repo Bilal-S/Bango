@@ -1,3 +1,4 @@
+pub mod bibtex;
 pub mod commands;
 pub mod crypto;
 pub mod db;
@@ -54,6 +55,8 @@ pub fn run() {
             commands::health_check,
             commands::import::parse_ris_file,
             commands::import::import_ris_file,
+            commands::import::parse_bibtex_file,
+            commands::import::import_bibtex_file,
             commands::import::get_articles,
             commands::dedup::check_duplicates,
             commands::dedup::merge_exact_duplicates,
