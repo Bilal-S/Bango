@@ -19,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   apply: [];
   clear: [];
+  close: [];
   'update:filter': [key: keyof ArticleFilter, value: unknown];
 }>();
 
@@ -72,12 +73,21 @@ const matchedAuthors = computed(() => {
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="font-h2 text-h2 text-on-surface">Filters</h3>
-      <button
-        class="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-medium"
-        @click="emit('clear')"
-      >
-        Clear All
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          class="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-medium"
+          @click="emit('clear')"
+        >
+          Clear All
+        </button>
+        <button
+          class="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+          title="Close filters"
+          @click="emit('close')"
+        >
+          ×
+        </button>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

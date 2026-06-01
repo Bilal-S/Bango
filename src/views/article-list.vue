@@ -160,6 +160,7 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
         :all-labels="allLabels"
         @apply="applyFilters"
         @clear="clearFilters"
+        @close="toggleFilters"
         @update:filter="handleUpdateFilter"
       />
 
