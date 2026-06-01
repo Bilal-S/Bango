@@ -1,7 +1,7 @@
 {
   "$schema": "./src/schema/tauri2.json",
   "productName": "Bango",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "identifier": "BonCode.Bango",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -27,7 +27,13 @@
   "bundle": {
     "active": true,
     "publisher": "BonCode",
-    "targets": ["nsis", "msi", "deb", "appimage", "dmg"],
+    "targets": [
+      "nsis",
+      "msi",
+      "deb",
+      "appimage",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
