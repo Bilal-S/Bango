@@ -69,6 +69,8 @@ pub fn run() {
             commands::criteria::create_criterion,
             commands::criteria::update_criterion,
             commands::criteria::delete_criterion,
+            commands::criteria::generate_criteria,
+            commands::criteria::critique_criteria,
             commands::llm_config::get_llm_config,
             commands::llm_config::save_llm_config,
             commands::llm_config::test_llm_connection,

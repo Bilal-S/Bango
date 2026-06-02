@@ -203,7 +203,7 @@ function filterByLabel(labelId: string): void {
                   :class="{ 'animate-spin': tagsStore.suggesting }"
                   >auto_awesome</span
                 >
-                {{ tagsStore.suggesting ? 'Generating...' : 'Generate from AI' }}
+                {{ tagsStore.suggesting ? 'Generating...' : 'Generate with AI' }}
               </button>
             </div>
           </div>
@@ -288,7 +288,7 @@ function filterByLabel(labelId: string): void {
               v-if="tagsStore.tags.length === 0"
               class="text-on-surface-variant font-body-sm text-body-sm text-center py-8"
             >
-              No tags yet. Add one above or generate from AI.
+              No tags yet. Add one above or generate with AI.
             </p>
           </div>
         </section>
@@ -340,7 +340,7 @@ function filterByLabel(labelId: string): void {
                   :class="{ 'animate-spin': labelsStore.suggesting }"
                   >auto_awesome</span
                 >
-                {{ labelsStore.suggesting ? 'Generating...' : 'Generate from AI' }}
+                {{ labelsStore.suggesting ? 'Generating...' : 'Generate with AI' }}
               </button>
             </div>
           </div>
@@ -425,7 +425,7 @@ function filterByLabel(labelId: string): void {
               v-if="labelsStore.labels.length === 0"
               class="text-on-surface-variant font-body-sm text-body-sm text-center py-8"
             >
-              No labels yet. Add one above or generate from AI.
+              No labels yet. Add one above or generate with AI.
             </p>
           </div>
         </section>

@@ -921,7 +921,7 @@ async function retry(): Promise<void> {
                 @click="tagsStore.suggestTags()"
               >
                 <span class="material-symbols-outlined text-[18px]">auto_awesome</span>
-                {{ tagsStore.suggesting ? 'Generating...' : 'Generate from AI' }}
+                {{ tagsStore.suggesting ? 'Generating...' : 'Generate with AI' }}
               </button>
             </div>
           </div>

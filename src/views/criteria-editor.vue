@@ -2,9 +2,14 @@
 import { ref, computed } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
+import { useLlmConfigStore } from '@/stores/llm-config';
 import type { Priority } from '@/types';
 
 const criteriaStore = useCriteriaStore();
+const llmConfigStore = useLlmConfigStore();
+
+// Pre-warm LLM config if not already loaded
+llmConfigStore.fetchIfNeeded();
 
 // Read directly from store - pre-warmed at startup, no onMounted fetch needed.
 const aims = computed(() => criteriaStore.aims);
@@ -15,6 +20,12 @@ const newInclusionText = ref('');
 const newExclusionText = ref('');
 const newInclusionPriority = ref<Priority>('standard');
 const newExclusionPriority = ref<Priority>('standard');
+
+// AI assistant state
+const generatingInclusion = ref(false);
+const generatingExclusion = ref(false);
+const inclusionCritiqueText = ref('');
+const exclusionCritiqueText = ref('');
 
 const inclusionCriteria = computed(() =>
   criteria.value.filter((c) => c.criterionType === 'inclusion')
@@ -130,6 +141,68 @@ function priorityLabel(priority: Priority): string {
   };
   return map[priority];
 }
+
+// ── AI assistant logic ──────────────────────────────────────────────
+
+const hasAims = computed(() => aims.value.length > 0);
+const llmConnected = computed(
+  () => llmConfigStore.initialized && llmConfigStore.config.apiKeyEncrypted !== null
+);
+const canUseAi = computed(() => hasAims.value && llmConnected.value);
+
+const inclusionButtonLabel = computed(() =>
+  inclusionCriteria.value.length === 0 ? 'Generate with AI' : 'Critique with AI'
+);
+const exclusionButtonLabel = computed(() =>
+  exclusionCriteria.value.length === 0 ? 'Generate with AI' : 'Critique with AI'
+);
+
+async function handleInclusionAi(): Promise<void> {
+  if (!canUseAi.value || generatingInclusion.value) return;
+  generatingInclusion.value = true;
+  inclusionCritiqueText.value = '';
+  try {
+    if (inclusionCriteria.value.length === 0) {
+      await tauriCommand('generate_criteria', {
+        request: { criterionType: 'inclusion' },
+      });
+      await refetch();
+    } else {
+      const result = await tauriCommand<{ critique: string }>('critique_criteria', {
+        request: { criterionType: 'inclusion' },
+      });
+      inclusionCritiqueText.value = result.critique;
+    }
+  } finally {
+    generatingInclusion.value = false;
+  }
+}
+
+/** Split plain-text critique into paragraphs for safe rendering. */
+function critiqueParagraphs(text: string): string[] {
+  return text.split('\n\n').filter((p) => p.trim().length > 0);
+}
+
+async function handleExclusionAi(): Promise<void> {
+  if (!canUseAi.value || generatingExclusion.value) return;
+  generatingExclusion.value = true;
+  exclusionCritiqueText.value = '';
+  try {
+    if (exclusionCriteria.value.length === 0) {
+      await tauriCommand('generate_criteria', {
+        request: { criterionType: 'exclusion' },
+      });
+      await refetch();
+    } else {
+      const result = await tauriCommand<{ critique: string }>('critique_criteria', {
+        request: { criterionType: 'exclusion' },
+      });
+      exclusionCritiqueText.value = result.critique;
+    }
+  } finally {
+    generatingExclusion.value = false;
+  }
+}
 </script>
 
 <template>
@@ -177,6 +250,14 @@ function priorityLabel(priority: Priority): string {
           <span class="material-symbols-outlined text-green-600">check_circle</span>
           <h2 class="section-panel__title">Inclusion Criteria</h2>
         </div>
+        <div v-if="generatingInclusion" class="ai-loading">
+          <span class="material-symbols-outlined animate-spin">progress_activity</span>
+          <span>Generating…</span>
+        </div>
+        <button v-else class="ai-btn" :disabled="!canUseAi" @click="handleInclusionAi">
+          <span class="material-symbols-outlined">auto_awesome</span>
+          {{ inclusionButtonLabel }}
+        </button>
       </div>
 
       <!-- Add new inclusion criterion -->
@@ -240,6 +321,24 @@ function priorityLabel(priority: Priority): string {
       </div>
     </section>
 
+    <!-- AI Critique: Inclusion -->
+    <div v-if="inclusionCritiqueText" class="ai-critique-card">
+      <div class="ai-critique-card__header">
+        <div class="ai-critique-card__title-group">
+          <span class="material-symbols-outlined">auto_awesome</span>
+          <span class="ai-critique-card__title">AI Critique — Inclusion Criteria</span>
+        </div>
+        <button class="ai-critique-card__dismiss" @click="inclusionCritiqueText = ''">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="ai-critique-card__body">
+        <p v-for="(para, i) in critiqueParagraphs(inclusionCritiqueText)" :key="i">
+          {{ para }}
+        </p>
+      </div>
+    </div>
+
     <!-- Section 3: Exclusion Criteria -->
     <section class="section-panel">
       <div class="section-panel__header">
@@ -247,6 +346,14 @@ function priorityLabel(priority: Priority): string {
           <span class="material-symbols-outlined text-error">cancel</span>
           <h2 class="section-panel__title">Exclusion Criteria</h2>
         </div>
+        <div v-if="generatingExclusion" class="ai-loading">
+          <span class="material-symbols-outlined animate-spin">progress_activity</span>
+          <span>Generating…</span>
+        </div>
+        <button v-else class="ai-btn" :disabled="!canUseAi" @click="handleExclusionAi">
+          <span class="material-symbols-outlined">auto_awesome</span>
+          {{ exclusionButtonLabel }}
+        </button>
       </div>
 
       <!-- Add new exclusion criterion -->
@@ -309,6 +416,24 @@ function priorityLabel(priority: Priority): string {
         </div>
       </div>
     </section>
+
+    <!-- AI Critique: Exclusion -->
+    <div v-if="exclusionCritiqueText" class="ai-critique-card">
+      <div class="ai-critique-card__header">
+        <div class="ai-critique-card__title-group">
+          <span class="material-symbols-outlined">auto_awesome</span>
+          <span class="ai-critique-card__title">AI Critique — Exclusion Criteria</span>
+        </div>
+        <button class="ai-critique-card__dismiss" @click="exclusionCritiqueText = ''">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="ai-critique-card__body">
+        <p v-for="(para, i) in critiqueParagraphs(exclusionCritiqueText)" :key="i">
+          {{ para }}
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -619,5 +744,134 @@ function priorityLabel(priority: Priority): string {
 
 .btn-primary-sm:hover {
   background-color: #4f46e5;
+}
+
+/* AI button — matches Tags & Labels pattern */
+.ai-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #e8def8;
+  color: #4a1564;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid #c8aee6;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.ai-btn:hover:not(:disabled) {
+  background-color: #d8c8f0;
+}
+
+.ai-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ai-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+/* AI loading indicator */
+.ai-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #f3e8ff;
+  color: #7c3aed;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid #ddd6fe;
+  border-radius: 0.5rem;
+  white-space: nowrap;
+  animation: pulse-subtle 1.5s ease-in-out infinite;
+}
+
+.ai-loading .material-symbols-outlined {
+  font-size: 18px;
+}
+
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* AI Critique card */
+.ai-critique-card {
+  background-color: #f5f0ff;
+  border: 1px solid #d8c8f0;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.ai-critique-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.ai-critique-card__title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #6b21a8;
+}
+
+.ai-critique-card__title-group .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.ai-critique-card__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ai-critique-card__dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+
+.ai-critique-card__dismiss:hover {
+  color: #ba1a1a;
+  background-color: #fef2f2;
+}
+
+.ai-critique-card__dismiss .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.ai-critique-card__body {
+  font-size: 14px;
+  line-height: 22px;
+  color: #1b1b24;
+}
+
+.ai-critique-card__body :deep(p) {
+  margin-bottom: 0.75rem;
+}
+
+.ai-critique-card__body :deep(p:last-child) {
+  margin-bottom: 0;
 }
 </style>
