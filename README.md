@@ -233,15 +233,21 @@ Pre-built installers for all major platforms are available on the [GitHub Releas
 
 > **Note:** macOS builds are for **Apple Silicon (ARM64)** only. Intel (x86_64) Macs are not supported in the current release.
 
+### Signed Builds
+
+- **Verified Builds** - Verified signed builds can be downloaded from the Microsoft Store for Windows users. Use the Microsoft Store app to do so.
+
 ### ⚠️ Unsigned Build Notice
 
-Bango binaries are **not code-signed**. This means:
+Bango binaries downloaded from Github are **not code-signed**. This means:
 
 - **The application has not been verified by Apple or Microsoft** - you will see security warnings on first launch.
 - **The binaries are safe to run** - they are built from the open-source code in this repository via [GitHub Actions CI](.github/workflows/release.yml). You can verify this by examining the workflow and building from source yourself.
-- **We do not hold Apple or Microsoft developer certificates**, which are required for signed distribution.
+- **We do not hold Apple certificate**, which is required for signed distribution but the software is still fully functional.
 
-If you prefer not to bypass OS security prompts, you can [build from source](#getting-started) instead.
+If you prefer not to bypass OS security prompts, you can [build from source](#getting-started) yourself instead.
+
+
 
 ### Platform-Specific Instructions
 
@@ -249,6 +255,7 @@ If you prefer not to bypass OS security prompts, you can [build from source](#ge
 <summary><strong>🐧 Linux</strong></summary>
 
 **AppImage (recommended):**
+This is a full self contained package.
 
 ```bash
 chmod +x Bango_*_amd64.AppImage
@@ -260,9 +267,15 @@ chmod +x Bango_*_amd64.AppImage
 **DEB package:**
 
 ```bash
+sudo apt install ./Bango_*_amd64.deb
+```
+or
+
+```bash
 sudo dpkg -i Bango_*_amd64.deb
 sudo apt-get install -f   # resolve any missing dependencies
 ```
+
 
 **RPM package:**
 
