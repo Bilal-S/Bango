@@ -161,12 +161,15 @@ pub async fn generate_criteria(
     };
 
     let system_prompt = "You are a systematic literature review assistant. Based on the research aims provided, \
-        suggest appropriate criteria for screening research papers in a systematic review.";
+        suggest appropriate criteria for screening research papers in a systematic review. \
+        Write criterion text concisely and directly — do not prefix with phrases like \
+        'Include studies that…' or 'Exclude studies that…'. The criterion type is already known from context. \
+        Do not use any EmDash characters your response. Example: write 'Randomized controlled trials only' not 'Include studies that use randomized controlled trials'.";
 
     let user_prompt = format!(
         r#"## Task
 First, determine the field of study based on the research aims below.
-Then suggest up to 5 {type_label} criteria that would be appropriate for this type of research.
+Then suggest up to 8 {type_label} criteria that would be appropriate for this type of research.
 Criteria should follow common scientific and methodological patterns for systematic reviews in this domain.
 
 ## Research Aims
@@ -185,7 +188,9 @@ Rules:
 - Priority values: critical, high, standard, low, optional. Use "standard" unless there's a clear reason for a different priority.
 - Each criterion should be clear, specific, and actionable.
 - Criteria should be directly relevant to the research aims.
-- Do not duplicate or overlap concepts."#,
+- Do not duplicate or overlap concepts.
+- Do not use EmDash chracters in your response.
+- Write criterion text concisely. Do NOT start with "Include studies that…" or "Exclude studies that…" — state the essential condition directly."#,
         type_label = type_label,
         research_aims = aims_list.join("\n"),
     );
@@ -292,20 +297,23 @@ pub async fn critique_criteria(
         .map(|(i, c)| format!("{}. [{}] {}", i + 1, c.priority.as_str(), c.text))
         .collect();
 
-    let type_label = if criterion_type == "inclusion" {
-        "Inclusion"
+    let (type_label, opposite_label) = if criterion_type == "inclusion" {
+        ("Inclusion", "exclusion")
     } else {
-        "Exclusion"
+        ("Exclusion", "inclusion")
     };
 
     let system_prompt = "You are a systematic literature review assistant. Critically evaluate the appropriateness \
-        of screening criteria for a systematic literature review. Provide specific, actionable feedback.";
+        of screening criteria for a systematic literature review. Provide specific, actionable feedback. \
+        Only evaluate the specific criteria type provided. Never suggest adding criteria of the opposite type.";
 
     let user_prompt = format!(
         r#"## Task
 Evaluate the following {type_label} Criteria for a systematic literature review.
 Assess their appropriateness, completeness, clarity, and methodological rigor.
 Provide specific, actionable suggestions for improvement.
+
+IMPORTANT: Focus exclusively on {type_label} criteria. Do NOT suggest adding {opposite_label} criteria — those are managed separately.
 
 ## Research Aims
 {research_aims}
@@ -315,11 +323,12 @@ Provide specific, actionable suggestions for improvement.
 
 Provide your critique as plain text with specific recommendations. Include:
 1. Overall assessment of the criteria quality
-2. Any gaps or missing criteria that should be considered
+2. Any gaps or missing {type_label} criteria that should be considered
 3. Suggestions for improving clarity or specificity
 4. Priority adjustments if warranted
 Do not return JSON."#,
         type_label = type_label,
+        opposite_label = opposite_label,
         research_aims = aims_list.join("\n"),
         criteria = criteria_list.join("\n"),
     );
