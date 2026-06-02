@@ -294,3 +294,32 @@ TY  - JOUR\nTI  - Keep Two\nAU  - Author C\nAB  - Abstract\nER  -\n";
     assert_eq!(all.len(), 2);
     assert!(all.iter().all(|a| !a.title.contains("Exclude")));
 }
+
+#[test]
+fn test_parse_t1_as_title_alternative() {
+    // T1 is an alternative to TI used by some RIS exporters (e.g., certain EndNote versions)
+    let ris = "TY  - JOUR\nT1  - Title via T1 Tag\nAU  - Author A\nAB  - Abstract text\nER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+    assert_eq!(
+        result.records[0].title.as_deref(),
+        Some("Title via T1 Tag")
+    );
+
+    // Verify the record passes validation
+    let errors = validate_record(&result.records[0], 1);
+    assert!(errors.is_empty(), "T1-titled record should be valid: {:?}", errors);
+}
+
+#[test]
+fn test_parse_t1_fallback_when_ti_present() {
+    // When both TI and T1 are present, TI takes precedence (parsed first, T1 overwrites)
+    let ris = "TY  - JOUR\nTI  - Title from TI\nT1  - Title from T1\nAU  - Author\nAB  - Abstract\nER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+    // Last one wins (T1 overwrites TI since they map to the same field)
+    assert_eq!(
+        result.records[0].title.as_deref(),
+        Some("Title from T1")
+    );
+}

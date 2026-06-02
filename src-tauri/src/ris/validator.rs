@@ -20,7 +20,7 @@ pub fn validate_record(record: &RisRecord, record_index: usize) -> Vec<RisParseE
     if record.title.as_ref().is_none_or(|t| t.trim().is_empty()) {
         errors.push(RisParseError {
             record_index,
-            message: "Missing required field: Title (TI)".to_string(),
+            message: "Missing required field: Title (TI or T1)".to_string(),
         });
     }
 

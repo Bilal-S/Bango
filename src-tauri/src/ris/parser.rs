@@ -135,7 +135,7 @@ fn find_next_tag_start(s: &str) -> Option<usize> {
 fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
     match tag {
         "TY" => record.reference_type = Some(value.to_string()),
-        "TI" => record.title = Some(value.to_string()),
+        "TI" | "T1" => record.title = Some(value.to_string()),
         "AB" => record.abstract_text = Some(value.to_string()),
         "AU" => record.authors.push(value.to_string()),
         "PY" => {
