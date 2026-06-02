@@ -148,17 +148,10 @@ pub async fn generate_criteria(
         (config, aims)
     };
 
-    let aims_list: Vec<String> = aims
-        .iter()
-        .enumerate()
-        .map(|(i, a)| format!("{}. {}", i + 1, a.text))
-        .collect();
+    let aims_list: Vec<String> =
+        aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
 
-    let type_label = if criterion_type == "inclusion" {
-        "inclusion"
-    } else {
-        "exclusion"
-    };
+    let type_label = if criterion_type == "inclusion" { "inclusion" } else { "exclusion" };
 
     let system_prompt = "You are a systematic literature review assistant. Based on the research aims provided, \
         suggest appropriate criteria for screening research papers in a systematic review. \
@@ -214,10 +207,7 @@ Rules:
             arr.iter()
                 .filter_map(|v| {
                     let text = v["text"].as_str()?.to_string();
-                    let priority = v["priority"]
-                        .as_str()
-                        .unwrap_or("standard")
-                        .to_string();
+                    let priority = v["priority"].as_str().unwrap_or("standard").to_string();
                     Some((text, priority))
                 })
                 .collect()
@@ -285,11 +275,8 @@ pub async fn critique_criteria(
         (config, aims, criteria)
     };
 
-    let aims_list: Vec<String> = aims
-        .iter()
-        .enumerate()
-        .map(|(i, a)| format!("{}. {}", i + 1, a.text))
-        .collect();
+    let aims_list: Vec<String> =
+        aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
 
     let criteria_list: Vec<String> = existing_criteria
         .iter()

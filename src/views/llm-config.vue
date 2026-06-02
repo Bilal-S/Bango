@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch, ref, computed } from 'vue';
+import { watch, ref, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
 import { useExport } from '@/composables/use-export';
@@ -34,6 +34,11 @@ const showErrorLog = ref(false);
 const showRawError = ref(false);
 const errorLogEntries = ref<Array<{ id: string; timestamp: string; details: string | null }>>([]);
 const errorLogLoading = ref(false);
+
+// Max Context Tokens inline editing
+const editingContextTokens = ref(false);
+const contextTokensInput = ref('');
+const contextTokensInputRef = ref<HTMLInputElement | null>(null);
 
 function handleImportFile(event: Event): void {
   const target = event.target as HTMLInputElement;
@@ -98,6 +103,38 @@ async function doDeleteProject(): Promise<void> {
     deleteConfirmText.value = '';
     router.push('/');
   }
+}
+
+function startEditingContextTokens(): void {
+  editingContextTokens.value = true;
+  contextTokensInput.value = String(config.value.contextWindowTokens);
+  nextTick(() => {
+    contextTokensInputRef.value?.focus();
+    contextTokensInputRef.value?.select();
+  });
+}
+
+const CONTEXT_MAX_CEILING = 1_000_000;
+
+function commitContextTokens(): void {
+  const raw = contextTokensInput.value.replace(/[^0-9]/g, '');
+  let parsed = parseInt(raw, 10);
+  if (isNaN(parsed) || parsed < 1000) {
+    parsed = 1000;
+  } else if (parsed > CONTEXT_MAX_CEILING) {
+    parsed = CONTEXT_MAX_CEILING;
+  }
+  // Round to nearest 1000 to keep in sync with slider step
+  config.value.contextWindowTokens = Math.round(parsed / 1000) * 1000;
+  editingContextTokens.value = false;
+}
+
+const contextSliderMax = computed(() => Math.max(config.value.contextWindowTokens, 50000));
+
+function formatCompact(n: number): string {
+  if (n >= 1_000_000) return `${n / 1_000_000}M`;
+  if (n >= 1_000) return `${n / 1_000}k`;
+  return String(n);
 }
 
 const providerDefaults: Record<string, { url: string; models: string[] }> = {
@@ -386,21 +423,34 @@ watch(
           <div class="field">
             <div class="field__header">
               <label class="field__label">Max Context Tokens</label>
-              <span class="field__value-badge">{{
-                config.contextWindowTokens.toLocaleString()
-              }}</span>
+              <span
+                v-if="!editingContextTokens"
+                class="field__value-badge field__value-badge--editable"
+                @click="startEditingContextTokens"
+                >{{ config.contextWindowTokens.toLocaleString() }}</span
+              >
+              <input
+                v-else
+                ref="contextTokensInputRef"
+                v-model="contextTokensInput"
+                type="text"
+                class="field__value-input"
+                @blur="commitContextTokens"
+                @keydown.enter="commitContextTokens"
+                @keydown.escape="editingContextTokens = false"
+              />
             </div>
             <input
               v-model.number="config.contextWindowTokens"
               type="range"
               class="field__range"
               min="1000"
-              max="50000"
+              :max="contextSliderMax"
               step="1000"
             />
             <div class="field__range-labels">
               <span>1k</span>
-              <span>50k</span>
+              <span>{{ formatCompact(contextSliderMax) }}</span>
             </div>
           </div>
 
@@ -985,6 +1035,24 @@ watch(
   padding: 0.125rem 0.5rem;
   border-radius: 0.25rem;
   font-weight: 500;
+}
+
+.field__value-badge--editable {
+  /* No visual affordance — intentionally undiscoverable */
+}
+
+.field__value-input {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+  color: #0f0069;
+  background-color: #ffffff;
+  border: 1px solid #3525cd;
+  box-shadow: 0 0 0 1px #3525cd;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+  width: 7rem;
+  outline: none;
 }
 
 /* Inline fields */

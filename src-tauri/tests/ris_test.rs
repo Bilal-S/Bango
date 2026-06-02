@@ -301,10 +301,7 @@ fn test_parse_t1_as_title_alternative() {
     let ris = "TY  - JOUR\nT1  - Title via T1 Tag\nAU  - Author A\nAB  - Abstract text\nER  -\n";
     let result = parse_ris(ris).expect("Parse failed");
     assert_eq!(result.records.len(), 1);
-    assert_eq!(
-        result.records[0].title.as_deref(),
-        Some("Title via T1 Tag")
-    );
+    assert_eq!(result.records[0].title.as_deref(), Some("Title via T1 Tag"));
 
     // Verify the record passes validation
     let errors = validate_record(&result.records[0], 1);
@@ -318,8 +315,5 @@ fn test_parse_t1_fallback_when_ti_present() {
     let result = parse_ris(ris).expect("Parse failed");
     assert_eq!(result.records.len(), 1);
     // Last one wins (T1 overwrites TI since they map to the same field)
-    assert_eq!(
-        result.records[0].title.as_deref(),
-        Some("Title from T1")
-    );
+    assert_eq!(result.records[0].title.as_deref(), Some("Title from T1"));
 }
