@@ -25,7 +25,7 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 aes-gcm = "0.10"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 sha2 = "0.10"
-# rand removed — confirmed unused (aes_gcm uses OsRng from its own crate)
+# rand removed - confirmed unused (aes_gcm uses OsRng from its own crate)
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
 async-trait = "0.1"
