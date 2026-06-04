@@ -6,6 +6,7 @@ defineProps<{
   rangeStart: number;
   rangeEnd: number;
   totalCount: number;
+  isFiltered: boolean;
   canGoPrev: boolean;
   canGoNext: boolean;
 }>();
@@ -103,9 +104,14 @@ function onPageSizeChange(event: Event): void {
       >
         &laquo;
       </button>
-      <span class="text-xs text-slate-500 min-w-[4rem] sm:min-w-[5rem] text-center">
-        {{ rangeStart }}-{{ rangeEnd }}<span class="hidden sm:inline"> of </span
-        ><span class="sm:hidden">/</span>{{ totalCount }}
+      <span
+        class="flex flex-col items-center text-xs text-slate-500 min-w-[4rem] sm:min-w-[5rem] text-center leading-tight"
+      >
+        <span
+          >{{ rangeStart }}-{{ rangeEnd }}<span class="hidden sm:inline"> of </span
+          ><span class="sm:hidden">/</span>{{ totalCount }}</span
+        >
+        <span v-if="isFiltered" class="text-[10px] text-indigo-500 font-medium">filtered</span>
       </span>
       <button
         class="px-1.5 sm:px-2 py-1 text-xs rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"

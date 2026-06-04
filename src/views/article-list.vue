@@ -56,6 +56,8 @@ const {
   goToPage,
   searchText,
   activeTotalCount,
+  isFiltered,
+  resultCount,
   rangeStart,
   rangeEnd,
   pageSize,
@@ -229,7 +231,8 @@ async function handleBulkAddLabel(): Promise<void> {
         :page-size="pageSize"
         :range-start="rangeStart"
         :range-end="rangeEnd"
-        :total-count="activeTotalCount"
+        :total-count="resultCount"
+        :is-filtered="isFiltered"
         :can-go-prev="canGoPrev"
         :can-go-next="canGoNext"
         @toggle-filters="toggleFilters"

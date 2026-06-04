@@ -321,14 +321,35 @@ export function useArticleSearch() {
     return statusCounts.value[tab as ArticleStatus] ?? 0;
   });
 
+  /** Whether a search or filter is currently active. */
+  const isFiltered = computed(() => {
+    return !!(
+      query.search ||
+      query.author ||
+      query.journal ||
+      query.tags.length > 0 ||
+      query.labels.length > 0 ||
+      query.yearFrom !== null ||
+      query.yearTo !== null
+    );
+  });
+
+  /** Display count: filtered result length when filtering, tab total otherwise. */
+  const resultCount = computed(() => {
+    if (isFiltered.value) return articles.value.length;
+    return activeTotalCount.value;
+  });
+
   /** 1-based index of the first displayed article on the current page. */
   const rangeStart = computed(() => {
-    if (activeTotalCount.value === 0) return 0;
+    if (resultCount.value === 0) return 0;
+    if (isFiltered.value) return 1;
     return (currentPage.value - 1) * pageSize.value + 1;
   });
 
   /** 1-based index of the last displayed article on the current page. */
   const rangeEnd = computed(() => {
+    if (isFiltered.value) return articles.value.length;
     return Math.min(currentPage.value * pageSize.value, activeTotalCount.value);
   });
 
@@ -528,6 +549,8 @@ export function useArticleSearch() {
     goToPage,
     searchText,
     activeTotalCount,
+    isFiltered,
+    resultCount,
     rangeStart,
     rangeEnd,
     changePageSize,
