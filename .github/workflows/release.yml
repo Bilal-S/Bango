@@ -243,12 +243,26 @@ jobs:
           # src-tauri/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
 
+      - name: Check for version changes
+        id: check_changes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
+          if git diff --cached --quiet; then
+            echo "needs_commit=false" >> "$GITHUB_OUTPUT"
+            echo "No version changes needed — files already at $VERSION"
+          else
+            echo "needs_commit=true" >> "$GITHUB_OUTPUT"
+            echo "Version changed to $VERSION"
+          fi
+
       - name: Commit and push version sync
+        if: steps.check_changes.outputs.needs_commit == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
           git commit -m "chore(release): sync version to $VERSION"
           git push
