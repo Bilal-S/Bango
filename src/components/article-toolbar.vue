@@ -31,12 +31,13 @@ function onPageSizeChange(event: Event): void {
 
 <template>
   <div
-    class="flex items-center justify-between mb-6 bg-white p-3 rounded-xl border border-slate-200 shadow-sm gap-3"
+    class="toolbar-container flex flex-wrap items-center justify-between mb-6 bg-white p-3 rounded-xl border border-slate-200 shadow-sm gap-3"
+    style="container-type: inline-size"
   >
-    <div class="flex items-center gap-3">
+    <div class="toolbar-left-group flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
       <!-- Filter toggle -->
       <button
-        class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors shrink-0"
+        class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors shrink-0"
         :class="
           showFilters
             ? 'bg-indigo-100 text-indigo-700'
@@ -45,11 +46,11 @@ function onPageSizeChange(event: Event): void {
         @click="emit('toggleFilters')"
       >
         <span class="material-symbols-outlined text-[18px]">filter_list</span>
-        Filter
+        <span class="hidden sm:inline">Filter</span>
       </button>
 
       <!-- Search input -->
-      <div class="relative flex items-center">
+      <div class="toolbar-search-group relative flex items-center min-w-0 flex-1">
         <span
           class="material-symbols-outlined text-[16px] text-slate-400 absolute left-2.5 pointer-events-none"
         >
@@ -59,7 +60,7 @@ function onPageSizeChange(event: Event): void {
           type="text"
           :value="searchText"
           placeholder="Search title or abstract..."
-          class="pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 w-56"
+          class="toolbar-search w-full pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
           @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
           @keyup.enter="emit('search')"
         />
@@ -74,20 +75,21 @@ function onPageSizeChange(event: Event): void {
         </button>
       </div>
 
-      <!-- Search button -->
+      <!-- Search button (icon only) -->
       <button
-        class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors active:scale-95 shrink-0"
+        class="toolbar-search-btn px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors active:scale-95 shrink-0"
+        title="Search"
         @click="emit('search')"
       >
-        Search
+        <span class="material-symbols-outlined text-[18px]">search</span>
       </button>
     </div>
 
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
       <!-- Page size dropdown -->
       <select
         :value="pageSize"
-        class="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer"
+        class="toolbar-page-size px-1.5 sm:px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer"
         @change="onPageSizeChange"
       >
         <option v-for="size in PAGE_SIZES" :key="size" :value="size">{{ size }}</option>
@@ -95,17 +97,18 @@ function onPageSizeChange(event: Event): void {
 
       <!-- Page navigation -->
       <button
-        class="px-2 py-1 text-xs rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+        class="px-1.5 sm:px-2 py-1 text-xs rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
         :disabled="!canGoPrev"
         @click="emit('goPrev')"
       >
         &laquo;
       </button>
-      <span class="text-xs text-slate-500 min-w-[5rem] text-center">
-        {{ rangeStart }}-{{ rangeEnd }} of {{ totalCount }}
+      <span class="text-xs text-slate-500 min-w-[4rem] sm:min-w-[5rem] text-center">
+        {{ rangeStart }}-{{ rangeEnd }}<span class="hidden sm:inline"> of </span
+        ><span class="sm:hidden">/</span>{{ totalCount }}
       </span>
       <button
-        class="px-2 py-1 text-xs rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+        class="px-1.5 sm:px-2 py-1 text-xs rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
         :disabled="!canGoNext"
         @click="emit('goNext')"
       >
@@ -114,12 +117,31 @@ function onPageSizeChange(event: Event): void {
 
       <!-- Export -->
       <button
-        class="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shrink-0"
+        class="toolbar-export flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shrink-0"
         @click="emit('exportRis')"
       >
         <span class="material-symbols-outlined text-[16px]">download</span>
-        Export
+        <span class="hidden sm:inline">Export</span>
       </button>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* ── Stacked layout: force left group full-width so right wraps below ── */
+@container (max-width: 499px) {
+  .toolbar-left-group {
+    flex-basis: 100%;
+  }
+}
+
+/* ── Minimal view: hide search, page size, export ── */
+@container (max-width: 299px) {
+  .toolbar-search-group,
+  .toolbar-search-btn,
+  .toolbar-page-size,
+  .toolbar-export {
+    display: none;
+  }
+}
+</style>
