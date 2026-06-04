@@ -125,7 +125,7 @@ async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
   if (isLast) {
     showDecisionNotification('Decision saved.', 'info');
   } else {
-    showDecisionNotification('Decision saved. Moving to next article.', 'success');
+    showDecisionNotification('Decision saved. Moved to next article.', 'success');
   }
 }
 
