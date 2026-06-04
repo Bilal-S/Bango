@@ -736,7 +736,7 @@ fn set_screening_error(
     raw_response: Option<&str>,
 ) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE articles SET screening_error = 1, screened_at = datetime('now') WHERE id = ?1",
+        "UPDATE articles SET screening_error = 1, screened_at = datetime('now'), changed_at = datetime('now') WHERE id = ?1",
         rusqlite::params![article_id],
     )?;
 
@@ -776,7 +776,7 @@ fn update_article_after_screening(
 
     conn.execute(
         "UPDATE articles SET status = ?1, ai_decision = ?2, ai_reasoning = ?3, ai_confidence = ?4, \
-         matched_inclusion_criteria = ?5, matched_exclusion_criteria = ?6, screened_at = datetime('now'), \
+         matched_inclusion_criteria = ?5, matched_exclusion_criteria = ?6, screened_at = datetime('now'), changed_at = datetime('now'), \
          actual_tokens = ?7 \
          WHERE id = ?8",
         rusqlite::params![

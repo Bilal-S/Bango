@@ -271,6 +271,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let import_source = get_str_field(a, "importSource", "import_source");
         let imported_at = get_str_field(a, "importedAt", "imported_at")
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        let changed_at = get_str_field(a, "changedAt", "changed_at")
+            .unwrap_or_else(|| imported_at.clone());
         let screened_at = get_str_field(a, "screenedAt", "screened_at");
         // Preserve sequence_id from backup; old backups lack it, so assign 1-based index
         let sequence_id = a.get("sequenceId").and_then(|v| v.as_i64()).unwrap_or_else(|| {
@@ -285,11 +287,11 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
                 user_notes, ris_extras, duplicate_of, ai_decision, ai_reasoning, ai_confidence,
                 matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
-                imported_at, screened_at
+                imported_at, changed_at, screened_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38,
-                ?39, ?40, ?41, ?42
+                ?39, ?40, ?41, ?42, ?43
             )",
             rusqlite::params![
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
@@ -298,7 +300,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
                 user_notes, ris_extras, duplicate_of, ai_decision, ai_reasoning, ai_confidence,
                 matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
-                imported_at, screened_at
+                imported_at, changed_at, screened_at
             ],
         )?;
     }

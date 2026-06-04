@@ -232,37 +232,51 @@ export function useArticleSearch() {
 
   async function moveArticle(id: string, newStatus: string): Promise<{ isLast: boolean }> {
     await tauriCommand('update_article_status', { id, newStatus });
-    // Update the article in-place in the local list to avoid a full table redraw / scroll reset
+    // Re-fetch the article so we get the updated changedAt from the backend
+    const fresh = await tauriCommand<Article>('get_article', { id });
+    // Patch the article in-place to reflect new status + changedAt without a full redraw
     const idx = articles.value.findIndex((a) => a.id === id);
     if (idx >= 0) {
-      const updated: Article = { ...articles.value[idx]!, status: newStatus as ArticleStatus };
-      articles.value.splice(idx, 1, updated);
+      articles.value.splice(idx, 1, fresh);
     }
     const isLast = !hasNext.value;
     if (!isLast) {
       await navigateNext();
     } else {
-      await selectArticle(id);
+      selectedArticle.value = fresh;
+      auditTrail.value = await tauriCommand<AuditEntry[]>('get_audit_trail', { articleId: id });
     }
     // Refresh counts in the background (e.g. tab badges)
     void fetchCounts();
     return { isLast };
   }
 
+  /** Patch the articles list row with the latest selectedArticle data so the table redraws. */
+  function syncArticleToList(id: string): void {
+    if (!selectedArticle.value || selectedArticle.value.id !== id) return;
+    const idx = articles.value.findIndex((a) => a.id === id);
+    if (idx >= 0) {
+      articles.value.splice(idx, 1, { ...selectedArticle.value });
+    }
+  }
+
   async function updateNotes(id: string, notes: string): Promise<void> {
     await tauriCommand('update_article_notes', { id, notes });
     await selectArticle(id);
+    syncArticleToList(id);
   }
 
   async function updateTags(id: string, tagIds: string[]): Promise<void> {
     await tauriCommand('update_article_tags', { id, tagIds });
     await selectArticle(id);
+    syncArticleToList(id);
     await tagsStore.fetchTags();
   }
 
   async function updateLabels(id: string, labelIds: string[]): Promise<void> {
     await tauriCommand('update_article_labels', { id, labelIds });
     await selectArticle(id);
+    syncArticleToList(id);
     await labelsStore.fetchLabels();
   }
 
@@ -273,6 +287,7 @@ export function useArticleSearch() {
   ): Promise<void> {
     await tauriCommand('update_article_criteria', { id, inclusionIds, exclusionIds });
     await selectArticle(id);
+    syncArticleToList(id);
   }
 
   const selectedIndex = computed(() => {

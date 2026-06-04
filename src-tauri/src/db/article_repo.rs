@@ -102,6 +102,7 @@ pub fn get_next_unscreened_working_batch(
             manual_override: false,
             import_source: None,
             imported_at: "".to_string(),
+            changed_at: "".to_string(),
             screened_at: None,
             data_length: None,
             token_estimate: None,
@@ -355,14 +356,14 @@ pub fn mark_as_duplicate(
     surviving_id: &str,
 ) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE articles SET duplicate_of = ?1 WHERE id = ?2",
+        "UPDATE articles SET duplicate_of = ?1, changed_at = datetime('now') WHERE id = ?2",
         params![surviving_id, article_id],
     )?;
     Ok(())
 }
 
 pub fn move_to_working(conn: &Connection, article_id: &str) -> Result<(), AppError> {
-    conn.execute("UPDATE articles SET status = 'working' WHERE id = ?1", params![article_id])?;
+    conn.execute("UPDATE articles SET status = 'working', changed_at = datetime('now') WHERE id = ?1", params![article_id])?;
     Ok(())
 }
 
@@ -377,7 +378,7 @@ pub fn move_articles_to_working_batch(
     let mut count = 0usize;
     for id in article_ids {
         let rows = conn.execute(
-            "UPDATE articles SET status = 'working' WHERE id = ?1 AND status = 'duplicate'",
+            "UPDATE articles SET status = 'working', changed_at = datetime('now') WHERE id = ?1 AND status = 'duplicate'",
             params![id],
         )?;
         count += rows;
@@ -495,7 +496,8 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
         "status" => format!(" ORDER BY status COLLATE NOCASE {sort_dir}"),
         "aiConfidence" => format!(" ORDER BY ai_confidence {sort_dir} NULLS LAST"),
         "importedAt" => format!(" ORDER BY imported_at {sort_dir}"),
-        _ => format!(" ORDER BY imported_at {sort_dir}"),
+        "changedAt" => format!(" ORDER BY changed_at {sort_dir}"),
+        _ => format!(" ORDER BY changed_at {sort_dir}"),
     };
     sql.push_str(&order_clause);
 
@@ -529,7 +531,7 @@ pub fn update_article_status(
         })?;
 
     conn.execute(
-        "UPDATE articles SET status = ?1, manual_override = 1 WHERE id = ?2",
+        "UPDATE articles SET status = ?1, manual_override = 1, changed_at = datetime('now') WHERE id = ?2",
         params![new_status, article_id],
     )?;
 
@@ -551,6 +553,10 @@ pub fn update_article_tags(
     article_id: &str,
     tag_names: &[String],
 ) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
+        [article_id],
+    )?;
     conn.execute("DELETE FROM article_tags WHERE article_id = ?1", [article_id])?;
 
     for tag_name in tag_names {
@@ -583,6 +589,10 @@ pub fn update_article_labels(
     article_id: &str,
     label_names: &[String],
 ) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
+        [article_id],
+    )?;
     conn.execute("DELETE FROM article_labels WHERE article_id = ?1", [article_id])?;
 
     for label_name in label_names {
@@ -611,7 +621,7 @@ pub fn update_article_labels(
 }
 
 pub fn update_user_notes(conn: &Connection, article_id: &str, notes: &str) -> Result<(), AppError> {
-    conn.execute("UPDATE articles SET user_notes = ?1 WHERE id = ?2", params![notes, article_id])?;
+    conn.execute("UPDATE articles SET user_notes = ?1, changed_at = datetime('now') WHERE id = ?2", params![notes, article_id])?;
     Ok(())
 }
 
@@ -624,7 +634,7 @@ pub fn update_article_criteria(
     let inc_json = serde_json::to_string(inclusion_ids)?;
     let exc_json = serde_json::to_string(exclusion_ids)?;
     conn.execute(
-        "UPDATE articles SET matched_inclusion_criteria = ?1, matched_exclusion_criteria = ?2 WHERE id = ?3",
+        "UPDATE articles SET matched_inclusion_criteria = ?1, matched_exclusion_criteria = ?2, changed_at = datetime('now') WHERE id = ?3",
         params![inc_json, exc_json, article_id],
     )?;
     Ok(())
@@ -643,13 +653,13 @@ pub fn override_ai_decision(
         })?;
 
     conn.execute(
-        "UPDATE articles SET ai_decision = ?1, status = ?2, manual_override = 1 WHERE id = ?3",
+        "UPDATE articles SET ai_decision = ?1, status = ?2, manual_override = 1, changed_at = datetime('now') WHERE id = ?3",
         params![new_decision, new_status, article_id],
     )?;
 
     if let Some(reason) = reasoning {
         conn.execute(
-            "UPDATE articles SET ai_reasoning = ?1 WHERE id = ?2",
+            "UPDATE articles SET ai_reasoning = ?1, changed_at = datetime('now') WHERE id = ?2",
             params![reason, article_id],
         )?;
     }
@@ -818,6 +828,7 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         manual_override: manual_override_int != 0,
         import_source: row.get("import_source")?,
         imported_at: row.get("imported_at")?,
+        changed_at: row.get("changed_at")?,
         screened_at: row.get("screened_at")?,
         data_length: row.get("data_length")?,
         token_estimate: row.get("token_estimate")?,
@@ -829,7 +840,7 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
 /// that were screened but didn't get a status change, so they can be re-screened.
 pub fn reset_screening_errors(conn: &Connection) -> Result<usize, AppError> {
     let rows = conn.execute(
-        "UPDATE articles SET screened_at = NULL, screening_error = 0 \
+        "UPDATE articles SET screened_at = NULL, screening_error = 0, changed_at = datetime('now') \
          WHERE status = 'working' AND screened_at IS NOT NULL",
         [],
     )?;
@@ -840,7 +851,7 @@ pub fn reset_screening_errors(conn: &Connection) -> Result<usize, AppError> {
 /// that have been previously screened, so they can be re-screened.
 pub fn reset_working_list(conn: &Connection) -> Result<usize, AppError> {
     let rows = conn.execute(
-        "UPDATE articles SET screened_at = NULL, screening_error = 0 \
+        "UPDATE articles SET screened_at = NULL, screening_error = 0, changed_at = datetime('now') \
          WHERE status = 'working' AND screened_at IS NOT NULL",
         [],
     )?;
@@ -859,7 +870,7 @@ pub fn bulk_update_article_status(
     let mut count = 0usize;
     for id in ids {
         let rows = conn.execute(
-            "UPDATE articles SET status = ?1, manual_override = 1 WHERE id = ?2",
+            "UPDATE articles SET status = ?1, manual_override = 1, changed_at = datetime('now') WHERE id = ?2",
             params![new_status, id],
         )?;
         count += rows;

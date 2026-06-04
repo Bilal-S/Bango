@@ -46,6 +46,7 @@ pub struct Article {
     pub manual_override: bool,
     pub import_source: Option<String>,
     pub imported_at: String,
+    pub changed_at: String,
     pub screened_at: Option<String>,
     pub data_length: Option<usize>,
     pub token_estimate: Option<usize>,

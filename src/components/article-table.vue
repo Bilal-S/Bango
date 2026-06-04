@@ -37,7 +37,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'journal', label: 'Journal', responsiveClass: 'col-journal' },
   { key: 'status', label: 'Status' },
   { key: 'aiConfidence', label: 'Confidence', width: 'w-16', responsiveClass: 'col-confidence' },
-  { key: 'importedAt', label: 'Imported', width: 'w-28', responsiveClass: 'col-imported' },
+  { key: 'changedAt', label: 'Changed', width: 'w-28', responsiveClass: 'col-changed' },
 ];
 
 function formatAuthors(authors: string[]): string {
@@ -157,8 +157,8 @@ watch(
             <td class="col-confidence py-5 px-2">
               <ConfidenceBar :confidence="article.aiConfidence" />
             </td>
-            <td class="col-imported py-5 px-2 text-body-sm text-slate-500">
-              {{ formatDate(article.importedAt) }}
+            <td class="col-changed py-5 px-2 text-body-sm text-slate-500">
+              {{ formatDate(article.changedAt) }}
             </td>
           </tr>
         </tbody>
@@ -181,14 +181,14 @@ watch(
 /* Hide lower-priority columns on smaller viewports */
 @media (max-width: 767px) {
   .col-journal,
-  .col-imported,
+  .col-changed,
   .col-confidence {
     display: none;
   }
 }
 
 @media (max-width: 1023px) and (min-width: 768px) {
-  .col-imported {
+  .col-changed {
     display: none;
   }
 }

@@ -42,6 +42,7 @@ export interface Article {
   manualOverride: boolean;
   importSource: string | null;
   importedAt: string;
+  changedAt: string;
   screenedAt: string | null;
 }
 
