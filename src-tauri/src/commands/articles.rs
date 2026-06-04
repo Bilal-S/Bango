@@ -220,6 +220,48 @@ pub fn get_generic_audit_entries(
 }
 
 #[tauri::command]
+pub fn bulk_update_article_status(
+    db_state: State<'_, DbState>,
+    ids: Vec<String>,
+    new_status: String,
+) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    article_repo::bulk_update_article_status(&conn, &ids, &new_status)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn bulk_add_tag_to_articles(
+    db_state: State<'_, DbState>,
+    article_ids: Vec<String>,
+    tag_name: String,
+) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    article_repo::bulk_add_tag_to_articles(&conn, &article_ids, &tag_name)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn bulk_add_label_to_articles(
+    db_state: State<'_, DbState>,
+    article_ids: Vec<String>,
+    label_name: String,
+) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    article_repo::bulk_add_label_to_articles(&conn, &article_ids, &label_name)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn clear_generic_audit(db_state: State<'_, DbState>) -> Result<usize, AppError> {
     let conn = db_state
         .conn

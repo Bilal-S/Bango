@@ -61,6 +61,9 @@ export function useArticleSearch() {
   const showDetail = ref(false);
   const returnToArticleId = ref<string | null>(null);
 
+  // Multi-select state for batch operations
+  const selectedIds = ref<Set<string>>(new Set());
+
   const activeStatusTab = ref<StatusTab>('all');
   const showFilters = ref(false);
 
@@ -227,7 +230,7 @@ export function useArticleSearch() {
     }
   }
 
-  async function moveArticle(id: string, newStatus: string): Promise<void> {
+  async function moveArticle(id: string, newStatus: string): Promise<{ isLast: boolean }> {
     await tauriCommand('update_article_status', { id, newStatus });
     // Update the article in-place in the local list to avoid a full table redraw / scroll reset
     const idx = articles.value.findIndex((a) => a.id === id);
@@ -235,9 +238,15 @@ export function useArticleSearch() {
       const updated: Article = { ...articles.value[idx]!, status: newStatus as ArticleStatus };
       articles.value.splice(idx, 1, updated);
     }
-    await selectArticle(id);
+    const isLast = !hasNext.value;
+    if (!isLast) {
+      await navigateNext();
+    } else {
+      await selectArticle(id);
+    }
     // Refresh counts in the background (e.g. tab badges)
     void fetchCounts();
+    return { isLast };
   }
 
   async function updateNotes(id: string, notes: string): Promise<void> {
@@ -343,6 +352,58 @@ export function useArticleSearch() {
     query.search = null;
     resetPage();
     void search();
+  }
+
+  // ── Multi-select helpers ──────────────────────────────────────────
+  const selectedCount = computed(() => selectedIds.value.size);
+
+  const allSelected = computed(
+    () => articles.value.length > 0 && selectedIds.value.size === articles.value.length
+  );
+
+  const someSelected = computed(() => selectedIds.value.size > 0 && !allSelected.value);
+
+  function toggleSelect(id: string): void {
+    const s = new Set(selectedIds.value);
+    if (s.has(id)) {
+      s.delete(id);
+    } else {
+      s.add(id);
+    }
+    selectedIds.value = s;
+  }
+
+  function toggleSelectAll(): void {
+    if (allSelected.value) {
+      selectedIds.value = new Set();
+    } else {
+      selectedIds.value = new Set(articles.value.map((a) => a.id));
+    }
+  }
+
+  function clearSelection(): void {
+    selectedIds.value = new Set();
+  }
+
+  // ── Bulk operations ───────────────────────────────────────────────
+  async function bulkUpdateStatus(ids: string[], newStatus: string): Promise<void> {
+    await tauriCommand('bulk_update_article_status', { ids, newStatus });
+    clearSelection();
+    await search();
+  }
+
+  async function bulkAddTag(ids: string[], tagName: string): Promise<void> {
+    await tauriCommand('bulk_add_tag_to_articles', { articleIds: ids, tagName });
+    clearSelection();
+    await tagsStore.fetchTags();
+    await search();
+  }
+
+  async function bulkAddLabel(ids: string[], labelName: string): Promise<void> {
+    await tauriCommand('bulk_add_label_to_articles', { articleIds: ids, labelName });
+    clearSelection();
+    await labelsStore.fetchLabels();
+    await search();
   }
 
   const hasReturnTarget = computed(() => returnToArticleId.value !== null);
@@ -459,5 +520,17 @@ export function useArticleSearch() {
     clearSearch,
     hasReturnTarget,
     navigateToArticle,
+    // Multi-select
+    selectedIds,
+    selectedCount,
+    allSelected,
+    someSelected,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
+    // Bulk operations
+    bulkUpdateStatus,
+    bulkAddTag,
+    bulkAddLabel,
   };
 }

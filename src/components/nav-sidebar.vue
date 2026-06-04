@@ -51,7 +51,7 @@ function handleNavClick(): void {
       'sidebar--mobile-open': mobileOpen,
     }"
   >
-    <div class="sidebar__header">
+    <div class="sidebar__header" @click="emit('toggleCollapse')">
       <img class="sidebar__logo" :src="appIcon" alt="Bango" />
       <span v-if="!collapsed" class="sidebar__title"
         >Bango <span class="sidebar__version">v{{ appVersion }}</span></span
@@ -150,6 +150,12 @@ function handleNavClick(): void {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   overflow: hidden;
   white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.sidebar__header:hover {
+  background-color: rgba(255, 255, 255, 0.08);
 }
 
 .sidebar--collapsed .sidebar__header {

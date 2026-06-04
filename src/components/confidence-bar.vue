@@ -7,6 +7,11 @@ const percentage = computed(() =>
   props.confidence !== null ? Math.round(props.confidence * 100) : 0
 );
 
+/** Number of filled segments out of 10 */
+const filledCount = computed(() =>
+  props.confidence !== null ? Math.round(props.confidence * 10) : 0
+);
+
 const fillClass = computed(() => {
   if (props.confidence === null) return 'bg-slate-200';
   if (props.confidence >= 0.8) return 'bg-indigo-500';
@@ -16,16 +21,19 @@ const fillClass = computed(() => {
 </script>
 
 <template>
-  <div class="flex items-center gap-2 w-32">
-    <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-      <div
-        class="h-full rounded-full transition-all duration-300"
-        :class="fillClass"
-        :style="{ width: `${percentage}%` }"
-      />
-    </div>
-    <span class="text-[11px] font-mono text-slate-500 min-w-[32px] text-right">
+  <div class="flex flex-col items-center w-16 gap-0.5">
+    <!-- Percentage label on top -->
+    <span class="text-[9px] font-mono text-slate-500 leading-none">
       {{ confidence !== null ? `${percentage}%` : '---' }}
     </span>
+    <!-- 10-segment dot bar -->
+    <div class="flex items-center gap-[2px]">
+      <span
+        v-for="i in 10"
+        :key="i"
+        class="inline-block w-[4px] h-[4px] rounded-[1px]"
+        :class="i <= filledCount ? fillClass : 'bg-slate-100'"
+      />
+    </div>
   </div>
 </template>

@@ -3,6 +3,7 @@ import { provide, ref, watch } from 'vue';
 import { useViewport } from '@/composables/use-viewport';
 import { initialDataLoaded } from '@/composables/use-dashboard';
 import NavSidebar from './nav-sidebar.vue';
+import ToastContainer from './toast-container.vue';
 
 const { isBelowMd } = useViewport();
 
@@ -100,6 +101,7 @@ watch(
         <router-view />
       </div>
     </main>
+    <ToastContainer />
   </div>
 </template>
 

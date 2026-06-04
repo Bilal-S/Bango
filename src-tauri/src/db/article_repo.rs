@@ -847,6 +847,96 @@ pub fn reset_working_list(conn: &Connection) -> Result<usize, AppError> {
     Ok(rows)
 }
 
+/// Bulk update status for multiple articles in a single transaction.
+pub fn bulk_update_article_status(
+    conn: &Connection,
+    ids: &[String],
+    new_status: &str,
+) -> Result<usize, AppError> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let mut count = 0usize;
+    for id in ids {
+        let rows = conn.execute(
+            "UPDATE articles SET status = ?1, manual_override = 1 WHERE id = ?2",
+            params![new_status, id],
+        )?;
+        count += rows;
+    }
+    Ok(count)
+}
+
+/// Bulk add a tag to multiple articles (by tag name).
+/// Creates the tag if it doesn't exist.
+pub fn bulk_add_tag_to_articles(
+    conn: &Connection,
+    article_ids: &[String],
+    tag_name: &str,
+) -> Result<usize, AppError> {
+    if article_ids.is_empty() {
+        return Ok(0);
+    }
+    // Ensure tag exists
+    let existing_id: Option<String> = conn
+        .query_row("SELECT id FROM tags WHERE name = ?1", [tag_name], |row| row.get(0))
+        .ok();
+    let tag_id = if let Some(id) = existing_id {
+        id
+    } else {
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO tags (id, name, source) VALUES (?1, ?2, 'user_created')",
+            params![id, tag_name],
+        )?;
+        id
+    };
+    let mut count = 0usize;
+    for article_id in article_ids {
+        let rows = conn.execute(
+            "INSERT OR IGNORE INTO article_tags (article_id, tag_id) VALUES (?1, ?2)",
+            params![article_id, tag_id],
+        )?;
+        count += rows;
+    }
+    Ok(count)
+}
+
+/// Bulk add a label to multiple articles (by label name).
+/// Creates the label if it doesn't exist.
+pub fn bulk_add_label_to_articles(
+    conn: &Connection,
+    article_ids: &[String],
+    label_name: &str,
+) -> Result<usize, AppError> {
+    if article_ids.is_empty() {
+        return Ok(0);
+    }
+    // Ensure label exists
+    let existing_id: Option<String> = conn
+        .query_row("SELECT id FROM labels WHERE name = ?1", [label_name], |row| row.get(0))
+        .ok();
+    let label_id = if let Some(id) = existing_id {
+        id
+    } else {
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO labels (id, name, source) VALUES (?1, ?2, 'user_created')",
+            params![id, label_name],
+        )?;
+        id
+    };
+    let mut count = 0usize;
+    for article_id in article_ids {
+        let rows = conn.execute(
+            "INSERT OR IGNORE INTO article_labels (article_id, label_id) VALUES (?1, ?2)",
+            params![article_id, label_id],
+        )?;
+        count += rows;
+    }
+    Ok(count)
+}
+
 pub fn get_article_counts(
     conn: &Connection,
 ) -> Result<crate::models::article::ArticleCounts, AppError> {

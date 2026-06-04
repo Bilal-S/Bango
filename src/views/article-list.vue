@@ -3,13 +3,16 @@ import { onMounted, ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
+import { useToast } from '@/composables/use-toast';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import ArticleFilterPanel from '@/components/article-filter-panel.vue';
+import BulkActionBar from '@/components/bulk-action-bar.vue';
 import ExportDialog from '@/components/export-dialog.vue';
 
 const route = useRoute();
+const toast = useToast();
 
 const {
   articles,
@@ -60,6 +63,18 @@ const {
   clearSearch,
   hasReturnTarget,
   navigateToArticle,
+  // Multi-select
+  selectedIds,
+  selectedCount,
+  allSelected,
+  someSelected,
+  toggleSelect,
+  toggleSelectAll,
+  clearSelection,
+  // Bulk operations
+  bulkUpdateStatus,
+  bulkAddTag,
+  bulkAddLabel,
 } = useArticleSearch();
 
 onMounted(() => {
@@ -78,6 +93,14 @@ onMounted(() => {
 const selectedId = computed(() => selectedArticle.value?.id ?? null);
 
 const showExport = ref(false);
+const bulkTagDialogOpen = ref(false);
+const bulkLabelDialogOpen = ref(false);
+const bulkInputValue = ref('');
+
+// Inline decision notification state
+const decisionMessage = ref('');
+const decisionType = ref<'success' | 'info'>('success');
+let decisionTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const STATUS_TAB_LABELS: Record<string, string> = {
   all: 'All',
@@ -88,12 +111,79 @@ const STATUS_TAB_LABELS: Record<string, string> = {
   error: 'Errors',
 };
 
+function showDecisionNotification(message: string, type: 'success' | 'info'): void {
+  if (decisionTimeout) clearTimeout(decisionTimeout);
+  decisionMessage.value = message;
+  decisionType.value = type;
+  decisionTimeout = setTimeout(() => {
+    decisionMessage.value = '';
+  }, 2000);
+}
+
 async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
-  await moveArticle(id, newStatus);
+  const { isLast } = await moveArticle(id, newStatus);
+  if (isLast) {
+    showDecisionNotification('Decision saved.', 'info');
+  } else {
+    showDecisionNotification('Decision saved. Moving to next article.', 'success');
+  }
 }
 
 function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
   (filter as Record<string, unknown>)[key] = value;
+}
+
+// ── Bulk action handlers ──────────────────────────────────────────
+async function handleBulkInclude(): Promise<void> {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return;
+  await bulkUpdateStatus(ids, 'included');
+  toast.show(`${ids.length} article${ids.length > 1 ? 's' : ''} included`, 'success');
+}
+
+async function handleBulkReject(): Promise<void> {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return;
+  await bulkUpdateStatus(ids, 'rejected');
+  toast.show(`${ids.length} article${ids.length > 1 ? 's' : ''} rejected`, 'success');
+}
+
+async function handleBulkMoveToWorking(): Promise<void> {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return;
+  await bulkUpdateStatus(ids, 'working');
+  toast.show(`${ids.length} article${ids.length > 1 ? 's' : ''} moved to Working`, 'success');
+}
+
+function openBulkTagDialog(): void {
+  bulkInputValue.value = '';
+  bulkTagDialogOpen.value = true;
+}
+
+async function handleBulkAddTag(): Promise<void> {
+  const name = bulkInputValue.value.trim();
+  if (!name) return;
+  const ids = Array.from(selectedIds.value);
+  await bulkAddTag(ids, name);
+  bulkTagDialogOpen.value = false;
+  toast.show(`Tag "${name}" added to ${ids.length} article${ids.length > 1 ? 's' : ''}`, 'success');
+}
+
+function openBulkLabelDialog(): void {
+  bulkInputValue.value = '';
+  bulkLabelDialogOpen.value = true;
+}
+
+async function handleBulkAddLabel(): Promise<void> {
+  const name = bulkInputValue.value.trim();
+  if (!name) return;
+  const ids = Array.from(selectedIds.value);
+  await bulkAddLabel(ids, name);
+  bulkLabelDialogOpen.value = false;
+  toast.show(
+    `Label "${name}" added to ${ids.length} article${ids.length > 1 ? 's' : ''}`,
+    'success'
+  );
 }
 </script>
 
@@ -172,8 +262,13 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
           :selected-id="selectedId"
           :sort-column="sortColumn"
           :sort-direction="sortDirection"
+          :selected-ids="selectedIds"
+          :all-selected="allSelected"
+          :some-selected="someSelected"
           @select="selectArticle"
           @sort="toggleSort"
+          @toggle-select="toggleSelect"
+          @toggle-select-all="toggleSelectAll"
         />
 
         <!-- Bottom pagination -->
@@ -224,6 +319,8 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       :has-previous="hasPrevious"
       :has-next="hasNext"
       :has-return-target="hasReturnTarget"
+      :decision-message="decisionMessage"
+      :decision-type="decisionType"
       @close="closeDetail"
       @navigate-prev="navigatePrev"
       @navigate-next="navigateNext"
@@ -234,6 +331,87 @@ function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
       @update-criteria="updateCriteria"
       @navigate-to-article="navigateToArticle"
     />
+
+    <!-- Bulk Action Bar -->
+    <BulkActionBar
+      :selected-count="selectedCount"
+      @bulk-include="handleBulkInclude"
+      @bulk-reject="handleBulkReject"
+      @bulk-move-to-working="handleBulkMoveToWorking"
+      @bulk-add-tag="openBulkTagDialog"
+      @bulk-add-label="openBulkLabelDialog"
+      @clear-selection="clearSelection"
+    />
+
+    <!-- Bulk Tag Dialog -->
+    <Teleport to="body">
+      <div
+        v-if="bulkTagDialogOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        @click.self="bulkTagDialogOpen = false"
+      >
+        <div class="bg-white rounded-xl shadow-xl p-6 w-96 max-w-full">
+          <h3 class="text-lg font-semibold mb-4">Add Tag to {{ selectedCount }} Articles</h3>
+          <input
+            v-model="bulkInputValue"
+            type="text"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Enter tag name"
+            @keydown.enter="handleBulkAddTag"
+          />
+          <div class="flex justify-end gap-2 mt-4">
+            <button
+              class="px-4 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50"
+              @click="bulkTagDialogOpen = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
+              :disabled="!bulkInputValue.trim()"
+              @click="handleBulkAddTag"
+            >
+              Add Tag
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Bulk Label Dialog -->
+    <Teleport to="body">
+      <div
+        v-if="bulkLabelDialogOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        @click.self="bulkLabelDialogOpen = false"
+      >
+        <div class="bg-white rounded-xl shadow-xl p-6 w-96 max-w-full">
+          <h3 class="text-lg font-semibold mb-4">Add Label to {{ selectedCount }} Articles</h3>
+          <input
+            v-model="bulkInputValue"
+            type="text"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="Enter label name"
+            @keydown.enter="handleBulkAddLabel"
+          />
+          <div class="flex justify-end gap-2 mt-4">
+            <button
+              class="px-4 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50"
+              @click="bulkLabelDialogOpen = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-40"
+              :disabled="!bulkInputValue.trim()"
+              @click="handleBulkAddLabel"
+            >
+              Add Label
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

@@ -16,6 +16,8 @@ const props = defineProps<{
   hasPrevious: boolean;
   hasNext: boolean;
   hasReturnTarget: boolean;
+  decisionMessage?: string;
+  decisionType?: 'success' | 'info';
 }>();
 
 const emit = defineEmits<{
@@ -636,6 +638,17 @@ function handleCriteriaSave(
       <div class="pb-10" />
     </div>
 
+    <!-- Inline Decision Notification -->
+    <Transition name="decision-toast">
+      <div
+        v-if="decisionMessage"
+        class="px-4 py-2 text-center text-sm font-semibold text-white"
+        :class="decisionType === 'info' ? 'bg-blue-500' : 'bg-emerald-500'"
+      >
+        {{ decisionMessage }}
+      </div>
+    </Transition>
+
     <!-- Footer Actions -->
     <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50 items-center">
       <button
@@ -709,5 +722,20 @@ function handleCriteriaSave(
   to {
     transform: translateX(0);
   }
+}
+
+/* Inline decision toast animation */
+.decision-toast-enter-active {
+  transition: all 0.3s ease-out;
+}
+.decision-toast-leave-active {
+  transition: all 0.25s ease-in;
+}
+.decision-toast-enter-from {
+  transform: translateX(100%);
+  opacity: 0;
+}
+.decision-toast-leave-to {
+  opacity: 0;
 }
 </style>

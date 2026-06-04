@@ -9,11 +9,16 @@ const props = defineProps<{
   selectedId: string | null;
   sortColumn: string | null;
   sortDirection: 'asc' | 'desc';
+  selectedIds: Set<string>;
+  allSelected: boolean;
+  someSelected: boolean;
 }>();
 
 defineEmits<{
   select: [id: string];
   sort: [column: string];
+  toggleSelect: [id: string];
+  toggleSelectAll: [];
 }>();
 
 interface ColumnDef {
@@ -31,7 +36,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'publicationYear', label: 'Year', width: 'w-16' },
   { key: 'journal', label: 'Journal', responsiveClass: 'col-journal' },
   { key: 'status', label: 'Status' },
-  { key: 'aiConfidence', label: 'Confidence', width: 'w-32', responsiveClass: 'col-confidence' },
+  { key: 'aiConfidence', label: 'Confidence', width: 'w-16', responsiveClass: 'col-confidence' },
   { key: 'importedAt', label: 'Imported', width: 'w-28', responsiveClass: 'col-imported' },
 ];
 
@@ -73,6 +78,16 @@ watch(
       <table class="w-full text-left border-collapse">
         <thead class="bg-slate-50/50 border-b border-slate-200">
           <tr>
+            <!-- Checkbox header -->
+            <th class="w-10 py-4 px-2">
+              <input
+                type="checkbox"
+                class="accent-indigo-600 rounded cursor-pointer"
+                :checked="allSelected"
+                :indeterminate="someSelected"
+                @change="$emit('toggleSelectAll')"
+              />
+            </th>
             <th
               v-for="col in COLUMNS"
               :key="col.key"
@@ -107,6 +122,15 @@ watch(
             :class="{ 'bg-indigo-50': selectedId === article.id }"
             @click="$emit('select', article.id)"
           >
+            <!-- Checkbox cell -->
+            <td class="py-5 px-2" @click.stop>
+              <input
+                type="checkbox"
+                class="accent-indigo-600 rounded cursor-pointer"
+                :checked="selectedIds.has(article.id)"
+                @change="$emit('toggleSelect', article.id)"
+              />
+            </td>
             <td
               class="col-index py-5 px-2 text-body-sm text-slate-500 font-mono border-l-4 transition-colors"
               :class="selectedId === article.id ? 'border-l-indigo-600' : 'border-l-transparent'"
