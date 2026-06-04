@@ -15,7 +15,6 @@ const emit = defineEmits<{
 
 const isOpen = ref(false);
 const containerRef = ref<HTMLDivElement | null>(null);
-const inputRef = ref<HTMLInputElement | null>(null);
 
 const filteredSuggestions = computed(() => {
   const query = props.modelValue.trim().toLowerCase();
@@ -72,7 +71,6 @@ onUnmounted(() => {
 <template>
   <div ref="containerRef" class="relative">
     <input
-      ref="inputRef"
       :value="modelValue"
       type="text"
       :placeholder="placeholder"
