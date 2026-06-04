@@ -542,7 +542,7 @@ impl ScreeningEngine {
 }
 
 /// Parse the LLM response as a JSON array of screening results.
-fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, AppError> {
+pub fn process_screening_responses(raw: &str) -> Result<Vec<LlmScreeningResponse>, AppError> {
     debug_log!("[screening] process_screening_responses received {} bytes", raw.len());
     debug_log!("[screening] raw first 300 chars: {}", &raw[..raw.len().min(300)]);
 
@@ -652,7 +652,7 @@ fn repair_truncated_json_array(json: &str) -> Option<String> {
     Some(repaired)
 }
 
-fn extract_json(raw: &str) -> String {
+pub fn extract_json(raw: &str) -> String {
     let trimmed = raw.trim();
 
     // Strategy 1: Code-fence stripping
@@ -1319,7 +1319,7 @@ Hope this helps!"#;
 /// Maximum character length for newly created tags or labels that don't match existing ones.
 const MAX_NEW_TAG_LABEL_LEN: usize = 30;
 
-fn create_or_match_tag(
+pub fn create_or_match_tag(
     conn: &Connection,
     tag_name: &str,
     article_id: &str,
@@ -1356,7 +1356,7 @@ fn create_or_match_tag(
     Ok(())
 }
 
-fn create_or_match_label(
+pub fn create_or_match_label(
     conn: &Connection,
     label_name: &str,
     article_id: &str,
@@ -1396,7 +1396,7 @@ fn create_or_match_label(
 ///
 /// Inclusion criteria are numbered `[1]..[N]`, then exclusion criteria continue `[N+1]..[N+M]`.
 /// This ensures `[3]` always refers to the same criterion regardless of which article is displayed.
-fn build_global_criterion_numbering(
+pub fn build_global_criterion_numbering(
     inclusion_criteria: &[&Criterion],
     exclusion_criteria: &[&Criterion],
 ) -> HashMap<String, usize> {
@@ -1421,7 +1421,7 @@ fn build_global_criterion_numbering(
 ///
 /// `inclusion_count` is the number of inclusion criteria in the global numbering,
 /// used to distinguish inclusion UUIDs (indices 1..N) from exclusion UUIDs (N+1..M).
-fn augment_matched_from_reasoning(
+pub fn augment_matched_from_reasoning(
     reasoning: &str,
     matched_inclusion_ids: &[String],
     matched_exclusion_ids: &[String],
