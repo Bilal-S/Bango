@@ -10,6 +10,7 @@ import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import ArticleFilterPanel from '@/components/article-filter-panel.vue';
 import BulkActionBar from '@/components/bulk-action-bar.vue';
 import ExportDialog from '@/components/export-dialog.vue';
+import SuggestInput from '@/components/suggest-input.vue';
 
 const route = useRoute();
 const toast = useToast();
@@ -352,12 +353,11 @@ async function handleBulkAddLabel(): Promise<void> {
       >
         <div class="bg-white rounded-xl shadow-xl p-6 w-96 max-w-full">
           <h3 class="text-lg font-semibold mb-4">Add Tag to {{ selectedCount }} Articles</h3>
-          <input
+          <SuggestInput
             v-model="bulkInputValue"
-            type="text"
-            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            placeholder="Enter tag name"
-            @keydown.enter="handleBulkAddTag"
+            :suggestions="allTags"
+            placeholder="Select or enter tag name"
+            @enter="handleBulkAddTag"
           />
           <div class="flex justify-end gap-2 mt-4">
             <button
@@ -387,12 +387,11 @@ async function handleBulkAddLabel(): Promise<void> {
       >
         <div class="bg-white rounded-xl shadow-xl p-6 w-96 max-w-full">
           <h3 class="text-lg font-semibold mb-4">Add Label to {{ selectedCount }} Articles</h3>
-          <input
+          <SuggestInput
             v-model="bulkInputValue"
-            type="text"
-            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            placeholder="Enter label name"
-            @keydown.enter="handleBulkAddLabel"
+            :suggestions="allLabels"
+            placeholder="Select or enter label name"
+            @enter="handleBulkAddLabel"
           />
           <div class="flex justify-end gap-2 mt-4">
             <button

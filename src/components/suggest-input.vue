@@ -35,9 +35,8 @@ function onFocus(): void {
 
 function selectSuggestion(name: string): void {
   emit('select', name);
-  emit('update:modelValue', '');
+  emit('update:modelValue', name);
   isOpen.value = false;
-  inputRef.value?.blur();
 }
 
 function onKeydown(event: KeyboardEvent): void {
