@@ -66,6 +66,7 @@ const {
   clearSearch,
   hasReturnTarget,
   navigateToArticle,
+  selectedGlobalIndex,
   // Multi-select
   selectedIds,
   selectedCount,
@@ -330,6 +331,8 @@ async function handleBulkAddLabel(): Promise<void> {
       :has-next="hasNext"
       :has-return-target="hasReturnTarget"
       :full-screen="isDetailFullScreen"
+      :article-position="selectedGlobalIndex"
+      :article-total="activeTotalCount"
       :decision-message="decisionMessage"
       :decision-type="decisionType"
       @close="closeDetail"

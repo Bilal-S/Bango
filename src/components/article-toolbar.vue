@@ -22,7 +22,7 @@ const emit = defineEmits<{
   goNext: [];
 }>();
 
-const PAGE_SIZES = [25, 50, 100];
+const PAGE_SIZES = [10, 25, 50, 100];
 
 function onPageSizeChange(event: Event): void {
   const target = event.target as HTMLSelectElement;

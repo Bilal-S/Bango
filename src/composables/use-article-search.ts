@@ -81,7 +81,7 @@ export function useArticleSearch() {
     labels: [],
   });
 
-  const pageSize = ref(25);
+  const pageSize = ref(10);
   const currentPage = ref(1);
   const searchText = ref('');
 
@@ -344,6 +344,12 @@ export function useArticleSearch() {
     }
   }
 
+  /** 1-based global position of the selected article across all pages. */
+  const selectedGlobalIndex = computed(() => {
+    if (selectedIndex.value < 0) return 0;
+    return (currentPage.value - 1) * pageSize.value + selectedIndex.value + 1;
+  });
+
   /** Total article count for the currently active status tab. */
   const activeTotalCount = computed(() => {
     const tab = activeStatusTab.value;
@@ -578,6 +584,7 @@ export function useArticleSearch() {
     canGoPrev,
     canGoNext,
     goToPage,
+    selectedGlobalIndex,
     searchText,
     activeTotalCount,
     isFiltered,

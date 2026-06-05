@@ -17,6 +17,8 @@ const props = defineProps<{
   hasNext: boolean;
   hasReturnTarget: boolean;
   fullScreen?: boolean;
+  articlePosition: number;
+  articleTotal: number;
   decisionMessage?: string;
   decisionType?: 'success' | 'info';
 }>();
@@ -345,6 +347,7 @@ function handleCriteriaSave(
           </button>
           <button
             class="material-symbols-outlined text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
+            :title="hasReturnTarget ? 'Return to previous article' : 'Close detail panel'"
             @click="emit('close')"
           >
             {{ hasReturnTarget ? 'arrow_back' : 'close' }}
@@ -680,45 +683,63 @@ function handleCriteriaSave(
 
     <!-- Footer Actions -->
     <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50 items-center">
-      <button
-        v-if="hasPrevious"
-        class="material-symbols-outlined text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors p-1 rounded-lg hover:bg-indigo-50"
-        title="Previous article"
-        @click="emit('navigatePrev')"
-      >
-        chevron_left
-      </button>
-      <div class="flex gap-3 flex-1">
+      <!-- Left: Navigation -->
+      <div class="flex items-center gap-1 shrink-0">
+        <button
+          class="material-symbols-outlined p-1 rounded-lg transition-colors"
+          :class="
+            hasPrevious
+              ? 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer'
+              : 'text-slate-200 cursor-not-allowed'
+          "
+          :title="hasPrevious ? 'Previous article' : 'No previous article'"
+          @click="hasPrevious && emit('navigatePrev')"
+        >
+          chevron_left
+        </button>
+        <span class="text-xs text-slate-500 font-medium tabular-nums min-w-[4rem] text-center">
+          {{ articlePosition }} of {{ articleTotal }}
+        </span>
+        <button
+          class="material-symbols-outlined p-1 rounded-lg transition-colors"
+          :class="
+            hasNext
+              ? 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer'
+              : 'text-slate-200 cursor-not-allowed'
+          "
+          :title="hasNext ? 'Next article' : 'No next article'"
+          @click="hasNext && emit('navigateNext')"
+        >
+          chevron_right
+        </button>
+      </div>
+      <!-- Right: Action buttons -->
+      <div class="flex gap-3 flex-1 justify-end">
         <button
           v-if="article.status !== 'included'"
-          class="flex-1 bg-emerald-600 text-white py-2 rounded-lg font-semibold text-sm hover:bg-emerald-700 active:scale-95 transition-all shadow-sm cursor-pointer"
+          class="bg-emerald-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-emerald-700 active:scale-95 transition-all shadow-sm cursor-pointer"
+          title="Include this article in your systematic review"
           @click="emit('moveArticle', article.id, 'included')"
         >
           Include
         </button>
         <button
           v-if="article.status !== 'rejected'"
-          class="flex-1 bg-white border border-slate-200 text-rose-700 py-2 rounded-lg font-semibold text-sm hover:bg-rose-50 transition-colors shadow-sm cursor-pointer"
+          class="bg-white border border-slate-200 text-rose-700 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-rose-50 transition-colors shadow-sm cursor-pointer"
+          title="Reject this article from your systematic review"
           @click="emit('moveArticle', article.id, 'rejected')"
         >
           Reject
         </button>
         <button
           v-if="article.status !== 'working'"
-          class="flex-1 bg-white border border-slate-200 text-slate-700 py-2 rounded-lg font-semibold text-sm hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
+          class="bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg font-semibold text-sm hover:bg-slate-50 transition-colors shadow-sm cursor-pointer"
+          title="Move this article back to Working status"
           @click="emit('moveArticle', article.id, 'working')"
         >
           Move to Working
         </button>
       </div>
-      <button
-        v-if="hasNext"
-        class="material-symbols-outlined text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors p-1 rounded-lg hover:bg-indigo-50"
-        title="Next article"
-        @click="emit('navigateNext')"
-      >
-        chevron_right
-      </button>
     </div>
   </aside>
 </template>
