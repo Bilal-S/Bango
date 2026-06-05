@@ -132,7 +132,8 @@ function showDecisionNotification(message: string, type: 'success' | 'info'): vo
 
 async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
   const { isLast } = await moveArticle(id, newStatus);
-  if (isLast) {
+  const autoNavigate = localStorage.getItem('bango-auto-navigate-after-decision') !== 'false';
+  if (isLast || !autoNavigate) {
     showDecisionNotification('Decision saved.', 'info');
   } else {
     showDecisionNotification('Decision saved. Moved to next article.', 'success');

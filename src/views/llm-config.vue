@@ -30,6 +30,19 @@ const showDeleteDialog = ref(false);
 const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
 const clearLogsStatus = ref<string | null>(null);
+
+// Screening preferences (persisted in localStorage)
+const autoNavigateAfterDecision = ref(
+  localStorage.getItem('bango-auto-navigate-after-decision') !== 'false'
+);
+
+function toggleAutoNavigate(): void {
+  autoNavigateAfterDecision.value = !autoNavigateAfterDecision.value;
+  localStorage.setItem(
+    'bango-auto-navigate-after-decision',
+    String(autoNavigateAfterDecision.value)
+  );
+}
 const showErrorLog = ref(false);
 const showRawError = ref(false);
 const errorLogEntries = ref<Array<{ id: string; timestamp: string; details: string | null }>>([]);
@@ -616,6 +629,33 @@ watch(
       </div>
     </div>
 
+    <!-- Screening Preferences -->
+    <div class="llm-config__card pm-card" style="margin-top: 1rem">
+      <h2 class="llm-config__card-title">
+        <span class="material-symbols-outlined text-primary">navigate_next</span>
+        Screening Preferences
+      </h2>
+      <p class="pm-card__desc">Configure behavior when screening articles.</p>
+      <div class="pm-card__toggle-row">
+        <label class="pm-card__toggle-label">
+          <span>Auto-navigate to next article after decision</span>
+          <span class="pm-card__toggle-hint"
+            >When enabled, automatically advances to the next article after including or
+            rejecting.</span
+          >
+        </label>
+        <button
+          class="pm-card__switch"
+          :class="{ 'pm-card__switch--on': autoNavigateAfterDecision }"
+          role="switch"
+          :aria-checked="autoNavigateAfterDecision"
+          @click="toggleAutoNavigate"
+        >
+          <span class="pm-card__switch-thumb" />
+        </button>
+      </div>
+    </div>
+
     <!-- Diagnostics -->
     <div class="llm-config__card pm-card" style="margin-top: 1rem">
       <h2 class="llm-config__card-title">
@@ -1038,7 +1078,8 @@ watch(
 }
 
 .field__value-badge--editable {
-  /* No visual affordance — intentionally undiscoverable */
+  /* No visual affordance  we add background color to avoid lint errors */
+  background-color: #e2dfff;
 }
 
 .field__value-input {
@@ -1301,6 +1342,61 @@ watch(
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+/* Toggle switch */
+.pm-card__toggle-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pm-card__toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  font-size: 14px;
+  color: #1b1b24;
+}
+
+.pm-card__toggle-hint {
+  font-size: 12px;
+  color: #777587;
+  line-height: 16px;
+}
+
+.pm-card__switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  border-radius: 9999px;
+  background-color: #c7c4d8;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.pm-card__switch--on {
+  background-color: #3525cd;
+}
+
+.pm-card__switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background-color: #ffffff;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.pm-card__switch--on .pm-card__switch-thumb {
+  transform: translateX(20px);
 }
 
 .btn--danger {

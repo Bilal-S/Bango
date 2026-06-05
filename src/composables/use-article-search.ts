@@ -64,7 +64,14 @@ export function useArticleSearch() {
   // Multi-select state for batch operations
   const selectedIds = ref<Set<string>>(new Set());
 
-  const activeStatusTab = ref<StatusTab>('all');
+  // Smart default tab: Working > Included > All
+  const defaultTab: StatusTab =
+    articlesStore.byStatus.working > 0
+      ? 'working'
+      : articlesStore.byStatus.included > 0
+        ? 'included'
+        : 'all';
+  const activeStatusTab = ref<StatusTab>(defaultTab);
   const showFilters = ref(false);
 
   const sortColumn = ref<string | null>(null);
@@ -86,7 +93,7 @@ export function useArticleSearch() {
   const searchText = ref('');
 
   const query = reactive<ArticleQuery>({
-    status: null,
+    status: defaultTab === 'all' ? null : defaultTab,
     search: null,
     sortBy: null,
     sortDir: null,
@@ -242,7 +249,8 @@ export function useArticleSearch() {
       articles.value.splice(idx, 1, fresh);
     }
     const isLast = !hasNext.value;
-    if (!isLast) {
+    const autoNavigate = localStorage.getItem('bango-auto-navigate-after-decision') !== 'false';
+    if (!isLast && autoNavigate) {
       await navigateNext();
     } else {
       selectedArticle.value = fresh;
