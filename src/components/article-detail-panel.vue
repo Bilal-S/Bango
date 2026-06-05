@@ -571,6 +571,18 @@ function handleCriteriaSave(
         </div>
       </section>
 
+      <!-- Imported Notes (read-only, shown only when present) -->
+      <section v-if="article.notes">
+        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
+          Imported Notes
+        </h3>
+        <p
+          class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-amber-50 border border-amber-200 p-3 rounded-lg"
+        >
+          {{ article.notes }}
+        </p>
+      </section>
+
       <!-- User Notes -->
       <section>
         <div class="flex items-center justify-between mb-3">

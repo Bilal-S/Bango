@@ -20,6 +20,7 @@ pub struct RisExportArticle {
     pub language: Option<String>,
     pub publisher: Option<String>,
     pub issn: Option<String>,
+    pub notes: Option<String>,
     pub ai_reasoning: Option<String>,
     pub user_notes: Option<String>,
     pub ai_decision: Option<String>,
@@ -84,6 +85,11 @@ pub fn article_to_ris(article: &RisExportArticle) -> String {
     if let Some(ref issn) = article.issn {
         lines.push(format!("SN  - {}", issn));
     }
+    // Imported notes (from original RIS N1 field) — emitted first
+    if let Some(ref notes) = article.notes {
+        lines.push(format!("N1  - {}", notes));
+    }
+    // AI reasoning — emitted as second N1 (RIS allows multiple N1 entries)
     if let Some(ref reasoning) = article.ai_reasoning {
         lines.push(format!("N1  - {}", reasoning));
     }

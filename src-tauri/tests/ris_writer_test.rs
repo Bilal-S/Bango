@@ -19,6 +19,7 @@ fn sample_article() -> RisExportArticle {
         language: Some("English".to_string()),
         publisher: Some("Springer".to_string()),
         issn: Some("1234-5678".to_string()),
+        notes: Some("Original imported note from database".to_string()),
         ai_reasoning: Some("Relevant to inclusion criteria".to_string()),
         user_notes: Some("Important article".to_string()),
         ai_decision: Some("include".to_string()),
@@ -47,6 +48,7 @@ fn minimal_article() -> RisExportArticle {
         language: None,
         publisher: None,
         issn: None,
+        notes: None,
         ai_reasoning: None,
         user_notes: None,
         ai_decision: None,
@@ -167,6 +169,32 @@ fn test_ris_includes_publisher() {
 fn test_ris_includes_issn() {
     let ris = article_to_ris(&sample_article());
     assert!(ris.contains("SN  - 1234-5678\n"));
+}
+
+#[test]
+fn test_ris_includes_imported_notes_in_n1() {
+    let ris = article_to_ris(&sample_article());
+    assert!(ris.contains("N1  - Original imported note from database\n"));
+}
+
+#[test]
+fn test_ris_imported_notes_appears_before_ai_reasoning() {
+    let ris = article_to_ris(&sample_article());
+    let notes_pos = ris.find("N1  - Original imported note from database").expect("imported notes N1 not found");
+    let reasoning_pos = ris.find("N1  - Relevant to inclusion criteria").expect("AI reasoning N1 not found");
+    assert!(notes_pos < reasoning_pos, "Imported notes N1 should appear before AI reasoning N1");
+}
+
+#[test]
+fn test_ris_both_notes_and_reasoning_produce_two_n1_lines() {
+    let ris = article_to_ris(&sample_article());
+    assert_eq!(ris.matches("N1  -").count(), 2, "Should have exactly 2 N1 lines (imported notes + AI reasoning)");
+}
+
+#[test]
+fn test_ris_no_n1_when_neither_notes_nor_reasoning() {
+    let ris = article_to_ris(&minimal_article());
+    assert!(!ris.contains("N1  -"), "Should have no N1 lines when notes and ai_reasoning are both None");
 }
 
 #[test]

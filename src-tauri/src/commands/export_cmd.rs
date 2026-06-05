@@ -47,6 +47,7 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
             language: a.language.clone(),
             publisher: a.publisher.clone(),
             issn: a.issn.clone(),
+            notes: a.notes.clone(),
             ai_reasoning: a.ai_reasoning.clone(),
             user_notes: a.user_notes.clone(),
             ai_decision: a.ai_decision.as_ref().map(|d| d.as_str().to_string()),
