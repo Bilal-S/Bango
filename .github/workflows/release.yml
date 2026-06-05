@@ -232,7 +232,24 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Check if version sync is needed
+        id: check_version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PKG=$(jq -r '.version' package.json)
+          CONF=$(jq -r '.version' src-tauri/tauri.conf.json)
+          CARGO=$(grep '^version = ' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          if [ "$PKG" = "$VERSION" ] && [ "$CONF" = "$VERSION" ] && [ "$CARGO" = "$VERSION" ]; then
+            echo "sync_needed=false" >> "$GITHUB_OUTPUT"
+            echo "All files already at $VERSION — skipping sync"
+          else
+            echo "sync_needed=true" >> "$GITHUB_OUTPUT"
+            echo "Version mismatch detected: pkg=$PKG conf=$CONF cargo=$CARGO → target=$VERSION"
+          fi
+
       - name: Sync version across config files
+        if: steps.check_version.outputs.sync_needed == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -243,25 +260,12 @@ jobs:
           # src-tauri/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
 
-      - name: Check for version changes
-        id: check_changes
+      - name: Commit and push version sync
+        if: steps.check_version.outputs.sync_needed == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml
-          if git diff --cached --quiet; then
-            echo "needs_commit=false" >> "$GITHUB_OUTPUT"
-            echo "No version changes needed — files already at $VERSION"
-          else
-            echo "needs_commit=true" >> "$GITHUB_OUTPUT"
-            echo "Version changed to $VERSION"
-          fi
-
-      - name: Commit and push version sync
-        if: steps.check_changes.outputs.needs_commit == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "chore(release): sync version to $VERSION"
