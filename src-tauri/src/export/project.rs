@@ -271,8 +271,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let import_source = get_str_field(a, "importSource", "import_source");
         let imported_at = get_str_field(a, "importedAt", "imported_at")
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
-        let changed_at = get_str_field(a, "changedAt", "changed_at")
-            .unwrap_or_else(|| imported_at.clone());
+        let changed_at =
+            get_str_field(a, "changedAt", "changed_at").unwrap_or_else(|| imported_at.clone());
         let screened_at = get_str_field(a, "screenedAt", "screened_at");
         // Preserve sequence_id from backup; old backups lack it, so assign 1-based index
         let sequence_id = a.get("sequenceId").and_then(|v| v.as_i64()).unwrap_or_else(|| {

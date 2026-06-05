@@ -363,7 +363,10 @@ pub fn mark_as_duplicate(
 }
 
 pub fn move_to_working(conn: &Connection, article_id: &str) -> Result<(), AppError> {
-    conn.execute("UPDATE articles SET status = 'working', changed_at = datetime('now') WHERE id = ?1", params![article_id])?;
+    conn.execute(
+        "UPDATE articles SET status = 'working', changed_at = datetime('now') WHERE id = ?1",
+        params![article_id],
+    )?;
     Ok(())
 }
 
@@ -410,7 +413,8 @@ pub struct ArticleQuery {
 pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
     let is_duplicate_view = query.status.as_deref() == Some("duplicate");
     let is_all_view = query.status.is_none();
-    let base_filter = if is_duplicate_view || is_all_view { "" } else { " WHERE duplicate_of IS NULL" };
+    let base_filter =
+        if is_duplicate_view || is_all_view { "" } else { " WHERE duplicate_of IS NULL" };
     let mut sql = format!("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles{base_filter}");
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -555,10 +559,7 @@ pub fn update_article_tags(
     article_id: &str,
     tag_names: &[String],
 ) -> Result<(), AppError> {
-    conn.execute(
-        "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
-        [article_id],
-    )?;
+    conn.execute("UPDATE articles SET changed_at = datetime('now') WHERE id = ?1", [article_id])?;
     conn.execute("DELETE FROM article_tags WHERE article_id = ?1", [article_id])?;
 
     for tag_name in tag_names {
@@ -591,10 +592,7 @@ pub fn update_article_labels(
     article_id: &str,
     label_names: &[String],
 ) -> Result<(), AppError> {
-    conn.execute(
-        "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
-        [article_id],
-    )?;
+    conn.execute("UPDATE articles SET changed_at = datetime('now') WHERE id = ?1", [article_id])?;
     conn.execute("DELETE FROM article_labels WHERE article_id = ?1", [article_id])?;
 
     for label_name in label_names {
@@ -623,7 +621,10 @@ pub fn update_article_labels(
 }
 
 pub fn update_user_notes(conn: &Connection, article_id: &str, notes: &str) -> Result<(), AppError> {
-    conn.execute("UPDATE articles SET user_notes = ?1, changed_at = datetime('now') WHERE id = ?2", params![notes, article_id])?;
+    conn.execute(
+        "UPDATE articles SET user_notes = ?1, changed_at = datetime('now') WHERE id = ?2",
+        params![notes, article_id],
+    )?;
     Ok(())
 }
 
@@ -891,9 +892,8 @@ pub fn bulk_add_tag_to_articles(
         return Ok(0);
     }
     // Ensure tag exists
-    let existing_id: Option<String> = conn
-        .query_row("SELECT id FROM tags WHERE name = ?1", [tag_name], |row| row.get(0))
-        .ok();
+    let existing_id: Option<String> =
+        conn.query_row("SELECT id FROM tags WHERE name = ?1", [tag_name], |row| row.get(0)).ok();
     let tag_id = if let Some(id) = existing_id {
         id
     } else {

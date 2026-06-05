@@ -1,5 +1,6 @@
 use bango_lib::summary::prompt::{
-    build_summary_prompt, format_screening_summary, ArticleSummary, ScreeningData, SummaryPromptInput,
+    build_summary_prompt, format_screening_summary, ArticleSummary, ScreeningData,
+    SummaryPromptInput,
 };
 
 fn sample_screening_data() -> ScreeningData {

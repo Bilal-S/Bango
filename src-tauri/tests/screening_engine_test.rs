@@ -1,11 +1,10 @@
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
-use bango_lib::screening::engine::{
-    augment_matched_from_reasoning, build_global_criterion_numbering,
-    create_or_match_label, create_or_match_tag, extract_json, process_screening_responses,
-    ScreeningEngine,
-};
 use bango_lib::models::criterion::{Criterion, CriterionType, Priority};
+use bango_lib::screening::engine::{
+    augment_matched_from_reasoning, build_global_criterion_numbering, create_or_match_label,
+    create_or_match_tag, extract_json, process_screening_responses, ScreeningEngine,
+};
 use rusqlite::Connection;
 
 fn setup_test_db() -> Connection {
@@ -154,7 +153,11 @@ fn test_tag_matches_existing_case_insensitive() {
     let conn = setup_test_db();
     let article_id = "art-tag-match";
     insert_test_article(&conn, article_id);
-    conn.execute("INSERT INTO tags (id, name, source) VALUES ('t1', 'machine-learning', 'user_created')", []).unwrap();
+    conn.execute(
+        "INSERT INTO tags (id, name, source) VALUES ('t1', 'machine-learning', 'user_created')",
+        [],
+    )
+    .unwrap();
     create_or_match_tag(&conn, "Machine-Learning", article_id).unwrap();
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 1);
@@ -166,7 +169,9 @@ fn test_tag_creates_new_when_no_match() {
     let article_id = "art-tag-new";
     insert_test_article(&conn, article_id);
     create_or_match_tag(&conn, "deep-learning", article_id).unwrap();
-    let name: String = conn.query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0)).unwrap();
+    let name: String = conn
+        .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(name, "deep-learning");
 }
 
@@ -175,8 +180,15 @@ fn test_tag_trimmed_to_30_chars() {
     let conn = setup_test_db();
     let article_id = "art-tag-trim";
     insert_test_article(&conn, article_id);
-    create_or_match_tag(&conn, "this-is-a-very-long-tag-name-that-exceeds-thirty-chars", article_id).unwrap();
-    let name: String = conn.query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0)).unwrap();
+    create_or_match_tag(
+        &conn,
+        "this-is-a-very-long-tag-name-that-exceeds-thirty-chars",
+        article_id,
+    )
+    .unwrap();
+    let name: String = conn
+        .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(name.len(), 30);
 }
 
@@ -187,7 +199,11 @@ fn test_label_matches_existing_case_insensitive() {
     let conn = setup_test_db();
     let article_id = "art-label-match";
     insert_test_article(&conn, article_id);
-    conn.execute("INSERT INTO labels (id, name, source) VALUES ('l1', 'priority-read', 'user_created')", []).unwrap();
+    conn.execute(
+        "INSERT INTO labels (id, name, source) VALUES ('l1', 'priority-read', 'user_created')",
+        [],
+    )
+    .unwrap();
     create_or_match_label(&conn, "Priority-Read", article_id).unwrap();
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM labels", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 1);
@@ -199,7 +215,9 @@ fn test_label_creates_new_when_no_match() {
     let article_id = "art-label-new";
     insert_test_article(&conn, article_id);
     create_or_match_label(&conn, "strong-methodology", article_id).unwrap();
-    let name: String = conn.query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0)).unwrap();
+    let name: String = conn
+        .query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(name, "strong-methodology");
 }
 
@@ -210,7 +228,9 @@ fn test_label_trimmed_to_30_chars() {
     insert_test_article(&conn, article_id);
     let long_label = "Inclusion: this is a very long criterion text that exceeds limit";
     create_or_match_label(&conn, long_label, article_id).unwrap();
-    let name: String = conn.query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0)).unwrap();
+    let name: String = conn
+        .query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(name.len(), 30);
 }
 
@@ -224,10 +244,10 @@ fn test_augment_adds_missing_uuid_from_reasoning() {
 
     let (inc, exc) = augment_matched_from_reasoning(
         "Matched uuid-1 based on criteria",
-        &[],          // no inclusion matched
-        &[],          // no exclusion matched
+        &[], // no inclusion matched
+        &[], // no exclusion matched
         &global_map,
-        1,            // 1 inclusion criterion
+        1, // 1 inclusion criterion
     );
 
     assert!(inc.contains(&"uuid-1".to_string()), "uuid-1 should be augmented into inclusion");
@@ -254,9 +274,27 @@ fn test_augment_no_duplicates() {
 
 #[test]
 fn test_global_numbering_sequential() {
-    let inc1 = Criterion { id: "a".into(), text: "I1".into(), criterion_type: CriterionType::Inclusion, priority: Priority::Standard, created_at: String::new() };
-    let inc2 = Criterion { id: "b".into(), text: "I2".into(), criterion_type: CriterionType::Inclusion, priority: Priority::Standard, created_at: String::new() };
-    let exc1 = Criterion { id: "c".into(), text: "E1".into(), criterion_type: CriterionType::Exclusion, priority: Priority::Standard, created_at: String::new() };
+    let inc1 = Criterion {
+        id: "a".into(),
+        text: "I1".into(),
+        criterion_type: CriterionType::Inclusion,
+        priority: Priority::Standard,
+        created_at: String::new(),
+    };
+    let inc2 = Criterion {
+        id: "b".into(),
+        text: "I2".into(),
+        criterion_type: CriterionType::Inclusion,
+        priority: Priority::Standard,
+        created_at: String::new(),
+    };
+    let exc1 = Criterion {
+        id: "c".into(),
+        text: "E1".into(),
+        criterion_type: CriterionType::Exclusion,
+        priority: Priority::Standard,
+        created_at: String::new(),
+    };
 
     let map = build_global_criterion_numbering(&[&inc1, &inc2], &[&exc1]);
     assert_eq!(map.get("a"), Some(&1));

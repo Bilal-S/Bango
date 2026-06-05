@@ -184,11 +184,7 @@ fn test_sort_title_case_insensitive() {
     let conn = setup_db();
     seed_working_articles(
         &conn,
-        &[
-            ("banana", Some(2020)),
-            ("Apple", Some(2021)),
-            ("cherry", Some(2022)),
-        ],
+        &[("banana", Some(2020)), ("Apple", Some(2021)), ("cherry", Some(2022))],
     );
 
     let query = ArticleQuery {
@@ -444,10 +440,7 @@ fn test_working_view_excludes_merged_duplicates() {
     let results = article_repo::query_articles(&conn, &query).expect("query failed");
     assert_eq!(results.len(), 2, "Working view should exclude merged duplicates");
     let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
-    assert!(
-        !titles.contains(&"Article 1 Dup"),
-        "Should NOT contain merged duplicate"
-    );
+    assert!(!titles.contains(&"Article 1 Dup"), "Should NOT contain merged duplicate");
 }
 
 #[test]
@@ -483,11 +476,7 @@ fn test_duplicate_view_shows_all_duplicates() {
     };
 
     let results = article_repo::query_articles(&conn, &query).expect("query failed");
-    assert_eq!(
-        results.len(),
-        3,
-        "Duplicate view should show all duplicates (merged or not)"
-    );
+    assert_eq!(results.len(), 3, "Duplicate view should show all duplicates (merged or not)");
 }
 
 // ─── Default sort direction (none specified) ──────────────────────
@@ -497,11 +486,7 @@ fn test_default_sort_direction_is_desc() {
     let conn = setup_db();
     seed_working_articles(
         &conn,
-        &[
-            ("Alpha", Some(2020)),
-            ("Charlie", Some(2021)),
-            ("Bravo", Some(2022)),
-        ],
+        &[("Alpha", Some(2020)), ("Charlie", Some(2021)), ("Bravo", Some(2022))],
     );
 
     let query = ArticleQuery {
@@ -535,11 +520,7 @@ fn test_sort_by_sequence_id_asc() {
     // Articles are assigned sequential sequence_ids (1, 2, 3) in insertion order
     seed_working_articles(
         &conn,
-        &[
-            ("Third", Some(2020)),
-            ("First", Some(2021)),
-            ("Second", Some(2022)),
-        ],
+        &[("Third", Some(2020)), ("First", Some(2021)), ("Second", Some(2022))],
     );
 
     let query = ArticleQuery {
@@ -570,11 +551,7 @@ fn test_sort_by_sequence_id_desc() {
     let conn = setup_db();
     seed_working_articles(
         &conn,
-        &[
-            ("Third", Some(2020)),
-            ("First", Some(2021)),
-            ("Second", Some(2022)),
-        ],
+        &[("Third", Some(2020)), ("First", Some(2021)), ("Second", Some(2022))],
     );
 
     let query = ArticleQuery {
