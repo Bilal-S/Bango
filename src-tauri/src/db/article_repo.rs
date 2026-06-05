@@ -409,7 +409,8 @@ pub struct ArticleQuery {
 
 pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
     let is_duplicate_view = query.status.as_deref() == Some("duplicate");
-    let base_filter = if is_duplicate_view { "" } else { " WHERE duplicate_of IS NULL" };
+    let is_all_view = query.status.is_none();
+    let base_filter = if is_duplicate_view || is_all_view { "" } else { " WHERE duplicate_of IS NULL" };
     let mut sql = format!("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles{base_filter}");
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -485,10 +486,11 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
 
     let sort_by = query.sort_by.as_deref().unwrap_or("imported_at");
     let sort_dir = match query.sort_dir.as_deref() {
-        Some("ASC") => "ASC",
+        Some(d) if d.eq_ignore_ascii_case("asc") => "ASC",
         _ => "DESC",
     };
     let order_clause = match sort_by {
+        "index" => format!(" ORDER BY sequence_id {sort_dir}"),
         "title" => format!(" ORDER BY title COLLATE NOCASE {sort_dir}"),
         "authors" => format!(" ORDER BY authors COLLATE NOCASE {sort_dir} NULLS LAST"),
         "journal" => format!(" ORDER BY journal COLLATE NOCASE {sort_dir} NULLS LAST"),

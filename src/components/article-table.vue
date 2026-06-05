@@ -30,7 +30,7 @@ interface ColumnDef {
 }
 
 const COLUMNS: ColumnDef[] = [
-  { key: 'index', label: '#', width: 'w-12', responsiveClass: 'col-index', sortable: false },
+  { key: 'index', label: '#', width: 'w-12', responsiveClass: 'col-index' },
   { key: 'title', label: 'Title' },
   { key: 'authors', label: 'Authors' },
   { key: 'publicationYear', label: 'Year', width: 'w-16' },

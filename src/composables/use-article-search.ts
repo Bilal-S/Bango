@@ -167,7 +167,9 @@ export function useArticleSearch() {
     }
     query.sortBy = sortColumn.value;
     query.sortDir = sortDirection.value;
-    resetPage();
+    // Keep the current page — re-sort in-place so the user sees the
+    // same offset with the new sort order applied.
+    query.offset = (currentPage.value - 1) * pageSize.value;
     void search();
   }
 
