@@ -99,6 +99,12 @@ const showExport = ref(false);
 const bulkTagDialogOpen = ref(false);
 const bulkLabelDialogOpen = ref(false);
 const bulkInputValue = ref('');
+const isDetailFullScreen = ref(localStorage.getItem('bango-detail-fullscreen') === 'true');
+
+function toggleDetailFullScreen(): void {
+  isDetailFullScreen.value = !isDetailFullScreen.value;
+  localStorage.setItem('bango-detail-fullscreen', String(isDetailFullScreen.value));
+}
 
 // Inline decision notification state
 const decisionMessage = ref('');
@@ -193,7 +199,7 @@ async function handleBulkAddLabel(): Promise<void> {
 <template>
   <div class="h-full flex">
     <!-- Main content area -->
-    <div class="flex-1 p-container-padding overflow-y-auto">
+    <div v-show="!isDetailFullScreen" class="flex-1 p-container-padding overflow-y-auto">
       <!-- Header -->
       <div class="mb-6">
         <h1 class="page-title">Articles</h1>
@@ -323,6 +329,7 @@ async function handleBulkAddLabel(): Promise<void> {
       :has-previous="hasPrevious"
       :has-next="hasNext"
       :has-return-target="hasReturnTarget"
+      :full-screen="isDetailFullScreen"
       :decision-message="decisionMessage"
       :decision-type="decisionType"
       @close="closeDetail"
@@ -334,6 +341,7 @@ async function handleBulkAddLabel(): Promise<void> {
       @update-labels="updateLabels"
       @update-criteria="updateCriteria"
       @navigate-to-article="navigateToArticle"
+      @toggle-full-screen="toggleDetailFullScreen"
     />
 
     <!-- Bulk Action Bar -->

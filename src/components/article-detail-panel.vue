@@ -16,6 +16,7 @@ const props = defineProps<{
   hasPrevious: boolean;
   hasNext: boolean;
   hasReturnTarget: boolean;
+  fullScreen?: boolean;
   decisionMessage?: string;
   decisionType?: 'success' | 'info';
 }>();
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   updateLabels: [id: string, labelIds: string[]];
   updateCriteria: [id: string, inclusionIds: string[], exclusionIds: string[]];
   navigateToArticle: [id: string];
+  toggleFullScreen: [];
 }>();
 
 /** Status badge config for the header display */
@@ -303,12 +305,17 @@ function handleCriteriaSave(
 
 <template>
   <aside
-    class="detail-panel h-full bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] border-l border-slate-200 flex flex-col z-50 relative"
-    :class="{ 'transition-none': isResizing }"
-    :style="{ '--detail-panel-width': panelWidth + 'px' }"
+    class="detail-panel h-full bg-white flex flex-col z-50 relative"
+    :class="{
+      'transition-none': isResizing,
+      'detail-panel--fullscreen': fullScreen,
+      'shadow-[0_4px_24px_rgba(0,0,0,0.15)] border-l border-slate-200': !fullScreen,
+    }"
+    :style="fullScreen ? {} : { '--detail-panel-width': panelWidth + 'px' }"
   >
-    <!-- Resize Handle (desktop only) -->
+    <!-- Resize Handle (desktop only, hidden in fullscreen) -->
     <div
+      v-if="!fullScreen"
       class="resizer hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-indigo-400/50 active:bg-indigo-600 transition-colors"
       @mousedown="startResize"
     />
@@ -328,12 +335,21 @@ function handleCriteriaSave(
             {{ statusDisplay.label }}
           </span>
         </div>
-        <button
-          class="material-symbols-outlined text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
-          @click="emit('close')"
-        >
-          {{ hasReturnTarget ? 'arrow_back' : 'close' }}
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            class="material-symbols-outlined text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
+            title="Toggle full screen"
+            @click="emit('toggleFullScreen')"
+          >
+            {{ fullScreen ? 'close_fullscreen' : 'open_in_full' }}
+          </button>
+          <button
+            class="material-symbols-outlined text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
+            @click="emit('close')"
+          >
+            {{ hasReturnTarget ? 'arrow_back' : 'close' }}
+          </button>
+        </div>
       </div>
       <h2 class="font-h1 text-h1 text-on-surface leading-tight mb-4">
         {{ article.title }}
@@ -381,8 +397,9 @@ function handleCriteriaSave(
               >
               <a
                 class="text-primary hover:underline flex items-center gap-1"
-                href="#"
-                @click.prevent
+                :href="'https://doi.org/' + article.doi"
+                target="_blank"
+                rel="noopener noreferrer"
               >
                 {{ article.doi }}
                 <span class="material-symbols-outlined text-[14px]">open_in_new</span>
@@ -711,6 +728,15 @@ function handleCriteriaSave(
   width: var(--detail-panel-width);
   flex-shrink: 0;
   transition: width 0.2s ease;
+}
+
+.detail-panel--fullscreen {
+  width: 100%;
+  flex-shrink: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  border-left: none;
+  box-shadow: none;
 }
 
 @media (max-width: 1023px) {
