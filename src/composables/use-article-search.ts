@@ -297,22 +297,51 @@ export function useArticleSearch() {
     return articles.value.findIndex((a) => a.id === selectedArticle.value!.id);
   });
 
-  const hasPrevious = computed(() => selectedIndex.value > 0);
+  const hasPrevious = computed(() => {
+    if (selectedIndex.value > 0) return true;
+    // Can go to previous page (and that page has articles)
+    return currentPage.value > 1;
+  });
+
   const hasNext = computed(() => {
     const idx = selectedIndex.value;
-    return idx >= 0 && idx < articles.value.length - 1;
+    if (idx >= 0 && idx < articles.value.length - 1) return true;
+    // Can go to next page (and that page has articles)
+    return currentPage.value < totalPages.value;
   });
 
   async function navigatePrev(): Promise<void> {
     if (!hasPrevious.value) return;
-    const prev = articles.value[selectedIndex.value - 1];
-    if (prev) await selectArticle(prev.id);
+    if (selectedIndex.value > 0) {
+      // Previous article on current page
+      const prev = articles.value[selectedIndex.value - 1];
+      if (prev) await selectArticle(prev.id);
+    } else if (currentPage.value > 1) {
+      // Cross to previous page — load it and select the last article
+      const prevPage = currentPage.value - 1;
+      currentPage.value = prevPage;
+      query.offset = (prevPage - 1) * pageSize.value;
+      await search();
+      const lastOnPrevPage = articles.value[articles.value.length - 1];
+      if (lastOnPrevPage) await selectArticle(lastOnPrevPage.id);
+    }
   }
 
   async function navigateNext(): Promise<void> {
     if (!hasNext.value) return;
-    const next = articles.value[selectedIndex.value + 1];
-    if (next) await selectArticle(next.id);
+    if (selectedIndex.value < articles.value.length - 1) {
+      // Next article on current page
+      const next = articles.value[selectedIndex.value + 1];
+      if (next) await selectArticle(next.id);
+    } else if (currentPage.value < totalPages.value) {
+      // Cross to next page — load it and select the first article
+      const nextPage = currentPage.value + 1;
+      currentPage.value = nextPage;
+      query.offset = (nextPage - 1) * pageSize.value;
+      await search();
+      const firstOnNextPage = articles.value[0];
+      if (firstOnNextPage) await selectArticle(firstOnNextPage.id);
+    }
   }
 
   /** Total article count for the currently active status tab. */
