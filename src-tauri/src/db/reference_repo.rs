@@ -5,7 +5,10 @@ use crate::error::AppError;
 use crate::models::reference::{MatchStatus, NewReference, Reference, ReferenceType};
 
 /// Insert a single reference record.
-pub fn insert_reference(conn: &Connection, reference: &NewReference) -> Result<Reference, AppError> {
+pub fn insert_reference(
+    conn: &Connection,
+    reference: &NewReference,
+) -> Result<Reference, AppError> {
     let id = Uuid::new_v4().to_string();
     let authors_json = serde_json::to_string(&reference.authors)?;
     let keywords_json = serde_json::to_string(&reference.keywords)?;
@@ -181,30 +184,24 @@ pub fn insert_references_batch(
 
 /// Get a single reference by ID.
 pub fn get_reference_by_id(conn: &Connection, id: &str) -> Result<Reference, AppError> {
-    conn.query_row(
-        "SELECT * FROM article_references WHERE id = ?1",
-        [id],
-        row_to_reference,
-    )
-    .map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => {
-            AppError::NotFound(format!("Reference {} not found", id))
-        }
-        other => AppError::Database(other),
-    })
-}
-
-fn get_reference_by_id_tx(
-    tx: &rusqlite::Transaction<'_>,
-    id: &str,
-) -> Result<Reference, AppError> {
-    tx.query_row("SELECT * FROM article_references WHERE id = ?1", [id], row_to_reference)
+    conn.query_row("SELECT * FROM article_references WHERE id = ?1", [id], row_to_reference)
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
                 AppError::NotFound(format!("Reference {} not found", id))
             }
             other => AppError::Database(other),
         })
+}
+
+fn get_reference_by_id_tx(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<Reference, AppError> {
+    tx.query_row("SELECT * FROM article_references WHERE id = ?1", [id], row_to_reference).map_err(
+        |e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Reference {} not found", id))
+            }
+            other => AppError::Database(other),
+        },
+    )
 }
 
 /// Get all references for a parent article, optionally filtered by type.
@@ -269,8 +266,10 @@ pub fn delete_references_for_article(conn: &Connection, parent_id: &str) -> Resu
 
 /// Update the parent article's `has_citation_details` and `has_reference_details` flags.
 fn update_parent_flags(conn: &Connection, parent_id: &str) -> Result<(), AppError> {
-    let has_citations = count_references_for_article(conn, parent_id, &ReferenceType::Citation)? > 0;
-    let has_references = count_references_for_article(conn, parent_id, &ReferenceType::Reference)? > 0;
+    let has_citations =
+        count_references_for_article(conn, parent_id, &ReferenceType::Citation)? > 0;
+    let has_references =
+        count_references_for_article(conn, parent_id, &ReferenceType::Reference)? > 0;
 
     conn.execute(
         "UPDATE articles SET has_citation_details = ?1, has_reference_details = ?2, changed_at = datetime('now') WHERE id = ?3",
@@ -300,22 +299,22 @@ fn update_parent_flags_tx(tx: &rusqlite::Transaction<'_>, parent_id: &str) -> Re
 
 fn row_to_reference(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reference> {
     let type_int: i32 = row.get("type")?;
-    let reference_type = ReferenceType::from_int(type_int)
-        .ok_or_else(|| rusqlite::Error::InvalidColumnType(1, "type".into(), rusqlite::types::Type::Integer))?;
+    let reference_type = ReferenceType::from_int(type_int).ok_or_else(|| {
+        rusqlite::Error::InvalidColumnType(1, "type".into(), rusqlite::types::Type::Integer)
+    })?;
 
     let status_str: String = row.get("match_status")?;
-    let match_status = MatchStatus::from_str(&status_str)
-        .ok_or_else(|| rusqlite::Error::InvalidColumnType(3, "match_status".into(), rusqlite::types::Type::Text))?;
+    let match_status = MatchStatus::from_str(&status_str).ok_or_else(|| {
+        rusqlite::Error::InvalidColumnType(3, "match_status".into(), rusqlite::types::Type::Text)
+    })?;
 
     let authors_str: Option<String> = row.get("authors")?;
-    let authors: Vec<String> = authors_str
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    let authors: Vec<String> =
+        authors_str.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
 
     let keywords_str: Option<String> = row.get("keywords")?;
-    let keywords: Vec<String> = keywords_str
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    let keywords: Vec<String> =
+        keywords_str.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
 
     let ris_extras_str: Option<String> = row.get("ris_extras")?;
     let ris_extras: Option<serde_json::Value> =

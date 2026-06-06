@@ -1,19 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 /// The type of reference record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum ReferenceType {
     /// Another article that cites the parent article
+    #[default]
     Citation,
     /// A work cited by the parent article
     Reference,
-}
-
-impl Default for ReferenceType {
-    fn default() -> Self {
-        ReferenceType::Citation
-    }
 }
 
 impl ReferenceType {
@@ -36,18 +31,13 @@ impl ReferenceType {
 }
 
 /// Match status for a reference record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum MatchStatus {
+    #[default]
     Unmatched,
     Matched,
     NotInLibrary,
-}
-
-impl Default for MatchStatus {
-    fn default() -> Self {
-        MatchStatus::Unmatched
-    }
 }
 
 impl MatchStatus {
@@ -61,6 +51,7 @@ impl MatchStatus {
     }
 
     #[must_use]
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "unmatched" => Some(Self::Unmatched),

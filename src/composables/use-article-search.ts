@@ -300,6 +300,28 @@ export function useArticleSearch() {
     syncArticleToList(id);
   }
 
+  async function attachFullText(articleId: string, filePath: string): Promise<void> {
+    await tauriCommand('attach_full_text', { articleId, filePath });
+    await selectArticle(articleId);
+    syncArticleToList(articleId);
+    await fetchCounts();
+  }
+
+  async function deleteFullTextAttachment(articleId: string): Promise<void> {
+    await tauriCommand('delete_full_text', { articleId });
+    await selectArticle(articleId);
+    syncArticleToList(articleId);
+    await fetchCounts();
+  }
+
+  async function readFullTextContent(articleId: string): Promise<string | null> {
+    return await tauriCommand<string | null>('read_full_text', { articleId });
+  }
+
+  async function getFullTextFilePath(articleId: string): Promise<string | null> {
+    return await tauriCommand<string | null>('get_full_text_file_path', { articleId });
+  }
+
   const selectedIndex = computed(() => {
     if (!selectedArticle.value) return -1;
     return articles.value.findIndex((a) => a.id === selectedArticle.value!.id);
@@ -616,5 +638,10 @@ export function useArticleSearch() {
     bulkUpdateStatus,
     bulkAddTag,
     bulkAddLabel,
+    // Full text
+    attachFullText,
+    deleteFullTextAttachment,
+    readFullTextContent,
+    getFullTextFilePath,
   };
 }

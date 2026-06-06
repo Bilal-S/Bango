@@ -27,11 +27,8 @@ pub fn get_fulltext_storage_dir(
     let default_path = compute_default_storage_dir();
 
     let is_custom = configured.as_ref().is_some_and(|p| !p.is_empty());
-    let effective_path = if is_custom {
-        configured.unwrap()
-    } else {
-        default_path.clone()
-    };
+    let effective_path =
+        configured.as_ref().filter(|p| !p.is_empty()).cloned().unwrap_or(default_path.clone());
 
     // Ensure directory exists
     std::fs::create_dir_all(&effective_path).map_err(|e| {
@@ -41,11 +38,7 @@ pub fn get_fulltext_storage_dir(
         ))
     })?;
 
-    Ok(FullTextStorageInfo {
-        effective_path,
-        is_custom,
-        default_path,
-    })
+    Ok(FullTextStorageInfo { effective_path, is_custom, default_path })
 }
 
 /// Set a custom fulltext storage directory. Pass empty string or null to reset to default.
@@ -67,17 +60,10 @@ pub fn set_fulltext_storage_dir(
     let default_path = compute_default_storage_dir();
 
     let is_custom = configured.as_ref().is_some_and(|p| !p.is_empty());
-    let effective_path = if is_custom {
-        configured.unwrap()
-    } else {
-        default_path.clone()
-    };
+    let effective_path =
+        configured.as_ref().filter(|p| !p.is_empty()).cloned().unwrap_or(default_path.clone());
 
-    Ok(FullTextStorageInfo {
-        effective_path,
-        is_custom,
-        default_path,
-    })
+    Ok(FullTextStorageInfo { effective_path, is_custom, default_path })
 }
 
 /// Compute the platform default: ~/Documents/Bango/fulltext/

@@ -3,6 +3,7 @@ pub mod articles;
 pub mod criteria;
 pub mod dedup;
 pub mod export_cmd;
+pub mod full_text;
 pub mod import;
 pub mod labels;
 pub mod llm_config;

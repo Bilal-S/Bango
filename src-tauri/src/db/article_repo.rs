@@ -982,6 +982,42 @@ pub fn bulk_add_label_to_articles(
     Ok(count)
 }
 
+/// Update the full text and file attachment info for an article.
+pub fn update_full_text(
+    conn: &Connection,
+    article_id: &str,
+    full_text: &str,
+    file_name: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET full_text = ?1, has_full_text = 1, full_text_file_name = ?2, changed_at = datetime('now') WHERE id = ?3",
+        params![full_text, file_name, article_id],
+    )?;
+    Ok(())
+}
+
+/// Clear the full text and file attachment info for an article.
+pub fn clear_full_text(conn: &Connection, article_id: &str) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET full_text = NULL, has_full_text = 0, full_text_file_name = NULL, changed_at = datetime('now') WHERE id = ?1",
+        params![article_id],
+    )?;
+    Ok(())
+}
+
+/// Get the full text file name for an article (if any).
+pub fn get_full_text_file_name(
+    conn: &Connection,
+    article_id: &str,
+) -> Result<Option<String>, AppError> {
+    let file_name: Option<String> = conn.query_row(
+        "SELECT full_text_file_name FROM articles WHERE id = ?1",
+        [article_id],
+        |row| row.get(0),
+    )?;
+    Ok(file_name)
+}
+
 pub fn get_article_counts(
     conn: &Connection,
 ) -> Result<crate::models::article::ArticleCounts, AppError> {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
+import { open } from '@tauri-apps/plugin-dialog';
 import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
@@ -79,6 +80,10 @@ const {
   bulkUpdateStatus,
   bulkAddTag,
   bulkAddLabel,
+  // Full text
+  attachFullText,
+  deleteFullTextAttachment,
+  readFullTextContent,
 } = useArticleSearch();
 
 onMounted(() => {
@@ -116,6 +121,13 @@ setTimeout(() => {
 function toggleDetailFullScreen(): void {
   isDetailFullScreen.value = !isDetailFullScreen.value;
   localStorage.setItem('bango-detail-fullscreen', String(isDetailFullScreen.value));
+}
+
+/** Close detail panel and always reset fullscreen state to prevent white screen */
+function handleCloseDetail(): void {
+  closeDetail();
+  isDetailFullScreen.value = false;
+  localStorage.setItem('bango-detail-fullscreen', 'false');
 }
 
 // Inline decision notification state
@@ -206,6 +218,43 @@ async function handleBulkAddLabel(): Promise<void> {
     `Label "${name}" added to ${ids.length} article${ids.length > 1 ? 's' : ''}`,
     'success'
   );
+}
+
+// ── Full text handlers ────────────────────────────────────────────
+async function handleAttachFullText(articleId: string): Promise<void> {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [
+        {
+          name: 'Documents',
+          extensions: ['pdf', 'txt'],
+        },
+      ],
+    });
+    if (!selected) return;
+    toast.show('Importing full text…', 'info');
+    await attachFullText(articleId, selected);
+    toast.show('Full text attached successfully.', 'success');
+  } catch (e: unknown) {
+    toast.show(`Failed to attach file: ${e instanceof Error ? e.message : String(e)}`, 'error');
+  }
+}
+
+async function handleDeleteFullText(articleId: string): Promise<void> {
+  try {
+    await deleteFullTextAttachment(articleId);
+    toast.show('Full text deleted.', 'success');
+  } catch (e: unknown) {
+    toast.show(
+      `Failed to delete full text: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    );
+  }
+}
+
+async function handleReadFullText(articleId: string): Promise<string | null> {
+  return await readFullTextContent(articleId);
 }
 </script>
 
@@ -347,7 +396,7 @@ async function handleBulkAddLabel(): Promise<void> {
       :article-total="activeTotalCount"
       :decision-message="decisionMessage"
       :decision-type="decisionType"
-      @close="closeDetail"
+      @close="handleCloseDetail"
       @navigate-prev="navigatePrev"
       @navigate-next="navigateNext"
       @move-article="handleMoveArticle"
@@ -357,6 +406,9 @@ async function handleBulkAddLabel(): Promise<void> {
       @update-criteria="updateCriteria"
       @navigate-to-article="navigateToArticle"
       @toggle-full-screen="toggleDetailFullScreen"
+      @attach-full-text="handleAttachFullText"
+      @delete-full-text="handleDeleteFullText"
+      @read-full-text="handleReadFullText"
     />
 
     <!-- Bulk Action Bar -->

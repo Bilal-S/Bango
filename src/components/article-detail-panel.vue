@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { openPath } from '@tauri-apps/plugin-opener';
 import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
 import SuggestInput from './suggest-input.vue';
@@ -34,6 +35,9 @@ const emit = defineEmits<{
   updateCriteria: [id: string, inclusionIds: string[], exclusionIds: string[]];
   navigateToArticle: [id: string];
   toggleFullScreen: [];
+  attachFullText: [id: string];
+  deleteFullText: [id: string];
+  readFullText: [id: string];
 }>();
 
 /** Status badge config for the header display */
@@ -289,6 +293,124 @@ const displayReasoning = computed(() => {
   return result;
 });
 
+// Full-text reading view state
+const showFullTextView = ref(false);
+const fullTextContent = ref<string | null>(null);
+const fullTextExpanded = ref(false);
+const pdfSrc = ref<string | null>(null);
+
+/** Whether the attached file is a PDF */
+const isPdfAttachment = computed(() => {
+  const name = props.article.fullTextFileName;
+  return !!name && name.toLowerCase().endsWith('.pdf');
+});
+
+/** Determine the file type icon based on filename */
+const fullTextFileIcon = computed(() => {
+  const name = props.article.fullTextFileName;
+  if (!name) return null;
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'picture_as_pdf';
+  if (lower.endsWith('.txt')) return 'description';
+  return 'draft';
+});
+
+/** Absolute file path for the attachment (fetched on demand) */
+const absoluteFilePath = ref<string | null>(null);
+
+/** Open the full-text reading view */
+async function openFullTextView(): Promise<void> {
+  showFullTextView.value = true;
+  fullTextContent.value = props.article.fullText;
+  pdfSrc.value = null;
+  absoluteFilePath.value = null;
+
+  if (isPdfAttachment.value) {
+    // Read file bytes via Tauri command and create a Blob URL for the iframe
+    const { tauriCommand } = await import('@/composables/use-tauri-command');
+    try {
+      const bytes = await tauriCommand<ArrayBuffer | null>('read_full_text_file_bytes', {
+        articleId: props.article.id,
+      });
+      if (bytes) {
+        const blob = new Blob([new Uint8Array(bytes as unknown as ArrayLike<number>)], {
+          type: 'application/pdf',
+        });
+        pdfSrc.value = URL.createObjectURL(blob);
+      }
+    } catch (e) {
+      console.warn('Failed to load PDF bytes for inline viewing:', e);
+      // Fallback: extracted text will be shown instead
+    }
+    // Also fetch the path for "Open externally"
+    const filePath = await tauriCommand<string | null>('get_full_text_file_path', {
+      articleId: props.article.id,
+    });
+    if (filePath) {
+      absoluteFilePath.value = filePath;
+    }
+  }
+}
+
+/** Open the attached file in the platform's default viewer */
+async function openFileExternally(): Promise<void> {
+  if (!absoluteFilePath.value) {
+    const { tauriCommand } = await import('@/composables/use-tauri-command');
+    const filePath = await tauriCommand<string | null>('get_full_text_file_path', {
+      articleId: props.article.id,
+    });
+    if (filePath) {
+      absoluteFilePath.value = filePath;
+    }
+  }
+  if (absoluteFilePath.value) {
+    await openPath(absoluteFilePath.value);
+  }
+}
+
+/** Revoke the Blob URL to free memory */
+function revokePdfSrc(): void {
+  if (pdfSrc.value && pdfSrc.value.startsWith('blob:')) {
+    URL.revokeObjectURL(pdfSrc.value);
+  }
+}
+
+/** Close the full-text reading view */
+function closeFullTextView(): void {
+  revokePdfSrc();
+  pdfSrc.value = null;
+  showFullTextView.value = false;
+  fullTextExpanded.value = false;
+}
+
+/** Toggle full-text expand (use full width by toggling panel fullscreen) */
+function toggleFullTextExpand(): void {
+  fullTextExpanded.value = !fullTextExpanded.value;
+  // Only toggle fullscreen if not already fullscreen to avoid double-toggle
+  if (fullTextExpanded.value && !props.fullScreen) {
+    emit('toggleFullScreen');
+  }
+}
+
+/** Delete the full-text attachment */
+function handleDeleteFullText(): void {
+  emit('deleteFullText', props.article.id);
+  showFullTextView.value = false;
+  fullTextExpanded.value = false;
+}
+
+// Reset full text view when article changes
+watch(
+  () => props.article.id,
+  () => {
+    showFullTextView.value = false;
+    fullTextExpanded.value = false;
+    fullTextContent.value = null;
+    pdfSrc.value = null;
+    absoluteFilePath.value = null;
+  }
+);
+
 // Criteria edit dialog
 const showCriteriaDialog = ref(false);
 
@@ -336,6 +458,28 @@ function handleCriteriaSave(
           >
             {{ statusDisplay.label }}
           </span>
+          <!-- Full-text attachment icon -->
+          <button
+            v-if="article.hasFullText && fullTextFileIcon"
+            class="material-symbols-outlined text-[18px] cursor-pointer rounded px-1 transition-colors"
+            :class="
+              article.fullTextFileName?.toLowerCase().endsWith('.pdf')
+                ? 'text-red-500 hover:bg-red-50'
+                : 'text-blue-500 hover:bg-blue-50'
+            "
+            :title="'Open full text: ' + (article.fullTextFileName ?? '')"
+            @click="openFullTextView"
+          >
+            {{ fullTextFileIcon }}
+          </button>
+          <button
+            v-else
+            class="material-symbols-outlined text-[18px] text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer rounded px-1 transition-colors"
+            title="Attach full text (PDF or TXT)"
+            @click="emit('attachFullText', article.id)"
+          >
+            attach_file
+          </button>
         </div>
         <div class="flex items-center gap-1">
           <button
@@ -680,6 +824,79 @@ function handleCriteriaSave(
         {{ decisionMessage }}
       </div>
     </Transition>
+
+    <!-- Full-Text Reading View Overlay -->
+    <div
+      v-if="showFullTextView"
+      class="absolute inset-0 z-50 bg-white flex flex-col"
+      :class="fullTextExpanded ? '' : ''"
+    >
+      <!-- Full-text header bar -->
+      <div
+        class="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0"
+      >
+        <div class="flex items-center gap-2">
+          <span
+            class="material-symbols-outlined text-[18px]"
+            :class="
+              article.fullTextFileName?.toLowerCase().endsWith('.pdf')
+                ? 'text-red-500'
+                : 'text-blue-500'
+            "
+          >
+            {{ fullTextFileIcon ?? 'description' }}
+          </span>
+          <span class="text-sm font-semibold text-slate-700 truncate max-w-[200px]">
+            {{ article.fullTextFileName ?? 'Full Text' }}
+          </span>
+        </div>
+        <div class="flex items-center gap-1">
+          <button
+            class="material-symbols-outlined text-[18px] text-slate-400 hover:text-slate-900 cursor-pointer rounded px-1 transition-colors"
+            :title="fullTextExpanded ? 'Collapse' : 'Expand to full width'"
+            @click="toggleFullTextExpand"
+          >
+            {{ fullTextExpanded ? 'close_fullscreen' : 'open_in_full' }}
+          </button>
+          <button
+            class="material-symbols-outlined text-[18px] text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer rounded px-1 transition-colors"
+            title="Open in system viewer"
+            @click="openFileExternally"
+          >
+            open_in_new
+          </button>
+          <button
+            class="material-symbols-outlined text-[18px] text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded px-1 transition-colors"
+            title="Delete full text attachment"
+            @click="handleDeleteFullText"
+          >
+            delete
+          </button>
+          <button
+            class="material-symbols-outlined text-[18px] text-slate-400 hover:text-slate-900 cursor-pointer rounded px-1 transition-colors"
+            title="Close full text view"
+            @click="closeFullTextView"
+          >
+            close
+          </button>
+        </div>
+      </div>
+      <!-- PDF inline viewer using Blob URL -->
+      <div v-if="isPdfAttachment && pdfSrc" class="flex-1 overflow-hidden">
+        <iframe :src="pdfSrc" class="w-full h-full border-0" title="PDF Viewer" />
+      </div>
+      <!-- Fallback: extracted text (for TXT, or when Blob URL failed) -->
+      <div v-else class="flex-1 overflow-y-auto p-6">
+        <pre
+          v-if="fullTextContent || article.fullText"
+          class="whitespace-pre-wrap font-body-main text-body-main text-on-surface leading-relaxed break-words"
+          >{{ fullTextContent ?? article.fullText }}</pre
+        >
+        <div v-else class="text-center py-16 text-slate-400 text-sm">
+          No full text content available.
+        </div>
+      </div>
+    </div>
 
     <!-- Footer Actions -->
     <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50 items-center">

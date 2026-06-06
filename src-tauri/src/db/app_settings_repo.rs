@@ -52,10 +52,7 @@ pub fn set_fulltext_storage_dir(conn: &Connection, path: Option<&str>) -> Result
     // Ensure the new directory exists
     if let Some(p) = value {
         std::fs::create_dir_all(p).map_err(|e| {
-            AppError::Import(format!(
-                "Failed to create fulltext storage directory '{}': {}",
-                p, e
-            ))
+            AppError::Import(format!("Failed to create fulltext storage directory '{}': {}", p, e))
         })?;
     }
 

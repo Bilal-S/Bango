@@ -11,6 +11,7 @@ pub mod prisma;
 pub mod ris;
 pub mod screening;
 pub mod summary;
+pub mod utils;
 
 use commands::screening::ScreeningState;
 use db::connection::DbState;
@@ -108,6 +109,11 @@ pub fn run() {
             commands::articles::bulk_add_label_to_articles,
             commands::app_settings::get_fulltext_storage_dir,
             commands::app_settings::set_fulltext_storage_dir,
+            commands::full_text::attach_full_text,
+            commands::full_text::delete_full_text,
+            commands::full_text::read_full_text,
+            commands::full_text::get_full_text_file_path,
+            commands::full_text::read_full_text_file_bytes,
             commands::screening::get_screening_readiness,
             commands::screening::start_screening,
             commands::screening::get_screening_progress,
