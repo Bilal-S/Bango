@@ -100,7 +100,18 @@ const showExport = ref(false);
 const bulkTagDialogOpen = ref(false);
 const bulkLabelDialogOpen = ref(false);
 const bulkInputValue = ref('');
-const isDetailFullScreen = ref(localStorage.getItem('bango-detail-fullscreen') === 'true');
+const isDetailFullScreen = ref(
+  localStorage.getItem('bango-detail-fullscreen') === 'true' &&
+    !!localStorage.getItem('bango-detail-fullscreen')
+);
+// Reset fullscreen state on fresh page load (no detail panel open)
+// This prevents white screen when the user reloads without an article selected
+setTimeout(() => {
+  if (!showDetail.value) {
+    isDetailFullScreen.value = false;
+    localStorage.setItem('bango-detail-fullscreen', 'false');
+  }
+}, 0);
 
 function toggleDetailFullScreen(): void {
   isDetailFullScreen.value = !isDetailFullScreen.value;
