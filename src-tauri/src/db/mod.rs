@@ -1,3 +1,4 @@
+pub mod app_settings_repo;
 pub mod article_repo;
 pub mod audit_repo;
 pub mod connection;
@@ -7,4 +8,5 @@ pub mod llm_config_repo;
 pub mod migration;
 pub mod migrations;
 pub mod summary_repo;
+pub mod reference_repo;
 pub mod tag_repo;

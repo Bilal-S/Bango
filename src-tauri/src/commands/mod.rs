@@ -1,3 +1,4 @@
+pub mod app_settings;
 pub mod articles;
 pub mod criteria;
 pub mod dedup;

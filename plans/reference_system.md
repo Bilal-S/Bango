@@ -57,11 +57,11 @@ Web of Science (WoS) RIS exports contain structured citation metadata in the `N1
 
 ## 2. Phase 1: Database Layer
 
-### 1A. Migration v004 — Articles Table Columns
+### 1A. Migration — Articles Table Columns
 
-**File**: `src-tauri/src/db/migrations/v004_article_references.rs`
+**File**: `src-tauri/src/db/migrations/v001_initial.rs` (consolidated single migration)
 
-Six new columns on the `articles` table:
+Six new columns on the `articles` table (all columns are alphabetically sorted):
 
 ```sql
 -- Citation counts extracted from N1 during import
@@ -90,77 +90,76 @@ ALTER TABLE articles ADD COLUMN full_text_file_name TEXT;
 
 ### 1B. New `references` Table
 
-**Included in the same migration v004.**
+**Included in `v001_initial.rs` (consolidated single migration).**  
+All columns are alphabetically sorted after PK/FK/type columns.
 
 ```sql
-CREATE TABLE IF NOT EXISTS references (
+CREATE TABLE IF NOT EXISTS article_references (
+    -- Primary key
     id TEXT PRIMARY KEY,
+    -- Foreign key columns
+    parent_id TEXT NOT NULL,
+    -- Type and status columns
     type INTEGER NOT NULL CHECK(type IN (0, 1)),
         -- 0 = citation (another article citing the parent)
         -- 1 = reference (a work cited by the parent)
-    parent_id TEXT NOT NULL,
     match_status TEXT NOT NULL DEFAULT 'unmatched'
-        CHECK(match_status IN ('unmatched', 'matched', 'imported')),
+        CHECK(match_status IN ('unmatched', 'matched', 'not_in_library')),
         -- 'unmatched': no link to an article in the main table
         -- 'matched': linked to an existing article via DOI/title match
-        -- 'imported': promoted to a full article in the articles table
+        -- 'not_in_library': confirmed not present in the article library
 
-    -- Metadata fields (mirroring articles, but all nullable for incomplete data)
-    title TEXT,
+    -- Columns (alphabetical)
     abstract_text TEXT,
-    authors TEXT,                     -- JSON array of strings
-    publication_year INTEGER,
-    doi TEXT,
-    journal TEXT,
-    volume TEXT,
-    issue TEXT,
-    start_page TEXT,
-    end_page TEXT,
-    keywords TEXT,                    -- JSON array of strings
-    url TEXT,
-    language TEXT,
-    publisher TEXT,
-    publisher_city TEXT,
-    publisher_address TEXT,
-    issn TEXT,
-    reference_type TEXT,
-    date TEXT,
-    author_address TEXT,
     accession_number TEXT,
+    author_address TEXT,
+    authors TEXT,                     -- JSON array of strings
     custom_field3 TEXT,
-    journal_abbreviation TEXT,
-    journal_iso_abbreviation TEXT,
-    notes TEXT,
-    web_of_science_db TEXT,
-    user_notes TEXT,
-    ris_extras TEXT,                  -- JSON object for unrecognized tags
-
-    -- Citation counts (reference records may also carry these)
-    num_cited INTEGER,
-    num_references INTEGER,
-
-    -- Full-text tracking
-    has_full_text INTEGER NOT NULL DEFAULT 0,
+    date TEXT,
+    doi TEXT,
+    end_page TEXT,
     full_text_file_name TEXT,
-
-    -- Import tracking
+    has_full_text INTEGER NOT NULL DEFAULT 0,
     import_source TEXT,
     imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+    issn TEXT,
+    issue TEXT,
+    journal TEXT,
+    journal_abbreviation TEXT,
+    journal_iso_abbreviation TEXT,
+    keywords TEXT,                    -- JSON array of strings
+    language TEXT,
+    notes TEXT,
+    num_cited INTEGER,
+    num_references INTEGER,
+    publication_year INTEGER,
+    publisher TEXT,
+    publisher_address TEXT,
+    publisher_city TEXT,
+    reference_type TEXT,
+    ris_extras TEXT,                  -- JSON object for unrecognized tags
+    start_page TEXT,
+    title TEXT,
+    url TEXT,
+    user_notes TEXT,
+    volume TEXT,
+    web_of_science_db TEXT,
 
+    -- Foreign key constraints
     FOREIGN KEY (parent_id) REFERENCES articles(id) ON DELETE CASCADE
 );
 
 -- Primary lookup: all references/citations for a given article
-CREATE INDEX IF NOT EXISTS idx_references_parent_type
-    ON references(parent_id, type);
+CREATE INDEX IF NOT EXISTS idx_article_refs_parent_type
+    ON article_references(parent_id, type);
 
 -- DOI lookup for matching references to existing articles
-CREATE INDEX IF NOT EXISTS idx_references_doi
-    ON references(doi);
+CREATE INDEX IF NOT EXISTS idx_article_refs_doi
+    ON article_references(doi);
 
 -- Filter by match status for promotion workflow
-CREATE INDEX IF NOT EXISTS idx_references_match_status
-    ON references(match_status);
+CREATE INDEX IF NOT EXISTS idx_article_refs_match_status
+    ON article_references(match_status);
 ```
 
 #### Design Decisions
@@ -607,23 +606,20 @@ pub fn sync_parent_reference_flags(
 
 The `sync_parent_reference_flags` function queries:
 ```sql
-SELECT COUNT(*) FROM references WHERE parent_id = ?1 AND type = 0  -- citations
-SELECT COUNT(*) FROM references WHERE parent_id = ?1 AND type = 1  -- references
+SELECT COUNT(*) FROM article_references WHERE parent_id = ?1 AND type = 0  -- citations
+SELECT COUNT(*) FROM article_references WHERE parent_id = ?1 AND type = 1  -- references
 ```
 Then updates the parent article's `has_citation_details` and `has_reference_details` accordingly.
 
 #### `src-tauri/src/db/migrations/mod.rs`
 
-Register v004:
+All tables consolidated in single migration (`v001_initial.rs`):
 
 ```rust
-pub mod v004_article_references;
+pub mod v001_initial;
 
 pub fn get_migrations() -> Vec<Migration> {
-    vec![
-        // ... existing ...
-        Migration { version: v004_article_references::VERSION, up_sql: v004_article_references::UP_SQL },
-    ]
+    vec![Migration { version: v001_initial::VERSION, up_sql: v001_initial::UP_SQL }]
 }
 ```
 
@@ -990,8 +986,8 @@ New panel/tab in article detail showing all reference/citation records for the s
 
 | File | Action | Description |
 |------|--------|-------------|
-| `src-tauri/src/db/migrations/v004_article_references.rs` | **CREATE** | Migration: new article columns + references table |
-| `src-tauri/src/db/migrations/mod.rs` | **MODIFY** | Register v004 |
+| `src-tauri/src/db/migrations/v001_initial.rs` | **MODIFY** | Consolidated migration: all tables incl. article_references |
+| `src-tauri/src/db/migrations/mod.rs` | **SIMPLIFY** | Single migration entry |
 | `src-tauri/src/models/article.rs` | **MODIFY** | Add 6 new fields to `Article` and `NewArticle` |
 | `src-tauri/src/models/reference.rs` | **CREATE** | New `Reference`, `NewReference`, `ReferenceType`, `MatchStatus` structs |
 | `src-tauri/src/models/mod.rs` | **MODIFY** | Add `pub mod reference` |
@@ -1025,9 +1021,9 @@ New panel/tab in article detail showing all reference/citation records for the s
 ### Phase 1 (Current)
 
 ```
-Step 1: Create migration v004
-        ├── New columns on articles table
-        ├── New references table
+Step 1: Update consolidated migration v001
+        ├── New columns on articles table (alphabetically sorted)
+        ├── New article_references table
         └── Indexes (including composite parent_id + type)
 
 Step 2: Update Rust models

@@ -109,6 +109,12 @@ pub fn get_next_unscreened_working_batch(
             actual_tokens: None,
             full_text: None,
             full_text_ai_summary: None,
+            num_cited: None,
+            num_references: None,
+            has_citation_details: false,
+            has_reference_details: false,
+            has_full_text: false,
+            full_text_file_name: None,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -146,7 +152,9 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             reference_type, date, author_address, accession_number,
             custom_field3, journal_abbreviation, journal_iso_abbreviation,
             notes, web_of_science_db, ris_extras, import_source,
-            data_length, token_estimate
+            data_length, token_estimate,
+            num_cited, num_references, has_citation_details, has_reference_details,
+            has_full_text, full_text_file_name
         ) VALUES (
             ?1, ?2, 'duplicate', ?3, ?4, ?5, ?6, ?7,
             ?8, ?9, ?10, ?11, ?12, ?13, ?14,
@@ -154,7 +162,9 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             ?20, ?21, ?22, ?23,
             ?24, ?25, ?26,
             ?27, ?28, ?29, ?30,
-            ?31, ?32
+            ?31, ?32,
+            ?33, ?34, 0, 0,
+            ?35, ?36
         )",
         params![
             id,
@@ -189,6 +199,10 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             article.import_source,
             data_length,
             token_estimate,
+            article.num_cited,
+            article.num_references,
+            article.has_full_text,
+            article.full_text_file_name,
         ],
     )?;
 
@@ -242,7 +256,9 @@ pub fn insert_articles_batch(
                 reference_type, date, author_address, accession_number,
                 custom_field3, journal_abbreviation, journal_iso_abbreviation,
                 notes, web_of_science_db, ris_extras, import_source,
-                data_length, token_estimate
+                data_length, token_estimate,
+                num_cited, num_references, has_citation_details, has_reference_details,
+                has_full_text, full_text_file_name
             ) VALUES (
                 ?1, ?2, 'duplicate', ?3, ?4, ?5, ?6, ?7,
                 ?8, ?9, ?10, ?11, ?12, ?13, ?14,
@@ -250,7 +266,9 @@ pub fn insert_articles_batch(
                 ?20, ?21, ?22, ?23,
                 ?24, ?25, ?26,
                 ?27, ?28, ?29, ?30,
-                ?31, ?32
+                ?31, ?32,
+                ?33, ?34, 0, 0,
+                ?35, ?36
             )",
             params![
                 id,
@@ -285,6 +303,10 @@ pub fn insert_articles_batch(
                 article_with_source.import_source,
                 data_length,
                 token_estimate,
+                article_with_source.num_cited,
+                article_with_source.num_references,
+                article_with_source.has_full_text,
+                article_with_source.full_text_file_name,
             ],
         )?;
 
@@ -840,6 +862,12 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         actual_tokens: row.get("actual_tokens")?,
         full_text: row.get("full_text")?,
         full_text_ai_summary: row.get("full_text_ai_summary")?,
+        num_cited: row.get("num_cited")?,
+        num_references: row.get("num_references")?,
+        has_citation_details: row.get::<_, i32>("has_citation_details")? != 0,
+        has_reference_details: row.get::<_, i32>("has_reference_details")? != 0,
+        has_full_text: row.get::<_, i32>("has_full_text")? != 0,
+        full_text_file_name: row.get("full_text_file_name")?,
     })
 }
 

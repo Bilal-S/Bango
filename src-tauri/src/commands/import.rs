@@ -161,6 +161,10 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
         import_source: None,
         data_length: Some(data_length),
         token_estimate: Some(token_estimate),
+        num_cited: record.num_cited,
+        num_references: record.num_references,
+        has_full_text: false,
+        full_text_file_name: None,
     }
 }
 

@@ -48,6 +48,52 @@ export interface Article {
   fullText: string | null;
   /** AI-generated summary with pertinent points and data */
   fullTextAiSummary: string | null;
+  /** Total times cited (from N1 field during import) */
+  numCited: number | null;
+  /** Number of cited references (from N1 field during import) */
+  numReferences: number | null;
+  /** Whether this article has imported citation details */
+  hasCitationDetails: boolean;
+  /** Whether this article has imported reference details */
+  hasReferenceDetails: boolean;
+  /** Whether full text file has been attached */
+  hasFullText: boolean;
+  /** Name of the attached full text file */
+  fullTextFileName: string | null;
+}
+
+/** Reference type for imported citations/references */
+export type ReferenceType = 'citation' | 'reference';
+
+/** Match status for a reference against the article library */
+export type MatchStatus = 'unmatched' | 'matched' | 'not_in_library';
+
+/** A citation or reference associated with an article */
+export interface ArticleReference {
+  id: string;
+  referenceType: ReferenceType;
+  parentId: string;
+  matchStatus: MatchStatus;
+  title: string | null;
+  abstractText: string | null;
+  authors: string[];
+  publicationYear: number | null;
+  doi: string | null;
+  journal: string | null;
+  volume: string | null;
+  issue: string | null;
+  startPage: string | null;
+  endPage: string | null;
+  keywords: string[];
+  url: string | null;
+  language: string | null;
+  publisher: string | null;
+  numCited: number | null;
+  numReferences: number | null;
+  hasFullText: boolean;
+  fullTextFileName: string | null;
+  importSource: string | null;
+  importedAt: string;
 }
 
 export type ArticleStatus = 'duplicate' | 'working' | 'included' | 'rejected';

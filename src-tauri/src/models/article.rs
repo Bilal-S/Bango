@@ -53,6 +53,20 @@ pub struct Article {
     pub actual_tokens: Option<usize>,
     pub full_text: Option<String>,
     pub full_text_ai_summary: Option<String>,
+
+    // --- Reference system fields ---
+    /// Total times cited (from N1: `Total Times Cited: NN`)
+    pub num_cited: Option<i32>,
+    /// Number of references (from N1: `Cited Reference Count: NN`)
+    pub num_references: Option<i32>,
+    /// True when citation detail records exist in `references` (type=0)
+    pub has_citation_details: bool,
+    /// True when reference detail records exist in `references` (type=1)
+    pub has_reference_details: bool,
+    /// True when a full-text file is associated
+    pub has_full_text: bool,
+    /// Relative path with partial subpath (e.g., `fulltext/smith2023.pdf`)
+    pub full_text_file_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +146,18 @@ pub struct NewArticle {
     pub import_source: Option<String>,
     pub data_length: Option<usize>,
     pub token_estimate: Option<usize>,
+
+    // --- Reference system fields ---
+    /// Total times cited (from N1: `Total Times Cited: NN`)
+    pub num_cited: Option<i32>,
+    /// Number of references (from N1: `Cited Reference Count: NN`)
+    pub num_references: Option<i32>,
+    /// True when a full-text file is associated
+    pub has_full_text: bool,
+    /// Relative path with partial subpath (e.g., `fulltext/smith2023.pdf`)
+    pub full_text_file_name: Option<String>,
+    // Note: has_citation_details and has_reference_details default to false
+    // and are only set when reference records are inserted, not during article import
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

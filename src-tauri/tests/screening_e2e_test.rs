@@ -63,6 +63,10 @@ fn seed_articles(conn: &rusqlite::Connection, count: usize) -> Vec<String> {
             import_source: Some("test".to_string()),
             data_length: None,
             token_estimate: None,
+            num_cited: None,
+            num_references: None,
+            has_full_text: false,
+            full_text_file_name: None,
         })
         .collect();
 

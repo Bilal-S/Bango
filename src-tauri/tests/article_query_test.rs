@@ -43,6 +43,10 @@ fn new_article(title: &str, year: Option<i32>) -> NewArticle {
         import_source: None,
         data_length: None,
         token_estimate: None,
+        num_cited: None,
+        num_references: None,
+        has_full_text: false,
+        full_text_file_name: None,
     }
 }
 

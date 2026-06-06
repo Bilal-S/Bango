@@ -30,6 +30,10 @@ pub struct RisRecord {
     pub journal_iso_abbreviation: Option<String>,
     pub notes: Option<String>,
     pub web_of_science_db: Option<String>,
+    /// Total times cited, extracted from N1 field
+    pub num_cited: Option<i32>,
+    /// Number of cited references, extracted from N1 field
+    pub num_references: Option<i32>,
     /// All unrecognized RIS tags preserved as key-value pairs.
     pub extras: HashMap<String, Vec<String>>,
 }

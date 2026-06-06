@@ -106,6 +106,8 @@ pub fn run() {
             commands::articles::bulk_update_article_status,
             commands::articles::bulk_add_tag_to_articles,
             commands::articles::bulk_add_label_to_articles,
+            commands::app_settings::get_fulltext_storage_dir,
+            commands::app_settings::set_fulltext_storage_dir,
             commands::screening::get_screening_readiness,
             commands::screening::start_screening,
             commands::screening::get_screening_progress,

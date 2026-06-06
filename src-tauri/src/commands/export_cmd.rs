@@ -122,18 +122,29 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
     {
         let tx = conn.transaction()?;
 
-        // Drop all data tables (child tables first for clarity, though FK is OFF)
+        // Drop all tables so migrations can re-create them from scratch.
+        // Using DROP (not DELETE) avoids ALTER TABLE conflicts when
+        // migrations are re-run against an existing schema.
         tx.execute_batch(
-            "DELETE FROM article_labels;
-             DELETE FROM article_tags;
-             DELETE FROM audit_entries;
-             DELETE FROM articles;
-             DELETE FROM criteria;
-             DELETE FROM research_aims;
-             DELETE FROM tags;
-             DELETE FROM labels;
-             DELETE FROM llm_config;
-             DELETE FROM summary;",
+            "DROP TABLE IF EXISTS article_labels;
+             DROP TABLE IF EXISTS article_tags;
+             DROP TABLE IF EXISTS audit_entries;
+             DROP TABLE IF EXISTS articles;
+             DROP TABLE IF EXISTS criteria;
+             DROP TABLE IF EXISTS research_aims;
+             DROP TABLE IF EXISTS tags;
+             DROP TABLE IF EXISTS labels;
+             DROP TABLE IF EXISTS llm_config;
+             DROP TABLE IF EXISTS summary;
+             DROP TABLE IF EXISTS app_settings;
+             DROP INDEX IF EXISTS idx_articles_status;
+             DROP INDEX IF EXISTS idx_articles_duplicate_of;
+             DROP INDEX IF EXISTS idx_articles_screened_at;
+             DROP INDEX IF EXISTS idx_articles_data_length;
+             DROP INDEX IF EXISTS idx_articles_sequence_id;
+             DROP INDEX IF EXISTS idx_audit_entries_article_id;
+             DROP INDEX IF EXISTS idx_criteria_type;
+             DROP INDEX IF EXISTS idx_articles_changed_at;",
         )?;
 
         tx.commit()?;
@@ -142,7 +153,10 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
     // Re-enable foreign keys (outside transaction)
     conn.execute("PRAGMA foreign_keys = ON", [])?;
 
-    // Re-run migrations to ensure clean schema (idempotent)
+    // Reset migration version to 0 so all migrations re-run from scratch.
+    conn.pragma_update(None, "user_version", 0)?;
+
+    // Re-run migrations to rebuild clean schema
     migration::run_migrations(&conn)?;
 
     Ok(())

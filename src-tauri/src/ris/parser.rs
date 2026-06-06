@@ -1,5 +1,6 @@
 use super::types::{RisParseError, RisParseResult, RisRecord};
 use crate::error::AppError;
+use crate::ris::n1_parser::parse_n1_citation_data;
 
 /// Parses a complete RIS file content into records.
 /// Records are delimited by `ER` tags.
@@ -191,7 +192,12 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
         "C3" => record.custom_field3 = Some(value.to_string()),
         "J9" => record.journal_abbreviation = Some(value.to_string()),
         "JI" => record.journal_iso_abbreviation = Some(value.to_string()),
-        "N1" => record.notes = Some(value.to_string()),
+        "N1" => {
+            record.notes = Some(value.to_string());
+            let (num_cited, num_references) = parse_n1_citation_data(value);
+            record.num_cited = num_cited;
+            record.num_references = num_references;
+        }
         "PA" => record.publisher_address = Some(value.to_string()),
         "PI" => record.publisher_city = Some(value.to_string()),
         "WE" => record.web_of_science_db = Some(value.to_string()),

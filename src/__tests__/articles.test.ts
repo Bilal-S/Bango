@@ -60,6 +60,12 @@ const mockArticles: Article[] = [
     matchedExclusionCriteria: [],
     fullText: null,
     fullTextAiSummary: null,
+    numCited: null,
+    numReferences: null,
+    hasCitationDetails: false,
+    hasReferenceDetails: false,
+    hasFullText: false,
+    fullTextFileName: null,
   },
   {
     id: '2',
@@ -109,6 +115,12 @@ const mockArticles: Article[] = [
     matchedExclusionCriteria: [],
     fullText: null,
     fullTextAiSummary: null,
+    numCited: null,
+    numReferences: null,
+    hasCitationDetails: false,
+    hasReferenceDetails: false,
+    hasFullText: false,
+    fullTextFileName: null,
   },
 ];
 
