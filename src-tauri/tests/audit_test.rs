@@ -108,3 +108,24 @@ fn test_multiple_audit_actions() {
     assert_eq!(entries[1].action.as_str(), "tag_add");
     assert_eq!(entries[2].action.as_str(), "import");
 }
+
+#[test]
+fn test_generic_system_errors() {
+    let conn = setup_db();
+
+    // Log system errors (which shouldn't require a valid article ID)
+    audit_repo::log_error(&conn, "Failed to connect to LLM").expect("Failed to log error");
+    audit_repo::log_error(&conn, "Malformed JSON response").expect("Failed to log error");
+
+    let entries = audit_repo::get_generic_audit_entries(&conn, 10).expect("Failed to get generic audit entries");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].details.as_deref(), Some("Malformed JSON response"));
+    assert_eq!(entries[0].article_id, ""); // Should map to empty string for Rust struct compatibility
+    assert_eq!(entries[0].action.as_str(), "error");
+
+    let cleared = audit_repo::clear_generic_entries(&conn).expect("Failed to clear entries");
+    assert_eq!(cleared, 2);
+
+    let entries_after = audit_repo::get_generic_audit_entries(&conn, 10).expect("Failed to get entries");
+    assert!(entries_after.is_empty());
+}

@@ -98,7 +98,7 @@ fn row_to_audit_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
     let source_str: String = row.get(7)?;
     Ok(AuditEntry {
         id: row.get(0)?,
-        article_id: row.get(1)?,
+        article_id: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
         timestamp: row.get(2)?,
         action: parse_action(&action_str),
         from_status: row.get(4)?,
@@ -143,7 +143,7 @@ pub fn log_error(conn: &Connection, details: &str) -> Result<(), AppError> {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
-         VALUES (?1, '', ?2, 'error', NULL, NULL, ?3, 'system')",
+         VALUES (?1, NULL, ?2, 'error', NULL, NULL, ?3, 'system')",
         params![id, now, details],
     )?;
     Ok(())
@@ -158,7 +158,7 @@ pub fn get_generic_audit_entries(
         "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
          ae.details, ae.source, NULL as article_title \
          FROM audit_entries ae \
-         WHERE ae.article_id = '' ORDER BY ae.timestamp DESC LIMIT ?1",
+         WHERE ae.article_id IS NULL ORDER BY ae.timestamp DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map([limit], row_to_audit_entry)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -168,9 +168,9 @@ pub fn get_generic_audit_entries(
 /// These are entries with empty article_id, typically system errors.
 pub fn clear_generic_entries(conn: &Connection) -> Result<usize, AppError> {
     let count =
-        conn.query_row("SELECT COUNT(*) FROM audit_entries WHERE article_id = ''", [], |row| {
+        conn.query_row("SELECT COUNT(*) FROM audit_entries WHERE article_id IS NULL", [], |row| {
             row.get::<_, usize>(0)
         })?;
-    conn.execute("DELETE FROM audit_entries WHERE article_id = ''", [])?;
+    conn.execute("DELETE FROM audit_entries WHERE article_id IS NULL", [])?;
     Ok(count)
 }

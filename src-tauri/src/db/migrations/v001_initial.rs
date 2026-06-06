@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS article_labels (
 
 CREATE TABLE IF NOT EXISTS audit_entries (
     id TEXT PRIMARY KEY,
-    article_id TEXT NOT NULL,
+    article_id TEXT,
     action TEXT NOT NULL CHECK(action IN (
         'import', 'dedup_merge', 'dedup_flag', 'status_change',
         'tag_add', 'tag_remove', 'label_add', 'label_remove',
