@@ -102,7 +102,9 @@ The app manages a **single project** - there is no project selector or multi-pro
     "screenedAt": "ISO-8601 timestamp | null",
     "dataLength": "integer | null (total character count for estimation)",
     "tokenEstimate": "integer | null (heuristic tokens)",
-    "actualTokens": "integer | null (actual tokens consumed)"
+    "actualTokens": "integer | null (actual tokens consumed)",
+    "fullText": "string | null (extracted full text of article, populated on demand)",
+    "fullTextAiSummary": "string | null (AI-generated summary with pertinent points and data)"
   },
   "LLMConfig": {
     "provider": "enum[openai, anthropic, google, mistral_ai, z_ai, llama_cpp, ollama, lm_studio, custom]",
@@ -135,6 +137,7 @@ The app manages a **single project** - there is no project selector or multi-pro
 
 **Changes from v2:**
 - Added `sequence_id`, `dataLength`, `tokenEstimate`, and `actualTokens` to Article for performance and progress tracking.
+- Added `fullText` and `fullTextAiSummary` to Article for full-text extraction and AI summarization (populated on demand, not during import).
 - Added `color` to Tag and Label models.
 - Expanded `LLMProvider` enum to include `anthropic` and `mistral_ai`.
 - Added `ExportMetadata` schema for forward-compatible exports.
@@ -993,6 +996,7 @@ The following features are explicitly **out of scope** for v1:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v3.4 | 2026-06-06 | Added `fullText` and `fullTextAiSummary` nullable text columns to Article model. These are stored directly on the articles table (not a separate table) since they are 1:1 with articles and queried together. Both fields are populated on demand (not during RIS import). Full project export/import already serializes all columns via `SELECT *`, so no export logic changes were needed beyond adding the fields to the import INSERT. Migration v004 adds the columns with `ALTER TABLE`. |
 | v3.3 | 2026-06-01 | AI Summary prompt update: replaced `AI Reasoning: {aiReasoning}` with `Keywords: {comma-separated tag names associated with the article}` in the per-article data sent to the LLM. The summary now receives article tags as keywords instead of AI screening reasoning, grounding the summary in content categorization rather than screening decisions. |
 | v3.2 | 2026-05-08 | Article status model refactor: renamed `imported` status to `duplicate`. Non-duplicate articles now promote directly to `working` on import. Only true duplicates remain in `duplicate` status. Added cross-status dedup protection: articles already in `working`, `included`, or `rejected` are never affected by new imports. Updated state machine diagram, transitions, PRISMA data mapping, and workflow sequence. |
 | v3.1 | 2026-05-05 | Design implementation update: added Tailwind CSS v4 with @theme tokens, disabled preflight for custom-CSS compatibility, Material Symbols Outlined icons replacing all Unicode fallbacks, Inter font loading, dual styling approach (custom CSS + Tailwind utilities). Documented design reference files and implementation gaps. |

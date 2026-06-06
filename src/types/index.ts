@@ -44,6 +44,10 @@ export interface Article {
   importedAt: string;
   changedAt: string;
   screenedAt: string | null;
+  /** Extracted full text of the article (populated on demand) */
+  fullText: string | null;
+  /** AI-generated summary with pertinent points and data */
+  fullTextAiSummary: string | null;
 }
 
 export type ArticleStatus = 'duplicate' | 'working' | 'included' | 'rejected';

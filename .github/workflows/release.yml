@@ -109,7 +109,10 @@ jobs:
   # ──────────────────────────────────────────────
   # Build MSIX for Microsoft Store
   # ──────────────────────────────────────────────
+  # TEMPORARILY DISABLED — re-enable by removing the "if: false" line
+  # and adding build-msix back to the sync-version needs list.
   build-msix:
+    if: false
     name: Build MSIX (Microsoft Store)
     runs-on: windows-latest
     steps:
@@ -217,7 +220,7 @@ jobs:
   # ──────────────────────────────────────────────
   sync-version:
     name: Sync version to config files
-    needs: [build, build-msix]
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

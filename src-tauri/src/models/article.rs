@@ -51,6 +51,8 @@ pub struct Article {
     pub data_length: Option<usize>,
     pub token_estimate: Option<usize>,
     pub actual_tokens: Option<usize>,
+    pub full_text: Option<String>,
+    pub full_text_ai_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

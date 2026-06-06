@@ -107,6 +107,8 @@ pub fn get_next_unscreened_working_batch(
             data_length: None,
             token_estimate: None,
             actual_tokens: None,
+            full_text: None,
+            full_text_ai_summary: None,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -836,6 +838,8 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         data_length: row.get("data_length")?,
         token_estimate: row.get("token_estimate")?,
         actual_tokens: row.get("actual_tokens")?,
+        full_text: row.get("full_text")?,
+        full_text_ai_summary: row.get("full_text_ai_summary")?,
     })
 }
 

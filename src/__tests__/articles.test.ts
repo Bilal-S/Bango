@@ -58,6 +58,8 @@ const mockArticles: Article[] = [
     aiConfidence: null,
     matchedInclusionCriteria: [],
     matchedExclusionCriteria: [],
+    fullText: null,
+    fullTextAiSummary: null,
   },
   {
     id: '2',
@@ -105,6 +107,8 @@ const mockArticles: Article[] = [
     aiConfidence: null,
     matchedInclusionCriteria: [],
     matchedExclusionCriteria: [],
+    fullText: null,
+    fullTextAiSummary: null,
   },
 ];
 
