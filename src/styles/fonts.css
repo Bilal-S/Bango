@@ -1,0 +1,26 @@
+/* Inter Variable - normal */
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/InterVariable.woff2') format('woff2-variations');
+}
+
+/* Inter Variable - italic */
+@font-face {
+  font-family: Inter;
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/InterVariable-Italic.woff2') format('woff2-variations');
+}
+
+/* Material Symbols Outlined Variable */
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url('/fonts/MaterialSymbolsOutlined.woff2') format('woff2-variations');
+}
