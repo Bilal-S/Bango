@@ -3,6 +3,7 @@ use tauri::State;
 
 use std::sync::Arc;
 
+use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
@@ -191,9 +192,17 @@ Rules:
         research_aims = aims_list.join("\n"),
     );
 
-    let (response, _) = orchestrator
+    let result = orchestrator
         .send(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
-        .await?;
+        .await;
+    if let Err(ref e) = result {
+        let err_msg = e.to_string();
+        if let Ok(conn) = db_state.conn.lock() {
+            let _ =
+                audit_repo::log_error(&conn, &format!("Criteria generation failed: {}", err_msg));
+        }
+    }
+    let (response, _) = result?;
 
     let json_str = response
         .trim()
@@ -326,9 +335,16 @@ Do not return JSON."#,
         criteria = criteria_list.join("\n"),
     );
 
-    let (response, _) = orchestrator
+    let result = orchestrator
         .send(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
-        .await?;
+        .await;
+    if let Err(ref e) = result {
+        let err_msg = e.to_string();
+        if let Ok(conn) = db_state.conn.lock() {
+            let _ = audit_repo::log_error(&conn, &format!("Criteria critique failed: {}", err_msg));
+        }
+    }
+    let (response, _) = result?;
 
     Ok(CritiqueCriteriaResult { critique: response })
 }

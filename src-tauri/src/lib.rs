@@ -55,7 +55,9 @@ pub fn run() {
                 let guard = app.state::<DbState>();
                 let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
                 match crate::db::llm_config_repo::get_config(&conn) {
-                    Ok(Some(cfg)) => (cfg.max_concurrent_requests as usize, cfg.request_delay_ms as u64),
+                    Ok(Some(cfg)) => {
+                        (cfg.max_concurrent_requests as usize, cfg.request_delay_ms as u64)
+                    }
                     _ => (3, 500), // defaults
                 }
             };

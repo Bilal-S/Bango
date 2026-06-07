@@ -26,8 +26,6 @@ pub struct HttpLlmClient {
 #[async_trait::async_trait]
 impl LlmClient for HttpLlmClient {
     async fn send(&self, system: &str, user: &str) -> Result<(String, usize), AppError> {
-        self.orchestrator
-            .send(&self.config, system, user, LlmRequestType::Screening)
-            .await
+        self.orchestrator.send(&self.config, system, user, LlmRequestType::Screening).await
     }
 }

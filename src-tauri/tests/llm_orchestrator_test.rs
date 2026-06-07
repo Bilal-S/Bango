@@ -104,14 +104,7 @@ async fn concurrent_sends_do_not_deadlock() {
         let orch = orch.clone();
         let config = config.clone();
         handles.push(tokio::spawn(async move {
-            let _ = orch
-                .send(
-                    &config,
-                    "system",
-                    "user",
-                    LlmRequestType::Screening,
-                )
-                .await;
+            let _ = orch.send(&config, "system", "user", LlmRequestType::Screening).await;
         }));
     }
 
@@ -131,14 +124,7 @@ async fn concurrent_sends_with_delay_do_not_deadlock() {
         let orch = orch.clone();
         let config = config.clone();
         handles.push(tokio::spawn(async move {
-            let _ = orch
-                .send(
-                    &config,
-                    "system",
-                    "user",
-                    LlmRequestType::TagGeneration,
-                )
-                .await;
+            let _ = orch.send(&config, "system", "user", LlmRequestType::TagGeneration).await;
         }));
     }
 
@@ -158,14 +144,7 @@ async fn many_concurrent_sends_at_high_concurrency() {
         let orch = orch.clone();
         let config = config.clone();
         handles.push(tokio::spawn(async move {
-            let _ = orch
-                .send(
-                    &config,
-                    "system",
-                    "user",
-                    LlmRequestType::SummaryGeneration,
-                )
-                .await;
+            let _ = orch.send(&config, "system", "user", LlmRequestType::SummaryGeneration).await;
         }));
     }
 
@@ -221,14 +200,7 @@ async fn send_unthrottled_fails_on_unreachable() {
     let orch = LlmOrchestrator::new(1, 0);
     let config = fake_config();
 
-    let result = orch
-        .send_unthrottled(
-            &config,
-            "sys",
-            "usr",
-            LlmRequestType::TestConnection,
-        )
-        .await;
+    let result = orch.send_unthrottled(&config, "sys", "usr", LlmRequestType::TestConnection).await;
     assert!(result.is_err());
 }
 
@@ -242,14 +214,7 @@ async fn update_settings_during_active_requests_no_deadlock() {
     let orch_clone = orch.clone();
     let config_clone = config.clone();
     let handle = tokio::spawn(async move {
-        let _ = orch_clone
-            .send(
-                &config_clone,
-                "sys",
-                "usr",
-                LlmRequestType::Screening,
-            )
-            .await;
+        let _ = orch_clone.send(&config_clone, "sys", "usr", LlmRequestType::Screening).await;
     });
 
     orch.update_settings(5, 100).await;
@@ -346,10 +311,8 @@ async fn concurrency_limit_is_enforced_with_mock_server() {
 
 /// Simulates what `save_llm_config` does: updates the orchestrator from config values.
 async fn simulate_save_config(orch: &LlmOrchestrator, config: &LlmConfig) {
-    orch.update_settings(
-        config.max_concurrent_requests as usize,
-        config.request_delay_ms as u64,
-    ).await;
+    orch.update_settings(config.max_concurrent_requests as usize, config.request_delay_ms as u64)
+        .await;
 }
 
 #[tokio::test]
@@ -610,11 +573,7 @@ async fn concurrency_does_not_exceed_limit() {
     }
 
     let peak = max_concurrent.load(Ordering::SeqCst);
-    assert!(
-        peak <= 2,
-        "Peak concurrent requests should be <= 2, was {}",
-        peak
-    );
+    assert!(peak <= 2, "Peak concurrent requests should be <= 2, was {}", peak);
 
     mock.assert_async().await;
 }
@@ -756,16 +715,8 @@ async fn queue_length_decreases_per_in_flight_send() {
 
     // Permits should have decreased
     let permits = orch.available_permits();
-    assert!(
-        permits < 5,
-        "Permits should decrease when requests are in-flight, got {}",
-        permits
-    );
-    assert!(
-        permits >= 2,
-        "At least 2 permits should remain (5 - 3 = 2), got {}",
-        permits
-    );
+    assert!(permits < 5, "Permits should decrease when requests are in-flight, got {}", permits);
+    assert!(permits >= 2, "At least 2 permits should remain (5 - 3 = 2), got {}", permits);
 
     // Wait for all to complete
     for h in handles {

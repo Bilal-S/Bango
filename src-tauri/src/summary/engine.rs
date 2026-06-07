@@ -26,7 +26,10 @@ impl SummaryInput {
     }
 }
 
-pub async fn generate_summary(orchestrator: &LlmOrchestrator, input: SummaryInput) -> Result<String, AppError> {
+pub async fn generate_summary(
+    orchestrator: &LlmOrchestrator,
+    input: SummaryInput,
+) -> Result<String, AppError> {
     if input.articles.is_empty() {
         return Err(AppError::Validation("No included articles to summarize".to_string()));
     }

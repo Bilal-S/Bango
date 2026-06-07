@@ -96,10 +96,8 @@ fn google_chat_response(content: &str, tokens: usize) -> String {
 
 // Standard OpenAI models list response body
 fn openai_models_response(model_ids: &[&str]) -> String {
-    let entries: Vec<String> = model_ids
-        .iter()
-        .map(|id| format!(r#"{{ "id": "{id}" }}"#))
-        .collect();
+    let entries: Vec<String> =
+        model_ids.iter().map(|id| format!(r#"{{ "id": "{id}" }}"#)).collect();
     format!(r#"{{ "data": [{}] }}"#, entries.join(", "))
 }
 
@@ -122,10 +120,8 @@ fn google_models_response(models: &[(&str, bool)]) -> String {
 
 // Anthropic models list response body
 fn anthropic_models_response(model_ids: &[&str]) -> String {
-    let entries: Vec<String> = model_ids
-        .iter()
-        .map(|id| format!(r#"{{ "id": "{id}" }}"#))
-        .collect();
+    let entries: Vec<String> =
+        model_ids.iter().map(|id| format!(r#"{{ "id": "{id}" }}"#)).collect();
     format!(r#"{{ "data": [{}] }}"#, entries.join(", "))
 }
 
@@ -311,10 +307,7 @@ async fn test_openai_malformed_json_returns_error() {
 
     mock.assert_async().await;
     let msg = err.to_string();
-    assert!(
-        msg.contains("JSON") || msg.contains("parse"),
-        "expected JSON parse error, got: {msg}"
-    );
+    assert!(msg.contains("JSON") || msg.contains("parse"), "expected JSON parse error, got: {msg}");
 }
 
 #[tokio::test]
@@ -368,21 +361,13 @@ async fn test_google_standard_response() {
 #[tokio::test]
 async fn test_google_rate_limit_429() {
     let mut server = mockito::Server::new_async().await;
-    let mock = server
-        .mock("POST", mockito::Matcher::Any)
-        .with_status(429)
-        .create_async()
-        .await;
+    let mock = server.mock("POST", mockito::Matcher::Any).with_status(429).create_async().await;
 
     let config = google_config(&server.url());
     let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
 
     mock.assert_async().await;
-    assert!(
-        err.to_string().contains("429"),
-        "expected 429 error, got: {}",
-        err
-    );
+    assert!(err.to_string().contains("429"), "expected 429 error, got: {}", err);
 }
 
 #[tokio::test]
@@ -391,11 +376,7 @@ async fn test_google_missing_api_key() {
     config.api_key_encrypted = None;
 
     let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
-    assert!(
-        err.to_string().contains("API key required"),
-        "expected API key error, got: {}",
-        err
-    );
+    assert!(err.to_string().contains("API key required"), "expected API key error, got: {}", err);
 }
 
 #[tokio::test]
@@ -430,11 +411,7 @@ async fn test_google_server_error() {
     let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
 
     mock.assert_async().await;
-    assert!(
-        err.to_string().contains("500"),
-        "expected 500 error, got: {}",
-        err
-    );
+    assert!(err.to_string().contains("500"), "expected 500 error, got: {}", err);
 }
 
 #[tokio::test]
@@ -452,11 +429,7 @@ async fn test_google_no_candidates_returns_error() {
     let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
 
     mock.assert_async().await;
-    assert!(
-        err.to_string().contains("No response"),
-        "expected no-response error, got: {}",
-        err
-    );
+    assert!(err.to_string().contains("No response"), "expected no-response error, got: {}", err);
 }
 
 // ── send_chat_completion: Anthropic path ─────────────────────────────
@@ -554,13 +527,8 @@ async fn test_list_models_openai() {
         .create_async()
         .await;
 
-    let result = client::list_models(
-        &LlmProvider::Openai,
-        &server.url(),
-        Some("test-key"),
-    )
-    .await
-    .unwrap();
+    let result =
+        client::list_models(&LlmProvider::Openai, &server.url(), Some("test-key")).await.unwrap();
 
     mock.assert_async().await;
     // OpenAI models are sorted
@@ -585,13 +553,8 @@ async fn test_list_models_openai_filters_non_chat() {
         .create_async()
         .await;
 
-    let result = client::list_models(
-        &LlmProvider::Openai,
-        &server.url(),
-        Some("test-key"),
-    )
-    .await
-    .unwrap();
+    let result =
+        client::list_models(&LlmProvider::Openai, &server.url(), Some("test-key")).await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(result, vec!["gpt-4o", "gpt-4o-mini"]);
@@ -614,13 +577,8 @@ async fn test_list_models_openai_filters_video_and_audio_models() {
         .create_async()
         .await;
 
-    let result = client::list_models(
-        &LlmProvider::Openai,
-        &server.url(),
-        Some("test-key"),
-    )
-    .await
-    .unwrap();
+    let result =
+        client::list_models(&LlmProvider::Openai, &server.url(), Some("test-key")).await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(result, vec!["gpt-4o"]);
@@ -636,8 +594,7 @@ async fn test_list_models_openai_no_api_key() {
         .create_async()
         .await;
 
-    let result =
-        client::list_models(&LlmProvider::Openai, &server.url(), None).await.unwrap();
+    let result = client::list_models(&LlmProvider::Openai, &server.url(), None).await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(result, vec!["gpt-4o"]);
@@ -660,13 +617,8 @@ async fn test_list_models_google() {
         .create_async()
         .await;
 
-    let result = client::list_models(
-        &LlmProvider::Google,
-        &server.url(),
-        Some("google-key"),
-    )
-    .await
-    .unwrap();
+    let result =
+        client::list_models(&LlmProvider::Google, &server.url(), Some("google-key")).await.unwrap();
 
     mock.assert_async().await;
     // Should strip "models/" prefix and filter to generateContent models
@@ -675,40 +627,22 @@ async fn test_list_models_google() {
 
 #[tokio::test]
 async fn test_list_models_google_missing_api_key() {
-    let err = client::list_models(&LlmProvider::Google, "http://unused", None)
-        .await
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("API key required"),
-        "expected API key error, got: {}",
-        err
-    );
+    let err = client::list_models(&LlmProvider::Google, "http://unused", None).await.unwrap_err();
+    assert!(err.to_string().contains("API key required"), "expected API key error, got: {}", err);
 }
 
 #[tokio::test]
 async fn test_list_models_google_error_response() {
     let mut server = mockito::Server::new_async().await;
-    let mock = server
-        .mock("GET", "/models")
-        .with_status(403)
-        .with_body("forbidden")
-        .create_async()
-        .await;
+    let mock =
+        server.mock("GET", "/models").with_status(403).with_body("forbidden").create_async().await;
 
-    let err = client::list_models(
-        &LlmProvider::Google,
-        &server.url(),
-        Some("bad-key"),
-    )
-    .await
-    .unwrap_err();
+    let err = client::list_models(&LlmProvider::Google, &server.url(), Some("bad-key"))
+        .await
+        .unwrap_err();
 
     mock.assert_async().await;
-    assert!(
-        err.to_string().contains("403"),
-        "expected 403 error, got: {}",
-        err
-    );
+    assert!(err.to_string().contains("403"), "expected 403 error, got: {}", err);
 }
 
 // ── list_models: Anthropic path ──────────────────────────────────────
@@ -721,20 +655,13 @@ async fn test_list_models_anthropic() {
         .match_header("x-api-key", "anthropic-key")
         .match_header("anthropic-version", "2023-06-01")
         .with_status(200)
-        .with_body(anthropic_models_response(&[
-            "claude-3-sonnet",
-            "claude-3-haiku",
-        ]))
+        .with_body(anthropic_models_response(&["claude-3-sonnet", "claude-3-haiku"]))
         .create_async()
         .await;
 
-    let result = client::list_models(
-        &LlmProvider::Anthropic,
-        &server.url(),
-        Some("anthropic-key"),
-    )
-    .await
-    .unwrap();
+    let result = client::list_models(&LlmProvider::Anthropic, &server.url(), Some("anthropic-key"))
+        .await
+        .unwrap();
 
     mock.assert_async().await;
     assert_eq!(result, vec!["claude-3-sonnet", "claude-3-haiku"]);
@@ -742,14 +669,9 @@ async fn test_list_models_anthropic() {
 
 #[tokio::test]
 async fn test_list_models_anthropic_missing_api_key() {
-    let err = client::list_models(&LlmProvider::Anthropic, "http://unused", None)
-        .await
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("API key required"),
-        "expected API key error, got: {}",
-        err
-    );
+    let err =
+        client::list_models(&LlmProvider::Anthropic, "http://unused", None).await.unwrap_err();
+    assert!(err.to_string().contains("API key required"), "expected API key error, got: {}", err);
 }
 
 // ── list_models: Ollama (no filtering) ───────────────────────────────
@@ -764,13 +686,7 @@ async fn test_list_models_ollama_no_filtering() {
         .create_async()
         .await;
 
-    let result = client::list_models(
-        &LlmProvider::Ollama,
-        &server.url(),
-        None,
-    )
-    .await
-    .unwrap();
+    let result = client::list_models(&LlmProvider::Ollama, &server.url(), None).await.unwrap();
 
     mock.assert_async().await;
     // Ollama doesn't filter — all models returned
@@ -790,8 +706,7 @@ async fn test_list_models_strips_trailing_slash() {
         .await;
 
     let url = format!("{}/", server.url());
-    let result =
-        client::list_models(&LlmProvider::Openai, &url, Some("key")).await.unwrap();
+    let result = client::list_models(&LlmProvider::Openai, &url, Some("key")).await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(result, vec!["gpt-4o"]);
@@ -808,8 +723,7 @@ async fn test_list_models_strips_models_suffix() {
         .await;
 
     let url = format!("{}/models", server.url());
-    let result =
-        client::list_models(&LlmProvider::Openai, &url, Some("key")).await.unwrap();
+    let result = client::list_models(&LlmProvider::Openai, &url, Some("key")).await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(result, vec!["gpt-4o"]);
@@ -827,20 +741,11 @@ async fn test_list_models_server_error() {
         .create_async()
         .await;
 
-    let err = client::list_models(
-        &LlmProvider::Openai,
-        &server.url(),
-        Some("key"),
-    )
-    .await
-    .unwrap_err();
+    let err =
+        client::list_models(&LlmProvider::Openai, &server.url(), Some("key")).await.unwrap_err();
 
     mock.assert_async().await;
-    assert!(
-        err.to_string().contains("500"),
-        "expected 500 error, got: {}",
-        err
-    );
+    assert!(err.to_string().contains("500"), "expected 500 error, got: {}", err);
 }
 
 // ── Edge cases ───────────────────────────────────────────────────────

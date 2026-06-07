@@ -15,6 +15,9 @@ use crate::error::AppError;
 use crate::llm::client;
 use crate::models::llm_config::LlmConfig;
 
+/// Maximum time to wait for a single LLM response.
+const LLM_TIMEOUT_SECS: u64 = 120;
+
 /// Label for categorizing LLM request sources.
 #[derive(Debug, Clone)]
 pub enum LlmRequestType {
@@ -80,8 +83,15 @@ impl LlmOrchestrator {
         // 2. Rate limiting: ensure minimum delay between requests
         self.enforce_rate_limit().await;
 
-        // 3. Make the actual LLM call
-        let result = client::send_chat_completion(config, system_prompt, user_prompt).await;
+        // 3. Make the actual LLM call with a 2-minute timeout
+        let result = tokio::time::timeout(
+            Duration::from_secs(LLM_TIMEOUT_SECS),
+            client::send_chat_completion(config, system_prompt, user_prompt),
+        )
+        .await
+        .map_err(|_| {
+            AppError::Import(format!("LLM request timed out after {} seconds", LLM_TIMEOUT_SECS))
+        })?;
 
         // 4. Log errors centrally
         if let Err(ref e) = result {
@@ -105,7 +115,14 @@ impl LlmOrchestrator {
         // Only enforce rate limiting, no semaphore
         self.enforce_rate_limit().await;
 
-        let result = client::send_chat_completion(config, system_prompt, user_prompt).await;
+        let result = tokio::time::timeout(
+            Duration::from_secs(LLM_TIMEOUT_SECS),
+            client::send_chat_completion(config, system_prompt, user_prompt),
+        )
+        .await
+        .map_err(|_| {
+            AppError::Import(format!("LLM request timed out after {} seconds", LLM_TIMEOUT_SECS))
+        })?;
 
         if let Err(ref e) = result {
             eprintln!("[LlmOrchestrator] {:?} request failed: {}", request_type, e);
@@ -131,11 +148,15 @@ impl LlmOrchestrator {
 
     /// Test an LLM connection using a simple "hello" prompt.
     /// Does NOT go through the semaphore (not a real request).
-    pub async fn test_connection(
-        &self,
-        config: &LlmConfig,
-    ) -> Result<(String, usize), AppError> {
-        crate::llm::client::send_chat_completion(config, "You are a test.", "Say hello.").await
+    pub async fn test_connection(&self, config: &LlmConfig) -> Result<(String, usize), AppError> {
+        tokio::time::timeout(
+            Duration::from_secs(30), // shorter timeout for connection test
+            crate::llm::client::send_chat_completion(config, "You are a test.", "Say hello."),
+        )
+        .await
+        .map_err(|_| {
+            AppError::Import("LLM connection test timed out after 30 seconds".to_string())
+        })?
     }
 
     /// Get number of available semaphore permits (for diagnostics).

@@ -4,6 +4,7 @@ use tauri::State;
 use std::sync::Arc;
 
 use crate::db::article_repo;
+use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::db::llm_config_repo;
 use crate::db::tag_repo;
@@ -175,9 +176,16 @@ Rules:
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of content-category tags for organizing articles in a literature review.";
-    let (response, _) = orchestrator
+    let result = orchestrator
         .send(&config, system_prompt, &user_prompt, LlmRequestType::TagGeneration)
-        .await?;
+        .await;
+    if let Err(ref e) = result {
+        let err_msg = e.to_string();
+        if let Ok(conn) = db_state.conn.lock() {
+            let _ = audit_repo::log_error(&conn, &format!("Tag suggestion failed: {}", err_msg));
+        }
+    }
+    let (response, _) = result?;
 
     // Parse response
     let json_str = response

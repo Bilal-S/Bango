@@ -3,6 +3,7 @@ use tauri::State;
 
 use std::sync::Arc;
 
+use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::label_repo;
@@ -206,9 +207,16 @@ Rules:
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process based on research aims and screening criteria.";
-    let (response, _) = orchestrator
+    let result = orchestrator
         .send(&config, system_prompt, &user_prompt, LlmRequestType::LabelGeneration)
-        .await?;
+        .await;
+    if let Err(ref e) = result {
+        let err_msg = e.to_string();
+        if let Ok(conn) = db_state.conn.lock() {
+            let _ = audit_repo::log_error(&conn, &format!("Label suggestion failed: {}", err_msg));
+        }
+    }
+    let (response, _) = result?;
 
     let json_str = response
         .trim()

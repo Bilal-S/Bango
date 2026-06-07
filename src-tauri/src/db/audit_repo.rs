@@ -26,7 +26,7 @@ pub fn get_recent_audit_entries(
          ae.details, ae.source, SUBSTR(a.title, 1, 40) as article_title \
          FROM audit_entries ae \
          LEFT JOIN articles a ON a.id = ae.article_id \
-         WHERE ae.action != 'import' ORDER BY ae.timestamp DESC LIMIT ?1 OFFSET ?2",
+         WHERE ae.action != 'import' AND ae.action != 'error' ORDER BY ae.timestamp DESC LIMIT ?1 OFFSET ?2",
     )?;
     let rows = stmt.query_map(params![limit, offset], row_to_audit_entry)?;
     Ok(rows.filter_map(|r| r.ok()).collect())

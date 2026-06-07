@@ -25,19 +25,15 @@ pub async fn save_llm_config(
     config: LlmConfig,
 ) -> Result<(), AppError> {
     {
-        let conn = db_state
-            .conn
-            .lock()
-            .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
         llm_config_repo::save_config(&conn, &config)?;
     } // conn dropped here
 
     // Update the in-memory orchestrator with new concurrency/delay settings
     orchestrator
-        .update_settings(
-            config.max_concurrent_requests as usize,
-            config.request_delay_ms as u64,
-        )
+        .update_settings(config.max_concurrent_requests as usize, config.request_delay_ms as u64)
         .await;
 
     Ok(())
@@ -77,8 +73,7 @@ pub async fn test_llm_connection(
                 let mut retry_config = config.clone();
                 retry_config.skip_temperature = true;
 
-                match orchestrator.test_connection(&retry_config).await
-                {
+                match orchestrator.test_connection(&retry_config).await {
                     Ok(_) => {
                         // Save the updated config so future calls skip temperature
                         let conn = db_state.conn.lock().map_err(|e| {
