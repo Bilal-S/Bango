@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { openPath } from '@tauri-apps/plugin-opener';
 import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
@@ -29,6 +29,7 @@ const props = defineProps<{
   articleTotal: number;
   decisionMessage?: string;
   decisionType?: 'success' | 'info';
+  openReaderId?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -46,6 +47,7 @@ const emit = defineEmits<{
   deleteFullText: [id: string];
   readFullText: [id: string];
   refreshArticle: [id: string];
+  readerOpened: [];
 }>();
 
 /** Status badge config for the header display */
@@ -463,6 +465,24 @@ watch(
     pdfSrc.value = null;
     absoluteFilePath.value = null;
   }
+);
+
+// Auto-open reader view when triggered from the article table attachment icon
+// Uses immediate:true because the panel may mount AFTER openReaderId is already set
+// (selectArticle is async, so the panel is created with the value already present)
+watch(
+  [() => props.openReaderId, () => props.article.id],
+  ([readerId, articleId]) => {
+    if (readerId && readerId === articleId && !showFullTextView.value) {
+      void nextTick().then(() => {
+        if (!showFullTextView.value) {
+          void openFullTextView();
+          emit('readerOpened');
+        }
+      });
+    }
+  },
+  { immediate: true }
 );
 
 // Criteria edit dialog

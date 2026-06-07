@@ -103,6 +103,7 @@ onMounted(() => {
 const selectedId = computed(() => selectedArticle.value?.id ?? null);
 
 const showExport = ref(false);
+const pendingOpenReaderId = ref<string | null>(null);
 const bulkTagDialogOpen = ref(false);
 const bulkLabelDialogOpen = ref(false);
 const bulkInputValue = ref('');
@@ -265,6 +266,11 @@ async function handleDeleteFullText(articleId: string): Promise<void> {
 async function handleReadFullText(articleId: string): Promise<string | null> {
   return await readFullTextContent(articleId);
 }
+
+function handleOpenReader(articleId: string): void {
+  pendingOpenReaderId.value = articleId;
+  selectArticle(articleId);
+}
 </script>
 
 <template>
@@ -347,6 +353,7 @@ async function handleReadFullText(articleId: string): Promise<string | null> {
           :all-selected="allSelected"
           :some-selected="someSelected"
           @select="selectArticle"
+          @open-reader="handleOpenReader"
           @sort="toggleSort"
           @toggle-select="toggleSelect"
           @toggle-select-all="toggleSelectAll"
@@ -405,6 +412,8 @@ async function handleReadFullText(articleId: string): Promise<string | null> {
       :article-total="activeTotalCount"
       :decision-message="decisionMessage"
       :decision-type="decisionType"
+      :open-reader-id="pendingOpenReaderId"
+      @reader-opened="pendingOpenReaderId = null"
       @close="handleCloseDetail"
       @navigate-prev="navigatePrev"
       @navigate-next="navigateNext"

@@ -16,6 +16,7 @@ const props = defineProps<{
 
 defineEmits<{
   select: [id: string];
+  openReader: [id: string];
   sort: [column: string];
   toggleSelect: [id: string];
   toggleSelectAll: [];
@@ -194,9 +195,19 @@ watch(
                 {{ article.sequenceId }}
               </td>
               <td class="py-5 px-2 max-w-xs">
-                <p class="text-body-main font-semibold text-slate-900 truncate">
-                  {{ article.title }}
-                </p>
+                <div class="flex items-center gap-1.5">
+                  <p class="text-body-main font-semibold text-slate-900 truncate">
+                    {{ article.title }}
+                  </p>
+                  <button
+                    v-if="article.hasFullText"
+                    class="material-symbols-outlined text-[16px] text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded flex-shrink-0 cursor-pointer transition-colors"
+                    :title="'Open reader: ' + (article.fullTextFileName ?? 'attachment')"
+                    @click.stop="$emit('openReader', article.id)"
+                  >
+                    attach_file
+                  </button>
+                </div>
               </td>
               <td class="py-5 px-2 text-body-sm text-slate-600">
                 {{ formatAuthors(article.authors) }}
