@@ -8,7 +8,7 @@ describe('color utils', () => {
       expect(result).toMatch(/^#[0-9a-f]{6}$/);
     });
 
-    it('is deterministic — same input always yields same output', () => {
+    it('is deterministic - same input always yields same output', () => {
       expect(hashColor('machine-learning')).toBe(hashColor('machine-learning'));
     });
 

@@ -159,7 +159,7 @@ pub async fn generate_criteria(
 
     let system_prompt = "You are a systematic literature review assistant. Based on the research aims provided, \
         suggest appropriate criteria for screening research papers in a systematic review. \
-        Write criterion text concisely and directly — do not prefix with phrases like \
+        Write criterion text concisely and directly - do not prefix with phrases like \
         'Include studies that…' or 'Exclude studies that…'. The criterion type is already known from context. \
         Do not use any EmDash characters your response. Example: write 'Randomized controlled trials only' not 'Include studies that use randomized controlled trials'.";
 
@@ -187,7 +187,7 @@ Rules:
 - Criteria should be directly relevant to the research aims.
 - Do not duplicate or overlap concepts.
 - Do not use EmDash chracters in your response.
-- Write criterion text concisely. Do NOT start with "Include studies that…" or "Exclude studies that…" — state the essential condition directly."#,
+- Write criterion text concisely. Do NOT start with "Include studies that…" or "Exclude studies that…" - state the essential condition directly."#,
         type_label = type_label,
         research_aims = aims_list.join("\n"),
     );
@@ -315,7 +315,7 @@ Evaluate the following {type_label} Criteria for a systematic literature review.
 Assess their appropriateness, completeness, clarity, and methodological rigor.
 Provide specific, actionable suggestions for improvement.
 
-IMPORTANT: Focus exclusively on {type_label} criteria. Do NOT suggest adding {opposite_label} criteria — those are managed separately.
+IMPORTANT: Focus exclusively on {type_label} criteria. Do NOT suggest adding {opposite_label} criteria - those are managed separately.
 
 ## Research Aims
 {research_aims}

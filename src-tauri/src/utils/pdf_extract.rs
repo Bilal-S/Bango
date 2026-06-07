@@ -374,7 +374,7 @@ fn strip_references(text: &str) -> String {
     ];
 
     let mut ref_pos: Option<usize> = None;
-    // Search from the end — find the LAST occurrence of a references heading
+    // Search from the end - find the LAST occurrence of a references heading
     for pattern in &ref_patterns {
         if let Some(pos) = text.rfind(pattern) {
             // Only consider it if it's in the latter half of the document

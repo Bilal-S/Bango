@@ -12,6 +12,14 @@ export const useCriteriaStore = defineStore('criteria', () => {
   const inclusionCriteria = ref<Criterion[]>([]);
   const exclusionCriteria = ref<Criterion[]>([]);
 
+  // ── AI assistant state (persists across route navigation) ──────────
+  const generatingInclusion = ref(false);
+  const generatingExclusion = ref(false);
+  const inclusionCritique = ref('');
+  const exclusionCritique = ref('');
+  const inclusionError = ref<string | null>(null);
+  const exclusionError = ref<string | null>(null);
+
   async function fetchIfNeeded(): Promise<void> {
     if (initialized.value || !isTauri()) return;
     await fetchAll();
@@ -67,6 +75,13 @@ export const useCriteriaStore = defineStore('criteria', () => {
     exclusionCriteria,
     loading,
     initialized,
+    // AI assistant state
+    generatingInclusion,
+    generatingExclusion,
+    inclusionCritique,
+    exclusionCritique,
+    inclusionError,
+    exclusionError,
     fetchIfNeeded,
     fetchAll,
     invalidate,

@@ -88,7 +88,7 @@ const llmConfigStore = useLlmConfigStore();
 void criteriaStore.fetchIfNeeded();
 void llmConfigStore.fetchIfNeeded();
 
-// AI Summary event listener — refreshes selected article when summary completes
+// AI Summary event listener - refreshes selected article when summary completes
 useAiSummaryEvents(async (articleId: string) => {
   emit('refreshArticle', articleId);
 });

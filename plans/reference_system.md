@@ -1,4 +1,4 @@
-# Reference System — Citation & Reference Tracking
+# Reference System - Citation & Reference Tracking
 
 > **Status**: Planning  
 > **Created**: 2025-06-05  
@@ -10,7 +10,7 @@
 
 1. [Overview](#1-overview)
 2. [Phase 1: Database Layer](#2-phase-1-database-layer)
-   - [1A. Migration v004 — Articles Table Columns](#1a-migration-v004--articles-table-columns)
+   - [1A. Migration v004 - Articles Table Columns](#1a-migration-v004--articles-table-columns)
    - [1B. New `references` Table](#1b-new-references-table)
    - [1C. Rust Model Changes](#1c-rust-model-changes)
    - [1D. N1 Citation Data Parsing](#1d-n1-citation-data-parsing)
@@ -57,7 +57,7 @@ Web of Science (WoS) RIS exports contain structured citation metadata in the `N1
 
 ## 2. Phase 1: Database Layer
 
-### 1A. Migration — Articles Table Columns
+### 1A. Migration - Articles Table Columns
 
 **File**: `src-tauri/src/db/migrations/v001_initial.rs` (consolidated single migration)
 
@@ -86,7 +86,7 @@ ALTER TABLE articles ADD COLUMN full_text_file_name TEXT;
 | `has_full_text` | `INTEGER` | `bool` | `0` | True when a full-text file is associated |
 | `full_text_file_name` | `TEXT` | `Option<String>` | `NULL` | Relative path with partial subpath (e.g., `fulltext/smith2023.pdf`) |
 
-**Index**: No new indexes needed on `articles` for these columns — they are lookups by article ID (primary key).
+**Index**: No new indexes needed on `articles` for these columns - they are lookups by article ID (primary key).
 
 ### 1B. New `references` Table
 
@@ -164,24 +164,24 @@ CREATE INDEX IF NOT EXISTS idx_article_refs_match_status
 
 #### Design Decisions
 
-1. **`type` as INTEGER 0/1** — Efficient for filtering and indexing. 0 = citation (this external paper cites the parent), 1 = reference (the parent cites this external paper).
+1. **`type` as INTEGER 0/1** - Efficient for filtering and indexing. 0 = citation (this external paper cites the parent), 1 = reference (the parent cites this external paper).
 
-2. **Composite index `(parent_id, type)`** — This is the most frequent query pattern: "give me all references for article X" or "give me all citations for article X". The composite index covers both without a separate lookup.
+2. **Composite index `(parent_id, type)`** - This is the most frequent query pattern: "give me all references for article X" or "give me all citations for article X". The composite index covers both without a separate lookup.
 
-3. **`match_status` enum** — Supports the future promotion workflow:
+3. **`match_status` enum** - Supports the future promotion workflow:
    - `unmatched` → no known link to the main articles table
    - `matched` → DOI or title matched to an existing article (store article ID separately or via DOI join)
    - `imported` → the reference was promoted to a full article record
 
-4. **No AI screening columns** — Reference records are metadata-only, not screened for inclusion/exclusion. No `status`, `ai_decision`, `ai_confidence`, `screened_at`, etc.
+4. **No AI screening columns** - Reference records are metadata-only, not screened for inclusion/exclusion. No `status`, `ai_decision`, `ai_confidence`, `screened_at`, etc.
 
-5. **No `sequence_id`** — Ordering is by `imported_at` or natural order from the source file.
+5. **No `sequence_id`** - Ordering is by `imported_at` or natural order from the source file.
 
-6. **No `tags`/`labels` junction tables** — Reference records don't have tags or labels. These are tracking metadata only.
+6. **No `tags`/`labels` junction tables** - Reference records don't have tags or labels. These are tracking metadata only.
 
-7. **All article metadata columns nullable** — Citation/reference exports often contain only partial data (title, authors, year, DOI). Abstracts are rare in these exports.
+7. **All article metadata columns nullable** - Citation/reference exports often contain only partial data (title, authors, year, DOI). Abstracts are rare in these exports.
 
-8. **CASCADE delete** — When a parent article is deleted, all its reference records are automatically removed.
+8. **CASCADE delete** - When a parent article is deleted, all its reference records are automatically removed.
 
 ### 1C. Rust Model Changes
 
@@ -292,7 +292,7 @@ pub struct Reference {
     pub parent_id: String,
     pub match_status: MatchStatus,
 
-    // Metadata (all optional — reference exports often have partial data)
+    // Metadata (all optional - reference exports often have partial data)
     pub title: Option<String>,
     pub abstract_text: Option<String>,
     pub authors: Vec<String>,
@@ -486,8 +486,8 @@ pub fn parse_n1_citation_data(n1_value: &str) -> (Option<i32>, Option<i32>) {
 - Case-sensitive matching (WoS exports use exact casing shown above)
 - Extracts only the first match for each field
 - Handles multi-line N1 values (each line checked independently)
-- Returns `(None, None)` if no citation data found — the N1 is still stored in `notes`
-- Does not modify the N1 value — full text preserved in `notes`
+- Returns `(None, None)` if no citation data found - the N1 is still stored in `notes`
+- Does not modify the N1 value - full text preserved in `notes`
 
 **Wiring**: Called in `ris_record_to_new_article()` after setting `notes`:
 
@@ -515,12 +515,12 @@ let (num_cited, num_references) = record.notes
 | `extra_whitespace` | Multiple spaces around colon/values | `(Some(49), Some(34))` |
 | `times_cited_only_first_line` | Times Cited on first line only | `(Some(44), None)` |
 | `large_numbers` | Counts in thousands | `(Some(1234), Some(5678))` |
-| `negative_value_treated_as_none` | `Total Times Cited: -1` | `(None, None)` — negative parsed but treated as absent (edge case decision: actually Rust `parse::<i32>()` will parse `-1` successfully, but WoS never outputs negative. We accept the parsed value.) |
+| `negative_value_treated_as_none` | `Total Times Cited: -1` | `(None, None)` - negative parsed but treated as absent (edge case decision: actually Rust `parse::<i32>()` will parse `-1` successfully, but WoS never outputs negative. We accept the parsed value.) |
 | `non_numeric_value` | `Total Times Cited: N/A` | `(None, None)` |
 | `duplicate_keys` | Same key twice | First value wins |
-| `embedded_in_longer_text` | Citation data mid-sentence | May not match with `strip_prefix` — this is by design. We only match lines that START with the key. |
+| `embedded_in_longer_text` | Citation data mid-sentence | May not match with `strip_prefix` - this is by design. We only match lines that START with the key. |
 
-> **Design note**: We use `strip_prefix` on each trimmed line rather than regex. This is intentional — it's faster, has no external dependency, and WoS N1 values always have the key at the start of a line.
+> **Design note**: We use `strip_prefix` on each trimmed line rather than regex. This is intentional - it's faster, has no external dependency, and WoS N1 values always have the key at the start of a line.
 
 ### 1E. Repository Layer Changes
 
@@ -538,7 +538,7 @@ let (num_cited, num_references) = record.notes
 **Changes to `get_next_unscreened_working_batch()`**:
 - Add default values for the 6 new fields in the screening batch query (these fields are not needed for screening, so just use `None`/`false`)
 
-**No new query functions needed for Phase 1** — the new columns are read alongside existing columns.
+**No new query functions needed for Phase 1** - the new columns are read alongside existing columns.
 
 #### `src-tauri/src/db/reference_repo.rs` (NEW FILE)
 
@@ -732,7 +732,7 @@ export interface Reference {
 | `duplicate_keys` | Same key appears twice | First value wins |
 | `large_numbers` | Thousands | `(Some(1234), Some(5678))` |
 | `extra_whitespace` | Multiple spaces | `(Some(49), Some(34))` |
-| `only_core_collection` | `Times Cited in Web of Science Core Collection: 44` without Total line | `(None, None)` — we only match `Total Times Cited:` |
+| `only_core_collection` | `Times Cited in Web of Science Core Collection: 44` without Total line | `(None, None)` - we only match `Total Times Cited:` |
 
 #### 1G-3. Article Repo Tests
 
@@ -832,7 +832,7 @@ pub async fn import_references_ris_file(
 #### UI: Reference Import View
 
 - Similar to existing RIS import stepper
-- Additional step: "Match to Articles" — shows how many references matched existing articles
+- Additional step: "Match to Articles" - shows how many references matched existing articles
 - Preview table showing: reference title, year, DOI, matched parent article title
 
 ### 2C. CSV Reference Import Pipeline
@@ -1001,7 +1001,7 @@ New panel/tab in article detail showing all reference/citation records for the s
 | `src-tauri/tests/reference_repo_test.rs` | **CREATE** | Reference repo integration tests |
 | `src-tauri/tests/article_query_test.rs` | **MODIFY** | Update for new columns |
 
-### Phase 2 (Import & UI) — DEFERRED
+### Phase 2 (Import & UI) - DEFERRED
 
 | File | Action | Description |
 |------|--------|-------------|

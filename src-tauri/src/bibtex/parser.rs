@@ -330,8 +330,8 @@ fn read_braced_value(chars: &[char], mut pos: u32, len: usize) -> (String, u32) 
 /// Returns (value, position_after_closing_quote).
 ///
 /// Handles two escape conventions:
-/// - `\"` — backslash-escaped quote (standard LaTeX)
-/// - `""` — double-double-quote (EBSCO / some BibTeX exporters)
+/// - `\"` - backslash-escaped quote (standard LaTeX)
+/// - `""` - double-double-quote (EBSCO / some BibTeX exporters)
 fn read_quoted_value(chars: &[char], mut pos: u32, len: usize) -> (String, u32) {
     let mut value = String::new();
 

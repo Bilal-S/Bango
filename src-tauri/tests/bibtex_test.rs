@@ -29,7 +29,7 @@ fn test_parse_sugar_bibtex() {
         assert_eq!(entry.entry_type, "article", "Entry {} should be article", i);
     }
 
-    // Entry 6 (EBSCO quotes) — key 2854824120170701
+    // Entry 6 (EBSCO quotes) - key 2854824120170701
     let ebsco_entry =
         result.entries.iter().find(|e| e.key == "2854824120170701").expect("EBSCO entry not found");
     let title_field: Option<&str> =
@@ -51,7 +51,7 @@ fn test_convert_sugar_bibtex() {
 
     assert_eq!(records.len(), 10);
 
-    // Entry 2 (Bossie, Andrew and Kuehn, Daniel) — multi-author
+    // Entry 2 (Bossie, Andrew and Kuehn, Daniel) - multi-author
     let bossie = records
         .iter()
         .find(|r| r.title.as_deref() == Some("WWII contract spending and inequality."))
@@ -66,7 +66,7 @@ fn test_convert_sugar_bibtex() {
     assert_eq!(bossie.issn.as_deref(), Some("1350-4851"));
     assert!(bossie.keywords.len() >= 4, "Should have multiple keywords");
 
-    // Entry 1 (Sweet Surprise) — ISSN with "; Print" suffix, pages "13-null"
+    // Entry 1 (Sweet Surprise) - ISSN with "; Print" suffix, pages "13-null"
     let sweet = records
         .iter()
         .find(|r| {
@@ -78,7 +78,7 @@ fn test_convert_sugar_bibtex() {
     assert_eq!(sweet.start_page.as_deref(), Some("13"));
     assert_eq!(sweet.end_page, None, "null end page should be None");
 
-    // Entry 5 (Glaesmer) — many authors, semicolon keywords
+    // Entry 5 (Glaesmer) - many authors, semicolon keywords
     let glaesmer = records
         .iter()
         .find(|r| {
@@ -91,14 +91,14 @@ fn test_convert_sugar_bibtex() {
     assert!(glaesmer.authors.len() >= 4, "Should have 4+ authors");
     assert!(glaesmer.keywords.len() >= 10, "Should have many keywords from semicolons");
 
-    // Entry 6 — EBSCO quotes in title preserved
+    // Entry 6 - EBSCO quotes in title preserved
     let ebsco = records
         .iter()
         .find(|r| r.title.as_deref().unwrap().contains("Making better use"))
         .expect("EBSCO entry");
     assert!(ebsco.title.as_ref().unwrap().contains('"'), "Title should have literal quotes");
 
-    // Entry 8 — empty abstract, empty keywords
+    // Entry 8 - empty abstract, empty keywords
     let geophys = records
         .iter()
         .find(|r| {
@@ -109,7 +109,7 @@ fn test_convert_sugar_bibtex() {
     assert_eq!(geophys.abstract_text.as_deref(), Some(""), "Abstract should be empty string");
     assert!(geophys.keywords.is_empty(), "Empty keywords should produce no entries");
 
-    // Entry 10 — Japanese Midwives
+    // Entry 10 - Japanese Midwives
     let midwives = records
         .iter()
         .find(|r| r.title.as_deref().unwrap().contains("Japanese Midwives Association"))

@@ -428,7 +428,7 @@ impl ScreeningEngine {
                             inclusion_count,
                         );
 
-                        // Keep raw reasoning with UUIDs — frontend replaces dynamically at display time
+                        // Keep raw reasoning with UUIDs - frontend replaces dynamically at display time
                         let mut reasoning = screening.reasoning.clone();
 
                         // Check for override
@@ -1175,7 +1175,7 @@ Hope this helps!"#;
         // LLM suggests same tag with different case
         create_or_match_tag(&conn, "Machine-Learning", article_id).unwrap();
 
-        // Should NOT create a new tag — still only 1
+        // Should NOT create a new tag - still only 1
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM tags", [], |r| r.get(0)).unwrap();
         assert_eq!(count, 1, "Should reuse existing tag, not create a new one");
 

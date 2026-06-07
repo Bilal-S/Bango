@@ -71,7 +71,7 @@ pub struct Reference {
     pub parent_id: String,
     pub match_status: MatchStatus,
 
-    // Metadata (all optional — reference exports often have partial data)
+    // Metadata (all optional - reference exports often have partial data)
     pub title: Option<String>,
     pub abstract_text: Option<String>,
     pub authors: Vec<String>,

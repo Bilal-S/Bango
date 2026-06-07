@@ -216,7 +216,7 @@ async fn test_openai_endpoint_appends_chat_completions() {
         .create_async()
         .await;
 
-    // Provide base URL without /chat/completions — client should append it
+    // Provide base URL without /chat/completions - client should append it
     let config = openai_config(&server.url());
     let _ = client::send_chat_completion(&config, "s", "u").await;
 
@@ -689,7 +689,7 @@ async fn test_list_models_ollama_no_filtering() {
     let result = client::list_models(&LlmProvider::Ollama, &server.url(), None).await.unwrap();
 
     mock.assert_async().await;
-    // Ollama doesn't filter — all models returned
+    // Ollama doesn't filter - all models returned
     assert_eq!(result, vec!["llama3", "mistral", "embedding-model"]);
 }
 
@@ -752,13 +752,13 @@ async fn test_list_models_server_error() {
 
 #[tokio::test]
 async fn test_empty_api_key_still_sends_request() {
-    // The code does unwrap_or("") then bearer_auth("") — so an empty key
+    // The code does unwrap_or("") then bearer_auth("") - so an empty key
     // still makes the request with a Bearer header (value is empty string).
     // Verify the request still succeeds when the server accepts it.
     let mut server = mockito::Server::new_async().await;
     let mock = server
         .mock("POST", "/chat/completions")
-        // Don't assert exact header value — reqwest may format "Bearer " differently
+        // Don't assert exact header value - reqwest may format "Bearer " differently
         .match_header("content-type", "application/json")
         .with_status(200)
         .with_body(openai_chat_response("empty auth", 1))

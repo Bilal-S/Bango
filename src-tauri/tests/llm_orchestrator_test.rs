@@ -860,7 +860,7 @@ async fn queue_length_at_boundary_concurrency_one() {
 
     assert_eq!(orch.available_permits(), 1);
 
-    // Start one request — should consume the only permit
+    // Start one request - should consume the only permit
     let orch_clone = orch.clone();
     let config_clone = config.clone();
     let handle = tokio::spawn(async move {

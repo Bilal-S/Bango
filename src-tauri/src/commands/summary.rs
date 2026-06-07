@@ -149,7 +149,7 @@ pub async fn generate_article_ai_summary(
     let truncated = if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
     let user_prompt = format!("## Article Title\n{}\n\n## Full Text\n{}", title, truncated);
 
-    // 3. Call LLM via orchestrator — catch errors to log them to audit trail
+    // 3. Call LLM via orchestrator - catch errors to log them to audit trail
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
     let llm_result = orchestrator
         .send(&config, ARTICLE_SUMMARY_SYSTEM_PROMPT, &user_prompt, LlmRequestType::ArticleSummary)
@@ -180,7 +180,7 @@ pub async fn generate_article_ai_summary(
         }
     };
 
-    // 4. Validate the response is valid JSON — strip markdown code fences if present
+    // 4. Validate the response is valid JSON - strip markdown code fences if present
     let cleaned = screening_engine::extract_json(&response_text);
     let parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
         Ok(v) => v,

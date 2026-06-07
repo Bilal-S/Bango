@@ -34,7 +34,7 @@ export const useAuditStore = defineStore('audit', () => {
     await fetch();
   }
 
-  /** Initial fetch — resets all state */
+  /** Initial fetch - resets all state */
   async function fetch(): Promise<void> {
     loading.value = true;
     try {

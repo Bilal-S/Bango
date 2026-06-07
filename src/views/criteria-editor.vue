@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
 import { useLlmConfigStore } from '@/stores/llm-config';
+import { formatLlmError } from '@/utils/llm-error';
 import type { Priority } from '@/types';
 
 const criteriaStore = useCriteriaStore();
@@ -21,11 +22,13 @@ const newExclusionText = ref('');
 const newInclusionPriority = ref<Priority>('standard');
 const newExclusionPriority = ref<Priority>('standard');
 
-// AI assistant state
-const generatingInclusion = ref(false);
-const generatingExclusion = ref(false);
-const inclusionCritiqueText = ref('');
-const exclusionCritiqueText = ref('');
+// AI assistant state lives in the Pinia store (persists across route navigation)
+const generatingInclusion = computed(() => criteriaStore.generatingInclusion);
+const generatingExclusion = computed(() => criteriaStore.generatingExclusion);
+const inclusionCritiqueText = computed(() => criteriaStore.inclusionCritique);
+const exclusionCritiqueText = computed(() => criteriaStore.exclusionCritique);
+const inclusionError = computed(() => criteriaStore.inclusionError);
+const exclusionError = computed(() => criteriaStore.exclusionError);
 
 const inclusionCriteria = computed(() =>
   criteria.value.filter((c) => c.criterionType === 'inclusion')
@@ -159,8 +162,9 @@ const exclusionButtonLabel = computed(() =>
 
 async function handleInclusionAi(): Promise<void> {
   if (!canUseAi.value || generatingInclusion.value) return;
-  generatingInclusion.value = true;
-  inclusionCritiqueText.value = '';
+  criteriaStore.generatingInclusion = true;
+  criteriaStore.inclusionCritique = '';
+  criteriaStore.inclusionError = null;
   try {
     if (inclusionCriteria.value.length === 0) {
       await tauriCommand('generate_criteria', {
@@ -171,10 +175,13 @@ async function handleInclusionAi(): Promise<void> {
       const result = await tauriCommand<{ critique: string }>('critique_criteria', {
         request: { criterionType: 'inclusion' },
       });
-      inclusionCritiqueText.value = result.critique;
+      criteriaStore.inclusionCritique = result.critique;
     }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    criteriaStore.inclusionError = msg;
   } finally {
-    generatingInclusion.value = false;
+    criteriaStore.generatingInclusion = false;
   }
 }
 
@@ -185,8 +192,9 @@ function critiqueParagraphs(text: string): string[] {
 
 async function handleExclusionAi(): Promise<void> {
   if (!canUseAi.value || generatingExclusion.value) return;
-  generatingExclusion.value = true;
-  exclusionCritiqueText.value = '';
+  criteriaStore.generatingExclusion = true;
+  criteriaStore.exclusionCritique = '';
+  criteriaStore.exclusionError = null;
   try {
     if (exclusionCriteria.value.length === 0) {
       await tauriCommand('generate_criteria', {
@@ -197,10 +205,13 @@ async function handleExclusionAi(): Promise<void> {
       const result = await tauriCommand<{ critique: string }>('critique_criteria', {
         request: { criterionType: 'exclusion' },
       });
-      exclusionCritiqueText.value = result.critique;
+      criteriaStore.exclusionCritique = result.critique;
     }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    criteriaStore.exclusionError = msg;
   } finally {
-    generatingExclusion.value = false;
+    criteriaStore.generatingExclusion = false;
   }
 }
 </script>
@@ -321,14 +332,48 @@ async function handleExclusionAi(): Promise<void> {
       </div>
     </section>
 
+    <!-- AI Error: Inclusion -->
+    <div v-if="inclusionError" class="ai-error-card">
+      <div class="ai-error-card__header">
+        <div class="ai-error-card__title-group">
+          <span class="material-symbols-outlined">error</span>
+          <span class="ai-error-card__title">AI Generation Failed - Inclusion Criteria</span>
+        </div>
+        <button class="ai-error-card__dismiss" @click="criteriaStore.inclusionError = null">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="ai-error-card__body">
+        <p class="ai-error-card__prefix">{{ formatLlmError(inclusionError).prefix }}</p>
+        <p v-if="formatLlmError(inclusionError).cause" class="ai-error-card__cause">
+          <strong>Cause:</strong> {{ formatLlmError(inclusionError).cause }}
+        </p>
+        <p v-if="formatLlmError(inclusionError).solution" class="ai-error-card__solution">
+          <strong>Solution:</strong> {{ formatLlmError(inclusionError).solution }}
+        </p>
+        <details class="ai-error-card__details">
+          <summary>Technical details</summary>
+          <pre>{{ inclusionError }}</pre>
+        </details>
+        <a
+          :href="formatLlmError(inclusionError).helpLink"
+          class="ai-error-card__help-link"
+          target="_blank"
+        >
+          <span class="material-symbols-outlined" style="font-size: 14px">help</span>
+          Troubleshooting guide
+        </a>
+      </div>
+    </div>
+
     <!-- AI Critique: Inclusion -->
     <div v-if="inclusionCritiqueText" class="ai-critique-card">
       <div class="ai-critique-card__header">
         <div class="ai-critique-card__title-group">
           <span class="material-symbols-outlined">auto_awesome</span>
-          <span class="ai-critique-card__title">AI Critique — Inclusion Criteria</span>
+          <span class="ai-critique-card__title">AI Critique - Inclusion Criteria</span>
         </div>
-        <button class="ai-critique-card__dismiss" @click="inclusionCritiqueText = ''">
+        <button class="ai-critique-card__dismiss" @click="criteriaStore.inclusionCritique = ''">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
@@ -417,14 +462,48 @@ async function handleExclusionAi(): Promise<void> {
       </div>
     </section>
 
+    <!-- AI Error: Exclusion -->
+    <div v-if="exclusionError" class="ai-error-card">
+      <div class="ai-error-card__header">
+        <div class="ai-error-card__title-group">
+          <span class="material-symbols-outlined">error</span>
+          <span class="ai-error-card__title">AI Generation Failed - Exclusion Criteria</span>
+        </div>
+        <button class="ai-error-card__dismiss" @click="criteriaStore.exclusionError = null">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="ai-error-card__body">
+        <p class="ai-error-card__prefix">{{ formatLlmError(exclusionError).prefix }}</p>
+        <p v-if="formatLlmError(exclusionError).cause" class="ai-error-card__cause">
+          <strong>Cause:</strong> {{ formatLlmError(exclusionError).cause }}
+        </p>
+        <p v-if="formatLlmError(exclusionError).solution" class="ai-error-card__solution">
+          <strong>Solution:</strong> {{ formatLlmError(exclusionError).solution }}
+        </p>
+        <details class="ai-error-card__details">
+          <summary>Technical details</summary>
+          <pre>{{ exclusionError }}</pre>
+        </details>
+        <a
+          :href="formatLlmError(exclusionError).helpLink"
+          class="ai-error-card__help-link"
+          target="_blank"
+        >
+          <span class="material-symbols-outlined" style="font-size: 14px">help</span>
+          Troubleshooting guide
+        </a>
+      </div>
+    </div>
+
     <!-- AI Critique: Exclusion -->
     <div v-if="exclusionCritiqueText" class="ai-critique-card">
       <div class="ai-critique-card__header">
         <div class="ai-critique-card__title-group">
           <span class="material-symbols-outlined">auto_awesome</span>
-          <span class="ai-critique-card__title">AI Critique — Exclusion Criteria</span>
+          <span class="ai-critique-card__title">AI Critique - Exclusion Criteria</span>
         </div>
-        <button class="ai-critique-card__dismiss" @click="exclusionCritiqueText = ''">
+        <button class="ai-critique-card__dismiss" @click="criteriaStore.exclusionCritique = ''">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
@@ -746,7 +825,7 @@ async function handleExclusionAi(): Promise<void> {
   background-color: #4f46e5;
 }
 
-/* AI button — matches Tags & Labels pattern */
+/* AI button - matches Tags & Labels pattern */
 .ai-btn {
   display: flex;
   align-items: center;
@@ -873,5 +952,123 @@ async function handleExclusionAi(): Promise<void> {
 
 .ai-critique-card__body :deep(p:last-child) {
   margin-bottom: 0;
+}
+
+/* AI Error card */
+.ai-error-card {
+  background-color: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-left: 4px solid #dc2626;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.ai-error-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.ai-error-card__title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #991b1b;
+}
+
+.ai-error-card__title-group .material-symbols-outlined {
+  font-size: 20px;
+  color: #dc2626;
+}
+
+.ai-error-card__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ai-error-card__dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+
+.ai-error-card__dismiss:hover {
+  color: #ba1a1a;
+  background-color: #fef2f2;
+}
+
+.ai-error-card__dismiss .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.ai-error-card__body {
+  font-size: 14px;
+  line-height: 22px;
+  color: #1b1b24;
+}
+
+.ai-error-card__prefix {
+  color: #7f1d1d;
+  font-size: 13px;
+  margin-bottom: 0.75rem;
+}
+
+.ai-error-card__cause {
+  margin-bottom: 0.5rem;
+  color: #374151;
+}
+
+.ai-error-card__solution {
+  margin-bottom: 0.75rem;
+  color: #374151;
+}
+
+.ai-error-card__details {
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.ai-error-card__details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #6b7280;
+  user-select: none;
+}
+
+.ai-error-card__details pre {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background-color: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  font-size: 12px;
+  line-height: 18px;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.ai-error-card__help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 13px;
+  color: #3525cd;
+  text-decoration: none;
+  margin-top: 0.5rem;
+}
+
+.ai-error-card__help-link:hover {
+  text-decoration: underline;
 }
 </style>

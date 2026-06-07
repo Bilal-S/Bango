@@ -174,7 +174,7 @@ export function useArticleSearch() {
     }
     query.sortBy = sortColumn.value;
     query.sortDir = sortDirection.value;
-    // Keep the current page — re-sort in-place so the user sees the
+    // Keep the current page - re-sort in-place so the user sees the
     // same offset with the new sort order applied.
     query.offset = (currentPage.value - 1) * pageSize.value;
     void search();
@@ -347,7 +347,7 @@ export function useArticleSearch() {
       const prev = articles.value[selectedIndex.value - 1];
       if (prev) await selectArticle(prev.id);
     } else if (currentPage.value > 1) {
-      // Cross to previous page — load it and select the last article
+      // Cross to previous page - load it and select the last article
       const prevPage = currentPage.value - 1;
       currentPage.value = prevPage;
       query.offset = (prevPage - 1) * pageSize.value;
@@ -364,7 +364,7 @@ export function useArticleSearch() {
       const next = articles.value[selectedIndex.value + 1];
       if (next) await selectArticle(next.id);
     } else if (currentPage.value < totalPages.value) {
-      // Cross to next page — load it and select the first article
+      // Cross to next page - load it and select the first article
       const nextPage = currentPage.value + 1;
       currentPage.value = nextPage;
       query.offset = (nextPage - 1) * pageSize.value;

@@ -6,7 +6,7 @@
 /// The N1 value is preserved in full in the article's `notes` field regardless
 /// of whether citation data was extracted.
 ///
-/// Uses `strip_prefix` on each trimmed line — WoS N1 values always have the
+/// Uses `strip_prefix` on each trimmed line - WoS N1 values always have the
 /// key at the start of a line. This is faster than regex and has no external
 /// dependency.
 pub fn parse_n1_citation_data(n1_value: &str) -> (Option<i32>, Option<i32>) {
@@ -55,11 +55,11 @@ Cited Reference Count:  34";
     fn single_line() {
         let input = "Total Times Cited: 49 Cited Reference Count: 34";
         // strip_prefix won't match because the line doesn't start with the key after "49 "
-        // Actually this is one line — strip_prefix checks start of the trimmed line
+        // Actually this is one line - strip_prefix checks start of the trimmed line
         // "Total Times Cited: 49 Cited Reference Count: 34" starts with "Total Times Cited:"
         // rest = " 49 Cited Reference Count: 34", trim -> "49 Cited Reference Count: 34"
         // parse::<i32>() will fail because it's not just digits
-        // So this format won't match — that's expected per the design (each field on its own line)
+        // So this format won't match - that's expected per the design (each field on its own line)
         let (cited, refs) = parse_n1_citation_data(input);
         // Single-line compact format won't parse because the value isn't pure digits
         assert_eq!(cited, None);

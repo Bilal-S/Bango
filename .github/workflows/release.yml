@@ -109,7 +109,7 @@ jobs:
   # ──────────────────────────────────────────────
   # Build MSIX for Microsoft Store
   # ──────────────────────────────────────────────
-  # TEMPORARILY DISABLED — re-enable by removing the "if: false" line
+  # TEMPORARILY DISABLED - re-enable by removing the "if: false" line
   # and adding build-msix back to the sync-version needs list.
   build-msix:
     if: false
@@ -245,7 +245,7 @@ jobs:
           CARGO=$(grep '^version = ' src-tauri/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           if [ "$PKG" = "$VERSION" ] && [ "$CONF" = "$VERSION" ] && [ "$CARGO" = "$VERSION" ]; then
             echo "sync_needed=false" >> "$GITHUB_OUTPUT"
-            echo "All files already at $VERSION — skipping sync"
+            echo "All files already at $VERSION - skipping sync"
           else
             echo "sync_needed=true" >> "$GITHUB_OUTPUT"
             echo "Version mismatch detected: pkg=$PKG conf=$CONF cargo=$CARGO → target=$VERSION"

@@ -56,7 +56,7 @@ export const useArticlesStore = defineStore('articles', () => {
         articles.value[idx] = updated;
       }
     } catch {
-      // Silently ignore — the article list will be refreshed on next navigation
+      // Silently ignore - the article list will be refreshed on next navigation
     }
   }
 
