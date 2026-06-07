@@ -37,22 +37,21 @@
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2.11.0",
     "@vitejs/plugin-vue": "^6.0.6",
-    "@vue/test-utils": "^2.4.10",
+    "vue-tsc": "^3.2.7",
     "eslint": "^10.3.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.9.0",
+    "fallow": "^2.89.0",
     "globals": "^17.6.0",
     "happy-dom": "^20.9.0",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.3",
     "simple-git-hooks": "^2.13.1",
     "tailwindcss": "^4.2.4",
-    "tslint": "^5.20.1",
+    "vitest": "^4.1.5",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.1",
-    "vite": "^8.0.10",
-    "vitest": "^4.1.5",
-    "vue-tsc": "^3.2.7"
+    "vite": "^8.0.10"
   },
   "simple-git-hooks": {
     "pre-commit": "npx lint-staged"

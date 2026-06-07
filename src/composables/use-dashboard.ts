@@ -2,7 +2,6 @@ import { computed, ref } from 'vue';
 import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
-import type { ArticleStatus } from '@/types';
 
 export interface StatusCounts {
   total: number;
@@ -161,16 +160,6 @@ export function useDashboard() {
     refresh,
     loadMoreActivities,
   };
-}
-
-export function formatStatusLabel(status: ArticleStatus): string {
-  const LABELS: Record<ArticleStatus, string> = {
-    duplicate: 'Duplicates',
-    working: 'Working',
-    included: 'Included',
-    rejected: 'Rejected',
-  };
-  return LABELS[status] ?? status;
 }
 
 export function formatAuditAction(action: string): string {

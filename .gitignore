@@ -14,6 +14,8 @@ src-tauri/Cargo.lock
 *.swp
 *.swo
 .DS_Store
+.cline/
+.fallowrc.jsonc
 
 # Environment
 .env
