@@ -12,16 +12,30 @@ const MAX_WORDS: usize = 30_000;
 /// 1. Extract text page-by-page using lopdf for header/footer detection
 /// 2. Detect repeating header/footer lines across pages
 /// 3. Extract full text using pdf-extract (better layout handling)
+///    - Falls back to lopdf page-by-page extraction if pdf-extract panics or fails
 /// 4. Remove detected headers/footers from the extracted text
 /// 5. Strip abstract and references sections
 /// 6. Truncate to MAX_WORDS
 pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
-    // Step 1: Detect headers/footers from lopdf
+    // Step 1: Detect headers/footers from lopdf (also pre-loads pages for fallback)
     let header_footer_lines = detect_headers_footers(file_path)?;
 
-    // Step 2: Extract full text using pdf-extract
-    let raw_text =
-        pdf_extract::extract_text(file_path).map_err(|e| format!("PDF extraction failed: {e}"))?;
+    // Step 2: Extract full text using pdf-extract, with panic safety
+    // pdf-extract can panic on PDFs with broken Unicode maps (FromUtf16Error).
+    // Wrap in catch_unwind so the app doesn't abort when called from a
+    // non-unwinding WebKit callback.
+    let raw_text = match extract_text_safe(file_path) {
+        Ok(text) => text,
+        Err(e) => {
+            // Fallback: use lopdf page-by-page extraction (degraded but doesn't panic)
+            eprintln!(
+                "[pdf_extract] pdf-extract failed/panicked: {e} — falling back to lopdf extraction"
+            );
+            let doc = LopdfDocument::load(file_path)
+                .map_err(|e2| format!("Fallback PDF load also failed: {e2}"))?;
+            extract_all_pages_text(&doc)?
+        }
+    };
 
     // Step 3: Remove detected header/footer lines
     let cleaned = remove_header_footer_lines(&raw_text, &header_footer_lines);
@@ -33,6 +47,30 @@ pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
     let truncated = truncate_to_word_limit(&stripped, MAX_WORDS);
 
     Ok(truncated)
+}
+
+/// Call `pdf_extract::extract_text` wrapped in `catch_unwind` so panics
+/// (e.g. FromUtf16Error on malformed font maps) are converted to `Err`.
+fn extract_text_safe(file_path: &Path) -> Result<String, String> {
+    std::panic::catch_unwind(|| pdf_extract::extract_text(file_path))
+        .map_err(|_| "PDF extraction panicked — the PDF may contain unsupported fonts".to_string())?
+        .map_err(|e| format!("PDF extraction failed: {e}"))
+}
+
+/// Fallback: extract text from all pages using lopdf (used when pdf-extract fails).
+fn extract_all_pages_text(doc: &LopdfDocument) -> Result<String, String> {
+    let pages = doc.get_pages();
+    let mut full_text = String::new();
+    for &page_num in pages.keys() {
+        if let Ok(page_text) = extract_page_text(doc, page_num) {
+            full_text.push_str(&page_text);
+            full_text.push('\n');
+        }
+    }
+    if full_text.trim().is_empty() {
+        return Err("lopdf fallback extracted no text from PDF".to_string());
+    }
+    Ok(full_text)
 }
 
 /// Reads plain text from a .txt file, strips abstract/references, truncates.

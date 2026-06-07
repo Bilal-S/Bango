@@ -36,7 +36,7 @@ tauri-plugin-fs = "2"
  resvg = { version = "0.45", default-features = false, features = ["text"] }
  fontdb = { version = "0.23", features = ["fs"] }
  dirs = "6"
-pdf-extract = "0.7"
+pdf-extract = "0.10"
 lopdf = "0.34"
 
 [dev-dependencies]
