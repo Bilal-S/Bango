@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::db::article_repo;
 use crate::db::connection::DbState;
@@ -6,7 +6,9 @@ use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::db::summary_repo;
 use crate::error::AppError;
+use crate::llm::client;
 use crate::prisma::data;
+use crate::screening::engine as screening_engine;
 use crate::summary::engine::{self, SummaryInput};
 use crate::summary::prompt::{ArticleSummary, ScreeningData};
 
@@ -110,4 +112,118 @@ pub fn get_saved_summary(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     summary_repo::get_summary(&conn)
+}
+
+/// AI Article Summary prompt from the spec.
+const ARTICLE_SUMMARY_SYSTEM_PROMPT: &str =
+    include_str!("../../../.worktrees/ai-article-summary.md");
+
+/// Generate an AI summary for a single article based on its full text.
+/// Calls the LLM, parses the JSON response, stores it in the database,
+/// and emits a Tauri event with the result.
+/// On error, logs the failure to the article's audit trail and emits an error event.
+#[tauri::command]
+pub async fn generate_article_ai_summary(
+    db_state: State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+    article_id: String,
+) -> Result<String, AppError> {
+    // 1. Fetch article full text and LLM config while holding the DB lock
+    let (title, full_text, config) = {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let (t, ft) = article_repo::get_full_text_for_summary(&conn, &article_id)?;
+        let cfg = llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+        (t, ft, cfg)
+    }; // conn lock released
+
+    // 2. Build user prompt with article title and full text
+    // Truncate full text to stay within reasonable token limits
+    let max_chars = ((config.context_window_tokens as usize).saturating_sub(2000)) * 4;
+    let truncated = if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
+    let user_prompt = format!("## Article Title\n{}\n\n## Full Text\n{}", title, truncated);
+
+    // 3. Call LLM — catch errors to log them to audit trail
+    let llm_result =
+        client::send_chat_completion(&config, ARTICLE_SUMMARY_SYSTEM_PROMPT, &user_prompt).await;
+
+    let (response_text, _tokens) = match llm_result {
+        Ok(v) => v,
+        Err(e) => {
+            // Log error to audit trail for this article
+            let err_msg = e.to_string();
+            if let Ok(conn) = db_state.conn.lock() {
+                let _ = crate::db::audit_repo::create_entry(
+                    &conn,
+                    &article_id,
+                    "ai_summary_error",
+                    None,
+                    None,
+                    Some(&format!("AI summary failed: {err_msg}")),
+                    "ai",
+                );
+            }
+            // Emit error event so frontend can react
+            let _ = app_handle.emit(
+                "article-ai-summary-error",
+                serde_json::json!({ "articleId": article_id, "error": err_msg }),
+            );
+            return Err(e);
+        }
+    };
+
+    // 4. Validate the response is valid JSON — strip markdown code fences if present
+    let cleaned = screening_engine::extract_json(&response_text);
+    let parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
+        Ok(v) => v,
+        Err(e) => {
+            let err_msg = format!("Invalid JSON response from LLM: {e}");
+            if let Ok(conn) = db_state.conn.lock() {
+                let _ = crate::db::audit_repo::create_entry(
+                    &conn,
+                    &article_id,
+                    "ai_summary_error",
+                    None,
+                    None,
+                    Some(&err_msg),
+                    "ai",
+                );
+            }
+            let _ = app_handle.emit(
+                "article-ai-summary-error",
+                serde_json::json!({ "articleId": article_id, "error": err_msg }),
+            );
+            return Err(AppError::Import(err_msg));
+        }
+    };
+
+    // Store the raw JSON string
+    let summary_json = parsed.to_string();
+
+    // 5. Store in database
+    {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        article_repo::set_ai_summary(&conn, &article_id, &summary_json)?;
+        crate::db::audit_repo::create_entry(
+            &conn,
+            &article_id,
+            "ai_summary",
+            None,
+            None,
+            Some("AI summary generated from full text"),
+            "ai",
+        )?;
+    }
+
+    // 6. Emit success event
+    let _ = app_handle.emit(
+        "article-ai-summary-complete",
+        serde_json::json!({ "articleId": article_id, "title": title }),
+    );
+
+    Ok(summary_json)
 }

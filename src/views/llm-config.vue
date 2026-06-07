@@ -44,6 +44,14 @@ function toggleAutoNavigate(): void {
     String(autoNavigateAfterDecision.value)
   );
 }
+
+// Full Text Summaries preference (off by default)
+const fullTextSummaries = ref(localStorage.getItem('bango-full-text-summaries') === 'true');
+
+function toggleFullTextSummaries(): void {
+  fullTextSummaries.value = !fullTextSummaries.value;
+  localStorage.setItem('bango-full-text-summaries', String(fullTextSummaries.value));
+}
 // Full text storage directory
 interface StorageInfo {
   effectivePath: string;
@@ -699,6 +707,24 @@ watch(
           role="switch"
           :aria-checked="autoNavigateAfterDecision"
           @click="toggleAutoNavigate"
+        >
+          <span class="pm-card__switch-thumb" />
+        </button>
+      </div>
+      <div class="pm-card__toggle-row" style="margin-top: 1rem">
+        <label class="pm-card__toggle-label">
+          <span>Full Text Summaries</span>
+          <span class="pm-card__toggle-hint"
+            >Auto-summarize full text when possible. When enabled, articles with uploaded full text
+            will be automatically summarized using the configured LLM.</span
+          >
+        </label>
+        <button
+          class="pm-card__switch"
+          :class="{ 'pm-card__switch--on': fullTextSummaries }"
+          role="switch"
+          :aria-checked="fullTextSummaries"
+          @click="toggleFullTextSummaries"
         >
           <span class="pm-card__switch-thumb" />
         </button>

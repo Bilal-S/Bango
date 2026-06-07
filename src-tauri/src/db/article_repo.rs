@@ -982,6 +982,38 @@ pub fn bulk_add_label_to_articles(
     Ok(count)
 }
 
+/// Get the full text and title for an article (for AI summary generation).
+pub fn get_full_text_for_summary(
+    conn: &Connection,
+    article_id: &str,
+) -> Result<(String, String), AppError> {
+    let (title, full_text): (String, Option<String>) = conn
+        .query_row("SELECT title, full_text FROM articles WHERE id = ?1", [article_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .map_err(AppError::Database)?;
+    let text = full_text.unwrap_or_default();
+    if text.is_empty() {
+        return Err(AppError::Validation(format!(
+            "No full text available for article {article_id}"
+        )));
+    }
+    Ok((title, text))
+}
+
+/// Store the AI-generated summary JSON for an article.
+pub fn set_ai_summary(
+    conn: &Connection,
+    article_id: &str,
+    summary_json: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET full_text_ai_summary = ?1, changed_at = datetime('now') WHERE id = ?2",
+        params![summary_json, article_id],
+    )?;
+    Ok(())
+}
+
 /// Update the full text and file attachment info for an article.
 pub fn update_full_text(
     conn: &Connection,

@@ -22,6 +22,14 @@
 - Use `impl Trait` for return types in function signatures when appropriate.
 - Prefer iterators over `for` loops with mutable accumulators.
 
+### LLM Calls (Orchestrator Pattern)
+- All LLM calls MUST go through `LlmOrchestrator` (registered as Tauri managed state).
+- Never call `llm::client::send_chat_completion` directly from command handlers or engines.
+- The orchestrator enforces `max_concurrent_requests` and `request_delay_ms` from `LlmConfig`.
+- Use `LlmRequestType` enum to categorize requests for logging and diagnostics.
+- Error logging to diagnostics and audit trail is handled centrally by the orchestrator.
+- The `screening::llm_client::LlmClient` trait wraps the orchestrator for testability (mockable).
+
 ### Database (SQLite)
 - Always use parameterized queries. Never interpolate user input into SQL.
 - Use Tauri's SQL plugin or a dedicated module with prepared statements.

@@ -125,6 +125,7 @@ pub fn run() {
             commands::screening::estimate_screening_tokens,
             commands::summary::generate_summary,
             commands::summary::get_saved_summary,
+            commands::summary::generate_article_ai_summary,
             commands::prisma::get_prisma_data,
             commands::prisma::get_prisma_svg,
             commands::prisma::export_prisma_svg_to_file,

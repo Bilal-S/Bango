@@ -78,9 +78,15 @@ pub fn attach_full_text(
 
     let word_count = full_text.split_whitespace().count();
 
-    // Build destination filename: {article_id}_{original_filename}
+    // Build destination filename: {original_stem}_{article_id}.{ext}
     let original_name = source_path.file_name().and_then(|n| n.to_str()).unwrap_or("document");
-    let dest_filename = format!("{article_id}_{original_name}");
+    let stem = source_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
+    let ext = source_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let dest_filename = if ext.is_empty() {
+        format!("{stem}_{article_id}")
+    } else {
+        format!("{stem}_{article_id}.{ext}")
+    };
     let dest_path = storage_dir.join(&dest_filename);
 
     // Copy file to storage directory

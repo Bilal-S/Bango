@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
+import { requestArticleAiSummary } from '@/composables/use-ai-summary';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -236,6 +237,14 @@ async function handleAttachFullText(articleId: string): Promise<void> {
     toast.show('Importing full text…', 'info');
     await attachFullText(articleId, selected);
     toast.show('Full text attached successfully.', 'success');
+
+    // Auto-summarize if Full Text Summaries preference is enabled
+    if (localStorage.getItem('bango-full-text-summaries') === 'true') {
+      const article = articles.value.find((a) => a.id === articleId);
+      if (article) {
+        requestArticleAiSummary(articleId, article.title);
+      }
+    }
   } catch (e: unknown) {
     toast.show(`Failed to attach file: ${e instanceof Error ? e.message : String(e)}`, 'error');
   }
@@ -409,6 +418,7 @@ async function handleReadFullText(articleId: string): Promise<string | null> {
       @attach-full-text="handleAttachFullText"
       @delete-full-text="handleDeleteFullText"
       @read-full-text="handleReadFullText"
+      @refresh-article="selectArticle"
     />
 
     <!-- Bulk Action Bar -->

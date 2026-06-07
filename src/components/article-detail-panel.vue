@@ -10,6 +10,14 @@ import CriteriaEditDialog from './criteria-edit-dialog.vue';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import { useCriteriaStore } from '@/stores/criteria';
+import { useLlmConfigStore } from '@/stores/llm-config';
+import {
+  requestArticleAiSummary,
+  parseAiSummary,
+  useAiSummaryEvents,
+  pendingSummaries,
+} from '@/composables/use-ai-summary';
+import type { AiSummaryData } from '@/composables/use-ai-summary';
 
 const props = defineProps<{
   article: Article;
@@ -38,6 +46,7 @@ const emit = defineEmits<{
   attachFullText: [id: string];
   deleteFullText: [id: string];
   readFullText: [id: string];
+  refreshArticle: [id: string];
 }>();
 
 /** Status badge config for the header display */
@@ -73,9 +82,55 @@ const statusDisplay = computed(() => {
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
 const criteriaStore = useCriteriaStore();
+const llmConfigStore = useLlmConfigStore();
 
 // Ensure criteria are loaded so we can resolve UUID → text
 void criteriaStore.fetchIfNeeded();
+void llmConfigStore.fetchIfNeeded();
+
+// AI Summary event listener — refreshes selected article when summary completes
+useAiSummaryEvents(async (articleId: string) => {
+  emit('refreshArticle', articleId);
+});
+
+// Whether LLM is configured (has API key)
+const isLlmConfigured = computed(
+  () => llmConfigStore.initialized && !!llmConfigStore.config.apiKeyEncrypted
+);
+
+// Parsed AI summary data
+const aiSummaryData = computed<AiSummaryData | null>(() =>
+  parseAiSummary(props.article.fullTextAiSummary)
+);
+
+// Whether we can request an AI summary (has full text, LLM configured, no summary yet)
+const canRequestAiSummary = computed(
+  () =>
+    !!props.article.hasFullText &&
+    !!props.article.fullText &&
+    isLlmConfigured.value &&
+    !aiSummaryData.value &&
+    !pendingSummaries.value.has(props.article.id)
+);
+
+// Whether an AI summary is pending for this article
+const isAiSummaryPending = computed(() => pendingSummaries.value.has(props.article.id));
+
+// Active tab for Abstract/AI Summary
+const abstractTab = ref<'abstract' | 'aiSummary'>('abstract');
+
+// Watch article changes to reset tab
+watch(
+  () => props.article.id,
+  () => {
+    abstractTab.value = 'abstract';
+  }
+);
+
+/** Trigger AI summary generation */
+function handleRequestAiSummary(): void {
+  requestArticleAiSummary(props.article.id, props.article.title);
+}
 
 // Metadata expand/collapse state (persisted)
 const metadataExpanded = ref(localStorage.getItem('bango-metadata-expanded') !== 'false');
@@ -480,6 +535,22 @@ function handleCriteriaSave(
           >
             attach_file
           </button>
+          <!-- AI Summary icon (show when full text exists, LLM enabled, no summary yet) -->
+          <button
+            v-if="canRequestAiSummary"
+            class="material-symbols-outlined text-[18px] text-violet-500 hover:text-violet-700 hover:bg-violet-50 cursor-pointer rounded px-1 transition-colors animate-pulse"
+            title="Generate AI summary from full text"
+            @click="handleRequestAiSummary"
+          >
+            auto_awesome
+          </button>
+          <span
+            v-else-if="isAiSummaryPending"
+            class="material-symbols-outlined text-[18px] text-violet-400 animate-spin px-1"
+            title="AI summary in progress..."
+          >
+            progress_activity
+          </span>
         </div>
         <div class="flex items-center gap-1">
           <button
@@ -502,14 +573,22 @@ function handleCriteriaSave(
         {{ article.title }}
       </h2>
       <!-- Collapsible Metadata -->
-      <div class="border border-slate-200 rounded-lg overflow-hidden">
+      <div class="border border-slate-200 rounded overflow-hidden">
         <button
           class="w-full flex items-center justify-between px-3 py-2 text-xs font-label-caps text-slate-500 uppercase tracking-wider hover:bg-slate-50 cursor-pointer transition-colors"
           @click="toggleMetadata"
         >
-          <span>Metadata</span>
+          <span class="flex items-center gap-1 min-w-0 overflow-hidden">
+            <span class="shrink-0">Metadata</span>
+            <span
+              v-if="!metadataExpanded && article.authors.length > 0"
+              class="text-[11px] text-slate-400 font-body-sm normal-case tracking-normal truncate"
+            >
+              – {{ article.authors.join(', ') }}
+            </span>
+          </span>
           <span
-            class="material-symbols-outlined text-[16px] transition-transform duration-200"
+            class="material-symbols-outlined text-[16px] transition-transform duration-200 shrink-0"
             :class="{ 'rotate-180': metadataExpanded }"
           >
             expand_more
@@ -665,14 +744,109 @@ function handleCriteriaSave(
         @save="handleCriteriaSave"
       />
 
-      <!-- Abstract -->
-      <section v-if="article.abstractText">
-        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
+      <!-- Abstract / AI Summary Tabbed View -->
+      <section v-if="article.abstractText || aiSummaryData">
+        <!-- Tab bar (only show when AI summary exists) -->
+        <div v-if="aiSummaryData" class="flex border-b border-slate-200 mb-3">
+          <button
+            class="px-3 py-1.5 text-xs font-label-caps uppercase tracking-wider transition-colors cursor-pointer"
+            :class="
+              abstractTab === 'abstract'
+                ? 'text-indigo-700 border-b-2 border-indigo-600'
+                : 'text-slate-400 hover:text-slate-600'
+            "
+            @click="abstractTab = 'abstract'"
+          >
+            Abstract
+          </button>
+          <button
+            class="px-3 py-1.5 text-xs font-label-caps uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1"
+            :class="
+              abstractTab === 'aiSummary'
+                ? 'text-violet-700 border-b-2 border-violet-600'
+                : 'text-slate-400 hover:text-slate-600'
+            "
+            @click="abstractTab = 'aiSummary'"
+          >
+            <span class="material-symbols-outlined text-[14px]">auto_awesome</span>
+            AI Summary
+          </button>
+        </div>
+        <h3 v-else class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
           Abstract
         </h3>
-        <p class="text-body-main font-body-main text-on-surface-variant leading-relaxed">
+        <!-- Abstract content -->
+        <p
+          v-if="abstractTab === 'abstract'"
+          class="text-body-main font-body-main text-on-surface-variant leading-relaxed"
+        >
           {{ article.abstractText }}
         </p>
+        <!-- AI Summary content -->
+        <div v-else-if="abstractTab === 'aiSummary' && aiSummaryData" class="space-y-4">
+          <div class="flex items-center gap-2 text-xs text-slate-500">
+            <span
+              class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded font-semibold capitalize"
+            >
+              {{ aiSummaryData.field.replace(/_/g, ' ') }}
+            </span>
+            <span class="text-slate-400">·</span>
+            <span class="italic">{{ aiSummaryData.subfield }}</span>
+          </div>
+          <!-- Structured extraction -->
+          <div v-if="aiSummaryData.structured_extraction" class="space-y-2">
+            <div
+              v-for="(value, key) in aiSummaryData.structured_extraction"
+              :key="key"
+              class="text-sm"
+            >
+              <span class="font-semibold text-slate-700 capitalize">{{
+                key.replace(/_/g, ' ')
+              }}</span>
+              <p class="text-slate-600 leading-relaxed">{{ value }}</p>
+            </div>
+          </div>
+          <!-- Summary -->
+          <div v-if="aiSummaryData.summary_150_250_words">
+            <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-1">
+              Summary
+            </h4>
+            <p class="text-body-main font-body-main text-on-surface-variant leading-relaxed">
+              {{ aiSummaryData.summary_150_250_words }}
+            </p>
+          </div>
+          <!-- Key Insights -->
+          <div v-if="aiSummaryData.key_insights.length > 0">
+            <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-1">
+              Key Insights
+            </h4>
+            <ul class="space-y-1">
+              <li
+                v-for="(insight, idx) in aiSummaryData.key_insights"
+                :key="idx"
+                class="flex gap-2 text-sm text-slate-600"
+              >
+                <span class="text-violet-400 mt-0.5 shrink-0">•</span>
+                <span>{{ insight }}</span>
+              </li>
+            </ul>
+          </div>
+          <!-- Keywords -->
+          <div v-if="aiSummaryData.keywords.length > 0">
+            <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-1">
+              Keywords
+            </h4>
+            <div class="flex flex-wrap gap-1.5">
+              <span
+                v-for="kw in aiSummaryData.keywords"
+                :key="kw"
+                class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded"
+              >
+                {{ kw }}
+              </span>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Tags -->
@@ -851,6 +1025,22 @@ function handleCriteriaSave(
           </span>
         </div>
         <div class="flex items-center gap-1">
+          <!-- AI Summary trigger in reading view -->
+          <button
+            v-if="canRequestAiSummary"
+            class="material-symbols-outlined text-[18px] text-violet-500 hover:text-violet-700 hover:bg-violet-50 cursor-pointer rounded px-1 transition-colors"
+            title="Generate AI summary from full text"
+            @click="handleRequestAiSummary"
+          >
+            auto_awesome
+          </button>
+          <span
+            v-else-if="isAiSummaryPending"
+            class="material-symbols-outlined text-[18px] text-violet-400 animate-spin px-1"
+            title="AI summary in progress..."
+          >
+            progress_activity
+          </span>
           <button
             class="material-symbols-outlined text-[18px] text-slate-400 hover:text-slate-900 cursor-pointer rounded px-1 transition-colors"
             :title="fullTextExpanded ? 'Collapse' : 'Expand to full width'"

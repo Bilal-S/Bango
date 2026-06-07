@@ -47,6 +47,19 @@ export const useArticlesStore = defineStore('articles', () => {
     initialized.value = false;
   }
 
+  /** Re-fetch a single article from the backend and update it in the store array. */
+  async function refreshArticle(id: string): Promise<void> {
+    try {
+      const updated = await tauriCommand<Article>('get_article', { id });
+      const idx = articles.value.findIndex((a) => a.id === id);
+      if (idx !== -1) {
+        articles.value[idx] = updated;
+      }
+    } catch {
+      // Silently ignore — the article list will be refreshed on next navigation
+    }
+  }
+
   return {
     articles,
     loading,
@@ -57,5 +70,6 @@ export const useArticlesStore = defineStore('articles', () => {
     fetchIfNeeded,
     fetchArticles,
     invalidate,
+    refreshArticle,
   };
 });

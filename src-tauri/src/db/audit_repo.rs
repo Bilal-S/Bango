@@ -123,6 +123,7 @@ fn parse_action(s: &str) -> AuditAction {
         "ai_screen" => AuditAction::AiScreen,
         "manual_override" => AuditAction::ManualOverride,
         "ai_summary" => AuditAction::AiSummary,
+        "ai_summary_error" => AuditAction::Error,
         "error" => AuditAction::Error,
         "dedup_auto" => AuditAction::DedupAuto,
         _ => AuditAction::StatusChange,
