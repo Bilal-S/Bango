@@ -1,16 +1,28 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
+use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::db::tag_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
+use crate::models::criterion::CriterionType;
 use crate::models::tag::Tag;
+
+/// Maximum number of top-cited articles to send with full context (title + abstract).
+const TOP_CITED_FULL_COUNT: usize = 5;
+/// Maximum number of next-most-cited articles to send as titles only.
+const NEXT_CITED_TITLES_COUNT: usize = 15;
+/// Minimum frequency for a keyword to be included (must appear in 2+ articles).
+const MIN_KEYWORD_FREQUENCY: usize = 2;
+/// Maximum number of keywords to send to the LLM.
+const MAX_KEYWORDS: usize = 200;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,33 +146,150 @@ pub async fn suggest_tags(
     db_state: State<'_, DbState>,
     orchestrator: State<'_, Arc<LlmOrchestrator>>,
 ) -> Result<SuggestTagsResult, AppError> {
-    let (config, keywords) = {
+    // ── Data gathering (under DB lock) ──────────────────────────────
+    let (config, top_cited_full, next_cited_titles, keywords_str, criteria_text) = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
+
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+
         let articles = article_repo::get_articles_by_status(&conn, "working")?;
-        let keywords: Vec<String> = articles
+
+        // --- Tiered article selection by citation count ---
+        // Collect articles that have num_cited > 0, sort descending by citations.
+        let mut cited: Vec<_> = articles
             .iter()
-            .flat_map(|a| a.keywords.iter().cloned())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
+            .filter(|a| a.num_cited.unwrap_or(0) > 0)
             .collect();
-        (config, keywords)
+        cited.sort_by(|a, b| b.num_cited.unwrap_or(0).cmp(&a.num_cited.unwrap_or(0)));
+
+        let top_cited_full: Vec<(String, String)> = cited
+            .iter()
+            .take(TOP_CITED_FULL_COUNT)
+            .map(|a| (a.title.clone(), a.abstract_text.clone()))
+            .collect();
+
+        let top_ids: Vec<&str> = top_cited_full.iter().map(|(t, _)| t.as_str()).collect();
+
+        let next_cited_titles: Vec<String> = cited
+            .iter()
+            .skip(TOP_CITED_FULL_COUNT)
+            .take(NEXT_CITED_TITLES_COUNT)
+            .filter(|a| !top_ids.contains(&a.title.as_str()))
+            .map(|a| a.title.clone())
+            .collect();
+
+        // --- Frequency-filtered keywords ---
+        let mut keyword_freq: HashMap<String, usize> = HashMap::new();
+        for a in &articles {
+            for kw in &a.keywords {
+                *keyword_freq.entry(kw.to_lowercase()).or_insert(0) += 1;
+            }
+        }
+        let mut freq_keywords: Vec<(String, usize)> = keyword_freq
+            .into_iter()
+            .filter(|(_, count)| *count >= MIN_KEYWORD_FREQUENCY)
+            .collect();
+        freq_keywords.sort_by(|a, b| b.1.cmp(&a.1));
+        let keywords: Vec<String> = freq_keywords
+            .into_iter()
+            .take(MAX_KEYWORDS)
+            .map(|(kw, _)| kw)
+            .collect();
+        let keywords_str = keywords.join(", ");
+
+        // --- Criteria ---
+        let inclusion = criteria_repo::get_criteria_by_type(&conn, "inclusion")
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|c| {
+                if matches!(c.criterion_type, CriterionType::Inclusion) {
+                    Some(c.text)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let exclusion = criteria_repo::get_criteria_by_type(&conn, "exclusion")
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|c| {
+                if matches!(c.criterion_type, CriterionType::Exclusion) {
+                    Some(c.text)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let mut criteria_text = String::new();
+        if !inclusion.is_empty() {
+            criteria_text.push_str("## Inclusion Criteria\n");
+            for (i, c) in inclusion.iter().enumerate() {
+                criteria_text.push_str(&format!("{}. {}\n", i + 1, c));
+            }
+        }
+        if !exclusion.is_empty() {
+            if !criteria_text.is_empty() {
+                criteria_text.push('\n');
+            }
+            criteria_text.push_str("## Exclusion Criteria\n");
+            for (i, c) in exclusion.iter().enumerate() {
+                criteria_text.push_str(&format!("{}. {}\n", i + 1, c));
+            }
+        }
+
+        (
+            config,
+            top_cited_full,
+            next_cited_titles,
+            keywords_str,
+            criteria_text,
+        )
     };
 
-    let keywords_str = keywords.join(", ");
+    // ── Prompt construction ─────────────────────────────────────────
+    let mut article_section = String::new();
+
+    if !top_cited_full.is_empty() {
+        article_section.push_str("## Most-Cited Articles (full context)\n");
+        for (i, (title, abstract_text)) in top_cited_full.iter().enumerate() {
+            article_section.push_str(&format!(
+                "{}. Title: {}\n   Abstract: {}\n",
+                i + 1,
+                title,
+                abstract_text
+            ));
+        }
+    }
+
+    if !next_cited_titles.is_empty() {
+        if !article_section.is_empty() {
+            article_section.push('\n');
+        }
+        article_section.push_str("## Additional Highly-Cited Articles (titles only)\n");
+        for title in &next_cited_titles {
+            article_section.push_str(&format!("- {}\n", title));
+        }
+    }
+
+    let criteria_section = if criteria_text.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}", criteria_text)
+    };
 
     let user_prompt = format!(
         r#"## Task
 Generate a concise set of content-category tags for organizing articles in a systematic literature review.
-Tags should represent meaningful topic, methodology, or relevance categories derived from the keywords
-found in article abstracts and titles.
+Tags should represent meaningful topic, methodology, or relevance categories derived from the article data.
 
-## Article Keywords (extracted from abstracts)
+{article_section}
+## Article Keywords (frequency-ranked, from all working articles)
 {keywords}
-
+{criteria_section}
 ## Response Format
 Return JSON exactly matching this schema:
 {{
@@ -170,12 +299,17 @@ Return JSON exactly matching this schema:
 Rules:
 - Generate 10-30 tags.
 - Each tag should be a short, lowercase, hyphenated string (e.g., "machine-learning", "clinical-trial").
-- Tags should be derived from the keywords found in article abstracts and titles.
+- Tags should be derived from the articles, keywords, and review criteria shown above.
 - Do not duplicate or overlap concepts."#,
+        article_section = article_section,
         keywords = keywords_str,
+        criteria_section = criteria_section,
     );
 
-    let system_prompt = "You are a systematic literature review assistant. Generate a set of content-category tags for organizing articles in a literature review.";
+    // ── LLM call ────────────────────────────────────────────────────
+    let system_prompt = "You are a systematic literature review assistant. Generate a set of \
+         content-category tags for organizing articles in a literature review based on the most \
+         cited articles, article keywords, and review criteria.";
     let result = orchestrator
         .send(&config, system_prompt, &user_prompt, LlmRequestType::TagGeneration)
         .await;
@@ -187,15 +321,16 @@ Rules:
     }
     let (response, _) = result?;
 
-    // Parse response
+    // ── Parse response ──────────────────────────────────────────────
     let json_str = response
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    let parsed: serde_json::Value = serde_json::from_str(json_str)
-        .map_err(|e| AppError::Import(format!("Failed to parse tag suggestion response: {}", e)))?;
+    let parsed: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+        AppError::Import(format!("Failed to parse tag suggestion response: {}", e))
+    })?;
     let tag_names: Vec<String> = parsed["tags"]
         .as_array()
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
