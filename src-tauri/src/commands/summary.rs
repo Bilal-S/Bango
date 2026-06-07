@@ -125,7 +125,8 @@ const ARTICLE_SUMMARY_SYSTEM_PROMPT: &str =
 /// Generate an AI summary for a single article based on its full text.
 /// Calls the LLM, parses the JSON response, stores it in the database,
 /// and emits a Tauri event with the result.
-/// On error, logs the failure to the article's audit trail and emits an error event.
+/// On success, records an `ai_summary` entry in the article's audit trail.
+/// On error, logs the failure to the general diagnostic audit and emits an error event.
 #[tauri::command]
 pub async fn generate_article_ai_summary(
     db_state: State<'_, DbState>,
@@ -158,17 +159,12 @@ pub async fn generate_article_ai_summary(
     let (response_text, _tokens) = match llm_result {
         Ok(v) => v,
         Err(e) => {
-            // Log error to audit trail for this article
+            // Log error to general diagnostic audit
             let err_msg = e.to_string();
             if let Ok(conn) = db_state.conn.lock() {
-                let _ = crate::db::audit_repo::create_entry(
+                let _ = crate::db::audit_repo::log_error(
                     &conn,
-                    &article_id,
-                    "ai_summary_error",
-                    None,
-                    None,
-                    Some(&format!("AI summary failed: {err_msg}")),
-                    "ai",
+                    &format!("AI summary failed for article {article_id} ({title}): {err_msg}"),
                 );
             }
             // Emit error event so frontend can react
@@ -187,14 +183,9 @@ pub async fn generate_article_ai_summary(
         Err(e) => {
             let err_msg = format!("Invalid JSON response from LLM: {e}");
             if let Ok(conn) = db_state.conn.lock() {
-                let _ = crate::db::audit_repo::create_entry(
+                let _ = crate::db::audit_repo::log_error(
                     &conn,
-                    &article_id,
-                    "ai_summary_error",
-                    None,
-                    None,
-                    Some(&err_msg),
-                    "ai",
+                    &format!("AI summary failed for article {article_id} ({title}): {err_msg}"),
                 );
             }
             let _ = app_handle.emit(

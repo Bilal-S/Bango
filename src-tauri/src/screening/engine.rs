@@ -670,7 +670,8 @@ pub fn extract_json(raw: &str) -> String {
                 return arr;
             }
         }
-        return inner.to_string();
+        // LLMs may omit the opening `{` — repair brace balance before returning
+        return balance_braces(inner);
     }
 
     // Strategy 2: Bare array (already correct)
@@ -698,7 +699,67 @@ pub fn extract_json(raw: &str) -> String {
         }
     }
 
-    trimmed.to_string()
+    // Strategy 5: Try to find a JSON object anywhere in the text
+    if let Some(start) = trimmed.find('{') {
+        if let Some(end) = trimmed.rfind('}') {
+            if end > start {
+                let candidate = &trimmed[start..=end];
+                if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
+                    return candidate.to_string();
+                }
+            }
+        }
+    }
+
+    // Final fallback: repair brace balance (e.g. missing opening `{`)
+    balance_braces(trimmed)
+}
+
+/// Repair missing opening `{` or closing `}` in a JSON-like string.
+/// LLMs sometimes omit the opening brace, producing e.g. `"field": "value" ... }`.
+fn balance_braces(s: &str) -> String {
+    // Count structural braces (ignoring those inside JSON string literals)
+    let mut open = 0usize;
+    let mut close = 0usize;
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for ch in s.chars() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+        if ch == '\\' && in_string {
+            escape_next = true;
+            continue;
+        }
+        if ch == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if !in_string {
+            if ch == '{' {
+                open += 1;
+            } else if ch == '}' {
+                close += 1;
+            }
+        }
+    }
+
+    let mut result = s.to_string();
+    // Missing opening braces: prepend them
+    if close > open {
+        for _ in 0..(close - open) {
+            result.insert(0, '{');
+        }
+    }
+    // Missing closing braces: append them
+    if open > close {
+        for _ in 0..(open - close) {
+            result.push('}');
+        }
+    }
+    result
 }
 
 /// Given a JSON object string, find and extract the first JSON array value
@@ -842,6 +903,45 @@ mod tests {
     #[test]
     fn test_extract_json_empty_string() {
         assert_eq!(extract_json(""), "");
+    }
+
+    #[test]
+    fn test_extract_json_missing_opening_brace_in_code_fence() {
+        // Gemini sometimes omits the opening `{` after stripping markdown fences
+        let inner = r#"  "field": "medicine",
+  "subfield": "public_health_nutrition"
+}"#;
+        let input = format!("```json\n{inner}\n```");
+        let result = extract_json(&input);
+        assert!(
+            result.starts_with('{'),
+            "Should prepend missing opening brace, got: {}",
+            &result[..result.len().min(80)]
+        );
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&result).is_ok(),
+            "Result should be valid JSON: {result}"
+        );
+    }
+
+    #[test]
+    fn test_balance_braces_no_change_when_balanced() {
+        let json = r#"{"key": "value"}"#;
+        assert_eq!(balance_braces(json), json);
+    }
+
+    #[test]
+    fn test_balance_braces_prepends_missing_open() {
+        let json = r#"  "key": "value"}"#;
+        let result = balance_braces(json);
+        assert_eq!(result, r#"{  "key": "value"}"#);
+    }
+
+    #[test]
+    fn test_balance_braces_appends_missing_close() {
+        let json = r#"{"key": "value""#;
+        let result = balance_braces(json);
+        assert_eq!(result, r#"{"key": "value"}"#);
     }
 
     // ── process_screening_responses tests ──

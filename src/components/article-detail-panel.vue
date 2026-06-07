@@ -14,7 +14,6 @@ import { useLlmConfigStore } from '@/stores/llm-config';
 import {
   requestArticleAiSummary,
   parseAiSummary,
-  useAiSummaryEvents,
   pendingSummaries,
 } from '@/composables/use-ai-summary';
 import type { AiSummaryData } from '@/composables/use-ai-summary';
@@ -88,11 +87,6 @@ const llmConfigStore = useLlmConfigStore();
 void criteriaStore.fetchIfNeeded();
 void llmConfigStore.fetchIfNeeded();
 
-// AI Summary event listener - refreshes selected article when summary completes
-useAiSummaryEvents(async (articleId: string) => {
-  emit('refreshArticle', articleId);
-});
-
 // Whether LLM is configured (has API key)
 const isLlmConfigured = computed(
   () => llmConfigStore.initialized && !!llmConfigStore.config.apiKeyEncrypted
@@ -129,7 +123,12 @@ watch(
 
 /** Trigger AI summary generation */
 function handleRequestAiSummary(): void {
-  requestArticleAiSummary(props.article.id, props.article.title);
+  requestArticleAiSummary(props.article.id, props.article.title, async (articleId: string) => {
+    // Refresh the article data so the AI Summary tab appears
+    emit('refreshArticle', articleId);
+    // Auto-switch to the AI Summary tab
+    abstractTab.value = 'aiSummary';
+  });
 }
 
 // Metadata expand/collapse state (persisted)
