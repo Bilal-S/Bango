@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use std::sync::Arc;
+
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::label_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
-use crate::llm::client;
+use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::label::Label;
 
 #[derive(Serialize)]
@@ -128,7 +130,10 @@ pub struct SuggestLabelsResult {
 }
 
 #[tauri::command]
-pub async fn suggest_labels(db_state: State<'_, DbState>) -> Result<SuggestLabelsResult, AppError> {
+pub async fn suggest_labels(
+    db_state: State<'_, DbState>,
+    orchestrator: State<'_, Arc<LlmOrchestrator>>,
+) -> Result<SuggestLabelsResult, AppError> {
     let (config, research_aims, inclusion_criteria, exclusion_criteria) = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -201,7 +206,9 @@ Rules:
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process based on research aims and screening criteria.";
-    let (response, _) = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
+    let (response, _) = orchestrator
+        .send(&config, system_prompt, &user_prompt, LlmRequestType::LabelGeneration)
+        .await?;
 
     let json_str = response
         .trim()

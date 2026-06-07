@@ -1,7 +1,9 @@
 //! Abstraction over LLM HTTP calls, enabling integration tests with mock clients.
 
+use std::sync::Arc;
+
 use crate::error::AppError;
-use crate::llm::client;
+use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::llm_config::LlmConfig;
 
 /// Trait abstracting a single chat-completion call.
@@ -15,14 +17,17 @@ pub trait LlmClient: Send + Sync {
 // Real HTTP implementation (used in production)
 // ---------------------------------------------------------------------------
 
-/// Production client that forwards to the real LLM HTTP endpoint.
+/// Production client that routes through the `LlmOrchestrator`.
 pub struct HttpLlmClient {
     pub config: LlmConfig,
+    pub orchestrator: Arc<LlmOrchestrator>,
 }
 
 #[async_trait::async_trait]
 impl LlmClient for HttpLlmClient {
     async fn send(&self, system: &str, user: &str) -> Result<(String, usize), AppError> {
-        client::send_chat_completion(&self.config, system, user).await
+        self.orchestrator
+            .send(&self.config, system, user, LlmRequestType::Screening)
+            .await
     }
 }

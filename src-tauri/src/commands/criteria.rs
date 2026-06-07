@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use std::sync::Arc;
+
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
-use crate::llm::client;
+use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::criterion::{Criterion, ResearchAim};
 
 #[tauri::command]
@@ -124,6 +126,7 @@ pub struct GenerateCriteriaResult {
 #[tauri::command]
 pub async fn generate_criteria(
     db_state: State<'_, DbState>,
+    orchestrator: State<'_, Arc<LlmOrchestrator>>,
     request: GenerateCriteriaRequest,
 ) -> Result<GenerateCriteriaResult, AppError> {
     let criterion_type = request.criterion_type;
@@ -188,7 +191,9 @@ Rules:
         research_aims = aims_list.join("\n"),
     );
 
-    let (response, _) = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
+    let (response, _) = orchestrator
+        .send(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
+        .await?;
 
     let json_str = response
         .trim()
@@ -244,6 +249,7 @@ pub struct CritiqueCriteriaResult {
 #[tauri::command]
 pub async fn critique_criteria(
     db_state: State<'_, DbState>,
+    orchestrator: State<'_, Arc<LlmOrchestrator>>,
     request: CritiqueCriteriaRequest,
 ) -> Result<CritiqueCriteriaResult, AppError> {
     let criterion_type = request.criterion_type;
@@ -320,7 +326,9 @@ Do not return JSON."#,
         criteria = criteria_list.join("\n"),
     );
 
-    let (response, _) = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
+    let (response, _) = orchestrator
+        .send(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
+        .await?;
 
     Ok(CritiqueCriteriaResult { critique: response })
 }

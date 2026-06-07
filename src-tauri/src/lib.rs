@@ -15,6 +15,7 @@ pub mod utils;
 
 use commands::screening::ScreeningState;
 use db::connection::DbState;
+use llm::orchestrator::LlmOrchestrator;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -48,6 +49,17 @@ pub fn run() {
             }
 
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
+
+            // Initialize LLM orchestrator from saved config (defaults if no config saved yet)
+            let (max_conc, delay_ms) = {
+                let guard = app.state::<DbState>();
+                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                match crate::db::llm_config_repo::get_config(&conn) {
+                    Ok(Some(cfg)) => (cfg.max_concurrent_requests as usize, cfg.request_delay_ms as u64),
+                    _ => (3, 500), // defaults
+                }
+            };
+            app.manage(std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms)));
 
             Ok(())
         })

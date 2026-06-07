@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use std::sync::Arc;
+
 use crate::db::article_repo;
 use crate::db::connection::DbState;
 use crate::db::llm_config_repo;
 use crate::db::tag_repo;
 use crate::error::AppError;
-use crate::llm::client;
+use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::tag::Tag;
 
 #[derive(Serialize)]
@@ -127,7 +129,10 @@ pub struct SuggestTagsResult {
 }
 
 #[tauri::command]
-pub async fn suggest_tags(db_state: State<'_, DbState>) -> Result<SuggestTagsResult, AppError> {
+pub async fn suggest_tags(
+    db_state: State<'_, DbState>,
+    orchestrator: State<'_, Arc<LlmOrchestrator>>,
+) -> Result<SuggestTagsResult, AppError> {
     let (config, keywords) = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -170,7 +175,9 @@ Rules:
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of content-category tags for organizing articles in a literature review.";
-    let (response, _) = client::send_chat_completion(&config, system_prompt, &user_prompt).await?;
+    let (response, _) = orchestrator
+        .send(&config, system_prompt, &user_prompt, LlmRequestType::TagGeneration)
+        .await?;
 
     // Parse response
     let json_str = response

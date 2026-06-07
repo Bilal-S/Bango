@@ -1,4 +1,6 @@
-use tauri::{Emitter, State};
+use std::sync::Arc;
+
+use tauri::{Emitter, Manager, State};
 
 use crate::db::article_repo;
 use crate::db::connection::DbState;
@@ -6,7 +8,7 @@ use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::db::summary_repo;
 use crate::error::AppError;
-use crate::llm::client;
+use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::prisma::data;
 use crate::screening::engine as screening_engine;
 use crate::summary::engine::{self, SummaryInput};
@@ -15,6 +17,7 @@ use crate::summary::prompt::{ArticleSummary, ScreeningData};
 #[tauri::command]
 pub async fn generate_summary(
     db_state: State<'_, DbState>,
+    app_handle: tauri::AppHandle,
     citation_style: Option<String>,
 ) -> Result<String, AppError> {
     let style = citation_style.unwrap_or_else(|| "APA".to_string());
@@ -89,7 +92,8 @@ pub async fn generate_summary(
         SummaryInput::new(config, aim_texts, articles, screening_data, style.clone())
     }; // conn lock released here
 
-    let result = engine::generate_summary(summary_input).await?;
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
+    let result = engine::generate_summary(&orchestrator, summary_input).await?;
 
     // Save to DB after successful generation
     let generated_at = chrono::Utc::now().to_rfc3339();
@@ -145,9 +149,11 @@ pub async fn generate_article_ai_summary(
     let truncated = if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
     let user_prompt = format!("## Article Title\n{}\n\n## Full Text\n{}", title, truncated);
 
-    // 3. Call LLM — catch errors to log them to audit trail
-    let llm_result =
-        client::send_chat_completion(&config, ARTICLE_SUMMARY_SYSTEM_PROMPT, &user_prompt).await;
+    // 3. Call LLM via orchestrator — catch errors to log them to audit trail
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
+    let llm_result = orchestrator
+        .send(&config, ARTICLE_SUMMARY_SYSTEM_PROMPT, &user_prompt, LlmRequestType::ArticleSummary)
+        .await;
 
     let (response_text, _tokens) = match llm_result {
         Ok(v) => v,

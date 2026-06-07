@@ -8,6 +8,7 @@ use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
+use crate::llm::orchestrator::LlmOrchestrator;
 use crate::screening::engine::{ScreeningEngine, ScreeningProgress};
 use crate::screening::llm_client::HttpLlmClient;
 use crate::screening::token_estimation;
@@ -207,7 +208,8 @@ pub async fn start_screening(
 
     // ── Non-blocking: spawn engine in background task ──
     let delay_ms = config.request_delay_ms as u64;
-    let llm: HttpLlmClient = HttpLlmClient { config };
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
+    let llm: HttpLlmClient = HttpLlmClient { config, orchestrator };
     tokio::spawn(async move {
         let db = app_handle.state::<DbState>();
         let screening = app_handle.state::<ScreeningState>();

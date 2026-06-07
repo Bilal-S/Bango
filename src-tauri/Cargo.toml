@@ -39,7 +39,10 @@ tauri-plugin-fs = "2"
 pdf-extract = "0.7"
 lopdf = "0.34"
 
-[lints.clippy]
+[dev-dependencies]
+mockito = "1"
+
+ [lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"

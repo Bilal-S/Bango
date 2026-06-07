@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::llm::client;
+use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::llm_config::LlmConfig;
 use crate::summary::prompt::{self, ScreeningData, SummaryPromptInput};
 
@@ -26,7 +26,7 @@ impl SummaryInput {
     }
 }
 
-pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
+pub async fn generate_summary(orchestrator: &LlmOrchestrator, input: SummaryInput) -> Result<String, AppError> {
     if input.articles.is_empty() {
         return Err(AppError::Validation("No included articles to summarize".to_string()));
     }
@@ -54,6 +54,7 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
         let batch_b = &input.articles[batch_size..];
 
         let summary_a = summarize_batch(
+            orchestrator,
             &input.config,
             &input.aim_texts,
             &input.screening_data,
@@ -62,6 +63,7 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
         )
         .await?;
         let summary_b = summarize_batch(
+            orchestrator,
             &input.config,
             &input.aim_texts,
             &input.screening_data,
@@ -72,6 +74,7 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
 
         // Synthesize
         synthesize_batches(
+            orchestrator,
             &input.config,
             &input.aim_texts,
             &input.screening_data,
@@ -82,6 +85,7 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
         .await?
     } else {
         summarize_batch(
+            orchestrator,
             &input.config,
             &input.aim_texts,
             &input.screening_data,
@@ -95,6 +99,7 @@ pub async fn generate_summary(input: SummaryInput) -> Result<String, AppError> {
 }
 
 async fn summarize_batch(
+    orchestrator: &LlmOrchestrator,
     config: &LlmConfig,
     aims: &[String],
     screening: &ScreeningData,
@@ -108,12 +113,14 @@ async fn summarize_batch(
         articles: articles.to_vec(),
     };
     let user_prompt = prompt::build_summary_prompt(&input);
-    let (response, _tokens) =
-        client::send_chat_completion(config, prompt::SYSTEM_PROMPT, &user_prompt).await?;
+    let (response, _tokens) = orchestrator
+        .send(config, prompt::SYSTEM_PROMPT, &user_prompt, LlmRequestType::SummaryGeneration)
+        .await?;
     Ok(response.trim().to_string())
 }
 
 async fn synthesize_batches(
+    orchestrator: &LlmOrchestrator,
     config: &LlmConfig,
     aims: &[String],
     screening: &ScreeningData,
@@ -173,7 +180,8 @@ Return only the plain text of the literature review. Do not wrap it in code fenc
         b = b,
     );
 
-    let (response, _tokens) =
-        client::send_chat_completion(config, prompt::SYSTEM_PROMPT, &synthesis_prompt).await?;
+    let (response, _tokens) = orchestrator
+        .send(config, prompt::SYSTEM_PROMPT, &synthesis_prompt, LlmRequestType::SummaryGeneration)
+        .await?;
     Ok(response.trim().to_string())
 }
