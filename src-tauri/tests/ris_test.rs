@@ -317,3 +317,147 @@ fn test_parse_t1_fallback_when_ti_present() {
     // Last one wins (T1 overwrites TI since they map to the same field)
     assert_eq!(result.records[0].title.as_deref(), Some("Title from T1"));
 }
+
+#[test]
+fn test_multiline_n1_followed_by_er() {
+    // N1 spans multiple lines, terminated by ER
+    let ris = "\
+TY  - JOUR\n\
+TI  - Test Article\n\
+AU  - Author A\n\
+AB  - Abstract text\n\
+N1  - Times Cited in Web of Science Core Collection:  87\n\
+Total Times Cited:  104\n\
+Cited Reference Count:  113\n\
+ER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+
+    let rec = &result.records[0];
+    let notes = rec.notes.as_ref().expect("notes should be present");
+    assert!(
+        notes.contains("Times Cited in Web of Science Core Collection:  87"),
+        "Should contain first line"
+    );
+    assert!(
+        notes.contains("Total Times Cited:  104"),
+        "Should contain second line"
+    );
+    assert!(
+        notes.contains("Cited Reference Count:  113"),
+        "Should contain third line"
+    );
+    assert_eq!(rec.num_cited, Some(104), "Should extract Total Times Cited");
+    assert_eq!(rec.num_references, Some(113), "Should extract Cited Reference Count");
+}
+
+#[test]
+fn test_multiline_n1_followed_by_other_tag() {
+    // N1 spans multiple lines, terminated by AU (not ER)
+    let ris = "\
+TY  - JOUR\n\
+TI  - Test Article\n\
+N1  - Times Cited in Web of Science Core Collection:  44\n\
+Total Times Cited:  49\n\
+Cited Reference Count:  34\n\
+AU  - Author A\n\
+AB  - Abstract text\n\
+ER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+
+    let rec = &result.records[0];
+    let notes = rec.notes.as_ref().expect("notes should be present");
+    assert!(
+        notes.contains("Times Cited in Web of Science Core Collection:  44"),
+        "Should contain first line"
+    );
+    assert!(
+        notes.contains("Total Times Cited:  49"),
+        "Should contain second line (continuation)"
+    );
+    assert!(
+        notes.contains("Cited Reference Count:  34"),
+        "Should contain third line (continuation)"
+    );
+    assert_eq!(rec.num_cited, Some(49), "Should extract Total Times Cited");
+    assert_eq!(rec.num_references, Some(34), "Should extract Cited Reference Count");
+    assert_eq!(rec.authors.len(), 1, "Author should be parsed after N1");
+    assert_eq!(rec.authors[0], "Author A");
+}
+
+#[test]
+fn test_multiline_n1_with_crlf() {
+    // N1 with Windows-style CRLF line endings
+    let ris = "TY  - JOUR\r\nTI  - Test\r\nAU  - Author\r\nAB  - Abstract\r\nN1  - Times Cited in Web of Science Core Collection:  87\r\nTotal Times Cited:  104\r\nCited Reference Count:  113\r\nER  -\r\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+
+    let rec = &result.records[0];
+    assert_eq!(rec.num_cited, Some(104), "Should extract Total Times Cited with CRLF");
+    assert_eq!(rec.num_references, Some(113), "Should extract Cited Reference Count with CRLF");
+}
+
+#[test]
+fn test_multiline_ab_continuation() {
+    // Abstract spans multiple lines
+    let ris = "\
+TY  - JOUR\n\
+TI  - Test Article\n\
+AU  - Author A\n\
+AB  - First paragraph of the abstract\n\
+Second paragraph with more details\n\
+Third paragraph concludes\n\
+ER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+
+    let ab = result.records[0].abstract_text.as_ref().expect("abstract should be present");
+    assert!(ab.contains("First paragraph"));
+    assert!(ab.contains("Second paragraph"));
+    assert!(ab.contains("Third paragraph"));
+}
+
+#[test]
+fn test_multiline_n1_no_citation_data() {
+    // Multi-line N1 with regular notes (no citation data)
+    let ris = "\
+TY  - JOUR\n\
+TI  - Test Article\n\
+AU  - Author A\n\
+AB  - Abstract\n\
+N1  - This is a note\n\
+With a second line of notes\n\
+And a third line\n\
+ER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+
+    let rec = &result.records[0];
+    let notes = rec.notes.as_ref().expect("notes should be present");
+    assert!(notes.contains("This is a note"));
+    assert!(notes.contains("With a second line of notes"));
+    assert!(notes.contains("And a third line"));
+    assert_eq!(rec.num_cited, None);
+    assert_eq!(rec.num_references, None);
+}
+
+#[test]
+fn test_single_line_n1_unchanged() {
+    // Verify single-line N1 still works correctly
+    let ris = "\
+TY  - JOUR\n\
+TI  - Test Article\n\
+AU  - Author A\n\
+AB  - Abstract\n\
+N1  - Times Cited in Web of Science Core Collection:  44\n\
+Total Times Cited:  49\n\
+Cited Reference Count:  34\n\
+ER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+    // This is actually multi-line - the continuation lines are appended
+    let rec = &result.records[0];
+    assert_eq!(rec.num_cited, Some(49));
+    assert_eq!(rec.num_references, Some(34));
+}

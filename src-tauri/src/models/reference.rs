@@ -30,7 +30,7 @@ impl ReferenceType {
     }
 }
 
-/// Match status for a reference record.
+/// Match status for a reference paper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum MatchStatus {
@@ -62,17 +62,12 @@ impl MatchStatus {
     }
 }
 
-/// A reference/citation detail record linked to a parent article.
+/// A deduplicated reference paper stored in `reference_papers`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Reference {
+pub struct ReferencePaper {
     pub id: String,
-    pub reference_type: ReferenceType,
-    pub parent_id: String,
-    pub match_status: MatchStatus,
-
-    // Metadata (all optional - reference exports often have partial data)
-    pub title: Option<String>,
+    pub title: String,
     pub abstract_text: Option<String>,
     pub authors: Vec<String>,
     pub publication_year: Option<i32>,
@@ -89,39 +84,23 @@ pub struct Reference {
     pub publisher_city: Option<String>,
     pub publisher_address: Option<String>,
     pub issn: Option<String>,
-    pub reference_type_field: Option<String>,
+    pub reference_type: Option<String>,
     pub date: Option<String>,
-    pub author_address: Option<String>,
-    pub accession_number: Option<String>,
-    pub custom_field3: Option<String>,
-    pub journal_abbreviation: Option<String>,
-    pub journal_iso_abbreviation: Option<String>,
     pub notes: Option<String>,
-    pub web_of_science_db: Option<String>,
-    pub user_notes: Option<String>,
     pub ris_extras: Option<serde_json::Value>,
-
-    // Citation counts
-    pub num_cited: Option<i32>,
-    pub num_references: Option<i32>,
-
-    // Full-text tracking
-    pub has_full_text: bool,
-    pub full_text_file_name: Option<String>,
-
-    // Import tracking
+    pub match_status: MatchStatus,
+    pub matched_article_id: Option<String>,
+    pub citation_count: i32,
+    pub reference_count: i32,
     pub import_source: Option<String>,
-    pub imported_at: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
-/// A new reference record to be inserted.
+/// A new reference paper to be inserted.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct NewReference {
-    pub reference_type: ReferenceType,
-    pub parent_id: String,
-    pub match_status: MatchStatus,
-
+pub struct NewReferencePaper {
     pub title: Option<String>,
     pub abstract_text: Option<String>,
     pub authors: Vec<String>,
@@ -139,20 +118,35 @@ pub struct NewReference {
     pub publisher_city: Option<String>,
     pub publisher_address: Option<String>,
     pub issn: Option<String>,
-    pub reference_type_field: Option<String>,
+    pub reference_type: Option<String>,
     pub date: Option<String>,
-    pub author_address: Option<String>,
-    pub accession_number: Option<String>,
-    pub custom_field3: Option<String>,
-    pub journal_abbreviation: Option<String>,
-    pub journal_iso_abbreviation: Option<String>,
     pub notes: Option<String>,
-    pub web_of_science_db: Option<String>,
     pub ris_extras: Option<serde_json::Value>,
-
-    pub num_cited: Option<i32>,
-    pub num_references: Option<i32>,
-    pub has_full_text: bool,
-    pub full_text_file_name: Option<String>,
+    pub match_status: Option<MatchStatus>,
+    pub matched_article_id: Option<String>,
     pub import_source: Option<String>,
+}
+
+/// A link between an article and a reference paper (junction row).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArticleReferenceLink {
+    pub id: String,
+    pub parent_article_id: String,
+    pub reference_paper_id: String,
+    pub reference_type: ReferenceType,
+    pub created_at: String,
+}
+
+/// A reference paper with its link context (for querying by article).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArticleReference {
+    /// The junction link
+    pub link_id: String,
+    pub parent_article_id: String,
+    pub reference_type: ReferenceType,
+    pub link_created_at: String,
+    /// The reference paper details
+    pub paper: ReferencePaper,
 }

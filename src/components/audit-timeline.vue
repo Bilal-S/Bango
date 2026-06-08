@@ -22,6 +22,9 @@ const actionLabels: Record<AuditAction, string> = {
   ai_screen: 'AI Screening Completed',
   manual_override: 'Manual Override',
   ai_summary: 'AI Summary Generated',
+  reference_import: 'Reference Imported',
+  reference_match: 'Reference Matched',
+  error: 'Error',
 };
 
 function formatTimestamp(ts: string): string {

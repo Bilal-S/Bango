@@ -121,7 +121,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
     action TEXT NOT NULL CHECK(action IN (
         'import', 'dedup_merge', 'dedup_flag', 'status_change',
         'tag_add', 'tag_remove', 'label_add', 'label_remove',
-        'criteria_match', 'ai_screen', 'manual_override', 'ai_summary', 'error', 'dedup_auto'
+        'criteria_match', 'ai_screen', 'manual_override', 'ai_summary',
+        'error', 'dedup_auto', 'reference_import', 'reference_match'
     )),
     details TEXT,
     from_status TEXT,
@@ -164,56 +165,55 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('fulltext_storage_dir', NULL);
 
--- ── Reference/citation detail records ────────────────────────
+-- ── Reference papers (deduplicated) ──────────────────────────
 
-CREATE TABLE IF NOT EXISTS article_references (
-    -- Primary key
+CREATE TABLE IF NOT EXISTS reference_papers (
     id TEXT PRIMARY KEY,
-    -- Foreign key columns
-    parent_id TEXT NOT NULL,
-    -- Type and status columns
+    title TEXT NOT NULL DEFAULT '',
+    abstract_text TEXT DEFAULT '',
+    authors TEXT DEFAULT '[]',                     -- JSON array of strings
+    publication_year INTEGER,
+    doi TEXT,
+    journal TEXT,
+    volume TEXT,
+    issue TEXT,
+    start_page TEXT,
+    end_page TEXT,
+    keywords TEXT DEFAULT '[]',                    -- JSON array of strings
+    url TEXT,
+    language TEXT,
+    publisher TEXT,
+    publisher_city TEXT,
+    publisher_address TEXT,
+    issn TEXT,
+    reference_type TEXT,
+    date TEXT,
+    notes TEXT,
+    ris_extras TEXT,                               -- JSON object
+    match_status TEXT NOT NULL DEFAULT 'unmatched'
+        CHECK(match_status IN ('unmatched', 'matched', 'not_in_library')),
+    matched_article_id TEXT,                       -- FK → articles.id
+    citation_count INTEGER NOT NULL DEFAULT 0,     -- how many articles cite this paper
+    reference_count INTEGER NOT NULL DEFAULT 0,    -- how many articles reference this paper
+    import_source TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (matched_article_id) REFERENCES articles(id)
+);
+
+-- ── Article ↔ reference paper links (junction) ───────────────
+
+CREATE TABLE IF NOT EXISTS article_reference_links (
+    id TEXT PRIMARY KEY,
+    parent_article_id TEXT NOT NULL,
+    reference_paper_id TEXT NOT NULL,
     type INTEGER NOT NULL CHECK(type IN (0, 1)),
         -- 0 = citation (another article citing the parent)
         -- 1 = reference (a work cited by the parent)
-    match_status TEXT NOT NULL DEFAULT 'unmatched'
-        CHECK(match_status IN ('unmatched', 'matched', 'not_in_library')),
-    -- Columns (alphabetical)
-    abstract_text TEXT,
-    accession_number TEXT,
-    author_address TEXT,
-    authors TEXT,                     -- JSON array of strings
-    custom_field3 TEXT,
-    date TEXT,
-    doi TEXT,
-    end_page TEXT,
-    full_text_file_name TEXT,
-    has_full_text INTEGER NOT NULL DEFAULT 0,
-    import_source TEXT,
-    imported_at TEXT NOT NULL DEFAULT (datetime('now')),
-    issn TEXT,
-    issue TEXT,
-    journal TEXT,
-    journal_abbreviation TEXT,
-    journal_iso_abbreviation TEXT,
-    keywords TEXT,                    -- JSON array of strings
-    language TEXT,
-    notes TEXT,
-    num_cited INTEGER,
-    num_references INTEGER,
-    publication_year INTEGER,
-    publisher TEXT,
-    publisher_address TEXT,
-    publisher_city TEXT,
-    reference_type TEXT,
-    ris_extras TEXT,                  -- JSON object for unrecognized tags
-    start_page TEXT,
-    title TEXT,
-    url TEXT,
-    user_notes TEXT,
-    volume TEXT,
-    web_of_science_db TEXT,
-    -- Foreign key constraints
-    FOREIGN KEY (parent_id) REFERENCES articles(id) ON DELETE CASCADE
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (parent_article_id) REFERENCES articles(id) ON DELETE CASCADE,
+    FOREIGN KEY (reference_paper_id) REFERENCES reference_papers(id) ON DELETE CASCADE,
+    UNIQUE(parent_article_id, reference_paper_id, type)
 );
 
 -- ── Indexes ──────────────────────────────────────────────────
@@ -226,10 +226,10 @@ CREATE INDEX IF NOT EXISTS idx_articles_sequence_id ON articles(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_articles_changed_at ON articles(changed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_entries_article_id ON audit_entries(article_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_type ON criteria(type);
-CREATE INDEX IF NOT EXISTS idx_article_refs_parent_type
-    ON article_references(parent_id, type);
-CREATE INDEX IF NOT EXISTS idx_article_refs_doi
-    ON article_references(doi);
-CREATE INDEX IF NOT EXISTS idx_article_refs_match_status
-    ON article_references(match_status);
+CREATE INDEX IF NOT EXISTS idx_ref_papers_doi ON reference_papers(doi);
+CREATE INDEX IF NOT EXISTS idx_ref_papers_match ON reference_papers(match_status);
+CREATE INDEX IF NOT EXISTS idx_ref_papers_matched_article ON reference_papers(matched_article_id);
+CREATE INDEX IF NOT EXISTS idx_ref_links_parent ON article_reference_links(parent_article_id);
+CREATE INDEX IF NOT EXISTS idx_ref_links_paper ON article_reference_links(reference_paper_id);
+CREATE INDEX IF NOT EXISTS idx_ref_links_parent_type ON article_reference_links(parent_article_id, type);
 "#;

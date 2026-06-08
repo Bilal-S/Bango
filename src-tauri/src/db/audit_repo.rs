@@ -126,6 +126,8 @@ fn parse_action(s: &str) -> AuditAction {
         "ai_summary_error" => AuditAction::Error,
         "error" => AuditAction::Error,
         "dedup_auto" => AuditAction::DedupAuto,
+        "reference_import" => AuditAction::ReferenceImport,
+        "reference_match" => AuditAction::ReferenceMatch,
         _ => AuditAction::StatusChange,
     }
 }

@@ -151,6 +151,13 @@ pub fn run() {
             commands::export_cmd::import_project_backup,
             commands::export_cmd::write_text_to_file,
             commands::export_cmd::reset_project,
+            commands::references::extract_cr_references,
+            commands::references::get_article_references,
+            commands::references::link_reference_to_article,
+            commands::references::delete_article_references,
+            commands::references::upsert_reference_paper,
+            commands::references::preview_references_import,
+            commands::references::import_references_for_article,
         ]);
 
     #[cfg(debug_assertions)]

@@ -10,8 +10,11 @@ use crate::commands::dedup::classify_imported_articles;
 use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
+use crate::db::reference_repo;
 use crate::error::AppError;
 use crate::models::article::{Article, NewArticle};
+use crate::models::reference::ReferenceType;
+use crate::ris::cr_parser;
 use crate::ris::parser::parse_ris;
 use crate::ris::types::RisRecord;
 use crate::ris::validator::{validate_all_grouped, ErrorGroup};
@@ -233,6 +236,9 @@ pub async fn import_ris_file(
         // Classify: move non-duplicates to working, keep duplicates in 'duplicate'
         let _classification = classify_imported_articles(&conn, &imported)?;
 
+        // Extract CR (Cited References) from imported RIS records
+        let _cr_errors = extract_cr_for_imported(&conn, &imported, &to_import);
+
         // Re-fetch articles to reflect updated statuses after classification
         let updated_articles: Vec<Article> = imported
             .iter()
@@ -434,6 +440,73 @@ pub async fn import_bibtex_file(
             Err(err)
         }
     }
+}
+
+/// Extract CR (Cited References) from imported RIS records and store them.
+/// Non-fatal: errors are logged to audit but don't fail the import.
+pub fn extract_cr_for_imported(
+    conn: &rusqlite::Connection,
+    imported: &[Article],
+    records: &[&RisRecord],
+) -> Vec<String> {
+    let mut errors = Vec::new();
+
+    for (article, record) in imported.iter().zip(records.iter()) {
+        let extras_val = serde_json::to_value(&record.extras).unwrap_or(serde_json::Value::Null);
+        let cr_papers = cr_parser::parse_cr_entries(&extras_val);
+        if cr_papers.is_empty() {
+            continue;
+        }
+
+        for cr_paper in &cr_papers {
+            let mut paper_to_insert = cr_paper.clone();
+            paper_to_insert.import_source = Some("cr_extraction".into());
+
+            match reference_repo::insert_or_find_paper(conn, &paper_to_insert) {
+                Ok((paper, _was_created)) => {
+                    if let Err(e) = reference_repo::create_link(
+                        conn,
+                        &article.id,
+                        &paper.id,
+                        &ReferenceType::Reference,
+                    ) {
+                        errors.push(format!("CR link error for article {}: {}", article.id, e));
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!("CR paper insert error for article {}: {}", article.id, e));
+                }
+            }
+        }
+
+        // Audit log per article
+        if !cr_papers.is_empty() {
+            let _ = audit_repo::create_entry(
+                conn,
+                &article.id,
+                "reference_import",
+                None,
+                None,
+                Some(&format!("Extracted {} CR references", cr_papers.len())),
+                "system",
+            );
+        }
+    }
+
+    // Log errors
+    for err in &errors {
+        let _ = audit_repo::create_entry(
+            conn,
+            "",
+            "error",
+            None,
+            None,
+            Some(&format!("CR extraction: {}", err)),
+            "system",
+        );
+    }
+
+    errors
 }
 
 #[tauri::command]

@@ -175,7 +175,10 @@ export type AuditAction =
   | 'criteria_match'
   | 'ai_screen'
   | 'manual_override'
-  | 'ai_summary';
+  | 'ai_summary'
+  | 'reference_import'
+  | 'reference_match'
+  | 'error';
 
 export type AuditSource = 'ai' | 'user' | 'system';
 

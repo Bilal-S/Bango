@@ -159,11 +159,8 @@ pub async fn suggest_tags(
 
         // --- Tiered article selection by citation count ---
         // Collect articles that have num_cited > 0, sort descending by citations.
-        let mut cited: Vec<_> = articles
-            .iter()
-            .filter(|a| a.num_cited.unwrap_or(0) > 0)
-            .collect();
-        cited.sort_by(|a, b| b.num_cited.unwrap_or(0).cmp(&a.num_cited.unwrap_or(0)));
+        let mut cited: Vec<_> = articles.iter().filter(|a| a.num_cited.unwrap_or(0) > 0).collect();
+        cited.sort_by_key(|b| std::cmp::Reverse(b.num_cited.unwrap_or(0)));
 
         let top_cited_full: Vec<(String, String)> = cited
             .iter()
@@ -188,16 +185,11 @@ pub async fn suggest_tags(
                 *keyword_freq.entry(kw.to_lowercase()).or_insert(0) += 1;
             }
         }
-        let mut freq_keywords: Vec<(String, usize)> = keyword_freq
-            .into_iter()
-            .filter(|(_, count)| *count >= MIN_KEYWORD_FREQUENCY)
-            .collect();
-        freq_keywords.sort_by(|a, b| b.1.cmp(&a.1));
-        let keywords: Vec<String> = freq_keywords
-            .into_iter()
-            .take(MAX_KEYWORDS)
-            .map(|(kw, _)| kw)
-            .collect();
+        let mut freq_keywords: Vec<(String, usize)> =
+            keyword_freq.into_iter().filter(|(_, count)| *count >= MIN_KEYWORD_FREQUENCY).collect();
+        freq_keywords.sort_by_key(|b| std::cmp::Reverse(b.1));
+        let keywords: Vec<String> =
+            freq_keywords.into_iter().take(MAX_KEYWORDS).map(|(kw, _)| kw).collect();
         let keywords_str = keywords.join(", ");
 
         // --- Criteria ---
@@ -241,13 +233,7 @@ pub async fn suggest_tags(
             }
         }
 
-        (
-            config,
-            top_cited_full,
-            next_cited_titles,
-            keywords_str,
-            criteria_text,
-        )
+        (config, top_cited_full, next_cited_titles, keywords_str, criteria_text)
     };
 
     // ── Prompt construction ─────────────────────────────────────────
@@ -275,11 +261,8 @@ pub async fn suggest_tags(
         }
     }
 
-    let criteria_section = if criteria_text.is_empty() {
-        String::new()
-    } else {
-        format!("\n{}", criteria_text)
-    };
+    let criteria_section =
+        if criteria_text.is_empty() { String::new() } else { format!("\n{}", criteria_text) };
 
     let user_prompt = format!(
         r#"## Task
@@ -328,9 +311,8 @@ Rules:
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    let parsed: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-        AppError::Import(format!("Failed to parse tag suggestion response: {}", e))
-    })?;
+    let parsed: serde_json::Value = serde_json::from_str(json_str)
+        .map_err(|e| AppError::Import(format!("Failed to parse tag suggestion response: {}", e)))?;
     let tag_names: Vec<String> = parsed["tags"]
         .as_array()
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())

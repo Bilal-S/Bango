@@ -8,6 +8,7 @@ pub mod import;
 pub mod labels;
 pub mod llm_config;
 pub mod prisma;
+pub mod references;
 pub mod screening;
 pub mod summary;
 pub mod tags;

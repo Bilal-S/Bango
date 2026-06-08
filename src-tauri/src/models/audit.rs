@@ -15,7 +15,7 @@ pub struct AuditEntry {
     pub article_title: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AuditAction {
     Import,
@@ -32,6 +32,8 @@ pub enum AuditAction {
     AiSummary,
     Error,
     DedupAuto,
+    ReferenceImport,
+    ReferenceMatch,
 }
 
 impl AuditAction {
@@ -52,6 +54,8 @@ impl AuditAction {
             Self::AiSummary => "ai_summary",
             Self::Error => "error",
             Self::DedupAuto => "dedup_auto",
+            Self::ReferenceImport => "reference_import",
+            Self::ReferenceMatch => "reference_match",
         }
     }
 }

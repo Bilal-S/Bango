@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue';
 import { openPath } from '@tauri-apps/plugin-opener';
+import { open as fileDialog } from '@tauri-apps/plugin-dialog';
 import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
 import SuggestInput from './suggest-input.vue';
@@ -17,6 +18,10 @@ import {
   pendingSummaries,
 } from '@/composables/use-ai-summary';
 import type { AiSummaryData } from '@/composables/use-ai-summary';
+import { useReferences } from '@/composables/use-references';
+import type { PreviewPaper } from '@/composables/use-references';
+import type { ArticleReference } from '@/types';
+import { flattenRawReferences } from '@/utils/reference-flatten';
 
 const props = defineProps<{
   article: Article;
@@ -140,8 +145,128 @@ function toggleMetadata(): void {
   localStorage.setItem('bango-metadata-expanded', String(metadataExpanded.value));
 }
 
+// Imported Notes expand/collapse state (persisted, collapsed by default)
+const importedNotesExpanded = ref(localStorage.getItem('bango-imported-notes-expanded') === 'true');
+function toggleImportedNotes(): void {
+  importedNotesExpanded.value = !importedNotesExpanded.value;
+  localStorage.setItem('bango-imported-notes-expanded', String(importedNotesExpanded.value));
+}
+
 // Audit trail expand/collapse state
 const auditExpanded = ref(false);
+
+// References section
+const { getArticleReferences } = useReferences();
+const articleReferences = ref<ArticleReference[]>([]);
+const refsLoading = ref(false);
+const refTab = ref<'reference' | 'citation'>('reference');
+const showRefImportDialog = ref(false);
+
+async function loadReferences(): Promise<void> {
+  if (!props.article.id) return;
+  refsLoading.value = true;
+  try {
+    const raw = await getArticleReferences(props.article.id);
+    // Backend returns nested { linkId, referenceType, paper: {...} }
+    // Flatten via utility so the template gets flat ArticleReference objects.
+    articleReferences.value = flattenRawReferences(raw as unknown[]);
+  } catch {
+    articleReferences.value = [];
+  } finally {
+    refsLoading.value = false;
+  }
+}
+
+// Import references from file - two-step flow
+const { previewReferencesImport, importReferencesForArticle } = useReferences();
+const refImportType = ref<'reference' | 'citation'>('reference');
+const refImportBusy = ref(false);
+const refImportStep = ref<'select' | 'preview'>('select');
+const refImportPreview = ref<PreviewPaper[] | null>(null);
+const refImportFilePath = ref<string | null>(null);
+
+/** Step 1: Choose file and preview what would be imported */
+async function handleChooseFile(): Promise<void> {
+  if (refImportBusy.value) return;
+  try {
+    const selected = await fileDialog({
+      multiple: false,
+      filters: [
+        { name: 'RIS Files', extensions: ['ris'] },
+        { name: 'BibTeX Files', extensions: ['bib'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (!selected) return;
+    refImportFilePath.value = selected;
+    refImportBusy.value = true;
+    const result = await previewReferencesImport(selected);
+    if (result) {
+      refImportPreview.value = result.papers;
+      refImportStep.value = 'preview';
+    }
+  } catch (e) {
+    console.error('[references] preview failed:', e);
+  } finally {
+    refImportBusy.value = false;
+  }
+}
+
+/** Step 2: Confirm and actually import */
+async function handleConfirmImport(): Promise<void> {
+  if (refImportBusy.value || !refImportFilePath.value) return;
+  refImportBusy.value = true;
+  try {
+    const result = await importReferencesForArticle(
+      props.article.id,
+      refImportFilePath.value,
+      refImportType.value
+    );
+    if (result) {
+      await loadReferences();
+      showRefImportDialog.value = false;
+      refImportStep.value = 'select';
+      refImportPreview.value = null;
+      refImportFilePath.value = null;
+    }
+  } catch (e) {
+    console.error('[references] import failed:', e);
+  } finally {
+    refImportBusy.value = false;
+  }
+}
+
+function closeRefImportDialog(): void {
+  showRefImportDialog.value = false;
+  refImportStep.value = 'select';
+  refImportPreview.value = null;
+  refImportFilePath.value = null;
+}
+
+// Load references when article changes (immediate: true so it also runs on mount)
+watch(
+  () => props.article.id,
+  () => {
+    articleReferences.value = [];
+    refTab.value = 'reference';
+    void loadReferences();
+  },
+  { immediate: true }
+);
+
+const refRefCount = computed(() => {
+  const count = articleReferences.value.filter((r) => r.referenceType === 'reference').length;
+  if (count > 0) return count;
+  return props.article.numReferences ?? 0;
+});
+const citationRefCount = computed(() => {
+  const count = articleReferences.value.filter((r) => r.referenceType === 'citation').length;
+  if (count > 0) return count;
+  return props.article.numCited ?? 0;
+});
+const activeRefs = computed(() =>
+  articleReferences.value.filter((r) => r.referenceType === refTab.value)
+);
 
 // Panel resizing logic
 const panelWidth = ref(parseInt(localStorage.getItem('bango-detail-panel-width') || '480'));
@@ -928,16 +1053,27 @@ function handleCriteriaSave(
         </div>
       </section>
 
-      <!-- Imported Notes (read-only, shown only when present) -->
+      <!-- Imported Notes (read-only, collapsible, shown only when present) -->
       <section v-if="article.notes">
-        <h3 class="text-xs font-label-caps text-slate-500 uppercase mb-3 tracking-wider">
-          Imported Notes
-        </h3>
-        <p
-          class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-amber-50 border border-amber-200 p-3 rounded-lg"
+        <button
+          class="w-full flex items-center justify-between text-xs font-label-caps text-slate-500 uppercase tracking-wider hover:text-slate-700 cursor-pointer transition-colors py-1"
+          @click="toggleImportedNotes"
         >
-          {{ article.notes }}
-        </p>
+          <span>Imported Notes</span>
+          <span
+            class="material-symbols-outlined text-[16px] transition-transform duration-200 shrink-0"
+            :class="{ 'rotate-180': importedNotesExpanded }"
+          >
+            expand_more
+          </span>
+        </button>
+        <div v-show="importedNotesExpanded" class="mt-3">
+          <p
+            class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-amber-50 border border-amber-200 p-3 rounded-lg whitespace-pre-line"
+          >
+            {{ article.notes }}
+          </p>
+        </div>
       </section>
 
       <!-- User Notes -->
@@ -980,6 +1116,226 @@ function handleCriteriaSave(
           {{ article.userNotes }}
         </p>
         <p v-else class="text-xs text-slate-400 italic">No notes yet. Click edit to add.</p>
+      </section>
+
+      <!-- References (tabbed) -->
+      <section>
+        <div class="flex border-b border-slate-200 mb-3">
+          <button
+            class="px-3 py-1.5 text-xs font-label-caps uppercase tracking-wider transition-colors cursor-pointer"
+            :class="
+              refTab === 'reference'
+                ? 'text-indigo-700 border-b-2 border-indigo-600 font-semibold'
+                : 'text-slate-400 hover:text-slate-600'
+            "
+            @click="refTab = 'reference'"
+          >
+            References Used
+            <span class="text-[10px] ml-0.5">({{ refRefCount }})</span>
+          </button>
+          <button
+            class="px-3 py-1.5 text-xs font-label-caps uppercase tracking-wider transition-colors cursor-pointer"
+            :class="
+              refTab === 'citation'
+                ? 'text-indigo-700 border-b-2 border-indigo-600 font-semibold'
+                : 'text-slate-400 hover:text-slate-600'
+            "
+            @click="refTab = 'citation'"
+          >
+            Cited By
+            <span class="text-[10px] ml-0.5">({{ citationRefCount }})</span>
+          </button>
+          <button
+            class="ml-auto text-xs text-indigo-500 hover:text-indigo-700 cursor-pointer font-semibold transition-colors"
+            :disabled="refImportBusy"
+            @click="showRefImportDialog = true"
+          >
+            <span class="material-symbols-outlined text-[14px] align-middle">upload_file</span>
+            import
+          </button>
+        </div>
+
+        <div v-if="refsLoading" class="text-xs text-slate-400 italic py-2">Loading…</div>
+        <div v-else-if="activeRefs.length === 0" class="text-xs text-slate-400 italic py-2">
+          <template
+            v-if="refTab === 'reference' && article.numReferences && article.numReferences > 0"
+          >
+            {{ article.numReferences }} referenced papers noted by import without details
+          </template>
+          <template v-else-if="refTab === 'citation' && article.numCited && article.numCited > 0">
+            {{ article.numCited }} citations noted by import without details
+          </template>
+          <template v-else>
+            No {{ refTab === 'reference' ? 'references' : 'citations' }} yet.
+          </template>
+        </div>
+        <ul v-else class="space-y-1 text-body-sm max-h-52 overflow-y-auto">
+          <li
+            v-for="item in activeRefs"
+            :key="item.id"
+            class="flex items-start gap-2 py-1 border-b border-slate-100 last:border-0"
+          >
+            <span
+              class="shrink-0 text-[10px] font-bold px-1 rounded mt-0.5"
+              :class="
+                item.matchStatus === 'matched'
+                  ? 'bg-emerald-50 text-emerald-600'
+                  : 'bg-slate-100 text-slate-400'
+              "
+            >
+              {{ item.matchStatus === 'matched' ? '✓' : '·' }}
+            </span>
+            <div class="min-w-0">
+              <span class="text-slate-700 truncate block">{{ item.title || '(untitled)' }}</span>
+              <span class="text-[11px] text-slate-400">
+                {{ item.authors.join(', ') }}
+                <span v-if="item.publicationYear"> ({{ item.publicationYear }})</span>
+              </span>
+            </div>
+          </li>
+        </ul>
+
+        <Teleport to="body">
+          <div
+            v-if="showRefImportDialog"
+            class="fixed inset-0 z-[100] flex items-center justify-center bg-black/30"
+            @click.self="closeRefImportDialog"
+          >
+            <div
+              class="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-5 space-y-4"
+            >
+              <h3 class="text-sm font-semibold text-slate-800">Import References</h3>
+
+              <!-- Step 1: Select type and file -->
+              <template v-if="refImportStep === 'select'">
+                <p class="text-xs text-slate-500">
+                  Import references or citations for
+                  <strong class="text-slate-700 truncate block">{{ article.title }}</strong>
+                </p>
+                <div class="flex gap-2 text-xs">
+                  <label
+                    class="flex items-center gap-1.5 cursor-pointer px-3 py-2 rounded-lg border transition-colors flex-1"
+                    :class="
+                      refImportType === 'reference'
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                    "
+                  >
+                    <input
+                      v-model="refImportType"
+                      type="radio"
+                      value="reference"
+                      class="accent-indigo-600"
+                    />
+                    Backward (cited refs)
+                  </label>
+                  <label
+                    class="flex items-center gap-1.5 cursor-pointer px-3 py-2 rounded-lg border transition-colors flex-1"
+                    :class="
+                      refImportType === 'citation'
+                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                        : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                    "
+                  >
+                    <input
+                      v-model="refImportType"
+                      type="radio"
+                      value="citation"
+                      class="accent-indigo-600"
+                    />
+                    Forward (cited by)
+                  </label>
+                </div>
+                <div class="flex gap-2 justify-end">
+                  <button
+                    class="text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer px-3 py-1.5 border border-slate-300 rounded-lg"
+                    @click="closeRefImportDialog"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    class="flex items-center gap-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    :disabled="refImportBusy"
+                    @click="handleChooseFile"
+                  >
+                    <span
+                      v-if="refImportBusy"
+                      class="material-symbols-outlined text-[14px] animate-spin"
+                      >progress_activity</span
+                    >
+                    <span v-else class="material-symbols-outlined text-[14px]">upload_file</span>
+                    {{ refImportBusy ? 'Parsing…' : 'Choose File (RIS / BibTeX)' }}
+                  </button>
+                </div>
+              </template>
+
+              <!-- Step 2: Preview and confirm -->
+              <template v-else-if="refImportStep === 'preview'">
+                <div
+                  class="flex items-center gap-2 p-3 rounded-lg bg-emerald-50 border border-emerald-200"
+                >
+                  <span class="material-symbols-outlined text-emerald-600 text-[20px]"
+                    >check_circle</span
+                  >
+                  <div>
+                    <span class="text-sm font-semibold text-emerald-800"
+                      >Found {{ refImportPreview?.length ?? 0 }} references</span
+                    >
+                    <p class="text-[11px] text-emerald-600">
+                      Review the list below, then click Add to import.
+                    </p>
+                  </div>
+                </div>
+
+                <!-- Scrollable preview list -->
+                <ul
+                  v-if="refImportPreview && refImportPreview.length > 0"
+                  class="max-h-48 overflow-y-auto space-y-1 border border-slate-200 rounded-lg p-2"
+                >
+                  <li
+                    v-for="(paper, idx) in refImportPreview"
+                    :key="idx"
+                    class="text-xs py-1 border-b border-slate-100 last:border-0"
+                  >
+                    <span class="text-slate-700 font-medium">{{
+                      paper.title || '(untitled)'
+                    }}</span>
+                    <span class="text-slate-400 block">
+                      {{ paper.authors.join(', ') }}
+                      <span v-if="paper.publicationYear"> ({{ paper.publicationYear }})</span>
+                      <span v-if="paper.journal"> — {{ paper.journal }}</span>
+                    </span>
+                  </li>
+                </ul>
+                <p v-else class="text-xs text-slate-400 italic">
+                  No references found in the selected file.
+                </p>
+
+                <div class="flex gap-2 justify-end">
+                  <button
+                    class="text-xs text-slate-500 hover:text-slate-700 font-semibold cursor-pointer px-3 py-1.5 border border-slate-300 rounded-lg"
+                    @click="closeRefImportDialog"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    class="flex items-center gap-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-1.5 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    :disabled="refImportBusy || !refImportPreview?.length"
+                    @click="handleConfirmImport"
+                  >
+                    <span
+                      v-if="refImportBusy"
+                      class="material-symbols-outlined text-[14px] animate-spin"
+                      >progress_activity</span
+                    >
+                    <span v-else class="material-symbols-outlined text-[14px]">add_circle</span>
+                    {{ refImportBusy ? 'Importing…' : 'Add' }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </Teleport>
       </section>
 
       <!-- Audit Trail -->

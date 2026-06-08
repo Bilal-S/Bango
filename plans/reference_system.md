@@ -939,12 +939,18 @@ New panel/tab in article detail showing all reference/citation records for the s
 - Shows title, authors, year, DOI for each record
 - Click to expand full metadata
 - "Match Status" indicator for each record
-- "Promote to Article" button for unmatched records
+- "Promote to Article" button for unmatched records. We should still keep the record in the references table and add way to recognize that article is already promoted. Disable the promoted button and change text to `promoted` etc.
+- should have two tabs `References` and `Citations` similar to Abstract/AI Summmary
+- display overall count of records e.g. `References - 19` in Tab header level
+- we will have instances where we only have counts without detail records, then we should display the counts from the articles table `num_cited` and `num_references`. If we have recordcounts from table, use them instead. 
+- If we have no reference details and no reference counts (e.g. all is zero) we should only display import link
+- We should have an import referencense link or icon that opens the import dialog for citations or references (the type should be clear shown on dialog)
+
 
 #### Import UI
 
 - New import option: "Import Citations/References"
-- Supports RIS and CSV formats
+- Supports RIS format but should be expandable
 - Shows matching results before import
 
 ### 2G. Phase 2 Test Plan
@@ -1059,7 +1065,7 @@ Step 7: Run full test suite
 ```
 
 ### Phase 2 (Deferred)
-
+ 
 ```
 Step 1: Wire N1 parsing into import commands
 Step 2: Create CSV parser module
