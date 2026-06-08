@@ -404,6 +404,9 @@ pub async fn import_bibtex_file(
 
         let _classification = classify_imported_articles(&conn, &imported)?;
 
+        // Extract CR (Cited References) from imported BibTeX records
+        let _cr_errors = extract_cr_for_imported(&conn, &imported, &to_import);
+
         let updated_articles: Vec<Article> = imported
             .iter()
             .filter_map(|a| article_repo::get_article_by_id(&conn, &a.id).ok())

@@ -196,6 +196,29 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
     record.extras.entry("_bibtex_type".to_string()).or_default().push(entry.entry_type.clone());
     record.extras.entry("_bibtex_key".to_string()).or_default().push(entry.key.clone());
 
+    // Map WoS-specific citation count fields
+    record.num_cited = field_map.get("times-cited").and_then(|v| v.trim().parse::<i32>().ok());
+
+    record.num_references =
+        field_map.get("number-of-cited-references").and_then(|v| v.trim().parse::<i32>().ok());
+
+    // Normalize BibTeX "cited-references" field to "CR" for CR parser compatibility.
+    // WoS BibTeX stores each cited reference on its own line inside braces.
+    // The BibTeX parser preserves newlines within brace-delimited values.
+    // Each line ends with a period '.' — we split on newlines, not periods,
+    // to avoid breaking DOIs like "10.1016/j.foreco.2017.04.005".
+    if let Some(cr_text) = field_map.get("cited-references") {
+        let lines: Vec<String> = cr_text
+            .split('\n')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        if !lines.is_empty() {
+            record.extras.entry("CR".to_string()).or_default().extend(lines);
+        }
+    }
+
     // Store unrecognized fields in extras
     let known_fields = [
         "title",
@@ -222,6 +245,9 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
         "issn",
         "isbn",
         "note",
+        "times-cited",
+        "number-of-cited-references",
+        "cited-references",
     ];
 
     for (field_name, field_value) in &entry.fields {

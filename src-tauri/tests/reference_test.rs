@@ -356,14 +356,11 @@ fn test_promote_unmatched_paper_to_article() {
         .expect("get refs failed");
     assert_eq!(refs_after.len(), 1);
     assert_eq!(refs_after[0].paper.match_status, MatchStatus::Imported);
-    assert_eq!(
-        refs_after[0].paper.matched_article_id.clone().unwrap(),
-        new_article.id
-    );
+    assert_eq!(refs_after[0].paper.matched_article_id.clone().unwrap(), new_article.id);
 
     // Verify the new article exists and has the right title
-    let fetched = article_repo::get_article_by_id(&conn, &new_article.id)
-        .expect("get article failed");
+    let fetched =
+        article_repo::get_article_by_id(&conn, &new_article.id).expect("get article failed");
     assert_eq!(fetched.title, "Unmatched Paper");
 }
 
@@ -395,8 +392,8 @@ fn test_promote_links_to_existing_article_by_doi() {
         reference_repo::insert_or_find_paper(&conn, &paper).expect("insert paper failed");
 
     // Auto-match should find the existing article
-    let matched_id =
-        reference_repo::auto_match_paper_to_article(&conn, &inserted_paper).expect("auto_match failed");
+    let matched_id = reference_repo::auto_match_paper_to_article(&conn, &inserted_paper)
+        .expect("auto_match failed");
     assert!(matched_id.is_some(), "Should find a match by DOI");
     assert_eq!(matched_id.as_deref().unwrap(), existing.id, "Should match the existing article");
 
@@ -410,8 +407,8 @@ fn test_promote_links_to_existing_article_by_doi() {
     .expect("update_paper_match failed");
 
     // Verify the paper is now linked
-    let refreshed = reference_repo::get_paper_by_id(&conn, &inserted_paper.id)
-        .expect("get paper failed");
+    let refreshed =
+        reference_repo::get_paper_by_id(&conn, &inserted_paper.id).expect("get paper failed");
     assert_eq!(refreshed.match_status, MatchStatus::Matched);
     assert_eq!(refreshed.matched_article_id.as_deref(), Some(existing.id.as_str()));
 

@@ -304,11 +304,7 @@ pub fn promote_reference_to_article(
         "user",
     );
 
-    Ok(PromoteResult {
-        article_id: article.id,
-        article_title: article.title,
-        was_linked: false,
-    })
+    Ok(PromoteResult { article_id: article.id, article_title: article.title, was_linked: false })
 }
 
 #[derive(serde::Serialize)]
