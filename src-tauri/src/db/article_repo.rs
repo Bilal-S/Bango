@@ -438,24 +438,20 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
     let is_duplicate_view = query.status.as_deref() == Some("duplicate");
     let is_all_view = query.status.is_none();
     let base_filter =
-        if is_duplicate_view || is_all_view { "" } else { " WHERE duplicate_of IS NULL" };
+        if is_duplicate_view || is_all_view { " WHERE 1=1" } else { " WHERE duplicate_of IS NULL" };
     let mut sql = format!("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles{base_filter}");
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ref status) = query.status {
         let idx = param_values.len() + 1;
-        if is_duplicate_view {
-            sql.push_str(&format!(" WHERE status = ?{idx}"));
-        } else {
-            sql.push_str(&format!(" AND status = ?{idx}"));
-        }
+        sql.push_str(&format!(" AND status = ?{idx}"));
         param_values.push(Box::new(status.clone()));
     }
 
     if let Some(ref search) = query.search {
         let idx = param_values.len() + 1;
         sql.push_str(&format!(
-            " AND (LOWER(title) LIKE ?{idx} OR LOWER(abstract_text) LIKE ?{idx})"
+            " AND (LOWER(title) LIKE ?{idx} OR LOWER(abstract_text) LIKE ?{idx} OR LOWER(COALESCE(user_notes, '')) LIKE ?{idx})"
         ));
         let pattern = format!("%{}%", search.to_lowercase());
         param_values.push(Box::new(pattern));

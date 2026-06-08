@@ -60,7 +60,7 @@ function onPageSizeChange(event: Event): void {
         <input
           type="text"
           :value="searchText"
-          placeholder="Search title or abstract..."
+          placeholder="Search title, abstract, or notes..."
           class="toolbar-search w-full pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
           @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
           @keyup.enter="emit('search')"

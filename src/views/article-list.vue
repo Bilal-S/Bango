@@ -146,6 +146,15 @@ const STATUS_TAB_LABELS: Record<string, string> = {
   error: 'Errors',
 };
 
+const STATUS_TAB_TIPS: Record<string, string> = {
+  all: 'All articles in our database',
+  working: 'In-process articles to be reviewed',
+  included: 'Articles included in research',
+  rejected: 'Articles excluded from research',
+  error: 'Articles with errors:check audit trail',
+  duplicate: 'Duplicate articles',
+};
+
 function showDecisionNotification(message: string, type: 'success' | 'info'): void {
   if (decisionTimeout) clearTimeout(decisionTimeout);
   decisionMessage.value = message;
@@ -293,7 +302,8 @@ function handleOpenReader(articleId: string): void {
         <button
           v-for="tab in STATUS_TABS"
           :key="tab"
-          class="pb-3 text-sm font-medium transition-colors relative"
+          :title="STATUS_TAB_TIPS[tab]"
+          class="pb-3 text-sm font-medium transition-colors relative cursor-default"
           :class="
             activeStatusTab === tab
               ? 'text-indigo-600 font-bold'

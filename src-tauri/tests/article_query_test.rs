@@ -580,3 +580,391 @@ fn test_sort_by_sequence_id_desc() {
     // DESC order: reverse insertion = Second, First, Third
     assert_eq!(titles, vec!["Second", "First", "Third"]);
 }
+
+// ─── Search on "All" tab (status = None) ──────────────────────────
+
+/// Regression test: search on the All tab (status = None) must not fail.
+/// Before the WHERE 1=1 fix, appending "AND (LOWER(title) LIKE ...)" without
+/// a preceding WHERE clause produced invalid SQL, silently returning stale results.
+#[test]
+fn test_all_view_search_filters_by_title() {
+    let conn = setup_db();
+    seed_working_articles(
+        &conn,
+        &[
+            ("Alpha Article", Some(2020)),
+            ("Beta Article", Some(2021)),
+            ("Gamma Paper", Some(2022)),
+        ],
+    );
+
+    let query = ArticleQuery {
+        status: None, // All view — no status filter
+        search: Some("article".into()),
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, vec!["Alpha Article", "Beta Article"]);
+}
+
+#[test]
+fn test_all_view_search_no_results() {
+    let conn = setup_db();
+    seed_working_articles(
+        &conn,
+        &[
+            ("Alpha Article", Some(2020)),
+            ("Beta Article", Some(2021)),
+        ],
+    );
+
+    let query = ArticleQuery {
+        status: None,
+        search: Some("nonexistent_xyz".into()),
+        sort_by: None,
+        sort_dir: None,
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    assert!(results.is_empty(), "Search with nonsense term should return zero results");
+}
+
+#[test]
+fn test_all_view_search_case_insensitive() {
+    let conn = setup_db();
+    seed_working_articles(
+        &conn,
+        &[("Machine Learning in Healthcare", Some(2022))],
+    );
+
+    // Search with lowercase should match mixed-case title
+    let query = ArticleQuery {
+        status: None,
+        search: Some("machine learning".into()),
+        sort_by: None,
+        sort_dir: None,
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title, "Machine Learning in Healthcare");
+}
+
+#[test]
+fn test_all_view_search_matches_abstract() {
+    let conn = setup_db();
+
+    // Insert one article with a known abstract
+    let article = NewArticle {
+        title: "Some Title".to_string(),
+        abstract_text: "This paper discusses quantum computing.".to_string(),
+        authors: vec![],
+        publication_year: Some(2023),
+        doi: None,
+        journal: None,
+        volume: None,
+        issue: None,
+        start_page: None,
+        end_page: None,
+        keywords: vec![],
+        url: None,
+        language: None,
+        publisher: None,
+        publisher_city: None,
+        publisher_address: None,
+        issn: None,
+        reference_type: None,
+        date: None,
+        author_address: None,
+        accession_number: None,
+        custom_field3: None,
+        journal_abbreviation: None,
+        journal_iso_abbreviation: None,
+        notes: None,
+        web_of_science_db: None,
+        ris_extras: None,
+        import_source: None,
+        data_length: None,
+        token_estimate: None,
+        num_cited: None,
+        num_references: None,
+        has_full_text: false,
+        full_text_file_name: None,
+    };
+    let inserted = article_repo::insert_article(&conn, &article).expect("insert failed");
+    article_repo::move_to_working(&conn, &inserted.id).expect("move failed");
+
+    let query = ArticleQuery {
+        status: None,
+        search: Some("quantum".into()),
+        sort_by: None,
+        sort_dir: None,
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    assert_eq!(results.len(), 1, "Search should match abstract text");
+}
+
+#[test]
+fn test_all_view_search_with_pagination() {
+    let conn = setup_db();
+    seed_working_articles(
+        &conn,
+        &[
+            ("Alpha One", Some(2020)),
+            ("Alpha Two", Some(2021)),
+            ("Alpha Three", Some(2022)),
+            ("Beta One", Some(2023)),
+        ],
+    );
+
+    // Page 1: limit 2, offset 0
+    let query = ArticleQuery {
+        status: None,
+        search: Some("alpha".into()),
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: Some(2),
+        offset: Some(0),
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, vec!["Alpha One", "Alpha Three"]);
+
+    // Page 2: limit 2, offset 2
+    let query2 = ArticleQuery {
+        status: None,
+        search: Some("alpha".into()),
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: Some(2),
+        offset: Some(2),
+    };
+    let results2 = article_repo::query_articles(&conn, &query2).expect("query failed");
+    let titles2: Vec<&str> = results2.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles2, vec!["Alpha Two"]);
+}
+
+#[test]
+fn test_all_view_year_filter() {
+    let conn = setup_db();
+    seed_working_articles(
+        &conn,
+        &[
+            ("Old Article", Some(2018)),
+            ("Mid Article", Some(2020)),
+            ("New Article", Some(2023)),
+        ],
+    );
+
+    let query = ArticleQuery {
+        status: None,
+        search: None,
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: Some(2019),
+        year_to: Some(2021),
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, vec!["Mid Article"]);
+}
+
+#[test]
+fn test_search_matches_user_notes() {
+    let conn = setup_db();
+
+    // Insert article with no keywords in title or abstract
+    let article = NewArticle {
+        title: "Generic Title".to_string(),
+        abstract_text: "Generic abstract text.".to_string(),
+        authors: vec![],
+        publication_year: Some(2023),
+        doi: None,
+        journal: None,
+        volume: None,
+        issue: None,
+        start_page: None,
+        end_page: None,
+        keywords: vec![],
+        url: None,
+        language: None,
+        publisher: None,
+        publisher_city: None,
+        publisher_address: None,
+        issn: None,
+        reference_type: None,
+        date: None,
+        author_address: None,
+        accession_number: None,
+        custom_field3: None,
+        journal_abbreviation: None,
+        journal_iso_abbreviation: None,
+        notes: None,
+        web_of_science_db: None,
+        ris_extras: None,
+        import_source: None,
+        data_length: None,
+        token_estimate: None,
+        num_cited: None,
+        num_references: None,
+        has_full_text: false,
+        full_text_file_name: None,
+    };
+    let inserted = article_repo::insert_article(&conn, &article).expect("insert failed");
+    article_repo::move_to_working(&conn, &inserted.id).expect("move failed");
+
+    // Add user notes after insert
+    article_repo::update_user_notes(&conn, &inserted.id, "Important finding about XYZ compound").expect("notes failed");
+
+    let query = ArticleQuery {
+        status: Some("working".into()),
+        search: Some("xyz compound".into()),
+        sort_by: None,
+        sort_dir: None,
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    assert_eq!(results.len(), 1, "Search should match user_notes text");
+    assert_eq!(results[0].title, "Generic Title");
+}
+
+#[test]
+fn test_search_user_notes_null_no_crash() {
+    let conn = setup_db();
+    seed_working_articles(
+        &conn,
+        &[("Article With No Notes", Some(2020))],
+    );
+
+    // user_notes is NULL for this article — search should not crash
+    let query = ArticleQuery {
+        status: Some("working".into()),
+        search: Some("something".into()),
+        sort_by: None,
+        sort_dir: None,
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    assert!(results.is_empty(), "NULL user_notes should not cause false positives");
+}
+
+#[test]
+fn test_duplicate_view_search_filters_results() {
+    let conn = setup_db();
+
+    // Insert duplicates (status stays 'duplicate')
+    let _d1 = article_repo::insert_article(&conn, &new_article("Dup Alpha", Some(2020))).expect("insert failed");
+    let _d2 = article_repo::insert_article(&conn, &new_article("Dup Beta", Some(2021))).expect("insert failed");
+    let _d3 = article_repo::insert_article(&conn, &new_article("Dup Gamma", Some(2022))).expect("insert failed");
+
+    let query = ArticleQuery {
+        status: Some("duplicate".into()),
+        search: Some("alpha".into()),
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    assert_eq!(results.len(), 1, "Duplicate view search should filter results");
+    assert_eq!(results[0].title, "Dup Alpha");
+}
