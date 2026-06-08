@@ -133,6 +133,18 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
     let data_length = title.chars().count() + abstract_text.chars().count();
     let token_estimate = data_length / 4;
 
+    // Affiliation: prefer explicit field (set by BibTeX converter),
+    // otherwise extract from author_address (RIS AD field): first comma-separated part
+    // e.g. "McGill Univ, Sch Comp Sci, Montreal, PQ, Canada" → "McGill Univ"
+    let affiliation = record.affiliation.clone().or_else(|| {
+        record.author_address.as_ref().and_then(|addr| {
+            addr.split(',')
+                .next()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+    });
+
     NewArticle {
         title,
         abstract_text,
@@ -154,6 +166,7 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
         reference_type: record.reference_type.clone(),
         date: record.date.clone(),
         author_address: record.author_address.clone(),
+        affiliation,
         accession_number: record.accession_number.clone(),
         custom_field3: record.custom_field3.clone(),
         journal_abbreviation: record.journal_abbreviation.clone(),

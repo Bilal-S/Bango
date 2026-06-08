@@ -266,6 +266,7 @@ pub fn promote_reference_to_article(
         reference_type: paper.reference_type.clone(),
         date: paper.date.clone(),
         author_address: None,
+        affiliation: None,
         accession_number: None,
         custom_field3: None,
         journal_abbreviation: None,

@@ -129,6 +129,12 @@ function toggleMetadata(): void {
           >
           <span class="text-on-surface">{{ article.authors.join(', ') }}</span>
         </div>
+        <div v-if="article.affiliation" class="flex flex-col gap-1 text-body-sm font-body-sm">
+          <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+            >Affiliation</span
+          >
+          <span class="text-on-surface">{{ article.affiliation }}</span>
+        </div>
         <div class="grid grid-cols-2 gap-4 text-body-sm font-body-sm">
           <div class="flex flex-col gap-1">
             <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"

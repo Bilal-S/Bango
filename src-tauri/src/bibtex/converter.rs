@@ -192,6 +192,28 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
         record.keywords = split_keywords(kw_str);
     }
 
+    // Affiliation extraction with priority:
+    // 1. institution → use directly
+    // 2. organization → use directly
+    // 3. affiliation → if contains comma, extract last comma part; otherwise use as-is
+    if let Some(inst) = field_map.get("institution") {
+        record.affiliation = Some(inst.trim().to_string());
+    } else if let Some(org) = field_map.get("organization") {
+        record.affiliation = Some(org.trim().to_string());
+    } else if let Some(aff) = field_map.get("affiliation") {
+        let trimmed = aff.trim();
+        if trimmed.contains(',') {
+            // "Department of X, University of Y" → "University of Y"
+            record.affiliation = trimmed
+                .split(',')
+                .last()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+        } else {
+            record.affiliation = Some(trimmed.to_string());
+        }
+    }
+
     // Store entry type and key in extras for traceability
     record.extras.entry("_bibtex_type".to_string()).or_default().push(entry.entry_type.clone());
     record.extras.entry("_bibtex_key".to_string()).or_default().push(entry.key.clone());
@@ -241,6 +263,8 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
         "publisher",
         "school",
         "institution",
+        "organization",
+        "affiliation",
         "address",
         "issn",
         "isbn",
@@ -456,5 +480,78 @@ mod tests {
 
         assert_eq!(record.start_page.as_deref(), Some("13"));
         assert_eq!(record.end_page, None);
+    }
+
+    #[test]
+    fn test_affiliation_from_institution() {
+        let input = r#"@techreport{key1,
+  author = "Author",
+  title = "Title",
+  institution = "University of Z",
+}"#;
+        let parse_result = parse_bibtex(input);
+        let record = bibtex_to_ris_record(&parse_result.entries[0]);
+        assert_eq!(record.affiliation.as_deref(), Some("University of Z"));
+    }
+
+    #[test]
+    fn test_affiliation_from_organization() {
+        let input = r#"@inproceedings{key1,
+  author = "Author",
+  title = "Title",
+  organization = "Institute Name",
+}"#;
+        let parse_result = parse_bibtex(input);
+        let record = bibtex_to_ris_record(&parse_result.entries[0]);
+        assert_eq!(record.affiliation.as_deref(), Some("Institute Name"));
+    }
+
+    #[test]
+    fn test_affiliation_from_affiliation_field() {
+        let input = r#"@article{key1,
+  author = "Author",
+  title = "Title",
+  affiliation = "University of Y",
+}"#;
+        let parse_result = parse_bibtex(input);
+        let record = bibtex_to_ris_record(&parse_result.entries[0]);
+        assert_eq!(record.affiliation.as_deref(), Some("University of Y"));
+    }
+
+    #[test]
+    fn test_affiliation_from_affiliation_with_comma() {
+        // "Department of X, University of Y" → "University of Y"
+        let input = r#"@article{key1,
+  author = "Author",
+  title = "Title",
+  affiliation = "Department of X, University of Y",
+}"#;
+        let parse_result = parse_bibtex(input);
+        let record = bibtex_to_ris_record(&parse_result.entries[0]);
+        assert_eq!(record.affiliation.as_deref(), Some("University of Y"));
+    }
+
+    #[test]
+    fn test_affiliation_priority_institution_over_organization() {
+        let input = r#"@techreport{key1,
+  author = "Author",
+  title = "Title",
+  institution = "University of Z",
+  organization = "Institute Name",
+}"#;
+        let parse_result = parse_bibtex(input);
+        let record = bibtex_to_ris_record(&parse_result.entries[0]);
+        assert_eq!(record.affiliation.as_deref(), Some("University of Z"));
+    }
+
+    #[test]
+    fn test_affiliation_no_field() {
+        let input = r#"@article{key1,
+  author = "Author",
+  title = "Title",
+}"#;
+        let parse_result = parse_bibtex(input);
+        let record = bibtex_to_ris_record(&parse_result.entries[0]);
+        assert!(record.affiliation.is_none());
     }
 }

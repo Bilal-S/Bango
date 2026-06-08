@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS articles (
     ai_reasoning TEXT,
     author_address TEXT,
     authors TEXT NOT NULL,
+    affiliation TEXT,
     changed_at TEXT NOT NULL DEFAULT '',
     custom_field3 TEXT,
     data_length INTEGER,

@@ -23,6 +23,7 @@ export interface Article {
   referenceType: string | null;
   date: string | null;
   authorAddress: string | null;
+  affiliation: string | null;
   accessionNumber: string | null;
   customField3: string | null;
   journalAbbreviation: string | null;

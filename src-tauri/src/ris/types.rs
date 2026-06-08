@@ -24,6 +24,8 @@ pub struct RisRecord {
     pub issn: Option<String>,
     pub date: Option<String>,
     pub author_address: Option<String>,
+    /// Affiliation extracted from import (e.g., first part of AD in RIS, or institution/org in BibTeX)
+    pub affiliation: Option<String>,
     pub accession_number: Option<String>,
     pub custom_field3: Option<String>,
     pub journal_abbreviation: Option<String>,

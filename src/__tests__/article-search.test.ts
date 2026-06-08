@@ -85,6 +85,7 @@ function makeArticle(overrides: Partial<Article> & { id: string }): Article {
     referenceType: null,
     date: null,
     authorAddress: null,
+    affiliation: null,
     accessionNumber: null,
     customField3: null,
     journalAbbreviation: null,

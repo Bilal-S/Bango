@@ -43,6 +43,7 @@ const mockArticle: Article = {
   referenceType: null,
   date: null,
   authorAddress: null,
+  affiliation: null,
   accessionNumber: null,
   customField3: null,
   journalAbbreviation: null,
