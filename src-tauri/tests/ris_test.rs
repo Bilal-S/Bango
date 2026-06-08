@@ -339,14 +339,8 @@ ER  -\n";
         notes.contains("Times Cited in Web of Science Core Collection:  87"),
         "Should contain first line"
     );
-    assert!(
-        notes.contains("Total Times Cited:  104"),
-        "Should contain second line"
-    );
-    assert!(
-        notes.contains("Cited Reference Count:  113"),
-        "Should contain third line"
-    );
+    assert!(notes.contains("Total Times Cited:  104"), "Should contain second line");
+    assert!(notes.contains("Cited Reference Count:  113"), "Should contain third line");
     assert_eq!(rec.num_cited, Some(104), "Should extract Total Times Cited");
     assert_eq!(rec.num_references, Some(113), "Should extract Cited Reference Count");
 }
@@ -372,10 +366,7 @@ ER  -\n";
         notes.contains("Times Cited in Web of Science Core Collection:  44"),
         "Should contain first line"
     );
-    assert!(
-        notes.contains("Total Times Cited:  49"),
-        "Should contain second line (continuation)"
-    );
+    assert!(notes.contains("Total Times Cited:  49"), "Should contain second line (continuation)");
     assert!(
         notes.contains("Cited Reference Count:  34"),
         "Should contain third line (continuation)"

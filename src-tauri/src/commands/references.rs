@@ -1,7 +1,9 @@
+use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::db::reference_repo;
 use crate::error::AppError;
+use crate::models::article::NewArticle;
 use crate::models::reference::{
     ArticleReference, ArticleReferenceLink, MatchStatus, NewReferencePaper, ReferenceType,
 };
@@ -182,6 +184,142 @@ pub fn link_reference_to_article(
     Ok(link)
 }
 
+/// Promote a reference paper to a full article in the library.
+///
+/// If an article with matching DOI or title+journal+year already exists,
+/// links the reference paper to that existing article instead of creating a duplicate.
+/// Otherwise, creates a new article with 'working' status.
+#[tauri::command]
+pub fn promote_reference_to_article(
+    db_state: tauri::State<'_, DbState>,
+    reference_paper_id: String,
+) -> Result<PromoteResult, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    // Fetch the reference paper
+    let paper = reference_repo::get_paper_by_id(&conn, &reference_paper_id)?;
+
+    // Check if already promoted/matched
+    if paper.matched_article_id.is_some() {
+        return Err(AppError::Validation(format!(
+            "Reference paper {} is already linked to article {}",
+            reference_paper_id,
+            paper.matched_article_id.as_deref().unwrap_or("?")
+        )));
+    }
+
+    // First, try to find a matching existing article in the library
+    if let Some(existing_id) = reference_repo::auto_match_paper_to_article(&conn, &paper)? {
+        // Link to existing article instead of creating a duplicate
+        reference_repo::update_paper_match(
+            &conn,
+            &reference_paper_id,
+            &MatchStatus::Matched,
+            Some(&existing_id),
+        )?;
+
+        let existing_article = article_repo::get_article_by_id(&conn, &existing_id)?;
+
+        // Audit log
+        let _ = audit_repo::create_entry(
+            &conn,
+            &existing_id,
+            "reference_import",
+            None,
+            None,
+            Some(&format!(
+                "Linked reference paper '{}' to existing article",
+                if paper.title.is_empty() { "(unknown)" } else { &paper.title }
+            )),
+            "user",
+        );
+
+        return Ok(PromoteResult {
+            article_id: existing_id,
+            article_title: existing_article.title,
+            was_linked: true,
+        });
+    }
+
+    // No existing match — create a new article from the paper's metadata
+    let new_article = NewArticle {
+        title: paper.title.clone(),
+        abstract_text: paper.abstract_text.clone().unwrap_or_default(),
+        authors: paper.authors.clone(),
+        publication_year: paper.publication_year,
+        doi: paper.doi.clone(),
+        journal: paper.journal.clone(),
+        volume: paper.volume.clone(),
+        issue: paper.issue.clone(),
+        start_page: paper.start_page.clone(),
+        end_page: paper.end_page.clone(),
+        keywords: paper.keywords.clone(),
+        url: paper.url.clone(),
+        language: paper.language.clone(),
+        publisher: paper.publisher.clone(),
+        publisher_city: paper.publisher_city.clone(),
+        publisher_address: paper.publisher_address.clone(),
+        issn: paper.issn.clone(),
+        reference_type: paper.reference_type.clone(),
+        date: paper.date.clone(),
+        author_address: None,
+        accession_number: None,
+        custom_field3: None,
+        journal_abbreviation: None,
+        journal_iso_abbreviation: None,
+        notes: paper.notes.clone(),
+        web_of_science_db: None,
+        ris_extras: paper.ris_extras.clone(),
+        import_source: Some("reference_promote".into()),
+        data_length: None,
+        token_estimate: None,
+        num_cited: None,
+        num_references: None,
+        has_full_text: false,
+        full_text_file_name: None,
+    };
+
+    let article = article_repo::insert_article(&conn, &new_article)?;
+
+    // Promoted articles go directly to 'working' status, not 'duplicate'
+    article_repo::move_to_working(&conn, &article.id)?;
+
+    // Update the reference paper's match status
+    reference_repo::promote_to_article(&conn, &reference_paper_id, &article.id)?;
+
+    // Audit log
+    let _ = audit_repo::create_entry(
+        &conn,
+        &article.id,
+        "reference_import",
+        None,
+        None,
+        Some(&format!(
+            "Promoted reference paper '{}' to article",
+            if paper.title.is_empty() { "(unknown)" } else { &paper.title }
+        )),
+        "user",
+    );
+
+    Ok(PromoteResult {
+        article_id: article.id,
+        article_title: article.title,
+        was_linked: false,
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromoteResult {
+    pub article_id: String,
+    pub article_title: String,
+    /// true if linked to an existing article, false if a new article was created
+    pub was_linked: bool,
+}
+
 /// Delete all references for an article.
 #[tauri::command]
 pub fn delete_article_references(
@@ -297,9 +435,8 @@ pub struct PreviewResult {
 /// Parses the file and returns what would be imported.
 #[tauri::command]
 pub fn preview_references_import(file_path: String) -> Result<PreviewResult, AppError> {
-    let content = std::fs::read_to_string(&file_path).map_err(|e| {
-        AppError::Import(format!("Failed to read file '{}': {}", file_path, e))
-    })?;
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| AppError::Import(format!("Failed to read file '{}': {}", file_path, e)))?;
 
     let parse_result = parser::parse_ris(&content)?;
     let records = &parse_result.records;

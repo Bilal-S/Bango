@@ -38,6 +38,7 @@ pub enum MatchStatus {
     Unmatched,
     Matched,
     NotInLibrary,
+    Imported,
 }
 
 impl MatchStatus {
@@ -47,6 +48,7 @@ impl MatchStatus {
             Self::Unmatched => "unmatched",
             Self::Matched => "matched",
             Self::NotInLibrary => "not_in_library",
+            Self::Imported => "imported",
         }
     }
 
@@ -57,6 +59,7 @@ impl MatchStatus {
             "unmatched" => Some(Self::Unmatched),
             "matched" => Some(Self::Matched),
             "not_in_library" => Some(Self::NotInLibrary),
+            "imported" => Some(Self::Imported),
             _ => None,
         }
     }

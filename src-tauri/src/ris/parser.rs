@@ -160,7 +160,7 @@ fn append_option(opt: &mut Option<String>, text: &str) {
 }
 
 /// Appends text (with newline separator) to the last entry in a Vec<String>.
-fn append_last_vec(vec: &mut Vec<String>, text: &str) {
+fn append_last_vec(vec: &mut [String], text: &str) {
     if let Some(last) = vec.last_mut() {
         last.push('\n');
         last.push_str(text);

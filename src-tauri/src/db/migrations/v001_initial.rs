@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS reference_papers (
     notes TEXT,
     ris_extras TEXT,                               -- JSON object
     match_status TEXT NOT NULL DEFAULT 'unmatched'
-        CHECK(match_status IN ('unmatched', 'matched', 'not_in_library')),
+        CHECK(match_status IN ('unmatched', 'matched', 'imported', 'not_in_library')),
     matched_article_id TEXT,                       -- FK → articles.id
     citation_count INTEGER NOT NULL DEFAULT 0,     -- how many articles cite this paper
     reference_count INTEGER NOT NULL DEFAULT 0,    -- how many articles reference this paper

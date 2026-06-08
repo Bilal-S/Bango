@@ -66,7 +66,7 @@ export interface Article {
 export type ReferenceType = 'citation' | 'reference';
 
 /** Match status for a reference against the article library */
-export type MatchStatus = 'unmatched' | 'matched' | 'not_in_library';
+export type MatchStatus = 'unmatched' | 'matched' | 'not_in_library' | 'imported';
 
 /** A citation or reference associated with an article */
 export interface ArticleReference {
@@ -74,6 +74,8 @@ export interface ArticleReference {
   referenceType: ReferenceType;
   parentId: string;
   matchStatus: MatchStatus;
+  /** ID of the article this reference was matched/promoted to (null if unmatched) */
+  matchedArticleId: string | null;
   title: string | null;
   abstractText: string | null;
   authors: string[];

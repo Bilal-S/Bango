@@ -158,6 +158,7 @@ pub fn run() {
             commands::references::upsert_reference_paper,
             commands::references::preview_references_import,
             commands::references::import_references_for_article,
+            commands::references::promote_reference_to_article,
         ]);
 
     #[cfg(debug_assertions)]

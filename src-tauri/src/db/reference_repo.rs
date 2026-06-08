@@ -215,6 +215,20 @@ pub fn auto_match_paper_to_article(
     Ok(None)
 }
 
+/// Promote a reference paper to a full article in the library.
+/// Returns the ID of the newly created article.
+pub fn promote_to_article(
+    conn: &Connection,
+    paper_id: &str,
+    new_article_id: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE reference_papers SET match_status = 'imported', matched_article_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+        params![new_article_id, paper_id],
+    )?;
+    Ok(())
+}
+
 /// Update match status and matched_article_id for a reference paper.
 pub fn update_paper_match(
     conn: &Connection,

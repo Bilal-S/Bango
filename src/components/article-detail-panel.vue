@@ -22,6 +22,7 @@ import { useReferences } from '@/composables/use-references';
 import type { PreviewPaper } from '@/composables/use-references';
 import type { ArticleReference } from '@/types';
 import { flattenRawReferences } from '@/utils/reference-flatten';
+import { useToast } from '@/composables/use-toast';
 
 const props = defineProps<{
   article: Article;
@@ -52,6 +53,7 @@ const emit = defineEmits<{
   deleteFullText: [id: string];
   readFullText: [id: string];
   refreshArticle: [id: string];
+  articlePromoted: [articleId: string];
   readerOpened: [];
 }>();
 
@@ -156,8 +158,10 @@ function toggleImportedNotes(): void {
 const auditExpanded = ref(false);
 
 // References section
-const { getArticleReferences } = useReferences();
+const { getArticleReferences, promoteReferenceToArticle } = useReferences();
 const articleReferences = ref<ArticleReference[]>([]);
+const expandedRefs = ref<Set<string>>(new Set());
+const promotingRefId = ref<string | null>(null);
 const refsLoading = ref(false);
 const refTab = ref<'reference' | 'citation'>('reference');
 const showRefImportDialog = ref(false);
@@ -267,6 +271,48 @@ const citationRefCount = computed(() => {
 const activeRefs = computed(() =>
   articleReferences.value.filter((r) => r.referenceType === refTab.value)
 );
+
+function toggleRefExpand(id: string): void {
+  const next = new Set(expandedRefs.value);
+  if (next.has(id)) {
+    next.delete(id);
+  } else {
+    next.add(id);
+  }
+  expandedRefs.value = next;
+}
+
+const toast = useToast();
+
+async function handlePromoteReference(paperId: string): Promise<void> {
+  promotingRefId.value = paperId;
+  try {
+    const result = await promoteReferenceToArticle(paperId);
+    if (result) {
+      // Update the local reference item to reflect the new status
+      const ref = articleReferences.value.find((r) => r.id === paperId);
+      if (ref) {
+        ref.matchStatus = 'imported';
+        ref.matchedArticleId = result.articleId;
+      }
+      const msg = result.wasLinked
+        ? `"${result.articleTitle}" already in library — linked to existing article`
+        : `"${result.articleTitle}" added to library`;
+      toast.show(msg, 'success');
+      emit('articlePromoted', result.articleId);
+    }
+  } catch (e) {
+    toast.show(`Failed to promote: ${e instanceof Error ? e.message : String(e)}`, 'error');
+  } finally {
+    promotingRefId.value = null;
+  }
+}
+
+function handleRefNavigate(item: ArticleReference): void {
+  if (item.matchedArticleId) {
+    emit('navigateToArticle', item.matchedArticleId);
+  }
+}
 
 // Panel resizing logic
 const panelWidth = ref(parseInt(localStorage.getItem('bango-detail-panel-width') || '480'));
@@ -1169,28 +1215,107 @@ function handleCriteriaSave(
             No {{ refTab === 'reference' ? 'references' : 'citations' }} yet.
           </template>
         </div>
-        <ul v-else class="space-y-1 text-body-sm max-h-52 overflow-y-auto">
+        <ul v-else class="space-y-0.5 text-body-sm max-h-72 overflow-y-auto">
           <li
             v-for="item in activeRefs"
             :key="item.id"
-            class="flex items-start gap-2 py-1 border-b border-slate-100 last:border-0"
+            class="group border-b border-slate-100 last:border-0"
           >
-            <span
-              class="shrink-0 text-[10px] font-bold px-1 rounded mt-0.5"
-              :class="
-                item.matchStatus === 'matched'
-                  ? 'bg-emerald-50 text-emerald-600'
-                  : 'bg-slate-100 text-slate-400'
-              "
+            <!-- Row header -->
+            <div class="flex items-start gap-2 py-1.5">
+              <!-- Title + authors (clickable: navigate if matched/imported, expand otherwise) -->
+              <div class="min-w-0 flex-1">
+                <span
+                  class="text-slate-700 truncate block"
+                  :class="{
+                    'hover:text-indigo-600 cursor-pointer':
+                      item.matchStatus === 'matched' || item.matchStatus === 'imported',
+                  }"
+                  @click="
+                    item.matchStatus === 'matched' || item.matchStatus === 'imported'
+                      ? handleRefNavigate(item)
+                      : toggleRefExpand(item.id)
+                  "
+                >
+                  {{ item.title || '(untitled)' }}
+                </span>
+                <span class="text-[11px] text-slate-400">
+                  {{ item.authors.join(', ') }}
+                  <span v-if="item.publicationYear"> ({{ item.publicationYear }})</span>
+                </span>
+              </div>
+
+              <!-- Action buttons -->
+              <div
+                class="shrink-0 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <!-- Expand/collapse -->
+                <button
+                  class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer rounded"
+                  title="Toggle details"
+                  @click="toggleRefExpand(item.id)"
+                >
+                  {{ expandedRefs.has(item.id) ? 'expand_less' : 'expand_more' }}
+                </button>
+                <!-- Navigate to matched article -->
+                <button
+                  v-if="item.matchStatus === 'matched' || item.matchStatus === 'imported'"
+                  class="material-symbols-outlined text-[14px] text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 cursor-pointer rounded"
+                  title="Go to article"
+                  @click="handleRefNavigate(item)"
+                >
+                  link
+                </button>
+                <!-- Promote to article (only for unmatched) -->
+                <button
+                  v-if="item.matchStatus === 'unmatched' || item.matchStatus === 'not_in_library'"
+                  class="material-symbols-outlined text-[14px] text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 cursor-pointer rounded"
+                  :title="promotingRefId === item.id ? 'Promoting…' : 'Add to library'"
+                  :disabled="promotingRefId === item.id"
+                  @click="handlePromoteReference(item.id)"
+                >
+                  {{ promotingRefId === item.id ? 'progress_activity' : 'add_circle' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Expanded details -->
+            <div
+              v-if="expandedRefs.has(item.id)"
+              class="pl-7 pb-2 text-[11px] text-slate-500 space-y-1"
             >
-              {{ item.matchStatus === 'matched' ? '✓' : '·' }}
-            </span>
-            <div class="min-w-0">
-              <span class="text-slate-700 truncate block">{{ item.title || '(untitled)' }}</span>
-              <span class="text-[11px] text-slate-400">
-                {{ item.authors.join(', ') }}
-                <span v-if="item.publicationYear"> ({{ item.publicationYear }})</span>
-              </span>
+              <p v-if="item.abstractText" class="leading-relaxed line-clamp-3">
+                {{ item.abstractText }}
+              </p>
+              <div class="flex flex-wrap gap-x-3 gap-y-0.5">
+                <span v-if="item.journal"> <strong>Journal:</strong> {{ item.journal }} </span>
+                <span v-if="item.doi">
+                  <strong>DOI:</strong>
+                  <a
+                    class="text-indigo-500 hover:underline"
+                    :href="'https://doi.org/' + item.doi"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {{ item.doi }}
+                  </a>
+                </span>
+                <span v-if="item.volume"><strong>Vol:</strong> {{ item.volume }}</span>
+                <span v-if="item.issue"><strong>Issue:</strong> {{ item.issue }}</span>
+                <span v-if="item.startPage">
+                  <strong>Pages:</strong> {{ item.startPage
+                  }}<template v-if="item.endPage">–{{ item.endPage }}</template>
+                </span>
+              </div>
+              <div v-if="item.keywords && item.keywords.length > 0" class="flex flex-wrap gap-1">
+                <span
+                  v-for="kw in item.keywords.slice(0, 5)"
+                  :key="kw"
+                  class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px]"
+                >
+                  {{ kw }}
+                </span>
+              </div>
             </div>
           </li>
         </ul>

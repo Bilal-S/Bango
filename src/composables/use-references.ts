@@ -155,6 +155,29 @@ export function useReferences() {
     }
   }
 
+  /**
+   * Promote a reference paper to a full article in the library.
+   * Returns the new article ID on success.
+   */
+  async function promoteReferenceToArticle(
+    referencePaperId: string
+  ): Promise<{ articleId: string; articleTitle: string; wasLinked: boolean } | null> {
+    loading.value = true;
+    error.value = null;
+    try {
+      return await tauriCommand<{ articleId: string; articleTitle: string; wasLinked: boolean }>(
+        'promote_reference_to_article',
+        { referencePaperId }
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      error.value = msg;
+      return null;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   return {
     loading,
     error,
@@ -164,5 +187,6 @@ export function useReferences() {
     deleteArticleReferences,
     previewReferencesImport,
     importReferencesForArticle,
+    promoteReferenceToArticle,
   };
 }

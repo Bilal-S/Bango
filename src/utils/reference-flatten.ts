@@ -25,6 +25,7 @@ export interface RawReference {
     language?: string | null;
     publisher?: string | null;
     matchStatus?: string | null;
+    matchedArticleId?: string | null;
     citationCount?: number | null;
     referenceCount?: number | null;
     hasFullText?: boolean | null;
@@ -49,6 +50,7 @@ export function flattenRawReferences(raw: unknown[]): ArticleReference[] {
       referenceType: r.referenceType as ArticleReference['referenceType'],
       parentId: r.parentArticleId,
       matchStatus: (p.matchStatus ?? 'unmatched') as ArticleReference['matchStatus'],
+      matchedArticleId: p.matchedArticleId ?? null,
       title: p.title ?? null,
       abstractText: p.abstractText ?? null,
       authors: p.authors ?? [],

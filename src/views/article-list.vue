@@ -165,6 +165,12 @@ async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
   }
 }
 
+/** When a reference is promoted to an article, refresh the list and navigate to it */
+async function handleArticlePromoted(articleId: string): Promise<void> {
+  await search();
+  selectArticle(articleId);
+}
+
 function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
   (filter as Record<string, unknown>)[key] = value;
 }
@@ -428,6 +434,7 @@ function handleOpenReader(articleId: string): void {
       @delete-full-text="handleDeleteFullText"
       @read-full-text="handleReadFullText"
       @refresh-article="selectArticle"
+      @article-promoted="handleArticlePromoted"
     />
 
     <!-- Bulk Action Bar -->

@@ -111,6 +111,44 @@ describe('flattenRawReferences', () => {
     expect(result[0]!.matchStatus).toBe('not_in_library');
   });
 
+  it('preserves "imported" matchStatus from paper', () => {
+    const raw = [
+      makeRawRef({
+        paper: { title: 'Promoted', authors: [], matchStatus: 'imported' },
+      }),
+    ];
+    const result = flattenRawReferences(raw);
+
+    expect(result[0]!.matchStatus).toBe('imported');
+  });
+
+  it('preserves matchedArticleId when present', () => {
+    const raw = [
+      makeRawRef({
+        paper: {
+          title: 'Linked',
+          authors: [],
+          matchStatus: 'matched',
+          matchedArticleId: 'article-42',
+        },
+      }),
+    ];
+    const result = flattenRawReferences(raw);
+
+    expect(result[0]!.matchedArticleId).toBe('article-42');
+  });
+
+  it('defaults matchedArticleId to null when missing', () => {
+    const raw = [
+      makeRawRef({
+        paper: { title: 'Unlinked', authors: [] },
+      }),
+    ];
+    const result = flattenRawReferences(raw);
+
+    expect(result[0]!.matchedArticleId).toBeNull();
+  });
+
   it('defaults authors to empty array when null', () => {
     const raw = [
       makeRawRef({
@@ -326,6 +364,36 @@ describe('useReferences', () => {
         filePath: '/path/to/refs.ris',
       });
       expect(result).toEqual(preview);
+    });
+  });
+
+  describe('promoteReferenceToArticle', () => {
+    it('calls promote_reference_to_article with referencePaperId', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({
+        articleId: 'new-article-1',
+        articleTitle: 'A Study of Testing Patterns',
+      });
+
+      const { promoteReferenceToArticle } = useReferences();
+      const result = await promoteReferenceToArticle('paper-1');
+
+      expect(tauriCommand).toHaveBeenCalledWith('promote_reference_to_article', {
+        referencePaperId: 'paper-1',
+      });
+      expect(result).toEqual({
+        articleId: 'new-article-1',
+        articleTitle: 'A Study of Testing Patterns',
+      });
+    });
+
+    it('returns null on error', async () => {
+      vi.mocked(tauriCommand).mockRejectedValue(new Error('Promotion failed'));
+
+      const { promoteReferenceToArticle, error } = useReferences();
+      const result = await promoteReferenceToArticle('paper-1');
+
+      expect(result).toBeNull();
+      expect(error.value).toBe('Promotion failed');
     });
   });
 

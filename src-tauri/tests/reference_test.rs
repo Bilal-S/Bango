@@ -3,7 +3,7 @@ use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::db::reference_repo;
 use bango_lib::models::article::NewArticle;
-use bango_lib::models::reference::{NewReferencePaper, ReferenceType};
+use bango_lib::models::reference::{MatchStatus, NewReferencePaper, ReferenceType};
 
 fn make_paper(title: &str, doi: Option<&str>) -> NewReferencePaper {
     NewReferencePaper {
@@ -308,4 +308,114 @@ fn test_filter_by_reference_type() {
     .expect("get cit failed");
     assert_eq!(cit_only.len(), 1);
     assert_eq!(cit_only[0].paper.title, "Cit Paper");
+}
+
+#[test]
+fn test_promote_unmatched_paper_to_article() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    // Create a source article
+    let source = article_repo::insert_article(&conn, &make_article("Source Article"))
+        .expect("insert source failed");
+
+    // Create an unmatched reference paper
+    let paper = make_paper("Unmatched Paper", Some("10.1234/promote-test"));
+    let (inserted_paper, _) =
+        reference_repo::insert_or_find_paper(&conn, &paper).expect("insert paper failed");
+
+    // Link it as a reference
+    reference_repo::create_link(&conn, &source.id, &inserted_paper.id, &ReferenceType::Reference)
+        .expect("create_link failed");
+
+    // Verify it starts as unmatched
+    assert_eq!(inserted_paper.match_status, MatchStatus::Unmatched);
+    assert!(inserted_paper.matched_article_id.is_none());
+
+    // Create a new article from the paper's data (mimics what the Tauri command does)
+    let new_article = article_repo::insert_article(
+        &conn,
+        &NewArticle {
+            title: inserted_paper.title.clone(),
+            abstract_text: inserted_paper.abstract_text.clone().unwrap_or_default(),
+            authors: inserted_paper.authors.clone(),
+            publication_year: inserted_paper.publication_year,
+            doi: inserted_paper.doi.clone(),
+            journal: inserted_paper.journal.clone(),
+            ..make_article("placeholder")
+        },
+    )
+    .expect("insert new article failed");
+
+    // Promote the paper — links it to the new article
+    reference_repo::promote_to_article(&conn, &inserted_paper.id, &new_article.id)
+        .expect("promote_to_article failed");
+
+    // Verify the paper's match status was updated
+    let refs_after = reference_repo::get_references_for_article(&conn, &source.id, None)
+        .expect("get refs failed");
+    assert_eq!(refs_after.len(), 1);
+    assert_eq!(refs_after[0].paper.match_status, MatchStatus::Imported);
+    assert_eq!(
+        refs_after[0].paper.matched_article_id.clone().unwrap(),
+        new_article.id
+    );
+
+    // Verify the new article exists and has the right title
+    let fetched = article_repo::get_article_by_id(&conn, &new_article.id)
+        .expect("get article failed");
+    assert_eq!(fetched.title, "Unmatched Paper");
+}
+
+#[test]
+fn test_promote_links_to_existing_article_by_doi() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    // Create an article with a known DOI
+    let existing = article_repo::insert_article(
+        &conn,
+        &NewArticle {
+            title: "Existing ML Paper".to_string(),
+            abstract_text: "Existing abstract".to_string(),
+            doi: Some("10.1234/existing-ml".to_string()),
+            authors: vec!["Smith".to_string()],
+            publication_year: Some(2021),
+            journal: Some("AI Journal".to_string()),
+            ..make_article("placeholder")
+        },
+    )
+    .expect("insert existing article failed");
+    // Move to working (articles default to 'duplicate')
+    article_repo::move_to_working(&conn, &existing.id).expect("move_to_working failed");
+
+    // Create a reference paper with the SAME DOI
+    let paper = make_paper("Existing ML Paper", Some("10.1234/existing-ml"));
+    let (inserted_paper, _) =
+        reference_repo::insert_or_find_paper(&conn, &paper).expect("insert paper failed");
+
+    // Auto-match should find the existing article
+    let matched_id =
+        reference_repo::auto_match_paper_to_article(&conn, &inserted_paper).expect("auto_match failed");
+    assert!(matched_id.is_some(), "Should find a match by DOI");
+    assert_eq!(matched_id.as_deref().unwrap(), existing.id, "Should match the existing article");
+
+    // Link the paper to the existing article (mimics promote command's linked path)
+    reference_repo::update_paper_match(
+        &conn,
+        &inserted_paper.id,
+        &MatchStatus::Matched,
+        matched_id.as_deref(),
+    )
+    .expect("update_paper_match failed");
+
+    // Verify the paper is now linked
+    let refreshed = reference_repo::get_paper_by_id(&conn, &inserted_paper.id)
+        .expect("get paper failed");
+    assert_eq!(refreshed.match_status, MatchStatus::Matched);
+    assert_eq!(refreshed.matched_article_id.as_deref(), Some(existing.id.as_str()));
+
+    // Verify no duplicate article was created (still only 1 article)
+    let all = article_repo::get_all_articles(&conn).expect("get all failed");
+    assert_eq!(all.len(), 1, "Should still have exactly 1 article");
 }
