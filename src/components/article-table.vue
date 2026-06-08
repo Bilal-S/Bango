@@ -18,7 +18,7 @@ defineEmits<{
   select: [id: string];
   openReader: [id: string];
   sort: [column: string];
-  toggleSelect: [id: string];
+  toggleSelect: [id: string, shiftKey: boolean];
   toggleSelectAll: [];
 }>();
 
@@ -136,14 +136,16 @@ watch(
           <thead class="bg-slate-50/50 border-b border-slate-200">
             <tr>
               <!-- Checkbox header -->
-              <th class="w-10 py-4 px-2">
-                <input
-                  type="checkbox"
-                  class="accent-indigo-600 rounded cursor-pointer"
-                  :checked="allSelected"
-                  :indeterminate="someSelected"
-                  @change="$emit('toggleSelectAll')"
-                />
+              <th class="w-12 py-3 px-2">
+                <label class="checkbox-target flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    class="accent-indigo-600 rounded cursor-pointer"
+                    :checked="allSelected"
+                    :indeterminate="someSelected"
+                    @change="$emit('toggleSelectAll')"
+                  />
+                </label>
               </th>
               <th
                 v-for="col in COLUMNS"
@@ -180,13 +182,15 @@ watch(
               @click="$emit('select', article.id)"
             >
               <!-- Checkbox cell -->
-              <td class="py-5 px-2" @click.stop>
-                <input
-                  type="checkbox"
-                  class="accent-indigo-600 rounded cursor-pointer"
-                  :checked="selectedIds.has(article.id)"
-                  @change="$emit('toggleSelect', article.id)"
-                />
+              <td class="py-3 px-2" @click.stop>
+                <label class="checkbox-target flex items-center justify-center">
+                  <input
+                    type="checkbox"
+                    class="accent-indigo-600 rounded cursor-pointer"
+                    :checked="selectedIds.has(article.id)"
+                    @click.stop="$emit('toggleSelect', article.id, ($event as MouseEvent).shiftKey)"
+                  />
+                </label>
               </td>
               <td
                 class="col-index py-5 px-2 text-body-sm text-slate-500 font-mono border-l-4 transition-colors"
@@ -314,5 +318,17 @@ watch(
   .col-changed {
     display: none;
   }
+}
+
+/* Larger checkbox hit target (44px min per WCAG) */
+.checkbox-target {
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.checkbox-target:hover {
+  background: rgba(99, 102, 241, 0.06);
 }
 </style>

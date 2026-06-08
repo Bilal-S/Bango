@@ -71,6 +71,7 @@ export function useArticleSearch() {
     allSelected,
     someSelected,
     toggleSelect,
+    toggleSelectRange,
     toggleSelectAll,
     clearSelection,
   } = useArticleSelection({ articles });
@@ -559,6 +560,7 @@ export function useArticleSearch() {
     allSelected,
     someSelected,
     toggleSelect,
+    toggleSelectRange,
     toggleSelectAll,
     clearSelection,
     // Bulk operations

@@ -625,6 +625,63 @@ describe('useArticleSearch', () => {
       expect(selectedIds.value.size).toBe(0);
     });
 
+    // ── Range selection (shift-click) ─────────────────────────────
+    it('toggleSelectRange without shift acts like toggleSelect', async () => {
+      mockSearchResults();
+      const { search, toggleSelectRange, selectedIds } = useArticleSearch();
+      await search();
+      toggleSelectRange('a1', false);
+      expect(selectedIds.value.has('a1')).toBe(true);
+    });
+
+    it('toggleSelectRange with shift selects range from last toggled', async () => {
+      mockSearchResults();
+      const { search, toggleSelectRange, selectedIds } = useArticleSearch();
+      await search();
+      // First click sets anchor
+      toggleSelectRange('a1', false);
+      // Shift-click selects a1..a3 inclusive
+      toggleSelectRange('a3', true);
+      expect(selectedIds.value.has('a1')).toBe(true);
+      expect(selectedIds.value.has('a2')).toBe(true);
+      expect(selectedIds.value.has('a3')).toBe(true);
+      expect(selectedIds.value.size).toBe(3);
+    });
+
+    it('toggleSelectRange works backwards', async () => {
+      mockSearchResults();
+      const { search, toggleSelectRange, selectedIds } = useArticleSearch();
+      await search();
+      toggleSelectRange('a3', false);
+      toggleSelectRange('a1', true);
+      expect(selectedIds.value.has('a1')).toBe(true);
+      expect(selectedIds.value.has('a2')).toBe(true);
+      expect(selectedIds.value.has('a3')).toBe(true);
+    });
+
+    it('consecutive shift-clicks extend from original anchor', async () => {
+      mockSearchResults();
+      const { search, toggleSelectRange, selectedIds } = useArticleSearch();
+      await search();
+      toggleSelectRange('a1', false);
+      toggleSelectRange('a2', true);
+      // Next shift-click extends from original anchor a1 to a3
+      toggleSelectRange('a3', true);
+      expect(selectedIds.value.has('a1')).toBe(true);
+      expect(selectedIds.value.has('a2')).toBe(true);
+      expect(selectedIds.value.has('a3')).toBe(true);
+      expect(selectedIds.value.size).toBe(3);
+    });
+
+    it('shift-click with no prior anchor falls back to toggle', async () => {
+      mockSearchResults();
+      const { search, toggleSelectRange, selectedIds } = useArticleSearch();
+      await search();
+      toggleSelectRange('a2', true);
+      expect(selectedIds.value.size).toBe(1);
+      expect(selectedIds.value.has('a2')).toBe(true);
+    });
+
     it('selectedCount returns size of selected set', () => {
       const { toggleSelect, selectedCount } = useArticleSearch();
       expect(selectedCount.value).toBe(0);

@@ -74,7 +74,7 @@ const {
   selectedCount,
   allSelected,
   someSelected,
-  toggleSelect,
+  toggleSelectRange,
   toggleSelectAll,
   clearSelection,
   // Bulk operations
@@ -361,7 +361,7 @@ function handleOpenReader(articleId: string): void {
           @select="selectArticle"
           @open-reader="handleOpenReader"
           @sort="toggleSort"
-          @toggle-select="toggleSelect"
+          @toggle-select="toggleSelectRange"
           @toggle-select-all="toggleSelectAll"
         />
 
