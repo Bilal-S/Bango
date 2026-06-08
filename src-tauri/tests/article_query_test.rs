@@ -591,11 +591,7 @@ fn test_all_view_search_filters_by_title() {
     let conn = setup_db();
     seed_working_articles(
         &conn,
-        &[
-            ("Alpha Article", Some(2020)),
-            ("Beta Article", Some(2021)),
-            ("Gamma Paper", Some(2022)),
-        ],
+        &[("Alpha Article", Some(2020)), ("Beta Article", Some(2021)), ("Gamma Paper", Some(2022))],
     );
 
     let query = ArticleQuery {
@@ -623,13 +619,7 @@ fn test_all_view_search_filters_by_title() {
 #[test]
 fn test_all_view_search_no_results() {
     let conn = setup_db();
-    seed_working_articles(
-        &conn,
-        &[
-            ("Alpha Article", Some(2020)),
-            ("Beta Article", Some(2021)),
-        ],
-    );
+    seed_working_articles(&conn, &[("Alpha Article", Some(2020)), ("Beta Article", Some(2021))]);
 
     let query = ArticleQuery {
         status: None,
@@ -655,10 +645,7 @@ fn test_all_view_search_no_results() {
 #[test]
 fn test_all_view_search_case_insensitive() {
     let conn = setup_db();
-    seed_working_articles(
-        &conn,
-        &[("Machine Learning in Healthcare", Some(2022))],
-    );
+    seed_working_articles(&conn, &[("Machine Learning in Healthcare", Some(2022))]);
 
     // Search with lowercase should match mixed-case title
     let query = ArticleQuery {
@@ -810,11 +797,7 @@ fn test_all_view_year_filter() {
     let conn = setup_db();
     seed_working_articles(
         &conn,
-        &[
-            ("Old Article", Some(2018)),
-            ("Mid Article", Some(2020)),
-            ("New Article", Some(2023)),
-        ],
+        &[("Old Article", Some(2018)), ("Mid Article", Some(2020)), ("New Article", Some(2023))],
     );
 
     let query = ArticleQuery {
@@ -884,7 +867,8 @@ fn test_search_matches_user_notes() {
     article_repo::move_to_working(&conn, &inserted.id).expect("move failed");
 
     // Add user notes after insert
-    article_repo::update_user_notes(&conn, &inserted.id, "Important finding about XYZ compound").expect("notes failed");
+    article_repo::update_user_notes(&conn, &inserted.id, "Important finding about XYZ compound")
+        .expect("notes failed");
 
     let query = ArticleQuery {
         status: Some("working".into()),
@@ -911,10 +895,7 @@ fn test_search_matches_user_notes() {
 #[test]
 fn test_search_user_notes_null_no_crash() {
     let conn = setup_db();
-    seed_working_articles(
-        &conn,
-        &[("Article With No Notes", Some(2020))],
-    );
+    seed_working_articles(&conn, &[("Article With No Notes", Some(2020))]);
 
     // user_notes is NULL for this article — search should not crash
     let query = ArticleQuery {
@@ -943,9 +924,12 @@ fn test_duplicate_view_search_filters_results() {
     let conn = setup_db();
 
     // Insert duplicates (status stays 'duplicate')
-    let _d1 = article_repo::insert_article(&conn, &new_article("Dup Alpha", Some(2020))).expect("insert failed");
-    let _d2 = article_repo::insert_article(&conn, &new_article("Dup Beta", Some(2021))).expect("insert failed");
-    let _d3 = article_repo::insert_article(&conn, &new_article("Dup Gamma", Some(2022))).expect("insert failed");
+    let _d1 = article_repo::insert_article(&conn, &new_article("Dup Alpha", Some(2020)))
+        .expect("insert failed");
+    let _d2 = article_repo::insert_article(&conn, &new_article("Dup Beta", Some(2021)))
+        .expect("insert failed");
+    let _d3 = article_repo::insert_article(&conn, &new_article("Dup Gamma", Some(2022)))
+        .expect("insert failed");
 
     let query = ArticleQuery {
         status: Some("duplicate".into()),
