@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +27,10 @@ pub struct ProjectBackup {
     pub article_tags: Vec<serde_json::Value>,
     pub article_labels: Vec<serde_json::Value>,
     pub audit_entries: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub reference_papers: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub article_reference_links: Vec<serde_json::Value>,
     pub llm_config: Option<LlmConfigBackup>,
 }
 
@@ -45,6 +51,9 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
     let article_tags = serialize_table(conn, "SELECT * FROM article_tags")?;
     let article_labels = serialize_table(conn, "SELECT * FROM article_labels")?;
     let audit = serialize_table(conn, "SELECT * FROM audit_entries")?;
+    let reference_papers = serialize_table(conn, "SELECT * FROM reference_papers")?;
+    let article_reference_links =
+        serialize_table(conn, "SELECT * FROM article_reference_links")?;
 
     let llm_backup = llm_config_repo::get_config(conn)?.map(|c| LlmConfigBackup {
         provider: c.provider.as_str().to_string(),
@@ -67,6 +76,8 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
         article_tags,
         article_labels,
         audit_entries: audit,
+        reference_papers,
+        article_reference_links,
         llm_config: llm_backup,
     };
 
@@ -134,6 +145,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     }
 
     // Clear existing data (reverse dependency order)
+    conn.execute("DELETE FROM article_reference_links", [])?;
+    conn.execute("DELETE FROM reference_papers", [])?;
     conn.execute("DELETE FROM audit_entries", [])?;
     conn.execute("DELETE FROM article_tags", [])?;
     conn.execute("DELETE FROM article_labels", [])?;
@@ -330,6 +343,138 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
     }
 
+    // Restore reference papers (after articles, before links)
+    // Build ID mapping for constraint-violation dedup: backup_id → actual_id
+    let mut paper_id_map: HashMap<String, String> = HashMap::new();
+
+    for rp in &backup.reference_papers {
+        let id = get_str(rp, "id");
+        let title = get_str(rp, "title");
+        let abstract_text = get_str_field(rp, "abstractText", "abstract_text")
+            .unwrap_or_default();
+        let authors = serde_json::to_string(
+            &rp.get("authors").cloned().unwrap_or(serde_json::json!([])),
+        )
+        .unwrap_or_default();
+        let publication_year = rp.get("publicationYear").and_then(|v| v.as_i64());
+        // Normalize DOI: empty string → None (matches unique constraint)
+        let doi: Option<String> = get_str_field(rp, "doi", "doi")
+            .and_then(|d| if d.is_empty() { None } else { Some(d) });
+        let journal = get_str_field(rp, "journal", "journal");
+        let volume = get_str_field(rp, "volume", "volume");
+        let issue = get_str_field(rp, "issue", "issue");
+        let start_page = get_str_field(rp, "startPage", "start_page");
+        let end_page = get_str_field(rp, "endPage", "end_page");
+        let keywords = serde_json::to_string(
+            &rp.get("keywords").cloned().unwrap_or(serde_json::json!([])),
+        )
+        .unwrap_or_default();
+        let url = get_str_field(rp, "url", "url");
+        let language = get_str_field(rp, "language", "language");
+        let publisher = get_str_field(rp, "publisher", "publisher");
+        let publisher_city = get_str_field(rp, "publisherCity", "publisher_city");
+        let publisher_address =
+            get_str_field(rp, "publisherAddress", "publisher_address");
+        let issn = get_str_field(rp, "issn", "issn");
+        let reference_type = get_str_field(rp, "referenceType", "reference_type");
+        let date = get_str_field(rp, "date", "date");
+        let notes = get_str_field(rp, "notes", "notes");
+        let ris_extras = serde_json::to_string(
+            &rp.get("risExtras")
+                .or_else(|| rp.get("ris_extras"))
+                .cloned()
+                .unwrap_or(serde_json::json!({})),
+        )
+        .unwrap_or_default();
+        let match_status = get_str_field(rp, "matchStatus", "match_status")
+            .unwrap_or_else(|| "unmatched".to_string());
+        let matched_article_id =
+            get_str_field(rp, "matchedArticleId", "matched_article_id");
+        let citation_count = rp
+            .get("citationCount")
+            .or_else(|| rp.get("citation_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let reference_count = rp
+            .get("referenceCount")
+            .or_else(|| rp.get("reference_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let import_source = get_str_field(rp, "importSource", "import_source");
+        let created_at =
+            get_str_field(rp, "createdAt", "created_at").unwrap_or_else(|| {
+                chrono::Utc::now().to_rfc3339()
+            });
+        let updated_at =
+            get_str_field(rp, "updatedAt", "updated_at").unwrap_or_else(|| {
+                chrono::Utc::now().to_rfc3339()
+            });
+
+        // Try INSERT; on unique constraint violation, find existing record
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO reference_papers (
+                id, title, abstract_text, authors, publication_year, doi, journal,
+                volume, issue, start_page, end_page, keywords, url, language, publisher,
+                publisher_city, publisher_address, issn, reference_type, date, notes,
+                ris_extras, match_status, matched_article_id, citation_count,
+                reference_count, import_source, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+            )",
+            rusqlite::params![
+                id, title, abstract_text, authors, publication_year, doi, journal,
+                volume, issue, start_page, end_page, keywords, url, language, publisher,
+                publisher_city, publisher_address, issn, reference_type, date, notes,
+                ris_extras, match_status, matched_article_id, citation_count,
+                reference_count, import_source, created_at, updated_at
+            ],
+        )?;
+
+        if inserted == 0 {
+            // Constraint violation — find existing record and map IDs
+            let existing_id = find_existing_paper_id(
+                conn, doi.as_deref(), &title, &authors, publication_year,
+            );
+            if let Some(eid) = existing_id {
+                paper_id_map.insert(id, eid);
+            }
+        }
+    }
+
+    // Restore article reference links (after both articles and reference_papers)
+    // Uses paper_id_map to remap deduplicated reference paper IDs
+    for rl in &backup.article_reference_links {
+        let id = get_str(rl, "id");
+        let parent_article_id = get_str_field(rl, "parentArticleId", "parent_article_id")
+            .unwrap_or_default();
+        let original_paper_id =
+            get_str_field(rl, "referencePaperId", "reference_paper_id")
+                .unwrap_or_default();
+        // Remap to actual paper ID if it was deduplicated
+        let reference_paper_id = paper_id_map
+            .get(&original_paper_id)
+            .map(|s| s.as_str())
+            .unwrap_or(&original_paper_id);
+        let ref_type = rl
+            .get("referenceType")
+            .or_else(|| rl.get("type"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let created_at =
+            get_str_field(rl, "createdAt", "created_at").unwrap_or_else(|| {
+                chrono::Utc::now().to_rfc3339()
+            });
+        conn.execute(
+            "INSERT INTO article_reference_links (
+                id, parent_article_id, reference_paper_id, type, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                id, parent_article_id, reference_paper_id, ref_type, created_at
+            ],
+        )?;
+    }
+
     // Restore audit entries
     for ae in &backup.audit_entries {
         let id = get_str(ae, "id");
@@ -366,4 +511,42 @@ fn get_str(v: &serde_json::Value, key: &str) -> String {
 
 fn get_str_field(v: &serde_json::Value, camel: &str, snake: &str) -> Option<String> {
     v.get(camel).or_else(|| v.get(snake)).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+/// Find an existing reference paper ID by DOI or title+authors+year.
+/// Used during import to remap links when INSERT OR IGNORE skips a duplicate.
+fn find_existing_paper_id(
+    conn: &Connection,
+    doi: Option<&str>,
+    title: &str,
+    authors: &str,
+    publication_year: Option<i64>,
+) -> Option<String> {
+    // Try DOI first
+    if let Some(doi) = doi {
+        let result: Option<String> = conn
+            .query_row(
+                "SELECT id FROM reference_papers WHERE doi = ?1 LIMIT 1",
+                [doi],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(id) = result {
+            return Some(id);
+        }
+    }
+    // Then title + authors + year
+    let result = match publication_year {
+        Some(y) => conn.query_row(
+            "SELECT id FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND authors = ?2 AND publication_year = ?3 LIMIT 1",
+            rusqlite::params![title, authors, y],
+            |row| row.get::<_, String>(0),
+        ).ok(),
+        None => conn.query_row(
+            "SELECT id FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND authors = ?2 LIMIT 1",
+            rusqlite::params![title, authors],
+            |row| row.get::<_, String>(0),
+        ).ok(),
+    };
+    result
 }

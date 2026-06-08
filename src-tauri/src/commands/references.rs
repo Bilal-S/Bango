@@ -5,7 +5,8 @@ use crate::db::reference_repo;
 use crate::error::AppError;
 use crate::models::article::NewArticle;
 use crate::models::reference::{
-    ArticleReference, ArticleReferenceLink, MatchStatus, NewReferencePaper, ReferenceType,
+    ArticleReference, ArticleReferenceLink, LinkedArticleInfo, MatchStatus, NewReferencePaper,
+    ReferenceType,
 };
 use crate::ris::cr_parser;
 use crate::ris::parser;
@@ -131,6 +132,63 @@ pub fn extract_cr_references(
     }
 
     Ok(ExtractResult { papers_created, links_created, errors })
+}
+
+// ─── References Tab commands ───────────────────────────────────
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryReferencePapersResult {
+    pub papers: Vec<crate::models::reference::ReferencePaper>,
+    pub total: usize,
+}
+
+/// Search reference papers with pagination for the References tab.
+#[tauri::command]
+pub fn query_reference_papers(
+    db_state: tauri::State<'_, DbState>,
+    search: Option<String>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<QueryReferencePapersResult, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    let limit = limit.unwrap_or(50);
+    let offset = offset.unwrap_or(0);
+    let (papers, total) =
+        reference_repo::query_reference_papers(&conn, search.as_deref(), limit, offset)?;
+
+    Ok(QueryReferencePapersResult { papers, total })
+}
+
+/// Get top 10 articles of interest (unmatched, high citation/reference count).
+#[tauri::command]
+pub fn get_reference_articles_of_interest(
+    db_state: tauri::State<'_, DbState>,
+) -> Result<Vec<crate::models::reference::ReferencePaper>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    reference_repo::get_articles_of_interest(&conn)
+}
+
+/// Get all parent articles linked to a reference paper.
+#[tauri::command]
+pub fn get_linked_articles_for_paper(
+    db_state: tauri::State<'_, DbState>,
+    paper_id: String,
+) -> Result<Vec<LinkedArticleInfo>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    reference_repo::get_linked_articles_for_paper(&conn, &paper_id)
 }
 
 #[derive(serde::Serialize)]

@@ -141,6 +141,18 @@ pub struct ArticleReferenceLink {
     pub created_at: String,
 }
 
+/// A linked article that references/cites a paper (for the References tab).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedArticleInfo {
+    pub id: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    pub publication_year: Option<i32>,
+    pub journal: Option<String>,
+    pub reference_type: ReferenceType,
+}
+
 /// A reference paper with its link context (for querying by article).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

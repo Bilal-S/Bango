@@ -40,13 +40,14 @@ export interface ArticleQuery {
 
 export type SortDirection = 'asc' | 'desc';
 
-const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error')[] = [
+const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references')[] = [
   'all',
   'duplicate',
   'working',
   'included',
   'rejected',
   'error',
+  'references',
 ] as const;
 
 export type StatusTab = (typeof STATUS_TABS)[number];
@@ -216,6 +217,10 @@ export function useArticleSearch() {
 
   function setStatusTab(tab: StatusTab): void {
     activeStatusTab.value = tab;
+    // "references" tab: no article query needed – the ReferencesView component handles its own data
+    if (tab === 'references') {
+      return;
+    }
     // "error" tab: show working articles that have screening errors
     if (tab === 'error') {
       query.status = 'working';

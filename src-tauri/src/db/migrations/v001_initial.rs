@@ -227,7 +227,13 @@ CREATE INDEX IF NOT EXISTS idx_articles_sequence_id ON articles(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_articles_changed_at ON articles(changed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_entries_article_id ON audit_entries(article_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_type ON criteria(type);
-CREATE INDEX IF NOT EXISTS idx_ref_papers_doi ON reference_papers(doi);
+-- Unique DOI (excluding NULLs — prevents duplicate papers with same DOI)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ref_papers_doi
+    ON reference_papers(doi) WHERE doi IS NOT NULL;
+-- Unique title + authors + year combination
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ref_papers_title_authors_year
+    ON reference_papers(LOWER(title), authors, publication_year)
+    WHERE title IS NOT NULL AND title != '' AND publication_year IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_ref_papers_match ON reference_papers(match_status);
 CREATE INDEX IF NOT EXISTS idx_ref_papers_matched_article ON reference_papers(matched_article_id);
 CREATE INDEX IF NOT EXISTS idx_ref_links_parent ON article_reference_links(parent_article_id);

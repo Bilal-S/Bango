@@ -159,6 +159,9 @@ pub fn run() {
             commands::references::preview_references_import,
             commands::references::import_references_for_article,
             commands::references::promote_reference_to_article,
+            commands::references::query_reference_papers,
+            commands::references::get_reference_articles_of_interest,
+            commands::references::get_linked_articles_for_paper,
         ]);
 
     #[cfg(debug_assertions)]

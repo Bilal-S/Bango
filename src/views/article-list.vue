@@ -13,6 +13,7 @@ import ArticleFilterPanel from '@/components/article-filter-panel.vue';
 import BulkActionBar from '@/components/bulk-action-bar.vue';
 import ExportDialog from '@/components/export-dialog.vue';
 import SuggestInput from '@/components/suggest-input.vue';
+import ReferencesView from '@/components/references-view.vue';
 
 const route = useRoute();
 const toast = useToast();
@@ -144,6 +145,7 @@ const STATUS_TAB_LABELS: Record<string, string> = {
   included: 'Included',
   rejected: 'Rejected',
   error: 'Errors',
+  references: 'References',
 };
 
 const STATUS_TAB_TIPS: Record<string, string> = {
@@ -153,6 +155,7 @@ const STATUS_TAB_TIPS: Record<string, string> = {
   rejected: 'Articles excluded from research',
   error: 'Articles with errors:check audit trail',
   duplicate: 'Duplicate articles',
+  references: 'Browse all reference & citation papers',
 };
 
 function showDecisionNotification(message: string, type: 'success' | 'info'): void {
@@ -312,7 +315,7 @@ function handleOpenReader(articleId: string): void {
           @click="setStatusTab(tab)"
         >
           <span>{{ STATUS_TAB_LABELS[tab] }}</span>
-          <span class="ml-1.5 text-[11px] font-mono">
+          <span v-if="tab !== 'references'" class="ml-1.5 text-[11px] font-mono">
             {{ statusCounts[tab] ?? 0 }}
           </span>
           <!-- Active underline -->
@@ -323,8 +326,16 @@ function handleOpenReader(articleId: string): void {
         </button>
       </nav>
 
-      <!-- Toolbar -->
+      <!-- References Tab Content -->
+      <ReferencesView
+        v-if="activeStatusTab === 'references'"
+        @article-promoted="handleArticlePromoted"
+        @navigate-to-article="navigateToArticle"
+      />
+
+      <!-- Toolbar (hidden on References tab) -->
       <ArticleToolbar
+        v-if="activeStatusTab !== 'references'"
         :search-text="searchText"
         :show-filters="showFilters"
         :page-size="pageSize"
@@ -350,7 +361,7 @@ function handleOpenReader(articleId: string): void {
 
       <!-- Filter Panel (collapsible) -->
       <ArticleFilterPanel
-        v-if="showFilters"
+        v-if="showFilters && activeStatusTab !== 'references'"
         :filter="filter"
         :all-authors="allAuthors"
         :all-tags="allTags"
@@ -361,58 +372,60 @@ function handleOpenReader(articleId: string): void {
         @update:filter="handleUpdateFilter"
       />
 
-      <!-- Article Table -->
-      <div v-if="loading" class="text-center py-16 text-slate-400 text-sm">Loading...</div>
-      <template v-else>
-        <ArticleTable
-          :articles="articles"
-          :selected-id="selectedId"
-          :sort-column="sortColumn"
-          :sort-direction="sortDirection"
-          :selected-ids="selectedIds"
-          :all-selected="allSelected"
-          :some-selected="someSelected"
-          @select="selectArticle"
-          @open-reader="handleOpenReader"
-          @sort="toggleSort"
-          @toggle-select="toggleSelectRange"
-          @toggle-select-all="toggleSelectAll"
-        />
+      <!-- Article Table (hidden on References tab) -->
+      <template v-if="activeStatusTab !== 'references'">
+        <div v-if="loading" class="text-center py-16 text-slate-400 text-sm">Loading...</div>
+        <template v-else>
+          <ArticleTable
+            :articles="articles"
+            :selected-id="selectedId"
+            :sort-column="sortColumn"
+            :sort-direction="sortDirection"
+            :selected-ids="selectedIds"
+            :all-selected="allSelected"
+            :some-selected="someSelected"
+            @select="selectArticle"
+            @open-reader="handleOpenReader"
+            @sort="toggleSort"
+            @toggle-select="toggleSelectRange"
+            @toggle-select-all="toggleSelectAll"
+          />
 
-        <!-- Bottom pagination -->
-        <div v-if="activeTotalCount > 0" class="flex items-center justify-center gap-2 mt-4 pb-4">
-          <button
-            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
-            :disabled="!canGoPrev"
-            @click="goToPage(1)"
-          >
-            First
-          </button>
-          <button
-            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
-            :disabled="!canGoPrev"
-            @click="goToPage(currentPage - 1)"
-          >
-            &laquo; Prev
-          </button>
-          <span class="text-xs text-slate-600 min-w-[6rem] text-center">
-            Page {{ currentPage }} of {{ totalPages }}
-          </span>
-          <button
-            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
-            :disabled="!canGoNext"
-            @click="goToPage(currentPage + 1)"
-          >
-            Next &raquo;
-          </button>
-          <button
-            class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
-            :disabled="!canGoNext"
-            @click="goToPage(totalPages)"
-          >
-            Last
-          </button>
-        </div>
+          <!-- Bottom pagination -->
+          <div v-if="activeTotalCount > 0" class="flex items-center justify-center gap-2 mt-4 pb-4">
+            <button
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+              :disabled="!canGoPrev"
+              @click="goToPage(1)"
+            >
+              First
+            </button>
+            <button
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+              :disabled="!canGoPrev"
+              @click="goToPage(currentPage - 1)"
+            >
+              &laquo; Prev
+            </button>
+            <span class="text-xs text-slate-600 min-w-[6rem] text-center">
+              Page {{ currentPage }} of {{ totalPages }}
+            </span>
+            <button
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+              :disabled="!canGoNext"
+              @click="goToPage(currentPage + 1)"
+            >
+              Next &raquo;
+            </button>
+            <button
+              class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+              :disabled="!canGoNext"
+              @click="goToPage(totalPages)"
+            >
+              Last
+            </button>
+          </div>
+        </template>
       </template>
     </div>
 

@@ -3,34 +3,37 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 use crate::models::reference::{
-    ArticleReference, ArticleReferenceLink, MatchStatus, NewReferencePaper, ReferencePaper,
-    ReferenceType,
+    ArticleReference, ArticleReferenceLink, LinkedArticleInfo, MatchStatus, NewReferencePaper,
+    ReferencePaper, ReferenceType,
 };
 
 // ─── Reference Paper operations ────────────────────────────────
 
-/// Insert a reference paper, or find an existing one by DOI or title+journal+year.
+/// Insert a reference paper, or find an existing one by DOI or title+authors+year.
 /// Returns the (paper, was_created) tuple.
 pub fn insert_or_find_paper(
     conn: &Connection,
     new_paper: &NewReferencePaper,
 ) -> Result<(ReferencePaper, bool), AppError> {
+    // Normalize DOI: treat empty string as None
+    let doi_normalized = new_paper.doi.as_deref().and_then(|d| {
+        if d.is_empty() { None } else { Some(d) }
+    });
+
     // Try to find existing by DOI first
-    if let Some(ref doi) = new_paper.doi {
-        if !doi.is_empty() {
-            if let Some(existing) = find_paper_by_doi(conn, doi)? {
-                return Ok((existing, false));
-            }
+    if let Some(doi) = doi_normalized {
+        if let Some(existing) = find_paper_by_doi(conn, doi)? {
+            return Ok((existing, false));
         }
     }
 
-    // Try to find by title + journal + year
+    // Try to find by title + authors + year
     if let Some(ref title) = new_paper.title {
         if !title.is_empty() {
-            if let Some(existing) = find_paper_by_title_journal_year(
+            if let Some(existing) = find_paper_by_title_authors_year(
                 conn,
                 title,
-                new_paper.journal.as_deref(),
+                &new_paper.authors,
                 new_paper.publication_year,
             )? {
                 return Ok((existing, false));
@@ -38,12 +41,36 @@ pub fn insert_or_find_paper(
         }
     }
 
-    // Insert new paper
-    let paper = insert_paper(conn, new_paper)?;
-    Ok((paper, true))
+    // Insert new paper (uses INSERT OR IGNORE for constraint safety)
+    match insert_paper(conn, new_paper) {
+        Ok(paper) => Ok((paper, true)),
+        // If constraint violation, look up existing
+        Err(_) => {
+            // Try DOI lookup first
+            if let Some(doi) = doi_normalized {
+                if let Some(existing) = find_paper_by_doi(conn, doi)? {
+                    return Ok((existing, false));
+                }
+            }
+            // Then title+authors+year
+            if let Some(ref title) = new_paper.title {
+                if !title.is_empty() {
+                    if let Some(existing) = find_paper_by_title_authors_year(
+                        conn, title, &new_paper.authors, new_paper.publication_year,
+                    )? {
+                        return Ok((existing, false));
+                    }
+                }
+            }
+            Err(AppError::Database(rusqlite::Error::InvalidParameterName(
+                "Failed to insert or find reference paper".into(),
+            )))
+        }
+    }
 }
 
 /// Insert a new reference paper.
+/// Normalizes empty DOI to NULL to avoid unique constraint violations.
 fn insert_paper(
     conn: &Connection,
     new_paper: &NewReferencePaper,
@@ -54,6 +81,12 @@ fn insert_paper(
     let ris_extras_json =
         new_paper.ris_extras.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default());
     let match_status = new_paper.match_status.as_ref().unwrap_or(&MatchStatus::Unmatched).as_str();
+
+    // Normalize DOI: empty string → NULL (prevents unique constraint violations)
+    let doi: Option<String> = new_paper
+        .doi
+        .as_deref()
+        .and_then(|d| if d.is_empty() { None } else { Some(d.to_string()) });
 
     conn.execute(
         "INSERT INTO reference_papers (
@@ -75,7 +108,7 @@ fn insert_paper(
             new_paper.abstract_text,
             authors_json,
             new_paper.publication_year,
-            new_paper.doi,
+            doi,
             new_paper.journal,
             new_paper.volume,
             new_paper.issue,
@@ -127,33 +160,26 @@ pub fn find_paper_by_doi(conn: &Connection, doi: &str) -> Result<Option<Referenc
     }
 }
 
-/// Find a reference paper by title + journal + year (fuzzy match).
-fn find_paper_by_title_journal_year(
+/// Find a reference paper by title + authors + year (matches unique constraint).
+fn find_paper_by_title_authors_year(
     conn: &Connection,
     title: &str,
-    journal: Option<&str>,
+    authors: &[String],
     year: Option<i32>,
 ) -> Result<Option<ReferencePaper>, AppError> {
-    let sql = match (journal, year) {
-        (Some(_), Some(_)) => {
-            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND LOWER(journal) = LOWER(?2) AND publication_year = ?3 LIMIT 1"
-        }
-        (Some(_), None) => {
-            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND LOWER(journal) = LOWER(?2) LIMIT 1"
-        }
-        (None, Some(_)) => {
-            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND publication_year = ?2 LIMIT 1"
-        }
-        (None, None) => {
-            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) LIMIT 1"
-        }
-    };
+    let authors_json = serde_json::to_string(authors).unwrap_or_else(|_| "[]".into());
 
-    let result = match (journal, year) {
-        (Some(j), Some(y)) => conn.query_row(sql, params![title, j, y], row_to_paper),
-        (Some(j), None) => conn.query_row(sql, params![title, j], row_to_paper),
-        (None, Some(y)) => conn.query_row(sql, params![title, y], row_to_paper),
-        (None, None) => conn.query_row(sql, [title], row_to_paper),
+    let result = match year {
+        Some(y) => conn.query_row(
+            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND authors = ?2 AND publication_year = ?3 LIMIT 1",
+            params![title, authors_json, y],
+            row_to_paper,
+        ),
+        None => conn.query_row(
+            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND authors = ?2 LIMIT 1",
+            params![title, authors_json],
+            row_to_paper,
+        ),
     };
 
     match result {
@@ -585,4 +611,100 @@ fn update_parent_flags_tx(
         params![citation_count > 0, reference_count > 0, parent_article_id],
     )?;
     Ok(())
+}
+
+// ─── References Tab queries ────────────────────────────────────
+
+/// Search reference papers with pagination.
+/// Searches across title, authors, abstract_text, and journal using LIKE.
+/// Returns (papers, total_count).
+pub fn query_reference_papers(
+    conn: &Connection,
+    search: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> Result<(Vec<ReferencePaper>, usize), AppError> {
+    let (count_sql, data_sql) = match search {
+        Some(term) if !term.is_empty() => {
+            (
+                "SELECT COUNT(*) FROM reference_papers WHERE title LIKE ?1 OR authors LIKE ?1 OR abstract_text LIKE ?1 OR journal LIKE ?1".to_string(),
+                "SELECT * FROM reference_papers WHERE title LIKE ?1 OR authors LIKE ?1 OR abstract_text LIKE ?1 OR journal LIKE ?1 ORDER BY (citation_count + reference_count) DESC, title ASC LIMIT ?2 OFFSET ?3".to_string(),
+            )
+        }
+        _ => (
+            "SELECT COUNT(*) FROM reference_papers".to_string(),
+            "SELECT * FROM reference_papers ORDER BY (citation_count + reference_count) DESC, title ASC LIMIT ?2 OFFSET ?3".to_string(),
+        ),
+    };
+
+    let total: usize = match search {
+        Some(term) if !term.is_empty() => {
+            let pattern = format!("%{}%", term);
+            conn.query_row(&count_sql, params![pattern], |row| row.get(0))?
+        }
+        _ => conn.query_row(&count_sql, [], |row| row.get(0))?,
+    };
+
+    let mut stmt = conn.prepare(&data_sql)?;
+    let papers: Vec<ReferencePaper> = match search {
+        Some(term) if !term.is_empty() => {
+            let pattern = format!("%{}%", term);
+            stmt.query_map(params![pattern, limit, offset], row_to_paper)?
+                .filter_map(|r| r.ok())
+                .collect()
+        }
+        _ => stmt.query_map(params![limit, offset], row_to_paper)?.filter_map(|r| r.ok()).collect(),
+    };
+
+    Ok((papers, total))
+}
+
+/// Get top 10 "articles of interest": unmatched reference papers with more than 2 total uses
+/// (citation_count + reference_count > 2) that are not matched to any article.
+pub fn get_articles_of_interest(conn: &Connection) -> Result<Vec<ReferencePaper>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM reference_papers
+         WHERE match_status = 'unmatched'
+           AND (citation_count + reference_count) > 2
+         ORDER BY (citation_count + reference_count) DESC
+         LIMIT 10",
+    )?;
+    let rows = stmt.query_map([], row_to_paper)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Get all parent articles linked to a reference paper (via article_reference_links).
+pub fn get_linked_articles_for_paper(
+    conn: &Connection,
+    paper_id: &str,
+) -> Result<Vec<LinkedArticleInfo>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT a.id, a.title, a.authors, a.publication_year, a.journal, l.type
+         FROM article_reference_links l
+         JOIN articles a ON a.id = l.parent_article_id
+         WHERE l.reference_paper_id = ?1
+         ORDER BY a.title ASC",
+    )?;
+    let rows = stmt.query_map(params![paper_id], |row| {
+        // SELECT order: a.id(0), a.title(1), a.authors(2), a.publication_year(3), a.journal(4), l.type(5)
+        let type_int: i32 = row.get(5)?;
+        let reference_type = ReferenceType::from_int(type_int).ok_or_else(|| {
+            rusqlite::Error::InvalidColumnType(5, "type".into(), rusqlite::types::Type::Integer)
+        })?;
+
+        let authors_str: Option<String> = row.get(2)?;
+        let authors: Vec<String> =
+            authors_str.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+
+        Ok(LinkedArticleInfo {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            authors,
+            publication_year: row.get(3)?,
+            journal: row.get(4)?,
+            reference_type,
+        })
+    })?;
+    let results: Vec<LinkedArticleInfo> = rows.filter_map(|r| r.ok()).collect();
+    Ok(results)
 }

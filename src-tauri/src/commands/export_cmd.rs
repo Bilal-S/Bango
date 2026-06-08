@@ -126,7 +126,9 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
         // Using DROP (not DELETE) avoids ALTER TABLE conflicts when
         // migrations are re-run against an existing schema.
         tx.execute_batch(
-            "DROP TABLE IF EXISTS article_labels;
+            "DROP TABLE IF EXISTS article_reference_links;
+             DROP TABLE IF EXISTS reference_papers;
+             DROP TABLE IF EXISTS article_labels;
              DROP TABLE IF EXISTS article_tags;
              DROP TABLE IF EXISTS audit_entries;
              DROP TABLE IF EXISTS articles;
@@ -144,7 +146,14 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
              DROP INDEX IF EXISTS idx_articles_sequence_id;
              DROP INDEX IF EXISTS idx_audit_entries_article_id;
              DROP INDEX IF EXISTS idx_criteria_type;
-             DROP INDEX IF EXISTS idx_articles_changed_at;",
+             DROP INDEX IF EXISTS idx_articles_changed_at;
+             DROP INDEX IF EXISTS uq_ref_papers_doi;
+             DROP INDEX IF EXISTS uq_ref_papers_title_authors_year;
+             DROP INDEX IF EXISTS idx_ref_papers_match;
+             DROP INDEX IF EXISTS idx_ref_papers_matched_article;
+             DROP INDEX IF EXISTS idx_ref_links_parent;
+             DROP INDEX IF EXISTS idx_ref_links_paper;
+             DROP INDEX IF EXISTS idx_ref_links_parent_type;",
         )?;
 
         tx.commit()?;

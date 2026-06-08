@@ -235,3 +235,44 @@ export interface ScreeningReadiness {
   tokenWarning: string | null;
   progress: ScreeningProgress | null;
 }
+
+/** A reference paper from the global reference_papers table (for References tab) */
+export interface ReferencePaperQuery {
+  id: string;
+  title: string | null;
+  abstractText: string | null;
+  authors: string[];
+  publicationYear: number | null;
+  doi: string | null;
+  journal: string | null;
+  volume: string | null;
+  issue: string | null;
+  startPage: string | null;
+  endPage: string | null;
+  keywords: string[];
+  url: string | null;
+  language: string | null;
+  publisher: string | null;
+  matchStatus: MatchStatus;
+  matchedArticleId: string | null;
+  citationCount: number;
+  referenceCount: number;
+  importSource: string | null;
+  createdAt: string;
+}
+
+/** Result from querying reference papers with pagination */
+export interface ReferencePaperQueryResult {
+  papers: ReferencePaperQuery[];
+  total: number;
+}
+
+/** A linked article that references/cites a paper (for References tab detail view) */
+export interface LinkedArticleInfo {
+  id: string;
+  title: string;
+  authors: string[];
+  publicationYear: number | null;
+  journal: string | null;
+  referenceType: ReferenceType;
+}

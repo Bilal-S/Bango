@@ -365,9 +365,11 @@ fn bibtex_record1_mack_extras() {
         "cited-references should be normalized to CR, not kept as-is"
     );
 
-    // Affiliation should be in extras (not mapped to author_address for BibTeX)
-    let aff = rec.extras.get("affiliation");
-    assert!(aff.is_some(), "affiliation should be in extras");
+    // Affiliation should be mapped to the record's affiliation field (not in extras)
+    assert!(
+        rec.affiliation.is_some(),
+        "affiliation should be mapped to record.affiliation field"
+    );
 
     // Keywords-Plus
     let kp = rec.extras.get("keywords-plus");
@@ -549,7 +551,6 @@ fn bibtex_unrecognized_fields_go_to_extras() {
     // These WoS-specific fields should all be in extras (keys are lowercase)
     let extra_fields = [
         "type",
-        "affiliation",
         "author-email",
         "research-areas",
         "doc-delivery-number",
