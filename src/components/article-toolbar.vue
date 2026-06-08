@@ -20,6 +20,7 @@ const emit = defineEmits<{
   changePageSize: [size: number];
   goPrev: [];
   goNext: [];
+  clearFilters: [];
 }>();
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -111,7 +112,19 @@ function onPageSizeChange(event: Event): void {
           >{{ rangeStart }}-{{ rangeEnd }}<span class="hidden sm:inline"> of </span
           ><span class="sm:hidden">/</span>{{ totalCount }}</span
         >
-        <span v-if="isFiltered" class="text-[10px] text-indigo-500 font-medium">filtered</span>
+        <span
+          v-if="isFiltered"
+          class="flex items-center gap-1 text-[10px] text-indigo-500 font-medium"
+        >
+          filtered
+          <button
+            class="flex items-center justify-center w-3.5 h-3.5 rounded-full bg-indigo-200 hover:bg-indigo-400 text-indigo-600 hover:text-white text-[9px] leading-none transition-colors"
+            title="Clear filters"
+            @click="emit('clearFilters')"
+          >
+            ×
+          </button>
+        </span>
       </span>
       <button
         class="px-1.5 sm:px-2 py-1 text-xs rounded border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"

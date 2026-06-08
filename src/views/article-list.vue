@@ -342,6 +342,10 @@ function handleOpenReader(articleId: string): void {
         @change-page-size="changePageSize"
         @go-prev="goToPage(currentPage - 1)"
         @go-next="goToPage(currentPage + 1)"
+        @clear-filters="
+          clearSearch();
+          clearFilters();
+        "
       />
 
       <!-- Filter Panel (collapsible) -->
