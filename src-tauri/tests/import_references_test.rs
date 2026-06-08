@@ -366,10 +366,7 @@ fn bibtex_record1_mack_extras() {
     );
 
     // Affiliation should be mapped to the record's affiliation field (not in extras)
-    assert!(
-        rec.affiliation.is_some(),
-        "affiliation should be mapped to record.affiliation field"
-    );
+    assert!(rec.affiliation.is_some(), "affiliation should be mapped to record.affiliation field");
 
     // Keywords-Plus
     let kp = rec.extras.get("keywords-plus");
@@ -549,14 +546,8 @@ fn bibtex_unrecognized_fields_go_to_extras() {
     let rec = &records[0]; // Mack record
 
     // These WoS-specific fields should all be in extras (keys are lowercase)
-    let extra_fields = [
-        "type",
-        "author-email",
-        "research-areas",
-        "doc-delivery-number",
-        "unique-id",
-        "da",
-    ];
+    let extra_fields =
+        ["type", "author-email", "research-areas", "doc-delivery-number", "unique-id", "da"];
 
     for field in &extra_fields {
         assert!(

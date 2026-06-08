@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useReferencesSearch } from '@/composables/use-references-search';
 import { useToast } from '@/composables/use-toast';
+import ReferencePaperDetailPanel from './reference-paper-detail-panel.vue';
 import type { ReferencePaperQuery } from '@/types';
 
 const emit = defineEmits<{
@@ -12,6 +13,7 @@ const emit = defineEmits<{
 const toast = useToast();
 const {
   searchText,
+  statusFilter,
   papers,
   articlesOfInterest,
   loading,
@@ -20,6 +22,7 @@ const {
   totalPages,
   canGoPrev,
   canGoNext,
+  error,
   linkedArticlesMap,
   linkedArticlesLoading,
   search,
@@ -31,6 +34,10 @@ const {
 
 // Track which cards are expanded
 const expandedIds = ref<Set<string>>(new Set());
+
+// Detail panel state
+const selectedPaperId = ref<string | null>(null);
+const selectedPaperData = ref<ReferencePaperQuery | null>(null);
 
 onMounted(async () => {
   await Promise.all([search(), loadArticlesOfInterest()]);
@@ -48,11 +55,22 @@ function toggleExpand(paper: ReferencePaperQuery): void {
   }
 }
 
+function openDetail(paper: ReferencePaperQuery): void {
+  selectedPaperId.value = paper.id;
+  selectedPaperData.value = paper;
+}
+
+function closeDetail(): void {
+  selectedPaperId.value = null;
+  selectedPaperData.value = null;
+}
+
 async function handlePromote(paper: ReferencePaperQuery): Promise<void> {
   const articleId = await promotePaper(paper.id);
   if (articleId) {
     toast.show(`"${paper.title ?? 'Untitled'}" promoted to article`, 'success');
     emit('article-promoted', articleId);
+    closeDetail();
   }
 }
 
@@ -76,6 +94,11 @@ function doiLink(doi: string | null): string | undefined {
   return doi.startsWith('http') ? doi : `https://doi.org/${doi}`;
 }
 
+function canPromote(paper: ReferencePaperQuery): boolean {
+  if (paper.matchStatus === 'matched' || paper.matchStatus === 'imported') return false;
+  return !!paper.abstractText?.trim();
+}
+
 function typeLabel(refType: string): string {
   return refType === 'citation' ? 'Cited by' : 'Ref';
 }
@@ -87,6 +110,24 @@ function refTypeIcon(refType: string): string {
 
 <template>
   <div class="references-view">
+    <!-- Error Banner -->
+    <div
+      v-if="error"
+      class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2"
+    >
+      <span class="material-symbols-outlined text-red-500 text-base mt-0.5">error</span>
+      <div class="flex-1">
+        <p class="text-sm text-red-700 font-medium">Error loading reference data</p>
+        <p class="text-xs text-red-600 mt-0.5">{{ error }}</p>
+      </div>
+      <button
+        class="material-symbols-outlined text-sm text-red-400 hover:text-red-600 cursor-pointer"
+        @click="search()"
+      >
+        refresh
+      </button>
+    </div>
+
     <!-- Section A: Articles of Interest -->
     <section v-if="articlesOfInterest.length > 0" class="mb-8">
       <h2 class="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">
@@ -100,7 +141,8 @@ function refTypeIcon(refType: string): string {
         <div
           v-for="paper in articlesOfInterest"
           :key="paper.id"
-          class="bg-amber-50 border border-amber-200 rounded-lg p-3 hover:bg-amber-100 transition-colors"
+          class="bg-amber-50 border border-amber-200 rounded-lg p-3 hover:bg-amber-100 transition-colors cursor-pointer"
+          @click="openDetail(paper)"
         >
           <div class="text-sm font-medium text-slate-800 line-clamp-2 mb-1">
             {{ paper.title || 'Untitled' }}
@@ -120,13 +162,15 @@ function refTypeIcon(refType: string): string {
               rel="noopener"
               class="material-symbols-outlined text-xs text-blue-600 hover:text-blue-800"
               title="Open DOI"
+              @click.stop
             >
               open_in_new
             </a>
             <button
+              v-if="canPromote(paper)"
               class="ml-auto material-symbols-outlined text-xs text-green-600 hover:text-green-800 cursor-pointer"
-              title="Promote to article"
-              @click="handlePromote(paper)"
+              title="Add to Working list"
+              @click.stop="handlePromote(paper)"
             >
               add_circle
             </button>
@@ -152,14 +196,24 @@ function refTypeIcon(refType: string): string {
             @keydown.enter="handleExecuteSearch"
           />
         </div>
+        <select
+          v-model="statusFilter"
+          class="px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer"
+          @change="handleExecuteSearch"
+        >
+          <option value="all">All</option>
+          <option value="unmatched">Unmatched</option>
+          <option value="matched">Matched</option>
+          <option value="imported">Imported</option>
+        </select>
         <button
-          class="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          class="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer"
           @click="handleExecuteSearch"
         >
           Search
         </button>
         <button
-          class="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+          class="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
           @click="handleClearSearch"
         >
           Clear
@@ -180,14 +234,17 @@ function refTypeIcon(refType: string): string {
       <ul v-else class="divide-y divide-slate-200 border border-slate-200 rounded-lg">
         <li v-for="paper in papers" :key="paper.id" class="hover:bg-slate-50 transition-colors">
           <!-- Card header (always visible) -->
-          <div class="flex items-start gap-3 px-4 py-3 cursor-pointer" @click="toggleExpand(paper)">
-            <!-- Type icon -->
-            <div class="flex flex-col items-center gap-1 pt-0.5">
+          <div class="flex items-start gap-3 px-4 py-3">
+            <!-- Type icon / click to open detail -->
+            <div
+              class="flex flex-col items-center gap-1 pt-0.5 cursor-pointer"
+              @click="openDetail(paper)"
+            >
               <span class="material-symbols-outlined text-sm text-indigo-500">article</span>
             </div>
 
             <!-- Main info -->
-            <div class="flex-1 min-w-0">
+            <div class="flex-1 min-w-0 cursor-pointer" @click="openDetail(paper)">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium text-slate-800 line-clamp-1">
                   {{ paper.title || 'Untitled' }}
@@ -228,12 +285,13 @@ function refTypeIcon(refType: string): string {
               >
                 {{ paper.citationCount + paper.referenceCount }} uses
               </span>
-              <span
-                class="material-symbols-outlined text-base text-slate-400 transition-transform"
+              <button
+                class="material-symbols-outlined text-base text-slate-400 transition-transform cursor-pointer"
                 :class="{ 'rotate-180': expandedIds.has(paper.id) }"
+                @click.stop="toggleExpand(paper)"
               >
                 expand_more
-              </span>
+              </button>
             </div>
           </div>
 
@@ -330,16 +388,13 @@ function refTypeIcon(refType: string): string {
                 </ul>
               </div>
 
-              <!-- Promote button -->
-              <div
-                v-if="paper.matchStatus === 'unmatched' || paper.matchStatus === 'not_in_library'"
-                class="pt-2 border-t border-slate-200"
-              >
+              <!-- Promote button (only if abstract exists and unmatched) -->
+              <div v-if="canPromote(paper)" class="pt-2 border-t border-slate-200">
                 <button
-                  class="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  class="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors cursor-pointer"
                   @click="handlePromote(paper)"
                 >
-                  Promote to Article
+                  Add to Working list
                 </button>
               </div>
             </div>
@@ -350,14 +405,14 @@ function refTypeIcon(refType: string): string {
       <!-- Pagination -->
       <div v-if="total > 0" class="flex items-center justify-center gap-2 mt-4 pb-4">
         <button
-          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors cursor-pointer"
           :disabled="!canGoPrev"
           @click="goToPage(1)"
         >
           First
         </button>
         <button
-          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors cursor-pointer"
           :disabled="!canGoPrev"
           @click="goToPage(currentPage - 1)"
         >
@@ -368,14 +423,14 @@ function refTypeIcon(refType: string): string {
           <span class="text-slate-400 ml-1">({{ total }} papers)</span>
         </span>
         <button
-          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors cursor-pointer"
           :disabled="!canGoNext"
           @click="goToPage(currentPage + 1)"
         >
           Next &raquo;
         </button>
         <button
-          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors"
+          class="px-3 py-1.5 text-xs rounded-lg border border-slate-300 disabled:opacity-40 hover:bg-slate-50 transition-colors cursor-pointer"
           :disabled="!canGoNext"
           @click="goToPage(totalPages)"
         >
@@ -383,6 +438,30 @@ function refTypeIcon(refType: string): string {
         </button>
       </div>
     </section>
+
+    <!-- Detail Panel Overlay -->
+    <Teleport to="body">
+      <div v-if="selectedPaperId" class="fixed inset-0 z-[60] bg-black/20" @click="closeDetail" />
+      <ReferencePaperDetailPanel
+        v-if="selectedPaperId"
+        :paper-id="selectedPaperId"
+        :initial-data="selectedPaperData ?? undefined"
+        @close="closeDetail"
+        @promoted="
+          (id) => {
+            emit('article-promoted', id);
+            closeDetail();
+            search();
+            loadArticlesOfInterest();
+          }
+        "
+        @navigate-to-article="
+          (id) => {
+            emit('navigate-to-article', id);
+          }
+        "
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -390,6 +469,7 @@ function refTypeIcon(refType: string): string {
 .line-clamp-1 {
   display: -webkit-box;
   -webkit-line-clamp: 1;
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -397,6 +477,7 @@ function refTypeIcon(refType: string): string {
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -404,6 +485,7 @@ function refTypeIcon(refType: string): string {
 .line-clamp-4 {
   display: -webkit-box;
   -webkit-line-clamp: 4;
+  line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

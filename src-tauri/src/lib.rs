@@ -162,6 +162,7 @@ pub fn run() {
             commands::references::query_reference_papers,
             commands::references::get_reference_articles_of_interest,
             commands::references::get_linked_articles_for_paper,
+            commands::references::get_reference_paper,
         ]);
 
     #[cfg(debug_assertions)]

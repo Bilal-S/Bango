@@ -148,6 +148,7 @@ pub struct QueryReferencePapersResult {
 pub fn query_reference_papers(
     db_state: tauri::State<'_, DbState>,
     search: Option<String>,
+    match_status: Option<String>,
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<QueryReferencePapersResult, AppError> {
@@ -158,8 +159,22 @@ pub fn query_reference_papers(
 
     let limit = limit.unwrap_or(50);
     let offset = offset.unwrap_or(0);
-    let (papers, total) =
-        reference_repo::query_reference_papers(&conn, search.as_deref(), limit, offset)?;
+
+    // Parse match_status filter
+    let status_filter = match_status.as_deref().and_then(|s| match s {
+        "unmatched" => Some(MatchStatus::Unmatched),
+        "matched" => Some(MatchStatus::Matched),
+        "imported" => Some(MatchStatus::Imported),
+        _ => None,
+    });
+
+    let (papers, total) = reference_repo::query_reference_papers(
+        &conn,
+        search.as_deref(),
+        status_filter.as_ref(),
+        limit,
+        offset,
+    )?;
 
     Ok(QueryReferencePapersResult { papers, total })
 }
@@ -189,6 +204,20 @@ pub fn get_linked_articles_for_paper(
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
     reference_repo::get_linked_articles_for_paper(&conn, &paper_id)
+}
+
+/// Get a single reference paper by ID (for detail panel).
+#[tauri::command]
+pub fn get_reference_paper(
+    db_state: tauri::State<'_, DbState>,
+    paper_id: String,
+) -> Result<crate::models::reference::ReferencePaper, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    reference_repo::get_paper_by_id(&conn, &paper_id)
 }
 
 #[derive(serde::Serialize)]
@@ -259,6 +288,13 @@ pub fn promote_reference_to_article(
 
     // Fetch the reference paper
     let paper = reference_repo::get_paper_by_id(&conn, &reference_paper_id)?;
+
+    // Require an abstract to promote
+    if paper.abstract_text.as_deref().unwrap_or("").trim().is_empty() {
+        return Err(AppError::Validation(
+            "Cannot promote: this reference paper has no abstract.".into(),
+        ));
+    }
 
     // Check if already promoted/matched
     if paper.matched_article_id.is_some() {

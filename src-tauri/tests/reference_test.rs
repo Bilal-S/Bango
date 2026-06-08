@@ -441,7 +441,8 @@ fn test_unique_doi_constraint_rejects_duplicate() {
     assert!(result.is_err(), "Raw INSERT with duplicate DOI should be rejected by unique index");
 
     // Verify only one paper exists in total
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM reference_papers", [], |row| row.get(0)).unwrap();
+    let count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM reference_papers", [], |row| row.get(0)).unwrap();
     assert_eq!(count, 1, "Should have exactly 1 paper (duplicate DOI was rejected)");
 }
 
@@ -525,10 +526,8 @@ fn test_empty_doi_normalized_to_null() {
     run_migrations(&conn).expect("Failed to run migrations");
 
     // Insert with empty string DOI — should be normalized to NULL
-    let paper1 = NewReferencePaper {
-        doi: Some("".to_string()),
-        ..make_paper("Paper with Empty DOI", None)
-    };
+    let paper1 =
+        NewReferencePaper { doi: Some("".to_string()), ..make_paper("Paper with Empty DOI", None) };
     let (first, created1) =
         reference_repo::insert_or_find_paper(&conn, &paper1).expect("insert 1 failed");
     assert!(created1);
@@ -541,7 +540,10 @@ fn test_empty_doi_normalized_to_null() {
     };
     let (_, created2) =
         reference_repo::insert_or_find_paper(&conn, &paper2).expect("insert 2 failed");
-    assert!(created2, "Different papers with empty DOI should both insert (NULL DOIs are distinct)");
+    assert!(
+        created2,
+        "Different papers with empty DOI should both insert (NULL DOIs are distinct)"
+    );
 }
 
 #[test]

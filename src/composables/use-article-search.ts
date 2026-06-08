@@ -446,6 +446,8 @@ export function useArticleSearch() {
 
   /** Navigate to an article while saving the current one as a return target. */
   async function navigateToArticle(targetId: string): Promise<void> {
+    // Skip if already viewing this article
+    if (selectedArticle.value?.id === targetId) return;
     if (selectedArticle.value) {
       returnToArticleId.value = selectedArticle.value.id;
     }

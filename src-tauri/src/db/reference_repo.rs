@@ -16,9 +16,8 @@ pub fn insert_or_find_paper(
     new_paper: &NewReferencePaper,
 ) -> Result<(ReferencePaper, bool), AppError> {
     // Normalize DOI: treat empty string as None
-    let doi_normalized = new_paper.doi.as_deref().and_then(|d| {
-        if d.is_empty() { None } else { Some(d) }
-    });
+    let doi_normalized =
+        new_paper.doi.as_deref().and_then(|d| if d.is_empty() { None } else { Some(d) });
 
     // Try to find existing by DOI first
     if let Some(doi) = doi_normalized {
@@ -56,7 +55,10 @@ pub fn insert_or_find_paper(
             if let Some(ref title) = new_paper.title {
                 if !title.is_empty() {
                     if let Some(existing) = find_paper_by_title_authors_year(
-                        conn, title, &new_paper.authors, new_paper.publication_year,
+                        conn,
+                        title,
+                        &new_paper.authors,
+                        new_paper.publication_year,
                     )? {
                         return Ok((existing, false));
                     }
@@ -83,10 +85,11 @@ fn insert_paper(
     let match_status = new_paper.match_status.as_ref().unwrap_or(&MatchStatus::Unmatched).as_str();
 
     // Normalize DOI: empty string → NULL (prevents unique constraint violations)
-    let doi: Option<String> = new_paper
-        .doi
-        .as_deref()
-        .and_then(|d| if d.is_empty() { None } else { Some(d.to_string()) });
+    let doi: Option<String> =
+        new_paper
+            .doi
+            .as_deref()
+            .and_then(|d| if d.is_empty() { None } else { Some(d.to_string()) });
 
     conn.execute(
         "INSERT INTO reference_papers (
@@ -617,43 +620,59 @@ fn update_parent_flags_tx(
 
 /// Search reference papers with pagination.
 /// Searches across title, authors, abstract_text, and journal using LIKE.
+/// Optionally filters by match_status.
 /// Returns (papers, total_count).
 pub fn query_reference_papers(
     conn: &Connection,
     search: Option<&str>,
+    match_status_filter: Option<&MatchStatus>,
     limit: usize,
     offset: usize,
 ) -> Result<(Vec<ReferencePaper>, usize), AppError> {
-    let (count_sql, data_sql) = match search {
-        Some(term) if !term.is_empty() => {
-            (
-                "SELECT COUNT(*) FROM reference_papers WHERE title LIKE ?1 OR authors LIKE ?1 OR abstract_text LIKE ?1 OR journal LIKE ?1".to_string(),
-                "SELECT * FROM reference_papers WHERE title LIKE ?1 OR authors LIKE ?1 OR abstract_text LIKE ?1 OR journal LIKE ?1 ORDER BY (citation_count + reference_count) DESC, title ASC LIMIT ?2 OFFSET ?3".to_string(),
-            )
-        }
-        _ => (
-            "SELECT COUNT(*) FROM reference_papers".to_string(),
-            "SELECT * FROM reference_papers ORDER BY (citation_count + reference_count) DESC, title ASC LIMIT ?2 OFFSET ?3".to_string(),
+    // Build WHERE clause fragments
+    let search_clause = match search {
+        Some(term) if !term.is_empty() => Some(
+            "(title LIKE ? OR authors LIKE ? OR abstract_text LIKE ? OR journal LIKE ?)"
+                .to_string(),
         ),
+        _ => None,
+    };
+    let status_clause = match_status_filter.map(|s| format!("match_status = '{}'", s.as_str()));
+
+    // Combine WHERE conditions
+    let where_parts: Vec<&str> =
+        [search_clause.as_deref(), status_clause.as_deref()].into_iter().flatten().collect();
+    let where_sql = if where_parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", where_parts.join(" AND "))
     };
 
-    let total: usize = match search {
-        Some(term) if !term.is_empty() => {
-            let pattern = format!("%{}%", term);
-            conn.query_row(&count_sql, params![pattern], |row| row.get(0))?
-        }
-        _ => conn.query_row(&count_sql, [], |row| row.get(0))?,
+    let count_sql = format!("SELECT COUNT(*) FROM reference_papers {}", where_sql);
+    let data_sql = format!(
+        "SELECT * FROM reference_papers {} ORDER BY (citation_count + reference_count) DESC, title ASC LIMIT ? OFFSET ?",
+        where_sql
+    );
+
+    // Build params dynamically
+    let search_pattern =
+        search.and_then(|t| if t.is_empty() { None } else { Some(format!("%{}%", t)) });
+
+    // Count query
+    let total: usize = if let Some(ref pattern) = search_pattern {
+        conn.query_row(&count_sql, params![pattern, pattern, pattern, pattern], |row| row.get(0))?
+    } else {
+        conn.query_row(&count_sql, [], |row| row.get(0))?
     };
 
+    // Data query
     let mut stmt = conn.prepare(&data_sql)?;
-    let papers: Vec<ReferencePaper> = match search {
-        Some(term) if !term.is_empty() => {
-            let pattern = format!("%{}%", term);
-            stmt.query_map(params![pattern, limit, offset], row_to_paper)?
-                .filter_map(|r| r.ok())
-                .collect()
-        }
-        _ => stmt.query_map(params![limit, offset], row_to_paper)?.filter_map(|r| r.ok()).collect(),
+    let papers: Vec<ReferencePaper> = if let Some(ref pattern) = search_pattern {
+        stmt.query_map(params![pattern, pattern, pattern, pattern, limit, offset], row_to_paper)?
+            .filter_map(|r| r.ok())
+            .collect()
+    } else {
+        stmt.query_map(params![limit, offset], row_to_paper)?.filter_map(|r| r.ok()).collect()
     };
 
     Ok((papers, total))

@@ -206,7 +206,7 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
             // "Department of X, University of Y" → "University of Y"
             record.affiliation = trimmed
                 .split(',')
-                .last()
+                .next_back()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty());
         } else {

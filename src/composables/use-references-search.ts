@@ -2,10 +2,13 @@ import { ref, computed } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import type { ReferencePaperQuery, LinkedArticleInfo } from '@/types';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
+
+export type MatchStatusFilter = 'all' | 'unmatched' | 'matched' | 'imported';
 
 export function useReferencesSearch() {
   const searchText = ref('');
+  const statusFilter = ref<MatchStatusFilter>('all');
   const papers = ref<ReferencePaperQuery[]>([]);
   const articlesOfInterest = ref<ReferencePaperQuery[]>([]);
   const loading = ref(false);
@@ -35,13 +38,15 @@ export function useReferencesSearch() {
     try {
       const offset = (currentPage.value - 1) * PAGE_SIZE;
       const term = searchText.value.trim() || undefined;
+      const matchStatus = statusFilter.value === 'all' ? null : statusFilter.value;
       const result = await tauriCommand<import('@/types').ReferencePaperQueryResult>(
         'query_reference_papers',
-        { search: term ?? null, limit: PAGE_SIZE, offset }
+        { search: term ?? null, matchStatus, limit: PAGE_SIZE, offset }
       );
       papers.value = result.papers;
       total.value = result.total;
     } catch (e: unknown) {
+      console.error('[references-search] loadPage failed:', e);
       error.value = e instanceof Error ? e.message : String(e);
       papers.value = [];
       total.value = 0;
@@ -108,6 +113,7 @@ export function useReferencesSearch() {
 
   return {
     searchText,
+    statusFilter,
     papers,
     articlesOfInterest,
     loading,

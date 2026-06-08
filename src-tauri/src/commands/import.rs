@@ -138,10 +138,7 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
     // e.g. "McGill Univ, Sch Comp Sci, Montreal, PQ, Canada" → "McGill Univ"
     let affiliation = record.affiliation.clone().or_else(|| {
         record.author_address.as_ref().and_then(|addr| {
-            addr.split(',')
-                .next()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
+            addr.split(',').next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
         })
     });
 
