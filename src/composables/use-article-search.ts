@@ -1,5 +1,8 @@
 import { ref, reactive, computed } from 'vue';
 import { tauriCommand } from './use-tauri-command';
+import { useArticlePagination } from './use-article-pagination';
+import { useArticleSelection } from './use-article-selection';
+import { useArticleFullText } from './use-article-full-text';
 import { useArticlesStore } from '@/stores/articles';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
@@ -61,8 +64,16 @@ export function useArticleSearch() {
   const showDetail = ref(false);
   const returnToArticleId = ref<string | null>(null);
 
-  // Multi-select state for batch operations
-  const selectedIds = ref<Set<string>>(new Set());
+  // Multi-select (extracted composable)
+  const {
+    selectedIds,
+    selectedCount,
+    allSelected,
+    someSelected,
+    toggleSelect,
+    toggleSelectAll,
+    clearSelection,
+  } = useArticleSelection({ articles });
 
   // Smart default tab: Working > Included > All
   const defaultTab: StatusTab =
@@ -88,8 +99,6 @@ export function useArticleSearch() {
     labels: [],
   });
 
-  const pageSize = ref(10);
-  const currentPage = ref(1);
   const searchText = ref('');
 
   const query = reactive<ArticleQuery>({
@@ -105,7 +114,7 @@ export function useArticleSearch() {
     journal: null,
     tags: [],
     labels: [],
-    limit: pageSize.value,
+    limit: 10,
     offset: 0,
   });
 
@@ -146,10 +155,63 @@ export function useArticleSearch() {
     return labelsStore.labels.map((l) => l.name).sort();
   });
 
-  function resetPage(): void {
-    currentPage.value = 1;
-    query.offset = 0;
+  async function search(): Promise<void> {
+    loading.value = true;
+    error.value = null;
+    try {
+      articles.value = await tauriCommand<Article[]>('query_articles', { query });
+      await fetchCounts();
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      loading.value = false;
+    }
   }
+
+  // ── Pagination (extracted composable) ───────────────────────────────
+  const isFiltered = computed(() => {
+    return !!(
+      query.search ||
+      query.author ||
+      query.journal ||
+      query.tags.length > 0 ||
+      query.labels.length > 0 ||
+      query.yearFrom !== null ||
+      query.yearTo !== null
+    );
+  });
+
+  const activeTotalCount = computed(() => {
+    const tab = activeStatusTab.value;
+    if (tab === 'all') return statusCounts.value.all;
+    if (tab === 'error') return statusCounts.value.error;
+    return statusCounts.value[tab as ArticleStatus] ?? 0;
+  });
+
+  const {
+    pageSize,
+    currentPage,
+    totalPages,
+    canGoPrev,
+    canGoNext,
+    selectedIndex,
+    selectedGlobalIndex,
+    resultCount,
+    rangeStart,
+    rangeEnd,
+    resetPage,
+    goToPage,
+    changePageSize,
+  } = useArticlePagination({
+    articles,
+    selectedArticle,
+    query,
+    statusCounts,
+    activeStatusTab,
+    search,
+    isFiltered,
+    activeTotalCount,
+  });
 
   function setStatusTab(tab: StatusTab): void {
     activeStatusTab.value = tab;
@@ -214,19 +276,6 @@ export function useArticleSearch() {
     query.labels = [];
     resetPage();
     void search();
-  }
-
-  async function search(): Promise<void> {
-    loading.value = true;
-    error.value = null;
-    try {
-      articles.value = await tauriCommand<Article[]>('query_articles', { query });
-      await fetchCounts();
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-    } finally {
-      loading.value = false;
-    }
   }
 
   async function selectArticle(id: string): Promise<void> {
@@ -300,32 +349,9 @@ export function useArticleSearch() {
     syncArticleToList(id);
   }
 
-  async function attachFullText(articleId: string, filePath: string): Promise<void> {
-    await tauriCommand('attach_full_text', { articleId, filePath });
-    await selectArticle(articleId);
-    syncArticleToList(articleId);
-    await fetchCounts();
-  }
-
-  async function deleteFullTextAttachment(articleId: string): Promise<void> {
-    await tauriCommand('delete_full_text', { articleId });
-    await selectArticle(articleId);
-    syncArticleToList(articleId);
-    await fetchCounts();
-  }
-
-  async function readFullTextContent(articleId: string): Promise<string | null> {
-    return await tauriCommand<string | null>('read_full_text', { articleId });
-  }
-
-  async function getFullTextFilePath(articleId: string): Promise<string | null> {
-    return await tauriCommand<string | null>('get_full_text_file_path', { articleId });
-  }
-
-  const selectedIndex = computed(() => {
-    if (!selectedArticle.value) return -1;
-    return articles.value.findIndex((a) => a.id === selectedArticle.value!.id);
-  });
+  // ── Full text (extracted composable) ─────────────────────────────
+  const { attachFullText, deleteFullTextAttachment, readFullTextContent, getFullTextFilePath } =
+    useArticleFullText({ selectArticle, syncArticleToList, fetchCounts });
 
   const hasPrevious = computed(() => {
     if (selectedIndex.value > 0) return true;
@@ -374,74 +400,6 @@ export function useArticleSearch() {
     }
   }
 
-  /** 1-based global position of the selected article across all pages. */
-  const selectedGlobalIndex = computed(() => {
-    if (selectedIndex.value < 0) return 0;
-    return (currentPage.value - 1) * pageSize.value + selectedIndex.value + 1;
-  });
-
-  /** Total article count for the currently active status tab. */
-  const activeTotalCount = computed(() => {
-    const tab = activeStatusTab.value;
-    if (tab === 'all') return statusCounts.value.all;
-    if (tab === 'error') return statusCounts.value.error;
-    return statusCounts.value[tab as ArticleStatus] ?? 0;
-  });
-
-  /** Whether a search or filter is currently active. */
-  const isFiltered = computed(() => {
-    return !!(
-      query.search ||
-      query.author ||
-      query.journal ||
-      query.tags.length > 0 ||
-      query.labels.length > 0 ||
-      query.yearFrom !== null ||
-      query.yearTo !== null
-    );
-  });
-
-  /** Display count: filtered result length when filtering, tab total otherwise. */
-  const resultCount = computed(() => {
-    if (isFiltered.value) return articles.value.length;
-    return activeTotalCount.value;
-  });
-
-  /** 1-based index of the first displayed article on the current page. */
-  const rangeStart = computed(() => {
-    if (resultCount.value === 0) return 0;
-    if (isFiltered.value) return 1;
-    return (currentPage.value - 1) * pageSize.value + 1;
-  });
-
-  /** 1-based index of the last displayed article on the current page. */
-  const rangeEnd = computed(() => {
-    if (isFiltered.value) return articles.value.length;
-    return Math.min(currentPage.value * pageSize.value, activeTotalCount.value);
-  });
-
-  function goToPage(page: number): void {
-    currentPage.value = page;
-    query.offset = (page - 1) * pageSize.value;
-    void search();
-  }
-
-  const totalPages = computed(() => {
-    const total = activeTotalCount.value;
-    return Math.max(1, Math.ceil(total / pageSize.value));
-  });
-
-  const canGoPrev = computed(() => currentPage.value > 1);
-  const canGoNext = computed(() => currentPage.value < totalPages.value);
-
-  /** Change page size and reset to page 1. */
-  function changePageSize(size: number): void {
-    pageSize.value = size;
-    query.limit = size;
-    resetPage();
-    void search();
-  }
-
   /** Execute a quick search from the toolbar search box. */
   function executeToolbarSearch(): void {
     query.search = searchText.value || null;
@@ -455,37 +413,6 @@ export function useArticleSearch() {
     query.search = null;
     resetPage();
     void search();
-  }
-
-  // ── Multi-select helpers ──────────────────────────────────────────
-  const selectedCount = computed(() => selectedIds.value.size);
-
-  const allSelected = computed(
-    () => articles.value.length > 0 && selectedIds.value.size === articles.value.length
-  );
-
-  const someSelected = computed(() => selectedIds.value.size > 0 && !allSelected.value);
-
-  function toggleSelect(id: string): void {
-    const s = new Set(selectedIds.value);
-    if (s.has(id)) {
-      s.delete(id);
-    } else {
-      s.add(id);
-    }
-    selectedIds.value = s;
-  }
-
-  function toggleSelectAll(): void {
-    if (allSelected.value) {
-      selectedIds.value = new Set();
-    } else {
-      selectedIds.value = new Set(articles.value.map((a) => a.id));
-    }
-  }
-
-  function clearSelection(): void {
-    selectedIds.value = new Set();
   }
 
   // ── Bulk operations ───────────────────────────────────────────────
