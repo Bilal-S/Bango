@@ -22,6 +22,9 @@ pub enum AppError {
 
     #[error("Rendering error: {0}")]
     Rendering(String),
+
+    #[error("Scraping error: {0}")]
+    Scraping(String),
 }
 
 impl Serialize for AppError {

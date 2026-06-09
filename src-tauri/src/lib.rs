@@ -10,12 +10,19 @@ pub mod models;
 pub mod prisma;
 pub mod ris;
 pub mod screening;
+pub mod scraping;
 pub mod summary;
 pub mod utils;
 
 use commands::screening::ScreeningState;
 use db::connection::DbState;
 use llm::orchestrator::LlmOrchestrator;
+
+/// Application-level feature flags set at startup.
+#[derive(Debug, Clone)]
+pub struct AppFlags {
+    pub premium: bool,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -49,6 +56,31 @@ pub fn run() {
             }
 
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
+
+            // Parse CLI flags and persist feature flags to DB.
+            let args: Vec<String> = std::env::args().collect();
+            let premium_from_cli = args.iter().any(|a| a == "--premium");
+            {
+                let guard = app.state::<DbState>();
+                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                if premium_from_cli {
+                    if let Err(e) = db::app_settings_repo::set_setting(&conn, "flag_premium", Some("true")) {
+                        eprintln!("warning: failed to persist flag_premium: {e:#}");
+                    }
+                }
+            }
+
+            // Read authoritative flag values from DB (persists across restarts).
+            let premium = {
+                let guard = app.state::<DbState>();
+                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                db::app_settings_repo::get_setting(&conn, "flag_premium")
+                    .ok()
+                    .flatten()
+                    .map(|v| v == "true")
+                    .unwrap_or(false)
+            };
+            app.manage(AppFlags { premium });
 
             // Initialize LLM orchestrator from saved config (defaults if no config saved yet)
             let (max_conc, delay_ms) = {
@@ -121,6 +153,7 @@ pub fn run() {
             commands::articles::bulk_update_article_status,
             commands::articles::bulk_add_tag_to_articles,
             commands::articles::bulk_add_label_to_articles,
+            commands::app_settings::get_app_flags,
             commands::app_settings::get_fulltext_storage_dir,
             commands::app_settings::set_fulltext_storage_dir,
             commands::full_text::attach_full_text,
@@ -163,6 +196,7 @@ pub fn run() {
             commands::references::get_reference_articles_of_interest,
             commands::references::get_linked_articles_for_paper,
             commands::references::get_reference_paper,
+            commands::scraping::scrape_citation_chaser_cmd,
         ]);
 
     #[cfg(debug_assertions)]

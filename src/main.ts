@@ -11,6 +11,8 @@ import { useLlmConfigStore } from './stores/llm-config';
 import { useAuditStore } from './stores/audit';
 import { useScreeningStore } from './stores/screening';
 import { initialDataLoaded } from './composables/use-dashboard';
+import { initFeatureFlags, useFeatureFlags } from './composables/use-feature-flags';
+import { useToast } from './composables/use-toast';
 
 const app = createApp(App);
 app.use(createPinia());
@@ -29,6 +31,10 @@ void Promise.all([
   useLlmConfigStore().fetchIfNeeded(),
   useAuditStore().fetchIfNeeded(),
   useScreeningStore().fetchIfNeeded(),
+  initFeatureFlags(),
 ]).finally(() => {
   initialDataLoaded.value = true;
+  if (useFeatureFlags().isPremium.value) {
+    useToast().show('Premium Mode Enabled.', 'info');
+  }
 });

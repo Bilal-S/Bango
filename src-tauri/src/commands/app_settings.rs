@@ -2,6 +2,19 @@ use crate::db::app_settings_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 
+/// Application-level feature flags exposed to the frontend.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppFlagsResponse {
+    pub premium: bool,
+}
+
+/// Read the current application feature flags.
+#[tauri::command]
+pub fn get_app_flags(flags: tauri::State<'_, crate::AppFlags>) -> AppFlagsResponse {
+    AppFlagsResponse { premium: flags.premium }
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FullTextStorageInfo {

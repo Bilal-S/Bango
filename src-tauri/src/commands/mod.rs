@@ -9,6 +9,7 @@ pub mod labels;
 pub mod llm_config;
 pub mod prisma;
 pub mod references;
+pub mod scraping;
 pub mod screening;
 pub mod summary;
 pub mod tags;

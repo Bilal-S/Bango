@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
+import { useToast } from '@/composables/use-toast';
 
 const props = defineProps<{
   article: Article;
@@ -20,11 +21,20 @@ const emit = defineEmits<{
   readFullText: [];
 }>();
 
+const toast = useToast();
+
 // Metadata expand/collapse state (persisted)
 const metadataExpanded = ref(localStorage.getItem('bango-metadata-expanded') !== 'false');
 function toggleMetadata(): void {
   metadataExpanded.value = !metadataExpanded.value;
   localStorage.setItem('bango-metadata-expanded', String(metadataExpanded.value));
+}
+
+function copyDoi(): void {
+  if (!props.article.doi) return;
+  navigator.clipboard.writeText(props.article.doi).then(() => {
+    toast.show('DOI copied to clipboard', 'success', 2000);
+  });
 }
 </script>
 
@@ -152,15 +162,23 @@ function toggleMetadata(): void {
             <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
               >DOI</span
             >
-            <a
-              class="text-primary hover:underline flex items-center gap-1"
-              :href="'https://doi.org/' + article.doi"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {{ article.doi }}
-              <span class="material-symbols-outlined text-[14px]">open_in_new</span>
-            </a>
+            <div class="flex items-center gap-1">
+              <a
+                class="text-primary hover:underline"
+                :href="'https://doi.org/' + article.doi"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {{ article.doi }}
+              </a>
+              <button
+                class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer transition-colors"
+                title="Copy DOI"
+                @click="copyDoi"
+              >
+                content_copy
+              </button>
+            </div>
           </div>
           <div v-if="article.keywords.length > 0" class="flex flex-col gap-1 col-span-2">
             <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
