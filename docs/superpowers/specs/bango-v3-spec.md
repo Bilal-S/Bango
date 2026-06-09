@@ -131,6 +131,83 @@ The app manages a **single project** - there is no project selector or multi-pro
     "exportedAt": "ISO-8601 timestamp",
     "appName": "string ('Bango')",
     "appVersion": "string"
+  },
+  "BiblioAuthor": {
+    "id": "uuid",
+    "normalized_name": "string (lastname + initials, lowercase, for dedup)",
+    "display_name": "string (e.g., 'Smith, J.')",
+    "first_author_count": "integer",
+    "article_count": "integer",
+    "created_at": "ISO-8601 timestamp"
+  },
+  "BiblioArticleAuthor": {
+    "id": "uuid",
+    "article_id": "uuid (references Article)",
+    "author_id": "uuid (references BiblioAuthor)",
+    "author_order": "integer (0-based position)",
+    "raw_name": "string | null (original author string from RIS)",
+    "raw_affiliation": "string | null (affiliation string from RIS)"
+  },
+  "BiblioInstitution": {
+    "id": "uuid",
+    "normalized_name": "string (lowercase, for dedup)",
+    "country": "string | null",
+    "city": "string | null"
+  },
+  "BiblioAuthorAffiliation": {
+    "id": "uuid",
+    "author_id": "uuid (references BiblioAuthor)",
+    "institution_id": "uuid (references BiblioInstitution)",
+    "article_id": "uuid (references Article — context of the affiliation)"
+  },
+  "BiblioTerm": {
+    "id": "uuid",
+    "normalized_term": "string (lowercase, stripped punctuation)",
+    "raw_term": "string (original form)",
+    "term_type": "enum[keyword, noun_phrase]",
+    "article_count": "integer (number of articles linked)",
+    "created_at": "ISO-8601 timestamp"
+  },
+  "BiblioArticleTerm": {
+    "id": "uuid",
+    "article_id": "uuid (references Article)",
+    "term_id": "uuid (references BiblioTerm)",
+    "frequency": "integer (occurrence count)"
+  },
+  "BiblioNetworkMeta": {
+    "id": "uuid",
+    "network_type": "enum[co_authorship, co_occurrence, citation, biblio_coupling, co_citation]",
+    "label": "string",
+    "article_filter": "string | null (SQL WHERE clause for filtering)",
+    "params_json": "string | null (JSON of generation parameters)",
+    "node_count": "integer",
+    "edge_count": "integer",
+    "created_at": "ISO-8601 timestamp"
+  },
+  "BiblioNetworkNode": {
+    "id": "uuid",
+    "network_id": "uuid (references BiblioNetworkMeta)",
+    "entity_id": "string (references BiblioAuthor.id or BiblioTerm.id)",
+    "label": "string (display name)",
+    "weight": "float (e.g., article count or term frequency)",
+    "cluster": "integer | null (community detection result)",
+    "x": "float | null (layout coordinate)",
+    "y": "float | null (layout coordinate)"
+  },
+  "BiblioNetworkEdge": {
+    "id": "uuid",
+    "network_id": "uuid (references BiblioNetworkMeta)",
+    "source_id": "string (entity_id of source node)",
+    "target_id": "string (entity_id of target node)",
+    "weight": "float (collaboration strength or co-occurrence count)"
+  },
+  "BiblioStatus": {
+    "author_count": "integer",
+    "institution_count": "integer",
+    "term_count": "integer",
+    "article_author_links": "integer",
+    "article_term_links": "integer",
+    "network_count": "integer"
   }
 }
 ```
@@ -475,6 +552,7 @@ Articles are sent to the LLM in **batches** (configurable size, default 1-5 arti
     "matched_inclusion_criteria": ["criteria-id-1", ...],
     "matched_exclusion_criteria": ["criteria-id-3", ...],
     "suggested_tags": ["tag-name-1", ...],
+    "extracted_terms": ["noun-phrase-1", "keyword-2", ...],
     "confidence": 0.0-1.0
   }
 ]
@@ -996,6 +1074,7 @@ The following features are explicitly **out of scope** for v1:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v3.5 | 2026-06-09 | Bibliometrics data layer: added 8 `biblio_*` SQLite tables for VOSViewer-style analysis. Domain models: `BiblioAuthor`, `BiblioTerm`, `BiblioInstitution`, `BiblioNetworkMeta/Node/Edge`. Added `extracted_terms` to AI screening response (Section 9.1). Data populated on-demand via `biblio_normalize` command. 5 new Tauri commands. New Rust modules: `biblio/normalizer.rs`, `db/biblio_repo.rs`, `models/biblio.rs`, `commands/biblio_cmd.rs`. |
 | v3.4 | 2026-06-06 | Added `fullText` and `fullTextAiSummary` nullable text columns to Article model. These are stored directly on the articles table (not a separate table) since they are 1:1 with articles and queried together. Both fields are populated on demand (not during RIS import). Full project export/import already serializes all columns via `SELECT *`, so no export logic changes were needed beyond adding the fields to the import INSERT. Migration v004 adds the columns with `ALTER TABLE`. |
 | v3.3 | 2026-06-01 | AI Summary prompt update: replaced `AI Reasoning: {aiReasoning}` with `Keywords: {comma-separated tag names associated with the article}` in the per-article data sent to the LLM. The summary now receives article tags as keywords instead of AI screening reasoning, grounding the summary in content categorization rather than screening decisions. |
 | v3.2 | 2026-05-08 | Article status model refactor: renamed `imported` status to `duplicate`. Non-duplicate articles now promote directly to `working` on import. Only true duplicates remain in `duplicate` status. Added cross-status dedup protection: articles already in `working`, `included`, or `rejected` are never affected by new imports. Updated state machine diagram, transitions, PRISMA data mapping, and workflow sequence. |

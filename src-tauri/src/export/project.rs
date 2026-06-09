@@ -31,6 +31,24 @@ pub struct ProjectBackup {
     pub reference_papers: Vec<serde_json::Value>,
     #[serde(default)]
     pub article_reference_links: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_authors: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_article_authors: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_institutions: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_author_affiliations: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_terms: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_article_terms: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_network_meta: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_network_nodes: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub biblio_network_edges: Vec<serde_json::Value>,
     pub llm_config: Option<LlmConfigBackup>,
 }
 
@@ -53,6 +71,16 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
     let audit = serialize_table(conn, "SELECT * FROM audit_entries")?;
     let reference_papers = serialize_table(conn, "SELECT * FROM reference_papers")?;
     let article_reference_links = serialize_table(conn, "SELECT * FROM article_reference_links")?;
+    let biblio_authors = serialize_table(conn, "SELECT * FROM biblio_authors")?;
+    let biblio_article_authors = serialize_table(conn, "SELECT * FROM biblio_article_authors")?;
+    let biblio_institutions = serialize_table(conn, "SELECT * FROM biblio_institutions")?;
+    let biblio_author_affiliations =
+        serialize_table(conn, "SELECT * FROM biblio_author_affiliations")?;
+    let biblio_terms = serialize_table(conn, "SELECT * FROM biblio_terms")?;
+    let biblio_article_terms = serialize_table(conn, "SELECT * FROM biblio_article_terms")?;
+    let biblio_network_meta = serialize_table(conn, "SELECT * FROM biblio_network_meta")?;
+    let biblio_network_nodes = serialize_table(conn, "SELECT * FROM biblio_network_nodes")?;
+    let biblio_network_edges = serialize_table(conn, "SELECT * FROM biblio_network_edges")?;
 
     let llm_backup = llm_config_repo::get_config(conn)?.map(|c| LlmConfigBackup {
         provider: c.provider.as_str().to_string(),
@@ -77,6 +105,15 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
         audit_entries: audit,
         reference_papers,
         article_reference_links,
+        biblio_authors,
+        biblio_article_authors,
+        biblio_institutions,
+        biblio_author_affiliations,
+        biblio_terms,
+        biblio_article_terms,
+        biblio_network_meta,
+        biblio_network_nodes,
+        biblio_network_edges,
         llm_config: llm_backup,
     };
 
@@ -156,6 +193,15 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         .map_err(|e| AppError::Import(format!("Failed to start import transaction: {}", e)))?;
 
     // Clear existing data (reverse dependency order)
+    tx.execute("DELETE FROM biblio_network_edges", [])?;
+    tx.execute("DELETE FROM biblio_network_nodes", [])?;
+    tx.execute("DELETE FROM biblio_network_meta", [])?;
+    tx.execute("DELETE FROM biblio_article_terms", [])?;
+    tx.execute("DELETE FROM biblio_terms", [])?;
+    tx.execute("DELETE FROM biblio_author_affiliations", [])?;
+    tx.execute("DELETE FROM biblio_article_authors", [])?;
+    tx.execute("DELETE FROM biblio_institutions", [])?;
+    tx.execute("DELETE FROM biblio_authors", [])?;
     tx.execute("DELETE FROM article_reference_links", [])?;
     tx.execute("DELETE FROM reference_papers", [])?;
     tx.execute("DELETE FROM audit_entries", [])?;
@@ -507,6 +553,129 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![id, article_id, timestamp, action, from_status, to_status, details, source],
+        )?;
+    }
+
+    // Restore biblio_authors
+    for ba in &backup.biblio_authors {
+        let id = get_str(ba, "id");
+        let normalized_name = get_str_field(ba, "normalizedName", "normalized_name").unwrap_or_default();
+        let display_name = get_str_field(ba, "displayName", "display_name").unwrap_or_default();
+        let first_author_count = ba.get("firstAuthorCount").or_else(|| ba.get("first_author_count")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let article_count = ba.get("articleCount").or_else(|| ba.get("article_count")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let created_at = get_str_field(ba, "createdAt", "created_at").unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        tx.execute(
+            "INSERT INTO biblio_authors (id, normalized_name, display_name, first_author_count, article_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, normalized_name, display_name, first_author_count, article_count, created_at],
+        )?;
+    }
+
+    // Restore biblio_institutions
+    for bi in &backup.biblio_institutions {
+        let id = get_str(bi, "id");
+        let normalized_name = get_str_field(bi, "normalizedName", "normalized_name").unwrap_or_default();
+        let country = get_str_field(bi, "country", "country");
+        let city = get_str_field(bi, "city", "city");
+        tx.execute(
+            "INSERT INTO biblio_institutions (id, normalized_name, country, city) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, normalized_name, country, city],
+        )?;
+    }
+
+    // Restore biblio_article_authors
+    for baa in &backup.biblio_article_authors {
+        let id = get_str(baa, "id");
+        let article_id = get_str_field(baa, "articleId", "article_id").unwrap_or_default();
+        let author_id = get_str_field(baa, "authorId", "author_id").unwrap_or_default();
+        let author_order = baa.get("authorOrder").or_else(|| baa.get("author_order")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let raw_name = get_str_field(baa, "rawName", "raw_name");
+        let raw_affiliation = get_str_field(baa, "rawAffiliation", "raw_affiliation");
+        tx.execute(
+            "INSERT INTO biblio_article_authors (id, article_id, author_id, author_order, raw_name, raw_affiliation) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, article_id, author_id, author_order, raw_name, raw_affiliation],
+        )?;
+    }
+
+    // Restore biblio_author_affiliations
+    for baf in &backup.biblio_author_affiliations {
+        let id = get_str(baf, "id");
+        let author_id = get_str_field(baf, "authorId", "author_id").unwrap_or_default();
+        let institution_id = get_str_field(baf, "institutionId", "institution_id").unwrap_or_default();
+        let article_id = get_str_field(baf, "articleId", "article_id").unwrap_or_default();
+        tx.execute(
+            "INSERT INTO biblio_author_affiliations (id, author_id, institution_id, article_id) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, author_id, institution_id, article_id],
+        )?;
+    }
+
+    // Restore biblio_terms
+    for bt in &backup.biblio_terms {
+        let id = get_str(bt, "id");
+        let normalized_term = get_str_field(bt, "normalizedTerm", "normalized_term").unwrap_or_default();
+        let raw_term = get_str_field(bt, "rawTerm", "raw_term").unwrap_or_default();
+        let term_type = get_str_field(bt, "termType", "term_type").unwrap_or_else(|| "keyword".to_string());
+        let article_count = bt.get("articleCount").or_else(|| bt.get("article_count")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let created_at = get_str_field(bt, "createdAt", "created_at").unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        tx.execute(
+            "INSERT INTO biblio_terms (id, normalized_term, raw_term, term_type, article_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, normalized_term, raw_term, term_type, article_count, created_at],
+        )?;
+    }
+
+    // Restore biblio_article_terms
+    for bat in &backup.biblio_article_terms {
+        let id = get_str(bat, "id");
+        let article_id = get_str_field(bat, "articleId", "article_id").unwrap_or_default();
+        let term_id = get_str_field(bat, "termId", "term_id").unwrap_or_default();
+        let frequency = bat.get("frequency").and_then(|v| v.as_i64()).unwrap_or(1);
+        tx.execute(
+            "INSERT INTO biblio_article_terms (id, article_id, term_id, frequency) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, article_id, term_id, frequency],
+        )?;
+    }
+
+    // Restore biblio_network_meta
+    for bnm in &backup.biblio_network_meta {
+        let id = get_str(bnm, "id");
+        let network_type = get_str_field(bnm, "networkType", "network_type").unwrap_or_default();
+        let label = get_str(bnm, "label");
+        let article_filter = get_str_field(bnm, "articleFilter", "article_filter");
+        let params_json = get_str_field(bnm, "paramsJson", "params_json");
+        let node_count = bnm.get("nodeCount").or_else(|| bnm.get("node_count")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let edge_count = bnm.get("edgeCount").or_else(|| bnm.get("edge_count")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let created_at = get_str_field(bnm, "createdAt", "created_at").unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        tx.execute(
+            "INSERT INTO biblio_network_meta (id, network_type, label, article_filter, params_json, node_count, edge_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![id, network_type, label, article_filter, params_json, node_count, edge_count, created_at],
+        )?;
+    }
+
+    // Restore biblio_network_nodes
+    for bnn in &backup.biblio_network_nodes {
+        let id = get_str(bnn, "id");
+        let network_id = get_str_field(bnn, "networkId", "network_id").unwrap_or_default();
+        let entity_id = get_str_field(bnn, "entityId", "entity_id").unwrap_or_default();
+        let label = get_str(bnn, "label");
+        let weight = bnn.get("weight").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let cluster: Option<i64> = bnn.get("cluster").and_then(|v| v.as_i64());
+        let x: Option<f64> = bnn.get("x").and_then(|v| v.as_f64());
+        let y: Option<f64> = bnn.get("y").and_then(|v| v.as_f64());
+        tx.execute(
+            "INSERT INTO biblio_network_nodes (id, network_id, entity_id, label, weight, cluster, x, y) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![id, network_id, entity_id, label, weight, cluster, x, y],
+        )?;
+    }
+
+    // Restore biblio_network_edges
+    for bne in &backup.biblio_network_edges {
+        let id = get_str(bne, "id");
+        let network_id = get_str_field(bne, "networkId", "network_id").unwrap_or_default();
+        let source_id = get_str_field(bne, "sourceId", "source_id").unwrap_or_default();
+        let target_id = get_str_field(bne, "targetId", "target_id").unwrap_or_default();
+        let weight = bne.get("weight").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        tx.execute(
+            "INSERT INTO biblio_network_edges (id, network_id, source_id, target_id, weight) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, network_id, source_id, target_id, weight],
         )?;
     }
 

@@ -16,7 +16,7 @@
 - Return `Result<T, E>` from all fallible functions.
 
 ### Code Style
-- Module structure: one module per domain concern (e.g., `ris`, `dedup`, `screening`, `llm`, `db`, `prisma`).
+- Module structure: one module per domain concern (e.g., `ris`, `dedup`, `screening`, `llm`, `db`, `prisma`, `biblio`).
 - Use `#[must_use]` on pure functions that return a value.
 - No `clone()` unless the borrow checker truly requires it. Prefer references.
 - Use `impl Trait` for return types in function signatures when appropriate.
