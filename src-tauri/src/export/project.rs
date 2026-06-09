@@ -143,27 +143,39 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )));
     }
 
+    // Disable foreign key checks during import.
+    // PRAGMA cannot be changed inside a transaction, so set it before starting one.
+    // This is safe because we delete all data first, then insert in dependency order.
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
+
+    // Wrap entire import in a transaction for atomicity.
+    // If any INSERT fails mid-way, all changes are rolled back so we don't
+    // leave the database in a partially-imported state.
+    let tx = conn.unchecked_transaction().map_err(|e| {
+        AppError::Import(format!("Failed to start import transaction: {}", e))
+    })?;
+
     // Clear existing data (reverse dependency order)
-    conn.execute("DELETE FROM article_reference_links", [])?;
-    conn.execute("DELETE FROM reference_papers", [])?;
-    conn.execute("DELETE FROM audit_entries", [])?;
-    conn.execute("DELETE FROM article_tags", [])?;
-    conn.execute("DELETE FROM article_labels", [])?;
-    conn.execute("DELETE FROM articles", [])?;
-    conn.execute("DELETE FROM criteria", [])?;
-    conn.execute("DELETE FROM research_aims", [])?;
-    conn.execute("DELETE FROM tags", [])?;
-    conn.execute("DELETE FROM labels", [])?;
-    conn.execute("DELETE FROM llm_config", [])?;
+    tx.execute("DELETE FROM article_reference_links", [])?;
+    tx.execute("DELETE FROM reference_papers", [])?;
+    tx.execute("DELETE FROM audit_entries", [])?;
+    tx.execute("DELETE FROM article_tags", [])?;
+    tx.execute("DELETE FROM article_labels", [])?;
+    tx.execute("DELETE FROM articles", [])?;
+    tx.execute("DELETE FROM criteria", [])?;
+    tx.execute("DELETE FROM research_aims", [])?;
+    tx.execute("DELETE FROM tags", [])?;
+    tx.execute("DELETE FROM labels", [])?;
+    tx.execute("DELETE FROM llm_config", [])?;
     // Clear any previously generated summary (it was for different articles)
-    conn.execute("DELETE FROM summary", [])?;
+    tx.execute("DELETE FROM summary", [])?;
 
     // Restore research aims
     for aim in &backup.research_aims {
         let id = get_str(aim, "id");
         let text = get_str(aim, "text");
         let created_at = get_str_field(aim, "createdAt", "created_at");
-        conn.execute(
+        tx.execute(
             "INSERT INTO research_aims (id, text, created_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![id, text, created_at],
         )?;
@@ -185,7 +197,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             }
         };
         let created_at = get_str_field(c, "createdAt", "created_at");
-        conn.execute(
+        tx.execute(
             "INSERT INTO criteria (id, type, text, priority, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![id, ctype, text, priority, created_at],
         )?;
@@ -203,7 +215,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 s
             }
         };
-        conn.execute(
+        tx.execute(
             "INSERT INTO tags (id, name, source) VALUES (?1, ?2, ?3)",
             rusqlite::params![id, name, source],
         )?;
@@ -221,7 +233,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 s
             }
         };
-        conn.execute(
+        tx.execute(
             "INSERT INTO labels (id, name, source) VALUES (?1, ?2, ?3)",
             rusqlite::params![id, name, source],
         )?;
@@ -293,7 +305,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         });
         let full_text = get_str_field(a, "fullText", "full_text");
         let full_text_ai_summary = get_str_field(a, "fullTextAiSummary", "full_text_ai_summary");
-        conn.execute(
+        tx.execute(
             "INSERT INTO articles (
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
                 volume, issue, start_page, end_page, keywords, url, language, publisher, publisher_city,
@@ -326,7 +338,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     for at in &backup.article_tags {
         let article_id = get_str(at, "articleId");
         let tag_id = get_str(at, "tagId");
-        conn.execute(
+        tx.execute(
             "INSERT INTO article_tags (article_id, tag_id) VALUES (?1, ?2)",
             rusqlite::params![article_id, tag_id],
         )?;
@@ -336,7 +348,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     for al in &backup.article_labels {
         let article_id = get_str(al, "articleId");
         let label_id = get_str(al, "labelId");
-        conn.execute(
+        tx.execute(
             "INSERT INTO article_labels (article_id, label_id) VALUES (?1, ?2)",
             rusqlite::params![article_id, label_id],
         )?;
@@ -401,7 +413,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
         // Try INSERT; on unique constraint violation, find existing record
-        let inserted = conn.execute(
+        let inserted = tx.execute(
             "INSERT OR IGNORE INTO reference_papers (
                 id, title, abstract_text, authors, publication_year, doi, journal,
                 volume, issue, start_page, end_page, keywords, url, language, publisher,
@@ -448,7 +460,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         if inserted == 0 {
             // Constraint violation — find existing record and map IDs
             let existing_id =
-                find_existing_paper_id(conn, doi.as_deref(), &title, &authors, publication_year);
+                find_existing_paper_id(&tx, doi.as_deref(), &title, &authors, publication_year);
             if let Some(eid) = existing_id {
                 paper_id_map.insert(id, eid);
             }
@@ -473,7 +485,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             .unwrap_or(0);
         let created_at = get_str_field(rl, "createdAt", "created_at")
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
-        conn.execute(
+        tx.execute(
             "INSERT INTO article_reference_links (
                 id, parent_article_id, reference_paper_id, type, created_at
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -491,7 +503,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let to_status = get_str_field(ae, "toStatus", "to_status");
         let details = get_str(ae, "details");
         let source = get_str(ae, "source");
-        conn.execute(
+        tx.execute(
             "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![id, article_id, timestamp, action, from_status, to_status, details, source],
@@ -500,13 +512,20 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
 
     // Restore LLM config (without keys)
     if let Some(ref llm_backup) = backup.llm_config {
-        conn.execute(
+        tx.execute(
             "INSERT INTO llm_config (id, provider, endpoint_url, model_name, \
              temperature, max_concurrent_requests, request_delay_ms, context_window_tokens) \
              VALUES (1, ?1, ?2, ?3, 0.2, 3, 500, 50000)",
             rusqlite::params![llm_backup.provider, llm_backup.endpoint_url, llm_backup.model_name],
         )?;
     }
+
+    tx.commit().map_err(|e| {
+        AppError::Import(format!("Failed to commit import transaction: {}", e))
+    })?;
+
+    // Re-enable foreign key checks after import
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
 
     Ok(())
 }

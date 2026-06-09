@@ -219,6 +219,106 @@ describe('useExport', () => {
     });
   });
 
+  describe('exportRisForTab', () => {
+    it('calls save dialog with tab-specific default path and sends flat args', async () => {
+      vi.mocked(save).mockResolvedValue('/path/to/error-articles.ris');
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+      const { exportRisForTab } = useExport();
+      const result = await exportRisForTab('error', true, 'Errors');
+
+      expect(result).toBe(true);
+      expect(save).toHaveBeenCalledWith({
+        defaultPath: 'errors-articles.ris',
+        filters: [{ name: 'RIS File', extensions: ['ris'] }],
+      });
+      // Flat args — no `request` wrapper
+      expect(tauriCommand).toHaveBeenCalledWith('export_ris_for_tab_to_file', {
+        path: '/path/to/error-articles.ris',
+        status: 'error',
+        screeningErrorsOnly: true,
+      });
+    });
+
+    it('sends screeningErrorsOnly=false for non-error tabs', async () => {
+      vi.mocked(save).mockResolvedValue('/path/to/included-articles.ris');
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+      const { exportRisForTab } = useExport();
+      const result = await exportRisForTab('included', false, 'Included');
+
+      expect(result).toBe(true);
+      expect(tauriCommand).toHaveBeenCalledWith('export_ris_for_tab_to_file', {
+        path: '/path/to/included-articles.ris',
+        status: 'included',
+        screeningErrorsOnly: false,
+      });
+    });
+
+    it('slugifies the label for the default filename', async () => {
+      vi.mocked(save).mockResolvedValue(null);
+
+      const { exportRisForTab } = useExport();
+      await exportRisForTab('all', false, 'All Articles');
+
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultPath: 'all-articles-articles.ris',
+        })
+      );
+    });
+
+    it('returns false when user cancels save dialog', async () => {
+      vi.mocked(save).mockResolvedValue(null);
+
+      const { exportRisForTab } = useExport();
+      const result = await exportRisForTab('rejected', false, 'Rejected');
+
+      expect(result).toBe(false);
+      expect(tauriCommand).not.toHaveBeenCalled();
+    });
+
+    it('sets error on tauri command failure', async () => {
+      vi.mocked(save).mockResolvedValue('/path/to/working.ris');
+      vi.mocked(tauriCommand).mockRejectedValue(new Error('Tab export failed'));
+
+      const { exportRisForTab, error, exporting } = useExport();
+      const result = await exportRisForTab('working', false, 'Working');
+
+      expect(result).toBe(false);
+      expect(error.value).toBe('Tab export failed');
+      expect(exporting.value).toBe(false);
+    });
+
+    it('handles non-Error exceptions', async () => {
+      vi.mocked(save).mockResolvedValue('/path.ris');
+      vi.mocked(tauriCommand).mockRejectedValue('unknown failure');
+
+      const { exportRisForTab, error } = useExport();
+      await exportRisForTab('duplicate', false, 'Duplicates');
+
+      expect(error.value).toBe('unknown failure');
+    });
+
+    it('sets exporting=true during operation', async () => {
+      let resolveCmd: () => void;
+      const cmdPromise = new Promise<void>((r) => {
+        resolveCmd = r;
+      });
+      vi.mocked(save).mockResolvedValue('/path.ris');
+      vi.mocked(tauriCommand).mockReturnValue(cmdPromise);
+
+      const { exportRisForTab, exporting } = useExport();
+      const promise = exportRisForTab('error', true, 'Errors');
+
+      expect(exporting.value).toBe(true);
+      resolveCmd!();
+      await promise;
+
+      expect(exporting.value).toBe(false);
+    });
+  });
+
   describe('resetProject', () => {
     it('calls reset command and invalidates stores', async () => {
       vi.mocked(tauriCommand).mockResolvedValue(undefined);

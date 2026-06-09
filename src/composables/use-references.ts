@@ -1,7 +1,7 @@
-import { ref, type Ref } from 'vue';
+import { ref, computed, type Ref } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 import { useToast } from './use-toast';
-import type { ArticleReference, ReferenceType } from '../types';
+import type { ArticleReference, ReferenceType, Article, BatchRefScrapingProgress } from '../types';
 
 export interface ExtractResult {
   papersCreated: number;
@@ -270,5 +270,176 @@ export function useReferences() {
     previewReferencesImport,
     importReferencesForArticle,
     promoteReferenceToArticle,
+  };
+}
+
+// ── Module-level reactive state for batch reference scraping ──
+const batchProgress = ref<BatchRefScrapingProgress>({
+  total: 0,
+  completed: 0,
+  scraped: 0,
+  skipped: 0,
+  errors: 0,
+  isRunning: false,
+  currentArticleTitle: '',
+});
+const batchCancelled = ref(false);
+
+/**
+ * Composable for batch reference scraping across all included articles.
+ *
+ * Uses module-level reactive state so all components share the same
+ * progress singleton. The batch loop runs entirely on the frontend,
+ * reusing existing Tauri commands for scraping and importing.
+ */
+export function useBatchReferenceScraping() {
+  const toast = useToast();
+
+  const batchPercentage = computed(() => {
+    if (!batchProgress.value.total) return 0;
+    return Math.round((batchProgress.value.completed / batchProgress.value.total) * 100);
+  });
+
+  /**
+   * Start batch scraping for all included articles that are missing
+   * references or citations.
+   *
+   * @param allIncludedArticles  All articles with status 'included'
+   * @param onComplete           Called after batch finishes (success or cancel)
+   */
+  async function startBatchScraping(
+    allIncludedArticles: Article[],
+    onComplete: () => Promise<void>
+  ): Promise<void> {
+    // Prevent double-start
+    if (batchProgress.value.isRunning) return;
+
+    batchProgress.value = {
+      total: allIncludedArticles.length,
+      completed: 0,
+      scraped: 0,
+      skipped: 0,
+      errors: 0,
+      isRunning: true,
+      currentArticleTitle: '',
+    };
+    batchCancelled.value = false;
+
+    for (const article of allIncludedArticles) {
+      if (batchCancelled.value) break;
+
+      batchProgress.value = {
+        ...batchProgress.value,
+        currentArticleTitle: article.title || '(untitled)',
+      };
+
+      // Check if this article needs scraping
+      const needsRefs = !article.hasReferenceDetails;
+      const needsCites = !article.hasCitationDetails;
+      const needsScraping = !!(article.doi && (needsRefs || needsCites));
+
+      if (!needsScraping) {
+        // Article already has both or has no DOI — skip
+        batchProgress.value = {
+          ...batchProgress.value,
+          completed: batchProgress.value.completed + 1,
+          skipped: batchProgress.value.skipped + 1,
+        };
+        continue;
+      }
+
+      try {
+        // 1. Scrape Citation Chaser (shortcuts if RIS files exist on disk)
+        const scrapeResult = await tauriCommand<ScrapeCitationChaserResult>(
+          'scrape_citation_chaser_cmd',
+          {
+            doi: article.doi!,
+            getReferences: needsRefs,
+            getCitations: needsCites,
+          }
+        );
+
+        // 2. Import each non-null RIS result
+        if (scrapeResult.referencesRis) {
+          await tauriCommand<ExtractResult>('import_references_for_article', {
+            payload: {
+              articleId: article.id,
+              filePath: scrapeResult.referencesRis,
+              refType: 'reference',
+            },
+          });
+        }
+        if (scrapeResult.citationsRis) {
+          await tauriCommand<ExtractResult>('import_references_for_article', {
+            payload: {
+              articleId: article.id,
+              filePath: scrapeResult.citationsRis,
+              refType: 'citation',
+            },
+          });
+        }
+
+        batchProgress.value = {
+          ...batchProgress.value,
+          completed: batchProgress.value.completed + 1,
+          scraped: batchProgress.value.scraped + 1,
+        };
+      } catch {
+        batchProgress.value = {
+          ...batchProgress.value,
+          completed: batchProgress.value.completed + 1,
+          errors: batchProgress.value.errors + 1,
+        };
+      }
+    }
+
+    const wasCancelled = batchCancelled.value;
+    batchProgress.value = {
+      ...batchProgress.value,
+      isRunning: false,
+      currentArticleTitle: '',
+    };
+
+    if (wasCancelled) {
+      toast.show('Batch reference import cancelled', 'info');
+    } else if (batchProgress.value.errors > 0) {
+      toast.show(
+        `Batch complete: ${batchProgress.value.scraped} scraped, ${batchProgress.value.errors} errors`,
+        'warning'
+      );
+    } else {
+      toast.show(
+        `Batch complete: ${batchProgress.value.scraped} articles scraped, ${batchProgress.value.skipped} skipped`,
+        'success'
+      );
+    }
+
+    await onComplete();
+  }
+
+  /** Cancel the running batch after the current article finishes. */
+  function cancelBatchScraping(): void {
+    batchCancelled.value = true;
+  }
+
+  /** Reset batch progress so the progress card is hidden. */
+  function resetBatchProgress(): void {
+    batchProgress.value = {
+      completed: 0,
+      total: 0,
+      scraped: 0,
+      skipped: 0,
+      errors: 0,
+      currentArticleTitle: '',
+      isRunning: false,
+    };
+  }
+
+  return {
+    batchProgress,
+    batchPercentage,
+    startBatchScraping,
+    cancelBatchScraping,
+    resetBatchProgress,
   };
 }

@@ -1,10 +1,43 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useExport } from '@/composables/use-export';
 
+const props = defineProps<{
+  activeTab?: string;
+  statusCounts?: Record<string, number>;
+  tabLabel?: string;
+}>();
 const emit = defineEmits<{ close: [] }>();
-const { exporting, error, exportRis, exportProject } = useExport();
+const { exporting, error, exportRis, exportRisForTab, exportProject } = useExport();
 const showBackup = ref(false);
+
+/** Map tab key to a human-readable label for the export button and messages */
+const TAB_LABELS: Record<string, string> = {
+  all: 'All',
+  duplicate: 'Duplicate',
+  working: 'Working',
+  included: 'Included',
+  rejected: 'Rejected',
+  error: 'Error',
+};
+
+/** Whether this dialog is being used from the article list (tab-aware) */
+const isTabExport = computed(() => !!props.activeTab && props.activeTab !== 'prisma');
+
+const currentTabLabel = computed(
+  () => props.tabLabel ?? TAB_LABELS[props.activeTab ?? 'all'] ?? 'All'
+);
+
+/** Number of articles in the current tab */
+const tabCount = computed(() => {
+  if (!props.activeTab || !props.statusCounts) return 0;
+  return props.statusCounts[props.activeTab] ?? 0;
+});
+
+/** Whether the current tab has articles to export */
+const hasArticles = computed(() => tabCount.value > 0);
+
+const isPrismaTab = computed(() => props.activeTab === 'prisma');
 </script>
 
 <template>
@@ -15,17 +48,57 @@ const showBackup = ref(false);
       <div v-if="error" class="dialog__error">{{ error }}</div>
 
       <div v-if="!showBackup" class="dialog__options">
-        <button
-          class="btn btn--primary"
-          :disabled="exporting"
-          @click="
-            async () => {
-              if (await exportRis()) emit('close');
-            }
-          "
-        >
-          Export Included Articles (RIS)
-        </button>
+        <!-- Tab-aware export (article list) -->
+        <template v-if="isTabExport">
+          <div v-if="!hasArticles" class="dialog__empty">
+            <p class="dialog__empty-msg">No {{ currentTabLabel }} articles found to export</p>
+          </div>
+          <template v-else>
+            <button
+              class="btn btn--primary"
+              :disabled="exporting"
+              @click="
+                async () => {
+                  if (await exportRisForTab(activeTab!, activeTab === 'error', currentTabLabel))
+                    emit('close');
+                }
+              "
+            >
+              Export {{ currentTabLabel }} Articles (RIS)
+            </button>
+          </template>
+        </template>
+
+        <!-- PRISMA tab: always export included -->
+        <template v-else-if="isPrismaTab">
+          <button
+            class="btn btn--primary"
+            :disabled="exporting"
+            @click="
+              async () => {
+                if (await exportRis()) emit('close');
+              }
+            "
+          >
+            Export Included Articles (RIS)
+          </button>
+        </template>
+
+        <!-- Default fallback -->
+        <template v-else>
+          <button
+            class="btn btn--primary"
+            :disabled="exporting"
+            @click="
+              async () => {
+                if (await exportRis()) emit('close');
+              }
+            "
+          >
+            Export Included Articles (RIS)
+          </button>
+        </template>
+
         <button class="btn btn--secondary" @click="showBackup = true">Export Project Backup</button>
       </div>
 
@@ -91,6 +164,14 @@ const showBackup = ref(false);
   flex-direction: column;
   gap: var(--space-3, 12px);
 }
+.dialog__empty {
+  padding: var(--space-4, 16px);
+  text-align: center;
+}
+.dialog__empty-msg {
+  font-size: var(--font-size-caption, 13px);
+  color: var(--color-on-surface-variant, #464555);
+}
 .dialog__backup {
   display: flex;
   flex-direction: column;
@@ -104,12 +185,6 @@ const showBackup = ref(false);
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2, 8px);
-}
-.input {
-  padding: var(--space-2, 8px) var(--space-3, 12px);
-  border: 1px solid var(--color-outline, #777587);
-  border-radius: var(--radius-default, 0.25rem);
-  font-size: var(--font-size-caption, 13px);
 }
 .btn {
   padding: var(--space-2, 8px) var(--space-4, 16px);

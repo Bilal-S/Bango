@@ -362,6 +362,26 @@ pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Art
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Fetch articles for tab-aware export.
+/// - `status`: `"all"` for all articles, or a specific status like `"included"`, `"working"`, etc.
+/// - `screening_errors_only`: when true, only working articles with screening errors are returned.
+pub fn get_articles_for_export(
+    conn: &Connection,
+    status: &str,
+    screening_errors_only: bool,
+) -> Result<Vec<Article>, AppError> {
+    let sql = if status == "all" && !screening_errors_only {
+        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles ORDER BY imported_at DESC".to_string()
+    } else if screening_errors_only {
+        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'working' AND screened_at IS NOT NULL ORDER BY imported_at DESC".to_string()
+    } else {
+        format!("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = '{status}' ORDER BY imported_at DESC")
+    };
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], row_to_article)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn get_duplicate_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'duplicate' AND duplicate_of IS NULL ORDER BY imported_at DESC"

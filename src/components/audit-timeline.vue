@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AuditEntry, AuditAction } from '@/types';
+import { stripUuidFromDetails } from '@/utils/formatters';
 
 withDefaults(defineProps<{ entries: AuditEntry[]; showHeader?: boolean }>(), {
   showHeader: true,
@@ -54,16 +55,16 @@ const DUPLICATE_REF_RE =
   /^(.+ article )([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 interface ParsedDetail {
-  prefix: string;
+  display: string;
   articleId: string | null;
 }
 
 function parseDuplicateRef(details: string): ParsedDetail {
   const match = details.match(DUPLICATE_REF_RE);
   if (match && match[1] && match[2]) {
-    return { prefix: match[1], articleId: match[2] };
+    return { display: stripUuidFromDetails(details) ?? details, articleId: match[2] };
   }
-  return { prefix: details, articleId: null };
+  return { display: stripUuidFromDetails(details) ?? details, articleId: null };
 }
 </script>
 
@@ -107,15 +108,15 @@ function parseDuplicateRef(details: string): ParsedDetail {
           </div>
           <p v-if="entry.details" class="mt-1 text-[12px] text-slate-500">
             <template v-if="parseDuplicateRef(entry.details).articleId">
-              {{ parseDuplicateRef(entry.details).prefix }}
+              {{ parseDuplicateRef(entry.details).display }}
               <button
-                class="text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                class="text-blue-600 hover:text-blue-800 underline cursor-pointer ml-1"
                 @click="emit('navigateToArticle', parseDuplicateRef(entry.details).articleId!)"
               >
-                {{ parseDuplicateRef(entry.details).articleId }}
+                view&nbsp;→
               </button>
             </template>
-            <template v-else>{{ entry.details }}</template>
+            <template v-else>{{ parseDuplicateRef(entry.details).display }}</template>
           </p>
         </div>
       </div>

@@ -9,6 +9,10 @@ defineProps<{
   isFiltered: boolean;
   canGoPrev: boolean;
   canGoNext: boolean;
+  /** Whether to show the batch reference scrape button (included tab + isPremium) */
+  showBatchRefScrape?: boolean;
+  /** Whether batch reference scraping is currently running */
+  isBatchRefRunning?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -21,6 +25,7 @@ const emit = defineEmits<{
   goPrev: [];
   goNext: [];
   clearFilters: [];
+  batchScrapeRefs: [];
 }>();
 
 const PAGE_SIZES = [10, 25, 50, 100];
@@ -134,6 +139,23 @@ function onPageSizeChange(event: Event): void {
         &raquo;
       </button>
 
+      <!-- Batch Reference Scrape -->
+      <button
+        v-if="showBatchRefScrape"
+        class="toolbar-batch-ref flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
+        title="Automatically import all missing references."
+        :disabled="isBatchRefRunning"
+        @click="emit('batchScrapeRefs')"
+      >
+        <span v-if="isBatchRefRunning" class="material-symbols-outlined text-[16px] animate-spin"
+          >progress_activity</span
+        >
+        <span v-else class="material-symbols-outlined text-[16px]">Table_Convert</span>
+        <span class="hidden sm:inline">{{
+          isBatchRefRunning ? 'Extracting from Internet…' : 'Extract Refs'
+        }}</span>
+      </button>
+
       <!-- Export -->
       <button
         class="toolbar-export flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors shrink-0"
@@ -159,7 +181,8 @@ function onPageSizeChange(event: Event): void {
   .toolbar-search-group,
   .toolbar-search-btn,
   .toolbar-page-size,
-  .toolbar-export {
+  .toolbar-export,
+  .toolbar-batch-ref {
     display: none;
   }
 }

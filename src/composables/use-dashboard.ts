@@ -2,6 +2,7 @@ import { computed, ref } from 'vue';
 import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
+import { stripUuidFromDetails } from '@/utils/formatters';
 
 export interface StatusCounts {
   total: number;
@@ -109,7 +110,7 @@ export function useDashboard() {
       action: entry.action,
       source: entry.source,
       timestamp: entry.timestamp,
-      details: entry.details,
+      details: stripUuidFromDetails(entry.details),
       articleTitle: entry.articleTitle,
     }));
 
@@ -120,7 +121,7 @@ export function useDashboard() {
           action: 'import',
           source: 'system',
           timestamp: act.timestamp,
-          details: act.filename,
+          details: stripUuidFromDetails(act.filename),
           count: act.count,
         })
       ),

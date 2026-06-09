@@ -1,3 +1,4 @@
+use super::doi::normalize_doi;
 use super::types::{RisParseError, RisParseResult, RisRecord};
 use crate::error::AppError;
 use crate::ris::n1_parser::parse_n1_citation_data;
@@ -49,8 +50,8 @@ pub fn parse_ris(content: &str) -> Result<RisParseResult, AppError> {
 
             if tag == "ER" {
                 if in_record {
-                    // Before finalizing, extract N1 citation data from the full notes
-                    finalize_n1(&mut current);
+                    // Before finalizing, extract N1 citation data and normalize DOI
+                    finalize_record(&mut current);
                     records.push(current);
                     current = RisRecord::default();
                     record_index += 1;
@@ -77,7 +78,7 @@ pub fn parse_ris(content: &str) -> Result<RisParseResult, AppError> {
             record_index,
             message: "Record missing ER (end of reference) tag".to_string(),
         });
-        finalize_n1(&mut current);
+        finalize_record(&mut current);
         records.push(current);
     }
 
@@ -97,14 +98,17 @@ fn is_ris_tag_line(line: &str) -> bool {
         && bytes[4] == b'-'
 }
 
-/// Extracts N1 citation data (num_cited, num_references) from the assembled notes field
-/// after all multi-line continuations have been applied.
-fn finalize_n1(record: &mut RisRecord) {
+/// Finalizes a record after all tags have been applied.
+/// Extracts N1 citation data and normalizes the DOI field.
+fn finalize_record(record: &mut RisRecord) {
     if let Some(ref notes) = record.notes {
         let (num_cited, num_references) = parse_n1_citation_data(notes);
         record.num_cited = num_cited;
         record.num_references = num_references;
     }
+    // Normalize DOI: handles cases where DOI was built from continuation lines
+    // or where initial normalization in apply_tag was insufficient.
+    record.doi = normalize_doi(record.doi.as_deref()).map(|s| s.to_string());
 }
 
 /// Appends a continuation line to the appropriate field for the given tag.
@@ -246,7 +250,7 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
             let year_str = value.split('/').next().unwrap_or(value);
             record.publication_year = year_str.parse().ok();
         }
-        "DO" => record.doi = Some(value.to_string()),
+        "DO" => record.doi = normalize_doi(Some(value)).map(|s| s.to_string()),
         "T2" => record.journal = Some(value.to_string()),
         "VL" => record.volume = Some(value.to_string()),
         "IS" => record.issue = Some(value.to_string()),

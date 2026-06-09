@@ -6,6 +6,7 @@ use crate::models::reference::{
     ArticleReference, ArticleReferenceLink, LinkedArticleInfo, MatchStatus, NewReferencePaper,
     ReferencePaper, ReferenceType,
 };
+use crate::ris::doi::normalize_doi;
 
 // ─── Reference Paper operations ────────────────────────────────
 
@@ -15,9 +16,8 @@ pub fn insert_or_find_paper(
     conn: &Connection,
     new_paper: &NewReferencePaper,
 ) -> Result<(ReferencePaper, bool), AppError> {
-    // Normalize DOI: treat empty string as None
-    let doi_normalized =
-        new_paper.doi.as_deref().and_then(|d| if d.is_empty() { None } else { Some(d) });
+    // Normalize DOI: filter placeholders via centralized utility
+    let doi_normalized = normalize_doi(new_paper.doi.as_deref());
 
     // Try to find existing by DOI first
     if let Some(doi) = doi_normalized {
@@ -84,12 +84,8 @@ fn insert_paper(
         new_paper.ris_extras.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default());
     let match_status = new_paper.match_status.as_ref().unwrap_or(&MatchStatus::Unmatched).as_str();
 
-    // Normalize DOI: empty string → NULL (prevents unique constraint violations)
-    let doi: Option<String> =
-        new_paper
-            .doi
-            .as_deref()
-            .and_then(|d| if d.is_empty() { None } else { Some(d.to_string()) });
+    // Normalize DOI: empty string and placeholders → NULL (prevents unique constraint violations)
+    let doi: Option<String> = normalize_doi(new_paper.doi.as_deref()).map(|s| s.to_string());
 
     conn.execute(
         "INSERT INTO reference_papers (
@@ -494,6 +490,105 @@ pub fn delete_references_for_article(
 
     update_parent_flags(conn, parent_article_id)?;
     Ok(())
+}
+
+// ─── Auto-link imported articles to existing reference papers ──
+
+/// Find unmatched reference papers by DOI.
+fn find_unmatched_papers_by_doi(
+    conn: &Connection,
+    doi: &str,
+) -> Result<Vec<ReferencePaper>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM reference_papers WHERE doi = ?1 AND match_status = 'unmatched' LIMIT 1",
+    )?;
+    let rows = stmt.query_map([doi], row_to_paper)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Find unmatched reference papers by title + year.
+fn find_unmatched_papers_by_title_year(
+    conn: &Connection,
+    title: &str,
+    year: Option<i32>,
+) -> Result<Vec<ReferencePaper>, AppError> {
+    let result = match year {
+        Some(y) => conn.query_row(
+            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND publication_year = ?2 AND match_status = 'unmatched' LIMIT 1",
+            params![title, y],
+            row_to_paper,
+        ),
+        None => conn.query_row(
+            "SELECT * FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND match_status = 'unmatched' LIMIT 1",
+            params![title],
+            row_to_paper,
+        ),
+    };
+    match result {
+        Ok(paper) => Ok(vec![paper]),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(vec![]),
+        Err(e) => Err(AppError::Database(e)),
+    }
+}
+
+/// After importing articles, find any existing reference_papers that match
+/// and link them. This connects papers from Citation Chaser/CR extraction
+/// to newly imported articles.
+///
+/// Returns the number of links created. Non-fatal: errors are logged but
+/// don't fail the caller.
+pub fn link_imported_articles_to_papers(
+    conn: &Connection,
+    imported: &[crate::models::article::Article],
+) -> usize {
+    let mut links_created = 0usize;
+
+    for article in imported {
+        // Strategy 1: DOI match
+        let matched = if let Some(ref doi) = article.doi {
+            if !doi.is_empty() {
+                find_unmatched_papers_by_doi(conn, doi).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Strategy 2: Title + year match
+        let matched = match matched {
+            Some(papers) if !papers.is_empty() => Some(papers),
+            _ => {
+                if !article.title.is_empty() {
+                    find_unmatched_papers_by_title_year(
+                        conn,
+                        &article.title,
+                        article.publication_year,
+                    )
+                    .ok()
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some(papers) = matched {
+            for paper in papers {
+                // Update match status
+                if update_paper_match(conn, &paper.id, &MatchStatus::Imported, Some(&article.id))
+                    .is_err()
+                {
+                    continue;
+                }
+                // Create reference link (Reference type)
+                if create_link(conn, &article.id, &paper.id, &ReferenceType::Reference).is_ok() {
+                    links_created += 1;
+                }
+            }
+        }
+    }
+
+    links_created
 }
 
 // ─── Row mappers ───────────────────────────────────────────────

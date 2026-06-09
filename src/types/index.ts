@@ -277,3 +277,21 @@ export interface LinkedArticleInfo {
   journal: string | null;
   referenceType: ReferenceType;
 }
+
+/** Progress state for batch reference scraping across all included articles */
+export interface BatchRefScrapingProgress {
+  /** Total included articles to evaluate */
+  total: number;
+  /** Articles processed so far */
+  completed: number;
+  /** Articles that required scraping + importing */
+  scraped: number;
+  /** Articles skipped (already have refs/citations, no DOI, or no missing data) */
+  skipped: number;
+  /** Articles that failed with errors */
+  errors: number;
+  /** Whether batch is currently running */
+  isRunning: boolean;
+  /** Title of the currently processing article */
+  currentArticleTitle: string;
+}

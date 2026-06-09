@@ -59,6 +59,36 @@ export function useExport() {
     }
   }
 
+  async function exportRisForTab(
+    status: string,
+    screeningErrorsOnly: boolean,
+    label: string
+  ): Promise<boolean> {
+    exporting.value = true;
+    error.value = null;
+    try {
+      const slug = label.toLowerCase().replace(/\s+/g, '-');
+      const filePath = await save({
+        defaultPath: `${slug}-articles.ris`,
+        filters: [{ name: 'RIS File', extensions: ['ris'] }],
+      });
+      if (filePath) {
+        await tauriCommand('export_ris_for_tab_to_file', {
+          path: filePath,
+          status,
+          screeningErrorsOnly,
+        });
+        return true;
+      }
+      return false;
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+      return false;
+    } finally {
+      exporting.value = false;
+    }
+  }
+
   async function exportProject(): Promise<boolean> {
     exporting.value = true;
     error.value = null;
@@ -83,18 +113,32 @@ export function useExport() {
     }
   }
 
-  async function importProject(file: File): Promise<void> {
+  async function importProject(file: File): Promise<boolean> {
     exporting.value = true;
     error.value = null;
     try {
+      console.log('[import] Reading file:', file.name, 'size:', file.size);
       const content = await file.text();
+      console.log(
+        '[import] File content length:',
+        content.length,
+        'first 200 chars:',
+        content.substring(0, 200)
+      );
+      console.log('[import] Calling import_project_backup...');
       await tauriCommand('import_project_backup', {
         request: { jsonContent: content },
       });
+      console.log('[import] Tauri command succeeded. Refreshing stores...');
       await refreshAllStores();
       useSummary().clearSummary();
+      console.log('[import] Stores refreshed. Import complete.');
+      return true;
     } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[import] Import failed:', msg, e);
+      error.value = msg;
+      return false;
     } finally {
       exporting.value = false;
     }
@@ -116,5 +160,13 @@ export function useExport() {
     }
   }
 
-  return { exporting, error, exportRis, exportProject, importProject, resetProject };
+  return {
+    exporting,
+    error,
+    exportRis,
+    exportRisForTab,
+    exportProject,
+    importProject,
+    resetProject,
+  };
 }

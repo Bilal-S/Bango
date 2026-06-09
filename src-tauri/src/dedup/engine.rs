@@ -55,8 +55,12 @@ pub fn run_dedup(articles: &[DedupArticle]) -> DedupResult {
 fn compare_articles(a: &DedupArticle, b: &DedupArticle) -> Option<DuplicatePair> {
     // Strategy 1: DOI exact match
     if let (Some(doi_a), Some(doi_b)) = (&a.doi, &b.doi) {
-        if !doi_a.is_empty() && !doi_b.is_empty() && doi_a.to_lowercase() == doi_b.to_lowercase() {
-            return Some(make_pair(a, b, 1.0, MatchType::ExactDuplicate, MatchStrategy::DoiExact));
+        let norm_a = crate::ris::doi::normalize_doi(Some(doi_a));
+        let norm_b = crate::ris::doi::normalize_doi(Some(doi_b));
+        if let (Some(na), Some(nb)) = (norm_a, norm_b) {
+            if na.eq_ignore_ascii_case(nb) {
+                return Some(make_pair(a, b, 1.0, MatchType::ExactDuplicate, MatchStrategy::DoiExact));
+            }
         }
     }
 

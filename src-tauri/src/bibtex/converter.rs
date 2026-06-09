@@ -118,7 +118,8 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
     record.abstract_text =
         field_map.get("abstract").or_else(|| field_map.get("annote")).map(|v| (*v).to_string());
 
-    record.doi = field_map.get("doi").map(|v| (*v).to_string());
+    record.doi = crate::ris::doi::normalize_doi(field_map.get("doi").copied())
+        .map(|s| s.to_string());
 
     record.url =
         field_map.get("url").or_else(|| field_map.get("howpublished")).map(|v| (*v).to_string());

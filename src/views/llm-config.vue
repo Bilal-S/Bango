@@ -21,7 +21,7 @@ const {
   resetFetchedModels,
 } = useLlmConfig();
 
-const { error, exportProject, importProject, resetProject } = useExport();
+const { exporting, error, exportProject, importProject, resetProject } = useExport();
 const router = useRouter();
 
 // Project management state
@@ -119,12 +119,24 @@ function handleImportFile(event: Event): void {
 
 async function doImportProject(): Promise<void> {
   if (!importFile.value) return;
-  await importProject(importFile.value);
+  console.log('[doImportProject] Starting import...');
+  const success = await importProject(importFile.value);
+  console.log(
+    '[doImportProject] importProject returned:',
+    success,
+    'error:',
+    error.value,
+    'exporting:',
+    exporting.value
+  );
   showImportDialog.value = false;
   importFile.value = null;
   // Navigate to dashboard so all views refresh with newly imported data
   if (!error.value) {
+    console.log('[doImportProject] Navigating to dashboard...');
     router.push('/');
+  } else {
+    console.log('[doImportProject] Not navigating - error present:', error.value);
   }
 }
 
@@ -812,11 +824,24 @@ watch(
       </div>
     </div>
 
+    <!-- Import/Export Error Banner -->
+    <div v-if="error" class="llm-config__error-banner">
+      <span class="material-symbols-outlined">error</span>
+      <p>{{ error }}</p>
+    </div>
+
     <!-- Import Dialog -->
     <div v-if="showImportDialog" class="dialog-overlay" @click.self="showImportDialog = false">
       <div class="dialog">
         <h2>Import Project Backup</h2>
         <p class="dialog__desc">Select a <code>.bango.json</code> file to restore your project.</p>
+        <div class="dialog__danger-box">
+          <span class="material-symbols-outlined">warning</span>
+          <p>
+            <strong>All existing data will be deleted</strong> and replaced with the backup data.
+            This action cannot be undone.
+          </p>
+        </div>
         <div class="field">
           <label class="field__label">Backup File</label>
           <input
@@ -1674,6 +1699,32 @@ watch(
   background-color: #f5f2ff;
   padding: 0.0625rem 0.375rem;
   border-radius: 0.25rem;
+}
+
+/* Import/Export Error Banner */
+.llm-config__error-banner {
+  margin-top: 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 0.5rem;
+  color: #991b1b;
+  font-size: 13px;
+}
+
+.llm-config__error-banner .material-symbols-outlined {
+  color: #dc2626;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.llm-config__error-banner p {
+  margin: 0;
+  line-height: 18px;
+  word-break: break-word;
 }
 
 /* Error Log */

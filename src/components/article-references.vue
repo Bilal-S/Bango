@@ -6,6 +6,7 @@ import {
   useReferences,
   isAutoDownloading,
   autoDownloadReferences,
+  useBatchReferenceScraping,
 } from '@/composables/use-references';
 import type { PreviewPaper } from '@/composables/use-references';
 import { flattenRawReferences } from '@/utils/reference-flatten';
@@ -179,15 +180,21 @@ function handleRefNavigate(item: ArticleReference): void {
 
 // ── Auto-download references (premium feature) ──
 const { isPremium } = useFeatureFlags();
+const { batchProgress } = useBatchReferenceScraping();
+
+const isBatchRunning = computed(() => batchProgress.value.isRunning);
 
 const canAutoDownload = computed(() => {
   if (!isPremium.value) return false;
   if (props.article.status !== 'included') return false;
   if (!props.article.doi) return false;
+  if (isBatchRunning.value) return false;
   return !props.article.hasReferenceDetails || !props.article.hasCitationDetails;
 });
 
-const autoDownloadInProgress = computed(() => isAutoDownloading(props.article.id));
+const autoDownloadInProgress = computed(
+  () => isAutoDownloading(props.article.id) || isBatchRunning.value
+);
 
 function handleAutoDownload(): void {
   if (!canAutoDownload.value || autoDownloadInProgress.value) return;

@@ -249,6 +249,20 @@ pub async fn import_ris_file(
         // Extract CR (Cited References) from imported RIS records
         let _cr_errors = extract_cr_for_imported(&conn, &imported, &to_import);
 
+        // Auto-link imported articles to existing unmatched reference papers
+        let links_created = reference_repo::link_imported_articles_to_papers(&conn, &imported);
+        if links_created > 0 {
+            let _ = audit_repo::create_entry(
+                &conn,
+                "",
+                "reference_link",
+                None,
+                None,
+                Some(&format!("Auto-linked {} imported articles to existing reference papers", links_created)),
+                "system",
+            );
+        }
+
         // Re-fetch articles to reflect updated statuses after classification
         let updated_articles: Vec<Article> = imported
             .iter()
@@ -416,6 +430,20 @@ pub async fn import_bibtex_file(
 
         // Extract CR (Cited References) from imported BibTeX records
         let _cr_errors = extract_cr_for_imported(&conn, &imported, &to_import);
+
+        // Auto-link imported articles to existing unmatched reference papers
+        let links_created = reference_repo::link_imported_articles_to_papers(&conn, &imported);
+        if links_created > 0 {
+            let _ = audit_repo::create_entry(
+                &conn,
+                "",
+                "reference_link",
+                None,
+                None,
+                Some(&format!("Auto-linked {} imported articles to existing reference papers", links_created)),
+                "system",
+            );
+        }
 
         let updated_articles: Vec<Article> = imported
             .iter()

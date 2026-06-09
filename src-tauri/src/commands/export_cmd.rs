@@ -11,18 +11,11 @@ use crate::error::AppError;
 use crate::export::project;
 use crate::export::ris_writer::{articles_to_ris, RisExportArticle};
 
-#[tauri::command]
-pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    let articles = article_repo::get_articles_by_status(&conn, "included")?;
-
-    // Build criteria lookup: id → text
-    let criteria_map: HashMap<String, String> =
-        criteria_repo::get_all_criteria(&conn)?.into_iter().map(|c| (c.id, c.text)).collect();
-
+/// Helper: convert articles into RIS string, resolving criteria labels.
+fn articles_to_ris_export(
+    articles: &[crate::models::article::Article],
+    criteria_map: &HashMap<String, String>,
+) -> String {
     let resolve_criteria = |ids: &[String]| -> Vec<String> {
         ids.iter().filter_map(|id| criteria_map.get(id).cloned()).collect()
     };
@@ -57,13 +50,47 @@ pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
         })
         .collect();
 
-    Ok(articles_to_ris(&export_articles))
+    articles_to_ris(&export_articles)
+}
+
+/// Build the criteria lookup map (id → text).
+fn build_criteria_map(conn: &rusqlite::Connection) -> Result<HashMap<String, String>, AppError> {
+    Ok(criteria_repo::get_all_criteria(conn)?.into_iter().map(|c| (c.id, c.text)).collect())
+}
+
+#[tauri::command]
+pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let articles = article_repo::get_articles_by_status(&conn, "included")?;
+    let criteria_map = build_criteria_map(&conn)?;
+    Ok(articles_to_ris_export(&articles, &criteria_map))
 }
 
 #[tauri::command]
 pub fn export_ris_to_file(db_state: State<'_, DbState>, path: String) -> Result<(), AppError> {
     let content = export_ris(db_state)?;
     std::fs::write(path, content).map_err(AppError::Io)
+}
+
+#[tauri::command]
+pub fn export_ris_for_tab_to_file(
+    db_state: State<'_, DbState>,
+    path: String,
+    status: String,
+    screening_errors_only: bool,
+) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let articles =
+        article_repo::get_articles_for_export(&conn, &status, screening_errors_only)?;
+    let criteria_map = build_criteria_map(&conn)?;
+    let content = articles_to_ris_export(&articles, &criteria_map);
+    std::fs::write(&path, content).map_err(AppError::Io)
 }
 
 #[derive(Deserialize)]
@@ -96,11 +123,18 @@ pub fn import_project_backup(
     db_state: State<'_, DbState>,
     request: ImportProjectRequest,
 ) -> Result<(), AppError> {
+    eprintln!("[import_project_backup] Command received, content length: {}", request.json_content.len());
     let conn = db_state
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    project::import_project(&conn, &request.json_content)
+    eprintln!("[import_project_backup] DB lock acquired, calling import_project...");
+    let result = project::import_project(&conn, &request.json_content);
+    match &result {
+        Ok(()) => eprintln!("[import_project_backup] Import succeeded"),
+        Err(e) => eprintln!("[import_project_backup] Import failed: {:?}", e),
+    }
+    result
 }
 
 #[tauri::command]

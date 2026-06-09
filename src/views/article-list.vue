@@ -6,6 +6,8 @@ import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
 import { requestArticleAiSummary } from '@/composables/use-ai-summary';
+import { useFeatureFlags } from '@/composables/use-feature-flags';
+import { useBatchReferenceScraping } from '@/composables/use-references';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -14,6 +16,7 @@ import BulkActionBar from '@/components/bulk-action-bar.vue';
 import ExportDialog from '@/components/export-dialog.vue';
 import SuggestInput from '@/components/suggest-input.vue';
 import ReferencesView from '@/components/references-view.vue';
+import BatchRefProgress from '@/components/batch-ref-progress.vue';
 
 const route = useRoute();
 const toast = useToast();
@@ -294,6 +297,41 @@ function handleOpenReader(articleId: string): void {
   pendingOpenReaderId.value = articleId;
   selectArticle(articleId);
 }
+
+// ── Batch reference scraping ──────────────────────────────────
+const { isPremium } = useFeatureFlags();
+const {
+  batchProgress,
+  batchPercentage,
+  startBatchScraping,
+  cancelBatchScraping,
+  resetBatchProgress,
+} = useBatchReferenceScraping();
+
+/** Only show batch button on Included tab when isPremium is on */
+const showBatchRefScrape = computed(() => activeStatusTab.value === 'included' && isPremium.value);
+
+/** Fetch all included articles for batch processing via search composable */
+async function handleBatchScrapeRefs(): Promise<void> {
+  const totalIncluded = statusCounts.value.included ?? 0;
+  if (totalIncluded === 0) {
+    toast.show('No included articles to process.', 'info');
+    return;
+  }
+
+  // Temporarily set page size to fetch ALL included articles in one page
+  const savedPageSize = pageSize.value;
+  changePageSize(totalIncluded);
+  await search();
+
+  // Run batch on all fetched articles
+  await startBatchScraping(articles.value, async () => {
+    // Restore original page size and refresh
+    changePageSize(savedPageSize);
+    await handleReferencesUpdated();
+    await search();
+  });
+}
 </script>
 
 <template>
@@ -350,6 +388,8 @@ function handleOpenReader(articleId: string): void {
         :is-filtered="isFiltered"
         :can-go-prev="canGoPrev"
         :can-go-next="canGoNext"
+        :show-batch-ref-scrape="showBatchRefScrape"
+        :is-batch-ref-running="batchProgress.isRunning"
         @toggle-filters="toggleFilters"
         @update:search-text="searchText = $event"
         @search="executeToolbarSearch"
@@ -358,10 +398,22 @@ function handleOpenReader(articleId: string): void {
         @change-page-size="changePageSize"
         @go-prev="goToPage(currentPage - 1)"
         @go-next="goToPage(currentPage + 1)"
+        @batch-scrape-refs="handleBatchScrapeRefs"
         @clear-filters="
           clearSearch();
           clearFilters();
         "
+      />
+
+      <!-- Batch Reference Progress (below toolbar, visible when running or recently finished) -->
+      <BatchRefProgress
+        v-if="batchProgress.isRunning || batchProgress.completed > 0"
+        :progress="batchProgress"
+        :percentage="batchPercentage"
+        :done="!batchProgress.isRunning && batchProgress.completed > 0"
+        class="mb-4"
+        @cancel="cancelBatchScraping"
+        @close="resetBatchProgress"
       />
 
       <!-- Filter Panel (collapsible) -->
@@ -435,7 +487,13 @@ function handleOpenReader(articleId: string): void {
     </div>
 
     <!-- Export Dialog -->
-    <ExportDialog v-if="showExport" @close="showExport = false" />
+    <ExportDialog
+      v-if="showExport"
+      :active-tab="activeStatusTab"
+      :status-counts="statusCounts"
+      :tab-label="STATUS_TAB_LABELS[activeStatusTab] ?? 'All'"
+      @close="showExport = false"
+    />
 
     <!-- Detail Panel -->
     <ArticleDetailPanel
