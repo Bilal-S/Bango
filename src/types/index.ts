@@ -109,6 +109,7 @@ export interface ArticleCounts {
   included: number;
   rejected: number;
   error: number;
+  references: number;
 }
 
 export interface ResearchAim {

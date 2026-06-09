@@ -39,22 +39,12 @@ fn test_scrape_references_only() {
     eprintln!("═══════════════════════════════════════════");
     let output_dir = temp_dir("references_only");
     eprintln!("   Output dir: {}", output_dir.display());
-    let options = ScrapeOptions {
-        get_citations: false,
-        get_references: true,
-    };
+    let options = ScrapeOptions { get_citations: false, get_references: true };
 
-    let result = scrape_citation_chaser(TEST_DOI, &output_dir, &options)
-        .expect("Scrape failed");
+    let result = scrape_citation_chaser(TEST_DOI, &output_dir, &options).expect("Scrape failed");
 
-    assert!(
-        result.references_ris.is_some(),
-        "Should have a references RIS file"
-    );
-    assert!(
-        result.citations_ris.is_none(),
-        "Should NOT have a citations RIS file"
-    );
+    assert!(result.references_ris.is_some(), "Should have a references RIS file");
+    assert!(result.citations_ris.is_none(), "Should NOT have a citations RIS file");
 
     let ris_path = result.references_ris.expect("references_ris missing");
     assert!(ris_path.exists(), "RIS file should exist on disk");
@@ -85,22 +75,12 @@ fn test_scrape_citations_only() {
     eprintln!("═══════════════════════════════════════════");
     let output_dir = temp_dir("citations_only");
     eprintln!("   Output dir: {}", output_dir.display());
-    let options = ScrapeOptions {
-        get_citations: true,
-        get_references: false,
-    };
+    let options = ScrapeOptions { get_citations: true, get_references: false };
 
-    let result = scrape_citation_chaser(TEST_DOI, &output_dir, &options)
-        .expect("Scrape failed");
+    let result = scrape_citation_chaser(TEST_DOI, &output_dir, &options).expect("Scrape failed");
 
-    assert!(
-        result.references_ris.is_none(),
-        "Should NOT have a references RIS file"
-    );
-    assert!(
-        result.citations_ris.is_some(),
-        "Should have a citations RIS file"
-    );
+    assert!(result.references_ris.is_none(), "Should NOT have a references RIS file");
+    assert!(result.citations_ris.is_some(), "Should have a citations RIS file");
 
     let ris_path = result.citations_ris.expect("citations_ris missing");
     assert!(ris_path.exists(), "RIS file should exist on disk");
@@ -114,10 +94,7 @@ fn test_scrape_citations_only() {
     );
 
     let contents = fs::read_to_string(&ris_path).expect("Failed to read RIS file");
-    assert!(
-        contents.contains("TY  -"),
-        "RIS file should contain TY tags"
-    );
+    assert!(contents.contains("TY  -"), "RIS file should contain TY tags");
     eprintln!("   ✅ Citations RIS saved to: {}", ris_path.display());
 }
 
@@ -132,17 +109,10 @@ fn test_scrape_both_references_and_citations() {
     eprintln!("   Output dir: {}", output_dir.display());
     let options = ScrapeOptions::default(); // both true
 
-    let result = scrape_citation_chaser(TEST_DOI, &output_dir, &options)
-        .expect("Scrape failed");
+    let result = scrape_citation_chaser(TEST_DOI, &output_dir, &options).expect("Scrape failed");
 
-    assert!(
-        result.references_ris.is_some(),
-        "Should have a references RIS file"
-    );
-    assert!(
-        result.citations_ris.is_some(),
-        "Should have a citations RIS file"
-    );
+    assert!(result.references_ris.is_some(), "Should have a references RIS file");
+    assert!(result.citations_ris.is_some(), "Should have a citations RIS file");
 
     // The two files should be different.
     let ref_path = result.references_ris.expect("references_ris missing");
@@ -152,8 +122,16 @@ fn test_scrape_both_references_and_citations() {
     // Verify DOI-based filenames
     let expected_ref_name = format!("{}_references.ris", clean_doi_filename(TEST_DOI));
     let expected_cit_name = format!("{}_citations.ris", clean_doi_filename(TEST_DOI));
-    assert_eq!(ref_path.file_name().unwrap().to_string_lossy(), expected_ref_name, "References filename");
-    assert_eq!(cit_path.file_name().unwrap().to_string_lossy(), expected_cit_name, "Citations filename");
+    assert_eq!(
+        ref_path.file_name().unwrap().to_string_lossy(),
+        expected_ref_name,
+        "References filename"
+    );
+    assert_eq!(
+        cit_path.file_name().unwrap().to_string_lossy(),
+        expected_cit_name,
+        "Citations filename"
+    );
 
     eprintln!("   ✅ References RIS: {}", ref_path.display());
     eprintln!("   ✅ Citations RIS:  {}", cit_path.display());
@@ -162,10 +140,7 @@ fn test_scrape_both_references_and_citations() {
 #[test]
 fn test_validation_error_when_both_false() {
     let output_dir = temp_dir("validation_test");
-    let options = ScrapeOptions {
-        get_citations: false,
-        get_references: false,
-    };
+    let options = ScrapeOptions { get_citations: false, get_references: false };
 
     let result = scrape_citation_chaser("10.1234/anything", &output_dir, &options);
 

@@ -4,6 +4,7 @@ import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
 import DetailHeader from './detail-header.vue';
 import AiDecisionCard from './ai-decision-card.vue';
+import ArticleMetadata from './article-metadata.vue';
 import MatchedCriteria from './matched-criteria.vue';
 import AbstractSummaryView from './abstract-summary-view.vue';
 import TagsSection from './tags-section.vue';
@@ -50,6 +51,7 @@ const emit = defineEmits<{
   refreshArticle: [id: string];
   articlePromoted: [articleId: string];
   readerOpened: [];
+  referencesUpdated: [];
 }>();
 
 const llmConfigStore = useLlmConfigStore();
@@ -159,6 +161,9 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
       <!-- AI Decision Card -->
       <AiDecisionCard v-if="article.aiDecision" :article="article" />
 
+      <!-- Metadata (Authors, Journal, Year, DOI, Keywords) -->
+      <ArticleMetadata :article="article" />
+
       <!-- Matched Criteria -->
       <MatchedCriteria
         :article="article"
@@ -188,6 +193,7 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
         :article="article"
         @navigate-to-article="emit('navigateToArticle', $event)"
         @article-promoted="emit('articlePromoted', $event)"
+        @references-updated="emit('referencesUpdated')"
       />
 
       <!-- Audit Trail -->

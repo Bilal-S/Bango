@@ -129,6 +129,7 @@ export function useArticleSearch() {
     included: articlesStore.byStatus.included,
     rejected: articlesStore.byStatus.rejected,
     error: 0,
+    references: 0,
   });
 
   async function fetchCounts(): Promise<void> {
@@ -294,7 +295,10 @@ export function useArticleSearch() {
     }
   }
 
-  async function moveArticle(id: string, newStatus: string): Promise<{ isLast: boolean }> {
+  async function moveArticle(
+    id: string,
+    newStatus: string
+  ): Promise<{ isLast: boolean; didNavigate: boolean }> {
     await tauriCommand('update_article_status', { id, newStatus });
     // Re-fetch the article so we get the updated changedAt from the backend
     const fresh = await tauriCommand<Article>('get_article', { id });
@@ -305,15 +309,17 @@ export function useArticleSearch() {
     }
     const isLast = !hasNext.value;
     const autoNavigate = localStorage.getItem('bango-auto-navigate-after-decision') !== 'false';
+    let didNavigate = false;
     if (!isLast && autoNavigate) {
       await navigateNext();
+      didNavigate = true;
     } else {
       selectedArticle.value = fresh;
       auditTrail.value = await tauriCommand<AuditEntry[]>('get_audit_trail', { articleId: id });
     }
     // Refresh counts in the background (e.g. tab badges)
     void fetchCounts();
-    return { isLast };
+    return { isLast, didNavigate };
   }
 
   /** Patch the articles list row with the latest selectedArticle data so the table redraws. */
@@ -526,6 +532,7 @@ export function useArticleSearch() {
     allLabels,
     STATUS_TABS,
     search,
+    fetchCounts,
     selectArticle,
     moveArticle,
     updateNotes,

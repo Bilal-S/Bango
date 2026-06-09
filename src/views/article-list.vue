@@ -35,6 +35,7 @@ const {
   allLabels,
   STATUS_TABS,
   search,
+  fetchCounts,
   selectArticle,
   hasPrevious,
   hasNext,
@@ -133,6 +134,11 @@ function handleCloseDetail(): void {
   localStorage.setItem('bango-detail-fullscreen', 'false');
 }
 
+/** Refresh status tab counts when references are updated */
+async function handleReferencesUpdated(): Promise<void> {
+  await fetchCounts();
+}
+
 // Inline decision notification state
 const decisionMessage = ref('');
 const decisionType = ref<'success' | 'info'>('success');
@@ -168,12 +174,11 @@ function showDecisionNotification(message: string, type: 'success' | 'info'): vo
 }
 
 async function handleMoveArticle(id: string, newStatus: string): Promise<void> {
-  const { isLast } = await moveArticle(id, newStatus);
-  const autoNavigate = localStorage.getItem('bango-auto-navigate-after-decision') !== 'false';
-  if (isLast || !autoNavigate) {
-    showDecisionNotification('Decision saved.', 'info');
-  } else {
+  const { didNavigate } = await moveArticle(id, newStatus);
+  if (didNavigate) {
     showDecisionNotification('Decision saved. Moved to next article.', 'success');
+  } else {
+    showDecisionNotification('Decision saved.', 'info');
   }
 }
 
@@ -315,7 +320,7 @@ function handleOpenReader(articleId: string): void {
           @click="setStatusTab(tab)"
         >
           <span>{{ STATUS_TAB_LABELS[tab] }}</span>
-          <span v-if="tab !== 'references'" class="ml-1.5 text-[11px] font-mono">
+          <span class="ml-1.5 text-[11px] font-mono">
             {{ statusCounts[tab] ?? 0 }}
           </span>
           <!-- Active underline -->
@@ -462,6 +467,7 @@ function handleOpenReader(articleId: string): void {
       @read-full-text="handleReadFullText"
       @refresh-article="selectArticle"
       @article-promoted="handleArticlePromoted"
+      @references-updated="handleReferencesUpdated"
     />
 
     <!-- Bulk Action Bar -->

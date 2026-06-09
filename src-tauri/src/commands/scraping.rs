@@ -11,7 +11,7 @@ use crate::db::app_settings_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
-use crate::scraping::citation_chaser::{scrape_citation_chaser, ScrapeOptions};
+use crate::scraping::citation_chaser::{clean_doi_filename, scrape_citation_chaser, ScrapeOptions};
 
 /// Serializable result returned to the frontend.
 #[derive(Debug, Serialize)]
@@ -25,9 +25,7 @@ pub struct ScrapeResultDto {
 ///
 /// Follows the same convention as `fulltext_storage_dir` (see `commands/app_settings.rs`).
 fn compute_ris_output_dir() -> PathBuf {
-    let docs = dirs::document_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let docs = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from("."));
     docs.join("Bango").join("ris")
 }
 
@@ -43,9 +41,8 @@ fn resolve_ris_dir(conn: &rusqlite::Connection) -> PathBuf {
         .filter(|p| !p.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            let docs = dirs::document_dir()
-                .or_else(dirs::home_dir)
-                .unwrap_or_else(|| PathBuf::from("."));
+            let docs =
+                dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from("."));
             docs.join("Bango")
         });
 
@@ -64,17 +61,21 @@ fn resolve_ris_dir(conn: &rusqlite::Connection) -> PathBuf {
 ///
 /// RIS files are saved to `~/Documents/Bango/ris/` (or the configured Bango
 /// directory). Logs errors to the audit table so they appear in the Audit Timeline.
+///
+/// **Shortcut**: If the expected RIS files already exist in the output directory,
+/// they are returned immediately without launching the headless browser.
+///
+/// This command is `async` and runs the heavy scraping work on a blocking thread
+/// via `spawn_blocking` so the Tauri main thread stays responsive.
 #[tauri::command]
-pub fn scrape_citation_chaser_cmd(
+pub async fn scrape_citation_chaser_cmd(
     app: AppHandle,
     doi: String,
     get_citations: Option<bool>,
     get_references: Option<bool>,
 ) -> Result<ScrapeResultDto, AppError> {
-    let options = ScrapeOptions {
-        get_citations: get_citations.unwrap_or(true),
-        get_references: get_references.unwrap_or(true),
-    };
+    let get_refs = get_references.unwrap_or(true);
+    let get_cits = get_citations.unwrap_or(true);
 
     // Resolve output directory from app settings.
     let output_path = if let Some(db_state) = app.try_state::<DbState>() {
@@ -87,24 +88,49 @@ pub fn scrape_citation_chaser_cmd(
         compute_ris_output_dir()
     };
 
-    match scrape_citation_chaser(&doi, &output_path, &options) {
-        Ok(result) => {
+    // ── Shortcut: check if RIS files already exist ──
+    let safe_doi = clean_doi_filename(&doi);
+    let refs_path = output_path.join(format!("{safe_doi}_references.ris"));
+    let cits_path = output_path.join(format!("{safe_doi}_citations.ris"));
+
+    let refs_exist = get_refs && refs_path.exists();
+    let cits_exist = get_cits && cits_path.exists();
+
+    if refs_exist && cits_exist {
+        // Both needed files already cached — skip scraping entirely.
+        return Ok(ScrapeResultDto {
+            references_ris: get_refs.then(|| refs_path),
+            citations_ris: get_cits.then(|| cits_path),
+        });
+    }
+
+    // ── Scrape on a blocking thread to keep the UI responsive ──
+    let options = ScrapeOptions { get_citations: get_cits, get_references: get_refs };
+    let doi_clone = doi.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        scrape_citation_chaser(&doi_clone, &output_path, &options)
+    })
+    .await
+    .map_err(|e| AppError::Scraping(format!("Scraping task panicked: {e}")))?;
+
+    match result {
+        Ok(scrape_result) => {
             // Log success to audit
             if let Some(db_state) = app.try_state::<DbState>() {
                 if let Ok(conn) = db_state.conn.lock() {
                     let details = format!(
                         "Citation Chaser scrape for DOI {}: refs={}, cites={}",
                         doi,
-                        result.references_ris.is_some(),
-                        result.citations_ris.is_some(),
+                        scrape_result.references_ris.is_some(),
+                        scrape_result.citations_ris.is_some(),
                     );
                     let _ = audit_repo::log_error(&conn, &details);
                 }
             }
 
             Ok(ScrapeResultDto {
-                references_ris: result.references_ris,
-                citations_ris: result.citations_ris,
+                references_ris: scrape_result.references_ris,
+                citations_ris: scrape_result.citations_ris,
             })
         }
         Err(err) => {

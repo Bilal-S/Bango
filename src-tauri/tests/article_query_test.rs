@@ -12,11 +12,7 @@ fn setup_db() -> rusqlite::Connection {
 
 /// Helper: build a minimal NewArticle with a given title and year.
 fn new_article(title: &str, year: Option<i32>) -> NewArticle {
-    NewArticle {
-        title: title.to_string(),
-        publication_year: year,
-        ..Default::default()
-    }
+    NewArticle { title: title.to_string(), publication_year: year, ..Default::default() }
 }
 
 /// Helper: insert articles and move them all to "working" status.

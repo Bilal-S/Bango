@@ -64,10 +64,7 @@ pub struct ScrapeOptions {
 
 impl Default for ScrapeOptions {
     fn default() -> Self {
-        Self {
-            get_citations: true,
-            get_references: true,
-        }
+        Self { get_citations: true, get_references: true }
     }
 }
 
@@ -102,6 +99,7 @@ const POLL_INTERVAL_MS: u64 = 1000;
 /// `"`, `<`, `>`, `|`) with `_`.
 ///
 /// ```
+/// use bango_lib::scraping::citation_chaser::clean_doi_filename;
 /// assert_eq!(clean_doi_filename("10.1016/j.jaad.2023.01.013"), "10.1016_j.jaad.2023.01.013");
 /// ```
 pub fn clean_doi_filename(doi: &str) -> String {
@@ -122,7 +120,9 @@ fn get_element_href(tab: &Tab, element_id: &str) -> Result<String, ScrapeError> 
     let js = format!("document.getElementById('{element_id}').href");
     let href = tab
         .evaluate(&js, false)
-        .map_err(|e| ScrapeError::ElementNotFound(format!("Failed to get href for #{element_id}: {e}")))?
+        .map_err(|e| {
+            ScrapeError::ElementNotFound(format!("Failed to get href for #{element_id}: {e}"))
+        })?
         .value
         .and_then(|v| v.as_str().map(String::from))
         .ok_or_else(|| ScrapeError::ElementNotFound(format!("No href value for #{element_id}")))?;
@@ -131,20 +131,29 @@ fn get_element_href(tab: &Tab, element_id: &str) -> Result<String, ScrapeError> 
 }
 
 /// Download a file from `url` to `output_dir` using `curl`.
-fn download_with_curl(url: &str, output_dir: &Path, filename: &str) -> Result<PathBuf, ScrapeError> {
+fn download_with_curl(
+    url: &str,
+    output_dir: &Path,
+    filename: &str,
+) -> Result<PathBuf, ScrapeError> {
     let output_path = output_dir.join(filename);
     eprintln!("  📥 Downloading via curl: {url}");
     eprintln!("  📁 Saving to: {}", output_path.display());
 
     let status = std::process::Command::new("curl")
         .args([
-            "-sL",           // silent, follow redirects
+            "-sL", // silent, follow redirects
             "-o",
         ])
         .arg(&output_path)
         .arg(url)
         .status()
-        .map_err(|e| ScrapeError::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to run curl: {e}"))))?;
+        .map_err(|e| {
+            ScrapeError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to run curl: {e}"),
+            ))
+        })?;
 
     if !status.success() {
         return Err(ScrapeError::DownloadTimeout(format!(
@@ -160,11 +169,7 @@ fn download_with_curl(url: &str, output_dir: &Path, filename: &str) -> Result<Pa
 }
 
 /// Poll until an XPath element is found, clicking it once it appears.
-fn click_xpath_with_retry(
-    tab: &Tab,
-    xpath: &str,
-    description: &str,
-) -> Result<(), ScrapeError> {
+fn click_xpath_with_retry(tab: &Tab, xpath: &str, description: &str) -> Result<(), ScrapeError> {
     eprintln!("  🔍 Looking for element: {description}");
     let deadline = Instant::now() + Duration::from_secs(ELEMENT_TIMEOUT_SECS);
     let mut logged_at: u64 = 0;
@@ -173,13 +178,15 @@ fn click_xpath_with_retry(
         match tab.find_element_by_xpath(xpath) {
             Ok(element) => {
                 eprintln!("  ✅ Found element, clicking: {description}");
-                element.click().map_err(|e| {
-                    ScrapeError::ClickFailed(format!("{description}: {e}"))
-                })?;
+                element
+                    .click()
+                    .map_err(|e| ScrapeError::ClickFailed(format!("{description}: {e}")))?;
                 return Ok(());
             }
             Err(_) => {
-                let elapsed = (Instant::now() - deadline + Duration::from_secs(ELEMENT_TIMEOUT_SECS)).as_secs();
+                let elapsed = (Instant::now() - deadline
+                    + Duration::from_secs(ELEMENT_TIMEOUT_SECS))
+                .as_secs();
                 if elapsed / 5 > logged_at / 5 {
                     eprintln!("  ⏳ Still looking for '{description}'… {elapsed}s elapsed");
                     logged_at = elapsed;
@@ -207,7 +214,9 @@ fn wait_for_element(tab: &Tab, xpath: &str, description: &str) -> Result<(), Scr
                 return Ok(());
             }
             Err(_) => {
-                let elapsed = (Instant::now() - deadline + Duration::from_secs(ELEMENT_TIMEOUT_SECS)).as_secs();
+                let elapsed = (Instant::now() - deadline
+                    + Duration::from_secs(ELEMENT_TIMEOUT_SECS))
+                .as_secs();
                 if elapsed / 5 > logged_at / 5 {
                     eprintln!("  ⏳ Still waiting for '{description}'… {elapsed}s elapsed");
                     logged_at = elapsed;
@@ -237,23 +246,24 @@ fn wait_for_download_enabled(tab: &Tab, element_id: &str) -> Result<(), ScrapeEr
         match tab.find_element_by_xpath(&xpath) {
             Ok(element) => {
                 // Check if the element still has the "disabled" class.
-                let classes = element
-                    .get_attributes()
-                    .unwrap_or_default()
-                    .unwrap_or_default()
-                    .join(" ");
+                let classes =
+                    element.get_attributes().unwrap_or_default().unwrap_or_default().join(" ");
                 if !classes.contains("disabled") {
                     eprintln!("  ✅ Download link #{element_id} is enabled");
                     return Ok(());
                 }
-                let elapsed = (Instant::now() - deadline + Duration::from_secs(ELEMENT_TIMEOUT_SECS)).as_secs();
+                let elapsed = (Instant::now() - deadline
+                    + Duration::from_secs(ELEMENT_TIMEOUT_SECS))
+                .as_secs();
                 if elapsed / 5 > logged_at / 5 {
                     eprintln!("  ⏳ Download link still disabled… {elapsed}s elapsed");
                     logged_at = elapsed;
                 }
             }
             Err(_) => {
-                let elapsed = (Instant::now() - deadline + Duration::from_secs(ELEMENT_TIMEOUT_SECS)).as_secs();
+                let elapsed = (Instant::now() - deadline
+                    + Duration::from_secs(ELEMENT_TIMEOUT_SECS))
+                .as_secs();
                 if elapsed / 5 > logged_at / 5 {
                     eprintln!("  ⏳ Download link #{element_id} not found yet… {elapsed}s elapsed");
                     logged_at = elapsed;
@@ -307,23 +317,17 @@ pub fn scrape_citation_chaser(
 
     // ── Launch headless Chrome ─────────────────────────────────────────
     eprintln!("🚀 Launching headless browser…");
-    let browser = Browser::new(
-        LaunchOptions {
-            headless: true,
-            sandbox: false,
-            path: Some(browser_info.executable),
-            args: vec![
-                OsStr::new("--disable-gpu"),
-                OsStr::new("--disable-dev-shm-usage"),
-            ],
-            ..Default::default()
-        },
-    )
+    let browser = Browser::new(LaunchOptions {
+        headless: true,
+        sandbox: false,
+        path: Some(browser_info.executable),
+        args: vec![OsStr::new("--disable-gpu"), OsStr::new("--disable-dev-shm-usage")],
+        ..Default::default()
+    })
     .map_err(|e| ScrapeError::Launch(format!("Failed to launch browser: {e}")))?;
 
-    let tab = browser
-        .new_tab()
-        .map_err(|e| ScrapeError::Launch(format!("Failed to create tab: {e}")))?;
+    let tab =
+        browser.new_tab().map_err(|e| ScrapeError::Launch(format!("Failed to create tab: {e}")))?;
     eprintln!("✅ Browser tab created");
 
     // Configure downloads to go to our output directory.
@@ -380,10 +384,7 @@ pub fn scrape_citation_chaser(
     let _ = tab.close(true);
     eprintln!("✅ Done!");
 
-    Ok(ScrapeResult {
-        references_ris,
-        citations_ris,
-    })
+    Ok(ScrapeResult { references_ris, citations_ris })
 }
 
 /// Run the "References" flow: click tab → search → wait for download enabled → fetch via curl.

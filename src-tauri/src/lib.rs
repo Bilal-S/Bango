@@ -9,8 +9,8 @@ pub mod llm;
 pub mod models;
 pub mod prisma;
 pub mod ris;
-pub mod screening;
 pub mod scraping;
+pub mod screening;
 pub mod summary;
 pub mod utils;
 
@@ -57,14 +57,20 @@ pub fn run() {
 
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
 
-            // Parse CLI flags and persist feature flags to DB.
+            // Parse CLI / env flags and persist feature flags to DB.
             let args: Vec<String> = std::env::args().collect();
             let premium_from_cli = args.iter().any(|a| a == "--premium");
+            let premium_from_env = std::env::var("BANGO_PREMIUM")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+            let premium_requested = premium_from_cli || premium_from_env;
             {
                 let guard = app.state::<DbState>();
                 let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
-                if premium_from_cli {
-                    if let Err(e) = db::app_settings_repo::set_setting(&conn, "flag_premium", Some("true")) {
+                if premium_requested {
+                    if let Err(e) =
+                        db::app_settings_repo::set_setting(&conn, "flag_premium", Some("true"))
+                    {
                         eprintln!("warning: failed to persist flag_premium: {e:#}");
                     }
                 }

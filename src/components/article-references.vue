@@ -2,10 +2,15 @@
 import { ref, computed, watch } from 'vue';
 import { open as fileDialog } from '@tauri-apps/plugin-dialog';
 import type { Article, ArticleReference } from '@/types';
-import { useReferences } from '@/composables/use-references';
+import {
+  useReferences,
+  isAutoDownloading,
+  autoDownloadReferences,
+} from '@/composables/use-references';
 import type { PreviewPaper } from '@/composables/use-references';
 import { flattenRawReferences } from '@/utils/reference-flatten';
 import { useToast } from '@/composables/use-toast';
+import { useFeatureFlags } from '@/composables/use-feature-flags';
 
 const props = defineProps<{
   article: Article;
@@ -14,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   navigateToArticle: [id: string];
   articlePromoted: [articleId: string];
+  referencesUpdated: [];
 }>();
 
 const toast = useToast();
@@ -87,6 +93,7 @@ async function handleConfirmImport(): Promise<void> {
     );
     if (result) {
       await loadReferences();
+      emit('referencesUpdated');
       showRefImportDialog.value = false;
       refImportStep.value = 'select';
       refImportPreview.value = null;
@@ -168,6 +175,38 @@ function handleRefNavigate(item: ArticleReference): void {
   if (item.matchedArticleId) {
     emit('navigateToArticle', item.matchedArticleId);
   }
+}
+
+// ── Auto-download references (premium feature) ──
+const { isPremium } = useFeatureFlags();
+
+const canAutoDownload = computed(() => {
+  if (!isPremium.value) return false;
+  if (props.article.status !== 'included') return false;
+  if (!props.article.doi) return false;
+  return !props.article.hasReferenceDetails || !props.article.hasCitationDetails;
+});
+
+const autoDownloadInProgress = computed(() => isAutoDownloading(props.article.id));
+
+function handleAutoDownload(): void {
+  if (!canAutoDownload.value || autoDownloadInProgress.value) return;
+  autoDownloadReferences(
+    props.article.id,
+    props.article.doi!,
+    props.article.title || '(untitled)',
+    !props.article.hasReferenceDetails,
+    !props.article.hasCitationDetails,
+    async () => {
+      await loadReferences();
+      emit('referencesUpdated');
+    },
+    (success) => {
+      if (success && showRefImportDialog.value) {
+        closeRefImportDialog();
+      }
+    }
+  );
 }
 </script>
 
@@ -330,7 +369,16 @@ function handleRefNavigate(item: ArticleReference): void {
         <div
           class="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-5 space-y-4"
         >
-          <h3 class="text-sm font-semibold text-slate-800">Import References</h3>
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-800">Import References</h3>
+            <button
+              class="material-symbols-outlined text-[18px] text-slate-400 hover:text-slate-600 cursor-pointer rounded transition-colors"
+              title="Close"
+              @click="closeRefImportDialog"
+            >
+              close
+            </button>
+          </div>
 
           <!-- Step 1: Select type and file -->
           <template v-if="refImportStep === 'select'">
@@ -393,6 +441,34 @@ function handleRefNavigate(item: ArticleReference): void {
                 {{ refImportBusy ? 'Parsing…' : 'Choose File (RIS / BibTeX)' }}
               </button>
             </div>
+
+            <!-- Auto-download section (premium) -->
+            <template v-if="canAutoDownload || autoDownloadInProgress">
+              <div
+                class="flex items-center gap-2 text-[10px] text-slate-300 uppercase tracking-wider"
+              >
+                <span class="flex-1 h-px bg-slate-200"></span>
+                <span>or</span>
+                <span class="flex-1 h-px bg-slate-200"></span>
+              </div>
+              <div
+                v-if="autoDownloadInProgress"
+                class="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200"
+              >
+                <span class="material-symbols-outlined text-amber-600 text-[18px] animate-spin"
+                  >progress_activity</span
+                >
+                <span class="text-xs text-amber-700 font-medium">Auto download in progress…</span>
+              </div>
+              <button
+                v-else
+                class="w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+                @click="handleAutoDownload"
+              >
+                <span class="material-symbols-outlined text-[14px]">download</span>
+                Auto download references
+              </button>
+            </template>
           </template>
 
           <!-- Step 2: Preview and confirm -->

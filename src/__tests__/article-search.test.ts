@@ -146,6 +146,7 @@ const sampleCounts: ArticleCounts = {
   included: 3,
   rejected: 2,
   error: 0,
+  references: 0,
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -578,6 +579,7 @@ describe('useArticleSearch', () => {
         included: 0,
         rejected: 0,
         error: 0,
+        references: 0,
       });
       const { search, rangeStart, setStatusTab } = useArticleSearch();
       setStatusTab('all');
@@ -1133,6 +1135,7 @@ describe('useArticleSearch', () => {
       });
       // Should have auto-navigated to next article
       expect(result.isLast).toBe(false);
+      expect(result.didNavigate).toBe(true);
     });
   });
 

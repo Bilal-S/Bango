@@ -172,4 +172,5 @@ pub struct ArticleCounts {
     pub rejected: usize,
     #[serde(default)]
     pub error: usize,
+    pub references: usize,
 }

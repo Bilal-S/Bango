@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue';
 import { tauriCommand } from './use-tauri-command';
+import { useToast } from './use-toast';
 import type { ArticleReference, ReferenceType } from '../types';
 
 export interface ExtractResult {
@@ -20,6 +21,87 @@ export interface PreviewResult {
   papers: PreviewPaper[];
   totalCount: number;
   errors: string[];
+}
+
+/** Result from scrape_citation_chaser_cmd (camelCase via serde) */
+interface ScrapeCitationChaserResult {
+  referencesRis: string | null;
+  citationsRis: string | null;
+}
+
+// ── Module-level reactive state for auto-download (persists across component lifecycles) ──
+const autoDownloadMap = ref(new Map<string, boolean>());
+
+/**
+ * Check whether an auto-download operation is currently in progress for an article.
+ * Reactive — safe to use in computed/template.
+ */
+export function isAutoDownloading(articleId: string): boolean {
+  return autoDownloadMap.value.get(articleId) === true;
+}
+
+/**
+ * Auto-download references/citations via Citation Chaser and import them.
+ *
+ * Runs in the background — fire-and-forget from the caller's perspective.
+ * Double-submit is prevented by the module-level reactive `autoDownloadMap`.
+ *
+ * @param reloadFn  Called after successful import so the caller can refresh its list.
+ * @param onComplete  Called with `true` on success or `false` on error (after toast).
+ */
+export function autoDownloadReferences(
+  articleId: string,
+  doi: string,
+  articleTitle: string,
+  needRefs: boolean,
+  needCites: boolean,
+  reloadFn: () => Promise<void>,
+  onComplete?: (success: boolean) => void
+): void {
+  // Double-submit prevention
+  if (autoDownloadMap.value.get(articleId)) return;
+  autoDownloadMap.value.set(articleId, true);
+  // Trigger reactivity
+  autoDownloadMap.value = new Map(autoDownloadMap.value);
+
+  const toast = useToast();
+
+  // Fire-and-forget async chain
+  void (async () => {
+    try {
+      // 1. Scrape Citation Chaser
+      const scrapeResult = await tauriCommand<ScrapeCitationChaserResult>(
+        'scrape_citation_chaser_cmd',
+        { doi, getReferences: needRefs, getCitations: needCites }
+      );
+
+      // 2. Import each non-null RIS result
+      if (scrapeResult.referencesRis) {
+        await tauriCommand<ExtractResult>('import_references_for_article', {
+          payload: { articleId, filePath: scrapeResult.referencesRis, refType: 'reference' },
+        });
+      }
+      if (scrapeResult.citationsRis) {
+        await tauriCommand<ExtractResult>('import_references_for_article', {
+          payload: { articleId, filePath: scrapeResult.citationsRis, refType: 'citation' },
+        });
+      }
+
+      // 3. Reload references list
+      await reloadFn();
+
+      toast.show(`References imported for ${articleTitle}`, 'success');
+      onComplete?.(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.show(`Error: ${msg}`, 'error');
+      onComplete?.(false);
+    } finally {
+      autoDownloadMap.value.delete(articleId);
+      // Trigger reactivity
+      autoDownloadMap.value = new Map(autoDownloadMap.value);
+    }
+  })();
 }
 
 /**

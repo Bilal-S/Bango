@@ -1067,6 +1067,7 @@ pub fn get_article_counts(
         included: 0,
         rejected: 0,
         error: 0,
+        references: 0,
     };
 
     for (status, count) in rows.flatten() {
@@ -1097,6 +1098,11 @@ pub fn get_article_counts(
         )
         .unwrap_or(0);
     counts.error = error_count;
+
+    // Count references: all reference papers
+    let ref_count: usize =
+        conn.query_row("SELECT COUNT(*) FROM reference_papers", [], |row| row.get(0)).unwrap_or(0);
+    counts.references = ref_count;
 
     Ok(counts)
 }
