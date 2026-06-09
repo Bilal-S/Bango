@@ -239,4 +239,113 @@ CREATE INDEX IF NOT EXISTS idx_ref_papers_matched_article ON reference_papers(ma
 CREATE INDEX IF NOT EXISTS idx_ref_links_parent ON article_reference_links(parent_article_id);
 CREATE INDEX IF NOT EXISTS idx_ref_links_paper ON article_reference_links(reference_paper_id);
 CREATE INDEX IF NOT EXISTS idx_ref_links_parent_type ON article_reference_links(parent_article_id, type);
+
+-- ── Bibliometrics: Normalized author entities ────────────────
+
+CREATE TABLE IF NOT EXISTS biblio_authors (
+    id TEXT PRIMARY KEY,
+    normalized_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    first_author_count INTEGER NOT NULL DEFAULT 0,
+    article_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_authors_norm ON biblio_authors(normalized_name);
+
+-- ── Bibliometrics: Article ↔ Author mapping ──────────────────
+
+CREATE TABLE IF NOT EXISTS biblio_article_authors (
+    id TEXT PRIMARY KEY,
+    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES biblio_authors(id) ON DELETE CASCADE,
+    author_order INTEGER NOT NULL DEFAULT 0,
+    raw_name TEXT,
+    raw_affiliation TEXT,
+    UNIQUE(article_id, author_id, author_order)
+);
+CREATE INDEX IF NOT EXISTS idx_baa_article ON biblio_article_authors(article_id);
+CREATE INDEX IF NOT EXISTS idx_baa_author ON biblio_article_authors(author_id);
+
+-- ── Bibliometrics: Normalized institution entities ───────────
+
+CREATE TABLE IF NOT EXISTS biblio_institutions (
+    id TEXT PRIMARY KEY,
+    normalized_name TEXT NOT NULL,
+    country TEXT,
+    city TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_inst_norm ON biblio_institutions(normalized_name);
+
+-- ── Bibliometrics: Author ↔ Institution mapping (per article) 
+
+CREATE TABLE IF NOT EXISTS biblio_author_affiliations (
+    id TEXT PRIMARY KEY,
+    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    author_id TEXT NOT NULL REFERENCES biblio_authors(id) ON DELETE CASCADE,
+    institution_id TEXT NOT NULL REFERENCES biblio_institutions(id) ON DELETE CASCADE,
+    UNIQUE(article_id, author_id, institution_id)
+);
+
+-- ── Bibliometrics: Normalized terms (keywords + noun phrases) 
+
+CREATE TABLE IF NOT EXISTS biblio_terms (
+    id TEXT PRIMARY KEY,
+    normalized_term TEXT NOT NULL,
+    raw_term TEXT NOT NULL,
+    term_type TEXT NOT NULL DEFAULT 'keyword' CHECK(term_type IN ('keyword', 'noun_phrase')),
+    article_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_terms_norm ON biblio_terms(normalized_term, term_type);
+
+-- ── Bibliometrics: Article ↔ Term mapping ────────────────────
+
+CREATE TABLE IF NOT EXISTS biblio_article_terms (
+    id TEXT PRIMARY KEY,
+    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    term_id TEXT NOT NULL REFERENCES biblio_terms(id) ON DELETE CASCADE,
+    frequency INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(article_id, term_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bat_article ON biblio_article_terms(article_id);
+CREATE INDEX IF NOT EXISTS idx_bat_term ON biblio_article_terms(term_id);
+
+-- ── Bibliometrics: Saved network graphs ──────────────────────
+
+CREATE TABLE IF NOT EXISTS biblio_network_meta (
+    id TEXT PRIMARY KEY,
+    network_type TEXT NOT NULL CHECK(network_type IN (
+        'co_authorship', 'co_occurrence', 'citation', 'biblio_coupling', 'co_citation'
+    )),
+    label TEXT NOT NULL,
+    article_filter TEXT,
+    params_json TEXT,
+    node_count INTEGER NOT NULL DEFAULT 0,
+    edge_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS biblio_network_nodes (
+    id TEXT PRIMARY KEY,
+    network_id TEXT NOT NULL REFERENCES biblio_network_meta(id) ON DELETE CASCADE,
+    entity_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    cluster INTEGER,
+    x REAL,
+    y REAL,
+    UNIQUE(network_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bnn_network ON biblio_network_nodes(network_id);
+
+CREATE TABLE IF NOT EXISTS biblio_network_edges (
+    id TEXT PRIMARY KEY,
+    network_id TEXT NOT NULL REFERENCES biblio_network_meta(id) ON DELETE CASCADE,
+    source_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    UNIQUE(network_id, source_id, target_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bne_network ON biblio_network_edges(network_id);
 "#;

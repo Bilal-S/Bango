@@ -98,13 +98,11 @@ pub fn detect_browser() -> Result<BrowserInfo, BrowserError> {
         ]
     };
 
-    for candidate in candidates {
-        if let Some(executable) = candidate {
-            return Ok(BrowserInfo { executable });
-        }
+    if let Some(executable) = candidates.into_iter().flatten().next() {
+        Ok(BrowserInfo { executable })
+    } else {
+        Err(BrowserError::NotFound)
     }
-
-    Err(BrowserError::NotFound)
 }
 
 #[cfg(test)]

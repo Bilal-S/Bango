@@ -148,12 +148,7 @@ fn download_with_curl(
         .arg(&output_path)
         .arg(url)
         .status()
-        .map_err(|e| {
-            ScrapeError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to run curl: {e}"),
-            ))
-        })?;
+        .map_err(|e| ScrapeError::Io(std::io::Error::other(format!("Failed to run curl: {e}"))))?;
 
     if !status.success() {
         return Err(ScrapeError::DownloadTimeout(format!(

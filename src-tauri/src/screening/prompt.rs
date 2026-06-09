@@ -15,7 +15,8 @@ Return a JSON array matching this schema, one object per article, in the same or
     \"matched_inclusion_criteria\": [\"criteria-id\"],
     \"matched_exclusion_criteria\": [\"criteria-id\"],
     \"suggested_tags\": [\"tag-name\"],
-    \"confidence\": 0.0-1.0
+    \"confidence\": 0.0-1.0,
+    \"extracted_terms\": [\"noun-phrase from abstract\"]
   }
 ]";
 

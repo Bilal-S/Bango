@@ -1,6 +1,7 @@
 pub mod app_settings_repo;
 pub mod article_repo;
 pub mod audit_repo;
+pub mod biblio_repo;
 pub mod connection;
 pub mod criteria_repo;
 pub mod label_repo;

@@ -258,7 +258,10 @@ pub async fn import_ris_file(
                 "reference_link",
                 None,
                 None,
-                Some(&format!("Auto-linked {} imported articles to existing reference papers", links_created)),
+                Some(&format!(
+                    "Auto-linked {} imported articles to existing reference papers",
+                    links_created
+                )),
                 "system",
             );
         }
@@ -440,7 +443,10 @@ pub async fn import_bibtex_file(
                 "reference_link",
                 None,
                 None,
-                Some(&format!("Auto-linked {} imported articles to existing reference papers", links_created)),
+                Some(&format!(
+                    "Auto-linked {} imported articles to existing reference papers",
+                    links_created
+                )),
                 "system",
             );
         }

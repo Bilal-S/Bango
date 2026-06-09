@@ -1,5 +1,6 @@
 pub mod article;
 pub mod audit;
+pub mod biblio;
 pub mod criterion;
 pub mod label;
 pub mod llm_config;

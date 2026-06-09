@@ -44,10 +44,7 @@ mod tests {
 
     #[test]
     fn test_valid_doi_with_slash() {
-        assert_eq!(
-            normalize_doi(Some("10.3945/ajcn.114.100925")),
-            Some("10.3945/ajcn.114.100925")
-        );
+        assert_eq!(normalize_doi(Some("10.3945/ajcn.114.100925")), Some("10.3945/ajcn.114.100925"));
     }
 
     #[test]
@@ -161,9 +158,6 @@ mod tests {
 
     #[test]
     fn test_doi_just_spaces_around_valid() {
-        assert_eq!(
-            normalize_doi(Some("  10.3390/nu12092535  ")),
-            Some("10.3390/nu12092535")
-        );
+        assert_eq!(normalize_doi(Some("  10.3390/nu12092535  ")), Some("10.3390/nu12092535"));
     }
 }

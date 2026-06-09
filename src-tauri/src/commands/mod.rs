@@ -1,5 +1,6 @@
 pub mod app_settings;
 pub mod articles;
+pub mod biblio_cmd;
 pub mod criteria;
 pub mod dedup;
 pub mod export_cmd;

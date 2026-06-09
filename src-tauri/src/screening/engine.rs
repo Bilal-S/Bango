@@ -19,8 +19,9 @@ macro_rules! debug_log {
     };
 }
 
-use crate::db::{article_repo, audit_repo, label_repo, tag_repo};
+use crate::db::{article_repo, audit_repo, biblio_repo, label_repo, tag_repo};
 use crate::error::AppError;
+use crate::models::biblio::TermType;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
 use crate::screening::llm_client::LlmClient;
 use crate::screening::prompt::{
@@ -65,6 +66,8 @@ pub struct LlmScreeningResponse {
     pub suggested_tags: Vec<String>,
     #[serde(default)]
     pub confidence: f64,
+    #[serde(default, alias = "extracted_terms", alias = "extractedTerms")]
+    pub extracted_terms: Vec<String>,
 }
 
 pub struct ScreeningEngine {
@@ -469,6 +472,16 @@ impl ScreeningEngine {
                             for (prefix, text) in &auto_label_criteria {
                                 let label_name = format!("{}: {}", prefix, text);
                                 let _ = create_or_match_label(&c, &label_name, &article.id);
+                            }
+
+                            // Save extracted terms to biblio tables for bibliometrics
+                            if !screening.extracted_terms.is_empty() {
+                                let terms: Vec<(String, TermType)> = screening
+                                    .extracted_terms
+                                    .iter()
+                                    .map(|t| (t.clone(), TermType::NounPhrase))
+                                    .collect();
+                                let _ = biblio_repo::save_article_terms(&c, &article.id, &terms);
                             }
                         }
 

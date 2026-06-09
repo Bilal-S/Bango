@@ -86,8 +86,7 @@ pub fn export_ris_for_tab_to_file(
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    let articles =
-        article_repo::get_articles_for_export(&conn, &status, screening_errors_only)?;
+    let articles = article_repo::get_articles_for_export(&conn, &status, screening_errors_only)?;
     let criteria_map = build_criteria_map(&conn)?;
     let content = articles_to_ris_export(&articles, &criteria_map);
     std::fs::write(&path, content).map_err(AppError::Io)
@@ -123,7 +122,10 @@ pub fn import_project_backup(
     db_state: State<'_, DbState>,
     request: ImportProjectRequest,
 ) -> Result<(), AppError> {
-    eprintln!("[import_project_backup] Command received, content length: {}", request.json_content.len());
+    eprintln!(
+        "[import_project_backup] Command received, content length: {}",
+        request.json_content.len()
+    );
     let conn = db_state
         .conn
         .lock()

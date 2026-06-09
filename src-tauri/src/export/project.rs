@@ -151,9 +151,9 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     // Wrap entire import in a transaction for atomicity.
     // If any INSERT fails mid-way, all changes are rolled back so we don't
     // leave the database in a partially-imported state.
-    let tx = conn.unchecked_transaction().map_err(|e| {
-        AppError::Import(format!("Failed to start import transaction: {}", e))
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| AppError::Import(format!("Failed to start import transaction: {}", e)))?;
 
     // Clear existing data (reverse dependency order)
     tx.execute("DELETE FROM article_reference_links", [])?;
@@ -520,9 +520,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
     }
 
-    tx.commit().map_err(|e| {
-        AppError::Import(format!("Failed to commit import transaction: {}", e))
-    })?;
+    tx.commit()
+        .map_err(|e| AppError::Import(format!("Failed to commit import transaction: {}", e)))?;
 
     // Re-enable foreign key checks after import
     conn.execute("PRAGMA foreign_keys = ON", [])?;

@@ -1,3 +1,4 @@
+pub mod biblio;
 pub mod bibtex;
 pub mod commands;
 pub mod crypto;
@@ -204,6 +205,11 @@ pub fn run() {
             commands::references::get_linked_articles_for_paper,
             commands::references::get_reference_paper,
             commands::scraping::scrape_citation_chaser_cmd,
+            commands::biblio_cmd::biblio_normalize,
+            commands::biblio_cmd::biblio_get_status,
+            commands::biblio_cmd::biblio_get_authors,
+            commands::biblio_cmd::biblio_get_terms,
+            commands::biblio_cmd::biblio_get_coauthor_network,
         ]);
 
     #[cfg(debug_assertions)]

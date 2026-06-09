@@ -99,8 +99,8 @@ pub async fn scrape_citation_chaser_cmd(
     if refs_exist && cits_exist {
         // Both needed files already cached — skip scraping entirely.
         return Ok(ScrapeResultDto {
-            references_ris: get_refs.then(|| refs_path),
-            citations_ris: get_cits.then(|| cits_path),
+            references_ris: get_refs.then_some(refs_path),
+            citations_ris: get_cits.then_some(cits_path),
         });
     }
 
