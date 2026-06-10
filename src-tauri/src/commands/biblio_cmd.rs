@@ -1,7 +1,8 @@
 use crate::db::biblio_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
-use crate::models::biblio::{BiblioAuthor, BiblioStatus, BiblioTerm};
+use crate::models::biblio::{BiblioAuthor, BiblioKpis, BiblioStatus, BiblioTerm};
+// BiblioTerm is re-exported through biblio_repo — no direct use here
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -76,4 +77,13 @@ pub fn biblio_get_coauthor_network(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     biblio_repo::get_coauthor_network_json(&conn)
+}
+
+#[tauri::command]
+pub fn biblio_get_kpis(db_state: tauri::State<'_, DbState>) -> Result<BiblioKpis, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    biblio_repo::get_biblio_kpis(&conn)
 }

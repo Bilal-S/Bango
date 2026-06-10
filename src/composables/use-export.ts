@@ -117,22 +117,12 @@ export function useExport() {
     exporting.value = true;
     error.value = null;
     try {
-      console.log('[import] Reading file:', file.name, 'size:', file.size);
       const content = await file.text();
-      console.log(
-        '[import] File content length:',
-        content.length,
-        'first 200 chars:',
-        content.substring(0, 200)
-      );
-      console.log('[import] Calling import_project_backup...');
       await tauriCommand('import_project_backup', {
         request: { jsonContent: content },
       });
-      console.log('[import] Tauri command succeeded. Refreshing stores...');
       await refreshAllStores();
       useSummary().clearSummary();
-      console.log('[import] Stores refreshed. Import complete.');
       return true;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

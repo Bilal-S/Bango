@@ -13,6 +13,7 @@ const TagLabelManagement = () => import('@/views/tag-label-management.vue');
 const ScreeningProgress = () => import('@/views/screening-progress.vue');
 const SummaryView = () => import('@/views/summary-view.vue');
 const PrismaDiagram = () => import('@/views/prisma-diagram.vue');
+const BiblioDashboard = () => import('@/views/biblio-dashboard.vue');
 const HelpGuide = () => import('@/views/help-guide.vue');
 
 const routes = [
@@ -44,6 +45,11 @@ const routes = [
     path: '/summary',
     name: 'summary',
     component: SummaryView,
+  },
+  {
+    path: '/bibliometrics',
+    name: 'bibliometrics',
+    component: BiblioDashboard,
   },
   { path: '/settings', name: 'settings', component: LlmConfigView },
   { path: '/help', name: 'help', component: HelpGuide },

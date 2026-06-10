@@ -31,6 +31,7 @@ const navItems: NavItem[] = [
   { label: 'Articles', icon: 'description', route: '/articles' },
   { label: 'PRISMA', icon: 'account_tree', route: '/prisma' },
   { label: 'AI Summary', icon: 'auto_awesome', route: '/summary' },
+  { label: 'Bibliometrics', icon: 'graph_3', route: '/bibliometrics' },
   { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
 

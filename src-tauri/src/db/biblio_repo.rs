@@ -2,8 +2,8 @@ use rusqlite::Connection;
 
 use crate::error::AppError;
 use crate::models::biblio::{
-    BiblioArticleAuthor, BiblioAuthor, BiblioNetworkEdge, BiblioNetworkMeta, BiblioNetworkNode,
-    BiblioStatus, BiblioTerm, NetworkType, TermType,
+    BiblioArticleAuthor, BiblioAuthor, BiblioKpis, BiblioNetworkEdge, BiblioNetworkMeta,
+    BiblioNetworkNode, BiblioStatus, BiblioTerm, NetworkType, TermType,
 };
 
 // =============================================================================
@@ -409,6 +409,121 @@ pub fn get_biblio_status(conn: &Connection) -> Result<BiblioStatus, AppError> {
         article_author_links,
         article_term_links,
         network_count,
+    })
+}
+
+/// Compute KPI aggregates for the bibliometric dashboard.
+pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
+    // Included article count
+    let included_count: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM articles WHERE status = 'included'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    // Total citations (num_cited may be NULL)
+    let total_citations: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(num_cited), 0) FROM articles WHERE status = 'included'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    // Unique normalized authors — fall back to raw articles.authors if not yet normalized
+    let unique_authors: i32 = {
+        let from_biblio: i32 =
+            conn.query_row("SELECT COUNT(*) FROM biblio_authors", [], |r| r.get(0)).unwrap_or(0);
+        if from_biblio > 0 {
+            from_biblio
+        } else {
+            // Estimate from raw authors column: count non-empty distinct values
+            conn.query_row(
+                "SELECT COUNT(DISTINCT authors) FROM articles WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        }
+    };
+
+    // Year range
+    let year_from: Option<i32> = conn
+        .query_row(
+            "SELECT MIN(publication_year) FROM articles WHERE status = 'included' AND publication_year IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    let year_to: Option<i32> = conn
+        .query_row(
+            "SELECT MAX(publication_year) FROM articles WHERE status = 'included' AND publication_year IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+
+    // Average publication year
+    let avg_year: Option<f64> = conn
+        .query_row(
+            "SELECT AVG(CAST(publication_year AS REAL)) FROM articles WHERE status = 'included' AND publication_year IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+
+    // YoY growth rate: compare last two distinct years
+    let growth_rate: Option<f64> = (|| -> Option<f64> {
+        let prev: i32 = conn
+            .query_row(
+                "SELECT publication_year FROM articles WHERE status='included' AND publication_year IS NOT NULL GROUP BY publication_year ORDER BY publication_year DESC LIMIT 1 OFFSET 1",
+                [],
+                |r| r.get(0),
+            )
+            .ok()?;
+        let last: i32 = conn
+            .query_row(
+                "SELECT publication_year FROM articles WHERE status='included' AND publication_year IS NOT NULL GROUP BY publication_year ORDER BY publication_year DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .ok()?;
+
+        let count_prev: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM articles WHERE status='included' AND publication_year=?1",
+                rusqlite::params![prev],
+                |r| r.get(0),
+            )
+            .ok()?;
+        let count_last: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM articles WHERE status='included' AND publication_year=?1",
+                rusqlite::params![last],
+                |r| r.get(0),
+            )
+            .ok()?;
+
+        if count_prev > 0 {
+            Some(((count_last - count_prev) as f64 / count_prev as f64) * 100.0)
+        } else {
+            None
+        }
+    })();
+
+    Ok(BiblioKpis {
+        included_count,
+        total_citations,
+        unique_authors,
+        year_from,
+        year_to,
+        avg_year,
+        growth_rate,
     })
 }
 
@@ -1083,5 +1198,183 @@ mod tests {
         let status_after = get_biblio_status(&conn).unwrap();
         assert_eq!(status_after.term_count, 2);
         assert_eq!(status_after.article_term_links, 2);
+    }
+
+    // ── KPI tests ──────────────────────────────────────────────────
+
+    /// Helper: insert an article with full control over key KPI fields.
+    /// `year` is an Option<i32> matching the INTEGER publication_year column.
+    fn insert_kpi_article(
+        conn: &Connection,
+        id: &str,
+        status: &str,
+        pub_year: Option<i32>,
+        num_cited: Option<i32>,
+        authors: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO articles (id, title, abstract_text, authors, status, publication_year, num_cited)
+             VALUES (?1, 'Test', 'Abstract', ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, authors, status, pub_year, num_cited],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn kpi_empty_db_returns_zeros() {
+        let conn = test_db();
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.included_count, 0);
+        assert_eq!(kpis.total_citations, 0);
+        assert_eq!(kpis.unique_authors, 0);
+        assert_eq!(kpis.year_from, None);
+        assert_eq!(kpis.year_to, None);
+        assert_eq!(kpis.avg_year, None);
+        assert_eq!(kpis.growth_rate, None);
+    }
+
+    #[test]
+    fn kpi_rejected_only_returns_zeros() {
+        let conn = test_db();
+        // Valid non-included statuses: 'rejected', 'duplicate', 'working'
+        insert_kpi_article(&conn, "a1", "rejected", Some(2020), Some(5), "Smith J");
+        insert_kpi_article(&conn, "a2", "duplicate", Some(2021), Some(10), "Doe A");
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.included_count, 0);
+        assert_eq!(kpis.total_citations, 0);
+        assert_eq!(kpis.unique_authors, 0);
+        assert_eq!(kpis.year_from, None);
+        assert_eq!(kpis.year_to, None);
+        assert_eq!(kpis.avg_year, None);
+    }
+
+    #[test]
+    fn kpi_basic_happy_path() {
+        let conn = test_db();
+        insert_kpi_article(&conn, "a1", "included", Some(2020), Some(5), "Smith J; Doe A");
+        insert_kpi_article(&conn, "a2", "included", Some(2021), Some(10), "Smith J");
+        insert_kpi_article(&conn, "a3", "included", Some(2022), Some(15), "Lee K");
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.included_count, 3);
+        assert_eq!(kpis.total_citations, 30);
+        assert_eq!(kpis.year_from, Some(2020));
+        assert_eq!(kpis.year_to, Some(2022));
+        // avg_year = (2020 + 2021 + 2022) / 3 = 2021.0
+        assert!((kpis.avg_year.unwrap() - 2021.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn kpi_year_null_value() {
+        let conn = test_db();
+        // publication_year is NULL → excluded from year aggregates
+        insert_kpi_article(&conn, "a1", "included", None, Some(3), "Smith J");
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.year_from, None);
+        assert_eq!(kpis.year_to, None);
+        assert_eq!(kpis.avg_year, None);
+        assert_eq!(kpis.included_count, 1);
+    }
+
+    #[test]
+    fn kpi_year_null_filtered() {
+        let conn = test_db();
+        insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "A");
+        insert_kpi_article(&conn, "a2", "included", None, Some(1), "B");         // NULL year
+        insert_kpi_article(&conn, "a4", "included", Some(2022), Some(1), "D");
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.included_count, 3); // all counted for count
+        assert_eq!(kpis.year_from, Some(2020));
+        assert_eq!(kpis.year_to, Some(2022));
+        // avg of 2020 and 2022 only = 2021.0
+        assert!((kpis.avg_year.unwrap() - 2021.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn kpi_avg_year_precision() {
+        let conn = test_db();
+        insert_kpi_article(&conn, "a1", "included", Some(2018), Some(1), "A");
+        insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "B");
+        insert_kpi_article(&conn, "a3", "included", Some(2022), Some(1), "C");
+        // avg = (2018 + 2020 + 2022) / 3 = 6060 / 3 = 2020.0
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert!((kpis.avg_year.unwrap() - 2020.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn kpi_citations_with_nulls() {
+        let conn = test_db();
+        insert_kpi_article(&conn, "a1", "included", Some(2020), Some(10), "A");
+        insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B");     // NULL citations
+        insert_kpi_article(&conn, "a3", "included", Some(2020), Some(5), "C");
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.total_citations, 15); // 10 + 5, NULL excluded
+    }
+
+    #[test]
+    fn kpi_growth_rate_positive() {
+        let conn = test_db();
+        // 5 articles in 2021, 10 in 2022
+        for i in 0..5 {
+            insert_kpi_article(&conn, &format!("old{i}"), "included", Some(2021), Some(1), "A");
+        }
+        for i in 0..10 {
+            insert_kpi_article(&conn, &format!("new{i}"), "included", Some(2022), Some(1), "B");
+        }
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        let rate = kpis.growth_rate.unwrap();
+        assert!((rate - 100.0).abs() < 0.1, "expected +100%, got {rate}");
+    }
+
+    #[test]
+    fn kpi_growth_rate_negative() {
+        let conn = test_db();
+        // 10 articles in 2021, 5 in 2022
+        for i in 0..10 {
+            insert_kpi_article(&conn, &format!("old{i}"), "included", Some(2021), Some(1), "A");
+        }
+        for i in 0..5 {
+            insert_kpi_article(&conn, &format!("new{i}"), "included", Some(2022), Some(1), "B");
+        }
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        let rate = kpis.growth_rate.unwrap();
+        assert!((rate - (-50.0)).abs() < 0.1, "expected -50%, got {rate}");
+    }
+
+    #[test]
+    fn kpi_growth_rate_single_year_is_none() {
+        let conn = test_db();
+        insert_kpi_article(&conn, "a1", "included", Some(2022), Some(1), "A");
+        insert_kpi_article(&conn, "a2", "included", Some(2022), Some(1), "B");
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.growth_rate, None);
+    }
+
+    #[test]
+    fn kpi_unique_authors_fallback_raw() {
+        let conn = test_db();
+        // No biblio_authors rows — falls back to COUNT(DISTINCT authors) from articles
+        insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J; Doe A");
+        insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "Smith J");
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.unique_authors, 2); // 2 distinct authors strings
+    }
+
+    #[test]
+    fn kpi_unique_authors_from_biblio_table() {
+        let conn = test_db();
+        insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J");
+        // Insert into biblio_authors
+        upsert_author(&conn, "smith j", "Smith, J.").unwrap();
+        upsert_author(&conn, "doe a", "Doe, A.").unwrap();
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        assert_eq!(kpis.unique_authors, 2); // from biblio_authors count
     }
 }

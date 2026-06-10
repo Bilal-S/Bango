@@ -21,7 +21,7 @@ const {
   resetFetchedModels,
 } = useLlmConfig();
 
-const { exporting, error, exportProject, importProject, resetProject } = useExport();
+const { error, exportProject, importProject, resetProject } = useExport();
 const router = useRouter();
 
 // Project management state
@@ -119,24 +119,12 @@ function handleImportFile(event: Event): void {
 
 async function doImportProject(): Promise<void> {
   if (!importFile.value) return;
-  console.log('[doImportProject] Starting import...');
-  const success = await importProject(importFile.value);
-  console.log(
-    '[doImportProject] importProject returned:',
-    success,
-    'error:',
-    error.value,
-    'exporting:',
-    exporting.value
-  );
+  await importProject(importFile.value);
   showImportDialog.value = false;
   importFile.value = null;
   // Navigate to dashboard so all views refresh with newly imported data
   if (!error.value) {
-    console.log('[doImportProject] Navigating to dashboard...');
     router.push('/');
-  } else {
-    console.log('[doImportProject] Not navigating - error present:', error.value);
   }
 }
 

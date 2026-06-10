@@ -149,3 +149,23 @@ pub struct BiblioStatus {
     pub article_term_links: i32,
     pub network_count: i32,
 }
+
+/// KPI summary for the bibliometric dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BiblioKpis {
+    /// Number of included articles.
+    pub included_count: i32,
+    /// Total citations across included articles (SUM of num_cited).
+    pub total_citations: i64,
+    /// Number of unique normalized authors.
+    pub unique_authors: i32,
+    /// Earliest publication year among included articles.
+    pub year_from: Option<i32>,
+    /// Latest publication year among included articles.
+    pub year_to: Option<i32>,
+    /// Average publication year across included articles.
+    pub avg_year: Option<f64>,
+    /// Year-over-year growth rate of the last two years (percentage).
+    pub growth_rate: Option<f64>,
+}
