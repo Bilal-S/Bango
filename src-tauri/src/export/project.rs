@@ -317,6 +317,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let publisher_city = get_str_field(a, "publisherCity", "publisher_city");
         let publisher_address = get_str_field(a, "publisherAddress", "publisher_address");
         let issn = get_str_field(a, "issn", "issn");
+        let eissn = get_str_field(a, "eissn", "eissn");
         let reference_type = get_str_field(a, "referenceType", "reference_type");
         let date = get_str_field(a, "date", "date");
         let author_address = get_str_field(a, "authorAddress", "author_address");
@@ -357,28 +358,42 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         });
         let full_text = get_str_field(a, "fullText", "full_text");
         let full_text_ai_summary = get_str_field(a, "fullTextAiSummary", "full_text_ai_summary");
+        let data_length = a.get("dataLength").and_then(|v| v.as_i64());
+        let token_estimate = a.get("tokenEstimate").and_then(|v| v.as_i64());
+        let num_cited = a.get("numCited").and_then(|v| v.as_i64());
+        let num_references = a.get("numReferences").and_then(|v| v.as_i64());
+        let has_citation_details =
+            a.get("hasCitationDetails").and_then(|v| v.as_i64()).unwrap_or(0);
+        let has_reference_details =
+            a.get("hasReferenceDetails").and_then(|v| v.as_i64()).unwrap_or(0);
+        let has_full_text = a.get("hasFullText").and_then(|v| v.as_i64()).unwrap_or(0);
+        let full_text_file_name = get_str_field(a, "fullTextFileName", "full_text_file_name");
         tx.execute(
             "INSERT INTO articles (
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
                 volume, issue, start_page, end_page, keywords, url, language, publisher, publisher_city,
-                publisher_address, issn, reference_type, date, author_address, accession_number,
+                publisher_address, issn, eissn, reference_type, date, author_address, accession_number,
                 custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
                 user_notes, ris_extras, duplicate_of, ai_decision, ai_reasoning, ai_confidence,
                 matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
-                imported_at, changed_at, screened_at, full_text, full_text_ai_summary
+                imported_at, changed_at, screened_at, full_text, full_text_ai_summary,
+                data_length, token_estimate, num_cited, num_references,
+                has_citation_details, has_reference_details, has_full_text, full_text_file_name
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38,
-                ?39, ?40, ?41, ?42, ?43, ?44, ?45
+                ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54
             )",
             rusqlite::params![
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
                 volume, issue, start_page, end_page, keywords, url, language, publisher, publisher_city,
-                publisher_address, issn, reference_type, date, author_address, accession_number,
+                publisher_address, issn, eissn, reference_type, date, author_address, accession_number,
                 custom_field3, journal_abbreviation, journal_iso_abbreviation, notes, web_of_science_db,
                 user_notes, ris_extras, duplicate_of, ai_decision, ai_reasoning, ai_confidence,
                 matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
-                imported_at, changed_at, screened_at, full_text, full_text_ai_summary
+                imported_at, changed_at, screened_at, full_text, full_text_ai_summary,
+                data_length, token_estimate, num_cited, num_references,
+                has_citation_details, has_reference_details, has_full_text, full_text_file_name
             ],
         )?;
     }
@@ -435,6 +450,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let publisher_city = get_str_field(rp, "publisherCity", "publisher_city");
         let publisher_address = get_str_field(rp, "publisherAddress", "publisher_address");
         let issn = get_str_field(rp, "issn", "issn");
+        let eissn = get_str_field(rp, "eissn", "eissn");
         let reference_type = get_str_field(rp, "referenceType", "reference_type");
         let date = get_str_field(rp, "date", "date");
         let notes = get_str_field(rp, "notes", "notes");
@@ -469,12 +485,12 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             "INSERT OR IGNORE INTO reference_papers (
                 id, title, abstract_text, authors, publication_year, doi, journal,
                 volume, issue, start_page, end_page, keywords, url, language, publisher,
-                publisher_city, publisher_address, issn, reference_type, date, notes,
+                publisher_city, publisher_address, issn, eissn, reference_type, date, notes,
                 ris_extras, match_status, matched_article_id, citation_count,
                 reference_count, import_source, created_at, updated_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30
             )",
             rusqlite::params![
                 id,
@@ -495,6 +511,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 publisher_city,
                 publisher_address,
                 issn,
+                eissn,
                 reference_type,
                 date,
                 notes,
@@ -732,6 +749,12 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
 
     // Re-enable foreign key checks after import
     conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+    // Post-import: resolve journal links for imported articles & reference papers.
+    // Backup files don't store journal_index_id (it's derived from ISSN/eISSN/journal name),
+    // so we rematch against the journal_index table.
+    let _ = crate::db::article_repo::rematch_all_journals(conn);
+    let _ = crate::db::reference_repo::rematch_all_journals(conn);
 
     Ok(())
 }
