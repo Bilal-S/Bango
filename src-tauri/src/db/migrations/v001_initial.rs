@@ -36,8 +36,6 @@ CREATE TABLE IF NOT EXISTS labels (
 CREATE TABLE IF NOT EXISTS articles (
     -- Primary key
     id TEXT PRIMARY KEY,
-    -- Foreign key columns
-    duplicate_of TEXT,
     -- Columns (alphabetical)
     abstract_text TEXT NOT NULL,
     accession_number TEXT,
@@ -45,14 +43,16 @@ CREATE TABLE IF NOT EXISTS articles (
     ai_confidence REAL,
     ai_decision TEXT CHECK(ai_decision IS NULL OR ai_decision IN ('include', 'exclude')),
     ai_reasoning TEXT,
+    affiliation TEXT,
     author_address TEXT,
     authors TEXT NOT NULL,
-    affiliation TEXT,
     changed_at TEXT NOT NULL DEFAULT '',
     custom_field3 TEXT,
     data_length INTEGER,
     date TEXT,
     doi TEXT,
+    duplicate_of TEXT,
+    eissn TEXT,
     end_page TEXT,
     full_text TEXT,
     full_text_ai_summary TEXT,
@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS articles (
     issue TEXT,
     journal TEXT,
     journal_abbreviation TEXT,
+    journal_index_id TEXT REFERENCES journal_index(id),
     journal_iso_abbreviation TEXT,
     keywords TEXT,
     language TEXT,
@@ -118,13 +119,13 @@ CREATE TABLE IF NOT EXISTS article_labels (
 
 CREATE TABLE IF NOT EXISTS audit_entries (
     id TEXT PRIMARY KEY,
-    article_id TEXT,
     action TEXT NOT NULL CHECK(action IN (
         'import', 'dedup_merge', 'dedup_flag', 'status_change',
         'tag_add', 'tag_remove', 'label_add', 'label_remove',
         'criteria_match', 'ai_screen', 'manual_override', 'ai_summary',
         'error', 'dedup_auto', 'reference_import', 'reference_match'
     )),
+    article_id TEXT,
     details TEXT,
     from_status TEXT,
     source TEXT NOT NULL CHECK(source IN ('ai', 'user', 'system')),
@@ -166,39 +167,72 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('fulltext_storage_dir', NULL);
 
+-- ── Journal Index (reference data) ────────────────────────────
+-- IMPORTANT: This table stores system-distributed reference data.
+-- Do NOT include in project backup export/import or reset operations.
+-- Populated from CSV files via the import_journals script and
+-- auto-loaded from the bundled portal DB on first startup.
+-- Must be created BEFORE articles/reference_papers (FK references).
+
+CREATE TABLE IF NOT EXISTS journal_index (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    eissn TEXT,
+    is_system INTEGER NOT NULL DEFAULT 0,
+    issn TEXT,
+    journal_title TEXT NOT NULL,
+    languages TEXT,
+    publisher_address TEXT,
+    publisher_name TEXT,
+    source_file TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    web_of_science_categories TEXT
+);
+
+-- Unique indexes for ISSN/eISSN (partial — only non-empty values)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_journal_issn
+    ON journal_index(issn) WHERE issn IS NOT NULL AND issn != '';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_journal_eissn
+    ON journal_index(eissn) WHERE eissn IS NOT NULL AND eissn != '';
+-- Case-insensitive title lookup index
+CREATE INDEX IF NOT EXISTS idx_journal_title_lower
+    ON journal_index(LOWER(journal_title));
+
 -- ── Reference papers (deduplicated) ──────────────────────────
 
 CREATE TABLE IF NOT EXISTS reference_papers (
     id TEXT PRIMARY KEY,
-    title TEXT NOT NULL DEFAULT '',
     abstract_text TEXT DEFAULT '',
     authors TEXT DEFAULT '[]',                     -- JSON array of strings
-    publication_year INTEGER,
-    doi TEXT,
-    journal TEXT,
-    volume TEXT,
-    issue TEXT,
-    start_page TEXT,
-    end_page TEXT,
-    keywords TEXT DEFAULT '[]',                    -- JSON array of strings
-    url TEXT,
-    language TEXT,
-    publisher TEXT,
-    publisher_city TEXT,
-    publisher_address TEXT,
-    issn TEXT,
-    reference_type TEXT,
+    citation_count INTEGER NOT NULL DEFAULT 0,     -- how many articles cite this paper
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     date TEXT,
-    notes TEXT,
-    ris_extras TEXT,                               -- JSON object
+    doi TEXT,
+    eissn TEXT,
+    end_page TEXT,
+    import_source TEXT,
+    issn TEXT,
+    issue TEXT,
+    journal TEXT,
+    journal_index_id TEXT REFERENCES journal_index(id),
+    keywords TEXT DEFAULT '[]',                    -- JSON array of strings
+    language TEXT,
     match_status TEXT NOT NULL DEFAULT 'unmatched'
         CHECK(match_status IN ('unmatched', 'matched', 'imported', 'not_in_library')),
     matched_article_id TEXT,                       -- FK → articles.id
-    citation_count INTEGER NOT NULL DEFAULT 0,     -- how many articles cite this paper
+    notes TEXT,
+    publication_year INTEGER,
+    publisher TEXT,
+    publisher_address TEXT,
+    publisher_city TEXT,
     reference_count INTEGER NOT NULL DEFAULT 0,    -- how many articles reference this paper
-    import_source TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reference_type TEXT,
+    ris_extras TEXT,                               -- JSON object
+    start_page TEXT,
+    title TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    url TEXT,
+    volume TEXT,
     FOREIGN KEY (matched_article_id) REFERENCES articles(id)
 );
 
@@ -206,12 +240,12 @@ CREATE TABLE IF NOT EXISTS reference_papers (
 
 CREATE TABLE IF NOT EXISTS article_reference_links (
     id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     parent_article_id TEXT NOT NULL,
     reference_paper_id TEXT NOT NULL,
     type INTEGER NOT NULL CHECK(type IN (0, 1)),
         -- 0 = citation (another article citing the parent)
         -- 1 = reference (a work cited by the parent)
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (parent_article_id) REFERENCES articles(id) ON DELETE CASCADE,
     FOREIGN KEY (reference_paper_id) REFERENCES reference_papers(id) ON DELETE CASCADE,
     UNIQUE(parent_article_id, reference_paper_id, type)
@@ -244,11 +278,11 @@ CREATE INDEX IF NOT EXISTS idx_ref_links_parent_type ON article_reference_links(
 
 CREATE TABLE IF NOT EXISTS biblio_authors (
     id TEXT PRIMARY KEY,
-    normalized_name TEXT NOT NULL,
+    article_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     display_name TEXT NOT NULL,
     first_author_count INTEGER NOT NULL DEFAULT 0,
-    article_count INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    normalized_name TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_authors_norm ON biblio_authors(normalized_name);
 
@@ -259,8 +293,8 @@ CREATE TABLE IF NOT EXISTS biblio_article_authors (
     article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
     author_id TEXT NOT NULL REFERENCES biblio_authors(id) ON DELETE CASCADE,
     author_order INTEGER NOT NULL DEFAULT 0,
-    raw_name TEXT,
     raw_affiliation TEXT,
+    raw_name TEXT,
     UNIQUE(article_id, author_id, author_order)
 );
 CREATE INDEX IF NOT EXISTS idx_baa_article ON biblio_article_authors(article_id);
@@ -270,10 +304,10 @@ CREATE INDEX IF NOT EXISTS idx_baa_author ON biblio_article_authors(author_id);
 
 CREATE TABLE IF NOT EXISTS biblio_institutions (
     id TEXT PRIMARY KEY,
-    normalized_name TEXT NOT NULL,
-    country TEXT,
     city TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    country TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    normalized_name TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_inst_norm ON biblio_institutions(normalized_name);
 
@@ -291,11 +325,11 @@ CREATE TABLE IF NOT EXISTS biblio_author_affiliations (
 
 CREATE TABLE IF NOT EXISTS biblio_terms (
     id TEXT PRIMARY KEY,
+    article_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
     normalized_term TEXT NOT NULL,
     raw_term TEXT NOT NULL,
-    term_type TEXT NOT NULL DEFAULT 'keyword' CHECK(term_type IN ('keyword', 'noun_phrase')),
-    article_count INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    term_type TEXT NOT NULL DEFAULT 'keyword' CHECK(term_type IN ('keyword', 'noun_phrase'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_terms_norm ON biblio_terms(normalized_term, term_type);
 
@@ -304,8 +338,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_terms_norm ON biblio_terms(normaliz
 CREATE TABLE IF NOT EXISTS biblio_article_terms (
     id TEXT PRIMARY KEY,
     article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    term_id TEXT NOT NULL REFERENCES biblio_terms(id) ON DELETE CASCADE,
     frequency INTEGER NOT NULL DEFAULT 1,
+    term_id TEXT NOT NULL REFERENCES biblio_terms(id) ON DELETE CASCADE,
     UNIQUE(article_id, term_id)
 );
 CREATE INDEX IF NOT EXISTS idx_bat_article ON biblio_article_terms(article_id);
@@ -315,24 +349,24 @@ CREATE INDEX IF NOT EXISTS idx_bat_term ON biblio_article_terms(term_id);
 
 CREATE TABLE IF NOT EXISTS biblio_network_meta (
     id TEXT PRIMARY KEY,
+    article_filter TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    edge_count INTEGER NOT NULL DEFAULT 0,
+    label TEXT NOT NULL,
     network_type TEXT NOT NULL CHECK(network_type IN (
         'co_authorship', 'co_occurrence', 'citation', 'biblio_coupling', 'co_citation'
     )),
-    label TEXT NOT NULL,
-    article_filter TEXT,
-    params_json TEXT,
     node_count INTEGER NOT NULL DEFAULT 0,
-    edge_count INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    params_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS biblio_network_nodes (
     id TEXT PRIMARY KEY,
-    network_id TEXT NOT NULL REFERENCES biblio_network_meta(id) ON DELETE CASCADE,
+    cluster INTEGER,
     entity_id TEXT NOT NULL,
     label TEXT NOT NULL,
+    network_id TEXT NOT NULL REFERENCES biblio_network_meta(id) ON DELETE CASCADE,
     weight REAL NOT NULL DEFAULT 1.0,
-    cluster INTEGER,
     x REAL,
     y REAL,
     UNIQUE(network_id, entity_id)
@@ -348,4 +382,5 @@ CREATE TABLE IF NOT EXISTS biblio_network_edges (
     UNIQUE(network_id, source_id, target_id)
 );
 CREATE INDEX IF NOT EXISTS idx_bne_network ON biblio_network_edges(network_id);
+
 "#;

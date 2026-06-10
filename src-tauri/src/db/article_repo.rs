@@ -80,6 +80,8 @@ pub fn get_next_unscreened_working_batch(
             publisher_city: None,
             publisher_address: None,
             issn: None,
+            eissn: None,
+            journal_index_id: None,
             reference_type: None,
             date: None,
             author_address: None,
@@ -149,7 +151,7 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
         "INSERT INTO articles (
             id, sequence_id, status, title, abstract_text, authors, publication_year, doi,
             journal, volume, issue, start_page, end_page, keywords, url,
-            language, publisher, publisher_city, publisher_address, issn,
+            language, publisher, publisher_city, publisher_address, issn, eissn, journal_index_id,
             reference_type, date, author_address, affiliation, accession_number,
             custom_field3, journal_abbreviation, journal_iso_abbreviation,
             notes, web_of_science_db, ris_extras, import_source,
@@ -159,13 +161,13 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
         ) VALUES (
             ?1, ?2, 'duplicate', ?3, ?4, ?5, ?6, ?7,
             ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19,
-            ?20, ?21, ?22, ?23, ?24,
-            ?25, ?26, ?27,
-            ?28, ?29, ?30, ?31,
-            ?32, ?33,
-            ?34, ?35, 0, 0,
-            ?36, ?37
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21,
+            ?22, ?23, ?24, ?25, ?26,
+            ?27, ?28, ?29,
+            ?30, ?31, ?32, ?33,
+            ?34, ?35,
+            ?36, ?37, 0, 0,
+            ?38, ?39
         )",
         params![
             id,
@@ -187,6 +189,8 @@ pub fn insert_article(conn: &Connection, article: &NewArticle) -> Result<Article
             article.publisher_city,
             article.publisher_address,
             article.issn,
+            article.eissn,
+            article.journal_index_id,
             article.reference_type,
             article.date,
             article.author_address,
@@ -254,7 +258,7 @@ pub fn insert_articles_batch(
             "INSERT INTO articles (
                 id, sequence_id, status, title, abstract_text, authors, publication_year, doi,
                 journal, volume, issue, start_page, end_page, keywords, url,
-                language, publisher, publisher_city, publisher_address, issn,
+                language, publisher, publisher_city, publisher_address, issn, eissn, journal_index_id,
                 reference_type, date, author_address, affiliation, accession_number,
                 custom_field3, journal_abbreviation, journal_iso_abbreviation,
                 notes, web_of_science_db, ris_extras, import_source,
@@ -264,13 +268,13 @@ pub fn insert_articles_batch(
             ) VALUES (
                 ?1, ?2, 'duplicate', ?3, ?4, ?5, ?6, ?7,
                 ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-                ?15, ?16, ?17, ?18, ?19,
-                ?20, ?21, ?22, ?23, ?24,
-                ?25, ?26, ?27,
-                ?28, ?29, ?30, ?31,
-                ?32, ?33,
-                ?34, ?35, 0, 0,
-                ?36, ?37
+                ?15, ?16, ?17, ?18, ?19, ?20, ?21,
+                ?22, ?23, ?24, ?25, ?26,
+                ?27, ?28, ?29,
+                ?30, ?31, ?32, ?33,
+                ?34, ?35,
+                ?36, ?37, 0, 0,
+                ?38, ?39
             )",
             params![
                 id,
@@ -292,6 +296,8 @@ pub fn insert_articles_batch(
                 article_with_source.publisher_city,
                 article_with_source.publisher_address,
                 article_with_source.issn,
+                article_with_source.eissn,
+                article_with_source.journal_index_id,
                 article_with_source.reference_type,
                 article_with_source.date,
                 article_with_source.author_address,
@@ -764,6 +770,9 @@ pub fn get_article_field_count(conn: &Connection, id: &str) -> Result<usize, App
     if article.issn.is_some() {
         count += 1;
     }
+    if article.eissn.is_some() {
+        count += 1;
+    }
     if article.reference_type.is_some() {
         count += 1;
     }
@@ -842,6 +851,8 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         publisher_city: row.get("publisher_city")?,
         publisher_address: row.get("publisher_address")?,
         issn: row.get("issn")?,
+        eissn: row.get("eissn")?,
+        journal_index_id: row.get("journal_index_id")?,
         reference_type: row.get("reference_type")?,
         date: row.get("date")?,
         author_address: row.get("author_address")?,
@@ -1125,4 +1136,74 @@ pub fn get_article_counts(
     counts.references = ref_count;
 
     Ok(counts)
+}
+
+/// Post-import step: resolve `journal_index_id` for articles that have ISSN/eISSN/journal name
+/// but no journal link yet. Non-fatal — errors are silently ignored.
+pub fn resolve_journal_links(conn: &Connection, articles: &[Article]) -> usize {
+    let mut resolved = 0usize;
+    for article in articles {
+        if article.journal_index_id.is_some() {
+            continue;
+        }
+        // Only attempt journal matching for journal articles
+        if article.reference_type.as_deref() != Some("JOUR") {
+            continue;
+        }
+        let journal_id = crate::db::journal_repo::resolve_journal_id(
+            conn,
+            article.issn.as_deref(),
+            article.eissn.as_deref(),
+            article.journal.as_deref(),
+        );
+        if let Some(ref id) = journal_id {
+            let _ = conn.execute(
+                "UPDATE articles SET journal_index_id = ?1 WHERE id = ?2",
+                params![id, article.id],
+            );
+            resolved += 1;
+        }
+    }
+    resolved
+}
+
+/// Bulk rematch: find all articles with `journal_index_id IS NULL` and `reference_type = 'JOUR'`,
+/// attempt to resolve their journal link, and return the count of newly resolved articles.
+pub fn rematch_all_journals(conn: &Connection) -> Result<usize, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, issn, eissn, journal FROM articles
+         WHERE journal_index_id IS NULL
+         AND reference_type = 'JOUR'
+         AND (issn IS NOT NULL AND issn != ''
+              OR eissn IS NOT NULL AND eissn != ''
+              OR journal IS NOT NULL AND journal != '')",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>("id")?,
+            row.get::<_, Option<String>>("issn")?,
+            row.get::<_, Option<String>>("eissn")?,
+            row.get::<_, Option<String>>("journal")?,
+        ))
+    })?;
+
+    let mut resolved = 0usize;
+    for row in rows {
+        let (id, issn, eissn, journal) = row?;
+        if let Some(journal_id) = crate::db::journal_repo::resolve_journal_id(
+            conn,
+            issn.as_deref(),
+            eissn.as_deref(),
+            journal.as_deref(),
+        ) {
+            conn.execute(
+                "UPDATE articles SET journal_index_id = ?1 WHERE id = ?2",
+                params![journal_id, id],
+            )?;
+            resolved += 1;
+        }
+    }
+
+    Ok(resolved)
 }

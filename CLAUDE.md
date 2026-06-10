@@ -76,6 +76,56 @@
 - Use `serde` deserialization with explicit field types - never deserialize untrusted input as `serde_json::Value` without validation.
 - RIS parser must handle malformed input gracefully - never crash on bad data.
 
+## Journal Index (Reference Data)
+
+The `journal_index` table stores system-distributed reference data for journals.
+It is populated from CSV files via the `scripts/import_journals/` Rust binary and
+bundled as `src-tauri/resources/journal_index.db` with the Tauri app.
+
+### Key Rules
+- `journal_index` is **never** included in project backup export/import or reset.
+- The table is marked `is_system = 1` for all bundled records.
+- Blank CSV values never overwrite existing non-blank data on update.
+
+### Startup Behavior (`lib.rs`)
+1. Migrations run → `journal_index` table created (v001).
+2. `load_journal_index_if_empty()` checks if the table has data.
+3. If empty, ATTACHes the bundled `journal_index.db` and bulk-copies all records.
+
+### How to Update Journal Data for a New Release
+1. Place updated CSV files in `~/Documents/Journals/` (or a specified directory).
+2. Run the import script:
+   ```bash
+   # Optionally delete the old DB first:
+   rm src-tauri/resources/journal_index.db
+   # Rebuild from all CSVs:
+   cd scripts/import_journals && cargo run
+   ```
+3. Verify the new `src-tauri/resources/journal_index.db` is correct.
+4. Create a new migration file to trigger a refresh on existing installations:
+   - Create `src-tauri/src/db/migrations/v00N_refresh_journals.rs`:
+     ```rust
+     pub const VERSION: i32 = N;
+     pub const UP_SQL: &str = "\
+         -- Refresh journal index: clears table so bundled portal DB is reloaded.
+         -- To update: run import_journals script with new CSVs, replace
+         -- src-tauri/resources/journal_index.db, then bump this version.
+         DELETE FROM journal_index;
+     ";
+     ```
+   - Register it in `src-tauri/src/db/migrations/mod.rs`.
+5. Commit the updated `journal_index.db` + the new migration file.
+
+The migration `DELETE FROM journal_index` clears the table. On next app startup,
+`load_journal_index_if_empty()` sees 0 records and reloads from the bundled DB.
+
+### Supported CSV Formats (auto-detected by header)
+- **Standard**: `"Journal title","ISSN","eISSN","Publisher name","Publisher address","Languages","Web of Science Categories"`
+- **JCR**: `Title20,Title,Country,SCIE,SSCI,AHCI,ESCI`
+
+### Match Priority (import script)
+1. ISSN (exact) → 2. eISSN (exact) → 3. Title (case-insensitive) → 4. New record
+
 ## Testing
 
 - Rust: `cargo test` for unit and integration tests.

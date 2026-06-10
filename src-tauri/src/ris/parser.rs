@@ -3,6 +3,85 @@ use super::types::{RisParseError, RisParseResult, RisRecord};
 use crate::error::AppError;
 use crate::ris::n1_parser::parse_n1_citation_data;
 
+/// Normalize RIS reference type (TY tag) to canonical 2–4 letter codes.
+///
+/// Different exporters use different names for the same type:
+/// e.g. "JOUR", "Journal", "Journal Article" should all become "JOUR".
+///
+/// See: https://en.wikipedia.org/wiki/RIS_(file_format)#Tags
+pub fn normalize_reference_type(raw: &str) -> String {
+    let key = raw.trim().to_lowercase();
+    match key.as_str() {
+        // Journal Article
+        "jour" | "journal" | "journal article" | "article" | "journalarticle"
+        | "article in journal" | "pap" | "papel" => "JOUR".to_string(),
+        // Book (whole)
+        "book" | "whole book" | "wholebook" => "BOOK".to_string(),
+        // Book Section / Chapter
+        "chap" | "book section" | "booksection" | "book chapter" | "bookchapter" | "chapter" => {
+            "CHAP".to_string()
+        }
+        // Conference Paper
+        "conf"
+        | "conference paper"
+        | "conferencepaper"
+        | "conference proceedings"
+        | "conferenceproceedings"
+        | "proceedings"
+        | "conference" => "CONF".to_string(),
+        // Thesis
+        "thes" | "thesis" | "dissertation" | "phd thesis" | "master's thesis" | "msc thesis" => {
+            "THES".to_string()
+        }
+        // Report
+        "rprt" | "report" | "tech report" | "technical report" | "techreport" => "RPRT".to_string(),
+        // Electronic Article / Source
+        "elec" | "electronic article" | "electronicarticle" | "electronic source"
+        | "electronicsource" | "online" | "online resource" | "e-article" => "ELEC".to_string(),
+        // Newspaper Article
+        "news" | "newspaper article" | "newspaperarticle" | "newspaper" => "NEWS".to_string(),
+        // Patent
+        "pat" | "patent" => "PAT".to_string(),
+        // Generic / Unspecified
+        "gen" | "generic" | "unspecified" | "other" | "misc" => "GEN".to_string(),
+        // Map
+        "map" => "MAP".to_string(),
+        // Audiovisual
+        "av" | "audiovisual" | "video" | "film" => "AV".to_string(),
+        // Artwork
+        "art" | "artwork" => "ART".to_string(),
+        // Case
+        "case" | "legal case" | "legalcase" | "court case" => "CASE".to_string(),
+        // Bill / Legislation
+        "bill" | "legislation" => "BILL".to_string(),
+        // Statute
+        "stat" | "statute" => "STAT".to_string(),
+        // Hearing
+        "hear" | "hearing" => "HEAR".to_string(),
+        // Computer Program
+        "comp" | "computer program" | "computerprogram" | "software" => "COMP".to_string(),
+        // Dictionary
+        "dict" | "dictionary" => "DICT".to_string(),
+        // Encyclopedia
+        "encyc" | "encyclopedia" => "ENCYC".to_string(),
+        // Grant
+        "grant" => "GRANT".to_string(),
+        // Unenacted Bill
+        "unbill" | "unenacted bill" => "UNBILL".to_string(),
+        // Music
+        "music" | "musical score" | "musicscore" => "MUSIC".to_string(),
+        // Classic Work
+        "classic" | "classic work" => "CLASSIC".to_string(),
+        // Web Page
+        "web" | "web page" | "webpage" | "website" | "www" | "internet" => "ELEC".to_string(),
+        // If already a known canonical code (uppercase 2-5 chars), keep it
+        _ => {
+            // Return uppercase version of the trimmed input for unknown types
+            raw.trim().to_uppercase()
+        }
+    }
+}
+
 /// Parses a complete RIS file content into records.
 /// Records are delimited by `ER` tags.
 pub fn parse_ris(content: &str) -> Result<RisParseResult, AppError> {
@@ -127,11 +206,13 @@ fn append_continuation(tag: &str, text: &str, record: &mut RisRecord) {
         "PA" => append_option(&mut record.publisher_address, text),
         "PI" => append_option(&mut record.publisher_city, text),
         "SN" => append_option(&mut record.issn, text),
+        "EI" => append_option(&mut record.eissn, text),
         "AN" => append_option(&mut record.accession_number, text),
         "C3" => append_option(&mut record.custom_field3, text),
         "J9" => append_option(&mut record.journal_abbreviation, text),
         "JI" => append_option(&mut record.journal_iso_abbreviation, text),
         "WE" => append_option(&mut record.web_of_science_db, text),
+        "JF" => append_option(&mut record.journal, text),
         "T2" => append_option(&mut record.journal, text),
         "JO" => append_option(&mut record.journal, text),
         "VL" => append_option(&mut record.volume, text),
@@ -241,7 +322,7 @@ fn find_next_tag_start(s: &str) -> Option<usize> {
 /// Applies a single RIS tag-value pair to a record.
 fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
     match tag {
-        "TY" => record.reference_type = Some(value.to_string()),
+        "TY" => record.reference_type = Some(normalize_reference_type(value)),
         "TI" | "T1" => record.title = Some(value.to_string()),
         "AB" => record.abstract_text = Some(value.to_string()),
         "AU" => record.authors.push(value.to_string()),
@@ -251,7 +332,12 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
             record.publication_year = year_str.parse().ok();
         }
         "DO" => record.doi = normalize_doi(Some(value)).map(|s| s.to_string()),
-        "T2" => record.journal = Some(value.to_string()),
+        "JF" => record.journal = Some(value.to_string()),
+        "T2" => {
+            if record.journal.is_none() {
+                record.journal = Some(value.to_string());
+            }
+        }
         "VL" => record.volume = Some(value.to_string()),
         "IS" => record.issue = Some(value.to_string()),
         "SP" => record.start_page = Some(value.to_string()),
@@ -272,14 +358,22 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
             }
         }
         "SN" => {
-            // Keep the first ISSN found
+            // First SN → issn (print), second SN → eissn (electronic)
             if record.issn.is_none() {
                 record.issn = Some(value.to_string());
+            } else if record.eissn.is_none() {
+                record.eissn = Some(value.to_string());
+            }
+        }
+        "EI" => {
+            // EI = Electronic ISSN
+            if record.eissn.is_none() {
+                record.eissn = Some(value.to_string());
             }
         }
         "M3" => {
             if record.reference_type.is_none() {
-                record.reference_type = Some(value.to_string());
+                record.reference_type = Some(normalize_reference_type(value));
             }
         }
         "N2" => {

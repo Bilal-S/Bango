@@ -91,15 +91,15 @@ fn insert_paper(
         "INSERT INTO reference_papers (
             id, title, abstract_text, authors, publication_year, doi,
             journal, volume, issue, start_page, end_page, keywords, url,
-            language, publisher, publisher_city, publisher_address, issn,
+            language, publisher, publisher_city, publisher_address, issn, eissn, journal_index_id,
             reference_type, date, notes, ris_extras,
             match_status, matched_article_id, import_source
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
             ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18,
-            ?19, ?20, ?21, ?22,
-            ?23, ?24, ?25
+            ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+            ?21, ?22, ?23, ?24,
+            ?25, ?26, ?27
         )",
         params![
             id,
@@ -120,6 +120,8 @@ fn insert_paper(
             new_paper.publisher_city,
             new_paper.publisher_address,
             new_paper.issn,
+            new_paper.eissn,
+            new_paper.journal_index_id,
             new_paper.reference_type,
             new_paper.date,
             new_paper.notes,
@@ -630,6 +632,8 @@ fn row_to_paper(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReferencePaper> {
         publisher_city: row.get("publisher_city")?,
         publisher_address: row.get("publisher_address")?,
         issn: row.get("issn")?,
+        eissn: row.get("eissn")?,
+        journal_index_id: row.get("journal_index_id")?,
         reference_type: row.get("reference_type")?,
         date: row.get("date")?,
         notes: row.get("notes")?,
@@ -821,4 +825,74 @@ pub fn get_linked_articles_for_paper(
     })?;
     let results: Vec<LinkedArticleInfo> = rows.filter_map(|r| r.ok()).collect();
     Ok(results)
+}
+
+/// Post-import step: resolve `journal_index_id` for reference papers that have
+/// ISSN/eISSN/journal name but no journal link yet. Non-fatal.
+pub fn resolve_journal_links(conn: &Connection, papers: &[ReferencePaper]) -> usize {
+    let mut resolved = 0usize;
+    for paper in papers {
+        if paper.journal_index_id.is_some() {
+            continue;
+        }
+        // Only attempt journal matching for journal articles
+        if paper.reference_type.as_deref() != Some("JOUR") {
+            continue;
+        }
+        let journal_id = crate::db::journal_repo::resolve_journal_id(
+            conn,
+            paper.issn.as_deref(),
+            paper.eissn.as_deref(),
+            paper.journal.as_deref(),
+        );
+        if let Some(ref id) = journal_id {
+            let _ = conn.execute(
+                "UPDATE reference_papers SET journal_index_id = ?1 WHERE id = ?2",
+                rusqlite::params![id, paper.id],
+            );
+            resolved += 1;
+        }
+    }
+    resolved
+}
+
+/// Bulk rematch: find all reference papers with `journal_index_id IS NULL` and `reference_type = 'JOUR'`,
+/// attempt to resolve their journal link, and return the count of newly resolved papers.
+pub fn rematch_all_journals(conn: &Connection) -> Result<usize, crate::error::AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, issn, eissn, journal FROM reference_papers
+         WHERE journal_index_id IS NULL
+         AND reference_type = 'JOUR'
+         AND (issn IS NOT NULL AND issn != ''
+              OR eissn IS NOT NULL AND eissn != ''
+              OR journal IS NOT NULL AND journal != '')",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>("id")?,
+            row.get::<_, Option<String>>("issn")?,
+            row.get::<_, Option<String>>("eissn")?,
+            row.get::<_, Option<String>>("journal")?,
+        ))
+    })?;
+
+    let mut resolved = 0usize;
+    for row in rows {
+        let (id, issn, eissn, journal) = row?;
+        if let Some(journal_id) = crate::db::journal_repo::resolve_journal_id(
+            conn,
+            issn.as_deref(),
+            eissn.as_deref(),
+            journal.as_deref(),
+        ) {
+            conn.execute(
+                "UPDATE reference_papers SET journal_index_id = ?1 WHERE id = ?2",
+                rusqlite::params![journal_id, id],
+            )?;
+            resolved += 1;
+        }
+    }
+
+    Ok(resolved)
 }

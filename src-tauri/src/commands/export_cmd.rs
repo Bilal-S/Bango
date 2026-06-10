@@ -161,6 +161,10 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
         // Drop all tables so migrations can re-create them from scratch.
         // Using DROP (not DELETE) avoids ALTER TABLE conflicts when
         // migrations are re-run against an existing schema.
+        //
+        // IMPORTANT: journal_index is NOT dropped here — it is system-distributed
+        // reference data that survives project reset. It is populated via the
+        // import_journals script and auto-loaded from the bundled portal DB.
         tx.execute_batch(
             "DROP TABLE IF EXISTS article_reference_links;
              DROP TABLE IF EXISTS reference_papers;

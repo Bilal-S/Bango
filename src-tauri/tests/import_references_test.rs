@@ -569,13 +569,17 @@ fn bibtex_eissn_fallback_to_extras() {
     // ISSN maps to the issn field
     assert_some!(rec.issn, mack::ISSN.to_string());
 
-    // EISSN is not a known field, so it goes to extras (lowercase key)
-    assert!(
-        rec.extras.contains_key("eissn"),
-        "eissn should be in extras. Keys: {:?}",
-        rec.extras.keys().collect::<Vec<_>>()
+    // EISSN is now a first-class field (mapped from BibTeX EISSN)
+    assert_eq!(
+        rec.eissn.as_deref(),
+        Some("1095-9203"),
+        "eissn should be populated from EISSN field"
     );
-    assert_eq!(rec.extras["eissn"][0], "1095-9203");
+    // It should NOT be in extras since it's now properly extracted
+    assert!(
+        !rec.extras.contains_key("eissn"),
+        "eissn should not be in extras since it's a first-class field"
+    );
 }
 
 #[test]

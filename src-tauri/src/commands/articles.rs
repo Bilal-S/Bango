@@ -269,3 +269,22 @@ pub fn clear_generic_audit(db_state: State<'_, DbState>) -> Result<usize, AppErr
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     audit_repo::clear_generic_entries(&conn)
 }
+
+/// Re-attempt journal matching for all articles and reference papers that have
+/// `journal_index_id IS NULL` and `reference_type = 'JOUR'`.
+/// Returns `{ "articles": <n>, "references": <m> }`.
+#[tauri::command]
+pub fn rematch_journals(db_state: State<'_, DbState>) -> Result<serde_json::Value, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    let articles_matched = article_repo::rematch_all_journals(&conn)?;
+    let refs_matched = crate::db::reference_repo::rematch_all_journals(&conn)?;
+
+    Ok(serde_json::json!({
+        "articles": articles_matched,
+        "references": refs_matched,
+    }))
+}

@@ -22,6 +22,8 @@ pub struct RisRecord {
     pub publisher_city: Option<String>,
     pub publisher_address: Option<String>,
     pub issn: Option<String>,
+    /// Electronic ISSN (RIS: EI tag, BibTeX: EISSN field)
+    pub eissn: Option<String>,
     pub date: Option<String>,
     pub author_address: Option<String>,
     /// Affiliation extracted from import (e.g., first part of AD in RIS, or institution/org in BibTeX)

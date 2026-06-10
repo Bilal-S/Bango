@@ -56,6 +56,13 @@ pub fn run() {
                 std::process::exit(1);
             }
 
+            // ── Journal Index: auto-load from bundled portal DB on first startup ──
+            // IMPORTANT: journal_index is system-distributed reference data.
+            // Do NOT include in project backup export/import or reset operations.
+            if let Err(e) = load_journal_index_if_empty(&conn, app) {
+                eprintln!("warning: failed to load journal index: {e:#}");
+            }
+
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
 
             // Parse CLI / env flags and persist feature flags to DB.
@@ -157,6 +164,7 @@ pub fn run() {
             commands::articles::get_import_activities,
             commands::articles::get_generic_audit_entries,
             commands::articles::clear_generic_audit,
+            commands::articles::rematch_journals,
             commands::articles::bulk_update_article_status,
             commands::articles::bulk_add_tag_to_articles,
             commands::articles::bulk_add_label_to_articles,
@@ -219,4 +227,85 @@ pub fn run() {
         eprintln!("fatal: {e:#}");
         std::process::exit(1);
     }
+}
+
+/// Load journal index from the bundled portal DB into the main database,
+/// but only if the journal_index table is currently empty (first startup).
+///
+/// IMPORTANT: journal_index is system-distributed reference data.
+/// It must survive project reset, and must not be exported/imported via backups.
+fn load_journal_index_if_empty(
+    conn: &rusqlite::Connection,
+    app: &tauri::App,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::Manager;
+
+    // Check if journal_index already has data
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM journal_index", [], |row| row.get(0))?;
+
+    if count > 0 {
+        eprintln!("[journal_index] already populated ({} records), skipping load", count);
+        return Ok(());
+    }
+
+    // Try to find the bundled portal DB resource.
+    // Production: resource_dir() points to the bundle's resources folder.
+    // Dev mode (cargo tauri dev): resources are NOT copied to target/debug/,
+    //   so we fall back to the source tree via CARGO_MANIFEST_DIR.
+    let resource_path = {
+        let prod_path = app.path().resource_dir()?.join("journal_index.db");
+        if prod_path.exists() {
+            prod_path
+        } else {
+            let src_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("journal_index.db");
+            if src_path.exists() {
+                eprintln!(
+                    "[journal_index] dev-mode fallback: using source tree path {:?}",
+                    src_path
+                );
+                src_path
+            } else {
+                prod_path // will trigger the "not found" warning below
+            }
+        }
+    };
+
+    if !resource_path.exists() {
+        eprintln!(
+            "[journal_index] no bundled portal DB at {:?} — skipping auto-load",
+            resource_path
+        );
+        return Ok(());
+    }
+
+    eprintln!("[journal_index] loading from bundled portal DB: {:?}", resource_path);
+
+    // ATTACH the portal DB and bulk-copy into the main database
+    let portal_path = resource_path.to_string_lossy().to_string();
+    conn.execute_batch(&format!(
+        "ATTACH DATABASE '{}' AS portal;",
+        portal_path.replace('\'', "''")
+    ))?;
+
+    conn.execute_batch(
+        "INSERT INTO journal_index
+            (id, journal_title, issn, eissn, publisher_name,
+             publisher_address, languages, web_of_science_categories,
+             is_system, source_file, created_at, updated_at)
+         SELECT
+            id, journal_title, issn, eissn, publisher_name,
+            publisher_address, languages, web_of_science_categories,
+            1, source_file, created_at, updated_at
+         FROM portal.journal_index;
+         DETACH DATABASE portal;",
+    )?;
+
+    let new_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM journal_index", [], |row| row.get(0))?;
+
+    eprintln!("[journal_index] loaded {} records from bundled portal DB", new_count);
+
+    Ok(())
 }

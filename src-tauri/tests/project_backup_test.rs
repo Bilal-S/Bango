@@ -20,8 +20,7 @@ fn new_article(title: &str) -> NewArticle {
 
 /// Count rows in a table.
 fn count_rows(conn: &rusqlite::Connection, table: &str) -> i64 {
-    conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| row.get(0))
-        .unwrap_or(0)
+    conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| row.get(0)).unwrap_or(0)
 }
 
 /// Seed all core tables with one row each (non-biblio).
@@ -41,22 +40,28 @@ fn seed_core_data(conn: &rusqlite::Connection) {
     // Tags & labels
     conn.execute("INSERT INTO tags (id, name, source) VALUES ('tag-1', 'ml', 'ai_suggested')", [])
         .expect("seed tag");
-    conn.execute("INSERT INTO labels (id, name, source) VALUES ('lbl-1', 'priority', 'ai_generated')", [])
-        .expect("seed label");
+    conn.execute(
+        "INSERT INTO labels (id, name, source) VALUES ('lbl-1', 'priority', 'ai_generated')",
+        [],
+    )
+    .expect("seed label");
 
     // Article
-    let a = article_repo::insert_article(conn, &new_article("Test Article")).expect("insert article");
+    let a =
+        article_repo::insert_article(conn, &new_article("Test Article")).expect("insert article");
     article_repo::move_to_working(conn, &a.id).expect("move to working");
 
     // Article tags & labels
     conn.execute(
         "INSERT INTO article_tags (article_id, tag_id) VALUES (?1, 'tag-1')",
         params![a.id],
-    ).expect("seed article_tag");
+    )
+    .expect("seed article_tag");
     conn.execute(
         "INSERT INTO article_labels (article_id, label_id) VALUES (?1, 'lbl-1')",
         params![a.id],
-    ).expect("seed article_label");
+    )
+    .expect("seed article_label");
 
     // Audit entry
     conn.execute(
@@ -212,12 +217,26 @@ fn test_export_import_round_trip_all_tables() {
 
     // Verify post-import counts match pre-export counts
     let tables = [
-        "research_aims", "criteria", "articles", "tags", "labels",
-        "article_tags", "article_labels", "audit_entries",
-        "reference_papers", "article_reference_links", "llm_config",
-        "biblio_authors", "biblio_article_authors", "biblio_institutions",
-        "biblio_author_affiliations", "biblio_terms", "biblio_article_terms",
-        "biblio_network_meta", "biblio_network_nodes", "biblio_network_edges",
+        "research_aims",
+        "criteria",
+        "articles",
+        "tags",
+        "labels",
+        "article_tags",
+        "article_labels",
+        "audit_entries",
+        "reference_papers",
+        "article_reference_links",
+        "llm_config",
+        "biblio_authors",
+        "biblio_article_authors",
+        "biblio_institutions",
+        "biblio_author_affiliations",
+        "biblio_terms",
+        "biblio_article_terms",
+        "biblio_network_meta",
+        "biblio_network_nodes",
+        "biblio_network_edges",
     ];
     for table in &tables {
         let post_count = count_rows(&conn2, table);

@@ -148,6 +148,9 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
     // ISSN (clean suffixes like "; Print" or "; Electronic")
     record.issn = field_map.get("issn").or_else(|| field_map.get("isbn")).map(|v| clean_issn(v));
 
+    // Electronic ISSN
+    record.eissn = field_map.get("eissn").map(|v| clean_issn(v));
+
     // Year
     record.publication_year = field_map.get("year").and_then(|y| y.trim().parse::<i32>().ok());
 
@@ -268,6 +271,7 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
         "affiliation",
         "address",
         "issn",
+        "eissn",
         "isbn",
         "note",
         "times-cited",

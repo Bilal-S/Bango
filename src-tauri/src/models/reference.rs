@@ -87,6 +87,10 @@ pub struct ReferencePaper {
     pub publisher_city: Option<String>,
     pub publisher_address: Option<String>,
     pub issn: Option<String>,
+    /// Electronic ISSN (RIS: EI, BibTeX: EISSN)
+    pub eissn: Option<String>,
+    /// FK to journal_index(id), set during import via ISSN/eISSN/title matching
+    pub journal_index_id: Option<String>,
     pub reference_type: Option<String>,
     pub date: Option<String>,
     pub notes: Option<String>,
@@ -121,6 +125,10 @@ pub struct NewReferencePaper {
     pub publisher_city: Option<String>,
     pub publisher_address: Option<String>,
     pub issn: Option<String>,
+    /// Electronic ISSN (RIS: EI, BibTeX: EISSN)
+    pub eissn: Option<String>,
+    /// FK to journal_index(id), set during import via ISSN/eISSN/title matching
+    pub journal_index_id: Option<String>,
     pub reference_type: Option<String>,
     pub date: Option<String>,
     pub notes: Option<String>,

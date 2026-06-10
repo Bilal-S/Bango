@@ -6,10 +6,10 @@ use crate::error::AppError;
 use crate::models::article::NewArticle;
 use crate::models::reference::{
     ArticleReference, ArticleReferenceLink, LinkedArticleInfo, MatchStatus, NewReferencePaper,
-    ReferenceType,
+    ReferencePaper, ReferenceType,
 };
 use crate::ris::cr_parser;
-use crate::ris::parser;
+use crate::ris::import_pipeline::{parse_and_validate, read_content, ValidationMode};
 use crate::ris::types::RisRecord;
 use serde::Deserialize;
 
@@ -44,6 +44,7 @@ pub fn extract_cr_references(
     let mut papers_created = 0usize;
     let mut links_created = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut created_papers: Vec<ReferencePaper> = Vec::new();
 
     for cr_paper in &cr_papers {
         let mut paper_to_insert = cr_paper.clone();
@@ -53,6 +54,7 @@ pub fn extract_cr_references(
             Ok((paper, was_created)) => {
                 if was_created {
                     papers_created += 1;
+                    created_papers.push(paper.clone());
 
                     // Try to auto-match the new paper to an existing article
                     if let Ok(Some(matched_id)) =
@@ -98,6 +100,11 @@ pub fn extract_cr_references(
                 ));
             }
         }
+    }
+
+    // Post-import: resolve journal links for newly created papers
+    if !created_papers.is_empty() {
+        reference_repo::resolve_journal_links(&conn, &created_papers);
     }
 
     // Audit log
@@ -357,6 +364,8 @@ pub fn promote_reference_to_article(
         publisher_city: paper.publisher_city.clone(),
         publisher_address: paper.publisher_address.clone(),
         issn: paper.issn.clone(),
+        eissn: paper.eissn.clone(),
+        journal_index_id: None,
         reference_type: paper.reference_type.clone(),
         date: paper.date.clone(),
         author_address: None,
@@ -381,6 +390,9 @@ pub fn promote_reference_to_article(
 
     // Promoted articles go directly to 'working' status, not 'duplicate'
     article_repo::move_to_working(&conn, &article.id)?;
+
+    // Resolve journal link for the promoted article
+    article_repo::resolve_journal_links(&conn, std::slice::from_ref(&article));
 
     // Update the reference paper's match status
     reference_repo::promote_to_article(&conn, &reference_paper_id, &article.id)?;
@@ -492,6 +504,8 @@ fn ris_record_to_reference_paper(record: &RisRecord) -> NewReferencePaper {
         publisher_city: record.publisher_city.clone(),
         publisher_address: record.publisher_address.clone(),
         issn: record.issn.clone(),
+        eissn: record.eissn.clone(),
+        journal_index_id: None,
         reference_type: record.reference_type.clone(),
         date: record.date.clone(),
         notes: record.notes.clone(),
@@ -523,23 +537,20 @@ pub struct PreviewResult {
 }
 
 /// Preview references/citations from a file without importing.
-/// Parses the file and returns what would be imported.
+/// Uses the shared import pipeline for consistent parsing.
 #[tauri::command]
 pub fn preview_references_import(file_path: String) -> Result<PreviewResult, AppError> {
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| AppError::Import(format!("Failed to read file '{}': {}", file_path, e)))?;
+    let content = read_content(None, Some(file_path))?;
+    let output = parse_and_validate(&content, ValidationMode::None)?;
 
-    let parse_result = parser::parse_ris(&content)?;
-    let records = &parse_result.records;
-
-    if records.is_empty() {
+    if output.valid_records.is_empty() {
         return Ok(PreviewResult { papers: vec![], total_count: 0, errors: vec![] });
     }
 
-    let mut papers = Vec::with_capacity(records.len());
+    let mut papers = Vec::with_capacity(output.valid_records.len());
     let errors: Vec<String> = Vec::new();
 
-    for record in records {
+    for record in &output.valid_records {
         papers.push(PreviewPaper {
             title: record.title.clone(),
             authors: record.authors.clone(),
@@ -596,23 +607,20 @@ pub fn import_references_for_article(
         _ => ReferenceType::Reference,
     };
 
-    // Read and parse RIS file
-    let content = std::fs::read_to_string(&payload.file_path).map_err(|e| {
-        AppError::Import(format!("Failed to read file '{}': {}", payload.file_path, e))
-    })?;
+    // Read and parse RIS file using shared pipeline
+    let content = read_content(None, Some(payload.file_path.clone()))?;
+    let output = parse_and_validate(&content, ValidationMode::None)?;
 
-    let parse_result = parser::parse_ris(&content)?;
-    let records = &parse_result.records;
-
-    if records.is_empty() {
+    if output.valid_records.is_empty() {
         return Ok(ExtractResult { papers_created: 0, links_created: 0, errors: vec![] });
     }
 
     let mut papers_created = 0usize;
     let mut links_created = 0usize;
     let mut errors: Vec<String> = Vec::new();
+    let mut created_papers: Vec<ReferencePaper> = Vec::new();
 
-    for record in records {
+    for record in &output.valid_records {
         let paper = ris_record_to_reference_paper(record);
 
         // If the record has CR entries, also parse those
@@ -628,6 +636,7 @@ pub fn import_references_for_article(
             Ok((inserted, was_created)) => {
                 if was_created {
                     papers_created += 1;
+                    created_papers.push(inserted.clone());
                     if let Ok(Some(matched_id)) =
                         reference_repo::auto_match_paper_to_article(&conn, &inserted)
                     {
@@ -670,6 +679,7 @@ pub fn import_references_for_article(
                 Ok((cr_inserted, cr_created)) => {
                     if cr_created {
                         papers_created += 1;
+                        created_papers.push(cr_inserted.clone());
                         if let Ok(Some(matched_id)) =
                             reference_repo::auto_match_paper_to_article(&conn, &cr_inserted)
                         {
@@ -698,6 +708,11 @@ pub fn import_references_for_article(
         }
     }
 
+    // Post-import: resolve journal links for newly created papers
+    if !created_papers.is_empty() {
+        reference_repo::resolve_journal_links(&conn, &created_papers);
+    }
+
     // Audit log
     let type_label = match ref_type {
         ReferenceType::Reference => "backward references",
@@ -705,7 +720,7 @@ pub fn import_references_for_article(
     };
     let details = format!(
         "Imported {} {} from file for article {} ({} new papers, {} links)",
-        records.len(),
+        output.valid_records.len(),
         type_label,
         payload.article_id,
         papers_created,

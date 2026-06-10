@@ -61,6 +61,9 @@ pub struct LlmConfigBackup {
 }
 
 pub fn export_project(conn: &Connection) -> Result<String, AppError> {
+    // NOTE: journal_index is NOT exported — it is system-distributed reference data
+    // that survives project reset and is populated via the import_journals script.
+
     let aims = serialize_table(conn, "SELECT * FROM research_aims")?;
     let criteria = serialize_table(conn, "SELECT * FROM criteria")?;
     let articles = serialize_table(conn, "SELECT * FROM articles")?;
@@ -191,6 +194,9 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| AppError::Import(format!("Failed to start import transaction: {}", e)))?;
+
+    // NOTE: journal_index is NOT cleared during import — it is system-distributed
+    // reference data that survives project reset and backup/restore cycles.
 
     // Clear existing data (reverse dependency order)
     tx.execute("DELETE FROM biblio_network_edges", [])?;
@@ -559,11 +565,21 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     // Restore biblio_authors
     for ba in &backup.biblio_authors {
         let id = get_str(ba, "id");
-        let normalized_name = get_str_field(ba, "normalizedName", "normalized_name").unwrap_or_default();
+        let normalized_name =
+            get_str_field(ba, "normalizedName", "normalized_name").unwrap_or_default();
         let display_name = get_str_field(ba, "displayName", "display_name").unwrap_or_default();
-        let first_author_count = ba.get("firstAuthorCount").or_else(|| ba.get("first_author_count")).and_then(|v| v.as_i64()).unwrap_or(0);
-        let article_count = ba.get("articleCount").or_else(|| ba.get("article_count")).and_then(|v| v.as_i64()).unwrap_or(0);
-        let created_at = get_str_field(ba, "createdAt", "created_at").unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        let first_author_count = ba
+            .get("firstAuthorCount")
+            .or_else(|| ba.get("first_author_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let article_count = ba
+            .get("articleCount")
+            .or_else(|| ba.get("article_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let created_at = get_str_field(ba, "createdAt", "created_at")
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         tx.execute(
             "INSERT INTO biblio_authors (id, normalized_name, display_name, first_author_count, article_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![id, normalized_name, display_name, first_author_count, article_count, created_at],
@@ -573,7 +589,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     // Restore biblio_institutions
     for bi in &backup.biblio_institutions {
         let id = get_str(bi, "id");
-        let normalized_name = get_str_field(bi, "normalizedName", "normalized_name").unwrap_or_default();
+        let normalized_name =
+            get_str_field(bi, "normalizedName", "normalized_name").unwrap_or_default();
         let country = get_str_field(bi, "country", "country");
         let city = get_str_field(bi, "city", "city");
         tx.execute(
@@ -587,7 +604,11 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let id = get_str(baa, "id");
         let article_id = get_str_field(baa, "articleId", "article_id").unwrap_or_default();
         let author_id = get_str_field(baa, "authorId", "author_id").unwrap_or_default();
-        let author_order = baa.get("authorOrder").or_else(|| baa.get("author_order")).and_then(|v| v.as_i64()).unwrap_or(0);
+        let author_order = baa
+            .get("authorOrder")
+            .or_else(|| baa.get("author_order"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         let raw_name = get_str_field(baa, "rawName", "raw_name");
         let raw_affiliation = get_str_field(baa, "rawAffiliation", "raw_affiliation");
         tx.execute(
@@ -600,7 +621,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     for baf in &backup.biblio_author_affiliations {
         let id = get_str(baf, "id");
         let author_id = get_str_field(baf, "authorId", "author_id").unwrap_or_default();
-        let institution_id = get_str_field(baf, "institutionId", "institution_id").unwrap_or_default();
+        let institution_id =
+            get_str_field(baf, "institutionId", "institution_id").unwrap_or_default();
         let article_id = get_str_field(baf, "articleId", "article_id").unwrap_or_default();
         tx.execute(
             "INSERT INTO biblio_author_affiliations (id, author_id, institution_id, article_id) VALUES (?1, ?2, ?3, ?4)",
@@ -611,11 +633,18 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     // Restore biblio_terms
     for bt in &backup.biblio_terms {
         let id = get_str(bt, "id");
-        let normalized_term = get_str_field(bt, "normalizedTerm", "normalized_term").unwrap_or_default();
+        let normalized_term =
+            get_str_field(bt, "normalizedTerm", "normalized_term").unwrap_or_default();
         let raw_term = get_str_field(bt, "rawTerm", "raw_term").unwrap_or_default();
-        let term_type = get_str_field(bt, "termType", "term_type").unwrap_or_else(|| "keyword".to_string());
-        let article_count = bt.get("articleCount").or_else(|| bt.get("article_count")).and_then(|v| v.as_i64()).unwrap_or(0);
-        let created_at = get_str_field(bt, "createdAt", "created_at").unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        let term_type =
+            get_str_field(bt, "termType", "term_type").unwrap_or_else(|| "keyword".to_string());
+        let article_count = bt
+            .get("articleCount")
+            .or_else(|| bt.get("article_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let created_at = get_str_field(bt, "createdAt", "created_at")
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         tx.execute(
             "INSERT INTO biblio_terms (id, normalized_term, raw_term, term_type, article_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![id, normalized_term, raw_term, term_type, article_count, created_at],
@@ -641,9 +670,18 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let label = get_str(bnm, "label");
         let article_filter = get_str_field(bnm, "articleFilter", "article_filter");
         let params_json = get_str_field(bnm, "paramsJson", "params_json");
-        let node_count = bnm.get("nodeCount").or_else(|| bnm.get("node_count")).and_then(|v| v.as_i64()).unwrap_or(0);
-        let edge_count = bnm.get("edgeCount").or_else(|| bnm.get("edge_count")).and_then(|v| v.as_i64()).unwrap_or(0);
-        let created_at = get_str_field(bnm, "createdAt", "created_at").unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        let node_count = bnm
+            .get("nodeCount")
+            .or_else(|| bnm.get("node_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let edge_count = bnm
+            .get("edgeCount")
+            .or_else(|| bnm.get("edge_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let created_at = get_str_field(bnm, "createdAt", "created_at")
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
         tx.execute(
             "INSERT INTO biblio_network_meta (id, network_type, label, article_filter, params_json, node_count, edge_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![id, network_type, label, article_filter, params_json, node_count, edge_count, created_at],
