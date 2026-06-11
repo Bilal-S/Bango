@@ -15,6 +15,7 @@ export interface BiblioKpis {
   pubsPerYear: number | null;
   pubsByYear: YearCount[];
   avgGrowthRate: number | null;
+  refsByYear: YearCount[];
 }
 
 interface NormalizeResult {
@@ -39,6 +40,7 @@ const kpis = ref<BiblioKpis>({
   pubsPerYear: null,
   pubsByYear: [],
   avgGrowthRate: null,
+  refsByYear: [],
 });
 const loading = ref(false);
 const normalizing = ref(false);

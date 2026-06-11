@@ -22,8 +22,22 @@ const avgGrowthRate = computed(() =>
 );
 const yearFrom = computed(() => kpis.value.yearFrom ?? '—');
 const yearTo = computed(() => kpis.value.yearTo ?? '—');
+const totalPubs = computed(() => kpis.value.pubsByYear.reduce((sum, yc) => sum + yc.count, 0));
 const maxPubsCount = computed(() => Math.max(1, ...kpis.value.pubsByYear.map((yc) => yc.count)));
 const hasPubsByYear = computed(() => kpis.value.pubsByYear.length > 0);
+const hasRefsByYear = computed(() => kpis.value.refsByYear.length > 0);
+const totalReferences = computed(() =>
+  kpis.value.refsByYear.reduce((sum, yc) => sum + yc.count, 0)
+);
+const maxRefsCount = computed(() => Math.max(1, ...kpis.value.refsByYear.map((yc) => yc.count)));
+const firstRefYear = computed(() =>
+  kpis.value.refsByYear.length > 0 ? (kpis.value.refsByYear[0]?.year ?? null) : null
+);
+const lastRefYear = computed(() =>
+  kpis.value.refsByYear.length > 0
+    ? (kpis.value.refsByYear[kpis.value.refsByYear.length - 1]?.year ?? null)
+    : null
+);
 const showNoArticlesModal = computed(() => includedCount.value === 0);
 const firstYear = computed(() =>
   kpis.value.pubsByYear.length > 0 ? (kpis.value.pubsByYear[0]?.year ?? null) : null
@@ -160,12 +174,28 @@ function dismissModal(): void {
 
     <!-- KPI Row — compact horizontal layout from High-Contrast Research Hub -->
     <section class="biblio__kpis">
-      <div class="kpi-card">
+      <div class="kpi-card kpi-card--chart">
         <div class="kpi-card__icon kpi-card__icon--blue">
           <span class="material-symbols-outlined">description</span>
         </div>
-        <span class="kpi-card__value">{{ includedCount.toLocaleString() }}</span>
-        <span class="kpi-card__label">Included Articles</span>
+        <span class="kpi-card__value">{{ totalReferences.toLocaleString() }}</span>
+        <div v-if="hasRefsByYear" class="kpi-sparkline">
+          <div class="kpi-sparkline__bars">
+            <div v-for="yc in kpis.refsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
+              <div
+                class="kpi-sparkline__bar kpi-sparkline__bar--blue"
+                :style="{ height: (yc.count / maxRefsCount) * 100 + '%' }"
+              >
+                <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="firstRefYear !== null && lastRefYear !== null" class="kpi-sparkline__years">
+            <span>{{ firstRefYear }}</span>
+            <span>{{ lastRefYear }}</span>
+          </div>
+        </div>
+        <span class="kpi-card__label kpi-card__label--center">References</span>
       </div>
       <div class="kpi-card">
         <div class="kpi-card__icon kpi-card__icon--purple">
@@ -185,6 +215,7 @@ function dismissModal(): void {
         <div class="kpi-card__icon kpi-card__icon--amber">
           <span class="material-symbols-outlined">calendar_month</span>
         </div>
+        <span class="kpi-card__value">{{ totalPubs.toLocaleString() }}</span>
         <div v-if="hasPubsByYear" class="kpi-sparkline">
           <div class="kpi-sparkline__bars">
             <div v-for="yc in kpis.pubsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
@@ -560,6 +591,10 @@ function dismissModal(): void {
     opacity 0.15s ease;
   cursor: pointer;
   position: relative;
+}
+
+.kpi-sparkline__bar--blue {
+  background: linear-gradient(to top, #60a5fa, #3b82f6);
 }
 
 .kpi-sparkline__bar:hover {

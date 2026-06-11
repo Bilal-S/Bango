@@ -475,6 +475,18 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         None
     };
 
+    // Reference counts of included articles, grouped by publication year
+    let mut refs_stmt = conn.prepare(
+        "SELECT publication_year, COALESCE(SUM(num_references), 0) AS cnt \
+         FROM articles \
+         WHERE status = 'included' AND publication_year IS NOT NULL \
+         GROUP BY publication_year \
+         ORDER BY publication_year ASC",
+    )?;
+    let refs_by_year: Vec<YearCount> = refs_stmt
+        .query_map([], |row| Ok(YearCount { year: row.get(0)?, count: row.get(1)? }))?
+        .collect::<Result<Vec<_>, _>>()?;
+
     Ok(BiblioKpis {
         included_count,
         total_citations,
@@ -484,6 +496,7 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         pubs_per_year,
         pubs_by_year,
         avg_growth_rate,
+        refs_by_year,
     })
 }
 
@@ -1193,6 +1206,7 @@ mod tests {
         assert_eq!(kpis.pubs_per_year, None);
         assert!(kpis.pubs_by_year.is_empty());
         assert_eq!(kpis.avg_growth_rate, None);
+        assert!(kpis.refs_by_year.is_empty());
     }
 
     #[test]

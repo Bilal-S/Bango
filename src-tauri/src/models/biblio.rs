@@ -178,4 +178,6 @@ pub struct BiblioKpis {
     pub pubs_by_year: Vec<YearCount>,
     /// Average year-over-year growth rate across all consecutive year pairs (percentage).
     pub avg_growth_rate: Option<f64>,
+    /// Reference papers of included articles, grouped by publication_year — powers the References bar chart.
+    pub refs_by_year: Vec<YearCount>,
 }
