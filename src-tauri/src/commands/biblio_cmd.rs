@@ -15,32 +15,39 @@ pub struct NormalizeResult {
 
 /// Run bibliometric normalization: extract and normalize all authors and terms
 /// from the articles table into the biblio_* tables.
+///
+/// Uses a SQLite transaction to batch all writes into a single commit,
+/// reducing disk I/O from thousands of individual writes to one batched commit.
 #[tauri::command]
-pub fn biblio_normalize(db_state: tauri::State<'_, DbState>) -> Result<NormalizeResult, AppError> {
-    let conn = db_state
+pub async fn biblio_normalize(db_state: tauri::State<'_, DbState>) -> Result<NormalizeResult, AppError> {
+    let mut conn = db_state
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
+    let tx = conn.transaction()?;
+
     // Clear previous normalization data
-    biblio_repo::clear_all_biblio(&conn)?;
+    biblio_repo::clear_all_biblio(&tx)?;
 
     // Extract and normalize authors from all articles
-    let authors = biblio_repo::normalize_authors_from_articles(&conn)?;
+    let authors = biblio_repo::normalize_authors_from_articles(&tx)?;
 
     // Extract terms from article keywords, titles, and abstracts
-    let terms = biblio_repo::normalize_terms_from_articles(&conn)?;
+    let terms = biblio_repo::normalize_terms_from_articles(&tx)?;
 
     // Build coauthor edges
-    let _edges = biblio_repo::build_coauthor_edges(&conn)?;
+    let _edges = biblio_repo::build_coauthor_edges(&tx)?;
 
-    let status = biblio_repo::get_biblio_status(&conn)?;
+    let status = biblio_repo::get_biblio_status(&tx)?;
+
+    tx.commit()?;
 
     Ok(NormalizeResult { authors, terms, status })
 }
 
 #[tauri::command]
-pub fn biblio_get_status(db_state: tauri::State<'_, DbState>) -> Result<BiblioStatus, AppError> {
+pub async fn biblio_get_status(db_state: tauri::State<'_, DbState>) -> Result<BiblioStatus, AppError> {
     let conn = db_state
         .conn
         .lock()
@@ -49,7 +56,7 @@ pub fn biblio_get_status(db_state: tauri::State<'_, DbState>) -> Result<BiblioSt
 }
 
 #[tauri::command]
-pub fn biblio_get_authors(
+pub async fn biblio_get_authors(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<BiblioAuthor>, AppError> {
     let conn = db_state
@@ -60,7 +67,7 @@ pub fn biblio_get_authors(
 }
 
 #[tauri::command]
-pub fn biblio_get_terms(db_state: tauri::State<'_, DbState>) -> Result<Vec<BiblioTerm>, AppError> {
+pub async fn biblio_get_terms(db_state: tauri::State<'_, DbState>) -> Result<Vec<BiblioTerm>, AppError> {
     let conn = db_state
         .conn
         .lock()
@@ -69,7 +76,7 @@ pub fn biblio_get_terms(db_state: tauri::State<'_, DbState>) -> Result<Vec<Bibli
 }
 
 #[tauri::command]
-pub fn biblio_get_coauthor_network(
+pub async fn biblio_get_coauthor_network(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<serde_json::Value, AppError> {
     let conn = db_state
@@ -80,7 +87,7 @@ pub fn biblio_get_coauthor_network(
 }
 
 #[tauri::command]
-pub fn biblio_get_kpis(db_state: tauri::State<'_, DbState>) -> Result<BiblioKpis, AppError> {
+pub async fn biblio_get_kpis(db_state: tauri::State<'_, DbState>) -> Result<BiblioKpis, AppError> {
     let conn = db_state
         .conn
         .lock()

@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use chrono::Datelike;
 use rusqlite::Connection;
 
 use crate::error::AppError;
@@ -487,6 +490,9 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         .query_map([], |row| Ok(YearCount { year: row.get(0)?, count: row.get(1)? }))?
         .collect::<Result<Vec<_>, _>>()?;
 
+    // ── Normalized Citations by Year ──────────────────────────────
+    let citations_by_year = compute_citations_by_year(conn);
+
     Ok(BiblioKpis {
         included_count,
         total_citations,
@@ -497,6 +503,7 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         pubs_by_year,
         avg_growth_rate,
         refs_by_year,
+        citations_by_year,
     })
 }
 
@@ -843,6 +850,108 @@ fn parse_network_type(s: &str) -> NetworkType {
         "co_citation" => NetworkType::CoCitation,
         _ => NetworkType::CoOccurrence, // fallback
     }
+}
+
+// =============================================================================
+// Normalized Citations by Year
+// =============================================================================
+
+/// Decay distribution weights (Year 0..5 after publication).
+const CITATION_DECAY: [f64; 6] = [0.02, 0.08, 0.13, 0.17, 0.15, 0.11];
+
+/// Compute normalized citations by year.
+///
+/// For articles **with** citation detail records (`has_citation_details = 1`),
+/// group actual linked reference papers by their `publication_year`.
+///
+/// For articles **without** detail records, spread `num_cited` across years
+/// using the decay distribution, with undistributed remainder going to the
+/// current year.
+fn compute_citations_by_year(conn: &Connection) -> Vec<YearCount> {
+    let current_year = chrono::Utc::now().year();
+    let mut map: HashMap<i32, i32> = HashMap::new();
+
+    // ── 1. Articles WITH citation detail records ─────────────────
+    // Each linked reference paper (type = 0 = citation) counts as 1 citation
+    // in the reference paper's publication_year.
+    let mut detail_stmt = match conn.prepare(
+        "SELECT rp.publication_year \
+         FROM article_reference_links arl \
+         JOIN reference_papers rp ON rp.id = arl.reference_paper_id \
+         JOIN articles a ON a.id = arl.parent_article_id \
+         WHERE a.status = 'included' \
+           AND arl.type = 0 \
+           AND rp.publication_year IS NOT NULL",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    if let Ok(rows) = detail_stmt.query_map([], |row| {
+        let year: i32 = row.get(0)?;
+        Ok(year)
+    }) {
+        for year in rows.flatten() {
+            *map.entry(year).or_insert(0) += 1;
+        }
+    }
+
+    // ── 2. Articles WITHOUT citation detail records ──────────────
+    let mut no_detail_stmt = match conn.prepare(
+        "SELECT publication_year, num_cited \
+         FROM articles \
+         WHERE status = 'included' \
+           AND has_citation_details = 0 \
+           AND publication_year IS NOT NULL \
+           AND num_cited IS NOT NULL AND num_cited > 0",
+    ) {
+        Ok(s) => s,
+        Err(_) => return sort_year_map(map),
+    };
+
+    if let Ok(rows) = no_detail_stmt.query_map([], |row| {
+        let year: i32 = row.get(0)?;
+        let cited: i32 = row.get(1)?;
+        Ok((year, cited))
+    }) {
+        for row in rows.flatten() {
+            distribute_citations(&mut map, row.0, row.1, current_year);
+        }
+    }
+
+    sort_year_map(map)
+}
+
+/// Distribute `num_cited` citations across years using the decay curve,
+/// starting from `pub_year`. Remainder goes to `current_year`.
+fn distribute_citations(map: &mut HashMap<i32, i32>, pub_year: i32, num_cited: i32, current_year: i32) {
+    let mut distributed: i32 = 0;
+    for (offset, weight) in CITATION_DECAY.iter().enumerate() {
+        let year = pub_year + offset as i32;
+        if year > current_year {
+            break;
+        }
+        let count = (*weight * num_cited as f64).round() as i32;
+        if count > 0 {
+            *map.entry(year).or_insert(0) += count;
+            distributed += count;
+        }
+    }
+    // Remainder goes to current year
+    let remainder = num_cited - distributed;
+    if remainder > 0 {
+        *map.entry(current_year).or_insert(0) += remainder;
+    }
+}
+
+/// Sort a year→count map into ascending YearCount vec.
+fn sort_year_map(map: HashMap<i32, i32>) -> Vec<YearCount> {
+    let mut v: Vec<YearCount> = map
+        .into_iter()
+        .map(|(year, count)| YearCount { year, count })
+        .collect();
+    v.sort_by_key(|yc| yc.year);
+    v
 }
 
 // =============================================================================

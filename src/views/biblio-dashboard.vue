@@ -5,7 +5,7 @@ import { useBibliometrics } from '../composables/use-bibliometrics';
 
 const router = useRouter();
 
-const { kpis, normalizing, runNormalization } = useBibliometrics();
+const { kpis, loading, normalizing, runNormalization } = useBibliometrics();
 
 const includedCount = computed(() => kpis.value.includedCount);
 const totalCitations = computed(() => kpis.value.totalCitations);
@@ -38,7 +38,21 @@ const lastRefYear = computed(() =>
     ? (kpis.value.refsByYear[kpis.value.refsByYear.length - 1]?.year ?? null)
     : null
 );
-const showNoArticlesModal = computed(() => includedCount.value === 0);
+const hasCitationsByYear = computed(() => kpis.value.citationsByYear.length > 0);
+const maxCitationsCount = computed(() =>
+  Math.max(1, ...kpis.value.citationsByYear.map((yc) => yc.count))
+);
+const firstCitYear = computed(() =>
+  kpis.value.citationsByYear.length > 0 ? (kpis.value.citationsByYear[0]?.year ?? null) : null
+);
+const lastCitYear = computed(() =>
+  kpis.value.citationsByYear.length > 0
+    ? (kpis.value.citationsByYear[kpis.value.citationsByYear.length - 1]?.year ?? null)
+    : null
+);
+const showNoArticlesModal = computed(
+  () => !loading.value && !normalizing.value && includedCount.value === 0
+);
 const firstYear = computed(() =>
   kpis.value.pubsByYear.length > 0 ? (kpis.value.pubsByYear[0]?.year ?? null) : null
 );
@@ -46,6 +60,34 @@ const lastYear = computed(() =>
   kpis.value.pubsByYear.length > 0
     ? (kpis.value.pubsByYear[kpis.value.pubsByYear.length - 1]?.year ?? null)
     : null
+);
+
+// Growth-rate sparkline: derive year-over-year growth from pubsByYear
+interface GrowthYear {
+  year: number;
+  rate: number;
+}
+const growthByYear = computed<GrowthYear[]>(() => {
+  const py = kpis.value.pubsByYear;
+  if (py.length < 2) return [];
+  const result: GrowthYear[] = [];
+  for (let i = 1; i < py.length; i++) {
+    const prev = py[i - 1]!.count;
+    const curr = py[i]!.count;
+    const rate = prev > 0 ? ((curr - prev) / prev) * 100 : 0;
+    result.push({ year: py[i]!.year, rate });
+  }
+  return result;
+});
+const hasGrowthByYear = computed(() => growthByYear.value.length > 0);
+const maxGrowthAbs = computed(() =>
+  Math.max(1, ...growthByYear.value.map((g) => Math.abs(g.rate)))
+);
+const firstGrowthYear = computed(() =>
+  growthByYear.value.length > 0 ? growthByYear.value[0]!.year : null
+);
+const lastGrowthYear = computed(() =>
+  growthByYear.value.length > 0 ? growthByYear.value[growthByYear.value.length - 1]!.year : null
 );
 
 interface AnalysisModule {
@@ -139,21 +181,6 @@ function dismissModal(): void {
       </div>
     </Teleport>
 
-    <!-- Normalization Progress Overlay -->
-    <Teleport to="body">
-      <div v-if="normalizing" class="biblio-overlay">
-        <div class="biblio-modal">
-          <span class="material-symbols-outlined biblio-modal__icon biblio__spin">
-            progress_activity
-          </span>
-          <h2 class="biblio-modal__title">Preparing Bibliometric Data</h2>
-          <p class="biblio-modal__message">
-            Normalizing authors, terms, and networks from your included articles…
-          </p>
-        </div>
-      </div>
-    </Teleport>
-
     <!-- Page Header -->
     <section class="biblio__header">
       <div class="biblio__header-text">
@@ -164,22 +191,39 @@ function dismissModal(): void {
           Analysis of {{ includedCount }} included articles from {{ yearFrom }} to {{ yearTo }}
         </p>
       </div>
-      <button class="biblio__refresh-btn" :disabled="normalizing" @click="runNormalization">
-        <span class="material-symbols-outlined" :class="{ biblio__spin: normalizing }">
-          {{ normalizing ? 'progress_activity' : 'sync' }}
-        </span>
-        {{ normalizing ? 'Normalizing…' : 'Refresh' }}
-      </button>
+      <!-- Progress bar while normalizing, Refresh button otherwise -->
+      <Transition name="biblio-fade" mode="out-in">
+        <div v-if="normalizing" key="progress" class="biblio__progress-wrap">
+          <span class="material-symbols-outlined biblio__spin biblio__progress-icon">
+            progress_activity
+          </span>
+          <span class="biblio__progress-text">Normalizing…</span>
+          <div class="biblio__progress-bar">
+            <div class="biblio__progress-fill"></div>
+          </div>
+        </div>
+        <button v-else key="refresh" class="biblio__refresh-btn" @click="runNormalization">
+          <span class="material-symbols-outlined">sync</span>
+          Refresh
+        </button>
+      </Transition>
     </section>
 
     <!-- KPI Row — compact horizontal layout from High-Contrast Research Hub -->
     <section class="biblio__kpis">
       <div class="kpi-card kpi-card--chart">
-        <div class="kpi-card__icon kpi-card__icon--blue">
-          <span class="material-symbols-outlined">description</span>
+        <div class="kpi-card__row">
+          <div class="kpi-card__icon kpi-card__icon--blue">
+            <span class="material-symbols-outlined">description</span>
+          </div>
+          <span
+            v-if="loading || normalizing"
+            class="material-symbols-outlined kpi-card__spinner biblio__spin"
+            >progress_activity</span
+          >
+          <span v-else class="kpi-card__value">{{ totalReferences.toLocaleString() }}</span>
         </div>
-        <span class="kpi-card__value">{{ totalReferences.toLocaleString() }}</span>
-        <div v-if="hasRefsByYear" class="kpi-sparkline">
+        <div v-if="hasRefsByYear && !loading && !normalizing" class="kpi-sparkline">
           <div class="kpi-sparkline__bars">
             <div v-for="yc in kpis.refsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
               <div
@@ -197,26 +241,63 @@ function dismissModal(): void {
         </div>
         <span class="kpi-card__label kpi-card__label--center">References</span>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-card__icon kpi-card__icon--purple">
-          <span class="material-symbols-outlined">format_quote</span>
+      <div class="kpi-card kpi-card--chart">
+        <div class="kpi-card__row">
+          <div class="kpi-card__icon kpi-card__icon--purple">
+            <span class="material-symbols-outlined">format_quote</span>
+          </div>
+          <span
+            v-if="loading || normalizing"
+            class="material-symbols-outlined kpi-card__spinner biblio__spin"
+            >progress_activity</span
+          >
+          <span v-else class="kpi-card__value">{{ totalCitations.toLocaleString() }}</span>
         </div>
-        <span class="kpi-card__value">{{ totalCitations.toLocaleString() }}</span>
-        <span class="kpi-card__label">Total Citations</span>
+        <div v-if="hasCitationsByYear && !loading && !normalizing" class="kpi-sparkline">
+          <div class="kpi-sparkline__bars">
+            <div v-for="yc in kpis.citationsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
+              <div
+                class="kpi-sparkline__bar kpi-sparkline__bar--purple"
+                :style="{ height: (yc.count / maxCitationsCount) * 100 + '%' }"
+              >
+                <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="firstCitYear !== null && lastCitYear !== null" class="kpi-sparkline__years">
+            <span>{{ firstCitYear }}</span>
+            <span>{{ lastCitYear }}</span>
+          </div>
+        </div>
+        <span class="kpi-card__label kpi-card__label--center">Normalized Citations</span>
       </div>
       <div class="kpi-card">
-        <div class="kpi-card__icon kpi-card__icon--teal">
-          <span class="material-symbols-outlined">group</span>
+        <div class="kpi-card__row">
+          <div class="kpi-card__icon kpi-card__icon--teal">
+            <span class="material-symbols-outlined">group</span>
+          </div>
+          <span
+            v-if="loading || normalizing"
+            class="material-symbols-outlined kpi-card__spinner biblio__spin"
+            >progress_activity</span
+          >
+          <span v-else class="kpi-card__value">{{ uniqueAuthors.toLocaleString() }}</span>
         </div>
-        <span class="kpi-card__value">{{ uniqueAuthors.toLocaleString() }}</span>
         <span class="kpi-card__label">Unique Authors</span>
       </div>
       <div class="kpi-card kpi-card--chart">
-        <div class="kpi-card__icon kpi-card__icon--amber">
-          <span class="material-symbols-outlined">calendar_month</span>
+        <div class="kpi-card__row">
+          <div class="kpi-card__icon kpi-card__icon--amber">
+            <span class="material-symbols-outlined">calendar_month</span>
+          </div>
+          <span
+            v-if="loading || normalizing"
+            class="material-symbols-outlined kpi-card__spinner biblio__spin"
+            >progress_activity</span
+          >
+          <span v-else class="kpi-card__value">{{ totalPubs.toLocaleString() }}</span>
         </div>
-        <span class="kpi-card__value">{{ totalPubs.toLocaleString() }}</span>
-        <div v-if="hasPubsByYear" class="kpi-sparkline">
+        <div v-if="hasPubsByYear && !loading && !normalizing" class="kpi-sparkline">
           <div class="kpi-sparkline__bars">
             <div v-for="yc in kpis.pubsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
               <div
@@ -235,18 +316,53 @@ function dismissModal(): void {
         <span class="kpi-card__label kpi-card__label--center">Pubs / Year</span>
       </div>
       <div class="kpi-card">
-        <div class="kpi-card__icon kpi-card__icon--pink">
-          <span class="material-symbols-outlined">star</span>
+        <div class="kpi-card__row">
+          <div class="kpi-card__icon kpi-card__icon--pink">
+            <span class="material-symbols-outlined">star</span>
+          </div>
+          <span
+            v-if="loading || normalizing"
+            class="material-symbols-outlined kpi-card__spinner biblio__spin"
+            >progress_activity</span
+          >
+          <span v-else class="kpi-card__value">{{ avgCitationsPerArticle }}</span>
         </div>
-        <span class="kpi-card__value">{{ avgCitationsPerArticle }}</span>
         <span class="kpi-card__label">Avg Citations / Article</span>
       </div>
-      <div class="kpi-card">
-        <div class="kpi-card__icon kpi-card__icon--green">
-          <span class="material-symbols-outlined">trending_up</span>
+      <div class="kpi-card kpi-card--chart">
+        <div class="kpi-card__row">
+          <div class="kpi-card__icon kpi-card__icon--green">
+            <span class="material-symbols-outlined">trending_up</span>
+          </div>
+          <span
+            v-if="loading || normalizing"
+            class="material-symbols-outlined kpi-card__spinner biblio__spin"
+            >progress_activity</span
+          >
+          <span v-else class="kpi-card__value">{{ avgGrowthRate }}</span>
         </div>
-        <span class="kpi-card__value">{{ avgGrowthRate }}</span>
-        <span class="kpi-card__label">Avg Growth Rate</span>
+        <div v-if="hasGrowthByYear && !loading && !normalizing" class="kpi-sparkline">
+          <div class="kpi-sparkline__bars">
+            <div v-for="g in growthByYear" :key="g.year" class="kpi-sparkline__bar-wrap">
+              <div
+                class="kpi-sparkline__bar kpi-sparkline__bar--green"
+                :style="{ height: (Math.abs(g.rate) / maxGrowthAbs) * 100 + '%' }"
+              >
+                <span class="kpi-sparkline__tooltip"
+                  >{{ g.year }}: {{ g.rate >= 0 ? '+' : '' }}{{ g.rate.toFixed(1) }}%</span
+                >
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="firstGrowthYear !== null && lastGrowthYear !== null"
+            class="kpi-sparkline__years"
+          >
+            <span>{{ firstGrowthYear }}</span>
+            <span>{{ lastGrowthYear }}</span>
+          </div>
+        </div>
+        <span class="kpi-card__label kpi-card__label--center">Avg Growth Rate</span>
       </div>
     </section>
 
@@ -320,6 +436,61 @@ function dismissModal(): void {
   margin-top: var(--space-1);
 }
 
+/* Progress Bar (replaces Refresh button during normalization) */
+.biblio__progress-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.biblio__progress-icon {
+  font-size: 18px;
+  color: var(--color-primary, #4f46e5);
+}
+
+.biblio__progress-text {
+  font-size: 12px;
+  color: var(--color-on-surface-variant);
+  font-weight: var(--font-weight-semibold);
+}
+
+.biblio__progress-bar {
+  width: 120px;
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.biblio__progress-fill {
+  height: 100%;
+  width: 40%;
+  background: var(--color-primary, #4f46e5);
+  border-radius: 2px;
+  animation: biblio-progress-slide 1.5s ease-in-out infinite;
+}
+
+@keyframes biblio-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+/* Fade transition for Refresh ↔ Progress bar */
+.biblio-fade-enter-active,
+.biblio-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.biblio-fade-enter-from,
+.biblio-fade-leave-to {
+  opacity: 0;
+}
+
 /* Refresh Button */
 .biblio__refresh-btn {
   display: inline-flex;
@@ -338,13 +509,19 @@ function dismissModal(): void {
   transition:
     border-color 0.2s,
     box-shadow 0.2s,
-    background 0.2s;
+    background 0.2s,
+    transform 0.1s ease;
   flex-shrink: 0;
 }
 
 .biblio__refresh-btn:hover:not(:disabled) {
   border-color: #818cf8;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+}
+
+.biblio__refresh-btn:active:not(:disabled) {
+  transform: scale(0.95);
+  background: #f5f3ff;
 }
 
 .biblio__refresh-btn:disabled {
@@ -400,6 +577,12 @@ function dismissModal(): void {
   box-shadow: var(--shadow-sm);
 }
 
+.kpi-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .kpi-card__icon {
   width: 36px;
   height: 36px;
@@ -448,12 +631,19 @@ function dismissModal(): void {
   line-height: 1;
 }
 
+.kpi-card__spinner {
+  font-size: 22px;
+  color: var(--color-outline);
+  line-height: 1;
+}
+
 .kpi-card__label {
   font-size: 12px;
   color: var(--color-outline);
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  margin-top: auto;
 }
 
 .kpi-card__label--center {
@@ -595,6 +785,14 @@ function dismissModal(): void {
 
 .kpi-sparkline__bar--blue {
   background: linear-gradient(to top, #60a5fa, #3b82f6);
+}
+
+.kpi-sparkline__bar--purple {
+  background: linear-gradient(to top, #a78bfa, #8b5cf6);
+}
+
+.kpi-sparkline__bar--green {
+  background: linear-gradient(to top, #34d399, #10b981);
 }
 
 .kpi-sparkline__bar:hover {

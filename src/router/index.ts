@@ -70,6 +70,7 @@ void router.isReady().then(() => {
     import('@/views/tag-label-management.vue'),
     import('@/views/import-ris.vue'),
     import('@/views/screening-progress.vue'),
+    import('@/views/biblio-dashboard.vue'),
   ]);
 });
 

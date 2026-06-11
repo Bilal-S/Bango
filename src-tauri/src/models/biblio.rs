@@ -180,4 +180,6 @@ pub struct BiblioKpis {
     pub avg_growth_rate: Option<f64>,
     /// Reference papers of included articles, grouped by publication_year — powers the References bar chart.
     pub refs_by_year: Vec<YearCount>,
+    /// Normalized citations by year — actual detail records where available, decay-distributed otherwise.
+    pub citations_by_year: Vec<YearCount>,
 }

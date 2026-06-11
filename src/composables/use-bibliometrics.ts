@@ -16,6 +16,7 @@ export interface BiblioKpis {
   pubsByYear: YearCount[];
   avgGrowthRate: number | null;
   refsByYear: YearCount[];
+  citationsByYear: YearCount[];
 }
 
 interface NormalizeResult {
@@ -41,6 +42,7 @@ const kpis = ref<BiblioKpis>({
   pubsByYear: [],
   avgGrowthRate: null,
   refsByYear: [],
+  citationsByYear: [],
 });
 const loading = ref(false);
 const normalizing = ref(false);
@@ -69,6 +71,9 @@ export function useBibliometrics() {
   async function runNormalization() {
     normalizing.value = true;
     error.value = null;
+    // Use setTimeout(0) — a macro-task that yields to the browser's render
+    // pipeline — so the progress bar actually paints before the IPC call starts.
+    await new Promise<void>((r) => setTimeout(r, 0));
     try {
       await tauriCommand<NormalizeResult>('biblio_normalize');
       await fetchKpis();
@@ -79,13 +84,20 @@ export function useBibliometrics() {
     }
   }
 
-  onMounted(async () => {
-    // First fetch KPIs to check if we have included articles
-    await fetchKpis();
-    // Auto-normalize when we have included articles
-    if (kpis.value.includedCount > 0) {
-      await runNormalization();
-    }
+  onMounted(() => {
+    // Set loading synchronously so spinners render on the very first paint.
+    loading.value = true;
+
+    // setTimeout(0) is a macro-task that yields to the browser's paint cycle.
+    // This ensures the page renders with spinners BEFORE any IPC calls execute.
+    setTimeout(async () => {
+      await fetchKpis();
+      // Auto-normalize only when we have included articles AND no normalized data yet.
+      // The user can trigger re-normalization manually via the Refresh button.
+      if (kpis.value.includedCount > 0 && kpis.value.uniqueAuthors === 0) {
+        runNormalization(); // not awaited — UI stays responsive
+      }
+    }, 0);
   });
 
   return { kpis, loading, normalizing, error, fetchKpis, runNormalization };
