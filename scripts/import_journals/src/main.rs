@@ -71,8 +71,8 @@ fn detect_format(headers: &csv::StringRecord) -> Option<CsvFormat> {
 #[derive(Debug)]
 struct JournalCsvRow {
     journal_title: String,
-    issn: String,
-    eissn: String,
+    issn: Option<String>,
+    eissn: Option<String>,
     publisher_name: String,
     publisher_address: String,
     languages: String,
@@ -117,46 +117,53 @@ fn ensure_schema(conn: &Connection) {
     .expect("Failed to create journal_index schema");
 }
 
-/// Normalise an ISSN/eISSN string: strip hyphens, trim whitespace, uppercase.
-fn normalise_issn(raw: &str) -> String {
-    raw.chars()
-        .filter(|c| *c != '-' && *c != ' ')
-        .collect::<String>()
-        .to_uppercase()
+/// Normalise an ISSN/eISSN string: trim whitespace, uppercase. Preserve hyphens (industry standard).
+/// Returns None for empty/whitespace-only input (stored as NULL in the database).
+fn normalise_issn(raw: &str) -> Option<String> {
+    let val = raw.trim().to_uppercase();
+    if val.is_empty() {
+        None
+    } else {
+        Some(val)
+    }
 }
 
 /// Try to find an existing journal record.  Returns the id if matched.
 fn find_existing(
     conn: &Connection,
-    issn: &str,
-    eissn: &str,
+    issn: Option<&str>,
+    eissn: Option<&str>,
     title: &str,
 ) -> Option<String> {
     // Priority 1: ISSN match
-    if !issn.is_empty() {
-        let result = conn
-            .query_row(
-                "SELECT id FROM journal_index WHERE issn = ?1 LIMIT 1",
-                [issn],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        if result.is_some() {
-            return result;
+    if let Some(issn_val) = issn {
+        if !issn_val.is_empty() {
+            let result = conn
+                .query_row(
+                    "SELECT id FROM journal_index WHERE issn = ?1 LIMIT 1",
+                    [issn_val],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+            if result.is_some() {
+                return result;
+            }
         }
     }
 
     // Priority 2: eISSN match (always check to avoid UNIQUE constraint violation)
-    if !eissn.is_empty() {
-        let result = conn
-            .query_row(
-                "SELECT id FROM journal_index WHERE eissn = ?1 LIMIT 1",
-                [eissn],
-                |row| row.get::<_, String>(0),
-            )
-            .ok();
-        if result.is_some() {
-            return result;
+    if let Some(eissn_val) = eissn {
+        if !eissn_val.is_empty() {
+            let result = conn
+                .query_row(
+                    "SELECT id FROM journal_index WHERE eissn = ?1 LIMIT 1",
+                    [eissn_val],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+            if result.is_some() {
+                return result;
+            }
         }
     }
 
@@ -223,8 +230,8 @@ fn update_journal(
     conn.execute(
         "UPDATE journal_index SET
             journal_title = CASE WHEN ?1 != '' THEN ?1 ELSE journal_title END,
-            issn          = CASE WHEN ?2 != '' THEN ?2 ELSE issn END,
-            eissn         = CASE WHEN ?3 != '' THEN ?3 ELSE eissn END,
+            issn          = COALESCE(?2, issn),
+            eissn         = COALESCE(?3, eissn),
             publisher_name = CASE WHEN ?4 != '' THEN ?4 ELSE publisher_name END,
             publisher_address = CASE WHEN ?5 != '' THEN ?5 ELSE publisher_address END,
             languages     = CASE WHEN ?6 != '' THEN ?6 ELSE languages END,
@@ -284,8 +291,8 @@ fn parse_jcr_row(record: &csv::StringRecord) -> JournalCsvRow {
 
     JournalCsvRow {
         journal_title: title,
-        issn: String::new(),        // JCR has no ISSN
-        eissn: String::new(),       // JCR has no eISSN
+        issn: None,              // JCR has no ISSN
+        eissn: None,             // JCR has no eISSN
         publisher_name: String::new(),
         publisher_address: country,
         languages: String::new(),
@@ -388,7 +395,7 @@ fn process_csv_file(conn: &Connection, path: &PathBuf, is_system: bool) -> (usiz
             continue;
         }
 
-        match find_existing(conn, &row.issn, &row.eissn, &row.journal_title) {
+        match find_existing(conn, row.issn.as_deref(), row.eissn.as_deref(), &row.journal_title) {
             Some(existing_id) => {
                 update_journal(conn, &existing_id, row, &file_name);
                 updated += 1;

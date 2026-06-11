@@ -64,7 +64,7 @@ pub fn match_journal(
         if !trimmed.is_empty() {
             let result: Option<String> = conn
                 .query_row(
-                    "SELECT id FROM journal_index WHERE LOWER(TRIM(title)) = LOWER(TRIM(?1)) LIMIT 1",
+                    "SELECT id FROM journal_index WHERE LOWER(TRIM(journal_title)) = LOWER(TRIM(?1)) LIMIT 1",
                     [trimmed],
                     |row| row.get(0),
                 )

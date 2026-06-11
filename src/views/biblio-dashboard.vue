@@ -5,24 +5,34 @@ import { useBibliometrics } from '../composables/use-bibliometrics';
 
 const router = useRouter();
 
-const { kpis, refreshing, refresh } = useBibliometrics();
+const { kpis, normalizing, runNormalization } = useBibliometrics();
 
 const includedCount = computed(() => kpis.value.includedCount);
 const totalCitations = computed(() => kpis.value.totalCitations);
 const uniqueAuthors = computed(() => kpis.value.uniqueAuthors);
-const avgYear = computed(() => (kpis.value.avgYear !== null ? kpis.value.avgYear.toFixed(1) : '—'));
 const avgCitationsPerArticle = computed(() =>
   kpis.value.includedCount > 0
     ? (kpis.value.totalCitations / kpis.value.includedCount).toFixed(1)
     : '—'
 );
-const growthRate = computed(() =>
-  kpis.value.growthRate !== null
-    ? `${kpis.value.growthRate >= 0 ? '+' : ''}${kpis.value.growthRate.toFixed(1)}%`
+const avgGrowthRate = computed(() =>
+  kpis.value.avgGrowthRate !== null
+    ? `${kpis.value.avgGrowthRate >= 0 ? '+' : ''}${kpis.value.avgGrowthRate.toFixed(1)}%`
     : '—'
 );
 const yearFrom = computed(() => kpis.value.yearFrom ?? '—');
 const yearTo = computed(() => kpis.value.yearTo ?? '—');
+const maxPubsCount = computed(() => Math.max(1, ...kpis.value.pubsByYear.map((yc) => yc.count)));
+const hasPubsByYear = computed(() => kpis.value.pubsByYear.length > 0);
+const showNoArticlesModal = computed(() => includedCount.value === 0);
+const firstYear = computed(() =>
+  kpis.value.pubsByYear.length > 0 ? (kpis.value.pubsByYear[0]?.year ?? null) : null
+);
+const lastYear = computed(() =>
+  kpis.value.pubsByYear.length > 0
+    ? (kpis.value.pubsByYear[kpis.value.pubsByYear.length - 1]?.year ?? null)
+    : null
+);
 
 interface AnalysisModule {
   id: string;
@@ -93,10 +103,43 @@ function navigateToModule(mod: AnalysisModule): void {
 function goHome(): void {
   router.push('/');
 }
+
+function dismissModal(): void {
+  router.push({ name: 'dashboard' });
+}
 </script>
 
 <template>
   <div class="biblio">
+    <!-- No Articles Modal Overlay -->
+    <Teleport to="body">
+      <div v-if="showNoArticlesModal" class="biblio-overlay" @click.self="dismissModal">
+        <div class="biblio-modal">
+          <span class="material-symbols-outlined biblio-modal__icon">info</span>
+          <h2 class="biblio-modal__title">No Articles Included</h2>
+          <p class="biblio-modal__message">
+            Include articles in your research first to access the Bibliometric dashboard.
+          </p>
+          <button class="biblio-modal__btn" @click="dismissModal">OK</button>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Normalization Progress Overlay -->
+    <Teleport to="body">
+      <div v-if="normalizing" class="biblio-overlay">
+        <div class="biblio-modal">
+          <span class="material-symbols-outlined biblio-modal__icon biblio__spin">
+            progress_activity
+          </span>
+          <h2 class="biblio-modal__title">Preparing Bibliometric Data</h2>
+          <p class="biblio-modal__message">
+            Normalizing authors, terms, and networks from your included articles…
+          </p>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Page Header -->
     <section class="biblio__header">
       <div class="biblio__header-text">
@@ -107,11 +150,11 @@ function goHome(): void {
           Analysis of {{ includedCount }} included articles from {{ yearFrom }} to {{ yearTo }}
         </p>
       </div>
-      <button class="biblio__refresh-btn" :disabled="refreshing" @click="refresh">
-        <span class="material-symbols-outlined" :class="{ biblio__spin: refreshing }">
-          {{ refreshing ? 'progress_activity' : 'sync' }}
+      <button class="biblio__refresh-btn" :disabled="normalizing" @click="runNormalization">
+        <span class="material-symbols-outlined" :class="{ biblio__spin: normalizing }">
+          {{ normalizing ? 'progress_activity' : 'sync' }}
         </span>
-        {{ refreshing ? 'Normalizing…' : 'Refresh' }}
+        {{ normalizing ? 'Normalizing…' : 'Refresh' }}
       </button>
     </section>
 
@@ -138,12 +181,27 @@ function goHome(): void {
         <span class="kpi-card__value">{{ uniqueAuthors.toLocaleString() }}</span>
         <span class="kpi-card__label">Unique Authors</span>
       </div>
-      <div class="kpi-card">
+      <div class="kpi-card kpi-card--chart">
         <div class="kpi-card__icon kpi-card__icon--amber">
           <span class="material-symbols-outlined">calendar_month</span>
         </div>
-        <span class="kpi-card__value">{{ avgYear }}</span>
-        <span class="kpi-card__label">Avg Publication Year</span>
+        <div v-if="hasPubsByYear" class="kpi-sparkline">
+          <div class="kpi-sparkline__bars">
+            <div v-for="yc in kpis.pubsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
+              <div
+                class="kpi-sparkline__bar"
+                :style="{ height: (yc.count / maxPubsCount) * 100 + '%' }"
+              >
+                <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="firstYear !== null && lastYear !== null" class="kpi-sparkline__years">
+            <span>{{ firstYear }}</span>
+            <span>{{ lastYear }}</span>
+          </div>
+        </div>
+        <span class="kpi-card__label kpi-card__label--center">Pubs / Year</span>
       </div>
       <div class="kpi-card">
         <div class="kpi-card__icon kpi-card__icon--pink">
@@ -156,8 +214,8 @@ function goHome(): void {
         <div class="kpi-card__icon kpi-card__icon--green">
           <span class="material-symbols-outlined">trending_up</span>
         </div>
-        <span class="kpi-card__value">{{ growthRate }}</span>
-        <span class="kpi-card__label">Growth Rate</span>
+        <span class="kpi-card__value">{{ avgGrowthRate }}</span>
+        <span class="kpi-card__label">Avg Growth Rate</span>
       </div>
     </section>
 
@@ -367,6 +425,11 @@ function goHome(): void {
   letter-spacing: 0.03em;
 }
 
+.kpi-card__label--center {
+  text-align: center;
+  width: 100%;
+}
+
 /* Analysis Modules */
 .biblio__section-label {
   font-size: var(--font-size-label);
@@ -458,5 +521,146 @@ function goHome(): void {
 .module-card:hover .module-card__arrow {
   transform: translateX(2px);
   color: #6366f1;
+}
+
+/* Inline Sparkline inside PUBS/YEAR KPI card */
+.kpi-card--chart {
+  position: relative;
+}
+
+.kpi-sparkline {
+  margin-top: var(--space-1);
+  width: 100%;
+}
+
+.kpi-sparkline__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 48px;
+  width: 100%;
+}
+
+.kpi-sparkline__bar-wrap {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  position: relative;
+}
+
+.kpi-sparkline__bar {
+  width: 100%;
+  min-height: 2px;
+  background: linear-gradient(to top, #fbbf24, #f59e0b);
+  border-radius: 2px 2px 0 0;
+  transition:
+    height 0.3s ease,
+    opacity 0.15s ease;
+  cursor: pointer;
+  position: relative;
+}
+
+.kpi-sparkline__bar:hover {
+  opacity: 0.8;
+}
+
+.kpi-sparkline__tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--color-on-surface, #1e293b);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  padding: 3px 8px;
+  border-radius: var(--radius-default, 4px);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+}
+
+.kpi-sparkline__bar:hover .kpi-sparkline__tooltip {
+  opacity: 1;
+}
+
+.kpi-sparkline__years {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--color-outline);
+  line-height: 1;
+}
+
+/* Modal Overlay */
+.biblio-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.biblio-modal {
+  background: #ffffff;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  padding: var(--space-8) var(--space-10);
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.biblio-modal__icon {
+  font-size: 40px;
+  color: var(--color-primary, #4f46e5);
+}
+
+.biblio-modal__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-on-surface);
+  margin: 0;
+}
+
+.biblio-modal__message {
+  font-size: var(--font-size-body);
+  color: var(--color-on-surface-variant);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.biblio-modal__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2) var(--space-8);
+  background: var(--color-primary, #4f46e5);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  margin-top: var(--space-2);
+}
+
+.biblio-modal__btn:hover {
+  opacity: 0.9;
 }
 </style>

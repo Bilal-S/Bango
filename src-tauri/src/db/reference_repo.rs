@@ -681,14 +681,20 @@ fn row_to_article_reference(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article
 // ─── Article flag updates ──────────────────────────────────────
 
 fn update_parent_flags(conn: &Connection, parent_article_id: &str) -> Result<(), AppError> {
-    let has_citations =
-        count_references_for_article(conn, parent_article_id, &ReferenceType::Citation)? > 0;
-    let has_references =
-        count_references_for_article(conn, parent_article_id, &ReferenceType::Reference)? > 0;
+    let citation_count =
+        count_references_for_article(conn, parent_article_id, &ReferenceType::Citation)?;
+    let reference_count =
+        count_references_for_article(conn, parent_article_id, &ReferenceType::Reference)?;
 
     conn.execute(
-        "UPDATE articles SET has_citation_details = ?1, has_reference_details = ?2, changed_at = datetime('now') WHERE id = ?3",
-        params![has_citations as i32, has_references as i32, parent_article_id],
+        "UPDATE articles SET has_citation_details = ?1, has_reference_details = ?2, num_cited = ?3, num_references = ?4, changed_at = datetime('now') WHERE id = ?5",
+        params![
+            (citation_count > 0) as i32,
+            (reference_count > 0) as i32,
+            citation_count as i32,
+            reference_count as i32,
+            parent_article_id,
+        ],
     )?;
     Ok(())
 }
@@ -709,8 +715,14 @@ fn update_parent_flags_tx(
     )?;
 
     tx.execute(
-        "UPDATE articles SET has_citation_details = ?1, has_reference_details = ?2, changed_at = datetime('now') WHERE id = ?3",
-        params![citation_count > 0, reference_count > 0, parent_article_id],
+        "UPDATE articles SET has_citation_details = ?1, has_reference_details = ?2, num_cited = ?3, num_references = ?4, changed_at = datetime('now') WHERE id = ?5",
+        params![
+            (citation_count > 0) as i32,
+            (reference_count > 0) as i32,
+            citation_count as i32,
+            reference_count as i32,
+            parent_article_id,
+        ],
     )?;
     Ok(())
 }

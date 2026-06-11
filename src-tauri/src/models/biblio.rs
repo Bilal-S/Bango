@@ -150,6 +150,14 @@ pub struct BiblioStatus {
     pub network_count: i32,
 }
 
+/// A single year's publication count for the per-year bar chart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YearCount {
+    pub year: i32,
+    pub count: i32,
+}
+
 /// KPI summary for the bibliometric dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -164,8 +172,10 @@ pub struct BiblioKpis {
     pub year_from: Option<i32>,
     /// Latest publication year among included articles.
     pub year_to: Option<i32>,
-    /// Average publication year across included articles.
-    pub avg_year: Option<f64>,
-    /// Year-over-year growth rate of the last two years (percentage).
-    pub growth_rate: Option<f64>,
+    /// Average publications per year (total included / number of distinct years).
+    pub pubs_per_year: Option<f64>,
+    /// Publications per year, ordered by year ASC — powers the mini bar chart.
+    pub pubs_by_year: Vec<YearCount>,
+    /// Average year-over-year growth rate across all consecutive year pairs (percentage).
+    pub avg_growth_rate: Option<f64>,
 }

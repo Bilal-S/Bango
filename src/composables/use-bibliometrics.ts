@@ -1,14 +1,20 @@
 import { ref, onMounted } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 
+export interface YearCount {
+  year: number;
+  count: number;
+}
+
 export interface BiblioKpis {
   includedCount: number;
   totalCitations: number;
   uniqueAuthors: number;
   yearFrom: number | null;
   yearTo: number | null;
-  avgYear: number | null;
-  growthRate: number | null;
+  pubsPerYear: number | null;
+  pubsByYear: YearCount[];
+  avgGrowthRate: number | null;
 }
 
 interface NormalizeResult {
@@ -30,11 +36,12 @@ const kpis = ref<BiblioKpis>({
   uniqueAuthors: 0,
   yearFrom: null,
   yearTo: null,
-  avgYear: null,
-  growthRate: null,
+  pubsPerYear: null,
+  pubsByYear: [],
+  avgGrowthRate: null,
 });
 const loading = ref(false);
-const refreshing = ref(false);
+const normalizing = ref(false);
 const error = ref<string | null>(null);
 
 export function useBibliometrics() {
@@ -50,8 +57,15 @@ export function useBibliometrics() {
     }
   }
 
-  async function refresh() {
-    refreshing.value = true;
+  /**
+   * Unified normalization flow:
+   * 1. Show progress overlay (normalizing = true)
+   * 2. Run biblio_normalize (generic, extensible)
+   * 3. Fetch fresh KPIs
+   * 4. Hide overlay
+   */
+  async function runNormalization() {
+    normalizing.value = true;
     error.value = null;
     try {
       await tauriCommand<NormalizeResult>('biblio_normalize');
@@ -59,11 +73,18 @@ export function useBibliometrics() {
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
-      refreshing.value = false;
+      normalizing.value = false;
     }
   }
 
-  onMounted(fetchKpis);
+  onMounted(async () => {
+    // First fetch KPIs to check if we have included articles
+    await fetchKpis();
+    // Auto-normalize when we have included articles
+    if (kpis.value.includedCount > 0) {
+      await runNormalization();
+    }
+  });
 
-  return { kpis, loading, refreshing, error, fetchKpis, refresh };
+  return { kpis, loading, normalizing, error, fetchKpis, runNormalization };
 }

@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::models::biblio::{
     BiblioArticleAuthor, BiblioAuthor, BiblioKpis, BiblioNetworkEdge, BiblioNetworkMeta,
-    BiblioNetworkNode, BiblioStatus, BiblioTerm, NetworkType, TermType,
+    BiblioNetworkNode, BiblioStatus, BiblioTerm, NetworkType, TermType, YearCount,
 };
 
 // =============================================================================
@@ -416,11 +416,7 @@ pub fn get_biblio_status(conn: &Connection) -> Result<BiblioStatus, AppError> {
 pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
     // Included article count
     let included_count: i32 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM articles WHERE status = 'included'",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'included'", [], |r| r.get(0))
         .unwrap_or(0);
 
     // Total citations (num_cited may be NULL)
@@ -432,89 +428,52 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         )
         .unwrap_or(0);
 
-    // Unique normalized authors — fall back to raw articles.authors if not yet normalized
-    let unique_authors: i32 = {
-        let from_biblio: i32 =
-            conn.query_row("SELECT COUNT(*) FROM biblio_authors", [], |r| r.get(0)).unwrap_or(0);
-        if from_biblio > 0 {
-            from_biblio
-        } else {
-            // Estimate from raw authors column: count non-empty distinct values
-            conn.query_row(
-                "SELECT COUNT(DISTINCT authors) FROM articles WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or(0)
-        }
+    // Unique normalized authors — always from biblio_authors (populated by normalization)
+    let unique_authors: i32 =
+        conn.query_row("SELECT COUNT(*) FROM biblio_authors", [], |r| r.get(0)).unwrap_or(0);
+
+    // Publications by year — single query groups included articles by publication_year
+    let mut stmt = conn.prepare(
+        "SELECT publication_year, COUNT(*) AS cnt \
+         FROM articles \
+         WHERE status = 'included' AND publication_year IS NOT NULL \
+         GROUP BY publication_year \
+         ORDER BY publication_year ASC",
+    )?;
+    let pubs_by_year: Vec<YearCount> = stmt
+        .query_map([], |row| Ok(YearCount { year: row.get(0)?, count: row.get(1)? }))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Derive year range from pubs_by_year (first & last element)
+    let year_from = pubs_by_year.first().map(|yc| yc.year);
+    let year_to = pubs_by_year.last().map(|yc| yc.year);
+
+    // Pubs per year: total included articles with a year / number of distinct years
+    let total_with_year: i32 = pubs_by_year.iter().map(|yc| yc.count).sum();
+    let pubs_per_year = if !pubs_by_year.is_empty() {
+        Some(total_with_year as f64 / pubs_by_year.len() as f64)
+    } else {
+        None
     };
 
-    // Year range
-    let year_from: Option<i32> = conn
-        .query_row(
-            "SELECT MIN(publication_year) FROM articles WHERE status = 'included' AND publication_year IS NOT NULL",
-            [],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-    let year_to: Option<i32> = conn
-        .query_row(
-            "SELECT MAX(publication_year) FROM articles WHERE status = 'included' AND publication_year IS NOT NULL",
-            [],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
-    // Average publication year
-    let avg_year: Option<f64> = conn
-        .query_row(
-            "SELECT AVG(CAST(publication_year AS REAL)) FROM articles WHERE status = 'included' AND publication_year IS NOT NULL",
-            [],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
-    // YoY growth rate: compare last two distinct years
-    let growth_rate: Option<f64> = (|| -> Option<f64> {
-        let prev: i32 = conn
-            .query_row(
-                "SELECT publication_year FROM articles WHERE status='included' AND publication_year IS NOT NULL GROUP BY publication_year ORDER BY publication_year DESC LIMIT 1 OFFSET 1",
-                [],
-                |r| r.get(0),
-            )
-            .ok()?;
-        let last: i32 = conn
-            .query_row(
-                "SELECT publication_year FROM articles WHERE status='included' AND publication_year IS NOT NULL GROUP BY publication_year ORDER BY publication_year DESC LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
-            .ok()?;
-
-        let count_prev: i32 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM articles WHERE status='included' AND publication_year=?1",
-                rusqlite::params![prev],
-                |r| r.get(0),
-            )
-            .ok()?;
-        let count_last: i32 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM articles WHERE status='included' AND publication_year=?1",
-                rusqlite::params![last],
-                |r| r.get(0),
-            )
-            .ok()?;
-
-        if count_prev > 0 {
-            Some(((count_last - count_prev) as f64 / count_prev as f64) * 100.0)
+    // Average growth rate: mean of all consecutive year-pair growth rates
+    let avg_growth_rate = if pubs_by_year.len() >= 2 {
+        let mut rates: Vec<f64> = Vec::new();
+        for window in pubs_by_year.windows(2) {
+            let prev = window[0].count;
+            let curr = window[1].count;
+            if prev > 0 {
+                rates.push(((curr - prev) as f64 / prev as f64) * 100.0);
+            }
+        }
+        if !rates.is_empty() {
+            Some(rates.iter().sum::<f64>() / rates.len() as f64)
         } else {
             None
         }
-    })();
+    } else {
+        None
+    };
 
     Ok(BiblioKpis {
         included_count,
@@ -522,8 +481,9 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         unique_authors,
         year_from,
         year_to,
-        avg_year,
-        growth_rate,
+        pubs_per_year,
+        pubs_by_year,
+        avg_growth_rate,
     })
 }
 
@@ -534,8 +494,9 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
 /// Extract and normalize all authors from the articles table into biblio tables.
 /// Returns the number of unique authors created.
 pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppError> {
-    let mut stmt = conn
-        .prepare("SELECT id, authors FROM articles WHERE authors IS NOT NULL AND authors != ''")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, authors FROM articles WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
+    )?;
     let rows: Vec<(String, String)> =
         stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
 
@@ -569,7 +530,7 @@ pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppEr
 pub fn normalize_terms_from_articles(conn: &Connection) -> Result<usize, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, keywords, title, abstract_text FROM articles \
-         WHERE status != 'excluded' \
+         WHERE status = 'included' \
          AND id NOT IN (SELECT DISTINCT article_id FROM biblio_article_terms)",
     )?;
     #[allow(clippy::type_complexity)]
@@ -1229,14 +1190,14 @@ mod tests {
         assert_eq!(kpis.unique_authors, 0);
         assert_eq!(kpis.year_from, None);
         assert_eq!(kpis.year_to, None);
-        assert_eq!(kpis.avg_year, None);
-        assert_eq!(kpis.growth_rate, None);
+        assert_eq!(kpis.pubs_per_year, None);
+        assert!(kpis.pubs_by_year.is_empty());
+        assert_eq!(kpis.avg_growth_rate, None);
     }
 
     #[test]
     fn kpi_rejected_only_returns_zeros() {
         let conn = test_db();
-        // Valid non-included statuses: 'rejected', 'duplicate', 'working'
         insert_kpi_article(&conn, "a1", "rejected", Some(2020), Some(5), "Smith J");
         insert_kpi_article(&conn, "a2", "duplicate", Some(2021), Some(10), "Doe A");
         let kpis = get_biblio_kpis(&conn).unwrap();
@@ -1245,7 +1206,8 @@ mod tests {
         assert_eq!(kpis.unique_authors, 0);
         assert_eq!(kpis.year_from, None);
         assert_eq!(kpis.year_to, None);
-        assert_eq!(kpis.avg_year, None);
+        assert_eq!(kpis.pubs_per_year, None);
+        assert!(kpis.pubs_by_year.is_empty());
     }
 
     #[test]
@@ -1260,19 +1222,28 @@ mod tests {
         assert_eq!(kpis.total_citations, 30);
         assert_eq!(kpis.year_from, Some(2020));
         assert_eq!(kpis.year_to, Some(2022));
-        // avg_year = (2020 + 2021 + 2022) / 3 = 2021.0
-        assert!((kpis.avg_year.unwrap() - 2021.0).abs() < 0.01);
+
+        // pubs_by_year: [{2020,1}, {2021,1}, {2022,1}]
+        assert_eq!(kpis.pubs_by_year.len(), 3);
+        assert_eq!(kpis.pubs_by_year[0], YearCount { year: 2020, count: 1 });
+        assert_eq!(kpis.pubs_by_year[2], YearCount { year: 2022, count: 1 });
+
+        // pubs_per_year = 3 articles / 3 years = 1.0
+        assert!((kpis.pubs_per_year.unwrap() - 1.0).abs() < 0.01);
+
+        // avg_growth_rate: 0% (2020→2021) and 0% (2021→2022) = avg 0%
+        assert!((kpis.avg_growth_rate.unwrap() - 0.0).abs() < 0.01);
     }
 
     #[test]
     fn kpi_year_null_value() {
         let conn = test_db();
-        // publication_year is NULL → excluded from year aggregates
         insert_kpi_article(&conn, "a1", "included", None, Some(3), "Smith J");
         let kpis = get_biblio_kpis(&conn).unwrap();
         assert_eq!(kpis.year_from, None);
         assert_eq!(kpis.year_to, None);
-        assert_eq!(kpis.avg_year, None);
+        assert_eq!(kpis.pubs_per_year, None);
+        assert!(kpis.pubs_by_year.is_empty());
         assert_eq!(kpis.included_count, 1);
     }
 
@@ -1280,33 +1251,45 @@ mod tests {
     fn kpi_year_null_filtered() {
         let conn = test_db();
         insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "A");
-        insert_kpi_article(&conn, "a2", "included", None, Some(1), "B");         // NULL year
+        insert_kpi_article(&conn, "a2", "included", None, Some(1), "B"); // NULL year
         insert_kpi_article(&conn, "a4", "included", Some(2022), Some(1), "D");
 
         let kpis = get_biblio_kpis(&conn).unwrap();
-        assert_eq!(kpis.included_count, 3); // all counted for count
+        assert_eq!(kpis.included_count, 3);
         assert_eq!(kpis.year_from, Some(2020));
         assert_eq!(kpis.year_to, Some(2022));
-        // avg of 2020 and 2022 only = 2021.0
-        assert!((kpis.avg_year.unwrap() - 2021.0).abs() < 0.01);
+
+        // pubs_by_year only has 2020 and 2022 (NULL excluded)
+        assert_eq!(kpis.pubs_by_year.len(), 2);
+        assert_eq!(kpis.pubs_by_year[0], YearCount { year: 2020, count: 1 });
+        assert_eq!(kpis.pubs_by_year[1], YearCount { year: 2022, count: 1 });
+
+        // pubs_per_year = 2 articles with year / 2 distinct years = 1.0
+        assert!((kpis.pubs_per_year.unwrap() - 1.0).abs() < 0.01);
     }
 
     #[test]
-    fn kpi_avg_year_precision() {
+    fn kpi_pubs_per_year_precision() {
         let conn = test_db();
+        // 3 articles across 3 years → pubs_per_year = 1.0
         insert_kpi_article(&conn, "a1", "included", Some(2018), Some(1), "A");
         insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "B");
         insert_kpi_article(&conn, "a3", "included", Some(2022), Some(1), "C");
-        // avg = (2018 + 2020 + 2022) / 3 = 6060 / 3 = 2020.0
         let kpis = get_biblio_kpis(&conn).unwrap();
-        assert!((kpis.avg_year.unwrap() - 2020.0).abs() < 0.01);
+        assert!((kpis.pubs_per_year.unwrap() - 1.0).abs() < 0.01);
+
+        // With 5 articles across 2 years → pubs_per_year = 2.5
+        insert_kpi_article(&conn, "a4", "included", Some(2018), Some(1), "D");
+        insert_kpi_article(&conn, "a5", "included", Some(2020), Some(1), "E");
+        let kpis2 = get_biblio_kpis(&conn).unwrap();
+        assert!((kpis2.pubs_per_year.unwrap() - (5.0 / 3.0)).abs() < 0.01);
     }
 
     #[test]
     fn kpi_citations_with_nulls() {
         let conn = test_db();
         insert_kpi_article(&conn, "a1", "included", Some(2020), Some(10), "A");
-        insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B");     // NULL citations
+        insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B"); // NULL citations
         insert_kpi_article(&conn, "a3", "included", Some(2020), Some(5), "C");
 
         let kpis = get_biblio_kpis(&conn).unwrap();
@@ -1314,9 +1297,9 @@ mod tests {
     }
 
     #[test]
-    fn kpi_growth_rate_positive() {
+    fn kpi_avg_growth_rate_positive() {
         let conn = test_db();
-        // 5 articles in 2021, 10 in 2022
+        // 5 articles in 2021, 10 in 2022 → one pair: +100%
         for i in 0..5 {
             insert_kpi_article(&conn, &format!("old{i}"), "included", Some(2021), Some(1), "A");
         }
@@ -1325,14 +1308,14 @@ mod tests {
         }
 
         let kpis = get_biblio_kpis(&conn).unwrap();
-        let rate = kpis.growth_rate.unwrap();
+        let rate = kpis.avg_growth_rate.unwrap();
         assert!((rate - 100.0).abs() < 0.1, "expected +100%, got {rate}");
     }
 
     #[test]
-    fn kpi_growth_rate_negative() {
+    fn kpi_avg_growth_rate_negative() {
         let conn = test_db();
-        // 10 articles in 2021, 5 in 2022
+        // 10 articles in 2021, 5 in 2022 → one pair: -50%
         for i in 0..10 {
             insert_kpi_article(&conn, &format!("old{i}"), "included", Some(2021), Some(1), "A");
         }
@@ -1341,40 +1324,67 @@ mod tests {
         }
 
         let kpis = get_biblio_kpis(&conn).unwrap();
-        let rate = kpis.growth_rate.unwrap();
+        let rate = kpis.avg_growth_rate.unwrap();
         assert!((rate - (-50.0)).abs() < 0.1, "expected -50%, got {rate}");
     }
 
     #[test]
-    fn kpi_growth_rate_single_year_is_none() {
+    fn kpi_avg_growth_rate_multi_year() {
+        let conn = test_db();
+        // 4 in 2019, 8 in 2020, 4 in 2021, 12 in 2022
+        for i in 0..4 {
+            insert_kpi_article(&conn, &format!("a19_{i}"), "included", Some(2019), Some(1), "A");
+        }
+        for i in 0..8 {
+            insert_kpi_article(&conn, &format!("a20_{i}"), "included", Some(2020), Some(1), "B");
+        }
+        for i in 0..4 {
+            insert_kpi_article(&conn, &format!("a21_{i}"), "included", Some(2021), Some(1), "C");
+        }
+        for i in 0..12 {
+            insert_kpi_article(&conn, &format!("a22_{i}"), "included", Some(2022), Some(1), "D");
+        }
+
+        let kpis = get_biblio_kpis(&conn).unwrap();
+        // Growth rates: 2019→2020 = +100%, 2020→2021 = -50%, 2021→2022 = +200%
+        // Avg = (100 + (-50) + 200) / 3 = 250 / 3 ≈ 83.33
+        let rate = kpis.avg_growth_rate.unwrap();
+        let expected = (100.0 + (-50.0) + 200.0) / 3.0;
+        assert!((rate - expected).abs() < 0.1, "expected {expected}%, got {rate}");
+
+        // pubs_per_year = 28 / 4 = 7.0
+        assert!((kpis.pubs_per_year.unwrap() - 7.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn kpi_avg_growth_rate_single_year_is_none() {
         let conn = test_db();
         insert_kpi_article(&conn, "a1", "included", Some(2022), Some(1), "A");
         insert_kpi_article(&conn, "a2", "included", Some(2022), Some(1), "B");
 
         let kpis = get_biblio_kpis(&conn).unwrap();
-        assert_eq!(kpis.growth_rate, None);
+        assert_eq!(kpis.avg_growth_rate, None);
     }
 
     #[test]
-    fn kpi_unique_authors_fallback_raw() {
+    fn kpi_unique_authors_zero_without_normalization() {
         let conn = test_db();
-        // No biblio_authors rows — falls back to COUNT(DISTINCT authors) from articles
         insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J; Doe A");
         insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "Smith J");
 
+        // Without normalization, biblio_authors is empty → unique_authors = 0
         let kpis = get_biblio_kpis(&conn).unwrap();
-        assert_eq!(kpis.unique_authors, 2); // 2 distinct authors strings
+        assert_eq!(kpis.unique_authors, 0);
     }
 
     #[test]
     fn kpi_unique_authors_from_biblio_table() {
         let conn = test_db();
         insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J");
-        // Insert into biblio_authors
         upsert_author(&conn, "smith j", "Smith, J.").unwrap();
         upsert_author(&conn, "doe a", "Doe, A.").unwrap();
 
         let kpis = get_biblio_kpis(&conn).unwrap();
-        assert_eq!(kpis.unique_authors, 2); // from biblio_authors count
+        assert_eq!(kpis.unique_authors, 2);
     }
 }
