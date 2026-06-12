@@ -82,6 +82,16 @@ const canRequestAiSummary = computed(
 // Whether an AI summary is pending for this article
 const isAiSummaryPending = computed(() => pendingSummaries.value.has(props.article.id));
 
+// Determine the file type icon based on filename
+const fullTextFileIcon = computed(() => {
+  const name = props.article.fullTextFileName;
+  if (!name) return null;
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'picture_as_pdf';
+  if (lower.endsWith('.txt')) return 'description';
+  return 'draft';
+});
+
 /** Trigger AI summary generation */
 function handleRequestAiSummary(): void {
   requestArticleAiSummary(props.article.id, props.article.title, async (articleId: string) => {
@@ -149,6 +159,7 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
       :full-screen="!!fullScreen"
       :can-request-ai-summary="canRequestAiSummary"
       :is-ai-summary-pending="isAiSummaryPending"
+      :full-text-file-icon="fullTextFileIcon"
       @toggle-full-screen="emit('toggleFullScreen')"
       @close="emit('close')"
       @read-full-text="fullTextReaderRef?.openFullTextView()"
