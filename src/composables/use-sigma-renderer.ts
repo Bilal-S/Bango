@@ -118,38 +118,48 @@ export function useSigmaRenderer() {
    * Returns { visibleNodes, visibleEdges } counts.
    */
   function applyGraphFilters(
-    graph: Graph,
-    filters: { minPapers: number; minLinkStrength: number; search: string }
+    g: Graph,
+    filters: { minPapers: number; minLinkStrength: number; maxAuthors: number; search: string }
   ): { visibleNodes: number; visibleEdges: number } {
-    const { minPapers, minLinkStrength, search } = filters;
+    const { minPapers, minLinkStrength, maxAuthors, search } = filters;
     const searchLower = search.toLowerCase();
 
-    // First, determine which nodes pass the filter
+    // First, determine which edges pass the maxAuthors filter.
+    // An edge whose maxAuthorCount exceeds the threshold means it comes from
+    // a mega-author paper, so we drop that edge.
+    const edgeVisible = new Map<string, boolean>();
+    for (const edge of g.edges()) {
+      const mac = (g.getEdgeAttribute(edge, 'maxAuthorCount') as number) ?? 0;
+      edgeVisible.set(edge, mac <= maxAuthors);
+    }
+
+    // Determine which nodes pass the filter
     const nodeVisible = new Map<string, boolean>();
-    for (const node of graph.nodes()) {
-      const weight = graph.getNodeAttribute(node, 'weight') as number;
-      const label = (graph.getNodeAttribute(node, 'label') as string) ?? '';
+    for (const node of g.nodes()) {
+      const weight = g.getNodeAttribute(node, 'weight') as number;
+      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
       const passesPapers = weight >= minPapers;
       const passesSearch = !searchLower || label.toLowerCase().includes(searchLower);
       const visible = passesPapers && passesSearch;
       nodeVisible.set(node, visible);
-      graph.setNodeAttribute(node, 'hidden', !visible);
+      g.setNodeAttribute(node, 'hidden', !visible);
     }
 
-    // Then, determine which edges pass
+    // Then, determine which edges pass all filters
     let visibleEdges = 0;
-    for (const edge of graph.edges()) {
-      const weight = graph.getEdgeAttribute(edge, 'weight') as number;
-      const source = graph.source(edge);
-      const target = graph.target(edge);
+    for (const edge of g.edges()) {
+      const weight = g.getEdgeAttribute(edge, 'weight') as number;
+      const source = g.source(edge);
+      const target = g.target(edge);
       const passesStrength = weight >= minLinkStrength;
+      const passesMaxAuthors = edgeVisible.get(edge) !== false;
       const bothEndsVisible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-      const visible = passesStrength && bothEndsVisible;
-      graph.setEdgeAttribute(edge, 'hidden', !visible);
+      const visible = passesStrength && passesMaxAuthors && bothEndsVisible;
+      g.setEdgeAttribute(edge, 'hidden', !visible);
       if (visible) visibleEdges++;
     }
 
-    const visibleNodes = graph.nodes().filter((n) => nodeVisible.get(n) === true).length;
+    const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
 
     return { visibleNodes, visibleEdges };
   }

@@ -76,8 +76,8 @@ function makeNetworkData(overrides: Partial<NetworkData> = {}): NetworkData {
       },
     ],
     edges: [
-      { source: 'a1', target: 'a2', weight: 3, fractionalWeight: 1.5 },
-      { source: 'a1', target: 'a3', weight: 1, fractionalWeight: 0.5 },
+      { source: 'a1', target: 'a2', weight: 3, fractionalWeight: 1.5, maxAuthorCount: 4 },
+      { source: 'a1', target: 'a3', weight: 1, fractionalWeight: 0.5, maxAuthorCount: 2 },
     ],
     ...overrides,
   };
@@ -188,8 +188,8 @@ describe('useCoAuthorNetwork', () => {
   it('skips edges with unknown nodes', async () => {
     const data = makeNetworkData({
       edges: [
-        { source: 'a1', target: 'unknown', weight: 1, fractionalWeight: 0.5 },
-        { source: 'a1', target: 'a2', weight: 2, fractionalWeight: 1.0 },
+        { source: 'a1', target: 'unknown', weight: 1, fractionalWeight: 0.5, maxAuthorCount: 3 },
+        { source: 'a1', target: 'a2', weight: 2, fractionalWeight: 1.0, maxAuthorCount: 2 },
       ],
     });
     vi.mocked(tauriCommand).mockResolvedValue(data);

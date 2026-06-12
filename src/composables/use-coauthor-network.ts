@@ -72,6 +72,7 @@ function buildGraph(data: NetworkData): Graph {
       weight: edge.weight,
       fullWeight: edge.weight,
       fractionalWeight: fw,
+      maxAuthorCount: edge.maxAuthorCount ?? 0,
       thickness: scale(edge.weight, minEW, maxEW, 0.5, 4),
       minFull: minEW,
       maxFull: maxEW,

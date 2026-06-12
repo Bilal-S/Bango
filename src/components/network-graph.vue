@@ -63,6 +63,7 @@ const props = defineProps<{
   isLayouting: boolean;
   error: string | null;
   focusedNodeId: string | null;
+  selectedClusters: number[];
   colorMode: 'cluster' | 'temporal';
   minYear: number;
   maxYear: number;
@@ -122,10 +123,27 @@ watch(
   () => {
     if (props.focusedNodeId) {
       applyFocusMode(props.focusedNodeId);
+    } else if (props.selectedClusters.length > 0) {
+      applyClusterHighlight(props.selectedClusters);
     } else {
       clearFocusMode();
     }
   }
+);
+
+watch(
+  () => props.selectedClusters,
+  (clusters) => {
+    if (props.focusedNodeId) {
+      // Focus mode takes priority; re-apply it
+      applyFocusMode(props.focusedNodeId);
+    } else if (clusters.length > 0) {
+      applyClusterHighlight(clusters);
+    } else {
+      clearFocusMode();
+    }
+  },
+  { deep: true }
 );
 
 function getTemporalColor(avgYear: number | null, minYear: number, maxYear: number): string {
@@ -200,6 +218,32 @@ function bindSigmaEvents() {
 
   sig.on('clickStage', () => {
     emit('node-click', null);
+  });
+}
+
+function applyClusterHighlight(clusterIds: number[]) {
+  if (!props.graph) return;
+  const g = props.graph;
+  const clusterSet = new Set(clusterIds);
+
+  g.forEachNode((n) => {
+    const cluster = g.getNodeAttribute(n, 'cluster') as number | null;
+    const isInCluster = cluster !== null && clusterSet.has(cluster);
+    const baseColor = getNodeColor(n);
+    g.setNodeAttribute(n, 'color', isInCluster ? baseColor : `${baseColor}26`);
+    const origSize = g.getNodeAttribute(n, 'size') ?? 5;
+    g.setNodeAttribute(n, 'size', isInCluster ? origSize : origSize * 0.6);
+  });
+
+  g.forEachEdge((_edge, _attrs, source, target) => {
+    const sCluster = g.getNodeAttribute(source, 'cluster') as number | null;
+    const tCluster = g.getNodeAttribute(target, 'cluster') as number | null;
+    const bothInCluster =
+      sCluster !== null &&
+      tCluster !== null &&
+      clusterSet.has(sCluster) &&
+      clusterSet.has(tCluster);
+    g.setEdgeAttribute(_edge as string, 'color', bothInCluster ? '#94a3b8' : '#f1f5f9');
   });
 }
 

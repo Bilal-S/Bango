@@ -30,7 +30,9 @@
           @mousedown.prevent="selectSuggestion(s)"
         >
           {{ s.label }}
-          <span class="text-xs text-slate-400 ml-1">({{ s.weight }} papers)</span>
+          <span class="text-xs text-slate-400 ml-1"
+            >({{ s.weight }} {{ s.weight === 1 ? 'paper' : 'papers' }})</span
+          >
         </li>
       </ul>
     </div>
@@ -64,6 +66,23 @@
         :min="1"
         :max="maxLinkLimit"
         step="1"
+        class="w-full accent-indigo-600"
+        @input="emitFilters"
+      />
+    </div>
+
+    <!-- Max authors per document slider -->
+    <div>
+      <label class="flex items-center justify-between text-xs text-slate-600 mb-1">
+        <span>Max. Authors per Document</span>
+        <span class="font-semibold tabular-nums">{{ maxAuthors }}</span>
+      </label>
+      <input
+        v-model.number="maxAuthors"
+        type="range"
+        :min="20"
+        :max="200"
+        step="5"
         class="w-full accent-indigo-600"
         @input="emitFilters"
       />
@@ -143,16 +162,36 @@
     <div class="border-t border-slate-100 pt-3">
       <!-- Cluster legend -->
       <div v-if="colorMode === 'cluster' && clusters.length > 0">
-        <p class="text-xs text-slate-500 mb-2">Clusters</p>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs text-slate-500">Clusters</p>
+          <button
+            class="w-6 h-6 flex items-center justify-center rounded-md border transition-colors cursor-pointer"
+            :class="
+              selectedClusters.length > 0
+                ? 'text-indigo-600 border-indigo-300 bg-indigo-50 hover:bg-indigo-100'
+                : 'text-slate-300 border-slate-200 bg-slate-50 cursor-default'
+            "
+            :disabled="selectedClusters.length === 0"
+            title="Clear cluster selection"
+            @click="$emit('clear-clusters')"
+          >
+            <span class="material-symbols-outlined text-sm">filter_alt_off</span>
+          </button>
+        </div>
         <div class="flex flex-wrap gap-1.5">
-          <span
+          <button
             v-for="c in clusters"
             :key="c.id"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-white"
-            :style="{ backgroundColor: c.color }"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium cursor-pointer transition-all"
+            :style="{
+              backgroundColor: selectedClusters.includes(c.id) ? c.color : c.color + '33',
+              color: selectedClusters.includes(c.id) ? '#fff' : c.color,
+              outline: selectedClusters.includes(c.id) ? `2px solid ${c.color}` : 'none',
+            }"
+            @click="$emit('select-cluster', c.id)"
           >
             {{ c.label }}
-          </span>
+          </button>
         </div>
       </div>
 
@@ -170,7 +209,7 @@
           </div>
           <!-- Neutral gray for no year -->
           <div class="flex items-center gap-1.5 mt-1">
-            <span class="h-2-5 w-2-5 rounded-full bg-slate-200 border border-slate-300"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-slate-200 border border-slate-300"></span>
             <span class="text-[10px] text-slate-400 italic">No year data</span>
           </div>
         </div>
@@ -209,27 +248,37 @@ const props = defineProps<{
   visibleEdges: number;
   clusterCount: number;
   authorNames: string[];
+  authorWeights: Map<string, number>;
   countingMode: CountingMode;
   colorMode: 'cluster' | 'temporal';
   minYear: number;
   maxYear: number;
+  selectedClusters: number[];
 }>();
 
 const emit = defineEmits<{
   (
     e: 'filter-change',
-    filters: { minPapers: number; minLinkStrength: number; search: string }
+    filters: {
+      minPapers: number;
+      minLinkStrength: number;
+      maxAuthors: number;
+      search: string;
+    }
   ): void;
   (e: 'locate-author', name: string): void;
   (e: 'reset-zoom'): void;
   (e: 'export-image'): void;
   (e: 'counting-mode-change', mode: CountingMode): void;
   (e: 'color-mode-change', mode: 'cluster' | 'temporal'): void;
+  (e: 'select-cluster', clusterId: number): void;
+  (e: 'clear-clusters'): void;
 }>();
 
 const searchQuery = ref('');
 const minPapers = ref(1);
 const minLinkStrength = ref(1);
+const maxAuthors = ref(200);
 const showSuggestions = ref(false);
 
 interface AuthorSuggestion {
@@ -247,7 +296,7 @@ const suggestions = computed<AuthorSuggestion[]>(() => {
     .map((name) => ({
       id: name,
       label: name,
-      weight: 0, // weight not available from name list — future: pass full author objects
+      weight: props.authorWeights.get(name) ?? 0,
     }));
 });
 
@@ -295,6 +344,7 @@ function emitFilters() {
   emit('filter-change', {
     minPapers: minPapers.value,
     minLinkStrength: minLinkStrength.value,
+    maxAuthors: maxAuthors.value,
     search: searchQuery.value,
   });
 }

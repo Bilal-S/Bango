@@ -847,6 +847,9 @@ pub fn build_coauthor_edges(conn: &Connection) -> Result<usize, AppError> {
         std::collections::HashMap::new();
     let mut fractional_sums: std::collections::HashMap<(String, String), f64> =
         std::collections::HashMap::new();
+    // Track max author count per edge (largest author list of any article contributing to this pair)
+    let mut max_author_counts: std::collections::HashMap<(String, String), i32> =
+        std::collections::HashMap::new();
 
     for authors in article_authors.values() {
         let n = authors.len();
@@ -855,6 +858,7 @@ pub fn build_coauthor_edges(conn: &Connection) -> Result<usize, AppError> {
         }
         let pair_count = n * (n - 1) / 2;
         let fractional_weight = 1.0 / pair_count as f64;
+        let author_count = n as i32;
 
         for i in 0..n {
             for j in (i + 1)..n {
@@ -863,7 +867,11 @@ pub fn build_coauthor_edges(conn: &Connection) -> Result<usize, AppError> {
                     std::mem::swap(&mut key.0, &mut key.1);
                 }
                 *full_counts.entry(key.clone()).or_insert(0) += 1;
-                *fractional_sums.entry(key).or_insert(0.0) += fractional_weight;
+                *fractional_sums.entry(key.clone()).or_insert(0.0) += fractional_weight;
+                let current = max_author_counts.get(&key).copied().unwrap_or(0);
+                if author_count > current {
+                    max_author_counts.insert(key, author_count);
+                }
             }
         }
     }
@@ -892,13 +900,21 @@ pub fn build_coauthor_edges(conn: &Connection) -> Result<usize, AppError> {
         )?;
     }
 
-    // Store fractional counts in a separate lookup (saved as network metadata attribute)
+    // Store fractional counts and max author counts in network metadata
     let fractional_map: Vec<serde_json::Value> = fractional_sums
         .iter()
-        .map(|((s, t), w)| serde_json::json!({"source": s, "target": t, "fractional_weight": (w * 1000.0).round() / 1000.0}))
+        .map(|((s, t), w)| {
+            let mac = max_author_counts.get(&(s.clone(), t.clone())).copied().unwrap_or(0);
+            serde_json::json!({
+                "source": s,
+                "target": t,
+                "fractional_weight": (w * 1000.0).round() / 1000.0,
+                "max_author_count": mac,
+            })
+        })
         .collect();
 
-    // Update network metadata with fractional data
+    // Update network metadata with fractional data and max author counts
     let enriched_params = serde_json::json!({
         "counting_modes": ["full", "fractional"],
         "fractional_edges": fractional_map,
@@ -1006,6 +1022,10 @@ pub fn get_coauthor_network_json(conn: &Connection) -> Result<serde_json::Value,
         .ok()
         .flatten();
 
+    // Also build a lookup for max_author_count per edge
+    let mut max_author_lookup: std::collections::HashMap<(String, String), i32> =
+        std::collections::HashMap::new();
+
     if let Some(ref pj) = params_json {
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(pj) {
             if let Some(fe) = parsed.get("fractional_edges").and_then(|v| v.as_array()) {
@@ -1016,6 +1036,14 @@ pub fn get_coauthor_network_json(conn: &Connection) -> Result<serde_json::Value,
                         edge.get("fractional_weight").and_then(|v| v.as_f64()),
                     ) {
                         fractional_lookup.insert((s.to_string(), t.to_string()), w);
+                    }
+                    // Extract max_author_count
+                    if let (Some(s), Some(t), Some(mac)) = (
+                        edge.get("source").and_then(|v| v.as_str()),
+                        edge.get("target").and_then(|v| v.as_str()),
+                        edge.get("max_author_count").and_then(|v| v.as_i64()),
+                    ) {
+                        max_author_lookup.insert((s.to_string(), t.to_string()), mac as i32);
                     }
                 }
             }
@@ -1038,11 +1066,14 @@ pub fn get_coauthor_network_json(conn: &Connection) -> Result<serde_json::Value,
         .map(|(source, target, weight)| {
             let frac =
                 fractional_lookup.get(&(source.clone(), target.clone())).copied().unwrap_or(0.0);
+            let mac =
+                max_author_lookup.get(&(source.clone(), target.clone())).copied().unwrap_or(0);
             serde_json::json!({
                 "source": source,
                 "target": target,
                 "weight": weight,
                 "fractionalWeight": frac,
+                "maxAuthorCount": mac,
             })
         })
         .collect();

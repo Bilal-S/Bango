@@ -18,8 +18,9 @@ const selectedAuthor = ref<CoAuthorNode | null>(null);
 const focusedNodeId = ref<string | null>(null);
 const visibleNodeCount = ref(0);
 const visibleEdgeCount = ref(0);
-
 const colorMode = ref<'cluster' | 'temporal'>('cluster');
+const selectedClusters = ref<number[]>([]);
+const sidebarCollapsed = ref(false);
 
 /** Derive cluster count from graph node attributes */
 const clusterCount = computed(() => {
@@ -68,6 +69,16 @@ const authorNames = computed(() => {
   });
 });
 
+const authorWeights = computed(() => {
+  const map = new Map<string, number>();
+  if (!graph.value) return map;
+  for (const id of graph.value.nodes()) {
+    const attrs = graph.value.getNodeAttributes(id);
+    map.set(attrs.label ?? id, attrs.weight ?? 0);
+  }
+  return map;
+});
+
 onMounted(async () => {
   await fetchNetwork();
   if (graph.value) {
@@ -101,7 +112,12 @@ function onNavigateToAuthor(nodeId: string) {
   locateNode(nodeId);
 }
 
-function onFilterChange(filters: { minPapers: number; minLinkStrength: number; search: string }) {
+function onFilterChange(filters: {
+  minPapers: number;
+  minLinkStrength: number;
+  maxAuthors: number;
+  search: string;
+}) {
   if (!graph.value) return;
   const result = applyGraphFilters(graph.value, filters);
   visibleNodeCount.value = result.visibleNodes;
@@ -133,6 +149,19 @@ function onExportImage() {
   }
 }
 
+function onSelectCluster(clusterId: number) {
+  const idx = selectedClusters.value.indexOf(clusterId);
+  if (idx >= 0) {
+    selectedClusters.value.splice(idx, 1);
+  } else {
+    selectedClusters.value.push(clusterId);
+  }
+}
+
+function onClearClusters() {
+  selectedClusters.value = [];
+}
+
 async function onCountingModeChange(mode: 'full' | 'fractional') {
   const changed = setCountingMode(mode);
   if (changed && graph.value) {
@@ -144,8 +173,23 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
 
 <template>
   <div class="coauthor-layout">
+    <!-- Sidebar toggle button -->
+    <button
+      class="absolute top-3 left-3 z-30 w-8 h-8 flex items-center justify-center rounded-lg bg-white/90 border border-slate-200 shadow-sm text-slate-500 hover:text-slate-700 hover:bg-white transition-all cursor-pointer"
+      :class="sidebarCollapsed ? 'left-3' : 'left-[calc(16rem+0.75rem)]'"
+      :title="sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
+      @click="sidebarCollapsed = !sidebarCollapsed"
+    >
+      <span class="material-symbols-outlined text-lg">
+        {{ sidebarCollapsed ? 'menu' : 'menu_open' }}
+      </span>
+    </button>
+
     <!-- Controls sidebar -->
-    <aside class="w-64 shrink-0 p-4 overflow-y-auto border-r border-slate-100 bg-slate-50/30">
+    <aside
+      class="shrink-0 p-4 overflow-y-auto border-r border-slate-100 bg-slate-50/30 transition-all duration-300"
+      :class="sidebarCollapsed ? 'w-0 p-0 overflow-hidden opacity-0' : 'w-64 opacity-100'"
+    >
       <NetworkControls
         :total-nodes="stats.totalAuthors"
         :total-edges="stats.totalEdges"
@@ -153,16 +197,20 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
         :visible-edges="stats.visibleEdges"
         :cluster-count="stats.clusterCount"
         :author-names="authorNames"
+        :author-weights="authorWeights"
         :counting-mode="countingMode"
         :color-mode="colorMode"
         :min-year="yearRange.min"
         :max-year="yearRange.max"
+        :selected-clusters="selectedClusters"
         @filter-change="onFilterChange"
         @locate-author="onLocateAuthor"
         @reset-zoom="onResetZoom"
         @export-image="onExportImage"
         @counting-mode-change="onCountingModeChange"
         @color-mode-change="colorMode = $event"
+        @select-cluster="onSelectCluster($event)"
+        @clear-clusters="onClearClusters"
       />
     </aside>
 
@@ -174,6 +222,7 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
         :is-layouting="isLayouting"
         :error="error"
         :focused-node-id="focusedNodeId"
+        :selected-clusters="selectedClusters"
         :color-mode="colorMode"
         :min-year="yearRange.min"
         :max-year="yearRange.max"
@@ -198,5 +247,6 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 </style>

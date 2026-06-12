@@ -41,6 +41,8 @@ export interface CoAuthorEdge {
   weight: number;
   /** Fractional counting weight (each paper contributes total=1 split among pairs). */
   fractionalWeight: number;
+  /** Max number of authors on any article contributing to this edge. */
+  maxAuthorCount: number;
 }
 
 /** Raw network payload from the backend. */
