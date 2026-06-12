@@ -45,23 +45,40 @@ export function detectCommunities(g: Graph): number {
 /**
  * Apply ForceAtlas2 layout asynchronously in chunks to keep the UI responsive.
  */
-async function runForceAtlas2Async(g: Graph, iterations: number): Promise<void> {
+async function runForceAtlas2Async(
+  g: Graph,
+  iterations: number,
+  layoutMode: 'fixed' | 'dynamic' = 'fixed'
+): Promise<void> {
   const shouldOptimize = g.order > 500;
   const chunkSize = 25;
   let remaining = iterations;
 
   while (remaining > 0) {
     const chunk = Math.min(remaining, chunkSize);
-    forceAtlas2(g, {
-      iterations: chunk,
-      settings: {
-        linLogMode: true,
-        adjustSizes: true,
-        gravity: 1,
-        scalingRatio: 2,
-        barnesHutOptimize: shouldOptimize,
-      },
-    });
+    if (layoutMode === 'fixed') {
+      forceAtlas2(g, {
+        iterations: chunk,
+        settings: {
+          linLogMode: true,
+          adjustSizes: true,
+          gravity: 1,
+          scalingRatio: 2,
+          barnesHutOptimize: shouldOptimize,
+        },
+      });
+    } else {
+      forceAtlas2.assign(g, {
+        iterations: chunk,
+        settings: {
+          linLogMode: true,
+          adjustSizes: true,
+          gravity: 1,
+          scalingRatio: 2,
+          barnesHutOptimize: shouldOptimize,
+        },
+      });
+    }
     remaining -= chunk;
     // Yield to the browser between chunks
     await new Promise<void>((r) => setTimeout(r, 0));
@@ -75,7 +92,11 @@ export function useNetworkLayout() {
   /**
    * Run the full layout pipeline: circular → Louvain → ForceAtlas2.
    */
-  async function applyLayout(g: Graph, iterations = 100): Promise<void> {
+  async function applyLayout(
+    g: Graph,
+    iterations = 100,
+    layoutMode: 'fixed' | 'dynamic' = 'fixed'
+  ): Promise<void> {
     isLayouting.value = true;
     try {
       // 1. Initial circular layout
@@ -85,7 +106,7 @@ export function useNetworkLayout() {
       detectCommunities(g);
 
       // 3. Run ForceAtlas2 for final positioning
-      await runForceAtlas2Async(g, iterations);
+      await runForceAtlas2Async(g, iterations, layoutMode);
     } finally {
       isLayouting.value = false;
     }

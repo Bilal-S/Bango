@@ -67,6 +67,7 @@ const props = defineProps<{
   colorMode: 'cluster' | 'temporal';
   minYear: number;
   maxYear: number;
+  recalculateTrigger: number;
 }>();
 
 const emit = defineEmits<{
@@ -144,6 +145,21 @@ watch(
     }
   },
   { deep: true }
+);
+
+watch(
+  () => props.recalculateTrigger,
+  () => {
+    if (props.graph) {
+      if (props.focusedNodeId) {
+        applyFocusMode(props.focusedNodeId);
+      } else if (props.selectedClusters.length > 0) {
+        applyClusterHighlight(props.selectedClusters);
+      } else {
+        clearFocusMode();
+      }
+    }
+  }
 );
 
 function getTemporalColor(avgYear: number | null, minYear: number, maxYear: number): string {

@@ -5,13 +5,13 @@ import { useDemo } from '@/composables/use-demo';
 
 const route = useRoute();
 const router = useRouter();
-const activeTab = ref<'guide' | 'troubleshoot' | 'local-ai'>('guide');
+const activeTab = ref<'guide' | 'biblio' | 'troubleshoot' | 'local-ai'>('guide');
 
 // Deep-link: /help?tab=troubleshoot#error-id
 onMounted(() => {
   const tab = route.query.tab as string | undefined;
-  if (tab === 'troubleshoot' || tab === 'local-ai' || tab === 'guide') {
-    activeTab.value = tab;
+  if (tab === 'troubleshoot' || tab === 'local-ai' || tab === 'guide' || tab === 'biblio') {
+    activeTab.value = tab as 'guide' | 'biblio' | 'troubleshoot' | 'local-ai';
   }
   // Scroll to anchor after DOM update
   if (route.hash) {
@@ -450,6 +450,16 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
       </button>
       <button
         class="help-tabs__btn"
+        :class="{ 'help-tabs__btn--active': activeTab === 'biblio' }"
+        role="tab"
+        :aria-selected="activeTab === 'biblio'"
+        @click="activeTab = 'biblio'"
+      >
+        <span class="material-symbols-outlined help-tabs__icon">hub</span>
+        Understanding Bibliometrics
+      </button>
+      <button
+        class="help-tabs__btn"
         :class="{ 'help-tabs__btn--active': activeTab === 'troubleshoot' }"
         role="tab"
         :aria-selected="activeTab === 'troubleshoot'"
@@ -586,6 +596,183 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
               </li>
             </ul>
           </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ===================== TAB: UNDERSTANDING BIBLIOMETRICS ===================== -->
+    <div v-if="activeTab === 'biblio'" role="tabpanel">
+      <section class="biblio-intro">
+        <h2 class="biblio-intro__title">Understanding Bibliometrics</h2>
+        <p class="biblio-intro__desc">
+          Bibliometrics is the statistical analysis of books, articles, or other scholarly
+          publications. It helps researchers map scientific fields, trace citation pathways, and
+          visualize collaborations across institutions and researchers.
+        </p>
+      </section>
+
+      <!-- Section: Bibliometric Models -->
+      <section class="biblio-section">
+        <h3 class="biblio-section__title">
+          <span class="material-symbols-outlined biblio-section__title-icon">analytics</span>
+          Bibliometric Analysis Models
+        </h3>
+        <p class="biblio-section__desc">
+          Mapping literature databases enables different perspectives of structural discovery. Bango
+          is designed to support several fundamental bibliometric networks:
+        </p>
+
+        <div class="biblio-grid">
+          <!-- Co-authorship -->
+          <div class="biblio-card biblio-card--implemented">
+            <div class="biblio-card__header">
+              <h4 class="biblio-card__title">Co-Authorship Network</h4>
+              <span class="biblio-card__badge biblio-card__badge--implemented">Active</span>
+            </div>
+            <p class="biblio-card__desc">
+              Maps actual collaborative ties between researchers based on joint publication counts.
+              Uncovers research groups, institutional structures, and collaboration intensity.
+            </p>
+          </div>
+
+          <!-- Co-occurrence -->
+          <div class="biblio-card biblio-card--unimplemented">
+            <div class="biblio-card__header">
+              <h4 class="biblio-card__title">Co-Occurrence Network</h4>
+              <span class="biblio-card__badge biblio-card__badge--planned">Planned</span>
+            </div>
+            <p class="biblio-card__desc">
+              Maps how frequently keywords and technical terms appear together in title and abstract
+              text. Reveals semantic clusters, evolving terminologies, and research paradigms.
+            </p>
+          </div>
+
+          <!-- Citation Network -->
+          <div class="biblio-card biblio-card--unimplemented">
+            <div class="biblio-card__header">
+              <h4 class="biblio-card__title">Citation Network</h4>
+              <span class="biblio-card__badge biblio-card__badge--planned">Planned</span>
+            </div>
+            <p class="biblio-card__desc">
+              A directional network showing which articles cite which other articles. Useful for
+              identifying seminal foundational works and tracking the chronologic progress of a
+              field.
+            </p>
+          </div>
+
+          <!-- Bibliographic Coupling -->
+          <div class="biblio-card biblio-card--unimplemented">
+            <div class="biblio-card__header">
+              <h4 class="biblio-card__title">Bibliographic Coupling</h4>
+              <span class="biblio-card__badge biblio-card__badge--planned">Planned</span>
+            </div>
+            <p class="biblio-card__desc">
+              Connects articles that share common references. Two papers with overlapping
+              bibliography lists are assumed to be addressing a similar paradigm, regardless of
+              direct citation.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Why Bango differs from VOSviewer -->
+      <section class="biblio-section">
+        <h3 class="biblio-section__title">
+          <span class="material-symbols-outlined biblio-section__title-icon">compare_arrows</span>
+          Modularity and Layout: Bango vs. VOSviewer
+        </h3>
+        <p class="biblio-section__desc">
+          If you run the same RIS bibliography dataset through both Bango and VOSviewer, you will
+          likely notice differences in the number of clusters and the relative spacing of authors on
+          the screen. This is due to different core mathematical formulations:
+        </p>
+
+        <div class="biblio-table-wrapper">
+          <table class="biblio-table">
+            <thead>
+              <tr>
+                <th>Feature / Dimension</th>
+                <th>Bango Approach</th>
+                <th>VOSviewer Approach</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Link Normalization</strong></td>
+                <td>
+                  Uses <strong>Absolute Weights</strong> (the exact number of co-authored papers).
+                </td>
+                <td>
+                  Uses <strong>Association Strength Normalization</strong> (link weight is divided
+                  by the product of both authors' total publications).
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Modularity & Clustering</strong></td>
+                <td>
+                  Optimizes standard Louvain modularity. Connected groups are kept together into
+                  cohesive communities (typically yielding 3–4 clusters on small datasets).
+                </td>
+                <td>
+                  Optimizes normalized modularity, heavily penalizing weakly-associated links.
+                  Splits nodes into many fine-grained clusters (typically 14+ clusters on the same
+                  small dataset).
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Visual Layout</strong></td>
+                <td>
+                  ForceAtlas2 force-directed layout (spring/magnet simulation). Highly connected
+                  hubs are drawn strongly to the center.
+                </td>
+                <td>
+                  VOS layout (multidimensional scaling/similarity distance minimization). Relies
+                  strictly on normalized association strengths.
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Advantages</strong></td>
+                <td>
+                  <ul class="biblio-table-list">
+                    <li>
+                      Reveals <strong>real-world collaboration hubs</strong> and direct working
+                      cohorts.
+                    </li>
+                    <li>Very easy to read and understand on small-to-medium datasets.</li>
+                    <li>Perfect for departmental or local-group collaboration reviews.</li>
+                  </ul>
+                </td>
+                <td>
+                  <ul class="biblio-table-list">
+                    <li>Prevents highly prolific authors from dominating the entire map.</li>
+                    <li>Allows small, specialized sub-fields to stand out clearly.</li>
+                    <li>Very clean cluster boundaries on huge datasets (e.g., 5,000+ papers).</li>
+                  </ul>
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Disadvantages</strong></td>
+                <td>
+                  <ul class="biblio-table-list">
+                    <li>
+                      In large-scale networks, nodes can collapse into a single dense central
+                      cluster ("hairball"), requiring manual adjustment of the resolution slider to
+                      split them.
+                    </li>
+                  </ul>
+                </td>
+                <td>
+                  <ul class="biblio-table-list">
+                    <li>
+                      Normalization can distort the visual and physical sense of scale. A single
+                      paper by two isolated authors can look just as strong as 10 papers by
+                      productive authors.
+                    </li>
+                  </ul>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
     </div>
@@ -1524,5 +1711,172 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
   padding: 1px 6px;
   border-radius: var(--radius-default);
   font-size: var(--font-size-caption);
+}
+
+/* ===================== UNDERSTANDING BIBLIOMETRICS ===================== */
+.biblio-intro {
+  margin-bottom: var(--space-6);
+}
+
+.biblio-intro__title {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.biblio-intro__desc {
+  font-size: var(--font-size-body);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0;
+}
+
+.biblio-section {
+  background-color: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: var(--space-6);
+}
+
+.biblio-section__title {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-top: 0;
+  margin-bottom: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.biblio-section__title-icon {
+  color: #4f46e5;
+}
+
+.biblio-section__desc {
+  font-size: var(--font-size-body);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin-bottom: var(--space-4);
+}
+
+/* Models Grid */
+.biblio-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .biblio-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.biblio-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-default);
+  padding: var(--space-4);
+  background-color: #f8fafc;
+}
+
+.biblio-card--implemented {
+  border-left: 4px solid #16a34a;
+}
+
+.biblio-card--unimplemented {
+  border-left: 4px solid #64748b;
+  opacity: 0.85;
+}
+
+.biblio-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.biblio-card__title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin: 0;
+}
+
+.biblio-card__badge {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 9999px;
+}
+
+.biblio-card__badge--implemented {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
+.biblio-card__badge--planned {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
+.biblio-card__desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0;
+}
+
+/* Responsive Table Container */
+.biblio-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-default);
+  margin-top: var(--space-4);
+}
+
+.biblio-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: var(--font-size-body);
+}
+
+.biblio-table th,
+.biblio-table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.biblio-table th {
+  background-color: #f1f5f9;
+  color: var(--color-on-surface);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.biblio-table tr:last-child td {
+  border-bottom: none;
+}
+
+.biblio-table td strong {
+  color: var(--color-on-surface);
+}
+
+.biblio-table ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.biblio-table li {
+  margin-bottom: var(--space-1);
 }
 </style>

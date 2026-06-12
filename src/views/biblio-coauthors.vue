@@ -20,6 +20,7 @@ const focusedNodeId = ref<string | null>(null);
 const visibleNodeCount = ref(0);
 const visibleEdgeCount = ref(0);
 const colorMode = ref<'cluster' | 'temporal'>('cluster');
+const layoutMode = ref<'fixed' | 'dynamic'>('fixed');
 const selectedClusters = ref<number[]>([]);
 const sidebarCollapsed = ref(false);
 
@@ -91,10 +92,11 @@ const authorWeights = computed(() => {
 onMounted(async () => {
   await fetchNetwork();
   if (graph.value) {
-    await applyLayout(graph.value);
+    await applyLayout(graph.value, 100, layoutMode.value);
     // Initialize visible counts
     visibleNodeCount.value = nodeCount.value;
     visibleEdgeCount.value = edgeCount.value;
+    recalculateTrigger.value++;
   }
 });
 
@@ -121,6 +123,14 @@ function onNavigateToAuthor(nodeId: string) {
   locateNode(nodeId);
 }
 
+// Layout mode change triggers a full recalculate under the new layout strategy
+async function onLayoutModeChange(mode: 'fixed' | 'dynamic') {
+  layoutMode.value = mode;
+  if (graph.value) {
+    await onRecalculate();
+  }
+}
+
 function onFilterChange(filters: {
   minPapers: number;
   minLinkStrength: number;
@@ -144,6 +154,7 @@ function onLocateAuthor(name: string) {
   }
 }
 
+// Export image file
 function onExportImage() {
   const dataUrl = exportImage();
   if (dataUrl) {
@@ -171,7 +182,7 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
   const changed = setCountingMode(mode);
   if (changed && graph.value) {
     // Quick layout polish after weight change
-    await runForceAtlas2Async(graph.value, 30);
+    await runForceAtlas2Async(graph.value, 30, layoutMode.value);
   }
 }
 
@@ -198,15 +209,14 @@ async function onRecalculate() {
     if (sub.order === 0) return;
 
     // 2. Run Louvain and ForceAtlas2 layout on the subgraph
-    await applyLayout(sub);
+    await applyLayout(sub, 100, layoutMode.value);
 
-    // 3. Write back coordinates, cluster, and color to the parent graph
+    // 3. Write back coordinates and cluster to the parent graph
     sub.forEachNode((node) => {
       const newAttrs = sub.getNodeAttributes(node);
       graph.value!.setNodeAttribute(node, 'x', newAttrs.x);
       graph.value!.setNodeAttribute(node, 'y', newAttrs.y);
       graph.value!.setNodeAttribute(node, 'cluster', newAttrs.cluster);
-      graph.value!.setNodeAttribute(node, 'color', newAttrs.color);
     });
 
     // 4. Force Sigma renderer to update and zoom to fit
@@ -244,6 +254,7 @@ async function onRecalculate() {
           :author-weights="authorWeights"
           :counting-mode="countingMode"
           :color-mode="colorMode"
+          :layout-mode="layoutMode"
           :min-year="yearRange.min"
           :max-year="yearRange.max"
           :selected-clusters="selectedClusters"
@@ -252,6 +263,7 @@ async function onRecalculate() {
           @export-image="onExportImage"
           @counting-mode-change="onCountingModeChange"
           @color-mode-change="colorMode = $event"
+          @layout-mode-change="onLayoutModeChange"
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"
           @recalculate="onRecalculate"
@@ -281,6 +293,7 @@ async function onRecalculate() {
         :color-mode="colorMode"
         :min-year="yearRange.min"
         :max-year="yearRange.max"
+        :recalculate-trigger="recalculateTrigger"
         @node-click="onNodeClick"
         @retry="fetchNetwork"
       />
