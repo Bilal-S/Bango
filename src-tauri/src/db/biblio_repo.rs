@@ -1537,16 +1537,21 @@ mod tests {
     #[test]
     fn test_upsert_institution_creates_new() {
         let conn = test_db();
-        let id = upsert_institution(&conn, "mit", Some("USA"), Some("Cambridge")).unwrap();
+        let (id, was_created) =
+            upsert_institution(&conn, "mit", Some("USA"), Some("Cambridge")).unwrap();
         assert!(!id.is_empty());
+        assert!(was_created);
     }
 
     #[test]
     fn test_upsert_institution_returns_same() {
         let conn = test_db();
-        let id1 = upsert_institution(&conn, "mit", Some("USA"), Some("Cambridge")).unwrap();
-        let id2 = upsert_institution(&conn, "mit", None, None).unwrap();
+        let (id1, was_created1) =
+            upsert_institution(&conn, "mit", Some("USA"), Some("Cambridge")).unwrap();
+        let (id2, was_created2) = upsert_institution(&conn, "mit", None, None).unwrap();
         assert_eq!(id1, id2);
+        assert!(was_created1);
+        assert!(!was_created2);
     }
 
     // ── Network operations ──────────────────────────────────────
