@@ -173,21 +173,19 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
 
 <template>
   <div class="coauthor-layout">
-    <!-- Sidebar toggle button -->
+    <!-- Drawer handle (outside aside to avoid overflow clipping) -->
     <button
-      class="absolute top-3 left-3 z-30 w-8 h-8 flex items-center justify-center rounded-lg bg-white/90 border border-slate-200 shadow-sm text-slate-500 hover:text-slate-700 hover:bg-white transition-all cursor-pointer"
-      :class="sidebarCollapsed ? 'left-3' : 'left-[calc(16rem+0.75rem)]'"
+      class="drawer-handle"
       :title="sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
+      :style="{ left: sidebarCollapsed ? '0px' : 'calc(16rem - 8px)' }"
       @click="sidebarCollapsed = !sidebarCollapsed"
     >
-      <span class="material-symbols-outlined text-lg">
-        {{ sidebarCollapsed ? 'menu' : 'menu_open' }}
-      </span>
+      <span class="drawer-handle-grip"></span>
     </button>
 
     <!-- Controls sidebar -->
     <aside
-      class="shrink-0 p-4 overflow-y-auto border-r border-slate-100 bg-slate-50/30 transition-all duration-300"
+      class="sidebar-panel shrink-0 p-4 overflow-y-auto border-r border-slate-100 bg-slate-50/30 transition-all duration-300"
       :class="sidebarCollapsed ? 'w-0 p-0 overflow-hidden opacity-0' : 'w-64 opacity-100'"
     >
       <NetworkControls
@@ -248,5 +246,65 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
   min-height: 0;
   overflow: hidden;
   position: relative;
+}
+
+.sidebar-panel {
+  z-index: 20;
+}
+
+/* Drawer handle - small pill tab positioned at sidebar edge */
+.drawer-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  width: 14px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition:
+    left 0.3s,
+    background-color 0.15s,
+    border-color 0.15s,
+    width 0.15s;
+}
+
+.drawer-handle:hover {
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  width: 16px;
+}
+
+/* Grip dots inside the handle */
+.drawer-handle-grip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+}
+
+.drawer-handle-grip::before,
+.drawer-handle-grip::after,
+.drawer-handle-grip {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: #94a3b8;
+  transition: background-color 0.15s;
+}
+
+.drawer-handle:hover .drawer-handle-grip::before,
+.drawer-handle:hover .drawer-handle-grip::after,
+.drawer-handle:hover .drawer-handle-grip {
+  background: #6366f1;
 }
 </style>

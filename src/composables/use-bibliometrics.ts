@@ -1,5 +1,5 @@
 import { ref, onMounted } from 'vue';
-import { tauriCommand } from './use-tauri-command';
+import { isTauri, tauriCommand } from './use-tauri-command';
 
 export interface YearCount {
   year: number;
@@ -46,6 +46,7 @@ const kpis = ref<BiblioKpis>({
 });
 const loading = ref(false);
 const normalizing = ref(false);
+const progress = ref(0);
 const error = ref<string | null>(null);
 
 export function useBibliometrics() {
@@ -71,15 +72,39 @@ export function useBibliometrics() {
   async function runNormalization() {
     normalizing.value = true;
     error.value = null;
+    progress.value = 0;
+
+    let unlisten: (() => void) | null = null;
+    if (isTauri()) {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<{ step: number; totalSteps: number; message: string }>(
+          'biblio:progress',
+          (event) => {
+            const stepDelta = 100 / event.payload.totalSteps;
+            progress.value = event.payload.step * stepDelta;
+          }
+        );
+      } catch {
+        // Fallback if event listening fails
+      }
+    }
+
     // Use setTimeout(0) — a macro-task that yields to the browser's render
     // pipeline — so the progress bar actually paints before the IPC call starts.
     await new Promise<void>((r) => setTimeout(r, 0));
     try {
       await tauriCommand<NormalizeResult>('biblio_normalize');
+      progress.value = 100;
       await fetchKpis();
+      // Keep progress bar at 100% for 500ms before returning to Refresh button
+      await new Promise<void>((r) => setTimeout(r, 500));
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
     } finally {
+      if (unlisten) {
+        unlisten();
+      }
       normalizing.value = false;
     }
   }
@@ -100,5 +125,5 @@ export function useBibliometrics() {
     }, 0);
   });
 
-  return { kpis, loading, normalizing, error, fetchKpis, runNormalization };
+  return { kpis, loading, normalizing, progress, error, fetchKpis, runNormalization };
 }

@@ -6,7 +6,7 @@ import { useBibliometrics } from '../composables/use-bibliometrics';
 const router = useRouter();
 const route = useRoute();
 
-const { kpis, loading, normalizing, runNormalization } = useBibliometrics();
+const { kpis, loading, normalizing, progress, runNormalization } = useBibliometrics();
 
 const includedCount = computed(() => kpis.value.includedCount);
 const totalCitations = computed(() => kpis.value.totalCitations);
@@ -215,7 +215,7 @@ function dismissModal(): void {
           </span>
           <span class="biblio__progress-text">Normalizing…</span>
           <div class="biblio__progress-bar">
-            <div class="biblio__progress-fill"></div>
+            <div class="biblio__progress-fill" :style="{ width: progress + '%' }"></div>
           </div>
         </div>
         <button v-else key="refresh" class="biblio__refresh-btn" @click="runNormalization">
@@ -529,19 +529,9 @@ function dismissModal(): void {
 
 .biblio__progress-fill {
   height: 100%;
-  width: 40%;
   background: var(--color-primary, #4f46e5);
   border-radius: 2px;
-  animation: biblio-progress-slide 1.5s ease-in-out infinite;
-}
-
-@keyframes biblio-progress-slide {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(350%);
-  }
+  transition: width 0.3s ease-out;
 }
 
 /* Fade transition for Refresh ↔ Progress bar */

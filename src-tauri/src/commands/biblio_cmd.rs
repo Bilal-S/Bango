@@ -6,6 +6,7 @@ use crate::models::biblio::{
 };
 // BiblioTerm is re-exported through biblio_repo — no direct use here
 use serde::Serialize;
+use tauri::Emitter;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,6 +14,14 @@ pub struct NormalizeResult {
     pub authors: usize,
     pub terms: usize,
     pub status: BiblioStatus,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NormalizeProgress {
+    step: usize,
+    total_steps: usize,
+    message: String,
 }
 
 /// Run bibliometric normalization: extract and normalize all authors and terms
@@ -23,6 +32,7 @@ pub struct NormalizeResult {
 #[tauri::command]
 pub async fn biblio_normalize(
     db_state: tauri::State<'_, DbState>,
+    app_handle: tauri::AppHandle,
 ) -> Result<NormalizeResult, AppError> {
     let mut conn = db_state
         .conn
@@ -31,23 +41,81 @@ pub async fn biblio_normalize(
 
     let tx = conn.transaction()?;
 
+    // Step 0: Start
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 0,
+            total_steps: 6,
+            message: "Starting normalization...".to_string(),
+        },
+    );
+
     // Clear previous normalization data (preserves AI-extracted and user-added terms)
     biblio_repo::clear_regeneratable_biblio(&tx)?;
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 1,
+            total_steps: 6,
+            message: "Cleared stale bibliometric data".to_string(),
+        },
+    );
 
     // Extract and normalize authors from all articles
     let authors = biblio_repo::normalize_authors_from_articles(&tx)?;
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 2,
+            total_steps: 6,
+            message: "Normalized author data".to_string(),
+        },
+    );
 
     // Parse raw affiliations → institutions + links
     let _affiliations = biblio_repo::normalize_affiliations(&tx)?;
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 3,
+            total_steps: 6,
+            message: "Normalized author affiliations".to_string(),
+        },
+    );
 
     // Extract terms from article keywords, titles, and abstracts
     let terms = biblio_repo::normalize_terms_from_articles(&tx)?;
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 4,
+            total_steps: 6,
+            message: "Normalized keywords and terms".to_string(),
+        },
+    );
 
     // Compute author metrics (citations, avg year, h-index)
     biblio_repo::compute_author_metrics(&tx)?;
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 5,
+            total_steps: 6,
+            message: "Computed author metrics".to_string(),
+        },
+    );
 
     // Build coauthor edges (full counting + fractional counting)
     let _edges = biblio_repo::build_coauthor_edges(&tx)?;
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 6,
+            total_steps: 6,
+            message: "Built co-authorship networks".to_string(),
+        },
+    );
 
     let status = biblio_repo::get_biblio_status(&tx)?;
 

@@ -278,7 +278,7 @@ const emit = defineEmits<{
 const searchQuery = ref('');
 const minPapers = ref(1);
 const minLinkStrength = ref(1);
-const maxAuthors = ref(200);
+const maxAuthors = ref(20);
 const showSuggestions = ref(false);
 
 interface AuthorSuggestion {
