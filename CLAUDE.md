@@ -133,3 +133,11 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
 - TypeScript: Vitest for unit tests.
 - Test file naming: `*.test.ts` for TS, `*_test.rs` or inline `#[cfg(test)]` for Rust.
 - Place Rust tests in a `tests/` directory beside the module they test.
+
+## Tauri App Diagnostics & Testing
+
+- When diagnosing frontend behavior, viewports, UI latency, or screen freezes, the agent can run the Tauri desktop app and use the `tauri-pilot` MCP tools to:
+  - Interactively navigate the application (`mcp_tauri-pilot_navigate`).
+  - Perform clicks and element queries (`mcp_tauri-pilot_click`, `mcp_tauri-pilot_wait`, `mcp_tauri-pilot_text`).
+  - Retrieve current state, console logs, and network logs (`mcp_tauri-pilot_logs`, `mcp_tauri-pilot_network`).
+  - Capture screenshots to visually inspect layout issues (`mcp_tauri-pilot_screenshot`).

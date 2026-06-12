@@ -240,12 +240,117 @@ pub fn dedup_terms(terms: &[String]) -> Vec<String> {
     result
 }
 
+#[must_use]
+fn is_us_state(part: &str) -> bool {
+    let trimmed = part.to_lowercase().trim().to_string();
+    if trimmed.len() == 2 {
+        let states = [
+            "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id", "il", "in",
+            "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv",
+            "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn",
+            "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy", "dc",
+        ];
+        return states.contains(&trimmed.as_str());
+    }
+    if trimmed.len() >= 5 {
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() == 2 && parts[0].len() == 2 {
+            let states = [
+                "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id", "il", "in",
+                "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv",
+                "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn",
+                "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy", "dc",
+            ];
+            if states.contains(&parts[0]) && parts[1].chars().all(|c| c.is_ascii_digit()) {
+                return true;
+            }
+        }
+    }
+    let full_states = [
+        "alabama",
+        "alaska",
+        "arizona",
+        "arkansas",
+        "california",
+        "colorado",
+        "connecticut",
+        "delaware",
+        "florida",
+        "georgia",
+        "hawaii",
+        "idaho",
+        "illinois",
+        "indiana",
+        "iowa",
+        "kansas",
+        "kentucky",
+        "louisiana",
+        "maine",
+        "maryland",
+        "massachusetts",
+        "michigan",
+        "minnesota",
+        "mississippi",
+        "missouri",
+        "montana",
+        "nebraska",
+        "nevada",
+        "new hampshire",
+        "new jersey",
+        "new mexico",
+        "new york",
+        "north carolina",
+        "north dakota",
+        "ohio",
+        "oklahoma",
+        "oregon",
+        "pennsylvania",
+        "rhode island",
+        "south carolina",
+        "south dakota",
+        "tennessee",
+        "texas",
+        "utah",
+        "vermont",
+        "virginia",
+        "washington",
+        "west virginia",
+        "wisconsin",
+        "wyoming",
+        "district of columbia",
+    ];
+    full_states.contains(&trimmed.as_str())
+}
+
+#[must_use]
+fn is_department_part(part: &str) -> bool {
+    let p = part.to_lowercase();
+    p.starts_with("dept ")
+        || p.starts_with("dept. ")
+        || p.starts_with("dept of ")
+        || p.starts_with("dept. of ")
+        || p.starts_with("department ")
+        || p.starts_with("department of ")
+        || p.starts_with("division of ")
+        || p.starts_with("faculty of ")
+        || p.starts_with("lab of ")
+        || p.starts_with("laboratory of ")
+        || p.starts_with("school of ")
+            && (p.contains("science")
+                || p.contains("engineering")
+                || p.contains("medicine")
+                || p.contains("art")
+                || p.contains("business")
+                || p.contains("law"))
+}
+
 /// Parse an affiliation string into institution, city, and country.
 ///
 /// Common formats:
 /// - "MIT, Cambridge, MA, USA"
 /// - "Department of CS, Stanford University, Stanford, CA"
 /// - "University of Oxford, Oxford, United Kingdom"
+#[must_use]
 pub fn parse_affiliation(affiliation: &str) -> ParsedAffiliation {
     if affiliation.trim().is_empty() {
         return ParsedAffiliation::default();
@@ -267,18 +372,131 @@ pub fn parse_affiliation(affiliation: &str) -> ParsedAffiliation {
         };
     }
 
-    // Heuristic: last segment is often country or state abbreviation
-    let country = parts.last().map(|s| s.to_string()).filter(|s| !s.is_empty());
-    let city =
-        if parts.len() >= 3 { parts.get(parts.len() - 2).map(|s| s.to_string()) } else { None };
-    // Institution: combine everything before city/country
-    let institution = if parts.len() > 2 {
-        Some(parts[..parts.len() - 2].join(", "))
+    let mut country_str: Option<String> = None;
+    let mut city_str: Option<String> = None;
+    let mut is_us = false;
+    let mut used_parts = 0;
+
+    // 1. Country Check
+    if let Some(&last_part) = parts.last() {
+        let last_lower = last_part.to_lowercase();
+        if last_lower == "usa"
+            || last_lower == "united states"
+            || last_lower == "united states of america"
+            || last_lower == "u.s.a."
+            || last_lower == "u.s."
+            || last_lower == "us"
+        {
+            country_str = Some("USA".to_string());
+            is_us = true;
+            used_parts += 1;
+        } else if last_lower == "uk"
+            || last_lower == "united kingdom"
+            || last_lower == "u.k."
+            || last_lower == "england"
+            || last_lower == "scotland"
+            || last_lower == "wales"
+            || last_lower == "great britain"
+            || last_lower == "gb"
+        {
+            country_str = Some("United Kingdom".to_string());
+            used_parts += 1;
+        } else {
+            let common_countries = [
+                "germany",
+                "france",
+                "china",
+                "japan",
+                "australia",
+                "canada",
+                "italy",
+                "spain",
+                "netherlands",
+                "switzerland",
+                "sweden",
+                "norway",
+                "finland",
+                "denmark",
+                "singapore",
+                "south korea",
+                "india",
+                "brazil",
+                "south africa",
+                "belgium",
+                "austria",
+                "new zealand",
+            ];
+            for &c in &common_countries {
+                if last_lower == c {
+                    country_str = Some(c[..1].to_uppercase() + &c[1..]);
+                    used_parts += 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    // 2. City & State extraction based on parts length and country
+    if country_str.is_some() {
+        if parts.len() >= 3 {
+            if is_us {
+                let state_candidate = parts[parts.len() - 2];
+                if is_us_state(state_candidate) {
+                    used_parts += 1;
+                    if parts.len() >= 4 {
+                        city_str = Some(parts[parts.len() - 3].to_string());
+                        used_parts += 1;
+                    }
+                } else {
+                    city_str = Some(state_candidate.to_string());
+                    used_parts += 1;
+                }
+            } else {
+                // Non-US country, assume second-to-last is city
+                city_str = Some(parts[parts.len() - 2].to_string());
+                used_parts += 1;
+            }
+        }
+    } else {
+        // No recognized country yet. Check if last part is a US state.
+        if parts.len() >= 2 {
+            let last_part = parts[parts.len() - 1];
+            if is_us_state(last_part) {
+                country_str = Some("USA".to_string());
+                used_parts += 1;
+                if parts.len() >= 3 {
+                    city_str = Some(parts[parts.len() - 2].to_string());
+                    used_parts += 1;
+                }
+            } else if parts.len() >= 3 {
+                // Naive fallback for unrecognized country
+                city_str = Some(parts[parts.len() - 2].to_string());
+                country_str = Some(last_part.to_string());
+                used_parts += 2;
+            } else {
+                // parts.len() == 2, unrecognized country. Treat last as country, first as institution.
+                country_str = Some(last_part.to_string());
+                used_parts += 1;
+            }
+        }
+    }
+
+    // 3. Institution Extraction & Department Filtering
+    let remaining_len = parts.len().saturating_sub(used_parts);
+    let institution = if remaining_len > 0 {
+        let inst_parts: Vec<&str> =
+            parts[..remaining_len].iter().copied().filter(|p| !is_department_part(p)).collect();
+        if inst_parts.is_empty() {
+            // Fallback if filtering left nothing
+            Some(parts[..remaining_len].join(", "))
+        } else {
+            Some(inst_parts.join(", "))
+        }
     } else {
         Some(parts[0].to_string())
     };
 
-    ParsedAffiliation { institution, city, country }
+    ParsedAffiliation { institution, city: city_str, country: country_str }
 }
 
 /// Collapse multiple whitespace chars into a single space.
@@ -537,8 +755,8 @@ mod tests {
     fn test_parse_affiliation_full() {
         let aff = parse_affiliation("MIT, Cambridge, MA, USA");
         assert_eq!(aff.country.as_deref(), Some("USA"));
-        assert_eq!(aff.city.as_deref(), Some("MA"));
-        assert_eq!(aff.institution.as_deref(), Some("MIT, Cambridge"));
+        assert_eq!(aff.city.as_deref(), Some("Cambridge"));
+        assert_eq!(aff.institution.as_deref(), Some("MIT"));
     }
 
     #[test]
@@ -569,8 +787,24 @@ mod tests {
     fn test_parse_affiliation_dept_university_city_country() {
         let aff = parse_affiliation("Dept of CS, Stanford University, Stanford, CA, USA");
         assert_eq!(aff.country.as_deref(), Some("USA"));
-        assert_eq!(aff.city.as_deref(), Some("CA"));
-        assert_eq!(aff.institution.as_deref(), Some("Dept of CS, Stanford University, Stanford"));
+        assert_eq!(aff.city.as_deref(), Some("Stanford"));
+        assert_eq!(aff.institution.as_deref(), Some("Stanford University"));
+    }
+
+    #[test]
+    fn test_parse_affiliation_state_only() {
+        let aff = parse_affiliation("MIT, Cambridge, MA");
+        assert_eq!(aff.country.as_deref(), Some("USA"));
+        assert_eq!(aff.city.as_deref(), Some("Cambridge"));
+        assert_eq!(aff.institution.as_deref(), Some("MIT"));
+    }
+
+    #[test]
+    fn test_parse_affiliation_uk_normalization() {
+        let aff = parse_affiliation("University of Oxford, Oxford, UK");
+        assert_eq!(aff.country.as_deref(), Some("United Kingdom"));
+        assert_eq!(aff.city.as_deref(), Some("Oxford"));
+        assert_eq!(aff.institution.as_deref(), Some("University of Oxford"));
     }
 
     // ── JSON author parsing ─────────────────────────────────────

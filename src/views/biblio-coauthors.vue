@@ -15,8 +15,11 @@ const { isLayouting, applyLayout, runForceAtlas2Async } = useNetworkLayout();
 const { locateNode, resetZoom, exportImage, applyGraphFilters } = useSigmaRenderer();
 
 const selectedAuthor = ref<CoAuthorNode | null>(null);
+const focusedNodeId = ref<string | null>(null);
 const visibleNodeCount = ref(0);
 const visibleEdgeCount = ref(0);
+
+const colorMode = ref<'cluster' | 'temporal'>('cluster');
 
 /** Derive cluster count from graph node attributes */
 const clusterCount = computed(() => {
@@ -27,6 +30,26 @@ const clusterCount = computed(() => {
     if (c !== null && c !== undefined) clusters.add(c);
   });
   return clusters.size;
+});
+
+const yearRange = computed(() => {
+  if (!graph.value) return { min: 2000, max: 2024 };
+  let min = Infinity;
+  let max = -Infinity;
+  graph.value.forEachNode((node) => {
+    const yr = graph.value!.getNodeAttribute(node, 'avgYear') as number | null;
+    if (yr !== null && yr !== undefined) {
+      if (yr < min) min = yr;
+      if (yr > max) max = yr;
+    }
+  });
+  if (min === Infinity || max === -Infinity) {
+    return { min: 2000, max: 2024 };
+  }
+  if (min === max) {
+    return { min: min - 1, max: min + 1 };
+  }
+  return { min: Math.floor(min), max: Math.ceil(max) };
 });
 
 const stats = computed(() => ({
@@ -55,8 +78,12 @@ onMounted(async () => {
   }
 });
 
-function onNodeClick(nodeId: string) {
-  if (!graph.value) return;
+function onNodeClick(nodeId: string | null) {
+  focusedNodeId.value = nodeId;
+  if (!nodeId || !graph.value) {
+    selectedAuthor.value = null;
+    return;
+  }
   const attrs = graph.value.getNodeAttributes(nodeId);
   selectedAuthor.value = {
     id: nodeId,
@@ -66,7 +93,6 @@ function onNodeClick(nodeId: string) {
     avgYear: attrs.avgYear ?? null,
     estimatedHIndex: attrs.estimatedHIndex ?? null,
     cluster: attrs.cluster ?? null,
-    color: attrs.color,
   };
 }
 
@@ -84,11 +110,11 @@ function onFilterChange(filters: { minPapers: number; minLinkStrength: number; s
 
 function onLocateAuthor(name: string) {
   if (!graph.value) return;
-  // Find the node ID by label
   const nodeId = graph.value.findNode(
     (node) => (graph.value!.getNodeAttribute(node, 'label') as string) === name
   );
   if (nodeId) {
+    onNodeClick(nodeId);
     locateNode(nodeId);
   }
 }
@@ -128,11 +154,15 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
         :cluster-count="stats.clusterCount"
         :author-names="authorNames"
         :counting-mode="countingMode"
+        :color-mode="colorMode"
+        :min-year="yearRange.min"
+        :max-year="yearRange.max"
         @filter-change="onFilterChange"
         @locate-author="onLocateAuthor"
         @reset-zoom="onResetZoom"
         @export-image="onExportImage"
         @counting-mode-change="onCountingModeChange"
+        @color-mode-change="colorMode = $event"
       />
     </aside>
 
@@ -143,6 +173,10 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
         :loading="loading"
         :is-layouting="isLayouting"
         :error="error"
+        :focused-node-id="focusedNodeId"
+        :color-mode="colorMode"
+        :min-year="yearRange.min"
+        :max-year="yearRange.max"
         @node-click="onNodeClick"
         @retry="fetchNetwork"
       />
@@ -152,7 +186,7 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
     <AuthorDetailPanel
       :author="selectedAuthor"
       :graph="graph"
-      @close="selectedAuthor = null"
+      @close="onNodeClick(null)"
       @navigate="onNavigateToAuthor"
     />
   </div>

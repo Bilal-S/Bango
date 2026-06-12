@@ -229,13 +229,13 @@ pub fn get_authors_for_article(
 // Institutions
 // =============================================================================
 
-/// Upsert an institution. Returns the institution ID.
+/// Upsert an institution. Returns the institution ID and a boolean indicating if it was newly created.
 pub fn upsert_institution(
     conn: &Connection,
     normalized_name: &str,
     country: Option<&str>,
     city: Option<&str>,
-) -> Result<String, AppError> {
+) -> Result<(String, bool), AppError> {
     let existing: Option<String> = conn
         .query_row(
             "SELECT id FROM biblio_institutions WHERE normalized_name = ?1",
@@ -245,14 +245,14 @@ pub fn upsert_institution(
         .ok();
 
     if let Some(id) = existing {
-        Ok(id)
+        Ok((id, false))
     } else {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO biblio_institutions (id, normalized_name, country, city) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![id, normalized_name, country, city],
         )?;
-        Ok(id)
+        Ok((id, true))
     }
 }
 
@@ -262,10 +262,16 @@ pub fn insert_author_affiliation(
     article_author_id: &str,
     institution_id: &str,
 ) -> Result<(), AppError> {
+    let (article_id, author_id): (String, String) = conn.query_row(
+        "SELECT article_id, author_id FROM biblio_article_authors WHERE id = ?1",
+        rusqlite::params![article_author_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+
     conn.execute(
-        "INSERT OR IGNORE INTO biblio_author_affiliations (id, article_author_id, institution_id) \
-         VALUES (?1, ?2, ?3)",
-        rusqlite::params![uuid::Uuid::new_v4().to_string(), article_author_id, institution_id],
+        "INSERT OR IGNORE INTO biblio_author_affiliations (id, article_id, author_id, institution_id) \
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![uuid::Uuid::new_v4().to_string(), article_id, author_id, institution_id],
     )?;
     Ok(())
 }
@@ -279,8 +285,7 @@ pub fn get_institutions_by_author(
         "SELECT DISTINCT i.id, i.normalized_name, i.country, i.city, i.created_at \
          FROM biblio_institutions i \
          JOIN biblio_author_affiliations baa ON baa.institution_id = i.id \
-         JOIN biblio_article_authors baa2 ON baa2.id = baa.article_author_id \
-         WHERE baa2.author_id = ?1 \
+         WHERE baa.author_id = ?1 \
          ORDER BY i.normalized_name",
     )?;
     let institutions = stmt
@@ -302,9 +307,10 @@ pub fn get_institutions_by_author(
 pub fn count_unmatched_affiliations(conn: &Connection) -> Result<i32, AppError> {
     let count: i32 = conn
         .query_row(
-            "SELECT COUNT(*) FROM biblio_article_authors \
-             WHERE raw_affiliation IS NOT NULL AND raw_affiliation != '' \
-             AND id NOT IN (SELECT DISTINCT article_author_id FROM biblio_author_affiliations)",
+            "SELECT COUNT(*) FROM biblio_article_authors baa \
+             LEFT JOIN biblio_author_affiliations baf ON baf.article_id = baa.article_id AND baf.author_id = baa.author_id \
+             WHERE baa.raw_affiliation IS NOT NULL AND baa.raw_affiliation != '' \
+             AND baf.id IS NULL",
             [],
             |r| r.get(0),
         )
@@ -604,13 +610,20 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
 /// Returns the number of unique authors created.
 pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, authors FROM articles WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
+        "SELECT id, authors, affiliation FROM articles WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
     )?;
-    let rows: Vec<(String, String)> =
-        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+    let rows: Vec<(String, String, Option<String>)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
 
-    for (article_id, authors_str) in &rows {
+    for (article_id, authors_str, affiliation_opt) in &rows {
         let parsed = crate::biblio::normalizer::parse_authors(authors_str);
+        let affs: Vec<String> = if let Some(aff_str) = affiliation_opt.as_ref() {
+            aff_str.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        } else {
+            Vec::new()
+        };
+
         for (order, author) in parsed.iter().enumerate() {
             let norm = crate::biblio::normalizer::normalize_author_name(&author.raw);
             let display = crate::biblio::normalizer::build_display_name(&author.raw);
@@ -618,13 +631,22 @@ pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppEr
                 continue;
             }
             let author_id = upsert_author(conn, &norm, &display)?;
+
+            let raw_aff = if order < affs.len() {
+                Some(affs[order].as_str())
+            } else if affs.len() == 1 {
+                Some(affs[0].as_str())
+            } else {
+                None
+            };
+
             link_article_author(
                 conn,
                 article_id,
                 &author_id,
                 order as i32,
                 Some(&author.raw),
-                None,
+                raw_aff,
             )?;
         }
     }
@@ -699,13 +721,15 @@ pub fn normalize_affiliations(conn: &Connection) -> Result<(usize, usize), AppEr
             if normalized.is_empty() {
                 continue;
             }
-            let inst_id = upsert_institution(
+            let (inst_id, created) = upsert_institution(
                 conn,
                 &normalized,
                 parsed.country.as_deref(),
                 parsed.city.as_deref(),
             )?;
-            institutions_created += 1;
+            if created {
+                institutions_created += 1;
+            }
             insert_author_affiliation(conn, article_author_id, &inst_id)?;
             links_created += 1;
         }

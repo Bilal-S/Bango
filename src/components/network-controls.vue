@@ -98,6 +98,35 @@
       </div>
     </div>
 
+    <!-- Color Mode toggle -->
+    <div>
+      <label class="text-xs text-slate-600 mb-1 block">Color Mode</label>
+      <div class="flex rounded-lg overflow-hidden border border-slate-200">
+        <button
+          :class="
+            colorMode === 'cluster'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          "
+          class="flex-1 px-3 py-1 text-xs font-medium transition-colors cursor-pointer"
+          @click="$emit('color-mode-change', 'cluster')"
+        >
+          Cluster
+        </button>
+        <button
+          :class="
+            colorMode === 'temporal'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          "
+          class="flex-1 px-3 py-1 text-xs font-medium transition-colors cursor-pointer"
+          @click="$emit('color-mode-change', 'temporal')"
+        >
+          Temporal
+        </button>
+      </div>
+    </div>
+
     <!-- Stats row -->
     <div class="flex items-center gap-4 text-xs text-slate-500 border-t border-slate-100 pt-3">
       <div class="flex items-center gap-1">
@@ -110,18 +139,41 @@
       </div>
     </div>
 
-    <!-- Cluster legend -->
-    <div v-if="clusters.length > 0" class="border-t border-slate-100 pt-3">
-      <p class="text-xs text-slate-500 mb-2">Clusters</p>
-      <div class="flex flex-wrap gap-1.5">
-        <span
-          v-for="c in clusters"
-          :key="c.id"
-          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-white"
-          :style="{ backgroundColor: c.color }"
-        >
-          {{ c.label }}
-        </span>
+    <!-- Legends -->
+    <div class="border-t border-slate-100 pt-3">
+      <!-- Cluster legend -->
+      <div v-if="colorMode === 'cluster' && clusters.length > 0">
+        <p class="text-xs text-slate-500 mb-2">Clusters</p>
+        <div class="flex flex-wrap gap-1.5">
+          <span
+            v-for="c in clusters"
+            :key="c.id"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium text-white"
+            :style="{ backgroundColor: c.color }"
+          >
+            {{ c.label }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Temporal legend -->
+      <div v-else-if="colorMode === 'temporal'">
+        <p class="text-xs text-slate-500 mb-2">Avg. Publication Year</p>
+        <div class="flex flex-col gap-1.5">
+          <!-- Gradient bar: Slate blue (#56B4E9) to Vibrant orange (#E69F00) -->
+          <div class="h-3 w-full rounded bg-gradient-to-r from-[#56B4E9] to-[#E69F00]"></div>
+          <!-- Labels -->
+          <div class="flex justify-between text-[10px] text-slate-400 font-medium px-0.5">
+            <span>{{ minYear }}</span>
+            <span>{{ Math.round((minYear + maxYear) / 2) }}</span>
+            <span>{{ maxYear }}</span>
+          </div>
+          <!-- Neutral gray for no year -->
+          <div class="flex items-center gap-1.5 mt-1">
+            <span class="h-2-5 w-2-5 rounded-full bg-slate-200 border border-slate-300"></span>
+            <span class="text-[10px] text-slate-400 italic">No year data</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -158,6 +210,9 @@ const props = defineProps<{
   clusterCount: number;
   authorNames: string[];
   countingMode: CountingMode;
+  colorMode: 'cluster' | 'temporal';
+  minYear: number;
+  maxYear: number;
 }>();
 
 const emit = defineEmits<{
@@ -169,6 +224,7 @@ const emit = defineEmits<{
   (e: 'reset-zoom'): void;
   (e: 'export-image'): void;
   (e: 'counting-mode-change', mode: CountingMode): void;
+  (e: 'color-mode-change', mode: 'cluster' | 'temporal'): void;
 }>();
 
 const searchQuery = ref('');

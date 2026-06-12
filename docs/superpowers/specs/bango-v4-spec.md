@@ -210,6 +210,9 @@ The application design is based on the **"Scholarly Precision"** style, utilizin
 *   **Project Backup**: Exports a single `.bango.json` containing aims, criteria, articles, tags, labels, and audit logs.
 *   **Credential Security**: LLM API keys are encrypted locally using AES-256-GCM (key derived via PBKDF2 from machine hostname, username, and app salt). Project exports encrypt API keys using a user-specified password.
 
+### 10.3 App Diagnostics & E2E Testing
+*   **Tauri Pilot Integration**: The application includes end-to-end (E2E) testing hooks via `tauri-pilot` for automated UI inspection, console log retrieval, and action replay. Agents can use the `tauri-pilot` MCP server to programmatically inspect current views, capture interface screenshots, and extract active runtime logs during diagnostic sessions.
+
 ---
 
 ## 11. Scope Exclusions

@@ -45,30 +45,63 @@
         </span>
       </div>
 
-      <!-- Co-authors -->
-      <div class="flex-1 overflow-y-auto px-4 pb-4">
-        <p class="text-xs font-semibold text-slate-500 mb-2">Co-Authors ({{ coAuthors.length }})</p>
-        <ul class="space-y-1">
-          <li
-            v-for="ca in coAuthors"
-            :key="ca.id"
-            class="flex items-center justify-between text-xs text-slate-700 py-1 px-2 rounded hover:bg-slate-50 cursor-pointer"
-            @click="$emit('navigate', ca.id)"
-          >
-            <span class="truncate">{{ ca.label }}</span>
-            <span class="text-slate-400 ml-2 shrink-0">{{ ca.weight }}p</span>
-          </li>
-        </ul>
+      <!-- Scroll Area (Affiliations & Co-authors) -->
+      <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
+        <!-- Affiliations -->
+        <div>
+          <p class="text-xs font-semibold text-slate-500 mb-2">Affiliations</p>
+          <div v-if="loading" class="flex justify-center py-2">
+            <span class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></span>
+          </div>
+          <div v-else-if="institutions.length === 0" class="text-xs text-slate-400 italic">
+            No affiliations found
+          </div>
+          <ul v-else class="space-y-2">
+            <li
+              v-for="inst in institutions"
+              :key="inst.id"
+              class="bg-slate-50 rounded p-2 text-xs border border-slate-100 flex flex-col"
+            >
+              <span class="font-medium text-slate-800 capitalize">{{ inst.normalizedName }}</span>
+              <span
+                v-if="inst.city || inst.country"
+                class="text-slate-400 text-[10px] mt-0.5 flex items-center gap-1"
+              >
+                <span class="material-symbols-outlined text-[10px] leading-none">location_on</span>
+                {{ [inst.city, inst.country].filter(Boolean).join(', ') }}
+              </span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Co-authors -->
+        <div>
+          <p class="text-xs font-semibold text-slate-500 mb-2">
+            Co-Authors ({{ coAuthors.length }})
+          </p>
+          <ul class="space-y-1">
+            <li
+              v-for="ca in coAuthors"
+              :key="ca.id"
+              class="flex items-center justify-between text-xs text-slate-700 py-1 px-2 rounded hover:bg-slate-50 cursor-pointer"
+              @click="$emit('navigate', ca.id)"
+            >
+              <span class="truncate">{{ ca.label }}</span>
+              <span class="text-slate-400 ml-2 shrink-0">{{ ca.weight }}p</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   </Transition>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type Graph from 'graphology';
-import type { CoAuthorNode } from '../types/biblio-network';
+import type { CoAuthorNode, BiblioInstitution } from '../types/biblio-network';
 import { clusterColor } from '../types/biblio-network';
+import { tauriCommand, isTauri } from '../composables/use-tauri-command';
 
 const props = defineProps<{
   author: CoAuthorNode | null;
@@ -82,6 +115,46 @@ defineEmits<{
 
 const authorColor = computed(() =>
   props.author?.cluster !== null ? clusterColor(props.author?.cluster ?? 0) : '#94a3b8'
+);
+
+const institutions = ref<BiblioInstitution[]>([]);
+const loading = ref(false);
+
+watch(
+  () => props.author?.id,
+  async (newId) => {
+    if (!newId) {
+      institutions.value = [];
+      return;
+    }
+    loading.value = true;
+    try {
+      if (isTauri()) {
+        institutions.value = await tauriCommand<BiblioInstitution[]>(
+          'biblio_get_author_institutions',
+          {
+            authorId: newId,
+          }
+        );
+      } else {
+        institutions.value = [
+          {
+            id: 'mock-1',
+            normalizedName: 'mock university of bango',
+            city: 'Tauri Town',
+            country: 'USA',
+            createdAt: new Date().toISOString(),
+          },
+        ];
+      }
+    } catch (err) {
+      console.error('Failed to load institutions:', err);
+      institutions.value = [];
+    } finally {
+      loading.value = false;
+    }
+  },
+  { immediate: true }
 );
 
 const coAuthors = computed(() => {

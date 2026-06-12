@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "mcp__tauri-pilot__*",
       "Bash(npx tauri *)",
       "Bash(npx -y @anthropic/mcp-client --help)",
       "Bash(npm search *)",
@@ -20,7 +21,6 @@
       "Bash(npm run check:all)",
       "Bash(npm run format:check)",
       "Bash(npm run lint:check)",
-      "Bash(npm install *)",
       "Bash(npx prettier --write *)",
       "Bash(git log --oneline *)"
     ],

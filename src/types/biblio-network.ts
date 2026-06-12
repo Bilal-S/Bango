@@ -24,6 +24,15 @@ export interface CoAuthorNode {
   color?: string;
 }
 
+/** A normalized institution entity. */
+export interface BiblioInstitution {
+  id: string;
+  normalizedName: string;
+  country: string | null;
+  city: string | null;
+  createdAt: string;
+}
+
 /** A single edge (co-authorship link) in the network. */
 export interface CoAuthorEdge {
   source: string;

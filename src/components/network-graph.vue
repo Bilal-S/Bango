@@ -62,10 +62,14 @@ const props = defineProps<{
   loading: boolean;
   isLayouting: boolean;
   error: string | null;
+  focusedNodeId: string | null;
+  colorMode: 'cluster' | 'temporal';
+  minYear: number;
+  maxYear: number;
 }>();
 
 const emit = defineEmits<{
-  (e: 'node-click', nodeId: string): void;
+  (e: 'node-click', nodeId: string | null): void;
   (e: 'retry'): void;
 }>();
 
@@ -73,7 +77,6 @@ const containerRef = ref<HTMLElement>();
 const hoveredNode = ref<CoAuthorNode | null>(null);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
-const focusedNodeId = ref<string | null>(null);
 
 const { renderer, initRenderer, destroyRenderer } = useSigmaRenderer();
 
@@ -88,6 +91,7 @@ watch(
   () => props.graph,
   (g) => {
     if (!g || !containerRef.value) return;
+    clearFocusMode();
     requestAnimationFrame(() => {
       if (!containerRef.value || !g) return;
       initRenderer(containerRef.value, g, {
@@ -95,9 +99,67 @@ watch(
         defaultEdgeColor: '#e2e8f0',
       });
       bindSigmaEvents();
+      if (props.focusedNodeId) {
+        applyFocusMode(props.focusedNodeId);
+      }
     });
   }
 );
+
+watch(
+  () => props.focusedNodeId,
+  (newId) => {
+    if (newId) {
+      applyFocusMode(newId);
+    } else {
+      clearFocusMode();
+    }
+  }
+);
+
+watch(
+  () => props.colorMode,
+  () => {
+    if (props.focusedNodeId) {
+      applyFocusMode(props.focusedNodeId);
+    } else {
+      clearFocusMode();
+    }
+  }
+);
+
+function getTemporalColor(avgYear: number | null, minYear: number, maxYear: number): string {
+  if (avgYear === null || avgYear === undefined) {
+    return '#cbd5e1'; // neutral gray
+  }
+  if (maxYear <= minYear) {
+    return '#56B4E9';
+  }
+  const ratio = Math.max(0, Math.min(1, (avgYear - minYear) / (maxYear - minYear)));
+
+  // Interpolate between RGB(86, 180, 233) and RGB(230, 159, 0)
+  const r = Math.round(86 + ratio * (230 - 86));
+  const g = Math.round(180 + ratio * (159 - 180));
+  const b = Math.round(233 + ratio * (0 - 233));
+
+  // Format as hex
+  const rHex = r.toString(16).padStart(2, '0');
+  const gHex = g.toString(16).padStart(2, '0');
+  const bHex = b.toString(16).padStart(2, '0');
+
+  return `#${rHex}${gHex}${bHex}`;
+}
+
+function getNodeColor(nodeId: string): string {
+  if (!props.graph || !props.graph.hasNode(nodeId)) return '#94a3b8';
+  if (props.colorMode === 'temporal') {
+    const avgYear = props.graph.getNodeAttribute(nodeId, 'avgYear');
+    return getTemporalColor(avgYear, props.minYear, props.maxYear);
+  } else {
+    const cluster = props.graph.getNodeAttribute(nodeId, 'cluster') ?? 0;
+    return clusterColor(cluster);
+  }
+}
 
 function bindSigmaEvents() {
   if (!renderer.value) return;
@@ -114,7 +176,7 @@ function bindSigmaEvents() {
       avgYear: attrs.avgYear ?? null,
       estimatedHIndex: attrs.estimatedHIndex ?? null,
       cluster: attrs.cluster ?? null,
-      color: attrs.color,
+      color: getNodeColor(node),
     };
   });
 
@@ -133,27 +195,25 @@ function bindSigmaEvents() {
   });
 
   sig.on('clickNode', ({ node }) => {
-    focusedNodeId.value = node;
-    applyFocusMode(node);
     emit('node-click', node);
   });
 
   sig.on('clickStage', () => {
-    clearFocusMode();
-    focusedNodeId.value = null;
+    emit('node-click', null);
   });
 }
 
 function applyFocusMode(nodeId: string) {
   if (!props.graph || !renderer.value) return;
   const g = props.graph;
+  if (!g.hasNode(nodeId)) return;
   const neighbors = new Set(g.neighbors(nodeId));
   neighbors.add(nodeId);
 
   g.forEachNode((n) => {
     const isNeighbor = neighbors.has(n);
-    const originalColor = g.getNodeAttribute(n, 'color') ?? '#94a3b8';
-    g.setNodeAttribute(n, 'color', isNeighbor ? originalColor : `${originalColor}26`);
+    const baseColor = getNodeColor(n);
+    g.setNodeAttribute(n, 'color', isNeighbor ? baseColor : `${baseColor}26`);
     const origSize = g.getNodeAttribute(n, 'size') ?? 5;
     g.setNodeAttribute(n, 'size', isNeighbor ? origSize : origSize * 0.6);
   });
@@ -173,8 +233,7 @@ function clearFocusMode() {
   const maxW = Math.max(...weights, 1);
 
   g.forEachNode((n) => {
-    const cluster = g.getNodeAttribute(n, 'cluster') ?? 0;
-    g.setNodeAttribute(n, 'color', clusterColor(cluster));
+    g.setNodeAttribute(n, 'color', getNodeColor(n));
     const weight = g.getNodeAttribute(n, 'weight') ?? 1;
     const size = minW === maxW ? 10 : 3 + ((weight - minW) / (maxW - minW)) * 17;
     g.setNodeAttribute(n, 'size', size);
