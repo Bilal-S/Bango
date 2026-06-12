@@ -32,6 +32,7 @@ const navItems: NavItem[] = [
   { label: 'PRISMA', icon: 'account_tree', route: '/prisma' },
   { label: 'AI Summary', icon: 'auto_awesome', route: '/summary' },
   { label: 'Bibliometrics', icon: 'graph_3', route: '/bibliometrics' },
+  { label: 'Chat', icon: 'chat_add_on', route: '/chat' },
   { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
 

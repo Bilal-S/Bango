@@ -113,3 +113,12 @@ pub struct ListModelsRequest {
 pub async fn list_llm_models(request: ListModelsRequest) -> Result<Vec<String>, AppError> {
     client::list_models(&request.provider, &request.endpoint_url, request.api_key.as_deref()).await
 }
+
+#[tauri::command]
+pub fn has_llm_config(db_state: State<'_, DbState>) -> Result<bool, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    llm_config_repo::has_config(&conn)
+}

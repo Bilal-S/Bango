@@ -136,6 +136,8 @@ pub fn run() {
             commands::llm_config::save_llm_config,
             commands::llm_config::test_llm_connection,
             commands::llm_config::list_llm_models,
+            commands::llm_config::has_llm_config,
+            commands::chat::send_chat_message,
             commands::tags::get_tags,
             commands::tags::get_tags_with_counts,
             commands::tags::create_tag,

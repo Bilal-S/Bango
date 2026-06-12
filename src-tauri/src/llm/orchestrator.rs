@@ -29,6 +29,7 @@ pub enum LlmRequestType {
     CriteriaGeneration,
     SummaryGeneration,
     TestConnection,
+    Chat,
 }
 
 /// Centralized LLM request coordinator.

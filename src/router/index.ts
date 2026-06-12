@@ -16,6 +16,7 @@ const PrismaDiagram = () => import('@/views/prisma-diagram.vue');
 const BiblioDashboard = () => import('@/views/biblio-dashboard.vue');
 const BiblioCoauthors = () => import('@/views/biblio-coauthors.vue');
 const HelpGuide = () => import('@/views/help-guide.vue');
+const ChatView = () => import('@/views/chat-view.vue');
 
 const routes = [
   { path: '/', name: 'dashboard', component: Dashboard },
@@ -59,6 +60,11 @@ const routes = [
       },
     ],
   },
+  {
+    path: '/chat',
+    name: 'chat',
+    component: ChatView,
+  },
   { path: '/settings', name: 'settings', component: LlmConfigView },
   { path: '/help', name: 'help', component: HelpGuide },
 ];
@@ -80,6 +86,7 @@ void router.isReady().then(() => {
     import('@/views/screening-progress.vue'),
     import('@/views/biblio-dashboard.vue'),
     import('@/views/biblio-coauthors.vue'),
+    import('@/views/chat-view.vue'),
   ]);
 });
 

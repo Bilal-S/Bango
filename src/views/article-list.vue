@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
@@ -8,6 +8,7 @@ import { useToast } from '@/composables/use-toast';
 import { requestArticleAiSummary } from '@/composables/use-ai-summary';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useBatchReferenceScraping } from '@/composables/use-references';
+import { useChatStore } from '@/stores/chat';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -19,7 +20,9 @@ import ReferencesView from '@/components/references-view.vue';
 import BatchRefProgress from '@/components/batch-ref-progress.vue';
 
 const route = useRoute();
+const router = useRouter();
 const toast = useToast();
+const chatStore = useChatStore();
 
 const {
   articles,
@@ -246,6 +249,17 @@ async function handleBulkAddLabel(): Promise<void> {
     `Label "${name}" added to ${ids.length} article${ids.length > 1 ? 's' : ''}`,
     'success'
   );
+}
+
+function handleBulkAddToChat(): void {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return;
+  chatStore.clearSelectedArticles();
+  for (const id of ids) {
+    chatStore.addSelectedArticle(id);
+  }
+  toast.show(`Added ${ids.length} article${ids.length > 1 ? 's' : ''} to chat`, 'success');
+  void router.push('/chat');
 }
 
 // ── Full text handlers ────────────────────────────────────────────
@@ -536,6 +550,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
       @bulk-move-to-working="handleBulkMoveToWorking"
       @bulk-add-tag="openBulkTagDialog"
       @bulk-add-label="openBulkLabelDialog"
+      @bulk-add-to-chat="handleBulkAddToChat"
       @clear-selection="clearSelection"
     />
 

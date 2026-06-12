@@ -9,6 +9,7 @@ defineEmits<{
   bulkMoveToWorking: [];
   bulkAddTag: [];
   bulkAddLabel: [];
+  bulkAddToChat: [];
   clearSelection: [];
 }>();
 </script>
@@ -51,6 +52,12 @@ defineEmits<{
       @click="$emit('bulkAddLabel')"
     >
       Add Label
+    </button>
+    <button
+      class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-700 transition-colors"
+      @click="$emit('bulkAddToChat')"
+    >
+      Add to Chat
     </button>
     <div class="w-px h-5 bg-[var(--color-sidebar-hover)]" />
     <button

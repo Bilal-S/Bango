@@ -636,16 +636,9 @@ pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppEr
         "SELECT id, authors, affiliation, author_address, custom_field3 FROM articles \
          WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
     )?;
+    #[allow(clippy::type_complexity)]
     let rows: Vec<(String, String, Option<String>, Option<String>, Option<String>)> = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-            ))
-        })?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
     for (article_id, authors_str, affiliation_opt, author_address_opt, custom_field3_opt) in &rows {
@@ -656,11 +649,8 @@ pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppEr
 
         // 1. Check C3 field (custom_field3)
         if let Some(c3_str) = custom_field3_opt.as_ref() {
-            let c3_list: Vec<String> = c3_str
-                .split(';')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let c3_list: Vec<String> =
+                c3_str.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
             if c3_list.len() == author_count {
                 resolved_affs = Some(c3_list);
             }
@@ -683,11 +673,7 @@ pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppEr
         // 3. Fallback to article affiliation
         let affs = resolved_affs.unwrap_or_else(|| {
             if let Some(aff_str) = affiliation_opt.as_ref() {
-                aff_str
-                    .split(';')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
+                aff_str.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
             } else {
                 Vec::new()
             }

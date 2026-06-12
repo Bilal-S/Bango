@@ -159,28 +159,62 @@ fn test_biblio_ordered_affiliation_matching() {
     normalize_affiliations(&conn).expect("normalize_affiliations failed");
 
     // Fetch author IDs
-    let smith_id: String = conn.query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'smith j'", [], |r| r.get(0)).unwrap();
-    let doe_id: String = conn.query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'doe j'", [], |r| r.get(0)).unwrap();
-    let brown_id: String = conn.query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'brown a'", [], |r| r.get(0)).unwrap();
+    let smith_id: String = conn
+        .query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'smith j'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let doe_id: String = conn
+        .query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'doe j'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let brown_id: String = conn
+        .query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'brown a'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
 
     // Verify raw affiliations mapped to Smith J (order 0 in art-1: Harvard Univ, order 0 in art-2: Stanford Univ)
     let smith_affs: Vec<String> = {
         let mut stmt = conn.prepare("SELECT raw_affiliation FROM biblio_article_authors WHERE author_id = ?1 ORDER BY article_id").unwrap();
-        stmt.query_map([&smith_id], |row| row.get(0)).unwrap().collect::<Result<Vec<Option<String>>, _>>().unwrap().into_iter().flatten().collect()
+        stmt.query_map([&smith_id], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<Option<String>>, _>>()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .collect()
     };
     assert_eq!(smith_affs, vec!["Harvard Univ, Boston, MA", "Stanford Univ, Stanford, CA"]);
 
     // Verify Yale Univ mapped to Doe J (order 1 in art-1)
     let doe_affs: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT raw_affiliation FROM biblio_article_authors WHERE author_id = ?1").unwrap();
-        stmt.query_map([&doe_id], |row| row.get(0)).unwrap().collect::<Result<Vec<Option<String>>, _>>().unwrap().into_iter().flatten().collect()
+        let mut stmt = conn
+            .prepare("SELECT raw_affiliation FROM biblio_article_authors WHERE author_id = ?1")
+            .unwrap();
+        stmt.query_map([&doe_id], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<Option<String>>, _>>()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .collect()
     };
     assert_eq!(doe_affs, vec!["Yale Univ, New Haven, CT"]);
 
     // Verify Oxford Univ mapped to Brown A (order 1 in art-2)
     let brown_affs: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT raw_affiliation FROM biblio_article_authors WHERE author_id = ?1").unwrap();
-        stmt.query_map([&brown_id], |row| row.get(0)).unwrap().collect::<Result<Vec<Option<String>>, _>>().unwrap().into_iter().flatten().collect()
+        let mut stmt = conn
+            .prepare("SELECT raw_affiliation FROM biblio_article_authors WHERE author_id = ?1")
+            .unwrap();
+        stmt.query_map([&brown_id], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<Option<String>>, _>>()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .collect()
     };
     assert_eq!(brown_affs, vec!["Oxford Univ, Oxford, UK"]);
 
@@ -208,7 +242,11 @@ fn test_biblio_ordered_affiliation_matching() {
     normalize_authors_from_articles(&conn).expect("normalize_authors_from_articles failed");
     normalize_affiliations(&conn).expect("normalize_affiliations failed");
 
-    let new_smith_id: String = conn.query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'smith j'", [], |r| r.get(0)).unwrap();
+    let new_smith_id: String = conn
+        .query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'smith j'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
     let new_smith_insts = get_institutions_by_author(&conn, &new_smith_id).unwrap();
     assert_eq!(new_smith_insts.len(), 2);
     // Stanford Univ (2025) should now be first, Harvard Univ (2024) should be second.
@@ -218,11 +256,11 @@ fn test_biblio_ordered_affiliation_matching() {
 
 #[test]
 fn test_co_author_w_affiliation_integration() {
-    use std::fs;
-    use std::path::PathBuf;
-    use bango_lib::ris::parser::parse_ris;
     use bango_lib::commands::import::ris_record_to_new_article;
     use bango_lib::db::article_repo;
+    use bango_lib::ris::parser::parse_ris;
+    use std::fs;
+    use std::path::PathBuf;
 
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("Failed to run migrations");
@@ -232,24 +270,27 @@ fn test_co_author_w_affiliation_integration() {
     path.push("../tests/assets/co-author-w-affilitation.ris");
     let content = fs::read_to_string(path).expect("fixture not found");
     let parse_result = parse_ris(&content).expect("Parse failed");
-    
+
     // Verify records parsed correctly
     assert_eq!(parse_result.records.len(), 12);
-    
+
     // Map to NewArticles and insert
     let new_articles: Vec<_> = parse_result.records.iter().map(ris_record_to_new_article).collect();
-    let inserted = article_repo::insert_articles_batch(&conn, &new_articles, "co-author-w-affilitation.ris")
-        .expect("Insert failed");
+    let inserted =
+        article_repo::insert_articles_batch(&conn, &new_articles, "co-author-w-affilitation.ris")
+            .expect("Insert failed");
     assert_eq!(inserted.len(), 12);
 
     // Set all articles status to 'included' so they are picked up by biblio normalization
     conn.execute("UPDATE articles SET status = 'included'", []).unwrap();
 
     // Run normalization pipeline
-    let authors_count = normalize_authors_from_articles(&conn).expect("normalize_authors_from_articles failed");
+    let authors_count =
+        normalize_authors_from_articles(&conn).expect("normalize_authors_from_articles failed");
     assert!(authors_count > 0);
 
-    let (inst_created, links_created) = normalize_affiliations(&conn).expect("normalize_affiliations failed");
+    let (inst_created, links_created) =
+        normalize_affiliations(&conn).expect("normalize_affiliations failed");
     assert!(inst_created > 0);
     assert!(links_created > 0);
 
@@ -263,14 +304,28 @@ fn test_co_author_w_affiliation_integration() {
     // C3: Faculty of Management, University of Leeds...
 
     // Patel, Nisha (normalized name "patel n") should be mapped to University of Leeds
-    let patel_id: String = conn.query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'patel n'", [], |r| r.get(0)).unwrap();
+    let patel_id: String = conn
+        .query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'patel n'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
     let patel_insts = get_institutions_by_author(&conn, &patel_id).unwrap();
     assert_eq!(patel_insts.len(), 1);
-    assert!(patel_insts[0].normalized_name.contains("university of leeds") || patel_insts[0].normalized_name.contains("leeds"));
+    assert!(
+        patel_insts[0].normalized_name.contains("university of leeds")
+            || patel_insts[0].normalized_name.contains("leeds")
+    );
 
     // Osei, Kwame (normalized name "osei k" from Paper 4) should be mapped to University of Ghana
-    let osei_id: String = conn.query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'osei k'", [], |r| r.get(0)).unwrap();
+    let osei_id: String = conn
+        .query_row("SELECT id FROM biblio_authors WHERE normalized_name = 'osei k'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
     let osei_insts = get_institutions_by_author(&conn, &osei_id).unwrap();
     assert_eq!(osei_insts.len(), 1);
-    assert!(osei_insts[0].normalized_name.contains("university of ghana") || osei_insts[0].normalized_name.contains("ghana"));
+    assert!(
+        osei_insts[0].normalized_name.contains("university of ghana")
+            || osei_insts[0].normalized_name.contains("ghana")
+    );
 }
