@@ -7,13 +7,15 @@ import AuthorDetailPanel from '../components/author-detail-panel.vue';
 import { useCoAuthorNetwork } from '../composables/use-coauthor-network';
 import { useNetworkLayout } from '../composables/use-network-layout';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
+import type { NetworkExportFormat } from '../utils/network-export';
 import type { CoAuthorNode } from '../types/biblio-network';
 
 const { graph, loading, error, nodeCount, edgeCount, countingMode, fetchNetwork, setCountingMode } =
   useCoAuthorNetwork();
 
 const { isLayouting, applyLayout, runForceAtlas2Async } = useNetworkLayout();
-const { locateNode, resetZoom, exportImage, applyGraphFilters, refresh } = useSigmaRenderer();
+const { locateNode, resetZoom, renderer, applyGraphFilters, refresh } = useSigmaRenderer();
 
 const selectedAuthor = ref<CoAuthorNode | null>(null);
 const focusedNodeId = ref<string | null>(null);
@@ -154,14 +156,18 @@ function onLocateAuthor(name: string) {
   }
 }
 
-// Export image file
-function onExportImage() {
-  const dataUrl = exportImage();
-  if (dataUrl) {
-    const link = document.createElement('a');
-    link.download = 'coauthor-network.png';
-    link.href = dataUrl;
-    link.click();
+// Export network in chosen format (PNG or GEXF) via Tauri save dialog
+async function onExportImage(format: NetworkExportFormat) {
+  try {
+    if (format === 'png') {
+      if (!renderer.value) return;
+      await exportNetworkPng(renderer.value);
+    } else if (format === 'gexf') {
+      if (!graph.value) return;
+      await exportNetworkGexf(graph.value);
+    }
+  } catch (err) {
+    console.error('[export] Network export failed:', err);
   }
 }
 
@@ -184,6 +190,24 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
     // Quick layout polish after weight change
     await runForceAtlas2Async(graph.value, 30, layoutMode.value);
   }
+}
+
+async function onResetAnalysis() {
+  // Reset all analysis state to defaults
+  colorMode.value = 'cluster';
+  layoutMode.value = 'fixed';
+  selectedClusters.value = [];
+  selectedAuthor.value = null;
+  focusedNodeId.value = null;
+
+  // Reset counting mode if changed
+  const changed = setCountingMode('full');
+  if (changed && graph.value) {
+    await runForceAtlas2Async(graph.value, 30, layoutMode.value);
+  }
+
+  // Re-apply filters (already reset by controls) and recalculate layout
+  await onRecalculate();
 }
 
 async function onRecalculate() {
@@ -267,6 +291,7 @@ async function onRecalculate() {
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"
           @recalculate="onRecalculate"
+          @reset-analysis="onResetAnalysis"
         />
       </aside>
 

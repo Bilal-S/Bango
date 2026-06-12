@@ -22,6 +22,7 @@
     "tauri:windows:build": "tauri-windows-bundle build"
   },
   "dependencies": {
+    "@sigma/export-image": "^3.0.0",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
@@ -29,6 +30,7 @@
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
     "graphology-components": "^1.5.4",
+    "graphology-gexf": "^0.13.2",
     "graphology-layout": "^0.6.1",
     "graphology-layout-forceatlas2": "^0.10.1",
     "graphology-types": "^0.24.8",

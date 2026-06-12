@@ -2,7 +2,7 @@ use crate::db::biblio_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::biblio::{
-    BiblioAuthor, BiblioInstitution, BiblioKpis, BiblioStatus, BiblioTerm,
+    BiblioAuthor, BiblioInstitution, BiblioKpis, BiblioStatus, BiblioTerm, YearCount,
 };
 // BiblioTerm is re-exported through biblio_repo — no direct use here
 use serde::Serialize;
@@ -198,4 +198,16 @@ pub async fn biblio_get_unmatched_affiliation_count(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     biblio_repo::count_unmatched_affiliations(&conn)
+}
+
+#[tauri::command]
+pub async fn biblio_get_author_pubs_by_year(
+    db_state: tauri::State<'_, DbState>,
+    author_id: String,
+) -> Result<Vec<YearCount>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    biblio_repo::get_author_pubs_by_year(&conn, &author_id)
 }

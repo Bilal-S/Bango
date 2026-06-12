@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::Deserialize;
 use tauri::State;
 
@@ -142,6 +143,14 @@ pub fn import_project_backup(
 #[tauri::command]
 pub fn write_text_to_file(path: String, content: String) -> Result<(), AppError> {
     std::fs::write(path, content).map_err(AppError::Io)
+}
+
+#[tauri::command]
+pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, bytes).map_err(AppError::Io)
 }
 
 #[tauri::command]

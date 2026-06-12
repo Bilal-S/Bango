@@ -452,3 +452,23 @@ ER  -\n";
     assert_eq!(rec.num_cited, Some(49));
     assert_eq!(rec.num_references, Some(34));
 }
+
+#[test]
+fn test_parse_multiple_ad_and_c3_tags() {
+    let ris = "\
+TY  - JOUR\n\
+TI  - Test Article\n\
+AU  - Author A\n\
+AU  - Author B\n\
+AD  - Univ of A\n\
+AD  - Univ of B\n\
+C3  - Affil A\n\
+C3  - Affil B\n\
+AB  - Abstract\n\
+ER  -\n";
+    let result = parse_ris(ris).expect("Parse failed");
+    assert_eq!(result.records.len(), 1);
+    let rec = &result.records[0];
+    assert_eq!(rec.author_address.as_deref(), Some("Univ of A; Univ of B"));
+    assert_eq!(rec.custom_field3.as_deref(), Some("Affil A; Affil B"));
+}

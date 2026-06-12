@@ -75,11 +75,11 @@ fn test_ris_includes_ai_reasoning_as_notes() {
 }
 
 #[test]
-fn test_ris_includes_matched_criteria_as_c1() {
+fn test_ris_includes_matched_criteria_as_c8() {
     let article = make_export_article();
     let ris = article_to_ris(&article);
-    assert!(ris.contains("C1  -"));
-    // C1 should contain resolved criterion text, not label names
+    assert!(ris.contains("C8  -"));
+    // C8 should contain resolved criterion text, not label names
     assert!(ris.contains("uses RCT methodology"));
     assert!(ris.contains("non-English language"));
 }

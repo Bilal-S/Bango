@@ -220,17 +220,17 @@ fn test_ris_includes_user_notes_in_no() {
 }
 
 #[test]
-fn test_ris_includes_matched_criteria_in_c1() {
+fn test_ris_includes_matched_criteria_in_c8() {
     let ris = article_to_ris(&sample_article());
-    assert!(ris.contains("C1  - "));
+    assert!(ris.contains("C8  - "));
     assert!(ris.contains(r#""inc":["#));
     assert!(ris.contains("criterion-1"));
 }
 
 #[test]
-fn test_ris_omits_c1_when_no_criteria_matched() {
+fn test_ris_omits_c8_when_no_criteria_matched() {
     let ris = article_to_ris(&minimal_article());
-    assert!(!ris.contains("C1  -"));
+    assert!(!ris.contains("C8  -"));
 }
 
 #[test]

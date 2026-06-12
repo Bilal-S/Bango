@@ -97,7 +97,7 @@ pub fn article_to_ris(article: &RisExportArticle) -> String {
         lines.push(format!("NO  - {}", notes));
     }
 
-    // Matched criteria as C1 field (resolved criterion text, not UUIDs)
+    // Matched criteria as C8 field (resolved criterion text, not UUIDs)
     if !article.matched_inclusion_criteria.is_empty()
         || !article.matched_exclusion_criteria.is_empty()
     {
@@ -105,7 +105,7 @@ pub fn article_to_ris(article: &RisExportArticle) -> String {
             serde_json::to_string(&article.matched_inclusion_criteria).unwrap_or_default();
         let exc_json =
             serde_json::to_string(&article.matched_exclusion_criteria).unwrap_or_default();
-        lines.push(format!("C1  - {{\"inc\":{},\"exc\":{}}}", inc_json, exc_json));
+        lines.push(format!("C8  - {{\"inc\":{},\"exc\":{}}}", inc_json, exc_json));
     }
 
     lines.push("ER  -".to_string());

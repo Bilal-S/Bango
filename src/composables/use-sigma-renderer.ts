@@ -1,8 +1,8 @@
-import { ref, onUnmounted } from 'vue';
+import { ref, shallowRef, onUnmounted } from 'vue';
 import Sigma from 'sigma';
 import type Graph from 'graphology';
 
-const renderer = ref<Sigma | null>(null);
+const renderer = shallowRef<Sigma | null>(null);
 
 export interface SigmaRendererOptions {
   /** Min camera ratio (zoom in limit). Default 0.1 */
@@ -79,27 +79,6 @@ export function useSigmaRenderer() {
     if (!renderer.value) return;
     const camera = renderer.value.getCamera();
     camera.animate({ ratio: 1, x: 0.5, y: 0.5 }, { duration: 300 });
-  }
-
-  /**
-   * Export the current graph view as a PNG data URL.
-   */
-  function exportImage(): string | null {
-    if (!renderer.value) return null;
-    // Sigma v3 doesn't expose toDataURL directly — grab it from the WebGL canvas
-    const canvases = renderer.value.getCanvases?.();
-    if (canvases) {
-      // Sigma v3.0.4+
-      const canvas = canvases.edges ?? canvases.nodes;
-      if (canvas) return canvas.toDataURL('image/png');
-    }
-    // Fallback: query the DOM for the sigma canvas element
-    const container = renderer.value.getContainer?.() ?? renderer.value.getGraph();
-    if (!container) return null;
-    const el = (container as unknown as HTMLElement).querySelector?.(
-      'canvas'
-    ) as HTMLCanvasElement | null;
-    return el?.toDataURL('image/png') ?? null;
   }
 
   /**
@@ -182,7 +161,6 @@ export function useSigmaRenderer() {
     initRenderer,
     destroyRenderer,
     resetZoom,
-    exportImage,
     locateNode,
     applyGraphFilters,
     refresh,

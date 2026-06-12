@@ -387,9 +387,23 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
             }
         }
         "DA" => record.date = Some(value.to_string()),
-        "AD" => record.author_address = Some(value.to_string()),
+        "AD" => {
+            if let Some(ref mut existing) = record.author_address {
+                existing.push_str("; ");
+                existing.push_str(value);
+            } else {
+                record.author_address = Some(value.to_string());
+            }
+        }
         "AN" => record.accession_number = Some(value.to_string()),
-        "C3" => record.custom_field3 = Some(value.to_string()),
+        "C3" => {
+            if let Some(ref mut existing) = record.custom_field3 {
+                existing.push_str("; ");
+                existing.push_str(value);
+            } else {
+                record.custom_field3 = Some(value.to_string());
+            }
+        }
         "J9" => record.journal_abbreviation = Some(value.to_string()),
         "JI" => record.journal_iso_abbreviation = Some(value.to_string()),
         "N1" => {

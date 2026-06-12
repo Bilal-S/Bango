@@ -206,7 +206,7 @@ The application design is based on the **"Scholarly Precision"** style, utilizin
 *   **System/Generic Audits**: System-wide operations or errors unrelated to a single article (e.g. scraping successes/failures, global LLM config connection issues) are recorded with `article_id` as `NULL` and `action` as `'error'`. These do not appear in article timelines but are accessible via the Diagnostics screen.
 
 ### 10.2 Export and Security
-*   **RIS Export**: Exports the Included list, mapping AI tags to `KW`, custom notes to `NO`, and labels to `C1` JSON groupings.
+*   **RIS Export**: Exports the Included list, mapping AI tags to `KW`, custom notes to `NO`, and labels to `C8` JSON groupings.
 *   **Project Backup**: Exports a single `.bango.json` containing aims, criteria, articles, tags, labels, and audit logs.
 *   **Credential Security**: LLM API keys are encrypted locally using AES-256-GCM (key derived via PBKDF2 from machine hostname, username, and app salt). Project exports encrypt API keys using a user-specified password.
 

@@ -16,7 +16,7 @@
       </div>
 
       <!-- Metrics -->
-      <div class="grid grid-cols-2 gap-3 p-4">
+      <div class="grid grid-cols-3 gap-3 p-4 pb-2">
         <div class="bg-slate-50 rounded-lg p-3 text-center">
           <p class="text-lg font-bold text-indigo-600">{{ author.weight }}</p>
           <p class="text-[10px] text-slate-500 mt-0.5">Papers</p>
@@ -29,9 +29,48 @@
           <p class="text-lg font-bold text-indigo-600">{{ author.estimatedHIndex ?? '—' }}</p>
           <p class="text-[10px] text-slate-500 mt-0.5">h-index</p>
         </div>
-        <div class="bg-slate-50 rounded-lg p-3 text-center">
-          <p class="text-lg font-bold text-indigo-600">{{ author.avgYear ?? '—' }}</p>
-          <p class="text-[10px] text-slate-500 mt-0.5">Avg. Year</p>
+      </div>
+
+      <!-- Pubs/Year sparkline bar graph -->
+      <div class="px-4 pb-3">
+        <div class="bg-slate-50 rounded-lg p-3">
+          <p class="text-[10px] text-slate-500 mb-2 font-medium">Pubs / Year</p>
+          <div v-if="pubsLoading" class="flex justify-center py-3">
+            <span class="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></span>
+          </div>
+          <div
+            v-else-if="pubsByYear.length === 0"
+            class="text-[10px] text-slate-400 italic text-center py-2"
+          >
+            No year data
+          </div>
+          <div v-else class="flex items-end gap-[2px] h-14" style="min-width: 0">
+            <div
+              v-for="(yc, i) in pubsByYear"
+              :key="i"
+              class="relative flex-1 group rounded-t-sm transition-colors duration-150 cursor-default"
+              :style="{
+                height: barHeight(yc.count) + '%',
+                backgroundColor: barColor(i),
+                minWidth: '0',
+              }"
+            >
+              <!-- Hover tooltip -->
+              <div
+                class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10"
+              >
+                {{ yc.year }}: {{ yc.count }}
+              </div>
+            </div>
+          </div>
+          <!-- Year labels (first / last) -->
+          <div
+            v-if="pubsByYear.length > 1"
+            class="flex justify-between text-[9px] text-slate-400 mt-1"
+          >
+            <span>{{ pubsByYear[0]!.year }}</span>
+            <span>{{ pubsByYear[pubsByYear.length - 1]!.year }}</span>
+          </div>
         </div>
       </div>
 
@@ -99,7 +138,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type Graph from 'graphology';
-import type { CoAuthorNode, BiblioInstitution } from '../types/biblio-network';
+import type { CoAuthorNode, BiblioInstitution, YearCount } from '../types/biblio-network';
 import { clusterColor } from '../types/biblio-network';
 import { tauriCommand, isTauri } from '../composables/use-tauri-command';
 
@@ -120,22 +159,46 @@ const authorColor = computed(() =>
 const institutions = ref<BiblioInstitution[]>([]);
 const loading = ref(false);
 
+// ── Pubs/Year sparkline state ──
+const pubsByYear = ref<YearCount[]>([]);
+const pubsLoading = ref(false);
+const pubsMax = computed(() =>
+  pubsByYear.value.length > 0 ? Math.max(...pubsByYear.value.map((yc) => yc.count)) : 0
+);
+
+/** Bar height as percentage of the container. */
+function barHeight(count: number): number {
+  if (pubsMax.value === 0) return 0;
+  return Math.max(8, (count / pubsMax.value) * 100);
+}
+
+/** Bar color: filled bars use indigo-400, hovered bars use indigo-600 via CSS group-hover. */
+function barColor(_index: number): string {
+  return '#818cf8'; // indigo-400
+}
+
 watch(
   () => props.author?.id,
   async (newId) => {
     if (!newId) {
       institutions.value = [];
+      pubsByYear.value = [];
       return;
     }
     loading.value = true;
+    pubsLoading.value = true;
     try {
       if (isTauri()) {
-        institutions.value = await tauriCommand<BiblioInstitution[]>(
-          'biblio_get_author_institutions',
-          {
+        const [instResult, pubsResult] = await Promise.all([
+          tauriCommand<BiblioInstitution[]>('biblio_get_author_institutions', {
             authorId: newId,
-          }
-        );
+          }),
+          tauriCommand<YearCount[]>('biblio_get_author_pubs_by_year', {
+            authorId: newId,
+          }),
+        ]);
+        institutions.value = instResult;
+        pubsByYear.value = pubsResult;
       } else {
         institutions.value = [
           {
@@ -146,12 +209,21 @@ watch(
             createdAt: new Date().toISOString(),
           },
         ];
+        pubsByYear.value = [
+          { year: 2020, count: 2 },
+          { year: 2021, count: 5 },
+          { year: 2022, count: 3 },
+          { year: 2023, count: 7 },
+          { year: 2024, count: 4 },
+        ];
       }
     } catch (err) {
-      console.error('Failed to load institutions:', err);
+      console.error('Failed to load author details:', err);
       institutions.value = [];
+      pubsByYear.value = [];
     } finally {
       loading.value = false;
+      pubsLoading.value = false;
     }
   },
   { immediate: true }

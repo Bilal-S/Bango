@@ -199,6 +199,7 @@ pub fn run() {
             commands::export_cmd::export_project_to_file,
             commands::export_cmd::import_project_backup,
             commands::export_cmd::write_text_to_file,
+            commands::export_cmd::write_base64_to_file,
             commands::export_cmd::reset_project,
             commands::references::extract_cr_references,
             commands::references::get_article_references,
@@ -221,6 +222,7 @@ pub fn run() {
             commands::biblio_cmd::biblio_get_kpis,
             commands::biblio_cmd::biblio_get_author_institutions,
             commands::biblio_cmd::biblio_get_unmatched_affiliation_count,
+            commands::biblio_cmd::biblio_get_author_pubs_by_year,
         ]);
 
     #[cfg(debug_assertions)]

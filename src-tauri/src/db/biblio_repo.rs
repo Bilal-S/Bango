@@ -276,17 +276,40 @@ pub fn insert_author_affiliation(
     Ok(())
 }
 
+/// Get publications-by-year for a single author.
+pub fn get_author_pubs_by_year(
+    conn: &Connection,
+    author_id: &str,
+) -> Result<Vec<YearCount>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT a.publication_year, COUNT(*) AS cnt \
+         FROM articles a \
+         JOIN biblio_article_authors baa ON baa.article_id = a.id \
+         WHERE baa.author_id = ?1 AND a.publication_year IS NOT NULL \
+         GROUP BY a.publication_year \
+         ORDER BY a.publication_year ASC",
+    )?;
+    let rows: Vec<YearCount> = stmt
+        .query_map(rusqlite::params![author_id], |row| {
+            Ok(YearCount { year: row.get(0)?, count: row.get(1)? })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// Get all institutions linked to an author (across all their articles).
 pub fn get_institutions_by_author(
     conn: &Connection,
     author_id: &str,
 ) -> Result<Vec<BiblioInstitution>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT i.id, i.normalized_name, i.country, i.city, i.created_at \
+        "SELECT i.id, i.normalized_name, i.country, i.city, i.created_at \
          FROM biblio_institutions i \
          JOIN biblio_author_affiliations baa ON baa.institution_id = i.id \
+         LEFT JOIN articles a ON baa.article_id = a.id \
          WHERE baa.author_id = ?1 \
-         ORDER BY i.normalized_name",
+         GROUP BY i.id, i.normalized_name, i.country, i.city, i.created_at \
+         ORDER BY MAX(COALESCE(a.publication_year, 0)) DESC, i.normalized_name ASC",
     )?;
     let institutions = stmt
         .query_map(rusqlite::params![author_id], |row| {
@@ -610,19 +633,65 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
 /// Returns the number of unique authors created.
 pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, authors, affiliation FROM articles WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
+        "SELECT id, authors, affiliation, author_address, custom_field3 FROM articles \
+         WHERE status = 'included' AND authors IS NOT NULL AND authors != ''",
     )?;
-    let rows: Vec<(String, String, Option<String>)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+    let rows: Vec<(String, String, Option<String>, Option<String>, Option<String>)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    for (article_id, authors_str, affiliation_opt) in &rows {
+    for (article_id, authors_str, affiliation_opt, author_address_opt, custom_field3_opt) in &rows {
         let parsed = crate::biblio::normalizer::parse_authors(authors_str);
-        let affs: Vec<String> = if let Some(aff_str) = affiliation_opt.as_ref() {
-            aff_str.split(';').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
-        } else {
-            Vec::new()
-        };
+        let author_count = parsed.len();
+
+        let mut resolved_affs = None;
+
+        // 1. Check C3 field (custom_field3)
+        if let Some(c3_str) = custom_field3_opt.as_ref() {
+            let c3_list: Vec<String> = c3_str
+                .split(';')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if c3_list.len() == author_count {
+                resolved_affs = Some(c3_list);
+            }
+        }
+
+        // 2. Fallback to AD field (author_address)
+        if resolved_affs.is_none() {
+            if let Some(ad_str) = author_address_opt.as_ref() {
+                let ad_list: Vec<String> = ad_str
+                    .split(';')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if ad_list.len() == author_count {
+                    resolved_affs = Some(ad_list);
+                }
+            }
+        }
+
+        // 3. Fallback to article affiliation
+        let affs = resolved_affs.unwrap_or_else(|| {
+            if let Some(aff_str) = affiliation_opt.as_ref() {
+                aff_str
+                    .split(';')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        });
 
         for (order, author) in parsed.iter().enumerate() {
             let norm = crate::biblio::normalizer::normalize_author_name(&author.raw);
@@ -1003,8 +1072,8 @@ pub fn get_coauthor_network_json(conn: &Connection) -> Result<serde_json::Value,
                 "id": a.id,
                 "label": a.display_name,
                 "weight": a.article_count,
-                "citations": a.total_citations,
-                "hIndex": a.estimated_h_index,
+                "totalCitations": a.total_citations,
+                "estimatedHIndex": a.estimated_h_index,
                 "avgYear": a.avg_year,
             })
         })
@@ -2078,8 +2147,8 @@ mod tests {
         let json = get_coauthor_network_json(&conn).unwrap();
         let nodes = json["nodes"].as_array().unwrap();
         assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0]["citations"], 10);
-        assert_eq!(nodes[0]["hIndex"], 1);
+        assert_eq!(nodes[0]["totalCitations"], 10);
+        assert_eq!(nodes[0]["estimatedHIndex"], 1);
         assert_eq!(nodes[0]["avgYear"], 2020.0);
     }
 }

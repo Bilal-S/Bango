@@ -63,6 +63,12 @@ export const CLUSTER_PALETTE = [
   '#999999', // gray
 ] as const;
 
+/** Year → count pair, used for publications-by-year sparklines. */
+export interface YearCount {
+  year: number;
+  count: number;
+}
+
 /** Get a color for a cluster index (wraps around palette). */
 export function clusterColor(cluster: number): string {
   return CLUSTER_PALETTE[cluster % CLUSTER_PALETTE.length]!;
