@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import Graph from 'graphology';
 import NetworkGraph from '../components/network-graph.vue';
 import NetworkControls from '../components/network-controls.vue';
 import AuthorDetailPanel from '../components/author-detail-panel.vue';
@@ -12,7 +13,7 @@ const { graph, loading, error, nodeCount, edgeCount, countingMode, fetchNetwork,
   useCoAuthorNetwork();
 
 const { isLayouting, applyLayout, runForceAtlas2Async } = useNetworkLayout();
-const { locateNode, resetZoom, exportImage, applyGraphFilters } = useSigmaRenderer();
+const { locateNode, resetZoom, exportImage, applyGraphFilters, refresh } = useSigmaRenderer();
 
 const selectedAuthor = ref<CoAuthorNode | null>(null);
 const focusedNodeId = ref<string | null>(null);
@@ -22,13 +23,21 @@ const colorMode = ref<'cluster' | 'temporal'>('cluster');
 const selectedClusters = ref<number[]>([]);
 const sidebarCollapsed = ref(false);
 
+const recalculateTrigger = ref(0);
+
 /** Derive cluster count from graph node attributes */
 const clusterCount = computed(() => {
+  // Access visibleNodeCount and recalculateTrigger to register reactive dependencies
+  void recalculateTrigger.value;
+  void visibleNodeCount.value;
   if (!graph.value) return 0;
   const clusters = new Set<number>();
   graph.value.forEachNode((node) => {
-    const c = graph.value!.getNodeAttribute(node, 'cluster') as number | null;
-    if (c !== null && c !== undefined) clusters.add(c);
+    const isHidden = graph.value!.getNodeAttribute(node, 'hidden') as boolean | null;
+    if (isHidden !== true) {
+      const c = graph.value!.getNodeAttribute(node, 'cluster') as number | null;
+      if (c !== null && c !== undefined) clusters.add(c);
+    }
   });
   return clusters.size;
 });
@@ -135,10 +144,6 @@ function onLocateAuthor(name: string) {
   }
 }
 
-function onResetZoom() {
-  resetZoom();
-}
-
 function onExportImage() {
   const dataUrl = exportImage();
   if (dataUrl) {
@@ -169,48 +174,100 @@ async function onCountingModeChange(mode: 'full' | 'fractional') {
     await runForceAtlas2Async(graph.value, 30);
   }
 }
+
+async function onRecalculate() {
+  if (!graph.value) return;
+
+  isLayouting.value = true;
+  try {
+    // 1. Create a temporary subgraph of visible nodes and edges
+    const sub = new Graph({ type: 'undirected', multi: false });
+
+    graph.value.forEachNode((node, attrs) => {
+      if (attrs.hidden !== true) {
+        sub.addNode(node, { ...attrs });
+      }
+    });
+
+    graph.value.forEachEdge((edge, attrs, source, target) => {
+      if (attrs.hidden !== true && sub.hasNode(source) && sub.hasNode(target)) {
+        sub.addUndirectedEdgeWithKey(edge, source, target, { ...attrs });
+      }
+    });
+
+    if (sub.order === 0) return;
+
+    // 2. Run Louvain and ForceAtlas2 layout on the subgraph
+    await applyLayout(sub);
+
+    // 3. Write back coordinates, cluster, and color to the parent graph
+    sub.forEachNode((node) => {
+      const newAttrs = sub.getNodeAttributes(node);
+      graph.value!.setNodeAttribute(node, 'x', newAttrs.x);
+      graph.value!.setNodeAttribute(node, 'y', newAttrs.y);
+      graph.value!.setNodeAttribute(node, 'cluster', newAttrs.cluster);
+      graph.value!.setNodeAttribute(node, 'color', newAttrs.color);
+    });
+
+    // 4. Force Sigma renderer to update and zoom to fit
+    resetZoom();
+    refresh();
+
+    // 5. Trigger computed statistics updates
+    recalculateTrigger.value++;
+  } finally {
+    isLayouting.value = false;
+  }
+}
 </script>
 
 <template>
   <div class="coauthor-layout">
-    <!-- Drawer handle (outside aside to avoid overflow clipping) -->
-    <button
-      class="drawer-handle"
-      :title="sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
-      :style="{ left: sidebarCollapsed ? '0px' : 'calc(16rem - 8px)' }"
-      @click="sidebarCollapsed = !sidebarCollapsed"
+    <!-- Sidebar Wrapper -->
+    <div
+      class="sidebar-wrapper relative transition-all duration-300 shrink-0"
+      :class="sidebarCollapsed ? 'w-0' : 'w-64'"
     >
-      <span class="drawer-handle-grip"></span>
-    </button>
+      <!-- Controls sidebar -->
+      <aside
+        class="sidebar-panel h-full p-4 overflow-y-auto border-r border-slate-100 bg-slate-50/30 transition-all duration-300 flex flex-col"
+        :class="sidebarCollapsed ? 'w-0 p-0 overflow-hidden opacity-0' : 'w-full opacity-100'"
+      >
+        <NetworkControls
+          class="my-auto"
+          :total-nodes="stats.totalAuthors"
+          :total-edges="stats.totalEdges"
+          :visible-nodes="stats.visibleAuthors"
+          :visible-edges="stats.visibleEdges"
+          :cluster-count="stats.clusterCount"
+          :author-names="authorNames"
+          :author-weights="authorWeights"
+          :counting-mode="countingMode"
+          :color-mode="colorMode"
+          :min-year="yearRange.min"
+          :max-year="yearRange.max"
+          :selected-clusters="selectedClusters"
+          @filter-change="onFilterChange"
+          @locate-author="onLocateAuthor"
+          @export-image="onExportImage"
+          @counting-mode-change="onCountingModeChange"
+          @color-mode-change="colorMode = $event"
+          @select-cluster="onSelectCluster($event)"
+          @clear-clusters="onClearClusters"
+          @recalculate="onRecalculate"
+        />
+      </aside>
 
-    <!-- Controls sidebar -->
-    <aside
-      class="sidebar-panel shrink-0 p-4 overflow-y-auto border-r border-slate-100 bg-slate-50/30 transition-all duration-300"
-      :class="sidebarCollapsed ? 'w-0 p-0 overflow-hidden opacity-0' : 'w-64 opacity-100'"
-    >
-      <NetworkControls
-        :total-nodes="stats.totalAuthors"
-        :total-edges="stats.totalEdges"
-        :visible-nodes="stats.visibleAuthors"
-        :visible-edges="stats.visibleEdges"
-        :cluster-count="stats.clusterCount"
-        :author-names="authorNames"
-        :author-weights="authorWeights"
-        :counting-mode="countingMode"
-        :color-mode="colorMode"
-        :min-year="yearRange.min"
-        :max-year="yearRange.max"
-        :selected-clusters="selectedClusters"
-        @filter-change="onFilterChange"
-        @locate-author="onLocateAuthor"
-        @reset-zoom="onResetZoom"
-        @export-image="onExportImage"
-        @counting-mode-change="onCountingModeChange"
-        @color-mode-change="colorMode = $event"
-        @select-cluster="onSelectCluster($event)"
-        @clear-clusters="onClearClusters"
-      />
-    </aside>
+      <!-- Drawer handle (inside wrapper to be relative to it, but outside aside to avoid overflow clipping) -->
+      <button
+        class="drawer-handle"
+        :title="sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
+        :style="{ left: sidebarCollapsed ? '0px' : 'calc(100% - 16px)' }"
+        @click="sidebarCollapsed = !sidebarCollapsed"
+      >
+        <span class="drawer-handle-grip"></span>
+      </button>
+    </div>
 
     <!-- Graph canvas -->
     <main class="flex-1 relative">

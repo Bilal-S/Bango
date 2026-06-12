@@ -164,6 +164,13 @@ export function useSigmaRenderer() {
     return { visibleNodes, visibleEdges };
   }
 
+  /**
+   * Force the Sigma renderer to re-read graph attributes and redraw.
+   */
+  function refresh(): void {
+    renderer.value?.refresh();
+  }
+
   // Auto-cleanup when the hosting component unmounts
   onUnmounted(() => {
     destroyRenderer();
@@ -178,5 +185,6 @@ export function useSigmaRenderer() {
     exportImage,
     locateNode,
     applyGraphFilters,
+    refresh,
   };
 }

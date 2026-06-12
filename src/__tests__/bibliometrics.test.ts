@@ -39,26 +39,29 @@ describe('useBibliometrics', () => {
   });
 
   it('runs normalization, listens to events, and updates progress', async () => {
-    let progressCallback:
-      | ((event: { payload: { step: number; totalSteps: number; message: string } }) => void)
-      | null = null;
+    const testState = {
+      progressCallback: null as
+        | ((event: { payload: { step: number; totalSteps: number; message: string } }) => void)
+        | null,
+      resolveTauriCommand: null as ((res: unknown) => void) | null,
+    };
+
     mockListen.mockImplementation(
       (
         event: string,
         cb: (event: { payload: { step: number; totalSteps: number; message: string } }) => void
       ) => {
         if (event === 'biblio:progress') {
-          progressCallback = cb;
+          testState.progressCallback = cb;
         }
         return Promise.resolve(() => {});
       }
     );
 
-    let resolveTauriCommand: ((res: unknown) => void) | null = null;
     vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
       if (cmd === 'biblio_normalize') {
         return new Promise((r) => {
-          resolveTauriCommand = r;
+          testState.resolveTauriCommand = r;
         });
       }
       if (cmd === 'biblio_get_kpis') {
@@ -78,15 +81,15 @@ describe('useBibliometrics', () => {
     expect(normalizing.value).toBe(true);
 
     // Manually trigger the progress event callback
-    if (progressCallback) {
-      progressCallback({ payload: { step: 3, totalSteps: 6, message: 'Step 3' } });
+    if (testState.progressCallback) {
+      testState.progressCallback({ payload: { step: 3, totalSteps: 6, message: 'Step 3' } });
     }
     // Step 3 progress = 3 * (100 / 6) = 50%
     expect(progress.value).toBe(50);
 
     // Complete the normalization command
-    if (resolveTauriCommand) {
-      resolveTauriCommand({ authors: 10, terms: 5, status: {} });
+    if (testState.resolveTauriCommand) {
+      testState.resolveTauriCommand({ authors: 10, terms: 5, status: {} });
     }
 
     // Wait for the normalization to fully complete (including the 500ms delay)

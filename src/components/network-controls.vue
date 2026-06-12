@@ -220,7 +220,7 @@
     <div class="flex items-center gap-2 border-t border-slate-100 pt-3">
       <button
         class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer transition-colors"
-        @click="$emit('reset-zoom')"
+        @click="$emit('recalculate')"
       >
         <span class="material-symbols-outlined text-sm">fit_screen</span>
         Fit
@@ -267,12 +267,12 @@ const emit = defineEmits<{
     }
   ): void;
   (e: 'locate-author', name: string): void;
-  (e: 'reset-zoom'): void;
   (e: 'export-image'): void;
   (e: 'counting-mode-change', mode: CountingMode): void;
   (e: 'color-mode-change', mode: 'cluster' | 'temporal'): void;
   (e: 'select-cluster', clusterId: number): void;
   (e: 'clear-clusters'): void;
+  (e: 'recalculate'): void;
 }>();
 
 const searchQuery = ref('');
