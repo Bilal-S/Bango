@@ -279,10 +279,13 @@ CREATE INDEX IF NOT EXISTS idx_ref_links_parent_type ON article_reference_links(
 CREATE TABLE IF NOT EXISTS biblio_authors (
     id TEXT PRIMARY KEY,
     article_count INTEGER NOT NULL DEFAULT 0,
+    avg_year REAL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     display_name TEXT NOT NULL,
+    estimated_h_index INTEGER,
     first_author_count INTEGER NOT NULL DEFAULT 0,
-    normalized_name TEXT NOT NULL
+    normalized_name TEXT NOT NULL,
+    total_citations INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_authors_norm ON biblio_authors(normalized_name);
 
@@ -329,6 +332,7 @@ CREATE TABLE IF NOT EXISTS biblio_terms (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     normalized_term TEXT NOT NULL,
     raw_term TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'metadata' CHECK(source IN ('metadata', 'ai_extracted', 'user_added')),
     term_type TEXT NOT NULL DEFAULT 'keyword' CHECK(term_type IN ('keyword', 'noun_phrase'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_biblio_terms_norm ON biblio_terms(normalized_term, term_type);

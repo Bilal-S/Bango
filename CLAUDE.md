@@ -14,6 +14,7 @@
 - Use `thiserror` for library-level errors (RIS parsing, deduplication, LLM client).
 - Never use `unwrap()` or `expect()` outside of tests. Clippy warns on both.
 - Return `Result<T, E>` from all fallible functions.
+- **System/Generic Error Logging**: For system-wide operational events or errors not tied to a specific article (e.g., scraping outcomes, global LLM client failures, database initialization errors), use `audit_repo::log_error(conn, details)`. This creates an audit entry with `article_id = NULL` and `action = 'error'`. Do not use this for article-specific events.
 
 ### Code Style
 - Module structure: one module per domain concern (e.g., `ris`, `dedup`, `screening`, `llm`, `db`, `prisma`, `biblio`).

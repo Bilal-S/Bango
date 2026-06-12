@@ -21,11 +21,69 @@ pub struct ParsedAffiliation {
 
 /// Split an author string into individual authors.
 ///
-/// Handles common delimiters: semicolons, " and ", newlines.
+/// Handles common formats:
+/// - JSON array: `["Smith, J", "Doe, A"]`
+/// - JSON objects: `[{"name":"Smith, J"},{"name":"Doe, A"}]`
+/// - Semicolon-delimited: `Smith, J; Doe, A`
+/// - "and"-delimited: `Smith, J and Doe, A`
+/// - Newline-delimited: `Smith, J\nDoe, A`
+///
 /// Strips empty entries and trims whitespace.
 pub fn split_authors(authors_str: &str) -> Vec<String> {
     if authors_str.trim().is_empty() {
         return Vec::new();
+    }
+
+    // ── JSON array detection ──────────────────────────────────────
+    let trimmed = authors_str.trim();
+    if trimmed.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Some(items) = arr.as_array() {
+                let names: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| {
+                        match item {
+                            // String element: "Smith, J"
+                            serde_json::Value::String(s) => {
+                                let t = s.trim().to_string();
+                                if t.is_empty() {
+                                    None
+                                } else {
+                                    Some(t)
+                                }
+                            }
+                            // Object element: {"name":"Smith, J"} or {"family":"Smith","given":"John"}
+                            serde_json::Value::Object(map) => {
+                                // Try "name" field first
+                                if let Some(name) = map.get("name").and_then(|v| v.as_str()) {
+                                    let t = name.trim().to_string();
+                                    if !t.is_empty() {
+                                        return Some(t);
+                                    }
+                                }
+                                // Try "family" + "given" fields (BibTeX JSON format)
+                                let family =
+                                    map.get("family").and_then(|v| v.as_str()).unwrap_or("");
+                                let given = map.get("given").and_then(|v| v.as_str()).unwrap_or("");
+                                if !family.is_empty() {
+                                    if given.is_empty() {
+                                        Some(family.to_string())
+                                    } else {
+                                        Some(format!("{}, {}", family, given))
+                                    }
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                // Return parsed names (may be empty for "[]")
+                return names;
+            }
+        }
+        // JSON parse failed — fall through to delimiter-based splitting
     }
 
     // Try semicolon first (most common in RIS/BibTeX)
@@ -513,5 +571,68 @@ mod tests {
         assert_eq!(aff.country.as_deref(), Some("USA"));
         assert_eq!(aff.city.as_deref(), Some("CA"));
         assert_eq!(aff.institution.as_deref(), Some("Dept of CS, Stanford University, Stanford"));
+    }
+
+    // ── JSON author parsing ─────────────────────────────────────
+
+    #[test]
+    fn test_split_authors_json_string_array() {
+        let result = split_authors(r#"["Smith, J", "Doe, A", "Brown, K"]"#);
+        assert_eq!(result, vec!["Smith, J", "Doe, A", "Brown, K"]);
+    }
+
+    #[test]
+    fn test_split_authors_json_single_element() {
+        let result = split_authors(r#"["Smith, J"]"#);
+        assert_eq!(result, vec!["Smith, J"]);
+    }
+
+    #[test]
+    fn test_split_authors_json_empty_array() {
+        let result = split_authors("[]");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_split_authors_json_with_objects_name_field() {
+        let result = split_authors(r#"[{"name":"Smith, J"}, {"name":"Doe, A"}]"#);
+        assert_eq!(result, vec!["Smith, J", "Doe, A"]);
+    }
+
+    #[test]
+    fn test_split_authors_json_with_objects_family_given() {
+        let result = split_authors(
+            r#"[{"family":"Smith","given":"John"}, {"family":"Doe","given":"Alice"}]"#,
+        );
+        assert_eq!(result, vec!["Smith, John", "Doe, Alice"]);
+    }
+
+    #[test]
+    fn test_split_authors_json_family_only() {
+        let result = split_authors(r#"[{"family":"Smith"}, {"family":"Doe"}]"#);
+        assert_eq!(result, vec!["Smith", "Doe"]);
+    }
+
+    #[test]
+    fn test_split_authors_json_mixed_types() {
+        let result =
+            split_authors(r#"["Smith, J", {"name":"Doe, A"}, {"family":"Brown","given":"K"}]"#);
+        assert_eq!(result, vec!["Smith, J", "Doe, A", "Brown, K"]);
+    }
+
+    #[test]
+    fn test_split_authors_json_with_empty_strings() {
+        let result = split_authors(r#"["Smith, J", "", "Doe, A"]"#);
+        assert_eq!(result, vec!["Smith, J", "Doe, A"]);
+    }
+
+    #[test]
+    fn test_parse_authors_json_round_trip() {
+        let authors = parse_authors(r#"["Smith, J", "Doe, A"]"#);
+        assert_eq!(authors.len(), 2);
+        assert_eq!(authors[0].display_name, "Smith, J");
+        assert_eq!(authors[0].normalized_name, "smith j");
+        assert_eq!(authors[1].display_name, "Doe, A");
+        assert_eq!(authors[1].normalized_name, "doe a");
     }
 }

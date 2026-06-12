@@ -219,6 +219,8 @@ pub fn run() {
             commands::biblio_cmd::biblio_get_terms,
             commands::biblio_cmd::biblio_get_coauthor_network,
             commands::biblio_cmd::biblio_get_kpis,
+            commands::biblio_cmd::biblio_get_author_institutions,
+            commands::biblio_cmd::biblio_get_unmatched_affiliation_count,
         ]);
 
     #[cfg(debug_assertions)]

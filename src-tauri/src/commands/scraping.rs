@@ -119,7 +119,7 @@ pub async fn scrape_citation_chaser_cmd(
             if let Some(db_state) = app.try_state::<DbState>() {
                 if let Ok(conn) = db_state.conn.lock() {
                     let details = format!(
-                        "Citation Chaser scrape for DOI {}: refs={}, cites={}",
+                        "Citation Chaser success scrape for DOI {}: refs={}, cites={}",
                         doi,
                         scrape_result.references_ris.is_some(),
                         scrape_result.citations_ris.is_some(),

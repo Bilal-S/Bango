@@ -21,7 +21,7 @@ macro_rules! debug_log {
 
 use crate::db::{article_repo, audit_repo, biblio_repo, label_repo, tag_repo};
 use crate::error::AppError;
-use crate::models::biblio::TermType;
+use crate::models::biblio::{TermSource, TermType};
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
 use crate::screening::llm_client::LlmClient;
 use crate::screening::prompt::{
@@ -476,10 +476,12 @@ impl ScreeningEngine {
 
                             // Save extracted terms to biblio tables for bibliometrics
                             if !screening.extracted_terms.is_empty() {
-                                let terms: Vec<(String, TermType)> = screening
+                                let terms: Vec<(String, TermType, TermSource)> = screening
                                     .extracted_terms
                                     .iter()
-                                    .map(|t| (t.clone(), TermType::NounPhrase))
+                                    .map(|t| {
+                                        (t.clone(), TermType::NounPhrase, TermSource::AiExtracted)
+                                    })
                                     .collect();
                                 let _ = biblio_repo::save_article_terms(&c, &article.id, &terms);
                             }

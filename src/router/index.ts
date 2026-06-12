@@ -14,6 +14,7 @@ const ScreeningProgress = () => import('@/views/screening-progress.vue');
 const SummaryView = () => import('@/views/summary-view.vue');
 const PrismaDiagram = () => import('@/views/prisma-diagram.vue');
 const BiblioDashboard = () => import('@/views/biblio-dashboard.vue');
+const BiblioCoauthors = () => import('@/views/biblio-coauthors.vue');
 const HelpGuide = () => import('@/views/help-guide.vue');
 
 const routes = [
@@ -50,6 +51,13 @@ const routes = [
     path: '/bibliometrics',
     name: 'bibliometrics',
     component: BiblioDashboard,
+    children: [
+      {
+        path: 'coauthors',
+        name: 'coauthors',
+        component: BiblioCoauthors,
+      },
+    ],
   },
   { path: '/settings', name: 'settings', component: LlmConfigView },
   { path: '/help', name: 'help', component: HelpGuide },
@@ -71,6 +79,7 @@ void router.isReady().then(() => {
     import('@/views/import-ris.vue'),
     import('@/views/screening-progress.vue'),
     import('@/views/biblio-dashboard.vue'),
+    import('@/views/biblio-coauthors.vue'),
   ]);
 });
 

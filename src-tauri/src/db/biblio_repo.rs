@@ -5,8 +5,9 @@ use rusqlite::Connection;
 
 use crate::error::AppError;
 use crate::models::biblio::{
-    BiblioArticleAuthor, BiblioAuthor, BiblioKpis, BiblioNetworkEdge, BiblioNetworkMeta,
-    BiblioNetworkNode, BiblioStatus, BiblioTerm, NetworkType, TermType, YearCount,
+    BiblioArticleAuthor, BiblioAuthor, BiblioInstitution, BiblioKpis, BiblioNetworkEdge,
+    BiblioNetworkMeta, BiblioNetworkNode, BiblioStatus, BiblioTerm, NetworkType, TermSource,
+    TermType, YearCount,
 };
 
 // =============================================================================
@@ -14,16 +15,19 @@ use crate::models::biblio::{
 // =============================================================================
 
 /// Upsert a term: insert if new normalized_term+term_type combo, otherwise increment article_count.
+/// When an AI-extracted term already exists, metadata normalisation reuses it instead of creating a duplicate.
 /// Returns the term ID.
 pub fn upsert_term(
     conn: &Connection,
     raw_term: &str,
     normalized_term: &str,
     term_type: &TermType,
+    source: &TermSource,
 ) -> Result<String, AppError> {
     let type_str = term_type.to_string();
+    let source_str = source.to_string();
 
-    // Try to find existing
+    // Try to find existing (by normalized_term + term_type, regardless of source)
     let existing: Option<String> = conn
         .query_row(
             "SELECT id FROM biblio_terms WHERE normalized_term = ?1 AND term_type = ?2",
@@ -42,9 +46,9 @@ pub fn upsert_term(
     } else {
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO biblio_terms (id, normalized_term, raw_term, term_type, article_count) \
-             VALUES (?1, ?2, ?3, ?4, 1)",
-            rusqlite::params![id, normalized_term, raw_term, type_str],
+            "INSERT INTO biblio_terms (id, normalized_term, raw_term, term_type, source, article_count) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+            rusqlite::params![id, normalized_term, raw_term, type_str, source_str],
         )?;
         Ok(id)
     }
@@ -86,7 +90,7 @@ pub fn get_terms_for_article(
     article_id: &str,
 ) -> Result<Vec<BiblioTerm>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.normalized_term, t.raw_term, t.term_type, t.article_count, t.created_at \
+        "SELECT t.id, t.normalized_term, t.raw_term, t.term_type, t.article_count, t.created_at, t.source \
          FROM biblio_terms t \
          JOIN biblio_article_terms bat ON t.id = bat.term_id \
          WHERE bat.article_id = ?1 \
@@ -97,11 +101,18 @@ pub fn get_terms_for_article(
             let type_str: String = row.get(3)?;
             let term_type =
                 if type_str == "noun_phrase" { TermType::NounPhrase } else { TermType::Keyword };
+            let source_str: String = row.get(6)?;
+            let source = match source_str.as_str() {
+                "ai_extracted" => TermSource::AiExtracted,
+                "user_added" => TermSource::UserAdded,
+                _ => TermSource::Metadata,
+            };
             Ok(BiblioTerm {
                 id: row.get(0)?,
                 normalized_term: row.get(1)?,
                 raw_term: row.get(2)?,
                 term_type,
+                source,
                 article_count: row.get(4)?,
                 created_at: row.get(5)?,
             })
@@ -114,14 +125,14 @@ pub fn get_terms_for_article(
 pub fn save_article_terms(
     conn: &Connection,
     article_id: &str,
-    terms: &[(String, TermType)],
+    terms: &[(String, TermType, TermSource)],
 ) -> Result<(), AppError> {
-    for (raw_term, term_type) in terms {
+    for (raw_term, term_type, source) in terms {
         let normalized = crate::biblio::normalizer::normalize_term(raw_term);
         if normalized.is_empty() {
             continue;
         }
-        let term_id = upsert_term(conn, raw_term, &normalized, term_type)?;
+        let term_id = upsert_term(conn, raw_term, &normalized, term_type, source)?;
         let _ = link_article_term(conn, article_id, &term_id);
     }
     Ok(())
@@ -243,6 +254,62 @@ pub fn upsert_institution(
         )?;
         Ok(id)
     }
+}
+
+/// Link an author (per-article) to an institution. Uses INSERT OR IGNORE to avoid duplicates.
+pub fn insert_author_affiliation(
+    conn: &Connection,
+    article_author_id: &str,
+    institution_id: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT OR IGNORE INTO biblio_author_affiliations (id, article_author_id, institution_id) \
+         VALUES (?1, ?2, ?3)",
+        rusqlite::params![uuid::Uuid::new_v4().to_string(), article_author_id, institution_id],
+    )?;
+    Ok(())
+}
+
+/// Get all institutions linked to an author (across all their articles).
+pub fn get_institutions_by_author(
+    conn: &Connection,
+    author_id: &str,
+) -> Result<Vec<BiblioInstitution>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT i.id, i.normalized_name, i.country, i.city, i.created_at \
+         FROM biblio_institutions i \
+         JOIN biblio_author_affiliations baa ON baa.institution_id = i.id \
+         JOIN biblio_article_authors baa2 ON baa2.id = baa.article_author_id \
+         WHERE baa2.author_id = ?1 \
+         ORDER BY i.normalized_name",
+    )?;
+    let institutions = stmt
+        .query_map(rusqlite::params![author_id], |row| {
+            Ok(BiblioInstitution {
+                id: row.get(0)?,
+                normalized_name: row.get(1)?,
+                country: row.get(2)?,
+                city: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(institutions)
+}
+
+/// Count article-author rows that have a raw_affiliation but no linked institution.
+/// These are candidates for LLM-based affiliation normalization.
+pub fn count_unmatched_affiliations(conn: &Connection) -> Result<i32, AppError> {
+    let count: i32 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM biblio_article_authors \
+             WHERE raw_affiliation IS NOT NULL AND raw_affiliation != '' \
+             AND id NOT IN (SELECT DISTINCT article_author_id FROM biblio_author_affiliations)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    Ok(count)
 }
 
 // =============================================================================
@@ -387,6 +454,28 @@ pub fn clear_all_biblio(conn: &Connection) -> Result<(), AppError> {
     conn.execute("DELETE FROM biblio_network_nodes", [])?;
     conn.execute("DELETE FROM biblio_network_meta", [])?;
     conn.execute("DELETE FROM biblio_terms", [])?;
+    conn.execute("DELETE FROM biblio_authors", [])?;
+    conn.execute("DELETE FROM biblio_institutions", [])?;
+    Ok(())
+}
+
+/// Clear only regeneratable biblio data, preserving AI-extracted and user-added terms.
+pub fn clear_regeneratable_biblio(conn: &Connection) -> Result<(), AppError> {
+    // Delete links for metadata-sourced terms only
+    conn.execute(
+        "DELETE FROM biblio_article_terms WHERE term_id IN \
+         (SELECT id FROM biblio_terms WHERE source = 'metadata')",
+        [],
+    )?;
+    // Delete only metadata-sourced terms
+    conn.execute("DELETE FROM biblio_terms WHERE source = 'metadata'", [])?;
+
+    // Everything else is fully regeneratable
+    conn.execute("DELETE FROM biblio_article_authors", [])?;
+    conn.execute("DELETE FROM biblio_author_affiliations", [])?;
+    conn.execute("DELETE FROM biblio_network_edges", [])?;
+    conn.execute("DELETE FROM biblio_network_nodes", [])?;
+    conn.execute("DELETE FROM biblio_network_meta", [])?;
     conn.execute("DELETE FROM biblio_authors", [])?;
     conn.execute("DELETE FROM biblio_institutions", [])?;
     Ok(())
@@ -559,14 +648,14 @@ pub fn normalize_terms_from_articles(conn: &Connection) -> Result<usize, AppErro
         .collect::<Result<Vec<_>, _>>()?;
 
     for (article_id, keywords, title, abstract_text) in &rows {
-        let mut terms: Vec<(String, TermType)> = Vec::new();
+        let mut terms: Vec<(String, TermType, TermSource)> = Vec::new();
 
         // Extract keywords from metadata
         if let Some(kw) = keywords {
             for k in kw.split(';').chain(kw.split(',')) {
                 let trimmed = k.trim();
                 if !trimmed.is_empty() {
-                    terms.push((trimmed.to_string(), TermType::Keyword));
+                    terms.push((trimmed.to_string(), TermType::Keyword, TermSource::Metadata));
                 }
             }
         }
@@ -578,7 +667,7 @@ pub fn normalize_terms_from_articles(conn: &Connection) -> Result<usize, AppErro
             abstract_text.as_deref().unwrap_or("")
         );
         for word in extract_significant_words(&text) {
-            terms.push((word, TermType::NounPhrase));
+            terms.push((word, TermType::NounPhrase, TermSource::Metadata));
         }
 
         save_article_terms(conn, article_id, &terms)?;
@@ -588,8 +677,131 @@ pub fn normalize_terms_from_articles(conn: &Connection) -> Result<usize, AppErro
     Ok(unique as usize)
 }
 
+/// Normalize affiliations from raw_affiliation strings in biblio_article_authors.
+/// Parses each raw_affiliation, upserts institutions, and creates links.
+/// Returns (institutions_created, links_created).
+pub fn normalize_affiliations(conn: &Connection) -> Result<(usize, usize), AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, raw_affiliation FROM biblio_article_authors \
+         WHERE raw_affiliation IS NOT NULL AND raw_affiliation != ''",
+    )?;
+    let rows: Vec<(String, String)> =
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+
+    let mut institutions_created = 0usize;
+    let mut links_created = 0usize;
+
+    for (article_author_id, raw_aff) in &rows {
+        let parsed = crate::biblio::normalizer::parse_affiliation(raw_aff);
+        if let Some(inst_name) = parsed.institution.as_ref() {
+            let normalized =
+                inst_name.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+            if normalized.is_empty() {
+                continue;
+            }
+            let inst_id = upsert_institution(
+                conn,
+                &normalized,
+                parsed.country.as_deref(),
+                parsed.city.as_deref(),
+            )?;
+            institutions_created += 1;
+            insert_author_affiliation(conn, article_author_id, &inst_id)?;
+            links_created += 1;
+        }
+    }
+
+    Ok((institutions_created, links_created))
+}
+
+/// Compute author metrics: total_citations, avg_year, estimated_h_index.
+/// Updates all rows in biblio_authors.
+pub fn compute_author_metrics(conn: &Connection) -> Result<(), AppError> {
+    // Get all author IDs
+    let mut stmt = conn.prepare("SELECT id FROM biblio_authors")?;
+    let author_ids: Vec<String> =
+        stmt.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?;
+
+    for author_id in &author_ids {
+        // Total citations: sum of num_cited for all articles by this author
+        let total_citations: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(a.num_cited), 0) \
+                 FROM articles a \
+                 JOIN biblio_article_authors baa ON baa.article_id = a.id \
+                 WHERE baa.author_id = ?1",
+                rusqlite::params![author_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Average publication year
+        let avg_year: Option<f64> = conn
+            .query_row(
+                "SELECT AVG(a.publication_year) \
+                 FROM articles a \
+                 JOIN biblio_article_authors baa ON baa.article_id = a.id \
+                 WHERE baa.author_id = ?1 AND a.publication_year IS NOT NULL",
+                rusqlite::params![author_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+
+        // Programmatic h-index (largest h where h papers have >= h citations each)
+        let h_index = compute_h_index(conn, author_id);
+
+        conn.execute(
+            "UPDATE biblio_authors SET total_citations = ?1, avg_year = ?2, estimated_h_index = ?3 WHERE id = ?4",
+            rusqlite::params![total_citations, avg_year, h_index, author_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Compute h-index for a single author programmatically.
+fn compute_h_index(conn: &Connection, author_id: &str) -> i32 {
+    let mut stmt = match conn.prepare(
+        "SELECT a.num_cited FROM articles a \
+         JOIN biblio_article_authors baa ON baa.article_id = a.id \
+         WHERE baa.author_id = ?1 AND a.num_cited IS NOT NULL \
+         ORDER BY a.num_cited DESC",
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = crate::db::audit_repo::log_error(
+                conn,
+                &format!("biblio: h-index prepare failed for author {author_id}: {e}"),
+            );
+            return 0;
+        }
+    };
+    let citations: Vec<i32> = match stmt.query_map(rusqlite::params![author_id], |row| row.get(0)) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(e) => {
+            let _ = crate::db::audit_repo::log_error(
+                conn,
+                &format!("biblio: h-index query failed for author {author_id}: {e}"),
+            );
+            Vec::new()
+        }
+    };
+
+    let mut h = 0;
+    for (i, &cites) in citations.iter().enumerate() {
+        if cites >= (i + 1) as i32 {
+            h = (i + 1) as i32;
+        } else {
+            break;
+        }
+    }
+    h
+}
+
 /// Build coauthor edges from the biblio_article_authors table.
 /// Two authors are connected if they appear on the same article.
+/// Computes both full counting (weight = co-paper count) and fractional counting.
 /// Returns the number of edges created.
 pub fn build_coauthor_edges(conn: &Connection) -> Result<usize, AppError> {
     // For each article, connect all pairs of authors
@@ -606,51 +818,89 @@ pub fn build_coauthor_edges(conn: &Connection) -> Result<usize, AppError> {
         article_authors.entry(article_id).or_default().push(author_id);
     }
 
-    // Create edges for each pair
-    let mut edge_counts: std::collections::HashMap<(String, String), i32> =
+    // Create edges for each pair — both full and fractional counting
+    let mut full_counts: std::collections::HashMap<(String, String), i32> =
         std::collections::HashMap::new();
+    let mut fractional_sums: std::collections::HashMap<(String, String), f64> =
+        std::collections::HashMap::new();
+
     for authors in article_authors.values() {
-        for i in 0..authors.len() {
-            for j in (i + 1)..authors.len() {
+        let n = authors.len();
+        if n < 2 {
+            continue;
+        }
+        let pair_count = n * (n - 1) / 2;
+        let fractional_weight = 1.0 / pair_count as f64;
+
+        for i in 0..n {
+            for j in (i + 1)..n {
                 let mut key = (authors[i].clone(), authors[j].clone());
                 if key.0 > key.1 {
                     std::mem::swap(&mut key.0, &mut key.1);
                 }
-                *edge_counts.entry(key).or_insert(0) += 1;
+                *full_counts.entry(key.clone()).or_insert(0) += 1;
+                *fractional_sums.entry(key).or_insert(0.0) += fractional_weight;
             }
         }
     }
 
-    // Save as a co-authorship network
+    // Save as a co-authorship network with params documenting counting mode
+    let params = serde_json::json!({
+        "counting_modes": ["full", "fractional"],
+        "description": "weight = full counting (co-paper count), fractional_weight = fractional counting"
+    }).to_string();
+
     let network_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO biblio_network_meta (id, network_type, label, node_count, edge_count) VALUES (?1, 'co_authorship', 'Co-authorship', 0, ?2)",
-        rusqlite::params![network_id, edge_counts.len() as i32],
+        "INSERT INTO biblio_network_meta (id, network_type, label, node_count, edge_count, params_json) VALUES (?1, 'co_authorship', 'Co-authorship', 0, ?2, ?3)",
+        rusqlite::params![network_id, full_counts.len() as i32, params],
     )?;
 
-    for ((source, target), count) in &edge_counts {
+    // Store both counting modes: weight = full count, fractional stored in a separate column
+    // Since schema only has `weight`, we store full counting as weight
+    // and fractional as a JSON attribute (via params_json on edges if available, or computed client-side)
+    for ((source, target), full_count) in &full_counts {
         let edge_id = uuid::Uuid::new_v4().to_string();
+        // Store full counting as weight
         conn.execute(
             "INSERT INTO biblio_network_edges (id, network_id, source_id, target_id, weight) VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![edge_id, network_id, source, target, *count as f64],
+            rusqlite::params![edge_id, network_id, source, target, *full_count as f64],
         )?;
     }
 
+    // Store fractional counts in a separate lookup (saved as network metadata attribute)
+    let fractional_map: Vec<serde_json::Value> = fractional_sums
+        .iter()
+        .map(|((s, t), w)| serde_json::json!({"source": s, "target": t, "fractional_weight": (w * 1000.0).round() / 1000.0}))
+        .collect();
+
+    // Update network metadata with fractional data
+    let enriched_params = serde_json::json!({
+        "counting_modes": ["full", "fractional"],
+        "fractional_edges": fractional_map,
+    })
+    .to_string();
+    conn.execute(
+        "UPDATE biblio_network_meta SET params_json = ?1 WHERE id = ?2",
+        rusqlite::params![enriched_params, network_id],
+    )?;
+
     // Update node count
     let unique_authors: std::collections::HashSet<&str> =
-        edge_counts.keys().flat_map(|(a, b)| [a.as_str(), b.as_str()]).collect();
+        full_counts.keys().flat_map(|(a, b)| [a.as_str(), b.as_str()]).collect();
     conn.execute(
         "UPDATE biblio_network_meta SET node_count = ?1 WHERE id = ?2",
         rusqlite::params![unique_authors.len() as i32, network_id],
     )?;
 
-    Ok(edge_counts.len())
+    Ok(full_counts.len())
 }
 
 /// Get all normalized authors.
 pub fn get_all_authors(conn: &Connection) -> Result<Vec<BiblioAuthor>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, normalized_name, display_name, first_author_count, article_count, created_at \
+        "SELECT id, normalized_name, display_name, first_author_count, article_count, \
+                total_citations, avg_year, estimated_h_index, created_at \
          FROM biblio_authors ORDER BY article_count DESC",
     )?;
     let authors = stmt
@@ -661,7 +911,10 @@ pub fn get_all_authors(conn: &Connection) -> Result<Vec<BiblioAuthor>, AppError>
                 display_name: row.get(2)?,
                 first_author_count: row.get(3)?,
                 article_count: row.get(4)?,
-                created_at: row.get(5)?,
+                total_citations: row.get(5)?,
+                avg_year: row.get(6)?,
+                estimated_h_index: row.get(7)?,
+                created_at: row.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -671,7 +924,7 @@ pub fn get_all_authors(conn: &Connection) -> Result<Vec<BiblioAuthor>, AppError>
 /// Get all terms.
 pub fn get_all_terms(conn: &Connection) -> Result<Vec<BiblioTerm>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, normalized_term, raw_term, term_type, article_count, created_at \
+        "SELECT id, normalized_term, raw_term, term_type, article_count, created_at, source \
          FROM biblio_terms ORDER BY article_count DESC",
     )?;
     let terms = stmt
@@ -679,11 +932,18 @@ pub fn get_all_terms(conn: &Connection) -> Result<Vec<BiblioTerm>, AppError> {
             let type_str: String = row.get(3)?;
             let term_type =
                 if type_str == "noun_phrase" { TermType::NounPhrase } else { TermType::Keyword };
+            let source_str: String = row.get(6)?;
+            let source = match source_str.as_str() {
+                "ai_extracted" => TermSource::AiExtracted,
+                "user_added" => TermSource::UserAdded,
+                _ => TermSource::Metadata,
+            };
             Ok(BiblioTerm {
                 id: row.get(0)?,
                 normalized_term: row.get(1)?,
                 raw_term: row.get(2)?,
                 term_type,
+                source,
                 article_count: row.get(4)?,
                 created_at: row.get(5)?,
             })
@@ -693,6 +953,7 @@ pub fn get_all_terms(conn: &Connection) -> Result<Vec<BiblioTerm>, AppError> {
 }
 
 /// Get coauthor network as JSON for graph rendering.
+/// Includes author metrics (citations, h-index, avg_year) and fractional edge weights.
 pub fn get_coauthor_network_json(conn: &Connection) -> Result<serde_json::Value, AppError> {
     let authors = get_all_authors(conn)?;
     let nodes: Vec<serde_json::Value> = authors
@@ -702,9 +963,40 @@ pub fn get_coauthor_network_json(conn: &Connection) -> Result<serde_json::Value,
                 "id": a.id,
                 "label": a.display_name,
                 "weight": a.article_count,
+                "citations": a.total_citations,
+                "hIndex": a.estimated_h_index,
+                "avgYear": a.avg_year,
             })
         })
         .collect();
+
+    // Build a lookup for fractional weights from network params_json
+    let mut fractional_lookup: std::collections::HashMap<(String, String), f64> =
+        std::collections::HashMap::new();
+    let params_json: Option<String> = conn
+        .query_row(
+            "SELECT params_json FROM biblio_network_meta WHERE network_type = 'co_authorship' ORDER BY created_at DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+
+    if let Some(ref pj) = params_json {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(pj) {
+            if let Some(fe) = parsed.get("fractional_edges").and_then(|v| v.as_array()) {
+                for edge in fe {
+                    if let (Some(s), Some(t), Some(w)) = (
+                        edge.get("source").and_then(|v| v.as_str()),
+                        edge.get("target").and_then(|v| v.as_str()),
+                        edge.get("fractional_weight").and_then(|v| v.as_f64()),
+                    ) {
+                        fractional_lookup.insert((s.to_string(), t.to_string()), w);
+                    }
+                }
+            }
+        }
+    }
 
     let mut edges_stmt = conn.prepare(
         "SELECT source_id, target_id, weight FROM biblio_network_edges WHERE network_id IN \
@@ -715,9 +1007,21 @@ pub fn get_coauthor_network_json(conn: &Connection) -> Result<serde_json::Value,
             let source: String = row.get(0)?;
             let target: String = row.get(1)?;
             let weight: f64 = row.get(2)?;
-            Ok(serde_json::json!({ "source": source, "target": target, "weight": weight }))
+            Ok((source, target, weight))
         })?
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|(source, target, weight)| {
+            let frac =
+                fractional_lookup.get(&(source.clone(), target.clone())).copied().unwrap_or(0.0);
+            serde_json::json!({
+                "source": source,
+                "target": target,
+                "weight": weight,
+                "fractionalWeight": frac,
+            })
+        })
+        .collect();
 
     Ok(serde_json::json!({ "nodes": nodes, "edges": edges }))
 }
@@ -924,7 +1228,12 @@ fn compute_citations_by_year(conn: &Connection) -> Vec<YearCount> {
 
 /// Distribute `num_cited` citations across years using the decay curve,
 /// starting from `pub_year`. Remainder goes to `current_year`.
-fn distribute_citations(map: &mut HashMap<i32, i32>, pub_year: i32, num_cited: i32, current_year: i32) {
+fn distribute_citations(
+    map: &mut HashMap<i32, i32>,
+    pub_year: i32,
+    num_cited: i32,
+    current_year: i32,
+) {
     let mut distributed: i32 = 0;
     for (offset, weight) in CITATION_DECAY.iter().enumerate() {
         let year = pub_year + offset as i32;
@@ -946,10 +1255,8 @@ fn distribute_citations(map: &mut HashMap<i32, i32>, pub_year: i32, num_cited: i
 
 /// Sort a year→count map into ascending YearCount vec.
 fn sort_year_map(map: HashMap<i32, i32>) -> Vec<YearCount> {
-    let mut v: Vec<YearCount> = map
-        .into_iter()
-        .map(|(year, count)| YearCount { year, count })
-        .collect();
+    let mut v: Vec<YearCount> =
+        map.into_iter().map(|(year, count)| YearCount { year, count }).collect();
     v.sort_by_key(|yc| yc.year);
     v
 }
@@ -981,8 +1288,14 @@ mod tests {
     #[test]
     fn test_upsert_term_creates_new() {
         let conn = test_db();
-        let id =
-            upsert_term(&conn, "Machine Learning", "machine learning", &TermType::Keyword).unwrap();
+        let id = upsert_term(
+            &conn,
+            "Machine Learning",
+            "machine learning",
+            &TermType::Keyword,
+            &TermSource::Metadata,
+        )
+        .unwrap();
         assert!(!id.is_empty());
 
         let count: i32 = conn
@@ -994,10 +1307,22 @@ mod tests {
     #[test]
     fn test_upsert_term_increments_count() {
         let conn = test_db();
-        let id1 =
-            upsert_term(&conn, "Machine Learning", "machine learning", &TermType::Keyword).unwrap();
-        let id2 =
-            upsert_term(&conn, "machine learning", "machine learning", &TermType::Keyword).unwrap();
+        let id1 = upsert_term(
+            &conn,
+            "Machine Learning",
+            "machine learning",
+            &TermType::Keyword,
+            &TermSource::Metadata,
+        )
+        .unwrap();
+        let id2 = upsert_term(
+            &conn,
+            "machine learning",
+            "machine learning",
+            &TermType::Keyword,
+            &TermSource::Metadata,
+        )
+        .unwrap();
         assert_eq!(id1, id2);
 
         let count: i32 = conn
@@ -1009,8 +1334,10 @@ mod tests {
     #[test]
     fn test_upsert_term_different_types() {
         let conn = test_db();
-        let id_kw = upsert_term(&conn, "ML", "ml", &TermType::Keyword).unwrap();
-        let id_np = upsert_term(&conn, "ML", "ml", &TermType::NounPhrase).unwrap();
+        let id_kw =
+            upsert_term(&conn, "ML", "ml", &TermType::Keyword, &TermSource::Metadata).unwrap();
+        let id_np = upsert_term(&conn, "ML", "ml", &TermType::NounPhrase, &TermSource::AiExtracted)
+            .unwrap();
         assert_ne!(id_kw, id_np);
     }
 
@@ -1018,7 +1345,8 @@ mod tests {
     fn test_link_article_term_creates_link() {
         let conn = test_db();
         insert_test_article(&conn, "art1");
-        let term_id = upsert_term(&conn, "AI", "ai", &TermType::Keyword).unwrap();
+        let term_id =
+            upsert_term(&conn, "AI", "ai", &TermType::Keyword, &TermSource::Metadata).unwrap();
         link_article_term(&conn, "art1", &term_id).unwrap();
 
         let count: i32 = conn
@@ -1035,7 +1363,8 @@ mod tests {
     fn test_link_article_term_increments_frequency() {
         let conn = test_db();
         insert_test_article(&conn, "art1");
-        let term_id = upsert_term(&conn, "AI", "ai", &TermType::Keyword).unwrap();
+        let term_id =
+            upsert_term(&conn, "AI", "ai", &TermType::Keyword, &TermSource::Metadata).unwrap();
         link_article_term(&conn, "art1", &term_id).unwrap();
         link_article_term(&conn, "art1", &term_id).unwrap();
 
@@ -1053,10 +1382,22 @@ mod tests {
     fn test_get_terms_for_article() {
         let conn = test_db();
         insert_test_article(&conn, "art1");
-        let t1 =
-            upsert_term(&conn, "Machine Learning", "machine learning", &TermType::Keyword).unwrap();
-        let t2 =
-            upsert_term(&conn, "neural network", "neural network", &TermType::NounPhrase).unwrap();
+        let t1 = upsert_term(
+            &conn,
+            "Machine Learning",
+            "machine learning",
+            &TermType::Keyword,
+            &TermSource::Metadata,
+        )
+        .unwrap();
+        let t2 = upsert_term(
+            &conn,
+            "neural network",
+            "neural network",
+            &TermType::NounPhrase,
+            &TermSource::AiExtracted,
+        )
+        .unwrap();
         link_article_term(&conn, "art1", &t1).unwrap();
         link_article_term(&conn, "art1", &t2).unwrap();
 
@@ -1072,9 +1413,9 @@ mod tests {
             &conn,
             "art1",
             &[
-                ("Machine Learning".to_string(), TermType::Keyword),
-                ("deep learning".to_string(), TermType::NounPhrase),
-                ("machine learning".to_string(), TermType::Keyword), // duplicate normalized
+                ("Machine Learning".to_string(), TermType::Keyword, TermSource::Metadata),
+                ("deep learning".to_string(), TermType::NounPhrase, TermSource::AiExtracted),
+                ("machine learning".to_string(), TermType::Keyword, TermSource::Metadata), // duplicate normalized
             ],
         )
         .unwrap();
@@ -1233,7 +1574,7 @@ mod tests {
     fn test_clear_all_biblio() {
         let conn = test_db();
         insert_test_article(&conn, "art1");
-        upsert_term(&conn, "AI", "ai", &TermType::Keyword).unwrap();
+        upsert_term(&conn, "AI", "ai", &TermType::Keyword, &TermSource::Metadata).unwrap();
         upsert_author(&conn, "smith j", "Smith, J.").unwrap();
 
         clear_all_biblio(&conn).unwrap();
@@ -1247,7 +1588,7 @@ mod tests {
     fn test_get_biblio_status() {
         let conn = test_db();
         insert_test_article(&conn, "art1");
-        upsert_term(&conn, "AI", "ai", &TermType::Keyword).unwrap();
+        upsert_term(&conn, "AI", "ai", &TermType::Keyword, &TermSource::Metadata).unwrap();
         upsert_author(&conn, "smith j", "Smith, J.").unwrap();
 
         let status = get_biblio_status(&conn).unwrap();
@@ -1262,8 +1603,18 @@ mod tests {
         insert_test_article(&conn, "art2");
 
         // Populate
-        save_article_terms(&conn, "art1", &[("ML".to_string(), TermType::Keyword)]).unwrap();
-        save_article_terms(&conn, "art2", &[("AI".to_string(), TermType::Keyword)]).unwrap();
+        save_article_terms(
+            &conn,
+            "art1",
+            &[("ML".to_string(), TermType::Keyword, TermSource::Metadata)],
+        )
+        .unwrap();
+        save_article_terms(
+            &conn,
+            "art2",
+            &[("AI".to_string(), TermType::Keyword, TermSource::Metadata)],
+        )
+        .unwrap();
 
         let status_before = get_biblio_status(&conn).unwrap();
         assert_eq!(status_before.term_count, 2);
@@ -1275,8 +1626,18 @@ mod tests {
         assert_eq!(status_cleared.term_count, 0);
 
         // Repopulate
-        save_article_terms(&conn, "art1", &[("ML".to_string(), TermType::Keyword)]).unwrap();
-        save_article_terms(&conn, "art2", &[("AI".to_string(), TermType::Keyword)]).unwrap();
+        save_article_terms(
+            &conn,
+            "art1",
+            &[("ML".to_string(), TermType::Keyword, TermSource::Metadata)],
+        )
+        .unwrap();
+        save_article_terms(
+            &conn,
+            "art2",
+            &[("AI".to_string(), TermType::Keyword, TermSource::Metadata)],
+        )
+        .unwrap();
 
         let status_after = get_biblio_status(&conn).unwrap();
         assert_eq!(status_after.term_count, 2);
@@ -1509,5 +1870,156 @@ mod tests {
 
         let kpis = get_biblio_kpis(&conn).unwrap();
         assert_eq!(kpis.unique_authors, 2);
+    }
+
+    // ── Selective Clear Tests ───────────────────────────────────
+
+    #[test]
+    fn test_clear_regeneratable_preserves_ai_terms() {
+        let conn = test_db();
+        insert_test_article(&conn, "art1");
+        // Insert metadata term and AI term
+        save_article_terms(
+            &conn,
+            "art1",
+            &[
+                ("keyword".to_string(), TermType::Keyword, TermSource::Metadata),
+                ("ai concept".to_string(), TermType::NounPhrase, TermSource::AiExtracted),
+            ],
+        )
+        .unwrap();
+
+        let before = get_biblio_status(&conn).unwrap();
+        assert_eq!(before.term_count, 2);
+
+        clear_regeneratable_biblio(&conn).unwrap();
+
+        let after = get_biblio_status(&conn).unwrap();
+        assert_eq!(after.term_count, 1, "AI term should be preserved");
+        assert_eq!(after.author_count, 0, "Authors should be cleared");
+    }
+
+    #[test]
+    fn test_clear_regeneratable_preserves_user_terms() {
+        let conn = test_db();
+        insert_test_article(&conn, "art1");
+        save_article_terms(
+            &conn,
+            "art1",
+            &[
+                ("user tag".to_string(), TermType::Keyword, TermSource::UserAdded),
+                ("metadata kw".to_string(), TermType::Keyword, TermSource::Metadata),
+            ],
+        )
+        .unwrap();
+
+        clear_regeneratable_biblio(&conn).unwrap();
+
+        let terms = get_all_terms(&conn).unwrap();
+        assert_eq!(terms.len(), 1);
+        assert_eq!(terms[0].source, TermSource::UserAdded);
+    }
+
+    // ── Author Metrics Tests ────────────────────────────────────
+
+    #[test]
+    fn test_compute_author_metrics() {
+        let conn = test_db();
+        // Insert articles with citation counts
+        conn.execute(
+            "INSERT INTO articles (id, title, abstract_text, authors, status, publication_year, num_cited) VALUES ('a1', 'T1', 'Abs', 'Smith J', 'included', 2020, 10)",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO articles (id, title, abstract_text, authors, status, publication_year, num_cited) VALUES ('a2', 'T2', 'Abs', 'Smith J', 'included', 2022, 5)",
+            [],
+        ).unwrap();
+
+        // Create author and links
+        let aid = upsert_author(&conn, "smith j", "Smith, J.").unwrap();
+        link_article_author(&conn, "a1", &aid, 0, Some("Smith J"), None).unwrap();
+        link_article_author(&conn, "a2", &aid, 0, Some("Smith J"), None).unwrap();
+
+        compute_author_metrics(&conn).unwrap();
+
+        let author = get_all_authors(&conn).unwrap().into_iter().next().unwrap();
+        assert_eq!(author.total_citations, 15, "Total citations should be 10+5=15");
+        assert!(author.avg_year.unwrap() > 2020.0, "Avg year should be ~2021");
+        assert_eq!(author.estimated_h_index, Some(2), "h-index: 2 papers with >=2 citations");
+    }
+
+    #[test]
+    fn test_compute_h_index() {
+        let conn = test_db();
+        // 5 papers with citations [10, 8, 5, 4, 3] → h-index = 4 (4 papers with >=4 citations)
+        for i in 0..5 {
+            let cites = [10, 8, 5, 4, 3][i];
+            conn.execute(
+                "INSERT INTO articles (id, title, abstract_text, authors, status, num_cited) VALUES (?1, 'T', 'Abs', 'A', 'included', ?2)",
+                rusqlite::params![format!("a{i}"), cites],
+            ).unwrap();
+        }
+        let aid = upsert_author(&conn, "a", "A.").unwrap();
+        for i in 0..5 {
+            link_article_author(&conn, &format!("a{i}"), &aid, i as i32, None, None).unwrap();
+        }
+
+        let h = compute_h_index(&conn, &aid);
+        assert_eq!(h, 4, "h-index should be 4 for [10,8,5,4,3]");
+    }
+
+    // ── Edge Counting Tests ─────────────────────────────────────
+
+    #[test]
+    fn test_build_coauthor_edges_full_and_fractional() {
+        let conn = test_db();
+        // 1 article with 3 authors → 3 pairs
+        conn.execute("INSERT INTO articles (id, title, abstract_text, authors, status) VALUES ('a1', 'T', 'Abs', 'A; B; C', 'included')", []).unwrap();
+        let a1 = upsert_author(&conn, "a", "A.").unwrap();
+        let a2 = upsert_author(&conn, "b", "B.").unwrap();
+        let a3 = upsert_author(&conn, "c", "C.").unwrap();
+        link_article_author(&conn, "a1", &a1, 0, None, None).unwrap();
+        link_article_author(&conn, "a1", &a2, 1, None, None).unwrap();
+        link_article_author(&conn, "a1", &a3, 2, None, None).unwrap();
+
+        let edge_count = build_coauthor_edges(&conn).unwrap();
+        assert_eq!(edge_count, 3, "3 authors → 3 edges");
+
+        // Verify fractional data in network metadata
+        let meta: String = conn
+            .query_row(
+                "SELECT params_json FROM biblio_network_meta WHERE network_type = 'co_authorship'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&meta).unwrap();
+        let frac_edges = parsed["fractional_edges"].as_array().unwrap();
+        // 3 pairs from 3 authors: each pair gets 1/3 ≈ 0.333
+        for fe in frac_edges {
+            let fw = fe["fractional_weight"].as_f64().unwrap();
+            assert!((fw - 0.333).abs() < 0.01, "Fractional weight should be ~0.333, got {fw}");
+        }
+    }
+
+    // ── Network JSON Output Tests ───────────────────────────────
+
+    #[test]
+    fn test_get_coauthor_network_json_includes_metrics() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO articles (id, title, abstract_text, authors, status, publication_year, num_cited) VALUES ('a1', 'T', 'Abs', 'Smith J', 'included', 2020, 10)",
+            [],
+        ).unwrap();
+        let aid = upsert_author(&conn, "smith j", "Smith, J.").unwrap();
+        link_article_author(&conn, "a1", &aid, 0, None, None).unwrap();
+        compute_author_metrics(&conn).unwrap();
+
+        let json = get_coauthor_network_json(&conn).unwrap();
+        let nodes = json["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0]["citations"], 10);
+        assert_eq!(nodes[0]["hIndex"], 1);
+        assert_eq!(nodes[0]["avgYear"], 2020.0);
     }
 }

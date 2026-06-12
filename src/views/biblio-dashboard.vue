@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { useBibliometrics } from '../composables/use-bibliometrics';
 
 const router = useRouter();
+const route = useRoute();
 
 const { kpis, loading, normalizing, runNormalization } = useBibliometrics();
 
@@ -150,14 +151,20 @@ const analysisModules: AnalysisModule[] = [
   },
 ];
 
+const isModuleActive = computed(() => route.name !== 'bibliometrics');
+const activeModuleLabel = computed(() => {
+  if (route.name === 'coauthors') return 'Co-Authorship Network';
+  return '';
+});
+
 function navigateToModule(mod: AnalysisModule): void {
-  // For now, just show the module ID in console — sub-routes will be added later
+  if (mod.id === 'co-authorship') {
+    router.push({ name: 'coauthors' });
+    return;
+  }
+  // Other modules remain as placeholders for future implementation
   // eslint-disable-next-line no-console
   console.log(`Navigate to module: ${mod.id}`);
-}
-
-function goHome(): void {
-  router.push('/');
 }
 
 function dismissModal(): void {
@@ -166,7 +173,7 @@ function dismissModal(): void {
 </script>
 
 <template>
-  <div class="biblio">
+  <div class="biblio" :class="{ 'biblio--module': isModuleActive }">
     <!-- No Articles Modal Overlay -->
     <Teleport to="body">
       <div v-if="showNoArticlesModal" class="biblio-overlay" @click.self="dismissModal">
@@ -185,9 +192,18 @@ function dismissModal(): void {
     <section class="biblio__header">
       <div class="biblio__header-text">
         <h1 class="page-title">
-          <button class="biblio__title-link" @click="goHome">Bibliometrics</button>
+          <button
+            v-if="isModuleActive"
+            class="biblio__title-link"
+            @click="router.push({ name: 'bibliometrics' })"
+          >
+            <span class="material-symbols-outlined biblio__back-icon">arrow_back</span>
+            Bibliometrics
+            <span class="biblio__module-name">- {{ activeModuleLabel }}</span>
+          </button>
+          <span v-else>Bibliometrics</span>
         </h1>
-        <p class="biblio__subtitle">
+        <p v-if="!isModuleActive" class="biblio__subtitle">
           Analysis of {{ includedCount }} included articles from {{ yearFrom }} to {{ yearTo }}
         </p>
       </div>
@@ -209,187 +225,197 @@ function dismissModal(): void {
       </Transition>
     </section>
 
-    <!-- KPI Row — compact horizontal layout from High-Contrast Research Hub -->
-    <section class="biblio__kpis">
-      <div class="kpi-card kpi-card--chart">
-        <div class="kpi-card__row">
-          <div class="kpi-card__icon kpi-card__icon--blue">
-            <span class="material-symbols-outlined">description</span>
-          </div>
-          <span
-            v-if="loading || normalizing"
-            class="material-symbols-outlined kpi-card__spinner biblio__spin"
-            >progress_activity</span
-          >
-          <span v-else class="kpi-card__value">{{ totalReferences.toLocaleString() }}</span>
-        </div>
-        <div v-if="hasRefsByYear && !loading && !normalizing" class="kpi-sparkline">
-          <div class="kpi-sparkline__bars">
-            <div v-for="yc in kpis.refsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
-              <div
-                class="kpi-sparkline__bar kpi-sparkline__bar--blue"
-                :style="{ height: (yc.count / maxRefsCount) * 100 + '%' }"
-              >
-                <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-if="firstRefYear !== null && lastRefYear !== null" class="kpi-sparkline__years">
-            <span>{{ firstRefYear }}</span>
-            <span>{{ lastRefYear }}</span>
-          </div>
-        </div>
-        <span class="kpi-card__label kpi-card__label--center">References</span>
-      </div>
-      <div class="kpi-card kpi-card--chart">
-        <div class="kpi-card__row">
-          <div class="kpi-card__icon kpi-card__icon--purple">
-            <span class="material-symbols-outlined">format_quote</span>
-          </div>
-          <span
-            v-if="loading || normalizing"
-            class="material-symbols-outlined kpi-card__spinner biblio__spin"
-            >progress_activity</span
-          >
-          <span v-else class="kpi-card__value">{{ totalCitations.toLocaleString() }}</span>
-        </div>
-        <div v-if="hasCitationsByYear && !loading && !normalizing" class="kpi-sparkline">
-          <div class="kpi-sparkline__bars">
-            <div v-for="yc in kpis.citationsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
-              <div
-                class="kpi-sparkline__bar kpi-sparkline__bar--purple"
-                :style="{ height: (yc.count / maxCitationsCount) * 100 + '%' }"
-              >
-                <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-if="firstCitYear !== null && lastCitYear !== null" class="kpi-sparkline__years">
-            <span>{{ firstCitYear }}</span>
-            <span>{{ lastCitYear }}</span>
-          </div>
-        </div>
-        <span class="kpi-card__label kpi-card__label--center">Normalized Citations</span>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-card__row">
-          <div class="kpi-card__icon kpi-card__icon--teal">
-            <span class="material-symbols-outlined">group</span>
-          </div>
-          <span
-            v-if="loading || normalizing"
-            class="material-symbols-outlined kpi-card__spinner biblio__spin"
-            >progress_activity</span
-          >
-          <span v-else class="kpi-card__value">{{ uniqueAuthors.toLocaleString() }}</span>
-        </div>
-        <span class="kpi-card__label">Unique Authors</span>
-      </div>
-      <div class="kpi-card kpi-card--chart">
-        <div class="kpi-card__row">
-          <div class="kpi-card__icon kpi-card__icon--amber">
-            <span class="material-symbols-outlined">calendar_month</span>
-          </div>
-          <span
-            v-if="loading || normalizing"
-            class="material-symbols-outlined kpi-card__spinner biblio__spin"
-            >progress_activity</span
-          >
-          <span v-else class="kpi-card__value">{{ totalPubs.toLocaleString() }}</span>
-        </div>
-        <div v-if="hasPubsByYear && !loading && !normalizing" class="kpi-sparkline">
-          <div class="kpi-sparkline__bars">
-            <div v-for="yc in kpis.pubsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
-              <div
-                class="kpi-sparkline__bar"
-                :style="{ height: (yc.count / maxPubsCount) * 100 + '%' }"
-              >
-                <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-if="firstYear !== null && lastYear !== null" class="kpi-sparkline__years">
-            <span>{{ firstYear }}</span>
-            <span>{{ lastYear }}</span>
-          </div>
-        </div>
-        <span class="kpi-card__label kpi-card__label--center">Pubs / Year</span>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-card__row">
-          <div class="kpi-card__icon kpi-card__icon--pink">
-            <span class="material-symbols-outlined">star</span>
-          </div>
-          <span
-            v-if="loading || normalizing"
-            class="material-symbols-outlined kpi-card__spinner biblio__spin"
-            >progress_activity</span
-          >
-          <span v-else class="kpi-card__value">{{ avgCitationsPerArticle }}</span>
-        </div>
-        <span class="kpi-card__label">Avg Citations / Article</span>
-      </div>
-      <div class="kpi-card kpi-card--chart">
-        <div class="kpi-card__row">
-          <div class="kpi-card__icon kpi-card__icon--green">
-            <span class="material-symbols-outlined">trending_up</span>
-          </div>
-          <span
-            v-if="loading || normalizing"
-            class="material-symbols-outlined kpi-card__spinner biblio__spin"
-            >progress_activity</span
-          >
-          <span v-else class="kpi-card__value">{{ avgGrowthRate }}</span>
-        </div>
-        <div v-if="hasGrowthByYear && !loading && !normalizing" class="kpi-sparkline">
-          <div class="kpi-sparkline__bars">
-            <div v-for="g in growthByYear" :key="g.year" class="kpi-sparkline__bar-wrap">
-              <div
-                class="kpi-sparkline__bar kpi-sparkline__bar--green"
-                :style="{ height: (Math.abs(g.rate) / maxGrowthAbs) * 100 + '%' }"
-              >
-                <span class="kpi-sparkline__tooltip"
-                  >{{ g.year }}: {{ g.rate >= 0 ? '+' : '' }}{{ g.rate.toFixed(1) }}%</span
-                >
-              </div>
-            </div>
-          </div>
-          <div
-            v-if="firstGrowthYear !== null && lastGrowthYear !== null"
-            class="kpi-sparkline__years"
-          >
-            <span>{{ firstGrowthYear }}</span>
-            <span>{{ lastGrowthYear }}</span>
-          </div>
-        </div>
-        <span class="kpi-card__label kpi-card__label--center">Avg Growth Rate</span>
-      </div>
-    </section>
+    <!-- Viewspace: child route content (analysis modules) -->
+    <router-view v-if="isModuleActive" />
 
-    <!-- Analysis Modules -->
-    <section class="biblio__modules">
-      <h2 class="biblio__section-label">Analysis Modules</h2>
-      <div class="biblio__module-grid">
-        <button
-          v-for="mod in analysisModules"
-          :key="mod.id"
-          class="module-card"
-          @click="navigateToModule(mod)"
-        >
-          <div
-            class="module-card__icon"
-            :style="{ backgroundColor: mod.color + '15', color: mod.color }"
+    <!-- Default view: KPIs + Module Grid (shown when no child route active) -->
+    <template v-else>
+      <!-- KPI Row — compact horizontal layout from High-Contrast Research Hub -->
+      <section class="biblio__kpis">
+        <div class="kpi-card kpi-card--chart">
+          <div class="kpi-card__row">
+            <div class="kpi-card__icon kpi-card__icon--blue">
+              <span class="material-symbols-outlined">description</span>
+            </div>
+            <span
+              v-if="loading || normalizing"
+              class="material-symbols-outlined kpi-card__spinner biblio__spin"
+              >progress_activity</span
+            >
+            <span v-else class="kpi-card__value">{{ totalReferences.toLocaleString() }}</span>
+          </div>
+          <div v-if="hasRefsByYear && !loading && !normalizing" class="kpi-sparkline">
+            <div class="kpi-sparkline__bars">
+              <div v-for="yc in kpis.refsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
+                <div
+                  class="kpi-sparkline__bar kpi-sparkline__bar--blue"
+                  :style="{ height: (yc.count / maxRefsCount) * 100 + '%' }"
+                >
+                  <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="firstRefYear !== null && lastRefYear !== null" class="kpi-sparkline__years">
+              <span>{{ firstRefYear }}</span>
+              <span>{{ lastRefYear }}</span>
+            </div>
+          </div>
+          <span class="kpi-card__label kpi-card__label--center">References</span>
+        </div>
+        <div class="kpi-card kpi-card--chart">
+          <div class="kpi-card__row">
+            <div class="kpi-card__icon kpi-card__icon--purple">
+              <span class="material-symbols-outlined">format_quote</span>
+            </div>
+            <span
+              v-if="loading || normalizing"
+              class="material-symbols-outlined kpi-card__spinner biblio__spin"
+              >progress_activity</span
+            >
+            <span v-else class="kpi-card__value">{{ totalCitations.toLocaleString() }}</span>
+          </div>
+          <div v-if="hasCitationsByYear && !loading && !normalizing" class="kpi-sparkline">
+            <div class="kpi-sparkline__bars">
+              <div
+                v-for="yc in kpis.citationsByYear"
+                :key="yc.year"
+                class="kpi-sparkline__bar-wrap"
+              >
+                <div
+                  class="kpi-sparkline__bar kpi-sparkline__bar--purple"
+                  :style="{ height: (yc.count / maxCitationsCount) * 100 + '%' }"
+                >
+                  <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="firstCitYear !== null && lastCitYear !== null" class="kpi-sparkline__years">
+              <span>{{ firstCitYear }}</span>
+              <span>{{ lastCitYear }}</span>
+            </div>
+          </div>
+          <span class="kpi-card__label kpi-card__label--center">Normalized Citations</span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-card__row">
+            <div class="kpi-card__icon kpi-card__icon--teal">
+              <span class="material-symbols-outlined">group</span>
+            </div>
+            <span
+              v-if="loading || normalizing"
+              class="material-symbols-outlined kpi-card__spinner biblio__spin"
+              >progress_activity</span
+            >
+            <span v-else class="kpi-card__value">{{ uniqueAuthors.toLocaleString() }}</span>
+          </div>
+          <span class="kpi-card__label">Unique Authors</span>
+        </div>
+        <div class="kpi-card kpi-card--chart">
+          <div class="kpi-card__row">
+            <div class="kpi-card__icon kpi-card__icon--amber">
+              <span class="material-symbols-outlined">calendar_month</span>
+            </div>
+            <span
+              v-if="loading || normalizing"
+              class="material-symbols-outlined kpi-card__spinner biblio__spin"
+              >progress_activity</span
+            >
+            <span v-else class="kpi-card__value">{{ totalPubs.toLocaleString() }}</span>
+          </div>
+          <div v-if="hasPubsByYear && !loading && !normalizing" class="kpi-sparkline">
+            <div class="kpi-sparkline__bars">
+              <div v-for="yc in kpis.pubsByYear" :key="yc.year" class="kpi-sparkline__bar-wrap">
+                <div
+                  class="kpi-sparkline__bar"
+                  :style="{ height: (yc.count / maxPubsCount) * 100 + '%' }"
+                >
+                  <span class="kpi-sparkline__tooltip">{{ yc.year }}: {{ yc.count }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="firstYear !== null && lastYear !== null" class="kpi-sparkline__years">
+              <span>{{ firstYear }}</span>
+              <span>{{ lastYear }}</span>
+            </div>
+          </div>
+          <span class="kpi-card__label kpi-card__label--center">Pubs / Year</span>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-card__row">
+            <div class="kpi-card__icon kpi-card__icon--pink">
+              <span class="material-symbols-outlined">star</span>
+            </div>
+            <span
+              v-if="loading || normalizing"
+              class="material-symbols-outlined kpi-card__spinner biblio__spin"
+              >progress_activity</span
+            >
+            <span v-else class="kpi-card__value">{{ avgCitationsPerArticle }}</span>
+          </div>
+          <span class="kpi-card__label">Avg Citations / Article</span>
+        </div>
+        <div class="kpi-card kpi-card--chart">
+          <div class="kpi-card__row">
+            <div class="kpi-card__icon kpi-card__icon--green">
+              <span class="material-symbols-outlined">trending_up</span>
+            </div>
+            <span
+              v-if="loading || normalizing"
+              class="material-symbols-outlined kpi-card__spinner biblio__spin"
+              >progress_activity</span
+            >
+            <span v-else class="kpi-card__value">{{ avgGrowthRate }}</span>
+          </div>
+          <div v-if="hasGrowthByYear && !loading && !normalizing" class="kpi-sparkline">
+            <div class="kpi-sparkline__bars">
+              <div v-for="g in growthByYear" :key="g.year" class="kpi-sparkline__bar-wrap">
+                <div
+                  class="kpi-sparkline__bar kpi-sparkline__bar--green"
+                  :style="{ height: (Math.abs(g.rate) / maxGrowthAbs) * 100 + '%' }"
+                >
+                  <span class="kpi-sparkline__tooltip"
+                    >{{ g.year }}: {{ g.rate >= 0 ? '+' : '' }}{{ g.rate.toFixed(1) }}%</span
+                  >
+                </div>
+              </div>
+            </div>
+            <div
+              v-if="firstGrowthYear !== null && lastGrowthYear !== null"
+              class="kpi-sparkline__years"
+            >
+              <span>{{ firstGrowthYear }}</span>
+              <span>{{ lastGrowthYear }}</span>
+            </div>
+          </div>
+          <span class="kpi-card__label kpi-card__label--center">Avg Growth Rate</span>
+        </div>
+      </section>
+
+      <!-- Analysis Modules -->
+      <section class="biblio__modules">
+        <h2 class="biblio__section-label">Analysis Modules</h2>
+        <div class="biblio__module-grid">
+          <button
+            v-for="mod in analysisModules"
+            :key="mod.id"
+            class="module-card"
+            @click="navigateToModule(mod)"
           >
-            <span class="material-symbols-outlined">{{ mod.icon }}</span>
-          </div>
-          <div class="module-card__text">
-            <p class="module-card__label">{{ mod.label }}</p>
-            <p class="module-card__desc">{{ mod.description }}</p>
-          </div>
-          <span class="material-symbols-outlined module-card__arrow">chevron_right</span>
-        </button>
-      </div>
-    </section>
+            <div
+              class="module-card__icon"
+              :style="{ backgroundColor: mod.color + '15', color: mod.color }"
+            >
+              <span class="material-symbols-outlined">{{ mod.icon }}</span>
+            </div>
+            <div class="module-card__text">
+              <p class="module-card__label">{{ mod.label }}</p>
+              <p class="module-card__desc">{{ mod.description }}</p>
+            </div>
+            <span class="material-symbols-outlined module-card__arrow">chevron_right</span>
+          </button>
+        </div>
+      </section>
+    </template>
   </div>
 </template>
 
@@ -399,6 +425,31 @@ function dismissModal(): void {
   padding: var(--container-padding);
   max-width: 1120px;
   margin: 0 auto;
+}
+
+/* When a child module is active, fill the full viewport height */
+.biblio--module {
+  height: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Module header: compact, fixed height */
+.biblio--module .biblio__header {
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface, #fff);
+}
+
+/* Router view container fills remaining space */
+.biblio--module :deep(> :not(.biblio__header)) {
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 767px) {
@@ -430,10 +481,22 @@ function dismissModal(): void {
   color: var(--color-primary, #4f46e5);
 }
 
+.biblio__back-icon {
+  font-size: 20px;
+  vertical-align: middle;
+  margin-right: var(--space-1);
+}
+
 .biblio__subtitle {
   color: var(--color-on-surface-variant);
   font-size: var(--font-size-body);
   margin-top: var(--space-1);
+}
+
+.biblio__module-name {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-on-surface-variant);
 }
 
 /* Progress Bar (replaces Refresh button during normalization) */
