@@ -2,8 +2,7 @@ import { ref, shallowRef, onUnmounted } from 'vue';
 import Sigma from 'sigma';
 import { createEdgeArrowProgram } from 'sigma/rendering';
 import type Graph from 'graphology';
-
-const renderer = shallowRef<Sigma | null>(null);
+import { filterNodesByYearRange } from '../utils/citation-analysis';
 
 interface SigmaRendererOptions {
   /** Min camera ratio (zoom in limit). Default 0.1 */
@@ -35,6 +34,12 @@ interface SigmaRendererOptions {
  *   await initRenderer(container.value!, graph, opts);
  */
 export function useSigmaRenderer() {
+  // IMPORTANT: this ref MUST live inside the function (component instance scope),
+  // NOT at module scope. A module-scoped singleton is shared across all callers,
+  // so one component's onUnmounted → destroyRenderer() would kill another
+  // component's renderer, causing crashes during route transitions where parent
+  // and child both use this composable.
+  const renderer = shallowRef<Sigma | null>(null);
   const isRendering = ref(false);
 
   /**
@@ -163,20 +168,31 @@ export function useSigmaRenderer() {
 
   /**
    * Apply visibility filters to citation graph nodes based on minCitations,
-   * showIsolated, and search query.
+   * showIsolated, search query, and optional year range.
    *
    * - `minCitations`: hide papers with fewer than N incoming citations.
    * - `showIsolated`: when false, hide nodes with zero degree (no edges).
    * - `search`: case-insensitive substring match on label/title/authors.
+   * - `yearRange`: when set, hide nodes whose `year` falls outside [min, max].
+   *   Nodes with null/undefined year are always visible (can't be evaluated).
    *
    * Returns { visibleNodes, visibleEdges } counts.
    */
   function applyCitationGraphFilters(
     g: Graph,
-    filters: { minCitations: number; showIsolated: boolean; search: string }
+    filters: {
+      minCitations: number;
+      showIsolated: boolean;
+      search: string;
+      yearRange?: [number, number] | null;
+    }
   ): { visibleNodes: number; visibleEdges: number } {
-    const { minCitations, showIsolated, search } = filters;
+    const { minCitations, showIsolated, search, yearRange } = filters;
     const searchLower = search.toLowerCase();
+
+    // Pre-compute the set of nodes passing the year filter once (O(n)),
+    // rather than recomputing inside the per-node loop.
+    const yearPassSet = filterNodesByYearRange(g, yearRange ?? null);
 
     // Determine which nodes pass the filter
     const nodeVisible = new Map<string, boolean>();
@@ -194,7 +210,8 @@ export function useSigmaRenderer() {
         label.toLowerCase().includes(searchLower) ||
         title.toLowerCase().includes(searchLower) ||
         authors.toLowerCase().includes(searchLower);
-      const visible = passesCitations && passesIsolated && passesSearch;
+      const passesYear = yearPassSet.has(node);
+      const visible = passesCitations && passesIsolated && passesSearch && passesYear;
       nodeVisible.set(node, visible);
       g.setNodeAttribute(node, 'hidden', !visible);
     }

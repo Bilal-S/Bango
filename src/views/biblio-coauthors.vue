@@ -15,7 +15,18 @@ const { graph, loading, error, nodeCount, edgeCount, countingMode, fetchNetwork,
   useCoAuthorNetwork();
 
 const { isLayouting, applyLayout, runForceAtlas2Async } = useNetworkLayout();
-const { locateNode, resetZoom, renderer, applyGraphFilters, refresh } = useSigmaRenderer();
+const { applyGraphFilters } = useSigmaRenderer();
+const graphRef = ref<InstanceType<typeof NetworkGraph> | null>(null);
+
+function locateNode(nodeId: string) {
+  graphRef.value?.locateNode(nodeId);
+}
+function resetZoom() {
+  graphRef.value?.resetZoom();
+}
+function refresh() {
+  graphRef.value?.refresh();
+}
 
 const selectedAuthor = ref<CoAuthorNode | null>(null);
 const focusedNodeId = ref<string | null>(null);
@@ -160,8 +171,8 @@ function onLocateAuthor(name: string) {
 async function onExportImage(format: NetworkExportFormat) {
   try {
     if (format === 'png') {
-      if (!renderer.value) return;
-      await exportNetworkPng(renderer.value);
+      if (!graphRef.value?.renderer) return;
+      await exportNetworkPng(graphRef.value.renderer);
     } else if (format === 'gexf') {
       if (!graph.value) return;
       await exportNetworkGexf(graph.value);
@@ -309,6 +320,7 @@ async function onRecalculate() {
     <!-- Graph canvas -->
     <main class="flex-1 relative">
       <NetworkGraph
+        ref="graphRef"
         :graph="graph"
         :loading="loading"
         :is-layouting="isLayouting"

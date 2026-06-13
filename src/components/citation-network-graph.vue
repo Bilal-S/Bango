@@ -1,5 +1,8 @@
 <template>
-  <div ref="containerRef" class="relative w-full h-full bg-slate-50/50 overflow-hidden">
+  <div class="relative w-full h-full bg-slate-50/50 overflow-hidden">
+    <!-- Sigma container -->
+    <div ref="containerRef" class="w-full h-full" />
+
     <!-- Loading overlay -->
     <div
       v-if="loading || isLayouting"
@@ -66,6 +69,10 @@ import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { citationClusterColor } from '../types/biblio-citation';
 import type { CitationNode } from '../types/biblio-citation';
 import { getTemporalColor } from '@/utils/color';
+import { computeAncestry, computeProgeny } from '../utils/citation-analysis';
+
+/** Isolation mode: focus on a node's ancestry (papers it cites) or progeny (papers citing it). */
+export type IsolationDirection = 'ancestry' | 'progeny';
 
 const props = defineProps<{
   graph: Graph | null;
@@ -78,6 +85,14 @@ const props = defineProps<{
   minYear: number;
   maxYear: number;
   recalculateTrigger: number;
+  /** When set, non-isolated nodes are dimmed. Takes visual precedence over focus/cluster. */
+  isolationMode: { nodeId: string; direction: IsolationDirection; label?: string } | null;
+  /** Phase 3 — Main Path (SPC): node IDs on the main path backbone. */
+  mainPathNodes: Set<string>;
+  /** Phase 3 — Main Path (SPC): edge IDs on the main path. */
+  mainPathEdges: Set<string>;
+  /** Phase 3 — Main Path (SPC): master toggle for the highlight. */
+  showMainPath: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -90,7 +105,14 @@ const hoveredNode = ref<CitationNode | null>(null);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
 
-const { renderer, initRenderer, destroyRenderer } = useSigmaRenderer();
+// Guard against async callbacks (rAF, worker results) firing after unmount.
+// Without this, a pending requestAnimationFrame can call initRenderer() on a
+// detached container during route transitions, causing crashes.
+let isUnmounted = false;
+let pendingFrame: number | null = null;
+
+const { renderer, initRenderer, destroyRenderer, locateNode, resetZoom, refresh } =
+  useSigmaRenderer();
 
 const hasGraph = computed(() => (props.graph?.order ?? 0) > 0);
 
@@ -103,9 +125,15 @@ watch(
   () => props.graph,
   (g) => {
     if (!g || !containerRef.value) return;
-    clearFocusMode();
-    requestAnimationFrame(() => {
-      if (!containerRef.value || !g) return;
+    // Cancel any previously scheduled frame to avoid double-init.
+    if (pendingFrame !== null) {
+      cancelAnimationFrame(pendingFrame);
+    }
+    pendingFrame = requestAnimationFrame(() => {
+      pendingFrame = null;
+      // Abort if the component was unmounted while we waited for the frame.
+      // This prevents mounting a Sigma renderer onto a detached DOM node.
+      if (isUnmounted || !containerRef.value || !g) return;
       initRenderer(containerRef.value, g, {
         labelRenderSizeThreshold: 1.2,
         defaultEdgeColor: '#cbd5e1',
@@ -115,64 +143,171 @@ watch(
         edgeArrowSize: { length: 4, wideness: 3 },
       });
       bindSigmaEvents();
-      if (props.focusedNodeId) {
-        applyFocusMode(props.focusedNodeId);
-      }
+      applyVisualState();
     });
   }
 );
 
 watch(
   () => props.focusedNodeId,
-  (newId) => {
-    if (newId) {
-      applyFocusMode(newId);
-    } else {
-      clearFocusMode();
-    }
+  () => {
+    applyVisualState();
   }
 );
 
-watch(
-  () => props.colorMode,
-  () => {
-    if (props.focusedNodeId) {
-      applyFocusMode(props.focusedNodeId);
-    } else if (props.selectedClusters.length > 0) {
-      applyClusterHighlight(props.selectedClusters);
+/**
+ * Centralized visual state dispatcher.
+ *
+ * Isolation takes precedence over focus mode, which takes precedence over
+ * cluster highlight.  When none are active, the default full-brightness state
+ * is restored.
+ */
+function applyVisualState() {
+  if (!props.graph) return;
+  const g = props.graph;
+
+  const isIsolationActive = !!props.isolationMode;
+  const isMainPathActive = props.showMainPath && props.mainPathNodes.size > 0;
+  const isFocusActive = !!props.focusedNodeId;
+  const isClusterActive = props.selectedClusters.length > 0;
+
+  // Precompute sets for quick lookup
+  const isolationSet = new Set<string>();
+  if (props.isolationMode && g.hasNode(props.isolationMode.nodeId)) {
+    const focusId = props.isolationMode.nodeId;
+    isolationSet.add(focusId);
+    if (props.isolationMode.direction === 'ancestry') {
+      for (const n of computeAncestry(g, focusId)) isolationSet.add(n);
     } else {
-      clearFocusMode();
+      for (const n of computeProgeny(g, focusId)) isolationSet.add(n);
     }
   }
+
+  let focusNeighborsSet = new Set<string>();
+  if (props.focusedNodeId && g.hasNode(props.focusedNodeId)) {
+    const focusId = props.focusedNodeId;
+    focusNeighborsSet = new Set([...g.inNeighbors(focusId), ...g.outNeighbors(focusId), focusId]);
+  }
+
+  const selectedClustersSet = new Set(props.selectedClusters);
+
+  // Pre-calculate base node size scaling bounds
+  const citedValues: number[] = [];
+  g.forEachNode((n) => {
+    if (g.getNodeAttribute(n, 'unmatched') !== true) {
+      citedValues.push(g.getNodeAttribute(n, 'numCited') ?? 0);
+    }
+  });
+  const minCited = Math.min(...citedValues, 0);
+  const maxCited = Math.max(...citedValues, 1);
+
+  // Apply composed visual attributes to nodes
+  g.forEachNode((n) => {
+    const isUnmatched = g.getNodeAttribute(n, 'unmatched') === true;
+    const baseColor = getNodeColor(n);
+
+    // Base size computation
+    let baseSize = 3;
+    if (!isUnmatched) {
+      const numCited = g.getNodeAttribute(n, 'numCited') ?? 0;
+      baseSize =
+        minCited === maxCited ? 10 : 4 + ((numCited - minCited) / (maxCited - minCited)) * 18;
+    }
+
+    const isIsolatedDimmed = isIsolationActive && !isolationSet.has(n);
+    const isOnMainPathDimmed = isMainPathActive && !props.mainPathNodes.has(n);
+    const isFocusedDimmed = isFocusActive && !focusNeighborsSet.has(n);
+    const isInClusterDimmed =
+      isClusterActive &&
+      (g.getNodeAttribute(n, 'cluster') === null ||
+        !selectedClustersSet.has(g.getNodeAttribute(n, 'cluster') as number));
+
+    const isDimmed = isIsolatedDimmed || isOnMainPathDimmed || isFocusedDimmed || isInClusterDimmed;
+
+    if (isDimmed) {
+      g.setNodeAttribute(n, 'color', `${baseColor}26`); // 15% opacity
+      g.setNodeAttribute(n, 'size', baseSize * 0.6);
+    } else {
+      g.setNodeAttribute(n, 'color', baseColor);
+      const sizeMultiplier = isMainPathActive && props.mainPathNodes.has(n) ? 1.15 : 1.0;
+      g.setNodeAttribute(n, 'size', baseSize * sizeMultiplier);
+    }
+  });
+
+  // Apply composed visual attributes to edges
+  g.forEachEdge((edge, attrs, source, target) => {
+    const isUnmatchedEdge = attrs.unmatched === true;
+
+    const isIsolatedEdgeDimmed =
+      isIsolationActive && (!isolationSet.has(source) || !isolationSet.has(target));
+    const isOnMainPathEdgeDimmed = isMainPathActive && !props.mainPathEdges.has(edge as string);
+    const isFocusedEdgeDimmed =
+      isFocusActive && (!focusNeighborsSet.has(source) || !focusNeighborsSet.has(target));
+
+    let isClusterEdgeDimmed = false;
+    if (isClusterActive) {
+      const sCluster = g.getNodeAttribute(source, 'cluster') as number | null;
+      const tCluster = g.getNodeAttribute(target, 'cluster') as number | null;
+      isClusterEdgeDimmed =
+        sCluster === null ||
+        tCluster === null ||
+        !selectedClustersSet.has(sCluster) ||
+        !selectedClustersSet.has(tCluster);
+    }
+
+    const isDimmedEdge =
+      isIsolatedEdgeDimmed || isOnMainPathEdgeDimmed || isFocusedEdgeDimmed || isClusterEdgeDimmed;
+
+    if (isDimmedEdge) {
+      g.setEdgeAttribute(edge as string, 'color', '#f1f5f9'); // highly dimmed (slate-100)
+    } else {
+      if (isMainPathActive && props.mainPathEdges.has(edge as string)) {
+        g.setEdgeAttribute(edge as string, 'color', '#f5473a'); // main path highlight color
+      } else if (isIsolationActive) {
+        g.setEdgeAttribute(edge as string, 'color', '#6366f1'); // isolation direction connection
+      } else if (isFocusActive || isClusterActive) {
+        g.setEdgeAttribute(edge as string, 'color', '#94a3b8'); // highlighted neighbor connection
+      } else {
+        g.setEdgeAttribute(edge as string, 'color', isUnmatchedEdge ? '#e2e8f0' : '#cbd5e1');
+      }
+    }
+  });
+
+  renderer.value?.refresh();
+}
+
+watch(
+  () => props.colorMode,
+  () => applyVisualState()
 );
 
 watch(
   () => props.selectedClusters,
-  (clusters) => {
-    if (props.focusedNodeId) {
-      applyFocusMode(props.focusedNodeId);
-    } else if (clusters.length > 0) {
-      applyClusterHighlight(clusters);
-    } else {
-      clearFocusMode();
-    }
-  },
+  () => applyVisualState(),
   { deep: true }
 );
 
 watch(
   () => props.recalculateTrigger,
   () => {
-    if (props.graph) {
-      if (props.focusedNodeId) {
-        applyFocusMode(props.focusedNodeId);
-      } else if (props.selectedClusters.length > 0) {
-        applyClusterHighlight(props.selectedClusters);
-      } else {
-        clearFocusMode();
-      }
-    }
+    if (props.graph) applyVisualState();
   }
+);
+
+watch(
+  () => props.isolationMode,
+  () => applyVisualState(),
+  { deep: true }
+);
+
+/**
+ * Phase 3 — Main Path (SPC): re-apply visual state when the toggle or the
+ * computed node/edge sets change.
+ */
+watch(
+  () => [props.showMainPath, props.mainPathNodes, props.mainPathEdges] as const,
+  () => applyVisualState(),
+  { deep: true }
 );
 
 function getNodeColor(nodeId: string): string {
@@ -235,96 +370,19 @@ function bindSigmaEvents() {
   });
 }
 
-function applyClusterHighlight(clusterIds: number[]) {
-  if (!props.graph) return;
-  const g = props.graph;
-  const clusterSet = new Set(clusterIds);
-
-  g.forEachNode((n) => {
-    const cluster = g.getNodeAttribute(n, 'cluster') as number | null;
-    const isInCluster = cluster !== null && clusterSet.has(cluster);
-    const baseColor = getNodeColor(n);
-    g.setNodeAttribute(n, 'color', isInCluster ? baseColor : `${baseColor}26`);
-    const origSize = g.getNodeAttribute(n, 'size') ?? 5;
-    g.setNodeAttribute(n, 'size', isInCluster ? origSize : origSize * 0.6);
-  });
-
-  g.forEachEdge((_edge, _attrs, source, target) => {
-    const sCluster = g.getNodeAttribute(source, 'cluster') as number | null;
-    const tCluster = g.getNodeAttribute(target, 'cluster') as number | null;
-    const bothInCluster =
-      sCluster !== null &&
-      tCluster !== null &&
-      clusterSet.has(sCluster) &&
-      clusterSet.has(tCluster);
-    g.setEdgeAttribute(_edge as string, 'color', bothInCluster ? '#94a3b8' : '#f1f5f9');
-  });
-}
-
-function applyFocusMode(nodeId: string) {
-  if (!props.graph || !renderer.value) return;
-  const g = props.graph;
-  if (!g.hasNode(nodeId)) return;
-
-  // For directed graphs, include both in-neighbors (citing) and out-neighbors (cited)
-  const neighbors = new Set<string>([...g.inNeighbors(nodeId), ...g.outNeighbors(nodeId)]);
-  neighbors.add(nodeId);
-
-  g.forEachNode((n) => {
-    const isNeighbor = neighbors.has(n);
-    const baseColor = getNodeColor(n);
-    g.setNodeAttribute(n, 'color', isNeighbor ? baseColor : `${baseColor}26`);
-    const origSize = g.getNodeAttribute(n, 'size') ?? 5;
-    g.setNodeAttribute(n, 'size', isNeighbor ? origSize : origSize * 0.6);
-  });
-
-  g.forEachEdge((_edge, _attrs, source, target) => {
-    const isConnected = neighbors.has(source) && neighbors.has(target);
-    g.setEdgeAttribute(_edge as string, 'color', isConnected ? '#94a3b8' : '#f1f5f9');
-  });
-}
-
-function clearFocusMode() {
-  if (!props.graph) return;
-  const g = props.graph;
-
-  // Recalculate sizes based on numCited (same as buildGraph).
-  // Only consider matched (real article) nodes for the scale range so that
-  // unmatched leaves (always 0 citations) don't compress the scale.
-  const citedValues: number[] = [];
-  g.forEachNode((n) => {
-    if (g.getNodeAttribute(n, 'unmatched') !== true) {
-      citedValues.push(g.getNodeAttribute(n, 'numCited') ?? 0);
-    }
-  });
-  const minCited = Math.min(...citedValues, 0);
-  const maxCited = Math.max(...citedValues, 1);
-
-  g.forEachNode((n) => {
-    g.setNodeAttribute(n, 'color', getNodeColor(n));
-    const isUnmatched = g.getNodeAttribute(n, 'unmatched') === true;
-    if (isUnmatched) {
-      // Unmatched leaves are always small; don't scale with citations.
-      g.setNodeAttribute(n, 'size', 3);
-      return;
-    }
-    const numCited = g.getNodeAttribute(n, 'numCited') ?? 0;
-    const size =
-      minCited === maxCited ? 10 : 4 + ((numCited - minCited) / (maxCited - minCited)) * 18;
-    g.setNodeAttribute(n, 'size', size);
-  });
-
-  g.forEachEdge((e) => {
-    const isUnmatched = g.getEdgeAttribute(e as string, 'unmatched') === true;
-    g.setEdgeAttribute(
-      e as string,
-      'color',
-      isUnmatched ? '#e2e8f0' : '#cbd5e1' // slate-200 : slate-300
-    );
-  });
-}
+defineExpose({
+  locateNode,
+  resetZoom,
+  refresh,
+  renderer,
+});
 
 onUnmounted(() => {
+  isUnmounted = true;
+  if (pendingFrame !== null) {
+    cancelAnimationFrame(pendingFrame);
+    pendingFrame = null;
+  }
   destroyRenderer();
 });
 </script>

@@ -4,9 +4,6 @@ import louvain from 'graphology-communities-louvain';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { clusterColor } from '../types/biblio-network';
 
-const isLayouting = ref(false);
-const clusterCount = ref(0);
-
 /**
  * Apply a circular layout to all nodes as an initial arrangement.
  * Useful before running ForceAtlas2 so nodes start in a predictable distribution.
@@ -22,12 +19,11 @@ export function applyCircularLayout(g: Graph, scale = 100): void {
 }
 
 /**
- * Detect communities using the Louvain algorithm and assign cluster colors.
- * Returns the number of detected communities.
+ * Standalone community detection — does NOT update any reactive ref.
+ * Use this when you only need the cluster assignments on the graph.
  */
 export function detectCommunities(g: Graph): number {
   const details = louvain.detailed(g, { resolution: 1.0 });
-  // details.communities is {[nodeId: string]: communityNumber}
   const coms = details.communities;
   let maxCommunity = 0;
 
@@ -38,8 +34,7 @@ export function detectCommunities(g: Graph): number {
     if (community > maxCommunity) maxCommunity = community;
   }
 
-  clusterCount.value = details.count > 0 ? details.count : maxCommunity + 1;
-  return clusterCount.value;
+  return details.count > 0 ? details.count : maxCommunity + 1;
 }
 
 /**
@@ -87,8 +82,27 @@ async function runForceAtlas2Async(
 
 /**
  * Composable for network layout and community detection.
+ *
+ * IMPORTANT: `isLayouting` and `clusterCount` are declared INSIDE the function
+ * so each component instance gets its own reactive state.  A previous version
+ * had these at module scope, creating a shared singleton across all callers —
+ * meaning one component's layout run could clobber another's flags during route
+ * transitions.
  */
 export function useNetworkLayout() {
+  const isLayouting = ref(false);
+  const clusterCount = ref(0);
+
+  /**
+   * Detect communities using the Louvain algorithm and assign cluster colors.
+   * Updates this composable instance's reactive `clusterCount` ref and returns
+   * the count.  Delegates the graph mutation to the standalone export.
+   */
+  function detectCommunitiesReactive(g: Graph): number {
+    clusterCount.value = detectCommunities(g);
+    return clusterCount.value;
+  }
+
   /**
    * Run the full layout pipeline: circular → Louvain → ForceAtlas2.
    */
@@ -102,8 +116,8 @@ export function useNetworkLayout() {
       // 1. Initial circular layout
       applyCircularLayout(g);
 
-      // 2. Detect communities (assigns cluster + color)
-      detectCommunities(g);
+      // 2. Detect communities (assigns cluster + color, updates ref)
+      detectCommunitiesReactive(g);
 
       // 3. Run ForceAtlas2 for final positioning
       await runForceAtlas2Async(g, iterations, layoutMode);
@@ -117,7 +131,9 @@ export function useNetworkLayout() {
     clusterCount,
     applyLayout,
     applyCircularLayout,
-    detectCommunities,
+    // Exposed under the original name for backward compatibility with callers
+    // that destructure `detectCommunities` from the composable's return value.
+    detectCommunities: detectCommunitiesReactive,
     runForceAtlas2Async,
   };
 }

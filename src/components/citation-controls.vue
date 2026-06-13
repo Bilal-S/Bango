@@ -93,6 +93,84 @@
       </button>
     </div>
 
+    <!-- Main Path (SPC) toggle -->
+    <div class="flex items-center justify-between">
+      <label class="text-xs text-slate-600 flex items-center gap-1">
+        Main Path (SPC)
+        <span
+          class="material-symbols-outlined text-[14px] text-slate-400 cursor-help"
+          title="Highlight the main path backbone using Search Path Count (SPC).  Dims all nodes and edges not on the main path."
+          >help</span
+        >
+      </label>
+      <button
+        class="relative w-9 h-5 rounded-full transition-colors cursor-pointer"
+        :class="showMainPath ? 'bg-amber-500' : 'bg-slate-300'"
+        :title="
+          showMainPath ? 'Main path highlight active — click to turn off' : 'Highlight main path'
+        "
+        @click="toggleMainPath"
+      >
+        <span
+          class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform"
+          :class="showMainPath ? 'translate-x-4' : ''"
+        ></span>
+      </button>
+    </div>
+
+    <!-- Time-Slice year range slider -->
+    <div v-if="minYear !== maxYear">
+      <label class="flex items-center justify-between text-xs text-slate-600 mb-1">
+        <span>Time-Slice</span>
+        <span class="font-semibold tabular-nums">{{ yearStart }} – {{ yearEnd }}</span>
+      </label>
+      <div class="relative h-6 flex items-center">
+        <!-- Track -->
+        <div class="absolute inset-x-0 h-1.5 bg-slate-200 rounded-full"></div>
+        <!-- Active range highlight -->
+        <div
+          class="absolute h-1.5 bg-indigo-500 rounded-full pointer-events-none"
+          :style="{
+            left: `${((yearStart - minYear) / (maxYear - minYear)) * 100}%`,
+            right: `${((maxYear - yearEnd) / (maxYear - minYear)) * 100}%`,
+          }"
+        ></div>
+        <!-- Left handle -->
+        <input
+          v-model.number="yearStart"
+          type="range"
+          :min="minYear"
+          :max="maxYear"
+          step="1"
+          class="dual-range absolute inset-0 w-full"
+          @input="onYearInput"
+          @change="onYearChange"
+        />
+        <!-- Right handle -->
+        <input
+          v-model.number="yearEnd"
+          type="range"
+          :min="minYear"
+          :max="maxYear"
+          step="1"
+          class="dual-range absolute inset-0 w-full"
+          @input="onYearInput"
+          @change="onYearChange"
+        />
+      </div>
+      <div class="flex justify-between text-[10px] text-slate-400 mt-0.5">
+        <span>{{ minYear }}</span>
+        <span>{{ maxYear }}</span>
+      </div>
+      <button
+        v-if="yearActive"
+        class="mt-1 text-[10px] text-indigo-600 hover:text-indigo-700 cursor-pointer"
+        @click="clearYearSlice"
+      >
+        Reset year filter
+      </button>
+    </div>
+
     <!-- Color Mode toggle -->
     <div>
       <label class="text-xs text-slate-600 mb-1 block">Color Mode</label>
@@ -147,6 +225,26 @@
           @click="$emit('layout-mode-change', 'dynamic')"
         >
           Dynamic
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Isolation Badge -->
+    <div v-if="isolationMode" class="flex flex-col gap-1.5 border-t border-slate-100 pt-3">
+      <span class="text-xs font-medium text-slate-500">Active Isolation</span>
+      <div
+        class="flex items-center justify-between bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1.5 text-xs text-indigo-700"
+      >
+        <div class="flex items-center gap-1.5 min-w-0">
+          <span class="material-symbols-outlined text-sm shrink-0">filter_alt</span>
+          <span class="font-medium truncate" :title="isolationLabel">{{ isolationLabel }}</span>
+        </div>
+        <button
+          class="material-symbols-outlined text-sm cursor-pointer text-indigo-400 hover:text-indigo-600 transition-colors ml-1.5 shrink-0 animate-none"
+          title="Clear isolation"
+          @click="$emit('clear-isolation')"
+        >
+          close
         </button>
       </div>
     </div>
@@ -286,12 +384,21 @@ const props = defineProps<{
   selectedClusters: number[];
   /** Current state of the "Show Unmatched References" toggle (mirrored back). */
   showUnmatched: boolean;
+  /** Current state of the "Main Path (SPC)" highlight toggle. */
+  showMainPath: boolean;
+  /** Current active isolation mode. */
+  isolationMode: { nodeId: string; direction: 'ancestry' | 'progeny'; label?: string } | null;
 }>();
 
 const emit = defineEmits<{
   (
     e: 'filter-change',
-    filters: { minCitations: number; showIsolated: boolean; search: string }
+    filters: {
+      minCitations: number;
+      showIsolated: boolean;
+      search: string;
+      yearRange?: [number, number] | null;
+    }
   ): void;
   (e: 'locate-paper', label: string): void;
   (e: 'export-image', format: 'png' | 'gexf'): void;
@@ -308,6 +415,29 @@ const emit = defineEmits<{
    * alone.
    */
   (e: 'unmatched-change', showUnmatched: boolean): void;
+  /**
+   * Phase 2 — Time-Slice: emitted on every `input` event (dragging a slider
+   * handle).  The parent applies the year-range filter immediately to hide/show
+   * nodes but defers the expensive ForceAtlas2 re-layout until `change` (slider
+   * release) is emitted via `year-range-commit`.
+   */
+  (
+    e: 'year-range-input',
+    range: [number, number],
+    filters?: { minCitations: number; showIsolated: boolean; search: string }
+  ): void;
+  /**
+   * Phase 2 — Time-Slice: emitted on `change` (slider release).  The parent runs
+   * the ForceAtlas2 re-layout on the now-filtered subgraph.
+   */
+  (e: 'year-range-commit', range: [number, number]): void;
+  /**
+   * Phase 3 — Main Path: emitted when the user toggles the SPC highlight.  The
+   * parent triggers the worker computation and applies the visual highlight.
+   */
+  (e: 'main-path-change', showMainPath: boolean): void;
+  /** Emitted when the user clears the isolation mode from the sidebar badge. */
+  (e: 'clear-isolation'): void;
 }>();
 
 const searchQuery = ref('');
@@ -327,6 +457,32 @@ watch(
 );
 const showSuggestions = ref(false);
 const showExportMenu = ref(false);
+
+/**
+ * Phase 2 — Time-Slice year-range state.
+ *
+ * `yearStart` / `yearEnd` are local refs initialised to the full extent of the
+ * data.  They are kept in sync with the parent's minYear/maxYear props so
+ * that programmatic resets (e.g. from the detail panel) are reflected in the UI.
+ */
+const yearStart = ref(props.minYear);
+const yearEnd = ref(props.maxYear);
+watch(
+  () => [props.minYear, props.maxYear] as const,
+  ([mn, mx]) => {
+    yearStart.value = mn;
+    yearEnd.value = mx;
+  }
+);
+const yearActive = computed(
+  () => yearStart.value !== props.minYear || yearEnd.value !== props.maxYear
+);
+
+const isolationLabel = computed(() => {
+  if (!props.isolationMode) return '';
+  const dirText = props.isolationMode.direction === 'ancestry' ? 'Ancestry' : 'Progeny';
+  return `${props.isolationMode.label ?? props.isolationMode.nodeId} (${dirText})`;
+});
 
 interface PaperSuggestion {
   id: string;
@@ -398,12 +554,54 @@ function toggleUnmatched() {
   emit('unmatched-change', showUnmatched.value);
 }
 
+function toggleMainPath() {
+  emit('main-path-change', !props.showMainPath);
+}
+
 function emitFilters() {
   emit('filter-change', {
     minCitations: minCitations.value,
     showIsolated: showIsolated.value,
     search: searchQuery.value,
+    yearRange: yearActive.value ? [yearStart.value, yearEnd.value] : null,
   });
+}
+
+/**
+ * Clamp the two handles so they never cross.  Runs on every `input` event.
+ */
+function onYearInput() {
+  if (yearStart.value > yearEnd.value) {
+    const tmp = yearStart.value;
+    yearStart.value = yearEnd.value;
+    yearEnd.value = tmp;
+  }
+  emit('year-range-input', [yearStart.value, yearEnd.value], {
+    minCitations: minCitations.value,
+    showIsolated: showIsolated.value,
+    search: searchQuery.value,
+  });
+}
+
+/**
+ * Fired on slider release (`change`).  Commits the final range so the parent
+ * can trigger a ForceAtlas2 re-layout on the now-filtered subgraph.
+ */
+function onYearChange() {
+  emit('year-range-commit', [yearStart.value, yearEnd.value]);
+  emitFilters();
+}
+
+function clearYearSlice() {
+  yearStart.value = props.minYear;
+  yearEnd.value = props.maxYear;
+  emit('year-range-input', [yearStart.value, yearEnd.value], {
+    minCitations: minCitations.value,
+    showIsolated: showIsolated.value,
+    search: searchQuery.value,
+  });
+  emit('year-range-commit', [yearStart.value, yearEnd.value]);
+  emitFilters();
 }
 
 function onExport(format: 'png' | 'gexf') {
@@ -416,7 +614,61 @@ function resetAnalysis() {
   showIsolated.value = true;
   searchQuery.value = '';
   showSuggestions.value = false;
+  yearStart.value = props.minYear;
+  yearEnd.value = props.maxYear;
+  emit('year-range-input', [yearStart.value, yearEnd.value], {
+    minCitations: minCitations.value,
+    showIsolated: showIsolated.value,
+    search: searchQuery.value,
+  });
+  emit('year-range-commit', [yearStart.value, yearEnd.value]);
   emitFilters();
   emit('reset-analysis');
 }
 </script>
+
+<style scoped>
+/* Dual-handle range slider.
+ * Two overlapping native <input type="range"> elements share the same track.
+ * Pointer-events are disabled on the track but enabled on the thumbs, so each
+ * handle is independently draggable without blocking the other.
+ */
+.dual-range {
+  pointer-events: none;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.dual-range::-webkit-slider-thumb {
+  pointer-events: auto;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #6366f1; /* indigo-500 */
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+  cursor: pointer;
+  position: relative;
+  z-index: 2;
+}
+.dual-range::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #6366f1;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+  cursor: pointer;
+  position: relative;
+  z-index: 2;
+}
+.dual-range::-webkit-slider-runnable-track {
+  background: transparent;
+}
+.dual-range::-moz-range-track {
+  background: transparent;
+}
+</style>

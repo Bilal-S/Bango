@@ -1,5 +1,8 @@
 <template>
-  <div ref="containerRef" class="relative w-full h-full bg-slate-50/50 overflow-hidden">
+  <div class="relative w-full h-full bg-slate-50/50 overflow-hidden">
+    <!-- Sigma container -->
+    <div ref="containerRef" class="w-full h-full" />
+
     <!-- Loading overlay -->
     <div
       v-if="loading || isLayouting"
@@ -81,7 +84,8 @@ const hoveredNode = ref<CoAuthorNode | null>(null);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
 
-const { renderer, initRenderer, destroyRenderer } = useSigmaRenderer();
+const { renderer, initRenderer, destroyRenderer, locateNode, resetZoom, refresh } =
+  useSigmaRenderer();
 
 const hasGraph = computed(() => (props.graph?.order ?? 0) > 0);
 
@@ -215,6 +219,13 @@ function bindSigmaEvents() {
     emit('node-click', null);
   });
 }
+
+defineExpose({
+  locateNode,
+  resetZoom,
+  refresh,
+  renderer,
+});
 
 function applyClusterHighlight(clusterIds: number[]) {
   if (!props.graph) return;

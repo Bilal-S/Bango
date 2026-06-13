@@ -2,12 +2,15 @@
 import { ref, computed, onMounted } from 'vue';
 import Graph from 'graphology';
 import CitationNetworkGraph from '../components/citation-network-graph.vue';
+import type { IsolationDirection } from '../components/citation-network-graph.vue';
 import CitationControls from '../components/citation-controls.vue';
 import CitationPaperDetailPanel from '../components/citation-paper-detail-panel.vue';
 import { useCitationNetwork } from '../composables/use-citation-network';
 import { useNetworkLayout } from '../composables/use-network-layout';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { useMainPathWorker } from '../composables/use-main-path-worker';
 import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
+import { debounce } from '../utils/debounce';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CitationNode } from '../types/biblio-citation';
 
@@ -25,7 +28,30 @@ const {
 } = useCitationNetwork();
 
 const { isLayouting, applyLayout } = useNetworkLayout();
-const { locateNode, resetZoom, renderer, applyCitationGraphFilters, refresh } = useSigmaRenderer();
+const { applyCitationGraphFilters } = useSigmaRenderer();
+const graphRef = ref<InstanceType<typeof CitationNetworkGraph> | null>(null);
+
+function locateNode(nodeId: string) {
+  graphRef.value?.locateNode(nodeId);
+}
+function resetZoom() {
+  graphRef.value?.resetZoom();
+}
+function refresh() {
+  graphRef.value?.refresh();
+}
+
+/**
+ * Phase 3 — Main Path (SPC): the worker composable manages the Web Worker
+ * lifecycle and exposes reactive node/edge ID sets for highlighting.
+ */
+const {
+  mainPathNodes,
+  mainPathEdges,
+  computing: mainPathComputing,
+  compute: computeMainPath,
+  clear: clearMainPath,
+} = useMainPathWorker(graph);
 
 const selectedPaper = ref<CitationNode | null>(null);
 const focusedNodeId = ref<string | null>(null);
@@ -37,10 +63,25 @@ const selectedClusters = ref<number[]>([]);
 const sidebarCollapsed = ref(false);
 
 /**
+ * Isolation mode: when active, the graph dims all nodes except the selected
+ * paper and its ancestry (papers it cites) or progeny (papers citing it).
+ * `null` = no isolation (normal view).
+ */
+const isolationMode = ref<{ nodeId: string; direction: IsolationDirection; label?: string } | null>(
+  null
+);
+
+/**
  * Whether unmatched reference papers should be requested from the backend and
  * rendered as dashed grey leaf nodes.  Toggling this triggers a network re-fetch.
  */
 const showUnmatched = ref(false);
+
+/**
+ * Phase 3 — Main Path (SPC): when true, the graph highlights the main path
+ * backbone and dims all other nodes/edges.  Toggling triggers the worker.
+ */
+const showMainPath = ref(false);
 
 /**
  * Diagnostic empty-state: when there are included articles and reference papers
@@ -171,6 +212,24 @@ function onNavigateToPaper(nodeId: string) {
   locateNode(nodeId);
 }
 
+/**
+ * Enter isolation mode for the currently-selected paper.
+ * Called from the detail panel's "Isolate Ancestry" / "Isolate Progeny" buttons.
+ */
+function onIsolate(direction: IsolationDirection) {
+  if (!selectedPaper.value) return;
+  isolationMode.value = {
+    nodeId: selectedPaper.value.id,
+    direction,
+    label: selectedPaper.value.label,
+  };
+}
+
+/** Exit isolation mode and return to the normal full-brightness view. */
+function onClearIsolation() {
+  isolationMode.value = null;
+}
+
 // Layout mode change triggers a full recalculate under the new layout strategy
 async function onLayoutModeChange(mode: 'fixed' | 'dynamic') {
   layoutMode.value = mode;
@@ -179,11 +238,58 @@ async function onLayoutModeChange(mode: 'fixed' | 'dynamic') {
   }
 }
 
-function onFilterChange(filters: { minCitations: number; showIsolated: boolean; search: string }) {
+function onFilterChange(filters: {
+  minCitations: number;
+  showIsolated: boolean;
+  search: string;
+  yearRange?: [number, number] | null;
+}) {
   if (!graph.value) return;
   const result = applyCitationGraphFilters(graph.value, filters);
   visibleNodeCount.value = result.visibleNodes;
   visibleEdgeCount.value = result.visibleEdges;
+  if (showMainPath.value) {
+    computeMainPath();
+  }
+}
+
+const debouncedApplyFilters = debounce(
+  (
+    range: [number, number],
+    otherFilters: { minCitations: number; showIsolated: boolean; search: string }
+  ) => {
+    if (!graph.value) return;
+    const result = applyCitationGraphFilters(graph.value, {
+      ...otherFilters,
+      yearRange: range,
+    });
+    visibleNodeCount.value = result.visibleNodes;
+    visibleEdgeCount.value = result.visibleEdges;
+    if (showMainPath.value) {
+      computeMainPath();
+    }
+  },
+  50
+);
+
+/**
+ * Phase 2 — Time-Slice: live drag handler.  Applies the year-range filter
+ * immediately (hide/show nodes) but does NOT trigger a ForceAtlas2 re-layout.
+ * The expensive layout is deferred until the slider is released (commit).
+ */
+function onYearRangeInput(
+  range: [number, number],
+  otherFilters?: { minCitations: number; showIsolated: boolean; search: string }
+) {
+  debouncedApplyFilters(range, otherFilters ?? { minCitations: 0, showIsolated: true, search: '' });
+}
+
+/**
+ * Phase 2 — Time-Slice: commit handler (slider release).  Triggers the full
+ * ForceAtlas2 re-layout on the now-filtered subgraph.
+ */
+async function onYearRangeCommit(_range: [number, number]) {
+  await onRecalculate();
 }
 
 /**
@@ -202,6 +308,21 @@ async function onUnmatchedChange(newShowUnmatched: boolean) {
     visibleNodeCount.value = nodeCount.value;
     visibleEdgeCount.value = edgeCount.value;
     recalculateTrigger.value++;
+    // Re-run main path on the new graph if the highlight is currently active.
+    if (showMainPath.value) computeMainPath();
+  }
+}
+
+/**
+ * Phase 3 — Main Path (SPC): toggle handler.  When turning on, trigger the
+ * worker computation.  When turning off, clear the highlight state.
+ */
+function onMainPathChange(newShowMainPath: boolean) {
+  showMainPath.value = newShowMainPath;
+  if (newShowMainPath) {
+    computeMainPath();
+  } else {
+    clearMainPath();
   }
 }
 
@@ -220,8 +341,8 @@ function onLocatePaper(label: string) {
 async function onExportImage(format: NetworkExportFormat) {
   try {
     if (format === 'png') {
-      if (!renderer.value) return;
-      await exportNetworkPng(renderer.value);
+      if (!graphRef.value?.renderer) return;
+      await exportNetworkPng(graphRef.value.renderer);
     } else if (format === 'gexf') {
       if (!graph.value) return;
       await exportNetworkGexf(graph.value);
@@ -325,6 +446,9 @@ async function onRecalculate() {
           :max-year="yearRange.max"
           :selected-clusters="selectedClusters"
           :show-unmatched="showUnmatched"
+          :show-main-path="showMainPath"
+          :isolation-mode="isolationMode"
+          @main-path-change="onMainPathChange"
           @filter-change="onFilterChange"
           @locate-paper="onLocatePaper"
           @export-image="onExportImage"
@@ -335,6 +459,9 @@ async function onRecalculate() {
           @recalculate="onRecalculate"
           @reset-analysis="onResetAnalysis"
           @unmatched-change="onUnmatchedChange"
+          @year-range-input="onYearRangeInput"
+          @year-range-commit="onYearRangeCommit"
+          @clear-isolation="onClearIsolation"
         />
       </aside>
 
@@ -352,9 +479,10 @@ async function onRecalculate() {
     <!-- Graph canvas -->
     <main class="flex-1 relative">
       <CitationNetworkGraph
+        ref="graphRef"
         :graph="graph"
         :loading="loading"
-        :is-layouting="isLayouting"
+        :is-layouting="isLayouting || mainPathComputing"
         :error="error"
         :focused-node-id="focusedNodeId"
         :selected-clusters="selectedClusters"
@@ -362,6 +490,10 @@ async function onRecalculate() {
         :min-year="yearRange.min"
         :max-year="yearRange.max"
         :recalculate-trigger="recalculateTrigger"
+        :isolation-mode="isolationMode"
+        :main-path-nodes="mainPathNodes"
+        :main-path-edges="mainPathEdges"
+        :show-main-path="showMainPath"
         @node-click="onNodeClick"
         @retry="fetchNetwork"
       />
@@ -411,9 +543,13 @@ async function onRecalculate() {
         :paper="selectedPaper"
         :citing-papers="citingPapers"
         :cited-papers="citedPapers"
+        :isolation-mode="isolationMode"
+        :main-path-nodes="mainPathNodes"
         class="w-72 shrink-0"
         @close="onNodeClick(null)"
         @navigate-paper="onNavigateToPaper"
+        @isolate="onIsolate"
+        @clear-isolation="onClearIsolation"
       />
     </Transition>
   </div>

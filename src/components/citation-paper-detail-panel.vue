@@ -32,6 +32,15 @@
           <span v-if="paper.journal" class="italic truncate">{{ paper.journal }}</span>
         </div>
 
+        <!-- Phase 3 — Main Path badge -->
+        <div
+          v-if="onMainPath"
+          class="mt-3 inline-flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5"
+        >
+          <span class="material-symbols-outlined text-[11px] text-amber-600">route</span>
+          <span class="text-[11px] text-amber-700 font-medium">On Main Path</span>
+        </div>
+
         <!-- Stats row -->
         <div class="flex gap-3 mt-3">
           <div class="flex-1 bg-slate-50 rounded-lg px-2.5 py-1.5 text-center">
@@ -54,6 +63,48 @@
               (no details available)
             </p>
           </div>
+        </div>
+
+        <!-- Isolation controls -->
+        <div class="mt-3 space-y-1.5">
+          <!-- Active isolation badge -->
+          <div
+            v-if="isolationMode && isolationMode.nodeId === paper.id"
+            class="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5"
+          >
+            <span class="text-[11px] text-indigo-700 font-medium flex items-center gap-1">
+              <span class="material-symbols-outlined text-xs">{{
+                isolationMode.direction === 'ancestry' ? 'arrow_upward' : 'arrow_downward'
+              }}</span>
+              {{ isolationMode.direction === 'ancestry' ? 'Ancestry' : 'Progeny' }} isolated
+            </span>
+            <button
+              class="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+              @click="$emit('clear-isolation')"
+            >
+              Show All
+            </button>
+          </div>
+
+          <!-- Isolation buttons (only when this paper is NOT currently isolated) -->
+          <template v-else>
+            <button
+              class="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
+              title="Dim all nodes except this paper and its references (transitively)"
+              @click="$emit('isolate', 'ancestry')"
+            >
+              <span class="material-symbols-outlined text-xs">arrow_upward</span>
+              Isolate Ancestry
+            </button>
+            <button
+              class="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
+              title="Dim all nodes except this paper and its citing papers (transitively)"
+              @click="$emit('isolate', 'progeny')"
+            >
+              <span class="material-symbols-outlined text-xs">arrow_downward</span>
+              Isolate Progeny
+            </button>
+          </template>
         </div>
 
         <!-- Abstract -->
@@ -109,16 +160,29 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { CitationNode } from '../types/biblio-citation';
+import type { IsolationDirection } from './citation-network-graph.vue';
 
-defineProps<{
+const props = defineProps<{
   paper: CitationNode | null;
   citingPapers: { id: string; label: string }[];
   citedPapers: { id: string; label: string }[];
+  /** Current isolation mode (null when not isolating). */
+  isolationMode: { nodeId: string; direction: IsolationDirection } | null;
+  /** Phase 3 — Main Path (SPC): set of node IDs on the main path backbone. */
+  mainPathNodes?: Set<string>;
 }>();
+
+/** Whether the currently-selected paper is on the main path backbone. */
+const onMainPath = computed(
+  () => !!props.paper && !!props.mainPathNodes && props.mainPathNodes.has(props.paper.id)
+);
 
 defineEmits<{
   (e: 'close'): void;
   (e: 'navigate-paper', nodeId: string): void;
+  (e: 'isolate', direction: IsolationDirection): void;
+  (e: 'clear-isolation'): void;
 }>();
 </script>

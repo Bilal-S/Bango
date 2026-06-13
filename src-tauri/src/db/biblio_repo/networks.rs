@@ -581,7 +581,8 @@ pub fn get_citation_network_json(
     if include_unmatched {
         let mut um_stmt = conn.prepare(
             "SELECT rp.id, rp.title, rp.authors, rp.publication_year, rp.journal, \
-                     rp.abstract_text, l.parent_article_id \
+                     rp.abstract_text, l.parent_article_id, l.type, \
+                     rp.citation_count, rp.reference_count \
               FROM reference_papers rp \
               JOIN article_reference_links l ON l.reference_paper_id = rp.id \
               WHERE rp.matched_article_id IS NULL \
@@ -595,6 +596,9 @@ pub fn get_citation_network_json(
             Option<String>,
             Option<String>,
             String,
+            i32,
+            i64,
+            i64,
         )> = um_stmt
             .query_map([], |row| {
                 Ok((
@@ -605,11 +609,40 @@ pub fn get_citation_network_json(
                     row.get(4)?,
                     row.get(5)?,
                     row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                    row.get(9)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-        for (pid, title, authors, year, journal, abstract_text, parent_id) in unmatched {
+        for (
+            pid,
+            title,
+            authors,
+            year,
+            journal,
+            abstract_text,
+            parent_id,
+            l_type,
+            citation_count,
+            reference_count,
+        ) in unmatched
+        {
+            let (source, target) = if l_type == 0 {
+                (pid.clone(), parent_id.clone())
+            } else {
+                (parent_id.clone(), pid.clone())
+            };
+
+            // Faint dashed edge matching the citation relationship (source → target: source cites target).
+            edges.push(serde_json::json!({
+                "source": source,
+                "target": target,
+                "weight": 0.1,
+                "unmatched": true,
+            }));
+
             // Dedup: skip if we've already added this paper.
             if nodes.iter().any(|n| n["id"] == pid) {
                 continue;
@@ -623,16 +656,9 @@ pub fn get_citation_network_json(
                 "authors": authors.unwrap_or_default(),
                 "year": year,
                 "journal": journal,
-                "numCited": 0,
-                "numReferences": 0,
+                "numCited": reference_count,
+                "numReferences": citation_count,
                 "abstract": abstract_text.unwrap_or_default(),
-                "unmatched": true,
-            }));
-            // Faint dashed edge from parent article → unmatched reference leaf.
-            edges.push(serde_json::json!({
-                "source": parent_id,
-                "target": pid,
-                "weight": 0.1,
                 "unmatched": true,
             }));
         }
