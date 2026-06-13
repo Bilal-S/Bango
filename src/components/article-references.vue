@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { open as fileDialog } from '@tauri-apps/plugin-dialog';
 import type { Article, ArticleReference } from '@/types';
 import {
@@ -24,6 +25,7 @@ const emit = defineEmits<{
 }>();
 
 const toast = useToast();
+const router = useRouter();
 
 // References section
 const { getArticleReferences, promoteReferenceToArticle } = useReferences();
@@ -112,6 +114,11 @@ function closeRefImportDialog(): void {
   refImportStep.value = 'select';
   refImportPreview.value = null;
   refImportFilePath.value = null;
+}
+
+function openHelp(): void {
+  closeRefImportDialog();
+  router.push('/help?tab=reference#ref-references-citations').catch(() => {});
 }
 
 // Load references when article changes
@@ -378,13 +385,22 @@ function handleAutoDownload(): void {
         >
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-semibold text-slate-800">Import References</h3>
-            <button
-              class="material-symbols-outlined text-[18px] text-slate-400 hover:text-slate-600 cursor-pointer rounded transition-colors"
-              title="Close"
-              @click="closeRefImportDialog"
-            >
-              close
-            </button>
+            <div class="flex items-center gap-2">
+              <a
+                href="#"
+                class="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium transition-colors"
+                @click.prevent="openHelp"
+              >
+                Help
+              </a>
+              <button
+                class="material-symbols-outlined text-[18px] text-slate-400 hover:text-slate-600 cursor-pointer rounded transition-colors"
+                title="Close"
+                @click="closeRefImportDialog"
+              >
+                close
+              </button>
+            </div>
           </div>
 
           <!-- Step 1: Select type and file -->
