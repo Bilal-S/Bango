@@ -132,7 +132,8 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
 - Rust: `cargo test` for unit and integration tests.
 - TypeScript: Vitest for unit tests.
 - Test file naming: `*.test.ts` for TS, `*_test.rs` or inline `#[cfg(test)]` for Rust.
-- Place Rust tests in a `tests/` directory beside the module they test.
+- Place Rust integration and database repository tests in the `src-tauri/tests/` directory.
+- Avoid large inline unit tests in library source files (e.g. database repository modules); instead, move them into standalone integration test files under `src-tauri/tests/` to keep the source code files compact and maintainable.
 
 ## Tauri App Diagnostics & Testing
 
