@@ -154,12 +154,17 @@ const analysisModules: AnalysisModule[] = [
 const isModuleActive = computed(() => route.name !== 'bibliometrics');
 const activeModuleLabel = computed(() => {
   if (route.name === 'coauthors') return 'Co-Authorship Network';
+  if (route.name === 'citations') return 'Citation Network';
   return '';
 });
 
 function navigateToModule(mod: AnalysisModule): void {
   if (mod.id === 'co-authorship') {
     router.push({ name: 'coauthors' });
+    return;
+  }
+  if (mod.id === 'citation-network') {
+    router.push({ name: 'citations' });
     return;
   }
   // Other modules remain as placeholders for future implementation

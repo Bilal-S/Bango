@@ -39,6 +39,7 @@ tauri-plugin-fs = "2"
  lopdf = "0.34"
 headless_chrome = "1"
 rand = "0.10"
+regex = "1"
 
 [dev-dependencies]
 mockito = "1"

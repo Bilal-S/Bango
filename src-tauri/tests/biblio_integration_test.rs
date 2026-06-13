@@ -1,9 +1,12 @@
 use bango_lib::db::biblio_repo::{
-    build_coauthor_edges, compute_author_metrics, get_coauthor_network_json,
+    auto_match_references_to_articles, build_citation_edges, build_coauthor_edges,
+    compute_author_metrics, get_citation_network_json, get_coauthor_network_json,
     get_institutions_by_author, normalize_affiliations, normalize_authors_from_articles,
 };
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
+use bango_lib::db::reference_repo::{create_link, insert_or_find_paper};
+use bango_lib::models::reference::{NewReferencePaper, ReferenceType};
 
 #[test]
 fn test_biblio_normalization_pipeline() {
@@ -224,8 +227,8 @@ fn test_biblio_ordered_affiliation_matching() {
     // So Harvard Univ (2024) should be first, Stanford Univ (2020) should be second.
     let smith_insts = get_institutions_by_author(&conn, &smith_id).unwrap();
     assert_eq!(smith_insts.len(), 2);
-    assert_eq!(smith_insts[0].normalized_name, "harvard univ");
-    assert_eq!(smith_insts[1].normalized_name, "stanford univ");
+    assert_eq!(smith_insts[0].normalized_name, "harvard university");
+    assert_eq!(smith_insts[1].normalized_name, "stanford university");
 
     // If we associate Stanford Univ with a more recent article (e.g. 2025), it should shift to first place
     conn.execute(
@@ -249,9 +252,9 @@ fn test_biblio_ordered_affiliation_matching() {
         .unwrap();
     let new_smith_insts = get_institutions_by_author(&conn, &new_smith_id).unwrap();
     assert_eq!(new_smith_insts.len(), 2);
-    // Stanford Univ (2025) should now be first, Harvard Univ (2024) should be second.
-    assert_eq!(new_smith_insts[0].normalized_name, "stanford univ");
-    assert_eq!(new_smith_insts[1].normalized_name, "harvard univ");
+    // Stanford University (2025) should now be first, Harvard University (2024) should be second.
+    assert_eq!(new_smith_insts[0].normalized_name, "stanford university");
+    assert_eq!(new_smith_insts[1].normalized_name, "harvard university");
 }
 
 #[test]
@@ -328,4 +331,189 @@ fn test_co_author_w_affiliation_integration() {
         osei_insts[0].normalized_name.contains("university of ghana")
             || osei_insts[0].normalized_name.contains("ghana")
     );
+}
+
+/// Regression test for the citation network pipeline.
+///
+/// This test reproduces the original bug where citation edges were never
+/// emitted because:
+///   1. Reference papers imported from RIS were never auto-matched to
+///      included articles, so `reference_papers.matched_article_id` stayed
+///      NULL and `build_citation_edges` produced zero rows.
+///   2. Even when matched, `get_citation_network_json` only surfaced matched
+///      nodes, hiding the reference topology from the user.
+///
+/// Scenario:
+///   - Article A ("Alpha") cites Article B ("Beta") and Article C ("Gamma").
+///   - B and C are also imported as reference papers linked to A, but with
+///     `matched_article_id = NULL` (simulating freshly imported references).
+///   - We run `auto_match_references_to_articles` and then
+///     `build_citation_edges`, then assert the network JSON.
+#[test]
+fn test_citation_network_edges_with_auto_match() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    // ── 1. Three included articles ───────────────────────────────────────
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, doi, journal) \
+         VALUES ('art-a', 'included', 'Alpha', 'Abstract A', '[\"Smith, J\"]', 2020, '10.0000/a', 'Nature')",
+        [],
+    )
+    .expect("insert art-a");
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, doi, journal) \
+         VALUES ('art-b', 'included', 'Beta', 'Abstract B', '[\"Doe, J\"]', 2019, '10.0000/b', 'Science')",
+        [],
+    )
+    .expect("insert art-b");
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, journal) \
+         VALUES ('art-c', 'included', 'Gamma', 'Abstract C', '[\"Roe, R\"]', 2021, 'Cell')",
+        [],
+    )
+    .expect("insert art-c");
+
+    // ── 2. Reference papers matching B and C, linked to A (A cites B, A cites C) ─
+    // Paper B matches art-b via DOI.  Paper C matches art-c via title+year.
+    let paper_b = insert_or_find_paper(
+        &conn,
+        &NewReferencePaper {
+            title: Some("Beta".to_string()),
+            authors: vec!["Doe, J".to_string()],
+            publication_year: Some(2019),
+            doi: Some("10.0000/b".to_string()),
+            journal: Some("Science".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("insert paper_b")
+    .0;
+    let paper_c = insert_or_find_paper(
+        &conn,
+        &NewReferencePaper {
+            title: Some("Gamma".to_string()),
+            authors: vec!["Roe, R".to_string()],
+            publication_year: Some(2021),
+            journal: Some("Cell".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("insert paper_c")
+    .0;
+
+    // Link both papers to art-a as *references* (type = 1): A cites B, A cites C.
+    create_link(&conn, "art-a", &paper_b.id, &ReferenceType::Reference)
+        .expect("link paper_b to art-a");
+    create_link(&conn, "art-a", &paper_c.id, &ReferenceType::Reference)
+        .expect("link paper_c to art-a");
+
+    // Sanity: before auto-match, both papers are unmatched.
+    let unmatched_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM reference_papers WHERE matched_article_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unmatched_count, 2, "both papers start unmatched");
+
+    // ── 3. Auto-match references → articles ──────────────────────────────
+    let matched = auto_match_references_to_articles(&conn).expect("auto_match failed");
+    assert_eq!(matched, 2, "both reference papers should be matched");
+
+    // Verify the matched_article_id values were written.
+    let b_match: String = conn
+        .query_row(
+            "SELECT matched_article_id FROM reference_papers WHERE id = ?1",
+            [&paper_b.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let c_match: String = conn
+        .query_row(
+            "SELECT matched_article_id FROM reference_papers WHERE id = ?1",
+            [&paper_c.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(b_match, "art-b");
+    assert_eq!(c_match, "art-c");
+
+    // ── 4. Build citation edges ──────────────────────────────────────────
+    let edges_built = build_citation_edges(&conn).expect("build_citation_edges failed");
+    assert_eq!(edges_built, 2, "expected 2 citation edges: art-a → art-b, art-a → art-c");
+
+    // ── 5. Verify network JSON (default mode: matched only) ──────────────
+    let json =
+        get_citation_network_json(&conn, false).expect("get_citation_network_json failed");
+    let nodes = json.get("nodes").unwrap().as_array().unwrap();
+    let edges = json.get("edges").unwrap().as_array().unwrap();
+    assert_eq!(nodes.len(), 3, "three articles participate in citation edges");
+    assert_eq!(edges.len(), 2, "two directed edges");
+
+    // Every emitted node must be matched (unmatched flag == false).
+    for node in nodes {
+        assert_eq!(
+            node.get("unmatched").and_then(|v| v.as_bool()),
+            Some(false),
+            "default mode must not emit unmatched nodes"
+        );
+    }
+
+    // Edges: both should originate from art-a.
+    let sources: Vec<&str> = edges
+        .iter()
+        .map(|e| e.get("source").unwrap().as_str().unwrap())
+        .collect();
+    assert!(sources.iter().all(|s| *s == "art-a"), "all edges should be sourced from art-a");
+
+    // Meta block must be present for diagnostic empty-state.
+    let meta = json.get("meta").expect("meta block should always be present");
+    assert_eq!(meta.get("nodeCount").and_then(|v| v.as_i64()), Some(3));
+    assert_eq!(meta.get("edgeCount").and_then(|v| v.as_i64()), Some(2));
+    assert_eq!(
+        meta.get("unmatchedCount").and_then(|v| v.as_i64()),
+        Some(0),
+        "no unmatched leaves in default mode"
+    );
+
+    // ── 6. Verify network JSON (include_unmatched=true) ──────────────────
+    // Add one genuinely unmatched paper linked to art-a to exercise the
+    // unmatched-leaf branch of get_citation_network_json.
+    let paper_x = insert_or_find_paper(
+        &conn,
+        &NewReferencePaper {
+            title: Some("Unmatched Paper".to_string()),
+            authors: vec!["Anon, A".to_string()],
+            publication_year: Some(2018),
+            ..Default::default()
+        },
+    )
+    .expect("insert paper_x")
+    .0;
+    create_link(&conn, "art-a", &paper_x.id, &ReferenceType::Reference)
+        .expect("link paper_x to art-a");
+
+    let json_um =
+        get_citation_network_json(&conn, true).expect("get_citation_network_json(unmatched) failed");
+    let nodes_um = json_um.get("nodes").unwrap().as_array().unwrap();
+    let edges_um = json_um.get("edges").unwrap().as_array().unwrap();
+    let meta_um = json_um.get("meta").unwrap();
+
+    // 3 matched article nodes + 1 unmatched reference-paper leaf.
+    assert_eq!(nodes_um.len(), 4, "should include the unmatched leaf node");
+    // 2 matched citation edges + 1 dashed unmatched edge.
+    assert_eq!(edges_um.len(), 3, "should include the dashed unmatched edge");
+    assert_eq!(
+        meta_um.get("unmatchedCount").and_then(|v| v.as_i64()),
+        Some(1),
+        "meta should report 1 unmatched leaf"
+    );
+
+    // The unmatched node should carry unmatched == true.
+    let has_unmatched_node = nodes_um
+        .iter()
+        .any(|n| n.get("unmatched").and_then(|v| v.as_bool()) == Some(true));
+    assert!(has_unmatched_node, "expected at least one unmatched leaf node");
 }

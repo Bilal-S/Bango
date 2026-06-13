@@ -15,6 +15,7 @@ const SummaryView = () => import('@/views/summary-view.vue');
 const PrismaDiagram = () => import('@/views/prisma-diagram.vue');
 const BiblioDashboard = () => import('@/views/biblio-dashboard.vue');
 const BiblioCoauthors = () => import('@/views/biblio-coauthors.vue');
+const BiblioCitations = () => import('@/views/biblio-citations.vue');
 const HelpGuide = () => import('@/views/help-guide.vue');
 const ChatView = () => import('@/views/chat-view.vue');
 
@@ -58,6 +59,11 @@ const routes = [
         name: 'coauthors',
         component: BiblioCoauthors,
       },
+      {
+        path: 'citations',
+        name: 'citations',
+        component: BiblioCitations,
+      },
     ],
   },
   {
@@ -86,6 +92,7 @@ void router.isReady().then(() => {
     import('@/views/screening-progress.vue'),
     import('@/views/biblio-dashboard.vue'),
     import('@/views/biblio-coauthors.vue'),
+    import('@/views/biblio-citations.vue'),
     import('@/views/chat-view.vue'),
   ]);
 });

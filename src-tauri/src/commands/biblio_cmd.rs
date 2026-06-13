@@ -46,7 +46,7 @@ pub async fn biblio_normalize(
         "biblio:progress",
         NormalizeProgress {
             step: 0,
-            total_steps: 6,
+            total_steps: 7,
             message: "Starting normalization...".to_string(),
         },
     );
@@ -57,7 +57,7 @@ pub async fn biblio_normalize(
         "biblio:progress",
         NormalizeProgress {
             step: 1,
-            total_steps: 6,
+            total_steps: 7,
             message: "Cleared stale bibliometric data".to_string(),
         },
     );
@@ -68,7 +68,7 @@ pub async fn biblio_normalize(
         "biblio:progress",
         NormalizeProgress {
             step: 2,
-            total_steps: 6,
+            total_steps: 7,
             message: "Normalized author data".to_string(),
         },
     );
@@ -79,7 +79,7 @@ pub async fn biblio_normalize(
         "biblio:progress",
         NormalizeProgress {
             step: 3,
-            total_steps: 6,
+            total_steps: 7,
             message: "Normalized author affiliations".to_string(),
         },
     );
@@ -90,7 +90,7 @@ pub async fn biblio_normalize(
         "biblio:progress",
         NormalizeProgress {
             step: 4,
-            total_steps: 6,
+            total_steps: 7,
             message: "Normalized keywords and terms".to_string(),
         },
     );
@@ -101,7 +101,7 @@ pub async fn biblio_normalize(
         "biblio:progress",
         NormalizeProgress {
             step: 5,
-            total_steps: 6,
+            total_steps: 7,
             message: "Computed author metrics".to_string(),
         },
     );
@@ -112,10 +112,28 @@ pub async fn biblio_normalize(
         "biblio:progress",
         NormalizeProgress {
             step: 6,
-            total_steps: 6,
+            total_steps: 7,
             message: "Built co-authorship networks".to_string(),
         },
     );
+
+    // Auto-match reference papers to included articles before building citation
+    // edges.  This closes the gap where references imported without
+    // auto-matching would never appear in the citation network.
+    let _matched_refs = biblio_repo::auto_match_references_to_articles(&tx)?;
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step: 7,
+            total_steps: 7,
+            message: "Auto-matched references to articles".to_string(),
+        },
+    );
+
+    // Build citation edges between included articles.
+    // This step runs silently (no progress event) because it is the final
+    // normalization step and completes quickly.
+    let _citation_edges = biblio_repo::build_citation_edges(&tx)?;
 
     let status = biblio_repo::get_biblio_status(&tx)?;
 
@@ -210,4 +228,16 @@ pub async fn biblio_get_author_pubs_by_year(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     biblio_repo::get_author_pubs_by_year(&conn, &author_id)
+}
+
+#[tauri::command]
+pub async fn biblio_get_citation_network(
+    db_state: tauri::State<'_, DbState>,
+    include_unmatched: Option<bool>,
+) -> Result<serde_json::Value, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    biblio_repo::get_citation_network_json(&conn, include_unmatched.unwrap_or(false))
 }

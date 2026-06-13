@@ -3,6 +3,8 @@
 //! Provides functions for splitting author strings, normalizing names,
 //! normalizing terms (keywords / noun phrases), and parsing affiliations.
 
+use crate::biblio::affiliation_extractor::AffiliationExtractor;
+
 /// A parsed author with raw and normalized forms.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedAuthor {
@@ -352,6 +354,14 @@ fn is_department_part(part: &str) -> bool {
 /// - "University of Oxford, Oxford, United Kingdom"
 #[must_use]
 pub fn parse_affiliation(affiliation: &str) -> ParsedAffiliation {
+    parse_affiliation_with_extractor(affiliation, None)
+}
+
+#[must_use]
+pub fn parse_affiliation_with_extractor(
+    affiliation: &str,
+    extractor: Option<&AffiliationExtractor>,
+) -> ParsedAffiliation {
     if affiliation.trim().is_empty() {
         return ParsedAffiliation::default();
     }
@@ -484,14 +494,21 @@ pub fn parse_affiliation(affiliation: &str) -> ParsedAffiliation {
     // 3. Institution Extraction & Department Filtering
     let remaining_len = parts.len().saturating_sub(used_parts);
     let institution = if remaining_len > 0 {
-        let inst_parts: Vec<&str> =
-            parts[..remaining_len].iter().copied().filter(|p| !is_department_part(p)).collect();
-        if inst_parts.is_empty() {
-            // Fallback if filtering left nothing
-            Some(parts[..remaining_len].join(", "))
-        } else {
-            Some(inst_parts.join(", "))
+        let joined_remaining = parts[..remaining_len].join(", ");
+        let mut extracted = None;
+        if let Some(ext) = extractor {
+            extracted = ext.extract(&joined_remaining);
         }
+        extracted.or_else(|| {
+            let inst_parts: Vec<&str> =
+                parts[..remaining_len].iter().copied().filter(|p| !is_department_part(p)).collect();
+            if inst_parts.is_empty() {
+                // Fallback if filtering left nothing
+                Some(joined_remaining.clone())
+            } else {
+                Some(inst_parts.join(", "))
+            }
+        })
     } else {
         Some(parts[0].to_string())
     };
@@ -868,5 +885,51 @@ mod tests {
         assert_eq!(authors[0].normalized_name, "smith j");
         assert_eq!(authors[1].display_name, "Doe, A");
         assert_eq!(authors[1].normalized_name, "doe a");
+    }
+
+    #[test]
+    fn test_affiliation_extractor_safe_init() {
+        let ext = AffiliationExtractor::new();
+        assert!(ext.is_ok());
+    }
+
+    #[test]
+    fn test_affiliation_extractor_multilingual() {
+        let ext = AffiliationExtractor::new().unwrap();
+        // English
+        assert_eq!(
+            ext.extract("Dept of Computer Science, Stanford Univ"),
+            Some("Stanford University".to_string())
+        );
+        // French
+        assert_eq!(
+            ext.extract("Département de Physique, Université de Paris"),
+            Some("Université de Paris".to_string())
+        );
+        // Spanish (no translation of proper nouns)
+        assert_eq!(
+            ext.extract("Facultad de Ciencias, Universidad de Buenos Aires"),
+            Some("Universidad de Buenos Aires".to_string())
+        );
+        // German
+        assert_eq!(
+            ext.extract("Institut für Informatik, Universität Heidelberg"),
+            Some("Universität Heidelberg".to_string())
+        );
+        // Korean (non-spaced substring match)
+        assert_eq!(ext.extract("컴퓨터공학과, 서울대학교"), Some("서울대학교".to_string()));
+    }
+
+    #[test]
+    fn test_parse_affiliation_with_scoring() {
+        let ext = AffiliationExtractor::new().unwrap();
+        // Test with complex department, university, city, country
+        let aff = parse_affiliation_with_extractor(
+            "Center for Brain Research, Harvard University, Boston, MA, USA",
+            Some(&ext),
+        );
+        assert_eq!(aff.country.as_deref(), Some("USA"));
+        assert_eq!(aff.city.as_deref(), Some("Boston"));
+        assert_eq!(aff.institution.as_deref(), Some("Harvard University"));
     }
 }

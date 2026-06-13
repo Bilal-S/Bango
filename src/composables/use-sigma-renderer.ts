@@ -144,6 +144,59 @@ export function useSigmaRenderer() {
   }
 
   /**
+   * Apply visibility filters to citation graph nodes based on minCitations,
+   * showIsolated, and search query.
+   *
+   * - `minCitations`: hide papers with fewer than N incoming citations.
+   * - `showIsolated`: when false, hide nodes with zero degree (no edges).
+   * - `search`: case-insensitive substring match on label/title/authors.
+   *
+   * Returns { visibleNodes, visibleEdges } counts.
+   */
+  function applyCitationGraphFilters(
+    g: Graph,
+    filters: { minCitations: number; showIsolated: boolean; search: string }
+  ): { visibleNodes: number; visibleEdges: number } {
+    const { minCitations, showIsolated, search } = filters;
+    const searchLower = search.toLowerCase();
+
+    // Determine which nodes pass the filter
+    const nodeVisible = new Map<string, boolean>();
+    for (const node of g.nodes()) {
+      const numCited = (g.getNodeAttribute(node, 'numCited') as number) ?? 0;
+      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
+      const title = (g.getNodeAttribute(node, 'title') as string) ?? '';
+      const authors = (g.getNodeAttribute(node, 'authors') as string) ?? '';
+      const degree = g.degree(node);
+
+      const passesCitations = numCited >= minCitations;
+      const passesIsolated = showIsolated || degree > 0;
+      const passesSearch =
+        !searchLower ||
+        label.toLowerCase().includes(searchLower) ||
+        title.toLowerCase().includes(searchLower) ||
+        authors.toLowerCase().includes(searchLower);
+      const visible = passesCitations && passesIsolated && passesSearch;
+      nodeVisible.set(node, visible);
+      g.setNodeAttribute(node, 'hidden', !visible);
+    }
+
+    // Edges are visible only if both endpoints are visible
+    let visibleEdges = 0;
+    for (const edge of g.edges()) {
+      const source = g.source(edge);
+      const target = g.target(edge);
+      const visible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
+      g.setEdgeAttribute(edge, 'hidden', !visible);
+      if (visible) visibleEdges++;
+    }
+
+    const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
+
+    return { visibleNodes, visibleEdges };
+  }
+
+  /**
    * Force the Sigma renderer to re-read graph attributes and redraw.
    */
   function refresh(): void {
@@ -163,6 +216,7 @@ export function useSigmaRenderer() {
     resetZoom,
     locateNode,
     applyGraphFilters,
+    applyCitationGraphFilters,
     refresh,
   };
 }

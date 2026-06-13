@@ -225,6 +225,7 @@ pub fn run() {
             commands::biblio_cmd::biblio_get_author_institutions,
             commands::biblio_cmd::biblio_get_unmatched_affiliation_count,
             commands::biblio_cmd::biblio_get_author_pubs_by_year,
+            commands::biblio_cmd::biblio_get_citation_network,
         ]);
 
     #[cfg(debug_assertions)]
