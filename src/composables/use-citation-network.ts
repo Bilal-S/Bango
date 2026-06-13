@@ -79,6 +79,10 @@ function buildGraph(data: CitationNetworkData): Graph {
     g.addDirectedEdge(edge.source, edge.target, {
       weight: edge.weight,
       thickness: isUnmatched ? 0.5 : 1.0,
+      // Sigma's edge/arrow programs read `size` (not `thickness`) for the
+      // stroke width. Unmatched leaves get a thinner stroke so their arrows
+      // stay visually subordinate to real citation edges.
+      size: isUnmatched ? 0.8 : 2,
       // Unmatched edges are faint dashed lines; real citation edges are solid.
       color: isUnmatched ? '#e2e8f0' : '#cbd5e1', // slate-200 : slate-300
       type: 'arrow',

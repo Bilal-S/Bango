@@ -1,5 +1,6 @@
 import { ref, shallowRef, onUnmounted } from 'vue';
 import Sigma from 'sigma';
+import { createEdgeArrowProgram } from 'sigma/rendering';
 import type Graph from 'graphology';
 
 const renderer = shallowRef<Sigma | null>(null);
@@ -17,6 +18,12 @@ interface SigmaRendererOptions {
   defaultEdgeColor?: string;
   /** Label render size threshold — labels hidden below this zoom level. Default 1.5 */
   labelRenderSizeThreshold?: number;
+  /**
+   * Custom arrow-head dimensions for directed edges. The arrow program scales
+   * relative to the edge's `size` attribute. Increasing these ratios produces
+   * larger arrowheads. Sigma defaults are length 2.5 / wideness 2.
+   */
+  edgeArrowSize?: { length?: number; wideness?: number };
 }
 
 /**
@@ -47,6 +54,17 @@ export function useSigmaRenderer() {
       labelRenderSizeThreshold: options.labelRenderSizeThreshold ?? 1.5,
       stagePadding: 30,
     };
+
+    // When a custom arrow size is requested, build a custom arrow program with
+    // enlarged length/wideness ratios and register it for the `arrow` edge type.
+    if (options.edgeArrowSize) {
+      settings.edgeProgramClasses = {
+        arrow: createEdgeArrowProgram({
+          lengthToThicknessRatio: options.edgeArrowSize.length ?? 2.5,
+          widenessToThicknessRatio: options.edgeArrowSize.wideness ?? 2,
+        }),
+      };
+    }
 
     const sig = new Sigma(graph, container, settings);
 

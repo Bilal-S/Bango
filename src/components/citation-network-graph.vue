@@ -110,6 +110,9 @@ watch(
         labelRenderSizeThreshold: 1.2,
         defaultEdgeColor: '#cbd5e1',
         renderEdgeLabels: false,
+        // Enlarge arrowheads so citation direction is clearly visible.
+        // Sigma defaults are length 2.5 / wideness 2.
+        edgeArrowSize: { length: 4, wideness: 3 },
       });
       bindSigmaEvents();
       if (props.focusedNodeId) {
