@@ -122,6 +122,35 @@
       </div>
     </div>
 
+    <!-- Layout Mode toggle -->
+    <div>
+      <label class="text-xs text-slate-600 mb-1 block">Layout</label>
+      <div class="flex rounded-lg overflow-hidden border border-slate-200">
+        <button
+          :class="
+            layoutMode === 'fixed'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          "
+          class="flex-1 px-3 py-1 text-xs font-medium transition-colors cursor-pointer"
+          @click="$emit('layout-mode-change', 'fixed')"
+        >
+          Fixed
+        </button>
+        <button
+          :class="
+            layoutMode === 'dynamic'
+              ? 'bg-indigo-600 text-white'
+              : 'bg-white text-slate-600 hover:bg-slate-50'
+          "
+          class="flex-1 px-3 py-1 text-xs font-medium transition-colors cursor-pointer"
+          @click="$emit('layout-mode-change', 'dynamic')"
+        >
+          Dynamic
+        </button>
+      </div>
+    </div>
+
     <!-- Stats row -->
     <div class="flex items-center gap-4 text-xs text-slate-500 border-t border-slate-100 pt-3">
       <div class="flex items-center gap-1">
@@ -251,6 +280,7 @@ const props = defineProps<{
   paperLabels: string[];
   paperTitles: Map<string, string>;
   colorMode: 'cluster' | 'temporal';
+  layoutMode: 'fixed' | 'dynamic';
   minYear: number;
   maxYear: number;
   selectedClusters: number[];
@@ -266,6 +296,7 @@ const emit = defineEmits<{
   (e: 'locate-paper', label: string): void;
   (e: 'export-image', format: 'png' | 'gexf'): void;
   (e: 'color-mode-change', mode: 'cluster' | 'temporal'): void;
+  (e: 'layout-mode-change', mode: 'fixed' | 'dynamic'): void;
   (e: 'select-cluster', clusterId: number): void;
   (e: 'clear-clusters'): void;
   (e: 'recalculate'): void;

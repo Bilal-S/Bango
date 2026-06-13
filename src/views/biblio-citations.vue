@@ -171,6 +171,14 @@ function onNavigateToPaper(nodeId: string) {
   locateNode(nodeId);
 }
 
+// Layout mode change triggers a full recalculate under the new layout strategy
+async function onLayoutModeChange(mode: 'fixed' | 'dynamic') {
+  layoutMode.value = mode;
+  if (graph.value) {
+    await onRecalculate();
+  }
+}
+
 function onFilterChange(filters: { minCitations: number; showIsolated: boolean; search: string }) {
   if (!graph.value) return;
   const result = applyCitationGraphFilters(graph.value, filters);
@@ -312,6 +320,7 @@ async function onRecalculate() {
           :paper-labels="paperLabels"
           :paper-titles="paperTitles"
           :color-mode="colorMode"
+          :layout-mode="layoutMode"
           :min-year="yearRange.min"
           :max-year="yearRange.max"
           :selected-clusters="selectedClusters"
@@ -320,6 +329,7 @@ async function onRecalculate() {
           @locate-paper="onLocatePaper"
           @export-image="onExportImage"
           @color-mode-change="colorMode = $event"
+          @layout-mode-change="onLayoutModeChange"
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"
           @recalculate="onRecalculate"
