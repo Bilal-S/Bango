@@ -65,6 +65,7 @@ import type Graph from 'graphology';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { citationClusterColor } from '../types/biblio-citation';
 import type { CitationNode } from '../types/biblio-citation';
+import { getTemporalColor } from '@/utils/color';
 
 const props = defineProps<{
   graph: Graph | null;
@@ -170,23 +171,6 @@ watch(
     }
   }
 );
-
-function getTemporalColor(year: number | null, minYear: number, maxYear: number): string {
-  if (year === null || year === undefined) {
-    return '#cbd5e1';
-  }
-  if (maxYear <= minYear) {
-    return '#56B4E9';
-  }
-  const ratio = Math.max(0, Math.min(1, (year - minYear) / (maxYear - minYear)));
-  const r = Math.round(86 + ratio * (230 - 86));
-  const g = Math.round(180 + ratio * (159 - 180));
-  const b = Math.round(233 + ratio * (0 - 233));
-  const rHex = r.toString(16).padStart(2, '0');
-  const gHex = g.toString(16).padStart(2, '0');
-  const bHex = b.toString(16).padStart(2, '0');
-  return `#${rHex}${gHex}${bHex}`;
-}
 
 function getNodeColor(nodeId: string): string {
   if (!props.graph || !props.graph.hasNode(nodeId)) return '#94a3b8';

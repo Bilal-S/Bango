@@ -3,8 +3,7 @@ import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
 import { stripUuidFromDetails } from '@/utils/formatters';
-
-export interface StatusCounts {
+interface StatusCounts {
   total: number;
   duplicate: number;
   working: number;
@@ -12,14 +11,14 @@ export interface StatusCounts {
   rejected: number;
 }
 
-export interface ScreeningProgress {
+interface ScreeningProgress {
   screened: number;
   total: number;
   percentage: number;
 }
 
 /** A single audit entry or a group of import entries */
-export interface GroupedAuditEntry {
+interface GroupedAuditEntry {
   id: string;
   action: string;
   source: string;

@@ -4,7 +4,7 @@ import type Graph from 'graphology';
 
 const renderer = shallowRef<Sigma | null>(null);
 
-export interface SigmaRendererOptions {
+interface SigmaRendererOptions {
   /** Min camera ratio (zoom in limit). Default 0.1 */
   minCameraRatio?: number;
   /** Max camera ratio (zoom out limit). Default 10 */

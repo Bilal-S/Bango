@@ -19,6 +19,7 @@ import {
   pendingSummaries,
 } from '@/composables/use-ai-summary';
 import type { AiSummaryData } from '@/composables/use-ai-summary';
+import { getFullTextFileIcon } from '@/utils/formatters';
 
 const props = defineProps<{
   article: Article;
@@ -83,14 +84,7 @@ const canRequestAiSummary = computed(
 const isAiSummaryPending = computed(() => pendingSummaries.value.has(props.article.id));
 
 // Determine the file type icon based on filename
-const fullTextFileIcon = computed(() => {
-  const name = props.article.fullTextFileName;
-  if (!name) return null;
-  const lower = name.toLowerCase();
-  if (lower.endsWith('.pdf')) return 'picture_as_pdf';
-  if (lower.endsWith('.txt')) return 'description';
-  return 'draft';
-});
+const fullTextFileIcon = computed(() => getFullTextFileIcon(props.article.fullTextFileName));
 
 /** Trigger AI summary generation */
 function handleRequestAiSummary(): void {

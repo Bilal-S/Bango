@@ -8,7 +8,7 @@ export interface ExclusionReason {
   count: number;
 }
 
-export interface PrismaData {
+interface PrismaData {
   recordsIdentified: number;
   duplicatesRemoved: number;
   recordsScreened: number;

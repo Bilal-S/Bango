@@ -1,10 +1,10 @@
 use rusqlite::Connection;
 
-use crate::error::AppError;
-use crate::models::biblio::{BiblioStatus, TermSource, TermType};
 use super::authors::{link_article_author, upsert_author};
 use super::institutions::{insert_author_affiliation, upsert_institution};
 use super::terms::save_article_terms;
+use crate::error::AppError;
+use crate::models::biblio::{BiblioStatus, TermSource, TermType};
 
 /// Extract and normalize all authors from the articles table into biblio tables.
 /// Returns the number of unique authors created.

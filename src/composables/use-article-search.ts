@@ -21,7 +21,7 @@ export interface ArticleFilter {
   labels: string[];
 }
 
-export interface ArticleQuery {
+interface ArticleQuery {
   status: string | null;
   search: string | null;
   sortBy: string | null;
@@ -38,7 +38,7 @@ export interface ArticleQuery {
   offset: number;
 }
 
-export type SortDirection = 'asc' | 'desc';
+type SortDirection = 'asc' | 'desc';
 
 const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references')[] = [
   'all',
@@ -50,7 +50,7 @@ const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references')[] =
   'references',
 ] as const;
 
-export type StatusTab = (typeof STATUS_TABS)[number];
+type StatusTab = (typeof STATUS_TABS)[number];
 
 export function useArticleSearch() {
   const articlesStore = useArticlesStore();

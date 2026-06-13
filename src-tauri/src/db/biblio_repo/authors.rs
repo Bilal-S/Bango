@@ -144,11 +144,8 @@ pub fn compute_h_index(conn: &Connection, author_id: &str) -> Result<i32, AppErr
         .query_map(rusqlite::params![author_id], |row| row.get(0))?
         .collect::<Result<Vec<i32>, _>>()?;
 
-    let h = citations
-        .iter()
-        .enumerate()
-        .take_while(|&(i, &cites)| cites >= (i + 1) as i32)
-        .count() as i32;
+    let h = citations.iter().enumerate().take_while(|&(i, &cites)| cites >= (i + 1) as i32).count()
+        as i32;
 
     Ok(h)
 }

@@ -33,3 +33,35 @@ export function stripUuidFromDetails(details: string | null): string | null {
   result = result.replace(/\s{2,}/g, ' ').trim();
   return result || null;
 }
+
+/**
+ * Determine the file type icon based on filename.
+ */
+export function getFullTextFileIcon(fileName: string | null | undefined): string | null {
+  if (!fileName) return null;
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'picture_as_pdf';
+  if (lower.endsWith('.txt')) return 'description';
+  return 'draft';
+}
+
+/**
+ * Format a list of author names.
+ */
+export function formatAuthors(
+  authors: string[] | null | undefined,
+  limit = 3,
+  separator = ', '
+): string {
+  if (!authors || !authors.length) return '';
+  if (authors.length <= limit) return authors.join(separator);
+  return `${authors[0]} et al.`;
+}
+
+/**
+ * Create a DOI hyperlink if possible.
+ */
+export function doiLink(doi: string | null | undefined): string | undefined {
+  if (!doi) return undefined;
+  return doi.startsWith('http') ? doi : `https://doi.org/${doi}`;
+}

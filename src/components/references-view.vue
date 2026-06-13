@@ -4,6 +4,7 @@ import { useReferencesSearch } from '@/composables/use-references-search';
 import { useToast } from '@/composables/use-toast';
 import ReferencePaperDetailPanel from './reference-paper-detail-panel.vue';
 import type { ReferencePaperQuery } from '@/types';
+import { formatAuthors, doiLink } from '@/utils/formatters';
 
 const emit = defineEmits<{
   (e: 'article-promoted', articleId: string): void;
@@ -81,17 +82,6 @@ function handleExecuteSearch(): void {
 function handleClearSearch(): void {
   searchText.value = '';
   search('');
-}
-
-function formatAuthors(authors: string[]): string {
-  if (!authors.length) return '';
-  if (authors.length <= 3) return authors.join(', ');
-  return `${authors[0]} et al.`;
-}
-
-function doiLink(doi: string | null): string | undefined {
-  if (!doi) return undefined;
-  return doi.startsWith('http') ? doi : `https://doi.org/${doi}`;
 }
 
 function canPromote(paper: ReferencePaperQuery): boolean {

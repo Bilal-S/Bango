@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
-export interface ChatMessage {
+interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;

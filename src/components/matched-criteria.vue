@@ -16,18 +16,7 @@ const criteriaStore = useCriteriaStore();
 
 const showCriteriaDialog = ref(false);
 
-/** Compute global criterion index: inclusion [1]..[N], exclusion [N+1]..[N+M] */
-const criterionIndexMap = computed(() => {
-  const map = new Map<string, number>();
-  let n = 1;
-  for (const c of criteriaStore.inclusionCriteria) {
-    map.set(c.id, n++);
-  }
-  for (const c of criteriaStore.exclusionCriteria) {
-    map.set(c.id, n++);
-  }
-  return map;
-});
+const criterionIndexMap = computed(() => criteriaStore.criterionIndexMap);
 
 /** Resolve a criterion UUID to its human-readable text */
 function criterionText(id: string): string {

@@ -206,7 +206,7 @@ watch(
                   <button
                     v-if="article.hasFullText"
                     class="material-symbols-outlined text-[16px] text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded flex-shrink-0 cursor-pointer transition-colors"
-                    :title="'Open reader: ' + (article.fullTextFileName ?? 'attachment')"
+                    :title="'Open reader'"
                     @click.stop="$emit('openReader', article.id)"
                   >
                     attach_file

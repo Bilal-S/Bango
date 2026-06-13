@@ -56,6 +56,7 @@ import type Graph from 'graphology';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { clusterColor } from '../types/biblio-network';
 import type { CoAuthorNode } from '../types/biblio-network';
+import { getTemporalColor } from '@/utils/color';
 
 const props = defineProps<{
   graph: Graph | null;
@@ -161,28 +162,6 @@ watch(
     }
   }
 );
-
-function getTemporalColor(avgYear: number | null, minYear: number, maxYear: number): string {
-  if (avgYear === null || avgYear === undefined) {
-    return '#cbd5e1'; // neutral gray
-  }
-  if (maxYear <= minYear) {
-    return '#56B4E9';
-  }
-  const ratio = Math.max(0, Math.min(1, (avgYear - minYear) / (maxYear - minYear)));
-
-  // Interpolate between RGB(86, 180, 233) and RGB(230, 159, 0)
-  const r = Math.round(86 + ratio * (230 - 86));
-  const g = Math.round(180 + ratio * (159 - 180));
-  const b = Math.round(233 + ratio * (0 - 233));
-
-  // Format as hex
-  const rHex = r.toString(16).padStart(2, '0');
-  const gHex = g.toString(16).padStart(2, '0');
-  const bHex = b.toString(16).padStart(2, '0');
-
-  return `#${rHex}${gHex}${bHex}`;
-}
 
 function getNodeColor(nodeId: string): string {
   if (!props.graph || !props.graph.hasNode(nodeId)) return '#94a3b8';

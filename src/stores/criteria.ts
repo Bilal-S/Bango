@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import type { ResearchAim, Criterion } from '@/types';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
@@ -68,11 +68,24 @@ export const useCriteriaStore = defineStore('criteria', () => {
     }
   }
 
+  const criterionIndexMap = computed(() => {
+    const map = new Map<string, number>();
+    let n = 1;
+    for (const c of inclusionCriteria.value) {
+      map.set(c.id, n++);
+    }
+    for (const c of exclusionCriteria.value) {
+      map.set(c.id, n++);
+    }
+    return map;
+  });
+
   return {
     aims,
     criteria,
     inclusionCriteria,
     exclusionCriteria,
+    criterionIndexMap,
     loading,
     initialized,
     // AI assistant state

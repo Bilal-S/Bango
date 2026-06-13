@@ -91,3 +91,28 @@ export function getColorScheme(name: string, customColor: string | null | undefi
   const hex = customColor || hashColor(name);
   return deriveColorScheme(hex);
 }
+
+/**
+ * Linearly interpolates a node's color based on its publication year.
+ * Returns a hex color string between #56B4E9 (start) and #E69F00 (end).
+ */
+export function getTemporalColor(
+  year: number | null | undefined,
+  minYear: number,
+  maxYear: number
+): string {
+  if (year === null || year === undefined) {
+    return '#cbd5e1';
+  }
+  if (maxYear <= minYear) {
+    return '#56B4E9';
+  }
+  const ratio = Math.max(0, Math.min(1, (year - minYear) / (maxYear - minYear)));
+  const r = Math.round(86 + ratio * (230 - 86));
+  const g = Math.round(180 + ratio * (159 - 180));
+  const b = Math.round(233 + ratio * (0 - 233));
+  const rHex = r.toString(16).padStart(2, '0');
+  const gHex = g.toString(16).padStart(2, '0');
+  const bHex = b.toString(16).padStart(2, '0');
+  return `#${rHex}${gHex}${bHex}`;
+}

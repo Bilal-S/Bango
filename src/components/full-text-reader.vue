@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import { openPath } from '@tauri-apps/plugin-opener';
 import type { Article } from '@/types';
 import { requestArticleAiSummary } from '@/composables/use-ai-summary';
+import { getFullTextFileIcon } from '@/utils/formatters';
 
 const props = defineProps<{
   article: Article;
@@ -33,14 +34,7 @@ const isPdfAttachment = computed(() => {
 });
 
 /** Determine the file type icon based on filename */
-const fullTextFileIcon = computed(() => {
-  const name = props.article.fullTextFileName;
-  if (!name) return null;
-  const lower = name.toLowerCase();
-  if (lower.endsWith('.pdf')) return 'picture_as_pdf';
-  if (lower.endsWith('.txt')) return 'description';
-  return 'draft';
-});
+const fullTextFileIcon = computed(() => getFullTextFileIcon(props.article.fullTextFileName));
 
 /** Open the full-text reading view */
 async function openFullTextView(): Promise<void> {

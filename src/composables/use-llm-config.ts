@@ -4,8 +4,6 @@ import { tauriCommand } from './use-tauri-command';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import type { TestResult } from '@/stores/llm-config';
 
-export type { TestResult };
-
 const providerDisplayNames: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',

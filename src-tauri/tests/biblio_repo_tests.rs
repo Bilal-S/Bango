@@ -1,18 +1,15 @@
 use rusqlite::Connection;
 
 use bango_lib::db::biblio_repo::{
-    upsert_term, link_article_term, get_terms_for_article, save_article_terms, get_all_terms,
-    upsert_author, link_article_author, get_authors_for_article, compute_author_metrics,
-    compute_h_index, get_all_authors,
-    upsert_institution,
-    save_network, load_network, load_network_nodes, load_network_edges, delete_network,
-    build_coauthor_edges, get_coauthor_network_json,
-    get_biblio_kpis,
-    clear_all_biblio, clear_regeneratable_biblio, get_biblio_status,
+    build_coauthor_edges, clear_all_biblio, clear_regeneratable_biblio, compute_author_metrics,
+    compute_h_index, delete_network, get_all_authors, get_all_terms, get_authors_for_article,
+    get_biblio_kpis, get_biblio_status, get_coauthor_network_json, get_terms_for_article,
+    link_article_author, link_article_term, load_network, load_network_edges, load_network_nodes,
+    save_article_terms, save_network, upsert_author, upsert_institution, upsert_term,
 };
 use bango_lib::db::migration::run_migrations;
 use bango_lib::models::biblio::{
-    BiblioNetworkEdge, BiblioNetworkNode, NetworkType, YearCount, TermType, TermSource,
+    BiblioNetworkEdge, BiblioNetworkNode, NetworkType, TermSource, TermType, YearCount,
 };
 
 fn test_db() -> Connection {
@@ -79,10 +76,9 @@ fn test_upsert_term_increments_count() {
 #[test]
 fn test_upsert_term_different_types() {
     let conn = test_db();
-    let id_kw =
-        upsert_term(&conn, "ML", "ml", &TermType::Keyword, &TermSource::Metadata).unwrap();
-    let id_np = upsert_term(&conn, "ML", "ml", &TermType::NounPhrase, &TermSource::AiExtracted)
-        .unwrap();
+    let id_kw = upsert_term(&conn, "ML", "ml", &TermType::Keyword, &TermSource::Metadata).unwrap();
+    let id_np =
+        upsert_term(&conn, "ML", "ml", &TermType::NounPhrase, &TermSource::AiExtracted).unwrap();
     assert_ne!(id_kw, id_np);
 }
 
@@ -186,9 +182,7 @@ fn test_upsert_author_increments_count() {
     assert_eq!(id1, id2);
 
     let count: i32 = conn
-        .query_row("SELECT article_count FROM biblio_authors WHERE id = ?1", [&id1], |r| {
-            r.get(0)
-        })
+        .query_row("SELECT article_count FROM biblio_authors WHERE id = ?1", [&id1], |r| r.get(0))
         .unwrap();
     assert_eq!(count, 2);
 }
@@ -267,16 +261,9 @@ fn test_save_and_load_network() {
         weight: 3.0,
     }];
 
-    let net_id = save_network(
-        &conn,
-        &NetworkType::CoAuthorship,
-        "Test Network",
-        None,
-        None,
-        &nodes,
-        &edges,
-    )
-    .unwrap();
+    let net_id =
+        save_network(&conn, &NetworkType::CoAuthorship, "Test Network", None, None, &nodes, &edges)
+            .unwrap();
 
     let meta = load_network(&conn, &net_id).unwrap().unwrap();
     assert_eq!(meta.label, "Test Network");

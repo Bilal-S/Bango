@@ -42,18 +42,7 @@ const aiDecisionColors = computed(() => {
   };
 });
 
-/** Compute global criterion index: inclusion [1]..[N], exclusion [N+1]..[N+M] */
-const criterionIndexMap = computed(() => {
-  const map = new Map<string, number>();
-  let n = 1;
-  for (const c of criteriaStore.inclusionCriteria) {
-    map.set(c.id, n++);
-  }
-  for (const c of criteriaStore.exclusionCriteria) {
-    map.set(c.id, n++);
-  }
-  return map;
-});
+const criterionIndexMap = computed(() => criteriaStore.criterionIndexMap);
 
 /**
  * Replace criterion UUIDs in reasoning text with global numbered references `[n]`.

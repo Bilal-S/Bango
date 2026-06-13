@@ -1,12 +1,10 @@
-use std::collections::{HashMap, HashSet};
 use rusqlite::{Connection, OptionalExtension};
+use std::collections::{HashMap, HashSet};
 
+use super::authors::get_all_authors;
 use crate::db::reference_repo;
 use crate::error::AppError;
-use crate::models::biblio::{
-    BiblioNetworkEdge, BiblioNetworkMeta, BiblioNetworkNode, NetworkType,
-};
-use super::authors::get_all_authors;
+use crate::models::biblio::{BiblioNetworkEdge, BiblioNetworkMeta, BiblioNetworkNode, NetworkType};
 
 /// Save a network with its nodes and edges. Returns the network ID.
 pub fn save_network(
@@ -354,7 +352,10 @@ pub fn format_paper_label(authors_str: &str, year: Option<i32>) -> String {
         return format!("Unknown{}", year_suffix);
     }
     // Use the surname portion of the display name ("Last, First" → "Last").
-    let first_author = parsed.first().map(|a| a.display_name.split(',').next().unwrap_or(&a.display_name).trim()).unwrap_or("Unknown");
+    let first_author = parsed
+        .first()
+        .map(|a| a.display_name.split(',').next().unwrap_or(&a.display_name).trim())
+        .unwrap_or("Unknown");
     if parsed.len() == 1 {
         format!("{}{}", first_author, year_suffix)
     } else {
@@ -597,7 +598,15 @@ pub fn get_citation_network_json(
               WHERE rp.matched_article_id IS NULL \
                 AND EXISTS (SELECT 1 FROM articles a WHERE a.id = l.parent_article_id AND a.status = 'included')",
         )?;
-        let unmatched: Vec<(String, Option<String>, Option<String>, Option<i32>, Option<String>, Option<String>, String)> = um_stmt
+        let unmatched: Vec<(
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i32>,
+            Option<String>,
+            Option<String>,
+            String,
+        )> = um_stmt
             .query_map([], |row| {
                 Ok((
                     row.get(0)?,
@@ -642,9 +651,7 @@ pub fn get_citation_network_json(
 
     // Diagnostic meta block — drives the frontend empty-state messaging.
     let included_article_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'included'", [], |r| {
-            r.get(0)
-        })
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'included'", [], |r| r.get(0))
         .unwrap_or(0);
     let reference_paper_count: i64 =
         conn.query_row("SELECT COUNT(*) FROM reference_papers", [], |r| r.get(0)).unwrap_or(0);

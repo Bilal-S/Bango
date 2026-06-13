@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useToast } from '@/composables/use-toast';
 import type { ReferencePaperQuery, LinkedArticleInfo } from '@/types';
+import { formatAuthors, doiLink } from '@/utils/formatters';
 
 const props = defineProps<{
   paperId: string;
@@ -80,17 +81,6 @@ async function handlePromote(): Promise<void> {
   } finally {
     promoting.value = false;
   }
-}
-
-function formatAuthors(authors: string[]): string {
-  if (!authors.length) return '';
-  if (authors.length <= 3) return authors.join(', ');
-  return `${authors[0]} et al.`;
-}
-
-function doiLink(doi: string | null): string | undefined {
-  if (!doi) return undefined;
-  return doi.startsWith('http') ? doi : `https://doi.org/${doi}`;
 }
 
 function typeLabel(refType: string): string {

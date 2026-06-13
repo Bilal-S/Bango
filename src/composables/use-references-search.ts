@@ -4,7 +4,7 @@ import type { ReferencePaperQuery, LinkedArticleInfo } from '@/types';
 
 const PAGE_SIZE = 25;
 
-export type MatchStatusFilter = 'all' | 'unmatched' | 'matched' | 'imported';
+type MatchStatusFilter = 'all' | 'unmatched' | 'matched' | 'imported';
 
 export function useReferencesSearch() {
   const searchText = ref('');

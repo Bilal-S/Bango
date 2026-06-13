@@ -41,7 +41,7 @@ export interface ImportResult {
   errorGroups: ErrorGroup[];
 }
 
-export type ImportFormat = 'ris' | 'bibtex';
+type ImportFormat = 'ris' | 'bibtex';
 export type ImportStep = 'upload' | 'parse' | 'import' | 'complete';
 
 /** Detect import format from file extension. */

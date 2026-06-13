@@ -3,7 +3,7 @@ import { tauriCommand } from './use-tauri-command';
 import { useToast } from './use-toast';
 import type { ArticleReference, ReferenceType, Article, BatchRefScrapingProgress } from '../types';
 
-export interface ExtractResult {
+interface ExtractResult {
   papersCreated: number;
   linksCreated: number;
   errors: string[];
@@ -17,7 +17,7 @@ export interface PreviewPaper {
   journal: string | null;
 }
 
-export interface PreviewResult {
+interface PreviewResult {
   papers: PreviewPaper[];
   totalCount: number;
   errors: string[];

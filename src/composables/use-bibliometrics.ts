@@ -6,7 +6,7 @@ export interface YearCount {
   count: number;
 }
 
-export interface BiblioKpis {
+interface BiblioKpis {
   includedCount: number;
   totalCitations: number;
   uniqueAuthors: number;

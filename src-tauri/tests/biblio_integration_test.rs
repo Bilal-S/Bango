@@ -445,8 +445,7 @@ fn test_citation_network_edges_with_auto_match() {
     assert_eq!(edges_built, 2, "expected 2 citation edges: art-a → art-b, art-a → art-c");
 
     // ── 5. Verify network JSON (default mode: matched only) ──────────────
-    let json =
-        get_citation_network_json(&conn, false).expect("get_citation_network_json failed");
+    let json = get_citation_network_json(&conn, false).expect("get_citation_network_json failed");
     let nodes = json.get("nodes").unwrap().as_array().unwrap();
     let edges = json.get("edges").unwrap().as_array().unwrap();
     assert_eq!(nodes.len(), 3, "three articles participate in citation edges");
@@ -462,10 +461,8 @@ fn test_citation_network_edges_with_auto_match() {
     }
 
     // Edges: both should originate from art-a.
-    let sources: Vec<&str> = edges
-        .iter()
-        .map(|e| e.get("source").unwrap().as_str().unwrap())
-        .collect();
+    let sources: Vec<&str> =
+        edges.iter().map(|e| e.get("source").unwrap().as_str().unwrap()).collect();
     assert!(sources.iter().all(|s| *s == "art-a"), "all edges should be sourced from art-a");
 
     // Meta block must be present for diagnostic empty-state.
@@ -495,8 +492,8 @@ fn test_citation_network_edges_with_auto_match() {
     create_link(&conn, "art-a", &paper_x.id, &ReferenceType::Reference)
         .expect("link paper_x to art-a");
 
-    let json_um =
-        get_citation_network_json(&conn, true).expect("get_citation_network_json(unmatched) failed");
+    let json_um = get_citation_network_json(&conn, true)
+        .expect("get_citation_network_json(unmatched) failed");
     let nodes_um = json_um.get("nodes").unwrap().as_array().unwrap();
     let edges_um = json_um.get("edges").unwrap().as_array().unwrap();
     let meta_um = json_um.get("meta").unwrap();
@@ -512,8 +509,7 @@ fn test_citation_network_edges_with_auto_match() {
     );
 
     // The unmatched node should carry unmatched == true.
-    let has_unmatched_node = nodes_um
-        .iter()
-        .any(|n| n.get("unmatched").and_then(|v| v.as_bool()) == Some(true));
+    let has_unmatched_node =
+        nodes_um.iter().any(|n| n.get("unmatched").and_then(|v| v.as_bool()) == Some(true));
     assert!(has_unmatched_node, "expected at least one unmatched leaf node");
 }

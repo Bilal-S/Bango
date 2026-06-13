@@ -4,7 +4,7 @@ import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 import type { AuditEntry } from '@/types';
 
 /** Shape returned by the Rust `get_import_activities` command */
-export interface ImportActivity {
+interface ImportActivity {
   id: string;
   timestamp: string;
   filename: string;

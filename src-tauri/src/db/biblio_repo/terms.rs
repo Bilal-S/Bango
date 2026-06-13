@@ -114,20 +114,15 @@ pub fn get_all_terms(conn: &Connection) -> Result<Vec<BiblioTerm>, AppError> {
         "SELECT id, normalized_term, raw_term, term_type, article_count, created_at, source \
          FROM biblio_terms ORDER BY article_count DESC",
     )?;
-    let terms = stmt
-        .query_map([], map_row_to_term)?
-        .collect::<Result<Vec<_>, _>>()?;
+    let terms = stmt.query_map([], map_row_to_term)?.collect::<Result<Vec<_>, _>>()?;
     Ok(terms)
 }
 
 /// Helper mapping database rows to `BiblioTerm`.
 fn map_row_to_term(row: &rusqlite::Row) -> Result<BiblioTerm, rusqlite::Error> {
     let type_str: String = row.get(3)?;
-    let term_type = if type_str == "noun_phrase" {
-        TermType::NounPhrase
-    } else {
-        TermType::Keyword
-    };
+    let term_type =
+        if type_str == "noun_phrase" { TermType::NounPhrase } else { TermType::Keyword };
     let source_str: String = row.get(6)?;
     let source = match source_str.as_str() {
         "ai_extracted" => TermSource::AiExtracted,

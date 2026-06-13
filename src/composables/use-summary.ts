@@ -3,7 +3,7 @@ import { tauriCommand } from './use-tauri-command';
 
 export type CitationStyle = 'APA' | 'MLA' | 'Chicago' | 'IEEE' | 'AMA';
 
-export interface SavedSummary {
+interface SavedSummary {
   summaryText: string;
   citationStyle: string;
   generatedAt: string;

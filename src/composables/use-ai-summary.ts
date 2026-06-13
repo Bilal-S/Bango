@@ -126,20 +126,3 @@ export function parseAiSummary(raw: string | null | undefined): AiSummaryData | 
     return null;
   }
 }
-
-/**
- * Composable for components that need to react to AI summary events.
- * The underlying Tauri listeners are global and persist across navigation.
- *
- * @param onSummaryComplete - Optional callback invoked with the articleId when
- *   a summary completes. Uses a global listener that survives component unmount.
- */
-export function useAiSummaryEvents(_onSummaryComplete?: (articleId: string) => Promise<void>) {
-  // The global listeners handle core logic (pending cleanup, toasts).
-  // If a callback is provided, components should use requestArticleAiSummary's
-  // onComplete parameter for per-article callbacks instead.
-  // This composable is kept for API compatibility.
-
-  // Return pendingSummaries for template binding
-  return { pendingSummaries };
-}
