@@ -354,7 +354,7 @@ fn test_citation_network_edges_with_auto_match() {
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("Failed to run migrations");
 
-    // ── 1. Three included articles ───────────────────────────────────────
+    // ── 1. Four included articles (3 connected, 1 isolated) ───────────────
     conn.execute(
         "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, doi, journal) \
          VALUES ('art-a', 'included', 'Alpha', 'Abstract A', '[\"Smith, J\"]', 2020, '10.0000/a', 'Nature')",
@@ -373,6 +373,12 @@ fn test_citation_network_edges_with_auto_match() {
         [],
     )
     .expect("insert art-c");
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, journal) \
+         VALUES ('art-d', 'included', 'Delta', 'Abstract D', '[\"Johnson, J\"]', 2022, 'Lancet')",
+        [],
+    )
+    .expect("insert art-d");
 
     // ── 2. Reference papers matching B and C, linked to A (A cites B, A cites C) ─
     // Paper B matches art-b via DOI.  Paper C matches art-c via title+year.
@@ -448,7 +454,7 @@ fn test_citation_network_edges_with_auto_match() {
     let json = get_citation_network_json(&conn, false).expect("get_citation_network_json failed");
     let nodes = json.get("nodes").unwrap().as_array().unwrap();
     let edges = json.get("edges").unwrap().as_array().unwrap();
-    assert_eq!(nodes.len(), 3, "three articles participate in citation edges");
+    assert_eq!(nodes.len(), 4, "four articles should be returned (including the isolated one)");
     assert_eq!(edges.len(), 2, "two directed edges");
 
     // Every emitted node must be matched (unmatched flag == false).
@@ -467,7 +473,7 @@ fn test_citation_network_edges_with_auto_match() {
 
     // Meta block must be present for diagnostic empty-state.
     let meta = json.get("meta").expect("meta block should always be present");
-    assert_eq!(meta.get("nodeCount").and_then(|v| v.as_i64()), Some(3));
+    assert_eq!(meta.get("nodeCount").and_then(|v| v.as_i64()), Some(4));
     assert_eq!(meta.get("edgeCount").and_then(|v| v.as_i64()), Some(2));
     assert_eq!(
         meta.get("unmatchedCount").and_then(|v| v.as_i64()),
@@ -498,8 +504,8 @@ fn test_citation_network_edges_with_auto_match() {
     let edges_um = json_um.get("edges").unwrap().as_array().unwrap();
     let meta_um = json_um.get("meta").unwrap();
 
-    // 3 matched article nodes + 1 unmatched reference-paper leaf.
-    assert_eq!(nodes_um.len(), 4, "should include the unmatched leaf node");
+    // 4 matched article nodes + 1 unmatched reference-paper leaf.
+    assert_eq!(nodes_um.len(), 5, "should include all matched nodes and the unmatched leaf node");
     // 2 matched citation edges + 1 dashed unmatched edge.
     assert_eq!(edges_um.len(), 3, "should include the dashed unmatched edge");
     assert_eq!(

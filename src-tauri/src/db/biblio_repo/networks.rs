@@ -510,23 +510,12 @@ pub fn get_citation_network_json(
     conn: &Connection,
     include_unmatched: bool,
 ) -> Result<serde_json::Value, AppError> {
-    // Fetch included articles that appear in the citation network.
+    // Fetch all included articles.
     let mut stmt = conn.prepare(
         "SELECT DISTINCT a.id, a.title, a.authors, a.publication_year, a.journal, \
                  a.num_cited, a.num_references, a.abstract_text \
           FROM articles a \
-          WHERE a.status = 'included' \
-            AND a.id IN ( \
-                 SELECT source_id FROM biblio_network_edges \
-                 WHERE network_id IN (\
-                     SELECT id FROM biblio_network_meta WHERE network_type = 'citation'\
-                 ) \
-                 UNION \
-                 SELECT target_id FROM biblio_network_edges \
-                 WHERE network_id IN (\
-                     SELECT id FROM biblio_network_meta WHERE network_type = 'citation'\
-                 ) \
-            )",
+          WHERE a.status = 'included'",
     )?;
 
     let mut nodes: Vec<serde_json::Value> = stmt

@@ -37,10 +37,22 @@
           <div class="flex-1 bg-slate-50 rounded-lg px-2.5 py-1.5 text-center">
             <p class="text-base font-bold text-slate-700">{{ paper.numCited }}</p>
             <p class="text-[10px] text-slate-400 uppercase tracking-wide">Cited by</p>
+            <p
+              v-if="paper.numCited > 0 && citingPapers.length === 0"
+              class="text-[9px] text-slate-400 lowercase mt-0.5 leading-none"
+            >
+              (no details available)
+            </p>
           </div>
           <div class="flex-1 bg-slate-50 rounded-lg px-2.5 py-1.5 text-center">
             <p class="text-base font-bold text-slate-700">{{ paper.numReferences }}</p>
             <p class="text-[10px] text-slate-400 uppercase tracking-wide">References</p>
+            <p
+              v-if="paper.numReferences > 0 && citedPapers.length === 0"
+              class="text-[9px] text-slate-400 lowercase mt-0.5 leading-none"
+            >
+              (no details available)
+            </p>
           </div>
         </div>
 
