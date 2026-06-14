@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
+import { getPublicationTypeLabel } from '@/utils/formatters';
 
 defineProps<{
   article: Article;
@@ -27,7 +28,7 @@ const emit = defineEmits<{
         <span
           class="text-xs font-label-caps text-primary uppercase bg-primary/5 px-2 py-0.5 rounded"
         >
-          Current Selection
+          Current {{ getPublicationTypeLabel(article.referenceType) }} Selection
         </span>
         <StatusBadge :status="article.status" />
         <!-- Full-text attachment icon -->

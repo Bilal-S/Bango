@@ -4,7 +4,7 @@ import { useReferencesSearch } from '@/composables/use-references-search';
 import { useToast } from '@/composables/use-toast';
 import ReferencePaperDetailPanel from './reference-paper-detail-panel.vue';
 import type { ReferencePaperQuery } from '@/types';
-import { formatAuthors, doiLink } from '@/utils/formatters';
+import { formatAuthors, doiLink, getPublicationTypeLabel } from '@/utils/formatters';
 
 const props = defineProps<{
   activePaperId?: string | null;
@@ -308,6 +308,11 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
                 {{ paper.matchStatus }}
               </span>
               <span
+                class="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200"
+              >
+                {{ getPublicationTypeLabel(paper.referenceType) }}
+              </span>
+              <span
                 v-if="paper.citationCount + paper.referenceCount > 0"
                 class="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full"
               >
@@ -335,6 +340,10 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
               </div>
               <div v-if="paper.journal">
                 <span class="font-medium">Journal:</span> {{ paper.journal }}
+              </div>
+              <div>
+                <span class="font-medium">Publication Type:</span>
+                {{ getPublicationTypeLabel(paper.referenceType) }}
               </div>
               <div class="flex flex-wrap gap-x-4 gap-y-1">
                 <span v-if="paper.volume"

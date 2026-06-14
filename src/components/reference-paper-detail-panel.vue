@@ -3,7 +3,7 @@ import { ref, watch } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useToast } from '@/composables/use-toast';
 import type { ReferencePaperQuery, LinkedArticleInfo } from '@/types';
-import { formatAuthors, doiLink } from '@/utils/formatters';
+import { formatAuthors, doiLink, getPublicationTypeLabel } from '@/utils/formatters';
 
 const props = defineProps<{
   paperId: string;
@@ -119,7 +119,13 @@ watch(
       >
         close
       </button>
-      <h2 class="text-sm font-semibold text-slate-800 truncate flex-1">Reference Paper Detail</h2>
+      <h2 class="text-sm font-semibold text-slate-800 truncate flex-1">
+        {{
+          paper
+            ? `${getPublicationTypeLabel(paper.referenceType)} Detail`
+            : 'Reference Paper Detail'
+        }}
+      </h2>
       <span
         class="text-[10px] px-2 py-0.5 rounded-full font-medium"
         :class="

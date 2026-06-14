@@ -4,6 +4,7 @@ import {
   formatConfidence,
   formatPriority,
   formatArticleCount,
+  getPublicationTypeLabel,
 } from '@/utils/formatters';
 
 describe('formatDate', () => {
@@ -47,5 +48,37 @@ describe('formatArticleCount', () => {
   it('uses plural for more than one', () => {
     expect(formatArticleCount(2)).toBe('2 articles');
     expect(formatArticleCount(142)).toBe('142 articles');
+  });
+});
+
+describe('getPublicationTypeLabel', () => {
+  it('maps known tags to friendly names', () => {
+    expect(getPublicationTypeLabel('JOUR')).toBe('Journal');
+    expect(getPublicationTypeLabel('BOOK')).toBe('Book');
+    expect(getPublicationTypeLabel('CHAP')).toBe('Chapter');
+    expect(getPublicationTypeLabel('CONF')).toBe('Conference');
+    expect(getPublicationTypeLabel('RPRT')).toBe('Reports');
+    expect(getPublicationTypeLabel('MAGZ')).toBe('Magazine');
+    expect(getPublicationTypeLabel('NEWS')).toBe('Newspaper');
+    expect(getPublicationTypeLabel('THES')).toBe('Theses');
+    expect(getPublicationTypeLabel('ELEC')).toBe('Electronic/Web');
+    expect(getPublicationTypeLabel('DATA')).toBe('Data files');
+    expect(getPublicationTypeLabel('ART')).toBe('Artwork');
+    expect(getPublicationTypeLabel('BILL')).toBe('Bills');
+    expect(getPublicationTypeLabel('PAMP')).toBe('Pamphlet');
+    expect(getPublicationTypeLabel('PAT')).toBe('Patent');
+    expect(getPublicationTypeLabel('VIDEO')).toBe('Video');
+    expect(getPublicationTypeLabel('SOUND')).toBe('Sound');
+  });
+
+  it('is case-insensitive and trims whitespace', () => {
+    expect(getPublicationTypeLabel(' jour ')).toBe('Journal');
+    expect(getPublicationTypeLabel('Book')).toBe('Book');
+  });
+
+  it('falls back to Publication for unknown tags or null/undefined', () => {
+    expect(getPublicationTypeLabel(null)).toBe('Publication');
+    expect(getPublicationTypeLabel(undefined)).toBe('Publication');
+    expect(getPublicationTypeLabel('UNKNOWN')).toBe('Publication');
   });
 });

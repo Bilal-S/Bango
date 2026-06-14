@@ -97,6 +97,7 @@ export interface ArticleReference {
   fullTextFileName: string | null;
   importSource: string | null;
   importedAt: string;
+  publicationType: string | null;
 }
 
 export type ArticleStatus = 'duplicate' | 'working' | 'included' | 'rejected';
@@ -260,6 +261,7 @@ export interface ReferencePaperQuery {
   referenceCount: number;
   importSource: string | null;
   createdAt: string;
+  referenceType: string | null;
 }
 
 /** Result from querying reference papers with pagination */

@@ -3,6 +3,7 @@ import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
 import ConfidenceBar from './confidence-bar.vue';
+import { getPublicationTypeLabel } from '@/utils/formatters';
 
 const props = defineProps<{
   articles: Article[];
@@ -35,6 +36,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'title', label: 'Title' },
   { key: 'authors', label: 'Authors' },
   { key: 'publicationYear', label: 'Year', width: 'w-16' },
+  { key: 'referenceType', label: 'Type', width: 'w-24', responsiveClass: 'col-type' },
   { key: 'journal', label: 'Journal', responsiveClass: 'col-journal' },
   { key: 'status', label: 'Status' },
   { key: 'aiConfidence', label: 'Confidence', width: 'w-16', responsiveClass: 'col-confidence' },
@@ -219,6 +221,9 @@ watch(
               <td class="py-5 px-2 text-body-sm text-slate-600 font-mono">
                 {{ article.publicationYear ?? '---' }}
               </td>
+              <td class="col-type py-5 px-2 text-body-sm text-slate-600">
+                {{ getPublicationTypeLabel(article.referenceType) }}
+              </td>
               <td class="col-journal py-5 px-2 text-body-sm text-slate-600 italic">
                 {{ article.journal ?? '---' }}
               </td>
@@ -307,6 +312,7 @@ watch(
 
 /* Hide lower-priority columns on smaller viewports */
 @media (max-width: 767px) {
+  .col-type,
   .col-journal,
   .col-changed,
   .col-confidence {
@@ -315,6 +321,7 @@ watch(
 }
 
 @media (max-width: 1023px) and (min-width: 768px) {
+  .col-type,
   .col-changed {
     display: none;
   }

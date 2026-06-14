@@ -32,6 +32,7 @@ export interface RawReference {
     fullTextFileName?: string | null;
     importSource?: string | null;
     createdAt?: string | null;
+    referenceType?: string | null;
   } | null;
 }
 
@@ -71,6 +72,7 @@ export function flattenRawReferences(raw: unknown[]): ArticleReference[] {
       fullTextFileName: p.fullTextFileName ?? null,
       importSource: p.importSource ?? null,
       importedAt: p.createdAt ?? '',
+      publicationType: p.referenceType ?? null,
     } satisfies ArticleReference;
   });
 }

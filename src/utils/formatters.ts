@@ -65,3 +65,31 @@ export function doiLink(doi: string | null | undefined): string | undefined {
   if (!doi) return undefined;
   return doi.startsWith('http') ? doi : `https://doi.org/${doi}`;
 }
+
+/**
+ * Convert a short publication type code (e.g. JOUR, BOOK) to a human-friendly label.
+ * Defaults to 'Publication' if clean code is not recognized or not provided.
+ */
+export function getPublicationTypeLabel(type: string | null | undefined): string {
+  if (!type) return 'Publication';
+  const cleanType = type.trim().toUpperCase();
+  const map: Record<string, string> = {
+    JOUR: 'Journal',
+    BOOK: 'Book',
+    CHAP: 'Chapter',
+    CONF: 'Conference',
+    RPRT: 'Reports',
+    MAGZ: 'Magazine',
+    NEWS: 'Newspaper',
+    THES: 'Theses',
+    ELEC: 'Electronic/Web',
+    DATA: 'Data files',
+    ART: 'Artwork',
+    BILL: 'Bills',
+    PAMP: 'Pamphlet',
+    PAT: 'Patent',
+    VIDEO: 'Video',
+    SOUND: 'Sound',
+  };
+  return map[cleanType] || 'Publication';
+}

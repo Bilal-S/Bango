@@ -29,6 +29,7 @@ export interface CitationNode {
    * included article).  Used to render dashed/faint leaf nodes.
    */
   unmatched?: boolean;
+  referenceType?: string | null;
 }
 
 /** A single directed edge (citation link) in the network. */

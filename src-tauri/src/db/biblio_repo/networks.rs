@@ -513,7 +513,7 @@ pub fn get_citation_network_json(
     // Fetch all included articles.
     let mut stmt = conn.prepare(
         "SELECT DISTINCT a.id, a.title, a.authors, a.publication_year, a.journal, \
-                 a.num_cited, a.num_references, a.abstract_text \
+                 a.num_cited, a.num_references, a.abstract_text, a.reference_type \
           FROM articles a \
           WHERE a.status = 'included'",
     )?;
@@ -528,11 +528,12 @@ pub fn get_citation_network_json(
             let num_cited: Option<i64> = row.get(5)?;
             let num_references: Option<i64> = row.get(6)?;
             let abstract_text: String = row.get(7)?;
-            Ok((id, title, authors, year, journal, num_cited, num_references, abstract_text))
+            let reference_type: Option<String> = row.get(8)?;
+            Ok((id, title, authors, year, journal, num_cited, num_references, abstract_text, reference_type))
         })?
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .map(|(id, title, authors, year, journal, num_cited, num_references, abstract_text)| {
+        .map(|(id, title, authors, year, journal, num_cited, num_references, abstract_text, reference_type)| {
             let label = format_paper_label(&authors, year);
             serde_json::json!({
                 "id": id,
@@ -545,6 +546,7 @@ pub fn get_citation_network_json(
                 "numReferences": num_references.unwrap_or(0),
                 "abstract": abstract_text,
                 "unmatched": false,
+                "referenceType": reference_type,
             })
         })
         .collect();
@@ -582,7 +584,7 @@ pub fn get_citation_network_json(
         let mut um_stmt = conn.prepare(
             "SELECT rp.id, rp.title, rp.authors, rp.publication_year, rp.journal, \
                      rp.abstract_text, l.parent_article_id, l.type, \
-                     rp.citation_count, rp.reference_count \
+                     rp.citation_count, rp.reference_count, rp.reference_type \
               FROM reference_papers rp \
               JOIN article_reference_links l ON l.reference_paper_id = rp.id \
               WHERE rp.matched_article_id IS NULL \
@@ -599,6 +601,7 @@ pub fn get_citation_network_json(
             i32,
             i64,
             i64,
+            Option<String>,
         )> = um_stmt
             .query_map([], |row| {
                 Ok((
@@ -612,6 +615,7 @@ pub fn get_citation_network_json(
                     row.get(7)?,
                     row.get(8)?,
                     row.get(9)?,
+                    row.get(10)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -627,6 +631,7 @@ pub fn get_citation_network_json(
             l_type,
             citation_count,
             reference_count,
+            reference_type,
         ) in unmatched
         {
             let (source, target) = if l_type == 0 {
@@ -660,6 +665,7 @@ pub fn get_citation_network_json(
                 "numReferences": citation_count,
                 "abstract": abstract_text.unwrap_or_default(),
                 "unmatched": true,
+                "referenceType": reference_type,
             }));
         }
     }

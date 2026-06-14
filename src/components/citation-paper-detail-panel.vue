@@ -5,7 +5,9 @@
   >
     <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 gap-2">
       <div class="flex items-center gap-2 min-w-0">
-        <h3 class="text-sm font-semibold text-slate-800 truncate">Paper Details</h3>
+        <h3 class="text-sm font-semibold text-slate-800 truncate">
+          {{ paper ? `${getPublicationTypeLabel(paper.referenceType)}` : 'Details' }}
+        </h3>
         <span
           v-if="paper"
           class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-tight shrink-0"
@@ -202,6 +204,7 @@
 import { computed } from 'vue';
 import type { CitationNode } from '../types/biblio-citation';
 import type { IsolationDirection } from './citation-network-graph.vue';
+import { getPublicationTypeLabel } from '@/utils/formatters';
 
 const props = defineProps<{
   paper: CitationNode | null;

@@ -13,6 +13,7 @@ import type { PreviewPaper } from '@/composables/use-references';
 import { flattenRawReferences } from '@/utils/reference-flatten';
 import { useToast } from '@/composables/use-toast';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
+import { getPublicationTypeLabel } from '@/utils/formatters';
 
 const props = defineProps<{
   article: Article;
@@ -343,6 +344,9 @@ function handleAutoDownload(): void {
           </p>
           <div class="flex flex-wrap gap-x-3 gap-y-0.5">
             <span v-if="item.journal"> <strong>Journal:</strong> {{ item.journal }} </span>
+            <span>
+              <strong>Type:</strong> {{ getPublicationTypeLabel(item.publicationType) }}
+            </span>
             <span v-if="item.doi">
               <strong>DOI:</strong>
               <a
