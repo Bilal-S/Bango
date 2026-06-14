@@ -63,6 +63,34 @@
         </div>
       </div>
 
+      <!-- Google Trends Compare CTA -->
+      <div class="px-4 py-1.5 shrink-0">
+        <button
+          class="w-full py-1.5 px-3 rounded border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all select-none cursor-pointer"
+          :disabled="isQueueFull && !isQueued"
+          :class="
+            isQueued
+              ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 hover:border-rose-300'
+              : isQueueFull
+                ? 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed'
+                : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300'
+          "
+          :title="
+            isQueued
+              ? 'Remove this keyword from Google Trends comparison'
+              : isQueueFull
+                ? 'Comparison queue is full (max 5 keywords). Remove one to add this.'
+                : 'Add this keyword to Google Trends comparison'
+          "
+          @click="toggleQueue"
+        >
+          <span class="material-symbols-outlined text-[15px]">
+            {{ isQueued ? 'remove_from_queue' : 'add_to_queue' }}
+          </span>
+          {{ isQueued ? 'Remove from Google Trends' : 'Compare in Google Trends' }}
+        </button>
+      </div>
+
       <!-- Detail Info -->
       <div class="px-4 py-2 space-y-2">
         <div class="flex justify-between items-center text-xs">
@@ -139,6 +167,7 @@ import { computed } from 'vue';
 import type Graph from 'graphology';
 import type { KeywordNode } from '../types/biblio-keyword';
 import { clusterColor } from '../types/biblio-network';
+import { useTrendsQueueStore } from '../stores/trends-queue';
 
 const props = defineProps<{
   keyword: KeywordNode | null;
@@ -149,6 +178,27 @@ defineEmits<{
   (e: 'close'): void;
   (e: 'navigate', nodeId: string): void;
 }>();
+
+const trendsQueue = useTrendsQueueStore();
+
+const isQueued = computed(() => {
+  if (!props.keyword) return false;
+  return trendsQueue.keywords.some((k) => k.toLowerCase() === props.keyword!.label.toLowerCase());
+});
+
+const isQueueFull = computed(() => {
+  return trendsQueue.keywords.length >= 5;
+});
+
+function toggleQueue() {
+  if (!props.keyword) return;
+  const term = props.keyword.label;
+  if (isQueued.value) {
+    trendsQueue.removeKeyword(term);
+  } else {
+    trendsQueue.addKeyword(term);
+  }
+}
 
 const keywordColor = computed(() =>
   props.keyword?.cluster !== null ? clusterColor(props.keyword?.cluster ?? 0) : '#94a3b8'

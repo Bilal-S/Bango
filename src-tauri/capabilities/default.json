@@ -9,6 +9,10 @@
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "$DOCUMENT/**" }]
     },
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://trends.google.com/**" }]
+    },
     "pilot:default",
     "dialog:default",
     "fs:default",

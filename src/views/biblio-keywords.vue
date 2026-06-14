@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
+import { useTrendsQueueStore } from '../stores/trends-queue';
+import GoogleTrendsPanel from '../components/google-trends-panel.vue';
 import Graph from 'graphology';
 import KeywordNetworkGraph from '../components/keyword-network-graph.vue';
 import KeywordControls from '../components/keyword-controls.vue';
@@ -264,6 +266,52 @@ function onLocateKeyword(label: string) {
     locateNode(nodeId);
   }
 }
+
+const trendsQueue = useTrendsQueueStore();
+
+const datasetYearsStats = computed(() => {
+  if (!graph.value) return null;
+  const yearCountsMap = new Map<number, number>();
+
+  graph.value.forEachNode((node) => {
+    const yc = graph.value!.getNodeAttribute(node, 'yearCounts') as
+      | { year: number; count: number }[]
+      | undefined;
+    if (yc) {
+      for (const item of yc) {
+        yearCountsMap.set(item.year, (yearCountsMap.get(item.year) || 0) + item.count);
+      }
+    }
+  });
+
+  if (yearCountsMap.size === 0) return null;
+
+  let minYear = Infinity;
+  let maxYear = -Infinity;
+  let mostActiveYear = 2002;
+  let maxCount = -1;
+
+  for (const [year, count] of yearCountsMap.entries()) {
+    if (year < minYear) minYear = year;
+    if (year > maxYear) maxYear = year;
+    if (count > maxCount) {
+      maxCount = count;
+      mostActiveYear = year;
+    }
+  }
+
+  return { minYear, maxYear, mostActiveYear };
+});
+
+watch(
+  datasetYearsStats,
+  (newStats) => {
+    if (newStats) {
+      trendsQueue.setResearchRange(newStats.minYear, newStats.maxYear, newStats.mostActiveYear);
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -319,24 +367,30 @@ function onLocateKeyword(label: string) {
       </button>
     </div>
 
-    <!-- Graph canvas -->
-    <main class="flex-1 relative">
-      <KeywordNetworkGraph
-        ref="graphRef"
-        :graph="graph"
-        :loading="loading"
-        :is-layouting="isLayouting"
-        :error="error"
-        :focused-node-id="focusedNodeId"
-        :selected-clusters="selectedClusters"
-        :color-mode="colorMode"
-        :min-year="yearRange.min"
-        :max-year="yearRange.max"
-        :recalculate-trigger="recalculateTrigger"
-        @node-click="onNodeClick"
-        @retry="fetchNetwork"
-      />
-    </main>
+    <!-- Central Content Area -->
+    <div class="flex-1 flex flex-col min-h-0 relative">
+      <!-- Graph canvas -->
+      <main class="flex-1 relative min-h-0">
+        <KeywordNetworkGraph
+          ref="graphRef"
+          :graph="graph"
+          :loading="loading"
+          :is-layouting="isLayouting"
+          :error="error"
+          :focused-node-id="focusedNodeId"
+          :selected-clusters="selectedClusters"
+          :color-mode="colorMode"
+          :min-year="yearRange.min"
+          :max-year="yearRange.max"
+          :recalculate-trigger="recalculateTrigger"
+          @node-click="onNodeClick"
+          @retry="fetchNetwork"
+        />
+      </main>
+
+      <!-- Google Trends bottom drawer panel -->
+      <GoogleTrendsPanel />
+    </div>
 
     <!-- Keyword detail panel -->
     <Transition name="detail-slide">
