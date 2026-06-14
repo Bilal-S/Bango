@@ -167,10 +167,10 @@ async function onExportImage(format: NetworkExportFormat) {
   try {
     if (format === 'png') {
       if (!graphRef.value?.renderer) return;
-      await exportNetworkPng(graphRef.value.renderer);
+      await exportNetworkPng(graphRef.value.renderer, 'keyword-network.png');
     } else if (format === 'gexf') {
       if (!graph.value) return;
-      await exportNetworkGexf(graph.value);
+      await exportNetworkGexf(graph.value, 'keyword-network.gexf');
     }
   } catch (err) {
     console.error('[export] Keyword network export failed:', err);

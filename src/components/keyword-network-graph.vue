@@ -122,10 +122,15 @@ const tooltipPosition = computed(() => ({
 watch(
   () => props.graph,
   (g) => {
-    if (!g || !containerRef.value) return;
     if (pendingFrame !== null) {
       cancelAnimationFrame(pendingFrame);
+      pendingFrame = null;
     }
+    if (!g) {
+      destroyRenderer();
+      return;
+    }
+    if (!containerRef.value) return;
     pendingFrame = requestAnimationFrame(() => {
       pendingFrame = null;
       if (isUnmounted || !containerRef.value || !g) return;

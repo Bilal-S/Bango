@@ -49,7 +49,7 @@
           "
           @click="toggleSource(src.value)"
         >
-          <span class="truncate">{{ src.label }}</span>
+          <span class="truncate" :title="src.label + ' - ' + src.description">{{ src.label }}</span>
           <span
             class="material-symbols-outlined text-[14px]"
             :class="localSources.includes(src.value) ? 'text-indigo-600' : 'text-slate-300'"
@@ -309,11 +309,23 @@ const emit = defineEmits<{
 }>();
 
 const availableSources = [
-  { value: 'metadata', label: 'Metadata' },
-  { value: 'ai_extracted', label: 'AI Noun Phrases' },
-  { value: 'tags', label: 'Tags' },
-  { value: 'labels', label: 'Labels' },
-  { value: 'user_added', label: 'User Added' },
+  { value: 'metadata', label: 'Metadata', description: 'Keywords defined in article metadata' },
+  {
+    value: 'ai_extracted',
+    label: 'AI Noun Phrases',
+    description: 'Noun phrases extracted from abstracts using LLM',
+  },
+  { value: 'tags', label: 'Tags', description: 'User-defined tags assigned to articles' },
+  {
+    value: 'labels',
+    label: 'Labels',
+    description: 'Screening criteria labels matched to articles',
+  },
+  {
+    value: 'user_added',
+    label: 'User Added',
+    description: 'Custom keywords added manually by the user',
+  },
 ];
 
 const searchQuery = ref('');

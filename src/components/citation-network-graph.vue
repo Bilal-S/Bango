@@ -124,11 +124,15 @@ const tooltipPosition = computed(() => ({
 watch(
   () => props.graph,
   (g) => {
-    if (!g || !containerRef.value) return;
-    // Cancel any previously scheduled frame to avoid double-init.
     if (pendingFrame !== null) {
       cancelAnimationFrame(pendingFrame);
+      pendingFrame = null;
     }
+    if (!g) {
+      destroyRenderer();
+      return;
+    }
+    if (!containerRef.value) return;
     pendingFrame = requestAnimationFrame(() => {
       pendingFrame = null;
       // Abort if the component was unmounted while we waited for the frame.

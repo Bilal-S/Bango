@@ -45,35 +45,23 @@ async function runForceAtlas2Async(
   iterations: number,
   layoutMode: 'fixed' | 'dynamic' = 'fixed'
 ): Promise<void> {
+  if (layoutMode === 'fixed') return;
   const shouldOptimize = g.order > 500;
   const chunkSize = 25;
   let remaining = iterations;
 
   while (remaining > 0) {
     const chunk = Math.min(remaining, chunkSize);
-    if (layoutMode === 'fixed') {
-      forceAtlas2(g, {
-        iterations: chunk,
-        settings: {
-          linLogMode: true,
-          adjustSizes: true,
-          gravity: 1,
-          scalingRatio: 2,
-          barnesHutOptimize: shouldOptimize,
-        },
-      });
-    } else {
-      forceAtlas2.assign(g, {
-        iterations: chunk,
-        settings: {
-          linLogMode: true,
-          adjustSizes: true,
-          gravity: 1,
-          scalingRatio: 2,
-          barnesHutOptimize: shouldOptimize,
-        },
-      });
-    }
+    forceAtlas2.assign(g, {
+      iterations: chunk,
+      settings: {
+        linLogMode: true,
+        adjustSizes: true,
+        gravity: 1,
+        scalingRatio: 2,
+        barnesHutOptimize: shouldOptimize,
+      },
+    });
     remaining -= chunk;
     // Yield to the browser between chunks
     await new Promise<void>((r) => setTimeout(r, 0));

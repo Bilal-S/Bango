@@ -84,6 +84,9 @@ const hoveredNode = ref<CoAuthorNode | null>(null);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
 
+let isUnmounted = false;
+let pendingFrame: number | null = null;
+
 const { renderer, initRenderer, destroyRenderer, locateNode, resetZoom, refresh } =
   useSigmaRenderer();
 
@@ -97,10 +100,19 @@ const tooltipPosition = computed(() => ({
 watch(
   () => props.graph,
   (g) => {
-    if (!g || !containerRef.value) return;
+    if (pendingFrame !== null) {
+      cancelAnimationFrame(pendingFrame);
+      pendingFrame = null;
+    }
+    if (!g) {
+      destroyRenderer();
+      return;
+    }
+    if (!containerRef.value) return;
     clearFocusMode();
-    requestAnimationFrame(() => {
-      if (!containerRef.value || !g) return;
+    pendingFrame = requestAnimationFrame(() => {
+      pendingFrame = null;
+      if (isUnmounted || !containerRef.value || !g) return;
       initRenderer(containerRef.value, g, {
         labelRenderSizeThreshold: 1.2,
         defaultEdgeColor: '#e2e8f0',
@@ -295,6 +307,11 @@ function clearFocusMode() {
 }
 
 onUnmounted(() => {
+  isUnmounted = true;
+  if (pendingFrame !== null) {
+    cancelAnimationFrame(pendingFrame);
+    pendingFrame = null;
+  }
   destroyRenderer();
 });
 </script>

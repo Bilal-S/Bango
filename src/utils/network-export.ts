@@ -1,5 +1,9 @@
 /**
- * Network export utilities for the Co-Authorship graph.
+ * Network export utilities shared by the bibliometric analytical modules
+ * (Co-Authorship, Citation, and Keyword co-occurrence networks).
+ *
+ * Callers should pass a `defaultName` matching their module so the save
+ * dialog suggests the appropriate file name (e.g. `citation-network.png`).
  *
  * Uses the same Tauri IPC command pattern as RIS export:
  *   save() dialog → tauriCommand('write_*_to_file', { path, ... })

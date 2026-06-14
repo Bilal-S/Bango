@@ -76,19 +76,8 @@ self.onmessage = (event: MessageEvent<LayoutRequest>) => {
 
   // 3. ForceAtlas2 layout
   try {
-    const shouldOptimize = g.order > 500;
-    if (layoutMode === 'fixed') {
-      forceAtlas2(g, {
-        iterations,
-        settings: {
-          linLogMode: true,
-          adjustSizes: true,
-          gravity: 1,
-          scalingRatio: 2,
-          barnesHutOptimize: shouldOptimize,
-        },
-      });
-    } else {
+    if (layoutMode === 'dynamic') {
+      const shouldOptimize = g.order > 500;
       forceAtlas2.assign(g, {
         iterations,
         settings: {

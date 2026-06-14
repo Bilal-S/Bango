@@ -415,10 +415,10 @@ async function onExportImage(format: NetworkExportFormat) {
   try {
     if (format === 'png') {
       if (!graphRef.value?.renderer) return;
-      await exportNetworkPng(graphRef.value.renderer);
+      await exportNetworkPng(graphRef.value.renderer, 'citation-network.png');
     } else if (format === 'gexf') {
       if (!graph.value) return;
-      await exportNetworkGexf(graph.value);
+      await exportNetworkGexf(graph.value, 'citation-network.gexf');
     }
   } catch (err) {
     console.error('[export] Citation network export failed:', err);
