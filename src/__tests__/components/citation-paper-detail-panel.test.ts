@@ -3,6 +3,24 @@ import { describe, it, expect } from 'vitest';
 import CitationPaperDetailPanel from '@/components/citation-paper-detail-panel.vue';
 import type { CitationNode } from '@/types/biblio-citation';
 
+const basePaper: CitationNode = {
+  id: 'node-1',
+  label: 'Smith et al. 2020',
+  title: 'Title One',
+  authors: 'A. Smith',
+  year: 2020,
+  journal: 'Journal of Testing',
+  numCited: 3,
+  numReferences: 2,
+  abstract: 'An abstract example.',
+  unmatched: false,
+  cluster: 0,
+};
+
+function makePaper(overrides: Partial<CitationNode> = {}): CitationNode {
+  return { ...basePaper, ...overrides };
+}
+
 describe('citation-paper-detail-panel.vue', () => {
   it('renders select paper placeholder when paper is null', () => {
     const wrapper = mount(CitationPaperDetailPanel, {
@@ -20,19 +38,7 @@ describe('citation-paper-detail-panel.vue', () => {
   });
 
   it('renders "Reference Only" badge for unmatched papers', () => {
-    const paper: CitationNode = {
-      id: 'node-1',
-      label: 'Smith et al. 2020',
-      title: 'Title One',
-      authors: 'A. Smith',
-      year: 2020,
-      journal: 'Journal of Testing',
-      numCited: 0,
-      numReferences: 0,
-      abstract: 'An abstract example.',
-      unmatched: true,
-      cluster: null,
-    };
+    const paper = makePaper({ unmatched: true, numCited: 0, numReferences: 0 });
 
     const wrapper = mount(CitationPaperDetailPanel, {
       props: {
@@ -50,19 +56,7 @@ describe('citation-paper-detail-panel.vue', () => {
   });
 
   it('renders "Included" badge for matched/included papers', () => {
-    const paper: CitationNode = {
-      id: 'node-2',
-      label: 'Jones et al. 2021',
-      title: 'Title Two',
-      authors: 'B. Jones',
-      year: 2021,
-      journal: 'Journal of Vue',
-      numCited: 5,
-      numReferences: 10,
-      abstract: 'Vue is great.',
-      unmatched: false,
-      cluster: 1,
-    };
+    const paper = makePaper({ unmatched: false });
 
     const wrapper = mount(CitationPaperDetailPanel, {
       props: {
@@ -77,5 +71,80 @@ describe('citation-paper-detail-panel.vue', () => {
     expect(wrapper.text()).toContain('Included');
     expect(wrapper.find('.bg-emerald-100').exists()).toBe(true);
     expect(wrapper.find('.bg-slate-100').exists()).toBe(false);
+  });
+
+  it('shows both isolation buttons when no isolation is active', () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper(),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: null,
+      },
+    });
+
+    expect(wrapper.find('[data-testid="isolate-ancestry-btn"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="isolate-progeny-btn"]').exists()).toBe(true);
+  });
+
+  it('keeps both isolation buttons visible even when isolation is active on this paper', () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper(),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: { nodeId: 'node-1', direction: 'ancestry' },
+      },
+    });
+
+    // Both buttons should still be present (the old behavior hid them).
+    expect(wrapper.find('[data-testid="isolate-ancestry-btn"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="isolate-progeny-btn"]').exists()).toBe(true);
+    // The active-isolation indicator badge should be shown.
+    expect(wrapper.text()).toContain('Ancestry isolated');
+  });
+
+  it('emits isolate when clicking the inactive button while the other is active', async () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper(),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: { nodeId: 'node-1', direction: 'ancestry' },
+      },
+    });
+
+    await wrapper.find('[data-testid="isolate-progeny-btn"]').trigger('click');
+    expect(wrapper.emitted('isolate')).toBeTruthy();
+    expect(wrapper.emitted('isolate')![0]).toEqual(['progeny']);
+  });
+
+  it('emits clear-isolation when clicking the currently active button', async () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper(),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: { nodeId: 'node-1', direction: 'ancestry' },
+      },
+    });
+
+    await wrapper.find('[data-testid="isolate-ancestry-btn"]').trigger('click');
+    expect(wrapper.emitted('clear-isolation')).toBeTruthy();
+  });
+
+  it('emits isolate when clicking a button with no prior isolation', async () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper(),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: null,
+      },
+    });
+
+    await wrapper.find('[data-testid="isolate-ancestry-btn"]').trigger('click');
+    expect(wrapper.emitted('isolate')).toBeTruthy();
+    expect(wrapper.emitted('isolate')![0]).toEqual(['ancestry']);
   });
 });

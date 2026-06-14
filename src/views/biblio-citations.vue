@@ -201,7 +201,10 @@ onMounted(async () => {
 function onNodeClick(nodeId: string | null) {
   focusedNodeId.value = nodeId;
   if (!nodeId) {
+    // Closing the panel (via close button or graph background click) also
+    // resets isolation to "Show All" so the graph returns to full brightness.
     selectedPaper.value = null;
+    isolationMode.value = null;
     return;
   }
   selectedPaper.value = getNode(nodeId);

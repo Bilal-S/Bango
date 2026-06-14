@@ -77,16 +77,16 @@
 
         <!-- Isolation controls -->
         <div class="mt-3 space-y-1.5">
-          <!-- Active isolation badge -->
+          <!-- Active isolation badge (indicator only; buttons remain visible below) -->
           <div
-            v-if="isolationMode && isolationMode.nodeId === paper.id"
+            v-if="isAncestryActive || isProgenyActive"
             class="flex items-center justify-between bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5"
           >
             <span class="text-[11px] text-indigo-700 font-medium flex items-center gap-1">
               <span class="material-symbols-outlined text-xs">{{
-                isolationMode.direction === 'ancestry' ? 'arrow_upward' : 'arrow_downward'
+                isAncestryActive ? 'arrow_upward' : 'arrow_downward'
               }}</span>
-              {{ isolationMode.direction === 'ancestry' ? 'Ancestry' : 'Progeny' }} isolated
+              {{ isAncestryActive ? 'Ancestry' : 'Progeny' }} isolated
             </span>
             <button
               class="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
@@ -96,25 +96,43 @@
             </button>
           </div>
 
-          <!-- Isolation buttons (only when this paper is NOT currently isolated) -->
-          <template v-else>
-            <button
-              class="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
-              title="Dim all nodes except this paper and its references (transitively)"
-              @click="$emit('isolate', 'ancestry')"
-            >
-              <span class="material-symbols-outlined text-xs">arrow_upward</span>
-              Isolate Ancestry
-            </button>
-            <button
-              class="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium text-slate-600 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
-              title="Dim all nodes except this paper and its citing papers (transitively)"
-              @click="$emit('isolate', 'progeny')"
-            >
-              <span class="material-symbols-outlined text-xs">arrow_downward</span>
-              Isolate Progeny
-            </button>
-          </template>
+          <!-- Both buttons always visible. Active direction is highlighted. -->
+          <button
+            data-testid="isolate-ancestry-btn"
+            class="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors border"
+            :class="
+              isAncestryActive
+                ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
+                : 'text-slate-600 bg-slate-50 hover:bg-slate-100 border-slate-200'
+            "
+            :title="
+              isAncestryActive
+                ? 'Ancestry isolated — click to return to Show All'
+                : 'Dim all nodes except this paper and its references (transitively)'
+            "
+            @click="onIsolateClick('ancestry')"
+          >
+            <span class="material-symbols-outlined text-xs">arrow_upward</span>
+            Isolate Ancestry
+          </button>
+          <button
+            data-testid="isolate-progeny-btn"
+            class="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors border"
+            :class="
+              isProgenyActive
+                ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
+                : 'text-slate-600 bg-slate-50 hover:bg-slate-100 border-slate-200'
+            "
+            :title="
+              isProgenyActive
+                ? 'Progeny isolated — click to return to Show All'
+                : 'Dim all nodes except this paper and its citing papers (transitively)'
+            "
+            @click="onIsolateClick('progeny')"
+          >
+            <span class="material-symbols-outlined text-xs">arrow_downward</span>
+            Isolate Progeny
+          </button>
         </div>
 
         <!-- Abstract -->
@@ -189,10 +207,42 @@ const onMainPath = computed(
   () => !!props.paper && !!props.mainPathNodes && props.mainPathNodes.has(props.paper.id)
 );
 
-defineEmits<{
+/** Whether ancestry isolation is active for the currently-selected paper. */
+const isAncestryActive = computed(
+  () =>
+    !!props.isolationMode &&
+    props.isolationMode.nodeId === props.paper?.id &&
+    props.isolationMode.direction === 'ancestry'
+);
+
+/** Whether progeny isolation is active for the currently-selected paper. */
+const isProgenyActive = computed(
+  () =>
+    !!props.isolationMode &&
+    props.isolationMode.nodeId === props.paper?.id &&
+    props.isolationMode.direction === 'progeny'
+);
+
+const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'navigate-paper', nodeId: string): void;
   (e: 'isolate', direction: IsolationDirection): void;
   (e: 'clear-isolation'): void;
 }>();
+
+/**
+ * Handle an isolation button click.
+ *
+ * If the clicked direction is already active, toggle off (emit `clear-isolation`).
+ * Otherwise, emit `isolate` with the new direction — the parent replaces the
+ * isolation mode, which implicitly clears any previously-active direction.
+ */
+function onIsolateClick(direction: IsolationDirection) {
+  const isActive = direction === 'ancestry' ? isAncestryActive.value : isProgenyActive.value;
+  if (isActive) {
+    emit('clear-isolation');
+  } else {
+    emit('isolate', direction);
+  }
+}
 </script>
