@@ -300,6 +300,49 @@ export function useSigmaRenderer() {
   }
 
   /**
+   * Apply visibility filters to keyword graph nodes based on minOccurrences,
+   * minCooccurrence, and search query.
+   *
+   * Returns { visibleNodes, visibleEdges } counts.
+   */
+  function applyKeywordGraphFilters(
+    g: Graph,
+    filters: { minOccurrences: number; minCooccurrence: number; search: string }
+  ): { visibleNodes: number; visibleEdges: number } {
+    const { minOccurrences, minCooccurrence, search } = filters;
+    const searchLower = search.toLowerCase();
+
+    // Determine which nodes pass the filter
+    const nodeVisible = new Map<string, boolean>();
+    for (const node of g.nodes()) {
+      const weight = g.getNodeAttribute(node, 'weight') as number;
+      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
+      const passesOccurrences = weight >= minOccurrences;
+      const passesSearch = !searchLower || label.toLowerCase().includes(searchLower);
+      const visible = passesOccurrences && passesSearch;
+      nodeVisible.set(node, visible);
+      g.setNodeAttribute(node, 'hidden', !visible);
+    }
+
+    // Determine which edges pass all filters
+    let visibleEdges = 0;
+    for (const edge of g.edges()) {
+      const weight = g.getEdgeAttribute(edge, 'weight') as number;
+      const source = g.source(edge);
+      const target = g.target(edge);
+      const passesStrength = weight >= minCooccurrence;
+      const bothEndsVisible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
+      const visible = passesStrength && bothEndsVisible;
+      g.setEdgeAttribute(edge, 'hidden', !visible);
+      if (visible) visibleEdges++;
+    }
+
+    const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
+
+    return { visibleNodes, visibleEdges };
+  }
+
+  /**
    * Force the Sigma renderer to re-read graph attributes and redraw.
    */
   function refresh(): void {
@@ -320,6 +363,7 @@ export function useSigmaRenderer() {
     locateNode,
     applyGraphFilters,
     applyCitationGraphFilters,
+    applyKeywordGraphFilters,
     refresh,
   };
 }

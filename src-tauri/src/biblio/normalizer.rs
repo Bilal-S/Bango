@@ -4,6 +4,17 @@
 //! normalizing terms (keywords / noun phrases), and parsing affiliations.
 
 use crate::biblio::affiliation_extractor::AffiliationExtractor;
+use once_cell::sync::Lazy;
+use rust_stemmers::{Algorithm, Stemmer};
+
+static STEMMER: Lazy<Stemmer> = Lazy::new(|| Stemmer::create(Algorithm::English));
+
+/// Snowball-stem a phrase. Each whitespace-delimited token is stemmed
+/// independently and the results joined. Keeps multi-word phrases atomic
+/// as a node while still normalizing inflections ("networks" → "network").
+pub fn stem_phrase(text: &str) -> String {
+    text.split_whitespace().map(|w| STEMMER.stem(w).to_string()).collect::<Vec<_>>().join(" ")
+}
 
 /// A parsed author with raw and normalized forms.
 #[derive(Debug, Clone, PartialEq)]
@@ -211,21 +222,40 @@ pub fn parse_authors(authors_str: &str) -> Vec<ParsedAuthor> {
 /// - Strip trailing punctuation
 /// - Collapse whitespace
 pub fn normalize_term(term: &str) -> String {
+    let t_trim = term.trim();
+    if t_trim.is_empty() || t_trim == "[]" || t_trim == "[\"\"]" {
+        return String::new();
+    }
     let lower = term.to_lowercase();
-    // Strip leading/trailing punctuation
+    // Strip leading/trailing punctuation and brackets
     let trimmed = lower
-        .trim_matches(|c: char| c.is_whitespace() || c == ',' || c == '.' || c == ';' || c == ':')
+        .trim_matches(|c: char| {
+            c.is_whitespace()
+                || c == ','
+                || c == '.'
+                || c == ';'
+                || c == ':'
+                || c == '['
+                || c == ']'
+        })
         .trim();
-    // Collapse internal whitespace
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Collapse internal whitespace and filter out brackets/quotes
     let collapsed: String = trimmed.chars().fold(String::new(), |mut acc, c| {
         if c == '-' || c == '_' {
             acc.push(' ');
-        } else {
+        } else if c != '[' && c != ']' && c != '"' && c != '\'' {
             acc.push(c);
         }
         acc
     });
-    collapse_whitespace(&collapsed)
+    let normalized = collapse_whitespace(&collapsed);
+    if normalized.is_empty() {
+        return String::new();
+    }
+    stem_phrase(&normalized)
 }
 
 /// Deduplicate a list of terms by their normalized form.
@@ -712,22 +742,22 @@ mod tests {
 
     #[test]
     fn test_normalize_term_lowercase() {
-        assert_eq!(normalize_term("Machine Learning"), "machine learning");
+        assert_eq!(normalize_term("Machine Learning"), "machin learn");
     }
 
     #[test]
     fn test_normalize_term_strip_punctuation() {
-        assert_eq!(normalize_term("deep-learning;"), "deep learning");
+        assert_eq!(normalize_term("deep-learning;"), "deep learn");
     }
 
     #[test]
     fn test_normalize_term_collapse_whitespace() {
-        assert_eq!(normalize_term("  natural   language  "), "natural language");
+        assert_eq!(normalize_term("  natural   language  "), "natur languag");
     }
 
     #[test]
     fn test_normalize_term_hyphen_to_space() {
-        assert_eq!(normalize_term("reinforcement-learning"), "reinforcement learning");
+        assert_eq!(normalize_term("reinforcement-learning"), "reinforc learn");
     }
 
     #[test]
@@ -738,6 +768,14 @@ mod tests {
     #[test]
     fn test_normalize_term_punctuation_only() {
         assert_eq!(normalize_term("..."), "");
+    }
+
+    #[test]
+    fn test_normalize_term_empty_array() {
+        assert_eq!(normalize_term("[]"), "");
+        assert_eq!(normalize_term("[\"\"]"), "");
+        assert_eq!(normalize_term("[   ]"), "");
+        assert_eq!(normalize_term("['']"), "");
     }
 
     // ── dedup_terms ──────────────────────────────────────────────

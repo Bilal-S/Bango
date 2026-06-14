@@ -2763,7 +2763,7 @@ ER  - </pre
 }
 
 .ref-section__body li {
-  margin-bottom: var(--space-1.5);
+  margin-bottom: calc(var(--space-1) * 1.5);
 }
 
 .ref-section__body li:last-child {

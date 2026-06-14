@@ -155,6 +155,7 @@ const isModuleActive = computed(() => route.name !== 'bibliometrics');
 const activeModuleLabel = computed(() => {
   if (route.name === 'coauthors') return 'Co-Authorship Network';
   if (route.name === 'citations') return 'Citation Network';
+  if (route.name === 'keywords') return 'Keyword Co-Occurrence';
   return '';
 });
 
@@ -165,6 +166,10 @@ function navigateToModule(mod: AnalysisModule): void {
   }
   if (mod.id === 'citation-network') {
     router.push({ name: 'citations' });
+    return;
+  }
+  if (mod.id === 'keyword-cooccurrence') {
+    router.push({ name: 'keywords' });
     return;
   }
   // Other modules remain as placeholders for future implementation

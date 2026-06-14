@@ -93,8 +93,7 @@ pub fn normalize_authors_from_articles(conn: &Connection) -> Result<usize, AppEr
 pub fn normalize_terms_from_articles(conn: &Connection) -> Result<usize, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, keywords, title, abstract_text FROM articles \
-         WHERE status = 'included' \
-         AND id NOT IN (SELECT DISTINCT article_id FROM biblio_article_terms)",
+         WHERE status = 'included'",
     )?;
     #[allow(clippy::type_complexity)]
     let rows: Vec<(String, Option<String>, Option<String>, Option<String>)> = stmt

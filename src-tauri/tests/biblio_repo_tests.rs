@@ -3,9 +3,10 @@ use rusqlite::Connection;
 use bango_lib::db::biblio_repo::{
     build_coauthor_edges, clear_all_biblio, clear_regeneratable_biblio, compute_author_metrics,
     compute_h_index, delete_network, get_all_authors, get_all_terms, get_authors_for_article,
-    get_biblio_kpis, get_biblio_status, get_coauthor_network_json, get_terms_for_article,
-    link_article_author, link_article_term, load_network, load_network_edges, load_network_nodes,
-    save_article_terms, save_network, upsert_author, upsert_institution, upsert_term,
+    get_biblio_kpis, get_biblio_status, get_coauthor_network_json, get_keyword_network_json,
+    get_terms_for_article, link_article_author, link_article_term, load_network,
+    load_network_edges, load_network_nodes, save_article_terms, save_network, upsert_author,
+    upsert_institution, upsert_term,
 };
 use bango_lib::db::migration::run_migrations;
 use bango_lib::models::biblio::{
@@ -758,4 +759,53 @@ fn test_get_coauthor_network_json_includes_metrics() {
     assert_eq!(nodes[0]["totalCitations"], 10);
     assert_eq!(nodes[0]["estimatedHIndex"], 1);
     assert_eq!(nodes[0]["avgYear"], 2020.0);
+}
+
+#[test]
+fn test_get_keyword_network_json() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+
+    // Insert metadata term for both articles -> co-occurrence edge
+    let t1 = upsert_term(
+        &conn,
+        "Neural Network",
+        "neural network",
+        &TermType::Keyword,
+        &TermSource::Metadata,
+    )
+    .unwrap();
+    let t2 = upsert_term(
+        &conn,
+        "Machine Learning",
+        "machin learn",
+        &TermType::Keyword,
+        &TermSource::Metadata,
+    )
+    .unwrap();
+
+    link_article_term(&conn, "art1", &t1).unwrap();
+    link_article_term(&conn, "art1", &t2).unwrap();
+    link_article_term(&conn, "art2", &t1).unwrap();
+    link_article_term(&conn, "art2", &t2).unwrap();
+
+    // Insert a tag for art1
+    conn.execute(
+        "INSERT INTO tags (id, name, source) VALUES ('tag1', 'Deep Learning', 'user_created')",
+        [],
+    )
+    .unwrap();
+    conn.execute("INSERT INTO article_tags (article_id, tag_id) VALUES ('art1', 'tag1')", [])
+        .unwrap();
+
+    // Fetch network json for metadata and tags
+    let sources = vec!["metadata".to_string(), "tags".to_string()];
+    let json = get_keyword_network_json(&conn, &sources, 1, 1).unwrap();
+
+    let nodes = json["nodes"].as_array().unwrap();
+    let edges = json["edges"].as_array().unwrap();
+
+    assert_eq!(nodes.len(), 3);
+    assert_eq!(edges.len(), 3); // All 3 pairs should share art1, making 3 edges.
 }

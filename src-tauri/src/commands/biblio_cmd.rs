@@ -241,3 +241,22 @@ pub async fn biblio_get_citation_network(
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     biblio_repo::get_citation_network_json(&conn, include_unmatched.unwrap_or(false))
 }
+
+#[tauri::command]
+pub async fn biblio_get_keyword_network(
+    db_state: tauri::State<'_, DbState>,
+    sources: Vec<String>,
+    min_occurrences: Option<i32>,
+    min_cooccurrence: Option<i32>,
+) -> Result<serde_json::Value, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    biblio_repo::get_keyword_network_json(
+        &conn,
+        &sources,
+        min_occurrences.unwrap_or(1),
+        min_cooccurrence.unwrap_or(1),
+    )
+}

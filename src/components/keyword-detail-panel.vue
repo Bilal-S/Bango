@@ -1,0 +1,203 @@
+<template>
+  <Transition name="slide">
+    <div
+      v-if="keyword"
+      class="absolute top-0 right-0 h-full w-80 bg-white border-l border-slate-200 shadow-xl z-40 flex flex-col overflow-hidden"
+    >
+      <!-- Header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+        <h3 class="text-sm font-semibold text-slate-800 truncate" :title="keyword.label">
+          {{ keyword.label }}
+        </h3>
+        <button
+          class="p-1 rounded hover:bg-slate-100 cursor-pointer transition-colors"
+          @click="$emit('close')"
+        >
+          <span class="material-symbols-outlined text-base text-slate-400">close</span>
+        </button>
+      </div>
+
+      <!-- Metrics -->
+      <div class="grid grid-cols-2 gap-3 p-4 pb-2">
+        <div class="bg-slate-50 rounded-lg p-3 text-center flex flex-col justify-center h-24">
+          <p class="text-xl font-bold text-indigo-600 leading-tight">{{ keyword.weight }}</p>
+          <p class="text-[10px] text-slate-500 font-medium mt-1">Occurrences</p>
+        </div>
+        <div class="bg-slate-50 rounded-lg p-2.5 flex flex-col justify-between h-24">
+          <div
+            v-if="pubsByYear.length === 0"
+            class="text-[10px] text-slate-400 italic text-center my-auto"
+          >
+            No year data
+          </div>
+          <div v-else class="flex flex-col justify-between h-full">
+            <div class="flex items-end gap-[1.5px] h-10 mt-1" style="min-width: 0">
+              <div
+                v-for="(yc, i) in pubsByYear"
+                :key="i"
+                class="relative flex-1 group rounded-t-sm transition-colors duration-150 cursor-default"
+                :style="{
+                  height: barHeight(yc.count) + '%',
+                  backgroundColor: '#818cf8',
+                  minWidth: '0',
+                }"
+              >
+                <!-- Hover tooltip -->
+                <div
+                  class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-800 text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10"
+                >
+                  {{ yc.year }}: {{ yc.count }}
+                </div>
+              </div>
+            </div>
+            <!-- Year labels (first / last) -->
+            <div
+              v-if="pubsByYear.length > 1"
+              class="flex justify-between text-[8px] text-slate-400 leading-none mt-1"
+            >
+              <span>{{ pubsByYear[0]?.year }}</span>
+              <span>{{ pubsByYear[pubsByYear.length - 1]?.year }}</span>
+            </div>
+          </div>
+          <p class="text-[10px] text-slate-500 font-medium text-center mt-1">Pubs / Year</p>
+        </div>
+      </div>
+
+      <!-- Detail Info -->
+      <div class="px-4 py-2 space-y-2">
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-slate-500 font-medium">Source:</span>
+          <span
+            class="font-semibold text-slate-700 capitalize bg-slate-100 px-2 py-0.5 rounded-full text-[10px]"
+            >{{ keyword.source }}</span
+          >
+        </div>
+        <div v-if="keyword.cluster !== null" class="flex justify-between items-center text-xs">
+          <span class="text-slate-500 font-medium">Community:</span>
+          <span
+            class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-white"
+            :style="{ backgroundColor: keywordColor }"
+          >
+            Cluster {{ (keyword.cluster ?? 0) + 1 }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Scroll Area -->
+      <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4 pt-2">
+        <!-- Raw Mapped Terms -->
+        <div v-if="keyword.rawTerms && keyword.rawTerms.length > 0">
+          <p class="text-xs font-semibold text-slate-500 mb-1.5">Mapped Raw Terms</p>
+          <div class="flex flex-wrap gap-1">
+            <span
+              v-for="term in keyword.rawTerms"
+              :key="term"
+              class="px-2 py-1 bg-slate-50 border border-slate-200/80 rounded-md text-[10px] text-slate-600"
+            >
+              {{ term }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Co-occurring Terms -->
+        <div>
+          <p class="text-xs font-semibold text-slate-500 mb-2">
+            Related Keywords ({{ relatedKeywords.length }})
+          </p>
+          <div v-if="relatedKeywords.length === 0" class="text-xs text-slate-400 italic">
+            No related keywords visible under current filters.
+          </div>
+          <ul v-else class="space-y-1">
+            <li
+              v-for="rk in relatedKeywords"
+              :key="rk.id"
+              class="flex items-center justify-between text-xs text-slate-700 py-1.5 px-2 rounded hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-100 transition-all"
+              @click="$emit('navigate', rk.id)"
+            >
+              <span class="truncate font-medium text-slate-800" :title="rk.label">{{
+                rk.label
+              }}</span>
+              <div class="flex items-center gap-2 text-slate-400 shrink-0">
+                <span
+                  class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500"
+                  title="Co-occurrences"
+                >
+                  w: {{ rk.edgeWeight }}
+                </span>
+                <span class="text-[10px]" title="Total frequency"> {{ rk.weight }}f </span>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </Transition>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue';
+import type Graph from 'graphology';
+import type { KeywordNode } from '../types/biblio-keyword';
+import { clusterColor } from '../types/biblio-network';
+
+const props = defineProps<{
+  keyword: KeywordNode | null;
+  graph: Graph | null;
+}>();
+
+defineEmits<{
+  (e: 'close'): void;
+  (e: 'navigate', nodeId: string): void;
+}>();
+
+const keywordColor = computed(() =>
+  props.keyword?.cluster !== null ? clusterColor(props.keyword?.cluster ?? 0) : '#94a3b8'
+);
+
+const pubsByYear = computed(() => {
+  return props.keyword?.yearCounts ?? [];
+});
+
+const pubsMax = computed(() =>
+  pubsByYear.value.length > 0 ? Math.max(...pubsByYear.value.map((yc) => yc.count)) : 0
+);
+
+function barHeight(count: number): number {
+  if (pubsMax.value === 0) return 0;
+  return Math.max(8, (count / pubsMax.value) * 100);
+}
+
+const relatedKeywords = computed(() => {
+  if (!props.keyword || !props.graph) return [];
+  const g = props.graph;
+  const nodeId = props.keyword.id;
+  if (!g.hasNode(nodeId)) return [];
+
+  return g
+    .neighbors(nodeId)
+    .filter((n: string) => g.getNodeAttribute(n, 'hidden') !== true)
+    .map((n: string) => {
+      const attrs = g.getNodeAttributes(n);
+      // Retrieve the undirected edge weight
+      const edgeWeight = (g.getEdgeAttribute(nodeId, n, 'weight') as number) ?? 0;
+      return {
+        id: n,
+        label: attrs.label ?? n,
+        weight: attrs.weight ?? 0,
+        edgeWeight,
+      };
+    })
+    .sort((a, b) => b.edgeWeight - a.edgeWeight || b.weight - a.weight);
+});
+</script>
+
+<style scoped>
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.25s ease;
+}
+.slide-enter-from,
+.slide-leave-to {
+  transform: translateX(100%);
+}
+</style>
