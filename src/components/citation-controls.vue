@@ -93,13 +93,13 @@
       </button>
     </div>
 
-    <!-- Main Path (SPC) toggle -->
+    <!-- Main Paths (SPC) toggle -->
     <div class="flex items-center justify-between">
       <label class="text-xs text-slate-600 flex items-center gap-1">
-        Main Path (SPC)
+        Main Paths (SPC)
         <span
           class="material-symbols-outlined text-[14px] text-slate-400 cursor-help"
-          title="Highlight the main path backbone using Search Path Count (SPC).  Dims all nodes and edges not on the main path."
+          title="Highlight the main backbones using Search Path Count (SPC).  Dims all nodes and edges not on the main paths."
           >help</span
         >
       </label>

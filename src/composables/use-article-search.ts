@@ -64,6 +64,7 @@ export function useArticleSearch() {
   const auditTrail = ref<AuditEntry[]>([]);
   const showDetail = ref(false);
   const returnToArticleId = ref<string | null>(null);
+  const returnToReferencePaperId = ref<string | null>(null);
 
   // Multi-select (extracted composable)
   const {
@@ -448,14 +449,19 @@ export function useArticleSearch() {
     await search();
   }
 
-  const hasReturnTarget = computed(() => returnToArticleId.value !== null);
+  const hasReturnTarget = computed(
+    () => returnToArticleId.value !== null || returnToReferencePaperId.value !== null
+  );
 
   /** Navigate to an article while saving the current one as a return target. */
-  async function navigateToArticle(targetId: string): Promise<void> {
+  async function navigateToArticle(targetId: string, fromReferencePaperId?: string): Promise<void> {
     // Skip if already viewing this article
     if (selectedArticle.value?.id === targetId) return;
     if (selectedArticle.value) {
       returnToArticleId.value = selectedArticle.value.id;
+    }
+    if (fromReferencePaperId) {
+      returnToReferencePaperId.value = fromReferencePaperId;
     }
     await selectArticle(targetId);
   }
@@ -467,6 +473,9 @@ export function useArticleSearch() {
       returnToArticleId.value = null;
       void selectArticle(returnId);
       return;
+    }
+    if (returnToReferencePaperId.value) {
+      returnToReferencePaperId.value = null;
     }
     showDetail.value = false;
     selectedArticle.value = null;
@@ -568,6 +577,7 @@ export function useArticleSearch() {
     clearSearch,
     hasReturnTarget,
     navigateToArticle,
+    returnToReferencePaperId,
     // Multi-select
     selectedIds,
     selectedCount,

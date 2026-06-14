@@ -16,13 +16,24 @@
           {{ paper.unmatched ? 'Reference Only' : 'Included' }}
         </span>
       </div>
-      <button
-        class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors shrink-0"
-        title="Close"
-        @click="$emit('close')"
-      >
-        <span class="material-symbols-outlined text-base">close</span>
-      </button>
+      <div class="flex items-center gap-0.5 shrink-0">
+        <button
+          v-if="paper && !paper.unmatched"
+          data-testid="open-linked-record-btn"
+          class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer transition-colors"
+          title="open linked record"
+          @click="$emit('open-linked-record', paper.id)"
+        >
+          <span class="material-symbols-outlined text-base">open_in_new</span>
+        </button>
+        <button
+          class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"
+          title="Close"
+          @click="$emit('close')"
+        >
+          <span class="material-symbols-outlined text-base">close</span>
+        </button>
+      </div>
     </div>
 
     <!-- Content -->
@@ -228,6 +239,7 @@ const emit = defineEmits<{
   (e: 'navigate-paper', nodeId: string): void;
   (e: 'isolate', direction: IsolationDirection): void;
   (e: 'clear-isolation'): void;
+  (e: 'open-linked-record', articleId: string): void;
 }>();
 
 /**

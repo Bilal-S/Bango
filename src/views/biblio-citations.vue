@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import Graph from 'graphology';
+import { open } from '@tauri-apps/plugin-dialog';
 import CitationNetworkGraph from '../components/citation-network-graph.vue';
 import type { IsolationDirection } from '../components/citation-network-graph.vue';
 import CitationControls from '../components/citation-controls.vue';
 import CitationPaperDetailPanel from '../components/citation-paper-detail-panel.vue';
+import ArticleDetailPanel from '../components/article-detail-panel.vue';
 import { useCitationNetwork } from '../composables/use-citation-network';
 import { useNetworkLayout } from '../composables/use-network-layout';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { useMainPathWorker } from '../composables/use-main-path-worker';
+import { useArticleSearch } from '../composables/use-article-search';
+import { useToast } from '../composables/use-toast';
 import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
 import { debounce } from '../utils/debounce';
 import type { NetworkExportFormat } from '../utils/network-export';
@@ -29,6 +33,32 @@ const {
 
 const { isLayouting, applyLayout } = useNetworkLayout();
 const { applyCitationGraphFilters } = useSigmaRenderer();
+const toast = useToast();
+
+/**
+ * Article detail panel (opened via "open linked record" from the citation
+ * paper detail panel).  Re-uses the same ArticleDetailPanel used in the
+ * Articles view so the user sees the full record with notes/tags/labels etc.
+ *
+ * Flow: click open_in_new in citation panel → ArticleDetailPanel opens over
+ * the citation panel → on close, the citation panel is shown again.
+ */
+const {
+  selectedArticle: detailArticle,
+  auditTrail: detailAuditTrail,
+  selectArticle,
+  updateNotes,
+  updateTags,
+  updateLabels,
+  updateCriteria,
+  moveArticle,
+  attachFullText,
+  deleteFullTextAttachment,
+} = useArticleSearch();
+
+const showArticleDetail = ref(false);
+const isArticleDetailFullScreen = ref(false);
+
 const graphRef = ref<InstanceType<typeof CitationNetworkGraph> | null>(null);
 
 function locateNode(nodeId: string) {
@@ -231,6 +261,46 @@ function onIsolate(direction: IsolationDirection) {
 /** Exit isolation mode and return to the normal full-brightness view. */
 function onClearIsolation() {
   isolationMode.value = null;
+}
+
+/**
+ * Open the full article detail panel from the citation paper detail panel.
+ * The linked record shares the same ID as the citation node (for matched/
+ * included papers), so we can pass `paper.id` directly to `selectArticle`.
+ *
+ * On close, we keep `selectedPaper` intact so the citation panel re-appears.
+ */
+async function onOpenLinkedRecord(articleId: string) {
+  try {
+    await selectArticle(articleId);
+    showArticleDetail.value = true;
+  } catch {
+    toast.show('Failed to load article details', 'error');
+  }
+}
+
+/** Close the article detail panel and return to the citation paper detail. */
+function onCloseArticleDetail() {
+  showArticleDetail.value = false;
+  isArticleDetailFullScreen.value = false;
+  detailArticle.value = null;
+  detailAuditTrail.value = [];
+}
+
+/** Attach a full-text PDF/text file to the article shown in the detail panel. */
+async function handleAttachFullText(articleId: string): Promise<void> {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'Documents', extensions: ['pdf', 'txt'] }],
+    });
+    if (!selected) return;
+    toast.show('Importing full text…', 'info');
+    await attachFullText(articleId, selected);
+    toast.show('Full text attached successfully.', 'success');
+  } catch {
+    toast.show('Failed to attach full text', 'error');
+  }
 }
 
 // Layout mode change triggers a full recalculate under the new layout strategy
@@ -479,8 +549,8 @@ async function onRecalculate() {
       </button>
     </div>
 
-    <!-- Graph canvas -->
-    <main class="flex-1 relative">
+    <!-- Graph canvas (hidden when article detail is fullscreen) -->
+    <main v-show="!(showArticleDetail && isArticleDetailFullScreen)" class="flex-1 relative">
       <CitationNetworkGraph
         ref="graphRef"
         :graph="graph"
@@ -539,10 +609,10 @@ async function onRecalculate() {
       </div>
     </main>
 
-    <!-- Detail panel -->
+    <!-- Citation detail panel (hidden while the article detail is open) -->
     <Transition name="detail-slide">
       <CitationPaperDetailPanel
-        v-if="selectedPaper"
+        v-if="selectedPaper && !showArticleDetail"
         :paper="selectedPaper"
         :citing-papers="citingPapers"
         :cited-papers="citedPapers"
@@ -553,6 +623,34 @@ async function onRecalculate() {
         @navigate-paper="onNavigateToPaper"
         @isolate="onIsolate"
         @clear-isolation="onClearIsolation"
+        @open-linked-record="onOpenLinkedRecord"
+      />
+    </Transition>
+
+    <!-- Full article detail panel (opened from the citation paper detail panel).
+         On close, returns to the citation sidebar.  Supports full-screen
+         expansion which hides the graph canvas. -->
+    <Transition name="detail-slide">
+      <ArticleDetailPanel
+        v-if="showArticleDetail && detailArticle"
+        :article="detailArticle"
+        :audit-trail="detailAuditTrail"
+        :has-previous="false"
+        :has-next="false"
+        :has-return-target="false"
+        :full-screen="isArticleDetailFullScreen"
+        :article-position="1"
+        :article-total="1"
+        @close="onCloseArticleDetail"
+        @toggle-full-screen="isArticleDetailFullScreen = !isArticleDetailFullScreen"
+        @update-notes="updateNotes"
+        @update-tags="updateTags"
+        @update-labels="updateLabels"
+        @update-criteria="updateCriteria"
+        @move-article="moveArticle"
+        @attach-full-text="handleAttachFullText"
+        @delete-full-text="deleteFullTextAttachment"
+        @refresh-article="selectArticle"
       />
     </Transition>
   </div>

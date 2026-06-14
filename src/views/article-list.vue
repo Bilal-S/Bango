@@ -76,6 +76,7 @@ const {
   clearSearch,
   hasReturnTarget,
   navigateToArticle,
+  returnToReferencePaperId,
   selectedGlobalIndex,
   // Multi-select
   selectedIds,
@@ -94,6 +95,15 @@ const {
   deleteFullTextAttachment,
   readFullTextContent,
 } = useArticleSearch();
+
+const activeReferencePaperId = ref<string | null>(null);
+
+function handleNavigateToArticleWithRef(articleId: string, paperId?: string): void {
+  if (paperId) {
+    activeReferencePaperId.value = paperId;
+  }
+  navigateToArticle(articleId, paperId);
+}
 
 onMounted(() => {
   const status = typeof route.query.status === 'string' ? route.query.status : undefined;
@@ -135,7 +145,11 @@ function toggleDetailFullScreen(): void {
 
 /** Close detail panel and always reset fullscreen state to prevent white screen */
 function handleCloseDetail(): void {
+  const refPaperId = returnToReferencePaperId.value;
   closeDetail();
+  if (refPaperId) {
+    activeReferencePaperId.value = refPaperId;
+  }
   isDetailFullScreen.value = false;
   localStorage.setItem('bango-detail-fullscreen', 'false');
 }
@@ -386,8 +400,10 @@ async function handleBatchScrapeRefs(): Promise<void> {
       <!-- References Tab Content -->
       <ReferencesView
         v-if="activeStatusTab === 'references'"
+        :active-paper-id="activeReferencePaperId"
         @article-promoted="handleArticlePromoted"
-        @navigate-to-article="navigateToArticle"
+        @navigate-to-article="handleNavigateToArticleWithRef"
+        @update:active-paper-id="activeReferencePaperId = $event"
       />
 
       <!-- Toolbar (hidden on References tab) -->

@@ -1159,4 +1159,43 @@ describe('useArticleSearch', () => {
       // Note: syncArticleToList is not directly returned, but tested indirectly
     });
   });
+
+  // ── Back-stack Navigation / Reference Paper Return Targets ─────────
+  describe('back-stack navigation / reference paper return targets', () => {
+    it('stores returnToReferencePaperId when navigating to an article from reference paper detail', async () => {
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'get_article') return Promise.resolve(sampleArticles[0]);
+        if (cmd === 'get_audit_trail') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+
+      const { navigateToArticle, returnToReferencePaperId, hasReturnTarget } = useArticleSearch();
+
+      expect(returnToReferencePaperId.value).toBeNull();
+      expect(hasReturnTarget.value).toBe(false);
+
+      await navigateToArticle('a1', 'ref-paper-123');
+
+      expect(returnToReferencePaperId.value).toBe('ref-paper-123');
+      expect(hasReturnTarget.value).toBe(true);
+    });
+
+    it('clears returnToReferencePaperId when closeDetail is called', async () => {
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'get_article') return Promise.resolve(sampleArticles[0]);
+        if (cmd === 'get_audit_trail') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+
+      const { navigateToArticle, returnToReferencePaperId, closeDetail, hasReturnTarget } =
+        useArticleSearch();
+
+      await navigateToArticle('a1', 'ref-paper-123');
+      expect(returnToReferencePaperId.value).toBe('ref-paper-123');
+
+      closeDetail();
+      expect(returnToReferencePaperId.value).toBeNull();
+      expect(hasReturnTarget.value).toBe(false);
+    });
+  });
 });

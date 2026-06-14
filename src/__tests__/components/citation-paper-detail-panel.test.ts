@@ -147,4 +147,63 @@ describe('citation-paper-detail-panel.vue', () => {
     expect(wrapper.emitted('isolate')).toBeTruthy();
     expect(wrapper.emitted('isolate')![0]).toEqual(['ancestry']);
   });
+
+  // ── open-linked-record button ─────────────────────────────────────────
+
+  it('renders open-linked-record button for included papers', () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper({ unmatched: false }),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: null,
+      },
+    });
+
+    const btn = wrapper.find('[data-testid="open-linked-record-btn"]');
+    expect(btn.exists()).toBe(true);
+    expect(btn.attributes('title')).toBe('open linked record');
+    expect(btn.find('.material-symbols-outlined').text()).toBe('open_in_new');
+  });
+
+  it('hides open-linked-record button for unmatched (reference-only) papers', () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper({ unmatched: true }),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: null,
+      },
+    });
+
+    expect(wrapper.find('[data-testid="open-linked-record-btn"]').exists()).toBe(false);
+  });
+
+  it('hides open-linked-record button when no paper is selected', () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: null,
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: null,
+      },
+    });
+
+    expect(wrapper.find('[data-testid="open-linked-record-btn"]').exists()).toBe(false);
+  });
+
+  it('emits open-linked-record with paper id when clicked', async () => {
+    const wrapper = mount(CitationPaperDetailPanel, {
+      props: {
+        paper: makePaper({ unmatched: false }),
+        citingPapers: [],
+        citedPapers: [],
+        isolationMode: null,
+      },
+    });
+
+    await wrapper.find('[data-testid="open-linked-record-btn"]').trigger('click');
+    expect(wrapper.emitted('open-linked-record')).toBeTruthy();
+    expect(wrapper.emitted('open-linked-record')![0]).toEqual(['node-1']);
+  });
 });

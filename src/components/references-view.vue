@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useReferencesSearch } from '@/composables/use-references-search';
 import { useToast } from '@/composables/use-toast';
 import ReferencePaperDetailPanel from './reference-paper-detail-panel.vue';
 import type { ReferencePaperQuery } from '@/types';
 import { formatAuthors, doiLink } from '@/utils/formatters';
 
+const props = defineProps<{
+  activePaperId?: string | null;
+}>();
+
 const emit = defineEmits<{
   (e: 'article-promoted', articleId: string): void;
-  (e: 'navigate-to-article', articleId: string): void;
+  (e: 'navigate-to-article', articleId: string, paperId?: string): void;
+  (e: 'update:active-paper-id', paperId: string | null): void;
 }>();
 
 const toast = useToast();
@@ -39,6 +44,33 @@ const expandedIds = ref<Set<string>>(new Set());
 // Detail panel state
 const selectedPaperId = ref<string | null>(null);
 const selectedPaperData = ref<ReferencePaperQuery | null>(null);
+
+watch(
+  () => props.activePaperId,
+  async (newId) => {
+    if (newId) {
+      if (selectedPaperId.value !== newId) {
+        selectedPaperId.value = newId;
+        const found =
+          papers.value.find((p) => p.id === newId) ||
+          articlesOfInterest.value.find((p) => p.id === newId);
+        if (found) {
+          selectedPaperData.value = found;
+        } else {
+          selectedPaperData.value = null;
+        }
+      }
+    } else {
+      selectedPaperId.value = null;
+      selectedPaperData.value = null;
+    }
+  },
+  { immediate: true }
+);
+
+watch(selectedPaperId, (newId) => {
+  emit('update:active-paper-id', newId);
+});
 
 onMounted(async () => {
   await Promise.all([search(), loadArticlesOfInterest()]);
@@ -95,6 +127,12 @@ function typeLabel(refType: string): string {
 
 function refTypeIcon(refType: string): string {
   return refType === 'citation' ? 'north_west' : 'south_east';
+}
+
+function handleNavigateToArticle(articleId: string, paperId?: string): void {
+  const finalPaperId = paperId || selectedPaperId.value || undefined;
+  closeDetail();
+  emit('navigate-to-article', articleId, finalPaperId);
 }
 </script>
 
@@ -243,7 +281,7 @@ function refTypeIcon(refType: string): string {
                   v-if="paper.matchedArticleId"
                   class="material-symbols-outlined text-xs text-blue-600 hover:text-blue-800 shrink-0"
                   title="Open matched article"
-                  @click.stop="emit('navigate-to-article', paper.matchedArticleId!)"
+                  @click.stop="handleNavigateToArticle(paper.matchedArticleId!, paper.id)"
                 >
                   link
                 </a>
@@ -352,7 +390,8 @@ function refTypeIcon(refType: string): string {
                   <li
                     v-for="linked in linkedArticlesMap[paper.id]"
                     :key="linked.id"
-                    class="flex items-center gap-2 text-slate-600"
+                    class="flex items-center gap-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded px-2 py-0.5 transition-colors cursor-pointer"
+                    @click="handleNavigateToArticle(linked.id, paper.id)"
                   >
                     <span
                       class="material-symbols-outlined text-xs"
@@ -370,7 +409,7 @@ function refTypeIcon(refType: string): string {
                     <button
                       class="material-symbols-outlined text-xs text-blue-600 hover:text-blue-800 cursor-pointer"
                       title="Go to article"
-                      @click="emit('navigate-to-article', linked.id)"
+                      @click.stop="handleNavigateToArticle(linked.id, paper.id)"
                     >
                       north_east
                     </button>
@@ -445,11 +484,7 @@ function refTypeIcon(refType: string): string {
             loadArticlesOfInterest();
           }
         "
-        @navigate-to-article="
-          (id) => {
-            emit('navigate-to-article', id);
-          }
-        "
+        @navigate-to-article="handleNavigateToArticle"
       />
     </Teleport>
   </div>

@@ -261,7 +261,8 @@ watch(
           <li
             v-for="linked in linkedArticles"
             :key="linked.id"
-            class="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg text-sm hover:bg-slate-100 transition-colors"
+            class="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg text-sm hover:bg-slate-100 transition-colors cursor-pointer"
+            @click="emit('navigate-to-article', linked.id)"
           >
             <span
               class="material-symbols-outlined text-xs"
