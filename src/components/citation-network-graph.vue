@@ -232,6 +232,8 @@ function applyVisualState() {
       const sizeMultiplier = isMainPathActive && props.mainPathNodes.has(n) ? 1.15 : 1.0;
       g.setNodeAttribute(n, 'size', baseSize * sizeMultiplier);
     }
+
+    g.setNodeAttribute(n, 'type', isUnmatched ? 'circle' : 'included');
   });
 
   // Apply composed visual attributes to edges

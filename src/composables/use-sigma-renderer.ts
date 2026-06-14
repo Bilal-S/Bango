@@ -1,8 +1,72 @@
 import { ref, shallowRef, onUnmounted } from 'vue';
 import Sigma from 'sigma';
-import { createEdgeArrowProgram } from 'sigma/rendering';
+import { createEdgeArrowProgram, NodeCircleProgram } from 'sigma/rendering';
 import type Graph from 'graphology';
 import { filterNodesByYearRange } from '../utils/citation-analysis';
+
+class NodeBorderProgram extends NodeCircleProgram {
+  getDefinition() {
+    const definition = super.getDefinition();
+    definition.FRAGMENT_SHADER_SOURCE = `
+precision highp float;
+
+varying vec4 v_color;
+varying vec2 v_diffVector;
+varying float v_radius;
+
+uniform float u_correctionRatio;
+uniform float u_sizeRatio;
+
+const vec4 transparent = vec4(0.0, 0.0, 0.0, 0.0);
+
+void main(void) {
+  float border = u_correctionRatio * 2.0;
+  float dist = length(v_diffVector) - v_radius + border;
+
+  #ifdef PICKING_MODE
+  if (dist > border)
+    gl_FragColor = transparent;
+  else
+    gl_FragColor = v_color;
+
+  #else
+  float t = 0.0;
+  if (dist > border)
+    t = 1.0;
+  else if (dist > 0.0)
+    t = dist / border;
+
+  // 1 pixel in the local coordinate space corresponds to 2.0 * u_correctionRatio / u_sizeRatio
+  float pixel_unit = 2.0 * u_correctionRatio / u_sizeRatio;
+
+  float outerBorder = pixel_unit * 1.5;
+  float innerGap = pixel_unit * 1.5;
+  float minCenterRadius = pixel_unit * 1.5;
+
+  if (v_radius < outerBorder + innerGap + minCenterRadius) {
+    float scale = v_radius / (outerBorder + innerGap + minCenterRadius);
+    outerBorder *= scale;
+    innerGap *= scale;
+  }
+
+  float r = length(v_diffVector);
+  vec4 finalColor = v_color;
+
+  if (v_radius - r < outerBorder) {
+    // Outer border color: #0f172a (slate-900)
+    finalColor = vec4(0.059, 0.090, 0.165, v_color.a);
+  } else if (v_radius - r < outerBorder + innerGap) {
+    // Inner gap color: white #ffffff
+    finalColor = vec4(1.0, 1.0, 1.0, v_color.a);
+  }
+
+  gl_FragColor = mix(finalColor, transparent, t);
+  #endif
+}
+    `;
+    return definition;
+  }
+}
 
 interface SigmaRendererOptions {
   /** Min camera ratio (zoom in limit). Default 0.1 */
@@ -58,6 +122,10 @@ export function useSigmaRenderer() {
       defaultEdgeColor: options.defaultEdgeColor ?? '#e2e8f0',
       labelRenderSizeThreshold: options.labelRenderSizeThreshold ?? 1.5,
       stagePadding: 30,
+      nodeProgramClasses: {
+        circle: NodeCircleProgram,
+        included: NodeBorderProgram,
+      },
     };
 
     // When a custom arrow size is requested, build a custom arrow program with

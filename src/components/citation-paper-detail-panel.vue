@@ -3,11 +3,21 @@
     class="flex flex-col h-full bg-white border-l border-slate-200 overflow-hidden"
     data-testid="citation-detail-panel"
   >
-    <!-- Header -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-      <h3 class="text-sm font-semibold text-slate-800 truncate">Paper Details</h3>
+    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 gap-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <h3 class="text-sm font-semibold text-slate-800 truncate">Paper Details</h3>
+        <span
+          v-if="paper"
+          class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-tight shrink-0"
+          :class="
+            paper.unmatched ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-800'
+          "
+        >
+          {{ paper.unmatched ? 'Reference Only' : 'Included' }}
+        </span>
+      </div>
       <button
-        class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors"
+        class="w-7 h-7 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors shrink-0"
         title="Close"
         @click="$emit('close')"
       >
