@@ -3,14 +3,15 @@ use rusqlite::Connection;
 use bango_lib::db::biblio_repo::{
     build_coauthor_edges, clear_all_biblio, clear_regeneratable_biblio, compute_author_metrics,
     compute_h_index, delete_network, get_all_authors, get_all_terms, get_authors_for_article,
-    get_biblio_kpis, get_biblio_status, get_coauthor_network_json, get_keyword_network_json,
-    get_terms_for_article, link_article_author, link_article_term, load_network,
-    load_network_edges, load_network_nodes, save_article_terms, save_network, upsert_author,
-    upsert_institution, upsert_term,
+    get_biblio_kpis, get_biblio_status, get_coauthor_network_json, get_journal_year_data,
+    get_keyword_network_json, get_terms_for_article, link_article_author, link_article_term,
+    load_network, load_network_edges, load_network_nodes, save_article_terms, save_network,
+    upsert_author, upsert_institution, upsert_term,
 };
 use bango_lib::db::migration::run_migrations;
 use bango_lib::models::biblio::{
-    BiblioNetworkEdge, BiblioNetworkNode, NetworkType, TermSource, TermType, YearCount,
+    BiblioNetworkEdge, BiblioNetworkNode, JournalYearData, NetworkType, TermSource, TermType,
+    YearCount,
 };
 
 fn test_db() -> Connection {
@@ -385,7 +386,9 @@ fn test_refresh_clears_and_repopulates() {
 // ── KPI tests ──────────────────────────────────────────────────
 
 /// Helper: insert an article with full control over key KPI fields.
-/// `year` is an Option<i32> matching the INTEGER publication_year column.
+/// `pub_year` is an Option<i32> matching the INTEGER publication_year column.
+/// `journal` and `journal_index_id` support the timeline journal_distribution tests.
+#[allow(clippy::too_many_arguments)]
 fn insert_kpi_article(
     conn: &Connection,
     id: &str,
@@ -393,11 +396,13 @@ fn insert_kpi_article(
     pub_year: Option<i32>,
     num_cited: Option<i32>,
     authors: &str,
+    journal: Option<&str>,
+    journal_index_id: Option<&str>,
 ) {
     conn.execute(
-        "INSERT INTO articles (id, title, abstract_text, authors, status, publication_year, num_cited)
-         VALUES (?1, 'Test', 'Abstract', ?2, ?3, ?4, ?5)",
-        rusqlite::params![id, authors, status, pub_year, num_cited],
+        "INSERT INTO articles (id, title, abstract_text, authors, status, publication_year, num_cited, journal, journal_index_id)
+         VALUES (?1, 'Test', 'Abstract', ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![id, authors, status, pub_year, num_cited, journal, journal_index_id],
     )
     .unwrap();
 }
@@ -420,8 +425,8 @@ fn kpi_empty_db_returns_zeros() {
 #[test]
 fn kpi_rejected_only_returns_zeros() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "rejected", Some(2020), Some(5), "Smith J");
-    insert_kpi_article(&conn, "a2", "duplicate", Some(2021), Some(10), "Doe A");
+    insert_kpi_article(&conn, "a1", "rejected", Some(2020), Some(5), "Smith J", None, None);
+    insert_kpi_article(&conn, "a2", "duplicate", Some(2021), Some(10), "Doe A", None, None);
     let kpis = get_biblio_kpis(&conn).unwrap();
     assert_eq!(kpis.included_count, 0);
     assert_eq!(kpis.total_citations, 0);
@@ -435,9 +440,9 @@ fn kpi_rejected_only_returns_zeros() {
 #[test]
 fn kpi_basic_happy_path() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(5), "Smith J; Doe A");
-    insert_kpi_article(&conn, "a2", "included", Some(2021), Some(10), "Smith J");
-    insert_kpi_article(&conn, "a3", "included", Some(2022), Some(15), "Lee K");
+    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(5), "Smith J; Doe A", None, None);
+    insert_kpi_article(&conn, "a2", "included", Some(2021), Some(10), "Smith J", None, None);
+    insert_kpi_article(&conn, "a3", "included", Some(2022), Some(15), "Lee K", None, None);
 
     let kpis = get_biblio_kpis(&conn).unwrap();
     assert_eq!(kpis.included_count, 3);
@@ -460,7 +465,7 @@ fn kpi_basic_happy_path() {
 #[test]
 fn kpi_year_null_value() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "included", None, Some(3), "Smith J");
+    insert_kpi_article(&conn, "a1", "included", None, Some(3), "Smith J", None, None);
     let kpis = get_biblio_kpis(&conn).unwrap();
     assert_eq!(kpis.year_from, None);
     assert_eq!(kpis.year_to, None);
@@ -472,9 +477,9 @@ fn kpi_year_null_value() {
 #[test]
 fn kpi_year_null_filtered() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "A");
-    insert_kpi_article(&conn, "a2", "included", None, Some(1), "B"); // NULL year
-    insert_kpi_article(&conn, "a4", "included", Some(2022), Some(1), "D");
+    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "A", None, None);
+    insert_kpi_article(&conn, "a2", "included", None, Some(1), "B", None, None); // NULL year
+    insert_kpi_article(&conn, "a4", "included", Some(2022), Some(1), "D", None, None);
 
     let kpis = get_biblio_kpis(&conn).unwrap();
     assert_eq!(kpis.included_count, 3);
@@ -494,15 +499,15 @@ fn kpi_year_null_filtered() {
 fn kpi_pubs_per_year_precision() {
     let conn = test_db();
     // 3 articles across 3 years → pubs_per_year = 1.0
-    insert_kpi_article(&conn, "a1", "included", Some(2018), Some(1), "A");
-    insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "B");
-    insert_kpi_article(&conn, "a3", "included", Some(2022), Some(1), "C");
+    insert_kpi_article(&conn, "a1", "included", Some(2018), Some(1), "A", None, None);
+    insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "B", None, None);
+    insert_kpi_article(&conn, "a3", "included", Some(2022), Some(1), "C", None, None);
     let kpis = get_biblio_kpis(&conn).unwrap();
     assert!((kpis.pubs_per_year.unwrap() - 1.0).abs() < 0.01);
 
     // With 5 articles across 2 years → pubs_per_year = 2.5
-    insert_kpi_article(&conn, "a4", "included", Some(2018), Some(1), "D");
-    insert_kpi_article(&conn, "a5", "included", Some(2020), Some(1), "E");
+    insert_kpi_article(&conn, "a4", "included", Some(2018), Some(1), "D", None, None);
+    insert_kpi_article(&conn, "a5", "included", Some(2020), Some(1), "E", None, None);
     let kpis2 = get_biblio_kpis(&conn).unwrap();
     assert!((kpis2.pubs_per_year.unwrap() - (5.0 / 3.0)).abs() < 0.01);
 }
@@ -510,9 +515,9 @@ fn kpi_pubs_per_year_precision() {
 #[test]
 fn kpi_citations_with_nulls() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(10), "A");
-    insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B"); // NULL citations
-    insert_kpi_article(&conn, "a3", "included", Some(2020), Some(5), "C");
+    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(10), "A", None, None);
+    insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B", None, None); // NULL citations
+    insert_kpi_article(&conn, "a3", "included", Some(2020), Some(5), "C", None, None);
 
     let kpis = get_biblio_kpis(&conn).unwrap();
     assert_eq!(kpis.total_citations, 15); // 10 + 5, NULL excluded
@@ -523,10 +528,28 @@ fn kpi_avg_growth_rate_positive() {
     let conn = test_db();
     // 5 articles in 2021, 10 in 2022 → one pair: +100%
     for i in 0..5 {
-        insert_kpi_article(&conn, &format!("old{i}"), "included", Some(2021), Some(1), "A");
+        insert_kpi_article(
+            &conn,
+            &format!("old{i}"),
+            "included",
+            Some(2021),
+            Some(1),
+            "A",
+            None,
+            None,
+        );
     }
     for i in 0..10 {
-        insert_kpi_article(&conn, &format!("new{i}"), "included", Some(2022), Some(1), "B");
+        insert_kpi_article(
+            &conn,
+            &format!("new{i}"),
+            "included",
+            Some(2022),
+            Some(1),
+            "B",
+            None,
+            None,
+        );
     }
 
     let kpis = get_biblio_kpis(&conn).unwrap();
@@ -539,10 +562,28 @@ fn kpi_avg_growth_rate_negative() {
     let conn = test_db();
     // 10 articles in 2021, 5 in 2022 → one pair: -50%
     for i in 0..10 {
-        insert_kpi_article(&conn, &format!("old{i}"), "included", Some(2021), Some(1), "A");
+        insert_kpi_article(
+            &conn,
+            &format!("old{i}"),
+            "included",
+            Some(2021),
+            Some(1),
+            "A",
+            None,
+            None,
+        );
     }
     for i in 0..5 {
-        insert_kpi_article(&conn, &format!("new{i}"), "included", Some(2022), Some(1), "B");
+        insert_kpi_article(
+            &conn,
+            &format!("new{i}"),
+            "included",
+            Some(2022),
+            Some(1),
+            "B",
+            None,
+            None,
+        );
     }
 
     let kpis = get_biblio_kpis(&conn).unwrap();
@@ -555,16 +596,52 @@ fn kpi_avg_growth_rate_multi_year() {
     let conn = test_db();
     // 4 in 2019, 8 in 2020, 4 in 2021, 12 in 2022
     for i in 0..4 {
-        insert_kpi_article(&conn, &format!("a19_{i}"), "included", Some(2019), Some(1), "A");
+        insert_kpi_article(
+            &conn,
+            &format!("a19_{i}"),
+            "included",
+            Some(2019),
+            Some(1),
+            "A",
+            None,
+            None,
+        );
     }
     for i in 0..8 {
-        insert_kpi_article(&conn, &format!("a20_{i}"), "included", Some(2020), Some(1), "B");
+        insert_kpi_article(
+            &conn,
+            &format!("a20_{i}"),
+            "included",
+            Some(2020),
+            Some(1),
+            "B",
+            None,
+            None,
+        );
     }
     for i in 0..4 {
-        insert_kpi_article(&conn, &format!("a21_{i}"), "included", Some(2021), Some(1), "C");
+        insert_kpi_article(
+            &conn,
+            &format!("a21_{i}"),
+            "included",
+            Some(2021),
+            Some(1),
+            "C",
+            None,
+            None,
+        );
     }
     for i in 0..12 {
-        insert_kpi_article(&conn, &format!("a22_{i}"), "included", Some(2022), Some(1), "D");
+        insert_kpi_article(
+            &conn,
+            &format!("a22_{i}"),
+            "included",
+            Some(2022),
+            Some(1),
+            "D",
+            None,
+            None,
+        );
     }
 
     let kpis = get_biblio_kpis(&conn).unwrap();
@@ -581,8 +658,8 @@ fn kpi_avg_growth_rate_multi_year() {
 #[test]
 fn kpi_avg_growth_rate_single_year_is_none() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "included", Some(2022), Some(1), "A");
-    insert_kpi_article(&conn, "a2", "included", Some(2022), Some(1), "B");
+    insert_kpi_article(&conn, "a1", "included", Some(2022), Some(1), "A", None, None);
+    insert_kpi_article(&conn, "a2", "included", Some(2022), Some(1), "B", None, None);
 
     let kpis = get_biblio_kpis(&conn).unwrap();
     assert_eq!(kpis.avg_growth_rate, None);
@@ -591,8 +668,8 @@ fn kpi_avg_growth_rate_single_year_is_none() {
 #[test]
 fn kpi_unique_authors_zero_without_normalization() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J; Doe A");
-    insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "Smith J");
+    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J; Doe A", None, None);
+    insert_kpi_article(&conn, "a2", "included", Some(2020), Some(1), "Smith J", None, None);
 
     // Without normalization, biblio_authors is empty → unique_authors = 0
     let kpis = get_biblio_kpis(&conn).unwrap();
@@ -602,7 +679,7 @@ fn kpi_unique_authors_zero_without_normalization() {
 #[test]
 fn kpi_unique_authors_from_biblio_table() {
     let conn = test_db();
-    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J");
+    insert_kpi_article(&conn, "a1", "included", Some(2020), Some(1), "Smith J", None, None);
     upsert_author(&conn, "smith j", "Smith, J.").unwrap();
     upsert_author(&conn, "doe a", "Doe, A.").unwrap();
 
@@ -808,4 +885,199 @@ fn test_get_keyword_network_json() {
 
     assert_eq!(nodes.len(), 3);
     assert_eq!(edges.len(), 3); // All 3 pairs should share art1, making 3 edges.
+}
+
+// ── Journal Distribution Tests (timeline) ────────────────────
+
+/// Seed a journal_index row and return its id.
+fn insert_journal_index_row(conn: &Connection, id: &str, title: &str) {
+    conn.execute(
+        "INSERT INTO journal_index (id, journal_title) VALUES (?1, ?2)",
+        rusqlite::params![id, title],
+    )
+    .unwrap();
+}
+
+#[test]
+fn journal_distribution_uses_canonical_title() {
+    let conn = test_db();
+    insert_journal_index_row(&conn, "j1", "Nature");
+
+    // Three articles with different raw journal casing, all linked to the same journal_index row.
+    insert_kpi_article(&conn, "a1", "included", Some(2020), None, "A", Some("Nature"), Some("j1"));
+    insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B", Some("nature"), Some("j1"));
+    insert_kpi_article(&conn, "a3", "included", Some(2020), None, "C", Some("NATURE "), Some("j1"));
+
+    let kpis = get_biblio_kpis(&conn).unwrap();
+    let dist = &kpis.journal_distribution;
+
+    // All three collapse to a single canonical "Nature" bucket for 2020.
+    let nature_rows: Vec<&JournalYearData> =
+        dist.iter().filter(|d| d.journal == "Nature" && d.year == 2020).collect();
+    assert_eq!(nature_rows.len(), 1, "raw variants should collapse to one canonical bucket");
+    assert_eq!(nature_rows[0].count, 3);
+    assert_eq!(nature_rows[0].journal_index_id.as_deref(), Some("j1"));
+}
+
+#[test]
+fn journal_distribution_falls_back_to_normalized_raw() {
+    let conn = test_db();
+    // Articles with NO journal_index_id — varied casing should normalize via UPPER(TRIM).
+    insert_kpi_article(&conn, "a1", "included", Some(2020), None, "A", Some("Science"), None);
+    insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B", Some("science "), None);
+    insert_kpi_article(&conn, "a3", "included", Some(2020), None, "C", Some("SCIENCE"), None);
+
+    let dist = get_journal_year_data(&conn).unwrap();
+    // Normalized key is UPPER(TRIM) → "SCIENCE"
+    let science_rows: Vec<&JournalYearData> =
+        dist.iter().filter(|d| d.journal == "SCIENCE" && d.year == 2020).collect();
+    assert_eq!(science_rows.len(), 1, "raw casing variants should normalize to one bucket");
+    assert_eq!(science_rows[0].count, 3);
+    assert!(science_rows[0].journal_index_id.is_none());
+}
+
+#[test]
+fn journal_distribution_journal_index_id_flag() {
+    let conn = test_db();
+    insert_journal_index_row(&conn, "j1", "Nature");
+    insert_kpi_article(&conn, "a1", "included", Some(2020), None, "A", Some("Nature"), Some("j1"));
+    insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B", Some("Cell"), None);
+
+    let dist = get_journal_year_data(&conn).unwrap();
+    for row in &dist {
+        if row.journal == "Nature" {
+            assert_eq!(row.journal_index_id.as_deref(), Some("j1"));
+        } else if row.journal == "CELL" {
+            assert!(row.journal_index_id.is_none());
+        } else {
+            panic!("unexpected journal key: {}", row.journal);
+        }
+    }
+}
+
+#[test]
+fn journal_distribution_null_and_empty_coalesce() {
+    let conn = test_db();
+    insert_kpi_article(&conn, "a1", "included", Some(2020), None, "A", None, None);
+    insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B", Some(""), None);
+
+    let dist = get_journal_year_data(&conn).unwrap();
+    let blank_rows: Vec<&JournalYearData> =
+        dist.iter().filter(|d| d.journal.is_empty() && d.year == 2020).collect();
+    assert_eq!(blank_rows.len(), 1, "NULL and empty journal should coalesce into one '' bucket");
+    assert_eq!(blank_rows[0].count, 2);
+}
+
+#[test]
+fn journal_distribution_ordering() {
+    let conn = test_db();
+    insert_journal_index_row(&conn, "j1", "Nature");
+    insert_kpi_article(&conn, "a1", "included", Some(2018), None, "A", Some("Nature"), Some("j1"));
+    insert_kpi_article(&conn, "a2", "included", Some(2018), None, "B", Some("Cell"), None);
+    insert_kpi_article(&conn, "a3", "included", Some(2020), None, "C", Some("Nature"), Some("j1"));
+
+    let dist = get_journal_year_data(&conn).unwrap();
+    // Rows ordered by publication_year ASC.
+    assert_eq!(dist[0].year, 2018);
+    assert!(dist[dist.len() - 1].year >= 2018);
+}
+
+#[test]
+fn journal_distribution_regression_other_kpis_unchanged() {
+    let conn = test_db();
+    insert_journal_index_row(&conn, "j1", "Nature");
+    insert_kpi_article(
+        &conn,
+        "a1",
+        "included",
+        Some(2020),
+        Some(5),
+        "A",
+        Some("Nature"),
+        Some("j1"),
+    );
+    insert_kpi_article(&conn, "a2", "included", Some(2021), Some(10), "B", Some("Cell"), None);
+
+    let kpis = get_biblio_kpis(&conn).unwrap();
+    // pubs_by_year / refs_by_year / citations_by_year remain unaffected by the new field.
+    assert_eq!(kpis.pubs_by_year.len(), 2);
+    assert_eq!(kpis.pubs_by_year[0], YearCount { year: 2020, count: 1 });
+    assert_eq!(kpis.included_count, 2);
+    assert_eq!(kpis.total_citations, 15);
+    // journal_distribution populated.
+    assert_eq!(kpis.journal_distribution.len(), 2);
+}
+
+// ── Journal Info Tests (timeline info card) ──────────────────
+
+#[test]
+fn get_journal_info_unknown_returns_none() {
+    let conn = test_db();
+    let result = bango_lib::db::journal_repo::get_journal_info(&conn, "does-not-exist").unwrap();
+    assert!(result.is_none(), "unknown journal id should return Ok(None)");
+}
+
+#[test]
+fn get_journal_info_returns_metadata_and_aggregates() {
+    let conn = test_db();
+    // Seed a journal_index row with rich metadata.
+    conn.execute(
+        "INSERT INTO journal_index (id, journal_title, issn, eissn, publisher_name, publisher_address, languages, web_of_science_categories)
+         VALUES ('j1', 'Nature', '0028-0836', '1476-4687', 'Springer Nature', 'London', 'English', 'Multidisciplinary')",
+        [],
+    )
+    .unwrap();
+
+    // Two included articles linked to the journal (different years, different citation counts).
+    insert_kpi_article(
+        &conn,
+        "a1",
+        "included",
+        Some(2019),
+        Some(40),
+        "A",
+        Some("Nature"),
+        Some("j1"),
+    );
+    insert_kpi_article(
+        &conn,
+        "a2",
+        "included",
+        Some(2021),
+        Some(60),
+        "B",
+        Some("Nature"),
+        Some("j1"),
+    );
+    // A rejected article linked to the same journal — must NOT be counted.
+    insert_kpi_article(
+        &conn,
+        "a3",
+        "rejected",
+        Some(2020),
+        Some(100),
+        "C",
+        Some("Nature"),
+        Some("j1"),
+    );
+
+    let info = bango_lib::db::journal_repo::get_journal_info(&conn, "j1")
+        .unwrap()
+        .expect("known journal id should return Some");
+
+    assert_eq!(info.id, "j1");
+    assert_eq!(info.journal_title, "Nature");
+    assert_eq!(info.issn.as_deref(), Some("0028-0836"));
+    assert_eq!(info.eissn.as_deref(), Some("1476-4687"));
+    assert_eq!(info.publisher_name.as_deref(), Some("Springer Nature"));
+    assert_eq!(info.languages.as_deref(), Some("English"));
+    assert_eq!(info.web_of_science_categories.as_deref(), Some("Multidisciplinary"));
+    // Aggregates over included articles only.
+    assert_eq!(info.article_count, 2);
+    assert_eq!(info.first_year, Some(2019));
+    assert_eq!(info.last_year, Some(2021));
+    assert_eq!(info.citations_total, 100); // 40 + 60 (rejected excluded)
+    assert_eq!(info.pubs_by_year.len(), 2);
+    assert_eq!(info.pubs_by_year[0], YearCount { year: 2019, count: 1 });
+    assert_eq!(info.pubs_by_year[1], YearCount { year: 2021, count: 1 });
 }

@@ -156,6 +156,7 @@ const activeModuleLabel = computed(() => {
   if (route.name === 'coauthors') return 'Co-Authorship Network';
   if (route.name === 'citations') return 'Citation Network';
   if (route.name === 'keywords') return 'Keyword Co-Occurrence';
+  if (route.name === 'timeline') return 'Publication Timeline';
   return '';
 });
 
@@ -170,6 +171,10 @@ function navigateToModule(mod: AnalysisModule): void {
   }
   if (mod.id === 'keyword-cooccurrence') {
     router.push({ name: 'keywords' });
+    return;
+  }
+  if (mod.id === 'publication-timeline') {
+    router.push({ name: 'timeline' });
     return;
   }
   // Other modules remain as placeholders for future implementation

@@ -27,6 +27,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2.5.4",
+    "apexcharts": "^5.15.0",
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
     "graphology-gexf": "^0.13.2",
@@ -36,7 +37,8 @@
     "pinia": "^3.0.4",
     "sigma": "^3.0.3",
     "vue": "^3.5.33",
-    "vue-router": "^4.6.4"
+    "vue-router": "^4.6.4",
+    "vue3-apexcharts": "^1.11.1"
   },
   "devDependencies": {
     "@choochmeque/tauri-windows-bundle": "^0.1.18",

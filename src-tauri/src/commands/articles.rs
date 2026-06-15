@@ -6,6 +6,7 @@ use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::article::Article;
 use crate::models::audit::{AuditEntry, ImportActivity};
+use crate::models::biblio::JournalInfo;
 
 #[tauri::command]
 pub fn query_articles(
@@ -287,4 +288,18 @@ pub fn rematch_journals(db_state: State<'_, DbState>) -> Result<serde_json::Valu
         "articles": articles_matched,
         "references": refs_matched,
     }))
+}
+
+/// Fetch full metadata + time-series for one journal_index row.
+/// Powers the timeline Journal Info Card. Returns `None` for an unknown id.
+#[tauri::command]
+pub fn biblio_get_journal_info(
+    db_state: State<'_, DbState>,
+    journal_index_id: String,
+) -> Result<Option<JournalInfo>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    crate::db::journal_repo::get_journal_info(&conn, &journal_index_id)
 }

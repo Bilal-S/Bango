@@ -110,13 +110,42 @@ onMounted(() => {
   const tagsParam = typeof route.query.tags === 'string' ? route.query.tags.split(',') : undefined;
   const labelsParam =
     typeof route.query.labels === 'string' ? route.query.labels.split(',') : undefined;
+  const yearFrom =
+    typeof route.query.yearFrom === 'string' ? Number(route.query.yearFrom) : undefined;
+  const yearTo = typeof route.query.yearTo === 'string' ? Number(route.query.yearTo) : undefined;
+  const journal = typeof route.query.journal === 'string' ? route.query.journal : undefined;
+  // filterCollapsed=1 → keep the filter panel collapsed (filters still applied)
+  const filterCollapsed = route.query.filterCollapsed === '1';
 
-  if (status || tagsParam || labelsParam) {
-    void applyRouteParams({ status, tags: tagsParam, labels: labelsParam });
+  if (
+    status ||
+    tagsParam ||
+    labelsParam ||
+    (yearFrom !== undefined && Number.isFinite(yearFrom)) ||
+    (yearTo !== undefined && Number.isFinite(yearTo)) ||
+    journal
+  ) {
+    void applyRouteParams({
+      status,
+      tags: tagsParam,
+      labels: labelsParam,
+      yearFrom,
+      yearTo,
+      journal,
+      filterCollapsed,
+    });
   } else {
     void search();
   }
 });
+
+/** Whether this article-list was opened via a deep-link from the Timeline view. */
+const fromTimeline = computed(() => route.query.from === 'timeline');
+
+/** Return to the Timeline view (state preserved via useTimelineState singleton). */
+function backToTimeline(): void {
+  void router.push({ name: 'timeline' });
+}
 
 const selectedId = computed(() => selectedArticle.value?.id ?? null);
 
@@ -367,7 +396,16 @@ async function handleBatchScrapeRefs(): Promise<void> {
     <!-- Main content area -->
     <div v-show="!isDetailFullScreen" class="flex-1 p-container-padding overflow-y-auto">
       <!-- Header -->
-      <div class="mb-6">
+      <div class="mb-6 flex items-center gap-3">
+        <button
+          v-if="fromTimeline"
+          class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg cursor-pointer transition-colors"
+          title="Return to the Publication Timeline (state preserved)"
+          @click="backToTimeline"
+        >
+          <span class="material-symbols-outlined text-sm">arrow_back</span>
+          Back to Timeline
+        </button>
         <h1 class="page-title">Articles</h1>
       </div>
 

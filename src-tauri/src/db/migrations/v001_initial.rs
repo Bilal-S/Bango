@@ -254,6 +254,12 @@ CREATE TABLE IF NOT EXISTS article_reference_links (
 -- ── Indexes ──────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_articles_status ON articles(status);
+-- Composite index for the bibliometric GROUP BY scans (pubs, refs/citations, journal-year)
+CREATE INDEX IF NOT EXISTS idx_articles_status_year
+    ON articles(status, publication_year);
+-- Supports the canonical-journal LEFT JOIN when aggregating timeline data
+CREATE INDEX IF NOT EXISTS idx_articles_journal_index_id
+    ON articles(journal_index_id) WHERE journal_index_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_articles_duplicate_of ON articles(duplicate_of);
 CREATE INDEX IF NOT EXISTS idx_articles_screened_at ON articles(screened_at);
 CREATE INDEX IF NOT EXISTS idx_articles_data_length ON articles(data_length);

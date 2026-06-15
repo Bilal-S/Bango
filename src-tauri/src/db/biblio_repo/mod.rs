@@ -30,7 +30,7 @@ pub use networks::{
 };
 
 // Re-export kpis functions:
-pub use kpis::get_biblio_kpis;
+pub use kpis::{get_biblio_kpis, get_journal_year_data};
 
 // Re-export normalization functions:
 pub use normalization::{

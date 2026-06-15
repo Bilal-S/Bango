@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 
 use crate::error::AppError;
+use crate::models::biblio::{JournalInfo, YearCount};
 
 /// Convenience wrapper: resolve a journal_index id from ISSN/eISSN/name.
 /// Returns `None` if no match found (never errors).
@@ -76,4 +77,72 @@ pub fn match_journal(
     }
 
     Ok(None)
+}
+
+/// Full metadata + time-series for one `journal_index` row.
+///
+/// Returns `Ok(None)` when the id is unknown. Aggregates (`article_count`,
+/// `first_year`, `last_year`, `pubs_by_year`, `citations_total`) are computed
+/// over `included` articles linked to this journal.
+pub fn get_journal_info(
+    conn: &Connection,
+    journal_index_id: &str,
+) -> Result<Option<JournalInfo>, AppError> {
+    // 1. Base metadata
+    let meta = conn.query_row(
+        "SELECT id, journal_title, issn, eissn, publisher_name, publisher_address, \
+                languages, web_of_science_categories
+         FROM journal_index WHERE id = ?1",
+        [journal_index_id],
+        |row| {
+            Ok(JournalInfo {
+                id: row.get(0)?,
+                journal_title: row.get(1)?,
+                issn: row.get(2)?,
+                eissn: row.get(3)?,
+                publisher_name: row.get(4)?,
+                publisher_address: row.get(5)?,
+                languages: row.get(6)?,
+                web_of_science_categories: row.get(7)?,
+                article_count: 0,
+                first_year: None,
+                last_year: None,
+                pubs_by_year: Vec::new(),
+                citations_total: 0,
+            })
+        },
+    );
+    let mut info = match meta {
+        Ok(i) => i,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+
+    // 2. Aggregates over included articles linked to this journal
+    let agg: (i32, Option<i32>, Option<i32>, i64) = conn.query_row(
+        "SELECT COUNT(*), MIN(publication_year), MAX(publication_year), COALESCE(SUM(num_cited), 0)
+         FROM articles
+         WHERE status = 'included' AND journal_index_id = ?1",
+        [journal_index_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )?;
+    info.article_count = agg.0;
+    info.first_year = agg.1;
+    info.last_year = agg.2;
+    info.citations_total = agg.3;
+
+    // 3. Yearly counts (ascending by year)
+    let mut stmt = conn.prepare(
+        "SELECT publication_year, COUNT(*) AS cnt
+         FROM articles
+         WHERE status = 'included' AND journal_index_id = ?1 AND publication_year IS NOT NULL
+         GROUP BY publication_year ORDER BY publication_year ASC",
+    )?;
+    info.pubs_by_year = stmt
+        .query_map([journal_index_id], |row| {
+            Ok(YearCount { year: row.get(0)?, count: row.get(1)? })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Some(info))
 }

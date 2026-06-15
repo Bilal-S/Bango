@@ -80,4 +80,40 @@ When the user requests a durable behavior change, record it here or in the relev
 
 ## Child DOX Index
 
-This project is not yet indexed. Before continuing you must scan the project, build the DOX tree and replace this message with the actual index. Go deep and scan files recursively to properly evaluate complexity and create nested DOX files where needed.
+Top-level source directories. No child `AGENTS.md` files exist yet; these entries
+describe each durable boundary so agents can locate the right area. Create a child
+`AGENTS.md` under a folder only when that folder grows its own local rules.
+
+- **`src-tauri/src/`** — Rust backend (Tauri 2.x). Owned modules: `db/` (repos +
+  `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
+  `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`. App entry
+  is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
+  `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
+  - **`src-tauri/src/db/biblio_repo/`** — bibliometric repos (`kpis`, `authors`,
+    `networks`, `terms`, `institutions`, `normalization`). Contract: `get_biblio_kpis`
+    returns `BiblioKpis` including `journal_distribution: Vec<JournalYearData>` (canonical
+    titles via `journal_index` LEFT JOIN, fallback `UPPER(TRIM(journal))`).
+  - **`src-tauri/src/db/journal_repo.rs`** — journal_index lookup/match (`resolve_journal_id`,
+    `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
+    and refreshable via the `rematch_journals` command.
+  - **`src-tauri/tests/`** — Rust integration tests. Repository/KPI tests live in
+    `biblio_repo_tests.rs` (in-memory SQLite via `run_migrations`).
+- **`src/`** — Vue 3 + TypeScript + Tailwind v4 frontend.
+  - **`src/views/`** — page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
+    parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`) render in its
+    `<router-view>`. `biblio-timeline.vue` is the Publication Timeline view.
+  - **`src/components/`** — reusable components. `journal-info-card.vue` lazily loads
+    journal metadata via the `biblio_get_journal_info` command.
+  - **`src/composables/`** — Vue composables. `use-bibliometrics.ts` (shared KPI
+    singleton, now exports `JournalYearData`), `use-journal-info.ts` (per-call lazy
+    loader), `use-article-search.ts` (supports `yearFrom`/`yearTo`/`journal` route params).
+  - **`src/utils/`** — pure utilities. `chart-export.ts` (timeline CSV/SVG export via the
+    `save()` + `write_text_to_file` pattern shared with `network-export.ts`).
+  - **`src/router/index.ts`** — route table; lazy views are prefetched after `router.isReady()`.
+- **`docs/superpowers/specs/bango-v4-spec.md`** — authoritative v4 product specification.
+- **`docs/design-reference/00-design-patterns.md`** — design tokens (Material 3 inspired).
+- **`.worktrees/`** — planning documents (`biblio-publication-timeline-plan-v3.md` is the
+  implemented plan). Not part of the shipped app.
+
+Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
+`-D warnings`) and `cargo test`.

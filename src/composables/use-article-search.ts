@@ -484,12 +484,22 @@ export function useArticleSearch() {
 
   /**
    * Apply an initial filter state derived from route query parameters.
-   * Sets the active status tab and/or tag/label filters, then searches.
+   * Sets the active status tab and/or tag/label/year/journal filters, then searches.
+   *
+   * Year and journal params are used by the Bibliometrics timeline deep-links
+   * ("View articles from YYYY" and "View this journal's articles"). Both the
+   * display `filter` and the search `query` are synced so the filter panel
+   * reflects the active state.
    */
   async function applyRouteParams(params: {
     status?: string;
     tags?: string[];
     labels?: string[];
+    yearFrom?: number;
+    yearTo?: number;
+    journal?: string;
+    /** When true, keep the filter panel collapsed even though filters are applied. */
+    filterCollapsed?: boolean;
   }): Promise<void> {
     if (params.status && STATUS_TABS.includes(params.status as StatusTab)) {
       activeStatusTab.value = params.status as StatusTab;
@@ -518,6 +528,22 @@ export function useArticleSearch() {
       filter.labels = labelNames;
       query.labels = labelNames;
       showFilters.value = true;
+    }
+    const showPanel = !params.filterCollapsed;
+    if (params.yearFrom !== undefined && Number.isFinite(params.yearFrom)) {
+      filter.yearFrom = params.yearFrom;
+      query.yearFrom = params.yearFrom;
+      if (showPanel) showFilters.value = true;
+    }
+    if (params.yearTo !== undefined && Number.isFinite(params.yearTo)) {
+      filter.yearTo = params.yearTo;
+      query.yearTo = params.yearTo;
+      if (showPanel) showFilters.value = true;
+    }
+    if (params.journal) {
+      filter.journal = params.journal;
+      query.journal = params.journal;
+      if (showPanel) showFilters.value = true;
     }
     await search();
   }

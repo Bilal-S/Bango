@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 
 use crate::error::AppError;
-use crate::models::biblio::{BiblioKpis, YearCount};
+use crate::models::biblio::{BiblioKpis, JournalYearData, YearCount};
 
 const CITATION_DECAY: [f64; 6] = [0.02, 0.08, 0.13, 0.17, 0.15, 0.11];
 
@@ -85,6 +85,9 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
     // ── Normalized Citations by Year ──────────────────────────────
     let citations_by_year = compute_citations_by_year(conn)?;
 
+    // ── Journal × Year distribution (canonical titles via journal_index) ──
+    let journal_distribution = get_journal_year_data(conn)?;
+
     Ok(BiblioKpis {
         included_count,
         total_citations,
@@ -96,7 +99,37 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         avg_growth_rate,
         refs_by_year,
         citations_by_year,
+        journal_distribution,
     })
+}
+
+/// Group included articles by journal and publication_year.
+///
+/// Uses the canonical `journal_index.journal_title` when the article has a
+/// journal link; otherwise falls back to `UPPER(TRIM(articles.journal))` so
+/// raw casing variants ("Nature", "nature", "NATURE ") collapse to one bucket.
+pub fn get_journal_year_data(conn: &Connection) -> Result<Vec<JournalYearData>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT \
+            COALESCE(ji.journal_title, UPPER(TRIM(a.journal)), '') AS journal_key, \
+            a.publication_year, \
+            COUNT(*) AS cnt, \
+            a.journal_index_id \
+         FROM articles a \
+         LEFT JOIN journal_index ji ON ji.id = a.journal_index_id \
+         WHERE a.status = 'included' AND a.publication_year IS NOT NULL \
+         GROUP BY journal_key, a.publication_year, a.journal_index_id \
+         ORDER BY a.publication_year ASC, cnt DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(JournalYearData {
+            journal: row.get(0)?,
+            year: row.get(1)?,
+            count: row.get(2)?,
+            journal_index_id: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 /// group actual linked reference papers by their `publication_year`.

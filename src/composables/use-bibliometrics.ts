@@ -6,6 +6,15 @@ export interface YearCount {
   count: number;
 }
 
+export interface JournalYearData {
+  /** Canonical `journal_title` when `journalIndexId` is set; else normalized raw title. */
+  journal: string;
+  year: number;
+  count: number;
+  /** `null` → raw fallback (not matched to journal_index). */
+  journalIndexId: string | null;
+}
+
 interface BiblioKpis {
   includedCount: number;
   totalCitations: number;
@@ -17,6 +26,7 @@ interface BiblioKpis {
   avgGrowthRate: number | null;
   refsByYear: YearCount[];
   citationsByYear: YearCount[];
+  journalDistribution: JournalYearData[];
 }
 
 interface NormalizeResult {
@@ -43,6 +53,7 @@ const kpis = ref<BiblioKpis>({
   avgGrowthRate: null,
   refsByYear: [],
   citationsByYear: [],
+  journalDistribution: [],
 });
 const loading = ref(false);
 const normalizing = ref(false);

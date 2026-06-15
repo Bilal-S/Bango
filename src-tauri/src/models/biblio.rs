@@ -182,6 +182,44 @@ pub struct YearCount {
     pub count: i32,
 }
 
+/// One journal's article count for a single publication year.
+///
+/// `journal` carries the canonical `journal_index.journal_title` when
+/// `journal_index_id` is `Some`; otherwise it carries the normalized raw title
+/// (`UPPER(TRIM(articles.journal))`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalYearData {
+    pub journal: String,
+    pub year: i32,
+    pub count: i32,
+    /// FK → `journal_index.id`. `Some` → canonical match; `None` → raw fallback.
+    pub journal_index_id: Option<String>,
+}
+
+/// Full metadata + time-series for one journal. Loaded lazily by the timeline
+/// info card via `biblio_get_journal_info`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalInfo {
+    pub id: String,
+    pub journal_title: String,
+    pub issn: Option<String>,
+    pub eissn: Option<String>,
+    pub publisher_name: Option<String>,
+    pub publisher_address: Option<String>,
+    pub languages: Option<String>,
+    pub web_of_science_categories: Option<String>,
+    /// Number of included articles linked to this journal.
+    pub article_count: i32,
+    pub first_year: Option<i32>,
+    pub last_year: Option<i32>,
+    /// This journal's yearly included-article counts (ascending by year).
+    pub pubs_by_year: Vec<YearCount>,
+    /// SUM(num_cited) across included articles in this journal.
+    pub citations_total: i64,
+}
+
 /// KPI summary for the bibliometric dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -206,6 +244,9 @@ pub struct BiblioKpis {
     pub refs_by_year: Vec<YearCount>,
     /// Normalized citations by year — actual detail records where available, decay-distributed otherwise.
     pub citations_by_year: Vec<YearCount>,
+    /// Per-journal, per-year counts for the timeline stacked view. Grouped by
+    /// canonical `journal_title` when `journal_index_id` is set, else normalized raw title.
+    pub journal_distribution: Vec<JournalYearData>,
 }
 
 #[cfg(test)]
@@ -380,11 +421,42 @@ mod tests {
             avg_growth_rate: Some(5.5),
             refs_by_year: vec![],
             citations_by_year: vec![],
+            journal_distribution: vec![],
         };
         let json = serde_json::to_string(&kpis).unwrap();
         assert!(json.contains("\"includedCount\":100"));
         assert!(json.contains("\"uniqueAuthors\":42"));
         assert!(json.contains("\"avgGrowthRate\":5.5"));
+        assert!(json.contains("\"journalDistribution\":[]"));
+    }
+
+    // ── JournalYearData ────────────────────────────────────────
+
+    #[test]
+    fn journal_year_data_camel_case_serialization() {
+        let jyd = JournalYearData {
+            journal: "Nature".into(),
+            year: 2024,
+            count: 5,
+            journal_index_id: Some("j-1".into()),
+        };
+        let json = serde_json::to_string(&jyd).unwrap();
+        assert!(json.contains("\"journalIndexId\":\"j-1\""));
+        assert!(json.contains("\"journal\":\"Nature\""));
+        let back: JournalYearData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, jyd);
+    }
+
+    #[test]
+    fn journal_year_data_null_index_id_serializes_as_null() {
+        let jyd = JournalYearData {
+            journal: "RAW TITLE".into(),
+            year: 2020,
+            count: 1,
+            journal_index_id: None,
+        };
+        let json = serde_json::to_string(&jyd).unwrap();
+        assert!(json.contains("\"journalIndexId\":null"));
     }
 
     // ── YearCount ──────────────────────────────────────────────
