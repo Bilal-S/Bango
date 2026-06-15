@@ -2,11 +2,13 @@
 import { ref, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { save } from '@tauri-apps/plugin-dialog';
 import VueApexCharts from 'vue3-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import { useAuthorRankings } from '@/composables/use-author-rankings';
 import type { AuthorRank } from '@/composables/use-author-rankings';
 import { useAuthorDetail } from '@/composables/use-author-detail';
+import { tauriCommand } from '@/composables/use-tauri-command';
 
 const router = useRouter();
 const { rankings, kpis, loading, error } = useAuthorRankings();
@@ -15,6 +17,9 @@ const { detail, loading: detailLoading, getAuthorDetail, clear } = useAuthorDeta
 // ── Sidebar state ────────────────────────────────────────────────
 const sidebarCollapsed = ref(false);
 const minPapers = ref(1);
+const topN = ref(0); // 0 = All
+const yearFrom = ref<number | null>(null);
+const yearTo = ref<number | null>(null);
 
 // ── Sortable table columns ───────────────────────────────────────
 interface SortColumn {
@@ -41,7 +46,7 @@ const sortColumn = ref<keyof AuthorRank>('estimatedHIndex');
 const sortDirection = ref<'asc' | 'desc'>('desc');
 
 function toggleSort(col: SortColumn): void {
-  if (col.key === 'index') return; // rank # column is not sortable
+  if (col.key === 'index') return;
   if (sortColumn.value === col.key) {
     sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
   } else {
@@ -60,34 +65,57 @@ function isSortActive(col: SortColumn): boolean {
   return col.key !== 'index' && sortColumn.value === col.key;
 }
 
+// ── Year range bounds ────────────────────────────────────────────
+const yearMin = computed(() => kpis.value?.yearFrom ?? 2000);
+const yearMax = computed(() => kpis.value?.yearTo ?? new Date().getFullYear());
+
+// Initialize year range once KPIs load
+watch(
+  () => kpis.value,
+  (k) => {
+    if (k && yearFrom.value === null && k.yearFrom !== null) {
+      yearFrom.value = k.yearFrom;
+      yearTo.value = k.yearTo;
+    }
+  },
+  { immediate: true }
+);
+
 // ── Filtered + sorted rankings ───────────────────────────────────
-const filteredRankings = computed(() => {
-  const list = rankings.value.filter((a) => a.articleCount >= minPapers.value);
+const sortedRankings = computed(() => {
   const col = sortColumn.value;
   const dir = sortDirection.value === 'asc' ? 1 : -1;
-  return [...list].sort((a, b) => {
+  return [...rankings.value].sort((a, b) => {
     const av = a[col];
     const bv = b[col];
-    if (typeof av === 'number' && typeof bv === 'number') {
-      return (av - bv) * dir;
-    }
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
     return String(av).localeCompare(String(bv)) * dir;
   });
+});
+
+const filteredRankings = computed(() => {
+  let list = sortedRankings.value.filter((a) => a.articleCount >= minPapers.value);
+  // Year range filter (on avgYear)
+  if (yearFrom.value !== null && yearTo.value !== null) {
+    list = list.filter((a) => {
+      if (a.avgYear === null) return false;
+      return a.avgYear >= yearFrom.value! && a.avgYear <= yearTo.value!;
+    });
+  }
+  // Top-N
+  if (topN.value > 0) list = list.slice(0, topN.value);
+  return list;
 });
 
 // ── Selected author for detail panel ─────────────────────────────
 const selectedAuthorId = ref<string | null>(null);
 
 watch(selectedAuthorId, (id) => {
-  if (id) {
-    void getAuthorDetail(id);
-  } else {
-    clear();
-  }
+  if (id) void getAuthorDetail(id);
+  else clear();
 });
 
 function selectAuthor(author: AuthorRank): void {
-  // Toggle: clicking the same author closes the panel
   selectedAuthorId.value = selectedAuthorId.value === author.id ? null : author.id;
 }
 
@@ -95,14 +123,122 @@ function closeDetail(): void {
   selectedAuthorId.value = null;
 }
 
+// ── Scatter chart (Productivity vs Impact) ───────────────────────
+const scatterRef = ref<InstanceType<typeof VueApexCharts> | null>(null);
+
+const scatterSeries = computed(() => {
+  return [
+    {
+      name: 'Authors',
+      data: filteredRankings.value.map((a) => ({
+        x: a.articleCount,
+        y: a.totalCitations,
+        z: Math.max(1, a.estimatedHIndex),
+        author: a,
+      })),
+    },
+  ];
+});
+
+function avgYearColor(year: number | null): string {
+  if (year === null) return '#94a3b8';
+  const min = yearMin.value;
+  const max = yearMax.value;
+  const range = Math.max(1, max - min);
+  const t = Math.min(1, Math.max(0, (year - min) / range));
+  // Blue (senior) → Red (early-career)
+  const r = Math.round(59 + (239 - 59) * t);
+  const g = Math.round(130 + (68 - 130) * t);
+  const b = Math.round(246 + (68 - 246) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+const scatterOptions = computed<ApexOptions>(() => ({
+  chart: {
+    type: 'bubble',
+    height: 320,
+    toolbar: { show: false },
+    animations: { enabled: false },
+    fontFamily: 'inherit',
+    background: 'transparent',
+    zoom: { enabled: true },
+    events: {
+      dataPointSelection: (_e: unknown, _c: unknown, opts?: { dataPointIndex?: number }) => {
+        const idx = opts?.dataPointIndex;
+        if (idx === undefined || idx < 0 || idx >= filteredRankings.value.length) return;
+        selectAuthor(filteredRankings.value[idx]!);
+      },
+    },
+  },
+  dataLabels: { enabled: false },
+  fill: { opacity: 0.7 },
+  colors: filteredRankings.value.map((a) => avgYearColor(a.avgYear)),
+  xaxis: {
+    title: { text: 'Papers', style: { color: '#475569', fontSize: '12px' } },
+    labels: { style: { colors: '#94a3b8', fontSize: '10px' } },
+    tickAmount: 6,
+  },
+  yaxis: {
+    title: { text: 'Citations', style: { color: '#475569', fontSize: '12px' } },
+    labels: { style: { colors: '#94a3b8', fontSize: '10px' } },
+  },
+  tooltip: {
+    theme: 'light',
+    custom: ({ dataPointIndex }: { dataPointIndex?: number }) => {
+      const idx = dataPointIndex;
+      if (idx === undefined || idx < 0 || idx >= filteredRankings.value.length) return '';
+      const a = filteredRankings.value[idx]!;
+      return `<div class="apexcharts-tooltip-title">${a.displayName}</div>
+        <div class="apexcharts-tooltip-series-group">
+          Papers: <strong>${a.articleCount}</strong> · Citations: <strong>${a.totalCitations}</strong><br/>
+          h: <strong>${a.estimatedHIndex}</strong> · i10: <strong>${a.i10Index}</strong><br/>
+          ${a.primaryInstitution ?? ''}
+        </div>`;
+    },
+  },
+  grid: { borderColor: '#f1f5f9', strokeDashArray: 3 },
+  plotOptions: {
+    bubble: { minBubbleRadius: 4, maxBubbleRadius: 20 },
+  },
+  legend: { show: false },
+}));
+
+const scatterKey = computed(
+  () =>
+    `${sortColumn.value}-${sortDirection.value}-${minPapers.value}-${yearFrom.value}-${yearTo.value}-${topN.value}`
+);
+
+// ── Draggable splitter between scatter and table ─────────────────
+const scatterHeight = ref(320);
+const isDragging = ref(false);
+
+function onSplitterMouseDown(e: MouseEvent): void {
+  e.preventDefault();
+  isDragging.value = true;
+  const startY = e.clientY;
+  const startHeight = scatterHeight.value;
+  const container = (e.currentTarget as HTMLElement).closest('.authors-main');
+  const maxHeight = (container?.clientHeight ?? 600) - 120;
+
+  function onMove(ev: MouseEvent): void {
+    const delta = ev.clientY - startY;
+    scatterHeight.value = Math.max(60, Math.min(maxHeight, startHeight + delta));
+  }
+  function onUp(): void {
+    isDragging.value = false;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+function onSplitterDoubleClick(): void {
+  scatterHeight.value = scatterHeight.value <= 60 ? 320 : 60;
+}
+
 // ── Google Scholar external lookup ───────────────────────────────
-/**
- * Build a Google Scholar advanced-search URL scoped to a single author.
- * Uses `as_sauthors` (author field) with a quoted exact-match phrase.
- */
 function scholarAuthorUrl(displayName: string): string {
-  // encodeURIComponent encodes space as %20, but Google Scholar query params
-  // expect spaces as + (form-encoding). Replace after encoding.
   const author = encodeURIComponent(`"${displayName}"`).replace(/%20/g, '+');
   return (
     'https://scholar.google.com/scholar' +
@@ -113,12 +249,11 @@ function scholarAuthorUrl(displayName: string): string {
 }
 
 function openScholar(displayName: string): void {
-  openUrl(scholarAuthorUrl(displayName)).catch((err) => {
-    console.error('Failed to open Google Scholar link:', err);
-  });
+  openUrl(scholarAuthorUrl(displayName)).catch((err) =>
+    console.error('Failed to open Google Scholar link:', err)
+  );
 }
 
-/** Build the Scholar tooltip without inline quotes (avoids Vue template parsing issues). */
 function scholarTooltip(displayName: string): string {
   return `Search ${displayName} on Google Scholar`;
 }
@@ -135,9 +270,7 @@ function cellValue(author: AuthorRank, col: SortColumn, index: number): string |
   if (col.key === 'index') return index + 1;
   const val = author[col.key];
   if (val === null || val === undefined) return '—';
-  if (typeof val === 'number') {
-    return col.label === 'Avg/Paper' ? val.toFixed(1) : val;
-  }
+  if (typeof val === 'number') return col.label === 'Avg/Paper' ? val.toFixed(1) : val;
   return val;
 }
 
@@ -151,9 +284,7 @@ const sparklineOptions = computed<ApexOptions>(() => ({
     fontFamily: 'inherit',
     background: 'transparent',
   },
-  plotOptions: {
-    bar: { columnWidth: '70%', borderRadius: 3, borderRadiusApplication: 'end' },
-  },
+  plotOptions: { bar: { columnWidth: '70%', borderRadius: 3, borderRadiusApplication: 'end' } },
   colors: ['#10b981'],
   dataLabels: { enabled: false },
   xaxis: {
@@ -170,6 +301,45 @@ const sparklineOptions = computed<ApexOptions>(() => ({
 const sparklineSeries = computed(() => [
   { name: 'Publications', data: detail.value?.pubsByYear.map((p) => p.count) ?? [] },
 ]);
+
+// ── Export (PNG / SVG) ───────────────────────────────────────────
+async function handleExportPng(): Promise<void> {
+  try {
+    const chart = scatterRef.value;
+    if (!chart) return;
+    const result = await (
+      chart as unknown as { dataURI: () => Promise<{ imgURI: string }> }
+    ).dataURI();
+    const filePath = await save({
+      defaultPath: 'author-scatter.png',
+      filters: [{ name: 'PNG Image', extensions: ['png'] }],
+    });
+    if (!filePath) return;
+    const base64 = result.imgURI.split(',')[1] ?? '';
+    await tauriCommand('write_base64_to_file', { path: filePath, data: base64 });
+  } catch (e) {
+    console.error('PNG export failed', e);
+  }
+}
+
+async function handleExportSvg(): Promise<void> {
+  try {
+    const chartEl = document.querySelector('.scatter-chart svg');
+    if (!chartEl) return;
+    const clone = chartEl.cloneNode(true) as SVGElement;
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    const svgString = new XMLSerializer().serializeToString(clone);
+    const filePath = await save({
+      defaultPath: 'author-scatter.svg',
+      filters: [{ name: 'SVG', extensions: ['svg'] }],
+    });
+    if (!filePath) return;
+    await tauriCommand('write_text_to_file', { path: filePath, content: svgString });
+  } catch (e) {
+    console.error('SVG export failed', e);
+  }
+}
 </script>
 
 <template>
@@ -184,7 +354,7 @@ const sparklineSeries = computed(() => [
     <div v-else-if="!loading && rankings.length === 0" class="authors-empty">
       <span class="material-symbols-outlined authors-empty__icon">inbox</span>
       <p class="authors-empty__text">
-        No included articles yet. Include articles to see author productivity rankings.
+        No articles yet. Import and review articles to see author productivity rankings.
       </p>
     </div>
 
@@ -193,10 +363,73 @@ const sparklineSeries = computed(() => [
       <div class="sidebar-wrapper" :class="sidebarCollapsed ? 'w-0' : 'w-64'">
         <aside class="sidebar" :class="{ 'sidebar--collapsed': sidebarCollapsed }">
           <div class="sidebar__scroll">
-            <!-- Min papers filter -->
+            <!-- Min papers -->
             <section class="sidebar__section">
               <h4 class="sidebar__label">Min Papers</h4>
               <input v-model.number="minPapers" type="number" min="1" class="sidebar__input" />
+            </section>
+
+            <!-- Top N -->
+            <section class="sidebar__section">
+              <h4 class="sidebar__label">Top N</h4>
+              <select v-model.number="topN" class="sidebar__select">
+                <option :value="0">All</option>
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+              </select>
+            </section>
+
+            <!-- Year range -->
+            <section v-if="yearFrom !== null && yearTo !== null" class="sidebar__section">
+              <h4 class="sidebar__label">Avg Year Range</h4>
+              <div class="dual-range-block">
+                <div class="dual-range-header">
+                  <span class="dual-range-value">{{ yearFrom }} – {{ yearTo }}</span>
+                  <button
+                    v-if="yearFrom !== yearMin || yearTo !== yearMax"
+                    class="dual-range-reset"
+                    @click="
+                      yearFrom = yearMin;
+                      yearTo = yearMax;
+                    "
+                  >
+                    Reset
+                  </button>
+                </div>
+                <div class="dual-range-track">
+                  <div class="dual-range-bar-bg"></div>
+                  <div
+                    class="dual-range-bar-active"
+                    :style="{
+                      left: `${((yearFrom - yearMin) / Math.max(1, yearMax - yearMin)) * 100}%`,
+                      right: `${((yearMax - yearTo) / Math.max(1, yearMax - yearMin)) * 100}%`,
+                    }"
+                  ></div>
+                  <input
+                    v-model.number="yearFrom"
+                    type="range"
+                    :min="yearMin"
+                    :max="yearMax"
+                    step="1"
+                    class="dual-range-input"
+                    aria-label="Year from"
+                  />
+                  <input
+                    v-model.number="yearTo"
+                    type="range"
+                    :min="yearMin"
+                    :max="yearMax"
+                    step="1"
+                    class="dual-range-input"
+                    aria-label="Year to"
+                  />
+                </div>
+                <div class="dual-range-endpoints">
+                  <span>{{ yearMin }}</span>
+                  <span>{{ yearMax }}</span>
+                </div>
+              </div>
             </section>
 
             <!-- Stats -->
@@ -206,6 +439,19 @@ const sparklineSeries = computed(() => [
               <p class="sidebar__stat-line">{{ rankings.length }} total authors</p>
             </section>
 
+            <!-- Export -->
+            <section class="sidebar__section">
+              <h4 class="sidebar__label">Export</h4>
+              <button class="sidebar__export" @click="handleExportPng">
+                <span class="material-symbols-outlined">image</span>
+                Export PNG
+              </button>
+              <button class="sidebar__export" @click="handleExportSvg">
+                <span class="material-symbols-outlined">share</span>
+                Export SVG
+              </button>
+            </section>
+
             <!-- Legend -->
             <section class="sidebar__section">
               <h4 class="sidebar__label">Metrics</h4>
@@ -213,6 +459,9 @@ const sparklineSeries = computed(() => [
               <p class="sidebar__hint"><strong>i10:</strong> papers with ≥ 10 citations.</p>
               <p class="sidebar__hint">
                 <strong>g-index:</strong> top-n papers have ≥ n² cumulative citations (est.).
+              </p>
+              <p class="sidebar__hint" style="margin-top: 0.5rem">
+                <strong>Scatter:</strong> X=Papers, Y=Citations, Size=h, Color=avg year
               </p>
             </section>
           </div>
@@ -279,109 +528,136 @@ const sparklineSeries = computed(() => [
           <span class="material-symbols-outlined chart-spin">progress_activity</span>
         </div>
 
-        <!-- Ranking table -->
-        <div v-else-if="filteredRankings.length > 0" class="table-container">
-          <table class="ranking-table">
-            <thead>
-              <tr>
-                <th
-                  v-for="col in columns"
-                  :key="col.key"
-                  :class="[
-                    'ranking-table__th',
-                    {
-                      'ranking-table__th--num': col.numeric,
-                      'ranking-table__th--sortable': col.key !== 'index',
-                      'ranking-table__th--active': isSortActive(col),
-                    },
-                  ]"
-                  @click="toggleSort(col)"
-                >
-                  <span class="ranking-table__th-label">{{ col.label }}</span>
-                  <span
-                    v-if="col.key !== 'index'"
-                    class="material-symbols-outlined ranking-table__sort-icon"
-                    :class="{ 'ranking-table__sort-icon--active': isSortActive(col) }"
-                  >
-                    {{ getSortIcon(col) }}
-                  </span>
-                </th>
-                <th class="ranking-table__th ranking-table__th--num">Institution</th>
-                <th class="ranking-table__th">Scholar</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(author, idx) in filteredRankings"
-                :key="author.id"
-                :class="[
-                  'ranking-table__row',
-                  { 'ranking-table__row--active': selectedAuthorId === author.id },
-                ]"
-                @click="selectAuthor(author)"
-              >
-                <td
-                  v-for="col in columns"
-                  :key="col.key"
-                  :class="[
-                    'ranking-table__td',
-                    {
-                      'ranking-table__td--num': col.numeric,
-                      'ranking-table__td--name': col.key === 'displayName',
-                    },
-                  ]"
-                >
-                  <template v-if="col.key === 'displayName'">
-                    <span class="ranking-table__author" :title="author.displayName">
-                      {{ author.displayName }}
-                    </span>
-                  </template>
-                  <template v-else>
-                    {{ cellValue(author, col, idx) }}
-                  </template>
-                </td>
-                <td class="ranking-table__td ranking-table__td--inst">
-                  <span :title="author.primaryInstitution ?? ''">
-                    {{ author.primaryInstitution ?? '—' }}
-                  </span>
-                </td>
-                <td class="ranking-table__td ranking-table__td--icon" @click.stop>
-                  <button
-                    class="scholar-btn"
-                    :title="scholarTooltip(author.displayName)"
-                    :aria-label="scholarTooltip(author.displayName)"
-                    @click="openScholar(author.displayName)"
-                  >
-                    <span class="material-symbols-outlined">open_in_new</span>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <template v-else>
+          <!-- Scatter plot -->
+          <div
+            v-if="filteredRankings.length > 0"
+            class="scatter-section"
+            :style="{ height: scatterHeight + 'px' }"
+          >
+            <h6 class="scatter-title">Productivity vs Impact</h6>
+            <VueApexCharts
+              :key="scatterKey"
+              ref="scatterRef"
+              type="bubble"
+              :options="scatterOptions"
+              :series="scatterSeries"
+              :height="Math.max(40, scatterHeight - 24)"
+              class="scatter-chart"
+            />
+          </div>
 
-        <!-- No results after filter -->
-        <div v-else class="chart-empty">
-          <span class="material-symbols-outlined">filter_alt_off</span>
-          <p>No authors match the current filters.</p>
-        </div>
+          <!-- Draggable splitter -->
+          <div
+            v-if="filteredRankings.length > 0"
+            class="splitter"
+            :class="{ 'splitter--dragging': isDragging }"
+            title="Drag to resize · Double-click to toggle"
+            @mousedown="onSplitterMouseDown"
+            @dblclick="onSplitterDoubleClick"
+          >
+            <span class="splitter__grip"></span>
+          </div>
+
+          <!-- Ranking table -->
+          <div v-if="filteredRankings.length > 0" class="table-container">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th
+                    v-for="col in columns"
+                    :key="col.key"
+                    :class="[
+                      'ranking-table__th',
+                      {
+                        'ranking-table__th--num': col.numeric,
+                        'ranking-table__th--sortable': col.key !== 'index',
+                        'ranking-table__th--active': isSortActive(col),
+                      },
+                    ]"
+                    @click="toggleSort(col)"
+                  >
+                    <span class="ranking-table__th-label">{{ col.label }}</span>
+                    <span
+                      v-if="col.key !== 'index'"
+                      class="material-symbols-outlined ranking-table__sort-icon"
+                      :class="{ 'ranking-table__sort-icon--active': isSortActive(col) }"
+                    >
+                      {{ getSortIcon(col) }}
+                    </span>
+                  </th>
+                  <th class="ranking-table__th ranking-table__th--num">Institution</th>
+                  <th class="ranking-table__th">Scholar</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="(author, idx) in filteredRankings"
+                  :key="author.id"
+                  :class="[
+                    'ranking-table__row',
+                    { 'ranking-table__row--active': selectedAuthorId === author.id },
+                  ]"
+                  @click="selectAuthor(author)"
+                >
+                  <td
+                    v-for="col in columns"
+                    :key="col.key"
+                    :class="[
+                      'ranking-table__td',
+                      {
+                        'ranking-table__td--num': col.numeric,
+                        'ranking-table__td--name': col.key === 'displayName',
+                      },
+                    ]"
+                  >
+                    <template v-if="col.key === 'displayName'">
+                      <span class="ranking-table__author" :title="author.displayName">
+                        {{ author.displayName }}
+                      </span>
+                    </template>
+                    <template v-else>
+                      {{ cellValue(author, col, idx) }}
+                    </template>
+                  </td>
+                  <td class="ranking-table__td ranking-table__td--inst">
+                    <span :title="author.primaryInstitution ?? ''">
+                      {{ author.primaryInstitution ?? '—' }}
+                    </span>
+                  </td>
+                  <td class="ranking-table__td ranking-table__td--icon" @click.stop>
+                    <button
+                      class="scholar-btn"
+                      :title="scholarTooltip(author.displayName)"
+                      :aria-label="scholarTooltip(author.displayName)"
+                      @click="openScholar(author.displayName)"
+                    >
+                      <span class="material-symbols-outlined">open_in_new</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- No results after filter -->
+          <div v-else class="chart-empty">
+            <span class="material-symbols-outlined">filter_alt_off</span>
+            <p>No authors match the current filters.</p>
+          </div>
+        </template>
       </main>
 
       <!-- ── Author Detail Panel ────────────────────────────── -->
       <Transition name="detail-slide">
         <aside v-if="selectedAuthorId" class="author-panel">
-          <!-- Loading -->
           <div v-if="detailLoading" class="author-panel__loading">
             <span class="material-symbols-outlined author-panel__spin">progress_activity</span>
           </div>
-
-          <!-- Error -->
           <div v-else-if="!detail" class="author-panel__error">
             <span class="material-symbols-outlined">error</span>
             <p>Failed to load author details.</p>
           </div>
-
-          <!-- Detail content -->
           <template v-else>
             <header class="author-panel__header">
               <div class="author-panel__title-row">
@@ -401,9 +677,7 @@ const sparklineSeries = computed(() => [
                 </button>
               </div>
             </header>
-
             <div class="author-panel__body">
-              <!-- Metrics grid -->
               <div class="author-panel__metrics">
                 <div class="author-panel__metric">
                   <span class="author-panel__metric-value">{{ detail.rank.articleCount }}</span>
@@ -444,8 +718,6 @@ const sparklineSeries = computed(() => [
                   <span class="author-panel__metric-label">Avg/Paper</span>
                 </div>
               </div>
-
-              <!-- Productivity sparkline -->
               <div v-if="detail.pubsByYear.length > 0" class="author-panel__sparkline">
                 <h5 class="author-panel__subhead">Publications by Year</h5>
                 <VueApexCharts
@@ -456,8 +728,6 @@ const sparklineSeries = computed(() => [
                   class="author-panel__chart"
                 />
               </div>
-
-              <!-- Institutions -->
               <div v-if="detail.institutions.length > 0" class="author-panel__section">
                 <h5 class="author-panel__subhead">Institutions</h5>
                 <ul class="author-panel__inst-list">
@@ -469,8 +739,6 @@ const sparklineSeries = computed(() => [
                   </li>
                 </ul>
               </div>
-
-              <!-- Top collaborators -->
               <div v-if="detail.topCollaborators.length > 0" class="author-panel__section">
                 <h5 class="author-panel__subhead">Top Collaborators</h5>
                 <ul class="author-panel__collab-list">
@@ -484,8 +752,6 @@ const sparklineSeries = computed(() => [
                   </li>
                 </ul>
               </div>
-
-              <!-- Recent papers -->
               <div v-if="detail.recentPapers.length > 0" class="author-panel__section">
                 <h5 class="author-panel__subhead">Recent Papers</h5>
                 <ul class="author-panel__paper-list">
@@ -501,8 +767,6 @@ const sparklineSeries = computed(() => [
                   </li>
                 </ul>
               </div>
-
-              <!-- Deep link button -->
               <button
                 class="author-panel__view-btn"
                 @click="viewAuthorArticles(detail.rank.displayName)"
@@ -533,7 +797,6 @@ const sparklineSeries = computed(() => [
   flex-shrink: 0;
   transition: width 0.3s;
 }
-
 .sidebar {
   height: 100%;
   width: 16rem;
@@ -545,27 +808,23 @@ const sparklineSeries = computed(() => [
     width 0.3s,
     padding 0.3s;
 }
-
 .sidebar--collapsed {
   width: 0;
   padding: 0;
   overflow: hidden;
   opacity: 0;
 }
-
 .sidebar__scroll {
   padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
 }
-
 .sidebar__section {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
-
 .sidebar__label {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -574,7 +833,6 @@ const sparklineSeries = computed(() => [
   color: #94a3b8;
   margin: 0;
 }
-
 .sidebar__select,
 .sidebar__input {
   padding: 0.375rem 0.5rem;
@@ -587,24 +845,126 @@ const sparklineSeries = computed(() => [
   outline: none;
   transition: border-color 0.15s;
 }
-
 .sidebar__select:focus,
 .sidebar__input:focus {
   border-color: var(--color-primary, #4f46e5);
   box-shadow: 0 0 0 1px var(--color-primary, #4f46e5);
 }
-
 .sidebar__stat-line {
   font-size: 0.75rem;
   color: #475569;
   margin: 0;
 }
-
 .sidebar__hint {
   font-size: 0.6875rem;
   color: #64748b;
   line-height: 1.5;
   margin: 0;
+}
+.sidebar__export {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-family: inherit;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.sidebar__export:hover {
+  border-color: var(--color-primary, #4f46e5);
+  color: var(--color-primary, #4f46e5);
+}
+.sidebar__export .material-symbols-outlined {
+  font-size: 0.875rem;
+}
+
+/* Dual-handle year range */
+.dual-range-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.dual-range-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.dual-range-value {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+}
+.dual-range-reset {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.6875rem;
+  color: var(--color-primary, #4f46e5);
+  padding: 0;
+}
+.dual-range-track {
+  position: relative;
+  height: 24px;
+}
+.dual-range-bar-bg {
+  position: absolute;
+  top: 10px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 2px;
+}
+.dual-range-bar-active {
+  position: absolute;
+  top: 10px;
+  height: 4px;
+  background: var(--color-primary, #4f46e5);
+  border-radius: 2px;
+}
+.dual-range-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  outline: none;
+}
+.dual-range-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--color-primary, #4f46e5);
+  cursor: pointer;
+}
+.dual-range-input::-moz-range-thumb {
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--color-primary, #4f46e5);
+  cursor: pointer;
+}
+.dual-range-endpoints {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.625rem;
+  color: #94a3b8;
 }
 
 .drawer-handle {
@@ -622,11 +982,9 @@ const sparklineSeries = computed(() => [
   justify-content: center;
   z-index: 10;
 }
-
 .drawer-handle:hover {
   background: #cbd5e1;
 }
-
 .drawer-handle-grip {
   width: 2px;
   height: 16px;
@@ -650,20 +1008,18 @@ const sparklineSeries = computed(() => [
   padding: 1rem;
   border-bottom: 1px solid #f1f5f9;
   background: #fafbfc;
+  flex-shrink: 0;
 }
-
 @media (max-width: 1024px) {
   .kpi-strip {
     grid-template-columns: repeat(3, 1fr);
   }
 }
-
 @media (max-width: 640px) {
   .kpi-strip {
     grid-template-columns: repeat(2, 1fr);
   }
 }
-
 .kpi-mini {
   display: flex;
   flex-direction: column;
@@ -673,14 +1029,12 @@ const sparklineSeries = computed(() => [
   border: 1px solid #f1f5f9;
   border-radius: 0.375rem;
 }
-
 .kpi-mini__value {
   font-size: 1.125rem;
   font-weight: 700;
   color: var(--color-primary, #4f46e5);
   line-height: 1.2;
 }
-
 .kpi-mini__label {
   font-size: 0.625rem;
   text-transform: uppercase;
@@ -702,25 +1056,21 @@ const sparklineSeries = computed(() => [
   color: #94a3b8;
   padding: 2rem;
 }
-
 .authors-empty__icon {
   font-size: 3rem;
   opacity: 0.5;
 }
-
 .authors-empty__text {
   font-size: 0.875rem;
   color: #64748b;
   margin: 0;
 }
-
 .chart-spin,
 .author-panel__spin {
   animation: authors-spin 1s linear infinite;
   font-size: 1.75rem;
   color: var(--color-primary, #4f46e5);
 }
-
 @keyframes authors-spin {
   from {
     transform: rotate(0deg);
@@ -730,19 +1080,77 @@ const sparklineSeries = computed(() => [
   }
 }
 
+/* ── Draggable splitter ─────────────────────────────────────── */
+.splitter {
+  height: 6px;
+  cursor: row-resize;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.15s;
+  user-select: none;
+  position: relative;
+  z-index: 10;
+}
+/* Invisible grab zone extends 4px above/below the 6px bar for easier dragging */
+.splitter::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+}
+.splitter:hover,
+.splitter--dragging {
+  background: #e2e8f0;
+}
+.splitter__grip {
+  width: 32px;
+  height: 2px;
+  background: #cbd5e1;
+  border-radius: 1px;
+  transition: background 0.15s;
+  pointer-events: none;
+}
+.splitter:hover .splitter__grip,
+.splitter--dragging .splitter__grip {
+  background: var(--color-primary, #4f46e5);
+}
+
+/* ── Scatter plot ────────────────────────────────────────────── */
+.scatter-section {
+  padding: 0.5rem 1rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-bottom: 1px solid #f1f5f9;
+}
+.scatter-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #94a3b8;
+  margin: 0 0 0.25rem 0;
+}
+.scatter-chart {
+  width: 100%;
+}
+
 /* ── Ranking table ───────────────────────────────────────────── */
 .table-container {
   flex: 1;
   overflow: auto;
   padding: 0 1rem 1rem;
 }
-
 .ranking-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.8125rem;
 }
-
 .ranking-table__th {
   text-align: left;
   padding: 0.625rem 0.5rem;
@@ -757,83 +1165,67 @@ const sparklineSeries = computed(() => [
   top: 0;
   z-index: 1;
 }
-
 .ranking-table__th--num {
   text-align: right;
 }
-
 .ranking-table__th--sortable {
   cursor: pointer;
   user-select: none;
   transition: color 0.1s;
 }
-
 .ranking-table__th--sortable:hover {
   color: #1e293b;
 }
-
 .ranking-table__th--active {
   color: var(--color-primary, #4f46e5);
 }
-
 .ranking-table__th-label {
   display: inline-flex;
   align-items: center;
   gap: 2px;
 }
-
 .ranking-table__sort-icon {
   font-size: 14px !important;
   color: #cbd5e1;
   transition: color 0.1s;
 }
-
 .ranking-table__sort-icon--active {
   color: var(--color-primary, #4f46e5);
 }
-
 .ranking-table__row {
   cursor: pointer;
   transition: background-color 0.1s;
   border-bottom: 1px solid #f1f5f9;
 }
-
 .ranking-table__row:hover {
   background: #f8fafc;
 }
-
 .ranking-table__row--active {
   background: #eef2ff;
 }
-
 .ranking-table__row--active:hover {
   background: #e0e7ff;
 }
-
 .ranking-table__td {
   padding: 0.5rem;
   color: #1e293b;
   vertical-align: middle;
 }
-
 .ranking-table__td--num {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
 }
-
 .ranking-table__td--name {
   font-weight: 500;
   max-width: 200px;
 }
-
 .ranking-table__author {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .ranking-table__td--inst {
   font-size: 0.75rem;
   color: #64748b;
@@ -842,12 +1234,10 @@ const sparklineSeries = computed(() => [
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .ranking-table__td--icon {
   text-align: center;
   padding: 0.25rem;
 }
-
 .scholar-btn {
   background: none;
   border: none;
@@ -860,12 +1250,10 @@ const sparklineSeries = computed(() => [
     background-color 0.15s,
     color 0.15s;
 }
-
 .scholar-btn:hover {
   background: #f1f5f9;
   color: var(--color-primary, #4f46e5);
 }
-
 .scholar-btn .material-symbols-outlined {
   font-size: 1rem;
 }
@@ -882,7 +1270,6 @@ const sparklineSeries = computed(() => [
   flex-direction: column;
   overflow: hidden;
 }
-
 .author-panel__loading,
 .author-panel__error {
   display: flex;
@@ -894,7 +1281,6 @@ const sparklineSeries = computed(() => [
   color: #94a3b8;
   flex: 1;
 }
-
 .author-panel__header {
   display: flex;
   align-items: center;
@@ -902,7 +1288,6 @@ const sparklineSeries = computed(() => [
   border-bottom: 1px solid #f1f5f9;
   flex-shrink: 0;
 }
-
 .author-panel__title-row {
   display: flex;
   align-items: center;
@@ -910,7 +1295,6 @@ const sparklineSeries = computed(() => [
   flex: 1;
   min-width: 0;
 }
-
 .author-panel__title {
   font-size: 0.9375rem;
   font-weight: 600;
@@ -921,7 +1305,6 @@ const sparklineSeries = computed(() => [
   white-space: nowrap;
   flex: 1;
 }
-
 .author-panel__scholar,
 .author-panel__close {
   background: none;
@@ -936,18 +1319,15 @@ const sparklineSeries = computed(() => [
     color 0.15s;
   flex-shrink: 0;
 }
-
 .author-panel__scholar:hover,
 .author-panel__close:hover {
   background: #f1f5f9;
   color: var(--color-primary, #4f46e5);
 }
-
 .author-panel__scholar .material-symbols-outlined,
 .author-panel__close .material-symbols-outlined {
   font-size: 1.125rem;
 }
-
 .author-panel__body {
   flex: 1;
   overflow-y: auto;
@@ -956,13 +1336,11 @@ const sparklineSeries = computed(() => [
   flex-direction: column;
   gap: 1.25rem;
 }
-
 .author-panel__metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.5rem;
 }
-
 .author-panel__metric {
   background: #f8fafc;
   border-radius: 0.375rem;
@@ -972,14 +1350,12 @@ const sparklineSeries = computed(() => [
   flex-direction: column;
   gap: 0.125rem;
 }
-
 .author-panel__metric-value {
   font-size: 1rem;
   font-weight: 700;
   color: var(--color-primary, #4f46e5);
   line-height: 1.1;
 }
-
 .author-panel__metric-label {
   font-size: 0.5625rem;
   text-transform: uppercase;
@@ -987,7 +1363,6 @@ const sparklineSeries = computed(() => [
   color: #94a3b8;
   font-weight: 600;
 }
-
 .author-panel__subhead {
   font-size: 0.6875rem;
   font-weight: 600;
@@ -996,13 +1371,11 @@ const sparklineSeries = computed(() => [
   color: #94a3b8;
   margin: 0 0 0.5rem 0;
 }
-
 .author-panel__section {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
-
 .author-panel__inst-list,
 .author-panel__collab-list,
 .author-panel__paper-list {
@@ -1013,7 +1386,6 @@ const sparklineSeries = computed(() => [
   flex-direction: column;
   gap: 0.375rem;
 }
-
 .author-panel__inst,
 .author-panel__collab,
 .author-panel__paper {
@@ -1023,40 +1395,33 @@ const sparklineSeries = computed(() => [
   flex-direction: column;
   gap: 0.125rem;
 }
-
 .author-panel__inst-name {
   font-weight: 500;
   color: #1e293b;
 }
-
 .author-panel__inst-loc {
   font-size: 0.6875rem;
   color: #64748b;
 }
-
 .author-panel__collab {
   flex-direction: row;
   justify-content: space-between;
   align-items: baseline;
 }
-
 .author-panel__collab-count {
   font-size: 0.6875rem;
   color: var(--color-primary, #4f46e5);
   font-weight: 600;
 }
-
 .author-panel__paper-title {
   font-weight: 500;
   color: #1e293b;
   line-height: 1.4;
 }
-
 .author-panel__paper-meta {
   font-size: 0.6875rem;
   color: #64748b;
 }
-
 .author-panel__view-btn {
   display: inline-flex;
   align-items: center;
@@ -1074,23 +1439,20 @@ const sparklineSeries = computed(() => [
   transition: opacity 0.15s;
   margin-top: auto;
 }
-
 .author-panel__view-btn:hover {
   opacity: 0.9;
 }
-
 .author-panel__view-btn .material-symbols-outlined {
   font-size: 1.125rem;
 }
 
-/* Slide transition (matches journal-info-card.vue) */
+/* Slide transition */
 .detail-slide-enter-active,
 .detail-slide-leave-active {
   transition:
     transform 0.25s ease,
     opacity 0.25s ease;
 }
-
 .detail-slide-enter-from,
 .detail-slide-leave-to {
   transform: translateX(100%);
