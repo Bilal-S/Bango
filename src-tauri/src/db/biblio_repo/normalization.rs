@@ -103,12 +103,14 @@ pub fn normalize_terms_from_articles(conn: &Connection) -> Result<usize, AppErro
     for (article_id, keywords, title, abstract_text) in &rows {
         let mut terms: Vec<(String, TermType, TermSource)> = Vec::new();
 
-        // Extract keywords from metadata
+        // Extract keywords from metadata.
+        // `articles.keywords` is stored as a JSON array (e.g.
+        // `["Allura Red", "tartrazine"]`), so we must parse JSON before
+        // falling back to `;`/`,` delimiter splitting. See `split_keywords`.
         if let Some(kw) = keywords {
-            for k in kw.split(';').chain(kw.split(',')) {
-                let trimmed = k.trim();
-                if !trimmed.is_empty() {
-                    terms.push((trimmed.to_string(), TermType::Keyword, TermSource::Metadata));
+            for k in crate::biblio::normalizer::split_keywords(kw) {
+                if !k.is_empty() {
+                    terms.push((k, TermType::Keyword, TermSource::Metadata));
                 }
             }
         }

@@ -258,6 +258,78 @@ pub fn normalize_term(term: &str) -> String {
     stem_phrase(&normalized)
 }
 
+/// Split a keywords string into individual keywords.
+///
+/// Handles common storage formats:
+/// - JSON array (the canonical storage form in the `articles.keywords` column):
+///   `["Allura Red", "tartrazine"]`
+/// - Semicolon-delimited: `Allura Red; tartrazine`
+/// - Comma-delimited: `Allura Red, tartrazine`
+///
+/// Strips empty entries and trims whitespace. Falls back to delimiter-based
+/// splitting when the input is not a valid JSON array.
+pub fn split_keywords(keywords_str: &str) -> Vec<String> {
+    let trimmed = keywords_str.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    // ── JSON array detection ──────────────────────────────────────
+    // The `articles.keywords` column is a JSON array of strings (written via
+    // `serde_json::to_string`). Splitting it on `,` would produce broken
+    // fragments like `["Allura Red"` — so parse JSON first.
+    if trimmed.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Some(items) = arr.as_array() {
+                let kws: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| {
+                        let s = item.as_str()?;
+                        let t = s.trim().to_string();
+                        if t.is_empty() {
+                            None
+                        } else {
+                            Some(t)
+                        }
+                    })
+                    .collect();
+                return kws;
+            }
+        }
+        // JSON parse failed — fall through to delimiter-based splitting
+    }
+
+    // ── Delimiter-based fallback (RIS/plain-text) ─────────────────
+    keywords_str
+        .split(';')
+        .flat_map(|s| s.split(','))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Sanitize a raw term for storage in `biblio_terms.raw_term`.
+///
+/// Strips brackets, quotes, and stray JSON artifacts so the stored display
+/// value contains only the human-readable word(s). Defense-in-depth against
+/// malformed input — the canonical cleaning happens in `split_keywords`.
+pub fn sanitize_raw_term(term: &str) -> String {
+    let trimmed = term.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Remove brackets, double/single quotes anywhere in the string.
+    let cleaned: String =
+        trimmed.chars().filter(|&c| c != '[' && c != ']' && c != '"' && c != '\'').collect();
+    // Strip leading/trailing punctuation that may remain after quote removal
+    // (e.g., a leading `"` consumed by filter leaves a trailing `,`).
+    let stripped = cleaned
+        .trim_matches(|c: char| c.is_whitespace() || c == ',' || c == '.' || c == ';' || c == ':')
+        .to_string();
+    // Collapse internal whitespace
+    collapse_whitespace(&stripped)
+}
+
 /// Deduplicate a list of terms by their normalized form.
 /// Returns unique terms preserving first-encountered order.
 pub fn dedup_terms(terms: &[String]) -> Vec<String> {
@@ -969,5 +1041,121 @@ mod tests {
         assert_eq!(aff.country.as_deref(), Some("USA"));
         assert_eq!(aff.city.as_deref(), Some("Boston"));
         assert_eq!(aff.institution.as_deref(), Some("Harvard University"));
+    }
+
+    // ── split_keywords (JSON-aware) ──────────────────────────────
+
+    #[test]
+    fn test_split_keywords_json_array() {
+        // This is the canonical storage form in `articles.keywords`.
+        let result = split_keywords(r#"["Allura Red", "tartrazine"]"#);
+        assert_eq!(result, vec!["Allura Red", "tartrazine"]);
+    }
+
+    #[test]
+    fn test_split_keywords_json_single() {
+        let result = split_keywords(r#"["unicorns"]"#);
+        assert_eq!(result, vec!["unicorns"]);
+    }
+
+    #[test]
+    fn test_split_keywords_json_empty_array() {
+        let result = split_keywords("[]");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_split_keywords_json_with_empty_strings() {
+        let result = split_keywords(r#"["", "real", ""]"#);
+        assert_eq!(result, vec!["real"]);
+    }
+
+    #[test]
+    fn test_split_keywords_does_not_produce_broken_fragments() {
+        // Regression for the original bug: splitting on `,` produced
+        // `["Allura Red"` and `"tartrazine"]`.
+        let result = split_keywords(r#"["Allura Red", "tartrazine"]"#);
+        assert!(!result.iter().any(|k| k.contains('[') || k.contains(']')));
+        assert!(!result.iter().any(|k| k.contains('"')));
+    }
+
+    #[test]
+    fn test_split_keywords_semicolon_delimited() {
+        let result = split_keywords("Allura Red; tartrazine; erythrosine");
+        assert_eq!(result, vec!["Allura Red", "tartrazine", "erythrosine"]);
+    }
+
+    #[test]
+    fn test_split_keywords_comma_delimited() {
+        let result = split_keywords("Allura Red, tartrazine, erythrosine");
+        assert_eq!(result, vec!["Allura Red", "tartrazine", "erythrosine"]);
+    }
+
+    #[test]
+    fn test_split_keywords_mixed_delimiters() {
+        let result = split_keywords("Allura Red; tartrazine, erythrosine");
+        assert_eq!(result, vec!["Allura Red", "tartrazine", "erythrosine"]);
+    }
+
+    #[test]
+    fn test_split_keywords_empty() {
+        assert!(split_keywords("").is_empty());
+        assert!(split_keywords("   ").is_empty());
+    }
+
+    #[test]
+    fn test_split_keywords_trailing_semicolon() {
+        let result = split_keywords("Allura Red;");
+        assert_eq!(result, vec!["Allura Red"]);
+    }
+
+    #[test]
+    fn test_split_keywords_single_keyword() {
+        let result = split_keywords("machine learning");
+        assert_eq!(result, vec!["machine learning"]);
+    }
+
+    // ── sanitize_raw_term ────────────────────────────────────────
+
+    #[test]
+    fn test_sanitize_raw_term_clean() {
+        // Already-clean input passes through.
+        assert_eq!(sanitize_raw_term("Allura Red"), "Allura Red");
+        assert_eq!(sanitize_raw_term("machine learning"), "machine learning");
+    }
+
+    #[test]
+    fn test_sanitize_raw_term_strips_brackets_and_quotes() {
+        // Simulates the broken fragments the bug used to produce.
+        assert_eq!(sanitize_raw_term(r#"["Allura Red""#), "Allura Red");
+        assert_eq!(sanitize_raw_term(r#""tartrazine"]"#), "tartrazine");
+        assert_eq!(sanitize_raw_term(r#""quoted""#), "quoted");
+        assert_eq!(sanitize_raw_term(r#"'single'"#), "single");
+    }
+
+    #[test]
+    fn test_sanitize_raw_term_strips_trailing_comma() {
+        // Simulates the comma that remains after the closing `"` is removed.
+        assert_eq!(sanitize_raw_term(r#"Allura Red,"#), "Allura Red");
+    }
+
+    #[test]
+    fn test_sanitize_raw_term_collapses_whitespace() {
+        assert_eq!(sanitize_raw_term("  Allura   Red  "), "Allura Red");
+    }
+
+    #[test]
+    fn test_sanitize_raw_term_empty() {
+        assert_eq!(sanitize_raw_term(""), "");
+        assert_eq!(sanitize_raw_term("   "), "");
+        assert_eq!(sanitize_raw_term("\"\""), "");
+    }
+
+    #[test]
+    fn test_sanitize_raw_term_preserves_internal_punctuation() {
+        // Internal hyphens / periods are kept (only brackets, quotes, and
+        // leading/trailing punctuation are stripped).
+        assert_eq!(sanitize_raw_term("co-variate"), "co-variate");
+        assert_eq!(sanitize_raw_term("Dr. Strange"), "Dr. Strange");
     }
 }

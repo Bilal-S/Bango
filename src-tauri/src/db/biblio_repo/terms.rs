@@ -98,11 +98,17 @@ pub fn save_article_terms(
     terms: &[(String, TermType, TermSource)],
 ) -> Result<(), AppError> {
     for (raw_term, term_type, source) in terms {
-        let normalized = crate::biblio::normalizer::normalize_term(raw_term);
+        // Defense-in-depth: sanitize the raw term before storage so no broken
+        // JSON fragments (e.g. `["Allura Red"`) leak into `biblio_terms.raw_term`.
+        let sanitized = crate::biblio::normalizer::sanitize_raw_term(raw_term);
+        if sanitized.is_empty() {
+            continue;
+        }
+        let normalized = crate::biblio::normalizer::normalize_term(&sanitized);
         if normalized.is_empty() {
             continue;
         }
-        let term_id = upsert_term(conn, raw_term, &normalized, term_type, source)?;
+        let term_id = upsert_term(conn, &sanitized, &normalized, term_type, source)?;
         let _ = link_article_term(conn, article_id, &term_id);
     }
     Ok(())
