@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import VueApexCharts from 'vue3-apexcharts';
 import type { ApexOptions, ApexYAxis } from 'apexcharts';
@@ -134,6 +134,32 @@ const OTHER_COLOR = '#c7c4d8';
 
 const xCategories = computed(() => filteredPubs.value.map((yc) => String(yc.year)));
 
+/**
+ * Shorten journal names for legend display by stripping common leading
+ * articles/prefixes (JOURNAL OF, ZEITSCHRIFT FUR, etc.), then truncating
+ * to 25 characters. The full name is preserved for tooltips and data lookups.
+ */
+function normalizeJournalName(name: string): string {
+  const cleaned = name
+    .replace(/^(THE|A|AN)\s+/i, '')
+    .replace(
+      /^(JOURNAL OF|ZEITSCHRIFT FUR|REVISTA DE|ANNALES DE|ARCHIVES OF|BULLETIN OF|PROCEEDINGS OF|INTERNATIONAL JOURNAL OF|ACTA)\s+/i,
+      ''
+    )
+    .trim();
+  return cleaned.length > 25 ? cleaned.slice(0, 25) + '…' : cleaned;
+}
+
+/** Map from normalized (legend) name → full journal name, for tooltip lookup. */
+const journalFullNameMap = computed(() => {
+  const m = new Map<string, string>();
+  for (const j of topJournals.value) {
+    m.set(normalizeJournalName(j), j);
+  }
+  m.set('Other', 'Other');
+  return m;
+});
+
 /** Build the series array depending on chart mode. */
 const chartSeries = computed<ApexMultiAxisSeries[]>(() => {
   const years = xCategories.value;
@@ -141,7 +167,7 @@ const chartSeries = computed<ApexMultiAxisSeries[]>(() => {
   if (state.chartMode.value === 'stacked') {
     // One bar series per visible journal (aligned by year), plus "Other".
     const series: ApexMultiAxisSeries[] = visibleJournals.value.map((j, idx) => ({
-      name: j,
+      name: normalizeJournalName(j),
       type: 'bar',
       data: years.map((_, i) => {
         const yc = filteredPubs.value[i];
@@ -249,6 +275,7 @@ const chartOptions = computed<ApexOptions>(() => {
       background: 'transparent',
       events: {
         click: handleDataPointClick as unknown as (...args: unknown[]) => void,
+        legendClick: handleLegendClick as unknown as (...args: unknown[]) => void,
       },
     },
     plotOptions: {
@@ -298,11 +325,42 @@ const chartOptions = computed<ApexOptions>(() => {
       position: 'bottom',
       fontSize: '11px',
       markers: { size: 5 },
+      onItemHover: {
+        highlightDataSeries: true,
+      },
+      onItemClick: {
+        toggleDataSeries: false,
+      },
     },
     tooltip: {
-      shared: true,
+      shared: !isStacked,
       intersect: false,
       theme: 'light',
+      ...(isStacked
+        ? {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            custom: ({ series: s, dataPointIndex, w }: any) => {
+              const year = xCategories.value[dataPointIndex] ?? '';
+              let rows = '';
+              s.forEach((vals: number[], si: number) => {
+                const val = vals[dataPointIndex] ?? 0;
+                if (val > 0) {
+                  const seriesName = w.config.series[si]?.name ?? '';
+                  const fullName = journalFullNameMap.value.get(seriesName) ?? seriesName;
+                  rows += `<div class="apexcharts-tooltip-series-group"><span class="apexcharts-tooltip-marker"></span><span class="apexcharts-tooltip-text"><span class="apexcharts-tooltip-y-group"><span class="apexcharts-tooltip-text-y-label">${fullName}</span><span class="apexcharts-tooltip-text-y-value">: <strong>${val}</strong></span></span></span></div>`;
+                }
+              });
+              return `<div class="apexcharts-tooltip-title">${year}</div>${rows}`;
+            },
+          }
+        : {
+            y: {
+              formatter: (val: number) => {
+                if (val === undefined) return '';
+                return String(val);
+              },
+            },
+          }),
     },
     grid: {
       borderColor: '#f1f5f9',
@@ -333,7 +391,7 @@ const journalTotals = computed(() => {
       totals.set(journal, (totals.get(journal) ?? 0) + count);
     }
   }
-  return [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  return [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
 });
 
 const journalChartSeries = computed(() => [
@@ -356,7 +414,6 @@ const journalChartOptions = computed<ApexOptions>(() => ({
     bar: {
       horizontal: true,
       borderRadius: 3,
-      barHeight: '60%',
       distributed: true,
     },
   },
@@ -398,6 +455,22 @@ const journalChartOptions = computed<ApexOptions>(() => ({
 }));
 
 const journalChartKey = computed(() => `journals-${yearFrom.value}-${yearTo.value}`);
+
+// After chart renders, inject `title` attributes on legend items so hovering
+// shows the full journal name as a native browser tooltip.
+watch(chartKey, () => {
+  void nextTick(() => {
+    const legendItems = document.querySelectorAll('.chart-primary .apexcharts-legend-series');
+    const allSeries = (chartOptions.value.series ?? []) as { name?: string }[];
+    legendItems.forEach((el, idx) => {
+      const seriesName = allSeries[idx]?.name ?? '';
+      const fullName = journalFullNameMap.value.get(seriesName);
+      if (fullName && fullName !== seriesName) {
+        el.setAttribute('title', fullName);
+      }
+    });
+  });
+});
 
 // ── Year Detail Panel data ─────────────────────────────────────
 interface JournalRow {
@@ -445,6 +518,28 @@ function handleDataPointClick(
   const entry = filteredPubs.value[idx];
   if (!entry) return;
   state.selectedYear.value = state.selectedYear.value === entry.year ? null : entry.year;
+}
+
+// ── Legend click → open Journal Info Card ──────────────────────
+// When user clicks a legend item in stacked mode, open the journal info card
+// for that journal (in addition to the default toggle behavior).
+function handleLegendClick(_chart: unknown, seriesIndex?: number): void {
+  if (seriesIndex === undefined || seriesIndex < 0) return;
+  // Get the series name (normalized) and look up the full journal name
+  const allSeries = (chartOptions.value.series ?? []) as { name?: string }[];
+  const clickedSeries = allSeries[seriesIndex];
+  if (!clickedSeries || !clickedSeries.name || clickedSeries.name === 'Other') return;
+  const fullName = journalFullNameMap.value.get(clickedSeries.name);
+  if (!fullName) return;
+  // Find the journalIndexId from the journal data
+  for (const inner of journalByYearIndex.value.values()) {
+    const entry = inner.get(fullName);
+    if (entry) {
+      selectedJournalKey.value = fullName;
+      selectedJournalIndexId.value = entry.journalIndexId;
+      return;
+    }
+  }
 }
 
 // ── Journal Info Card selection ────────────────────────────────
@@ -1307,7 +1402,7 @@ onUnmounted(() => {
 
 .chart-secondary {
   flex: 0 0 auto;
-  height: 12rem;
+  height: 16rem;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
