@@ -90,9 +90,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
   - **`src-tauri/src/db/biblio_repo/`** — bibliometric repos (`kpis`, `authors`,
-    `networks`, `terms`, `institutions`, `normalization`). Contract: `get_biblio_kpis`
-    returns `BiblioKpis` including `journal_distribution: Vec<JournalYearData>` (canonical
-    titles via `journal_index` LEFT JOIN, fallback `UPPER(TRIM(journal))`).
+    `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
+    `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
+    Vec<JournalYearData>` (canonical titles via `journal_index` LEFT JOIN, fallback
+    `UPPER(TRIM(journal))`). `productivity.rs` exposes `get_author_rankings`,
+    `get_author_detail`, `get_author_productivity_kpis` — author-level h-index, i10,
+    g-index, first/last/solo counts scoped to included articles.
   - **`src-tauri/src/db/journal_repo.rs`** — journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.
@@ -100,8 +103,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `biblio_repo_tests.rs` (in-memory SQLite via `run_migrations`).
 - **`src/`** — Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/views/`** — page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
-    parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`) render in its
-    `<router-view>`. `biblio-timeline.vue` is the Publication Timeline view.
+    parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)
+    render in its `<router-view>`. `biblio-timeline.vue` is the Publication Timeline view;
+    `biblio-authors.vue` is the Author Productivity Ranking view (sortable table + slide-over
+    detail panel + Google Scholar external lookup icons).
   - **`src/components/`** — reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command.
   - **`src/composables/`** — Vue composables. `use-bibliometrics.ts` (shared KPI

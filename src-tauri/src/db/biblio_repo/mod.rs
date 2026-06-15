@@ -3,6 +3,7 @@ pub mod institutions;
 pub mod kpis;
 pub mod networks;
 pub mod normalization;
+pub mod productivity;
 pub mod terms;
 
 // Re-export terms functions:
@@ -31,6 +32,9 @@ pub use networks::{
 
 // Re-export kpis functions:
 pub use kpis::{get_biblio_kpis, get_journal_year_data};
+
+// Re-export productivity functions:
+pub use productivity::{get_author_detail, get_author_productivity_kpis, get_author_rankings};
 
 // Re-export normalization functions:
 pub use normalization::{

@@ -228,6 +228,9 @@ pub fn run() {
             commands::biblio_cmd::biblio_get_author_pubs_by_year,
             commands::biblio_cmd::biblio_get_citation_network,
             commands::biblio_cmd::biblio_get_keyword_network,
+            commands::biblio_cmd::biblio_get_author_rankings,
+            commands::biblio_cmd::biblio_get_author_detail,
+            commands::biblio_cmd::biblio_get_author_productivity_kpis,
             commands::trends::check_trends_url,
         ]);
 

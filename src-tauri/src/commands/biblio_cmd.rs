@@ -2,7 +2,8 @@ use crate::db::biblio_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::biblio::{
-    BiblioAuthor, BiblioInstitution, BiblioKpis, BiblioStatus, BiblioTerm, YearCount,
+    AuthorDetail, AuthorProductivityKpis, AuthorRank, BiblioAuthor, BiblioInstitution, BiblioKpis,
+    BiblioStatus, BiblioTerm, YearCount,
 };
 // BiblioTerm is re-exported through biblio_repo — no direct use here
 use serde::Serialize;
@@ -259,4 +260,38 @@ pub async fn biblio_get_keyword_network(
         min_occurrences.unwrap_or(1),
         min_cooccurrence.unwrap_or(1),
     )
+}
+
+#[tauri::command]
+pub async fn biblio_get_author_rankings(
+    db_state: tauri::State<'_, DbState>,
+) -> Result<Vec<AuthorRank>, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    biblio_repo::get_author_rankings(&conn)
+}
+
+#[tauri::command]
+pub async fn biblio_get_author_detail(
+    db_state: tauri::State<'_, DbState>,
+    author_id: String,
+) -> Result<AuthorDetail, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    biblio_repo::get_author_detail(&conn, &author_id)
+}
+
+#[tauri::command]
+pub async fn biblio_get_author_productivity_kpis(
+    db_state: tauri::State<'_, DbState>,
+) -> Result<AuthorProductivityKpis, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    biblio_repo::get_author_productivity_kpis(&conn)
 }

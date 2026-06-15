@@ -114,6 +114,7 @@ onMounted(() => {
     typeof route.query.yearFrom === 'string' ? Number(route.query.yearFrom) : undefined;
   const yearTo = typeof route.query.yearTo === 'string' ? Number(route.query.yearTo) : undefined;
   const journal = typeof route.query.journal === 'string' ? route.query.journal : undefined;
+  const author = typeof route.query.author === 'string' ? route.query.author : undefined;
   // filterCollapsed=1 → keep the filter panel collapsed (filters still applied)
   const filterCollapsed = route.query.filterCollapsed === '1';
 
@@ -123,7 +124,8 @@ onMounted(() => {
     labelsParam ||
     (yearFrom !== undefined && Number.isFinite(yearFrom)) ||
     (yearTo !== undefined && Number.isFinite(yearTo)) ||
-    journal
+    journal ||
+    author
   ) {
     void applyRouteParams({
       status,
@@ -132,6 +134,7 @@ onMounted(() => {
       yearFrom,
       yearTo,
       journal,
+      author,
       filterCollapsed,
     });
   } else {
@@ -139,12 +142,22 @@ onMounted(() => {
   }
 });
 
-/** Whether this article-list was opened via a deep-link from the Timeline view. */
-const fromTimeline = computed(() => route.query.from === 'timeline');
+/** Whether this article-list was opened via a deep-link from a bibliometric view. */
+const fromBiblio = computed(
+  () => route.query.from === 'timeline' || route.query.from === 'authors'
+);
 
-/** Return to the Timeline view (state preserved via useTimelineState singleton). */
-function backToTimeline(): void {
-  void router.push({ name: 'timeline' });
+/** The biblio view name to return to ('timeline' or 'authors'). */
+const biblioReturnName = computed(() => (route.query.from === 'timeline' ? 'timeline' : 'authors'));
+
+/** The human-readable label for the back button. */
+const biblioReturnLabel = computed(() =>
+  route.query.from === 'timeline' ? 'Back to Timeline' : 'Back to Authors'
+);
+
+/** Return to the originating bibliometric view. */
+function backToBiblio(): void {
+  void router.push({ name: biblioReturnName.value });
 }
 
 const selectedId = computed(() => selectedArticle.value?.id ?? null);
@@ -398,13 +411,13 @@ async function handleBatchScrapeRefs(): Promise<void> {
       <!-- Header -->
       <div class="mb-6 flex items-center gap-3">
         <button
-          v-if="fromTimeline"
+          v-if="fromBiblio"
           class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg cursor-pointer transition-colors"
-          title="Return to the Publication Timeline (state preserved)"
-          @click="backToTimeline"
+          title="Return to the bibliometric view"
+          @click="backToBiblio"
         >
           <span class="material-symbols-outlined text-sm">arrow_back</span>
-          Back to Timeline
+          {{ biblioReturnLabel }}
         </button>
         <h1 class="page-title">Articles</h1>
       </div>

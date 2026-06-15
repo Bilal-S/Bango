@@ -157,6 +157,7 @@ const activeModuleLabel = computed(() => {
   if (route.name === 'citations') return 'Citation Network';
   if (route.name === 'keywords') return 'Keyword Co-Occurrence';
   if (route.name === 'timeline') return 'Publication Timeline';
+  if (route.name === 'authors') return 'Author Productivity';
   return '';
 });
 
@@ -175,6 +176,10 @@ function navigateToModule(mod: AnalysisModule): void {
   }
   if (mod.id === 'publication-timeline') {
     router.push({ name: 'timeline' });
+    return;
+  }
+  if (mod.id === 'author-productivity') {
+    router.push({ name: 'authors' });
     return;
   }
   // Other modules remain as placeholders for future implementation

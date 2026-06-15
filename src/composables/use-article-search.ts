@@ -498,6 +498,7 @@ export function useArticleSearch() {
     yearFrom?: number;
     yearTo?: number;
     journal?: string;
+    author?: string;
     /** When true, keep the filter panel collapsed even though filters are applied. */
     filterCollapsed?: boolean;
   }): Promise<void> {
@@ -543,6 +544,11 @@ export function useArticleSearch() {
     if (params.journal) {
       filter.journal = params.journal;
       query.journal = params.journal;
+      if (showPanel) showFilters.value = true;
+    }
+    if (params.author) {
+      filter.authorText = params.author;
+      query.author = params.author;
       if (showPanel) showFilters.value = true;
     }
     await search();

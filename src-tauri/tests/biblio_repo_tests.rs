@@ -2,11 +2,12 @@ use rusqlite::Connection;
 
 use bango_lib::db::biblio_repo::{
     build_coauthor_edges, clear_all_biblio, clear_regeneratable_biblio, compute_author_metrics,
-    compute_h_index, delete_network, get_all_authors, get_all_terms, get_authors_for_article,
-    get_biblio_kpis, get_biblio_status, get_coauthor_network_json, get_journal_year_data,
-    get_keyword_network_json, get_terms_for_article, link_article_author, link_article_term,
-    load_network, load_network_edges, load_network_nodes, save_article_terms, save_network,
-    upsert_author, upsert_institution, upsert_term,
+    compute_h_index, delete_network, get_all_authors, get_all_terms, get_author_detail,
+    get_author_productivity_kpis, get_author_rankings, get_authors_for_article, get_biblio_kpis,
+    get_biblio_status, get_coauthor_network_json, get_journal_year_data, get_keyword_network_json,
+    get_terms_for_article, link_article_author, link_article_term, load_network,
+    load_network_edges, load_network_nodes, save_article_terms, save_network, upsert_author,
+    upsert_institution, upsert_term,
 };
 use bango_lib::db::migration::run_migrations;
 use bango_lib::models::biblio::{
@@ -1080,4 +1081,221 @@ fn get_journal_info_returns_metadata_and_aggregates() {
     assert_eq!(info.pubs_by_year.len(), 2);
     assert_eq!(info.pubs_by_year[0], YearCount { year: 2019, count: 1 });
     assert_eq!(info.pubs_by_year[1], YearCount { year: 2021, count: 1 });
+}
+
+// ── Author Productivity tests ───────────────────────────────
+
+/// Helper: seed an article with authors + citation count, then
+/// link the authors to it. Returns the created author IDs in order.
+fn seed_productivity_article(
+    conn: &Connection,
+    article_id: &str,
+    pub_year: Option<i32>,
+    num_cited: Option<i32>,
+    authors: &[(&str, &str)], // (normalized, display)
+) -> Vec<String> {
+    seed_productivity_article_with_status(
+        conn, article_id, "included", pub_year, num_cited, authors,
+    )
+}
+
+/// Helper: seed an article with a custom status (working/included/rejected/duplicate).
+fn seed_productivity_article_with_status(
+    conn: &Connection,
+    article_id: &str,
+    status: &str,
+    pub_year: Option<i32>,
+    num_cited: Option<i32>,
+    authors: &[(&str, &str)], // (normalized, display)
+) -> Vec<String> {
+    conn.execute(
+        "INSERT INTO articles (id, title, abstract_text, authors, status, publication_year, num_cited) \
+         VALUES (?1, 'T', 'Abs', ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            article_id,
+            authors.iter().map(|(_, d)| *d).collect::<Vec<_>>().join("; "),
+            status,
+            pub_year,
+            num_cited
+        ],
+    )
+    .unwrap();
+
+    let mut ids = Vec::new();
+    for (order, (norm, display)) in authors.iter().enumerate() {
+        let id = upsert_author(conn, norm, display).unwrap();
+        link_article_author(conn, article_id, &id, order as i32, Some(display), None).unwrap();
+        ids.push(id);
+    }
+    ids
+}
+
+#[test]
+fn productivity_rankings_empty_db() {
+    let conn = test_db();
+    let rankings = get_author_rankings(&conn).unwrap();
+    assert!(rankings.is_empty(), "no articles → no rankings");
+}
+
+#[test]
+fn productivity_rankings_basic_metrics() {
+    let conn = test_db();
+    // 3 articles, 2 authors each
+    seed_productivity_article(
+        &conn,
+        "a1",
+        Some(2020),
+        Some(10),
+        &[("smith j", "Smith, J."), ("doe a", "Doe, A.")],
+    );
+    seed_productivity_article(
+        &conn,
+        "a2",
+        Some(2021),
+        Some(20),
+        &[("smith j", "Smith, J."), ("doe a", "Doe, A.")],
+    );
+    seed_productivity_article(
+        &conn,
+        "a3",
+        Some(2022),
+        Some(30),
+        &[("smith j", "Smith, J."), ("lee k", "Lee, K.")],
+    );
+
+    compute_author_metrics(&conn).unwrap();
+    let rankings = get_author_rankings(&conn).unwrap();
+    assert_eq!(rankings.len(), 3, "3 distinct authors");
+
+    // Smith has 3 articles (first author each), 60 total citations
+    let smith = rankings.iter().find(|r| r.display_name == "Smith, J.").unwrap();
+    assert_eq!(smith.article_count, 3);
+    assert_eq!(smith.first_author_count, 3);
+    assert_eq!(smith.total_citations, 60);
+    assert_eq!(smith.last_author_count, 0, "Smith is always order 0, never last");
+
+    // Lee has 1 article, 30 citations
+    let lee = rankings.iter().find(|r| r.display_name == "Lee, K.").unwrap();
+    assert_eq!(lee.article_count, 1);
+    assert_eq!(lee.total_citations, 30);
+    assert_eq!(lee.last_author_count, 1, "Lee is order 1 (last) in a3");
+}
+
+#[test]
+fn productivity_rankings_i10_index() {
+    let conn = test_db();
+    // Papers cited [15, 12, 8, 5] → i10 = 2 (only 15 and 12 ≥ 10)
+    seed_productivity_article(&conn, "a1", Some(2020), Some(15), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a2", Some(2020), Some(12), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a3", Some(2020), Some(8), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a4", Some(2020), Some(5), &[("smith j", "Smith")]);
+
+    compute_author_metrics(&conn).unwrap();
+    let rankings = get_author_rankings(&conn).unwrap();
+    let smith = &rankings[0];
+    assert_eq!(smith.i10_index, 2, "2 papers have ≥ 10 citations");
+}
+
+#[test]
+fn productivity_rankings_g_index() {
+    let conn = test_db();
+    // Papers cited [10, 9, 8, 7] → sorted desc: [10, 9, 8, 7], cumulative: [10, 19, 27, 34]
+    // n=1: 10 ≥ 1 ✓; n=2: 19 ≥ 4 ✓; n=3: 27 ≥ 9 ✓; n=4: 34 ≥ 16 ✓ → g=4
+    seed_productivity_article(&conn, "a1", Some(2020), Some(7), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a2", Some(2020), Some(8), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a3", Some(2020), Some(9), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a4", Some(2020), Some(10), &[("smith j", "Smith")]);
+
+    compute_author_metrics(&conn).unwrap();
+    let rankings = get_author_rankings(&conn).unwrap();
+    let smith = &rankings[0];
+    assert_eq!(smith.g_index, 4, "g=4 for [10,9,8,7] (34 cumulative ≥ 16)");
+}
+
+#[test]
+fn productivity_rankings_g_index_caps_at_citation_deficit() {
+    let conn = test_db();
+    // Papers cited [3, 2, 1] → sorted desc: [3, 2, 1], cumulative: [3, 5, 6]
+    // n=1: 3 ≥ 1 ✓; n=2: 5 ≥ 4 ✓; n=3: 6 < 9 ✗ → g=2
+    seed_productivity_article(&conn, "a1", Some(2020), Some(1), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a2", Some(2020), Some(2), &[("smith j", "Smith")]);
+    seed_productivity_article(&conn, "a3", Some(2020), Some(3), &[("smith j", "Smith")]);
+
+    compute_author_metrics(&conn).unwrap();
+    let rankings = get_author_rankings(&conn).unwrap();
+    let smith = &rankings[0];
+    assert_eq!(smith.g_index, 2, "g=2 for [3,2,1] (6 cumulative < 9)");
+}
+
+#[test]
+fn productivity_rankings_scope_excludes_duplicates_only() {
+    let conn = test_db();
+    // One included, one working, one rejected, one duplicate.
+    // Rankings should include working + included + rejected authors,
+    // but NOT the duplicate's author.
+    seed_productivity_article(&conn, "inc1", Some(2020), Some(5), &[("a", "A")]);
+    seed_productivity_article(&conn, "wk1", Some(2021), Some(3), &[("b", "B")]);
+    seed_productivity_article(&conn, "rej1", Some(2022), Some(1), &[("c", "C")]);
+    // Duplicate article — its author must NOT appear
+    conn.execute(
+        "INSERT INTO articles (id, title, abstract_text, authors, status) VALUES ('dup1', 'T', 'Abs', 'D', 'duplicate')",
+        [],
+    )
+    .unwrap();
+    let author_d = upsert_author(&conn, "d", "D").unwrap();
+    link_article_author(&conn, "dup1", &author_d, 0, Some("D"), None).unwrap();
+
+    compute_author_metrics(&conn).unwrap();
+    let rankings = get_author_rankings(&conn).unwrap();
+    assert_eq!(
+        rankings.len(),
+        3,
+        "working + included + rejected authors appear, duplicate excluded"
+    );
+    let names: Vec<&str> = rankings.iter().map(|r| r.display_name.as_str()).collect();
+    assert!(names.contains(&"A"), "included author present");
+    assert!(names.contains(&"B"), "working author present");
+    assert!(names.contains(&"C"), "rejected author present");
+    assert!(!names.contains(&"D"), "duplicate author excluded");
+}
+
+#[test]
+fn productivity_kpis_basic() {
+    let conn = test_db();
+    seed_productivity_article(&conn, "a1", Some(2020), Some(10), &[("a", "A")]);
+    seed_productivity_article(&conn, "a2", Some(2022), Some(20), &[("a", "A"), ("b", "B")]);
+    compute_author_metrics(&conn).unwrap();
+    build_coauthor_edges(&conn).unwrap();
+
+    let kpis = get_author_productivity_kpis(&conn).unwrap();
+    assert_eq!(kpis.total_authors, 2);
+    assert!(kpis.max_h_index >= 1);
+    assert_eq!(kpis.year_from, Some(2020));
+    assert_eq!(kpis.year_to, Some(2022));
+    assert!(kpis.total_collaborations >= 1, "A and B co-authored a2");
+}
+
+#[test]
+fn productivity_detail_lazy_load() {
+    let conn = test_db();
+    let author_ids = seed_productivity_article(
+        &conn,
+        "a1",
+        Some(2020),
+        Some(10),
+        &[("smith j", "Smith, J."), ("doe a", "Doe, A.")],
+    );
+    compute_author_metrics(&conn).unwrap();
+    build_coauthor_edges(&conn).unwrap();
+
+    let smith_id = &author_ids[0];
+    let detail = get_author_detail(&conn, smith_id).unwrap();
+
+    assert_eq!(detail.rank.display_name, "Smith, J.");
+    assert_eq!(detail.pubs_by_year.len(), 1);
+    assert!(!detail.recent_papers.is_empty(), "should have ≥ 1 recent paper");
+    assert_eq!(detail.recent_papers[0].title, "T");
+    // Collaborators: Doe A with 1 shared paper
+    assert_eq!(detail.top_collaborators.len(), 1);
+    assert_eq!(detail.top_collaborators[0].collaborator_name, "Doe, A.");
 }

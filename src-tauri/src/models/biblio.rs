@@ -249,6 +249,85 @@ pub struct BiblioKpis {
     pub journal_distribution: Vec<JournalYearData>,
 }
 
+// ── Author Productivity models ─────────────────────────────────
+
+/// Author ranking row — one per normalized author.
+/// Extends BiblioAuthor with derived metrics for the productivity view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorRank {
+    pub id: String,
+    pub display_name: String,
+    pub normalized_name: String,
+    pub article_count: i32,
+    pub first_author_count: i32,
+    pub last_author_count: i32,
+    pub solo_paper_count: i32,
+    pub total_citations: i64,
+    pub estimated_h_index: i32,
+    pub i10_index: i32,
+    pub g_index: i32,
+    pub avg_citations_per_paper: Option<f64>,
+    pub avg_year: Option<f64>,
+    pub years_active: Option<i32>,
+    pub productivity_rate: Option<f64>,
+    /// Papers published in the last 5 years.
+    pub recent_paper_count: i32,
+    /// Primary institution (most recent by publication_year), if linked.
+    pub primary_institution: Option<String>,
+}
+
+/// Full author profile for the detail panel (lazy-loaded per click).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorDetail {
+    pub rank: AuthorRank,
+    pub pubs_by_year: Vec<YearCount>,
+    pub institutions: Vec<BiblioInstitution>,
+    pub top_collaborators: Vec<AuthorCollaborator>,
+    pub recent_papers: Vec<AuthorPaper>,
+}
+
+/// A collaborator of the selected author, with co-authorship strength.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorCollaborator {
+    pub collaborator_id: String,
+    pub collaborator_name: String,
+    /// Number of shared papers (full counting).
+    pub shared_papers: i32,
+}
+
+/// A recent paper by the selected author (for the detail panel list).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorPaper {
+    pub article_id: String,
+    pub title: String,
+    pub publication_year: Option<i32>,
+    pub journal: Option<String>,
+    pub num_cited: Option<i64>,
+    pub author_order: i32,
+    pub doi: Option<String>,
+}
+
+/// Aggregate KPI stats for the productivity view header strip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorProductivityKpis {
+    pub total_authors: i32,
+    /// Sum of article_count across all authors (may exceed included articles — multi-author).
+    pub total_papers: i64,
+    pub avg_h_index: Option<f64>,
+    pub max_h_index: i32,
+    pub avg_citations: Option<f64>,
+    /// Distinct co-author pairs (edges in the co-authorship network).
+    pub total_collaborations: i64,
+    /// (min_year, max_year) span of included articles.
+    pub year_from: Option<i32>,
+    pub year_to: Option<i32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
