@@ -104,17 +104,3 @@ pub fn detect_browser() -> Result<BrowserInfo, BrowserError> {
         Err(BrowserError::NotFound)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_detect_browser_returns_result() {
-        // On CI or development machines, a browser should be available.
-        // This test just verifies the function doesn't panic and returns a
-        // proper Result.
-        let result = detect_browser();
-        assert!(result.is_ok() || matches!(result, Err(BrowserError::NotFound)));
-    }
-}

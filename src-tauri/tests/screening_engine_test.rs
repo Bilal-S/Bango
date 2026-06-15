@@ -2,8 +2,9 @@ use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::models::criterion::{Criterion, CriterionType, Priority};
 use bango_lib::screening::engine::{
-    augment_matched_from_reasoning, build_global_criterion_numbering, create_or_match_label,
-    create_or_match_tag, extract_json, process_screening_responses, ScreeningEngine,
+    augment_matched_from_reasoning, balance_braces, build_global_criterion_numbering,
+    create_or_match_label, create_or_match_tag, extract_json, process_screening_responses,
+    ScreeningEngine,
 };
 use rusqlite::Connection;
 
@@ -232,6 +233,220 @@ fn test_label_trimmed_to_30_chars() {
         .query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0))
         .unwrap();
     assert_eq!(name.len(), 30);
+}
+
+// ── balance_braces tests ──
+
+#[test]
+fn test_balance_braces_no_change_when_balanced() {
+    let json = r#"{"key": "value"}"#;
+    assert_eq!(balance_braces(json), json);
+}
+
+#[test]
+fn test_balance_braces_prepends_missing_open() {
+    let json = r#"  "key": "value"}"#;
+    let result = balance_braces(json);
+    assert_eq!(result, r#"{  "key": "value"}"#);
+}
+
+#[test]
+fn test_balance_braces_appends_missing_close() {
+    let json = r#"{"key": "value""#;
+    let result = balance_braces(json);
+    assert_eq!(result, r#"{"key": "value"}"#);
+}
+
+// ── extract_json: additional variants ──
+
+#[test]
+fn test_extract_json_plain_code_fence() {
+    let inner = r#"[{"decision":"include"}]"#;
+    let input = format!("```\n{inner}\n```");
+    assert_eq!(extract_json(&input), inner);
+}
+
+#[test]
+fn test_extract_json_missing_opening_brace_in_code_fence() {
+    // Gemini sometimes omits the opening `{` after stripping markdown fences
+    let inner = r#"  "field": "medicine",
+  "subfield": "public_health_nutrition"
+}"#;
+    let input = format!("```json\n{inner}\n```");
+    let result = extract_json(&input);
+    assert!(
+        result.starts_with('{'),
+        "Should prepend missing opening brace, got: {}",
+        &result[..result.len().min(80)]
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&result).is_ok(),
+        "Result should be valid JSON: {result}"
+    );
+}
+
+// ── process_screening_responses: additional coverage ──
+
+#[test]
+fn test_parse_batch_of_fifteen() {
+    let items: Vec<String> = (0..15)
+        .map(|i| {
+            format!(
+                r#"{{"decision":"{}","reasoning":"Article {}","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.{:02}}}"#,
+                if i % 2 == 0 { "include" } else { "exclude" },
+                i,
+                50 + i
+            )
+        })
+        .collect();
+    let raw = format!("[{}]", items.join(","));
+    let results = process_screening_responses(&raw).unwrap();
+    assert_eq!(results.len(), 15);
+    assert_eq!(results[0].decision, "include");
+    assert_eq!(results[1].decision, "exclude");
+    assert_eq!(results[14].decision, "include"); // 14 % 2 == 0 → include
+}
+
+#[test]
+fn test_parse_response_with_all_fields_populated() {
+    let raw = r#"[{
+        "decision": "include",
+        "reasoning": "Meets criteria c1 and c3.",
+        "matchedInclusionCriteria": ["c1", "c3"],
+        "matchedExclusionCriteria": ["c2"],
+        "suggestedTags": ["machine-learning", "healthcare", "systematic-review"],
+        "confidence": 0.95
+    }]"#;
+    let results = process_screening_responses(raw).unwrap();
+    assert_eq!(results[0].matched_inclusion_criteria, vec!["c1", "c3"]);
+    assert_eq!(results[0].matched_exclusion_criteria, vec!["c2"]);
+    assert_eq!(
+        results[0].suggested_tags,
+        vec!["machine-learning", "healthcare", "systematic-review"]
+    );
+}
+
+#[test]
+fn test_parse_response_with_empty_arrays() {
+    let raw = r#"[{
+        "decision": "exclude",
+        "reasoning": "No criteria matched",
+        "matchedInclusionCriteria": [],
+        "matchedExclusionCriteria": [],
+        "suggestedTags": [],
+        "confidence": 0.3
+    }]"#;
+    let results = process_screening_responses(raw).unwrap();
+    assert!(results[0].matched_inclusion_criteria.is_empty());
+    assert!(results[0].matched_exclusion_criteria.is_empty());
+    assert!(results[0].suggested_tags.is_empty());
+}
+
+#[test]
+fn test_parse_response_with_surrounding_text() {
+    // LLM sometimes wraps JSON in explanatory text - extract_json handles this
+    let raw = r#"Here are the screening results:
+[
+{"decision":"include","reasoning":"ok","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}
+]
+Hope this helps!"#;
+    let result = process_screening_responses(raw);
+    assert!(result.is_ok(), "Should extract JSON from surrounding text");
+    let responses = result.unwrap();
+    assert_eq!(responses.len(), 1);
+    assert_eq!(responses[0].decision, "include");
+}
+
+#[test]
+fn test_parse_missing_required_field_returns_error() {
+    let raw = r#"[{"decision":"include"}]"#;
+    let result = process_screening_responses(raw);
+    assert!(result.is_err(), "Missing fields should fail deserialization");
+}
+
+#[test]
+fn test_parse_extra_unknown_fields_ignored() {
+    let raw = r#"[{
+        "decision": "include",
+        "reasoning": "ok",
+        "matchedInclusionCriteria": [],
+        "matchedExclusionCriteria": [],
+        "suggestedTags": [],
+        "confidence": 0.9,
+        "extra_field": "should be ignored"
+    }]"#;
+    let results = process_screening_responses(raw).unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+// ── Response count mismatch validation ──
+
+#[test]
+fn test_response_count_mismatch_detected() {
+    // Simulate: 3 articles fetched, but LLM returns 2 results
+    let raw = r#"[
+        {"decision":"include","reasoning":"R1","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9},
+        {"decision":"exclude","reasoning":"R2","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.8}
+    ]"#;
+    let results = process_screening_responses(raw).unwrap();
+    let batch_len = 3;
+    assert_ne!(results.len(), batch_len, "Should detect mismatch: 2 results for 3 articles");
+}
+
+#[test]
+fn test_response_count_matches_batch() {
+    let raw = r#"[
+        {"decision":"include","reasoning":"R1","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9},
+        {"decision":"exclude","reasoning":"R2","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.8},
+        {"decision":"include","reasoning":"R3","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.7}
+    ]"#;
+    let results = process_screening_responses(raw).unwrap();
+    let batch_len = 3;
+    assert_eq!(results.len(), batch_len, "Count should match");
+}
+
+#[test]
+fn test_response_more_results_than_articles() {
+    // 1 article but 2 results → mismatch
+    let raw = r#"[
+        {"decision":"include","reasoning":"R1","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9},
+        {"decision":"exclude","reasoning":"R2","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.8}
+    ]"#;
+    let results = process_screening_responses(raw).unwrap();
+    let batch_len = 1;
+    assert_ne!(results.len(), batch_len, "Should detect: more results than articles");
+}
+
+// ── create_or_match_tag: additional edge cases ──
+
+#[test]
+fn test_tag_exactly_30_chars_not_trimmed() {
+    let conn = setup_test_db();
+    let article_id = "art-tag-exact";
+    insert_test_article(&conn, article_id);
+
+    let exact_tag = "123456789012345678901234567890"; // exactly 30 chars
+    assert_eq!(exact_tag.len(), 30);
+    create_or_match_tag(&conn, exact_tag, article_id).unwrap();
+
+    let name: String = conn
+        .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(name, exact_tag);
+}
+
+#[test]
+fn test_tag_short_name_unchanged() {
+    let conn = setup_test_db();
+    let article_id = "art-tag-short";
+    insert_test_article(&conn, article_id);
+
+    create_or_match_tag(&conn, "ml", article_id).unwrap();
+
+    let name: String = conn
+        .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(name, "ml");
 }
 
 // ── augment_matched_from_reasoning tests ──

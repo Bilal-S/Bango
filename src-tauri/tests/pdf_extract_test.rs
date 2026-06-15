@@ -45,3 +45,70 @@ fn extract_pdf_text_does_not_panic_on_expert_encoded_fonts() {
         }
     }
 }
+
+// ── Unit tests extracted from inline `#[cfg(test)] mod tests` ──
+// These cover the text-processing helpers (no PDF asset required).
+
+use bango_lib::utils::pdf_extract::{
+    extract_txt_text, is_page_number, normalize_line, remove_header_footer_lines, strip_abstract,
+    strip_references, truncate_to_word_limit,
+};
+
+#[test]
+fn test_strip_references() {
+    let text = "Introduction\nSome text here.\nMore content.\nAdditional body paragraph.\nFurther discussion.\n\nReferences\n1. Smith et al.\n2. Jones et al.";
+    let result = strip_references(text);
+    assert!(!result.contains("References"));
+    assert!(!result.contains("Smith"));
+    assert!(result.contains("Introduction"));
+}
+
+#[test]
+fn test_strip_abstract() {
+    let text =
+        "Title\n\nAbstract\nThis is the abstract text.\n\n1. Introduction\nThis is the intro.";
+    let result = strip_abstract(text);
+    assert!(!result.contains("abstract text"));
+    assert!(result.contains("Introduction"));
+    assert!(result.contains("intro"));
+}
+
+#[test]
+fn test_truncate_to_word_limit() {
+    let text = "one two three four five six";
+    let result = truncate_to_word_limit(text, 4);
+    assert_eq!(result, "one two three four");
+}
+
+#[test]
+fn test_is_page_number() {
+    assert!(is_page_number("3"));
+    assert!(is_page_number("page 42"));
+    assert!(is_page_number("- 7 -"));
+    assert!(!is_page_number("Introduction"));
+}
+
+#[test]
+fn test_normalize_line() {
+    assert_eq!(normalize_line("  Hello   World  "), "hello world");
+}
+
+#[test]
+fn test_remove_header_footer_lines() {
+    let text =
+        "Journal of Something\nIntroduction\nSome content\n3\nConclusion\nJournal of Something";
+    let hfs = vec!["journal of something".to_string(), "__PAGE_NUMBER__".to_string()];
+    let result = remove_header_footer_lines(text, &hfs);
+    assert!(!result.contains("Journal of Something"));
+    assert!(result.contains("Introduction"));
+    assert!(!result.contains("\n3\n"));
+}
+
+#[test]
+fn test_extract_txt_text() {
+    let content =
+        "Abstract\nThis is abstract.\n\nIntroduction\nBody text here.\n\nReferences\n[1] Author.";
+    let result = extract_txt_text(content);
+    assert!(result.contains("Body text"));
+    assert!(!result.contains("References"));
+}

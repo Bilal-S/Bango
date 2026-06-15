@@ -99,8 +99,13 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src-tauri/src/db/journal_repo.rs`** — journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.
-  - **`src-tauri/tests/`** — Rust integration tests. Repository/KPI tests live in
-    `biblio_repo_tests.rs` (in-memory SQLite via `run_migrations`).
+  - **`src-tauri/tests/`** — Rust integration tests. Inline `#[cfg(test)] mod tests`
+    blocks are extracted here to keep source files compact (helpers tested externally
+    are `pub`). Repository/KPI tests live in `biblio_repo_tests.rs` (in-memory SQLite
+    via `run_migrations`). Unit-test extractions: `biblio_normalizer_test.rs`,
+    `biblio_models_test.rs`, `bibtex_parser_test.rs`, `bibtex_converter_test.rs`,
+    `cr_parser_test.rs`, `doi_test.rs`, `n1_parser_test.rs`,
+    `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`.
 - **`src/`** — Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/views/`** — page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
     parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)

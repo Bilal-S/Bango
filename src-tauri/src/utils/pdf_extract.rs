@@ -276,12 +276,14 @@ fn decode_hex_string(hex: &str) -> String {
 }
 
 /// Normalize a line for comparison (lowercase, collapse whitespace).
-fn normalize_line(line: &str) -> String {
+#[must_use]
+pub fn normalize_line(line: &str) -> String {
     line.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Check if a normalized line is just a page number.
-fn is_page_number(line: &str) -> bool {
+#[must_use]
+pub fn is_page_number(line: &str) -> bool {
     let trimmed = line.trim();
     // Pure number
     if trimmed.parse::<u32>().is_ok() {
@@ -301,7 +303,8 @@ fn is_page_number(line: &str) -> bool {
 }
 
 /// Remove header/footer lines from the extracted text.
-fn remove_header_footer_lines(text: &str, header_footer_lines: &[String]) -> String {
+#[must_use]
+pub fn remove_header_footer_lines(text: &str, header_footer_lines: &[String]) -> String {
     if header_footer_lines.is_empty() {
         return text.to_string();
     }
@@ -336,7 +339,8 @@ fn remove_header_footer_lines(text: &str, header_footer_lines: &[String]) -> Str
 
 /// Strip the abstract section from the beginning of the text.
 /// Looks for "Abstract" heading and removes everything up to the next section heading.
-fn strip_abstract(text: &str) -> String {
+#[must_use]
+pub fn strip_abstract(text: &str) -> String {
     let abstract_patterns = [
         "\nabstract\n",
         "\nabstract ",
@@ -399,7 +403,8 @@ fn strip_abstract(text: &str) -> String {
 }
 
 /// Strip the references section from the end of the text.
-fn strip_references(text: &str) -> String {
+#[must_use]
+pub fn strip_references(text: &str) -> String {
     let ref_patterns = [
         "\nReferences\n",
         "\nReferences ",
@@ -435,73 +440,11 @@ fn strip_abstract_and_references(text: &str) -> String {
 }
 
 /// Truncate text to a maximum number of words.
-fn truncate_to_word_limit(text: &str, max_words: usize) -> String {
+#[must_use]
+pub fn truncate_to_word_limit(text: &str, max_words: usize) -> String {
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.len() <= max_words {
         return text.to_string();
     }
     words[..max_words].join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_strip_references() {
-        let text = "Introduction\nSome text here.\nMore content.\nAdditional body paragraph.\nFurther discussion.\n\nReferences\n1. Smith et al.\n2. Jones et al.";
-        let result = strip_references(text);
-        assert!(!result.contains("References"));
-        assert!(!result.contains("Smith"));
-        assert!(result.contains("Introduction"));
-    }
-
-    #[test]
-    fn test_strip_abstract() {
-        let text =
-            "Title\n\nAbstract\nThis is the abstract text.\n\n1. Introduction\nThis is the intro.";
-        let result = strip_abstract(text);
-        assert!(!result.contains("abstract text"));
-        assert!(result.contains("Introduction"));
-        assert!(result.contains("intro"));
-    }
-
-    #[test]
-    fn test_truncate_to_word_limit() {
-        let text = "one two three four five six";
-        let result = truncate_to_word_limit(text, 4);
-        assert_eq!(result, "one two three four");
-    }
-
-    #[test]
-    fn test_is_page_number() {
-        assert!(is_page_number("3"));
-        assert!(is_page_number("page 42"));
-        assert!(is_page_number("- 7 -"));
-        assert!(!is_page_number("Introduction"));
-    }
-
-    #[test]
-    fn test_normalize_line() {
-        assert_eq!(normalize_line("  Hello   World  "), "hello world");
-    }
-
-    #[test]
-    fn test_remove_header_footer_lines() {
-        let text =
-            "Journal of Something\nIntroduction\nSome content\n3\nConclusion\nJournal of Something";
-        let hfs = vec!["journal of something".to_string(), "__PAGE_NUMBER__".to_string()];
-        let result = remove_header_footer_lines(text, &hfs);
-        assert!(!result.contains("Journal of Something"));
-        assert!(result.contains("Introduction"));
-        assert!(!result.contains("\n3\n"));
-    }
-
-    #[test]
-    fn test_extract_txt_text() {
-        let content = "Abstract\nThis is abstract.\n\nIntroduction\nBody text here.\n\nReferences\n[1] Author.";
-        let result = extract_txt_text(content);
-        assert!(result.contains("Body text"));
-        assert!(!result.contains("References"));
-    }
 }
