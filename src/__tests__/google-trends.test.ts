@@ -7,6 +7,10 @@ import {
   buildComparisonItems,
   buildExploreQuery,
   buildExternalExploreUrl,
+  buildEmbedMonitorScript,
+  buildWidgetSrcdoc,
+  buildEmbedUrl,
+  nextRequestDelay,
 } from '../utils/google-trends';
 
 describe('Google Trends Utilities', () => {
@@ -166,6 +170,106 @@ describe('Google Trends Utilities', () => {
       expect(urlCustom).toBe(
         'https://trends.google.com/trends/explore?date=2012-05-14%202022-06-14&q=unicor,walruses&hl=en&legacy'
       );
+    });
+  });
+
+  describe('buildEmbedMonitorScript', () => {
+    it('should post a status message to the parent via postMessage', () => {
+      const script = buildEmbedMonitorScript();
+      expect(script).toContain('trends_embed_status');
+      expect(script).toContain('window.parent.postMessage');
+    });
+
+    it('should include all detection mechanisms', () => {
+      const script = buildEmbedMonitorScript();
+      // 1. Capture-phase error listener for failed script loads
+      expect(script).toMatch(/addEventListener\(\s*["']error["']/);
+      // 2. fetch patch for HTTP errors
+      expect(script).toContain('window.fetch');
+      // 3. XMLHttpRequest patch for HTTP errors
+      expect(script).toContain('XMLHttpRequest');
+      // 4. Watchdog timeout backstop (no more MutationObserver — see docstring)
+      expect(script).toMatch(/setTimeout/);
+    });
+
+    it('should use a settled flag to prevent multiple reports', () => {
+      const script = buildEmbedMonitorScript();
+      expect(script).toContain('settled');
+      expect(script).toMatch(/if\s*\(settled\)\s*return/);
+    });
+
+    it('should distinguish 429 rate-limit from generic http errors', () => {
+      const script = buildEmbedMonitorScript();
+      expect(script).toContain('429');
+      expect(script).toContain('"429"');
+      expect(script).toContain('"http"');
+    });
+
+    it('should report network errors for failed script loads', () => {
+      const script = buildEmbedMonitorScript();
+      expect(script).toContain('"network"');
+      // Capture phase (third arg = true) so we catch resource load errors
+      expect(script).toMatch(/,\s*true\s*\)/);
+    });
+  });
+
+  describe('buildEmbedUrl', () => {
+    it('should build a preflight URL with encoded req and eq params', () => {
+      const url = buildEmbedUrl(
+        'TIMESERIES',
+        ['ai', 'ml'],
+        'today 5-y',
+        'today 5-y',
+        300 // UTC-5:00 (300 minutes)
+      );
+      expect(url).toContain('https://trends.google.com/trends/embed/explore/TIMESERIES');
+      expect(url).toContain('tz=-300');
+      expect(url).toContain('req=');
+      expect(url).toContain('eq=');
+    });
+
+    it('should embed the comparisonItem in the req parameter as JSON', () => {
+      const url = buildEmbedUrl('GEO_MAP', ['cats'], 'now 7-d', 'now 7-d');
+      const decoded = decodeURIComponent(url);
+      expect(decoded).toContain('"keyword":"cats"');
+      expect(decoded).toContain('"time":"now 7-d"');
+      expect(decoded).toContain('"geo":""');
+    });
+  });
+
+  describe('nextRequestDelay', () => {
+    it('should return a delay between 2000 and 3999ms', () => {
+      for (let i = 0; i < 50; i++) {
+        const d = nextRequestDelay();
+        expect(d).toBeGreaterThanOrEqual(2000);
+        expect(d).toBeLessThan(4000);
+      }
+    });
+  });
+
+  describe('buildWidgetSrcdoc', () => {
+    it('should embed the monitor script at the top of the document head', () => {
+      const doc = buildWidgetSrcdoc('TIMESERIES', ['ai'], 'today 5-y', 'today 5-y');
+      // Monitor script appears before the trends loader script
+      const monitorIdx = doc.indexOf('trends_embed_status');
+      const loaderIdx = doc.indexOf('embed_loader.js');
+      expect(monitorIdx).toBeGreaterThan(-1);
+      expect(loaderIdx).toBeGreaterThan(-1);
+      expect(monitorIdx).toBeLessThan(loaderIdx);
+    });
+
+    it('should include both TIMESERIES and GEO_MAP widget types', () => {
+      const chartDoc = buildWidgetSrcdoc('TIMESERIES', ['ai'], 'today 5-y', 'today 5-y');
+      expect(chartDoc).toContain('TIMESERIES');
+
+      const mapDoc = buildWidgetSrcdoc('GEO_MAP', ['ai'], 'today 5-y', 'today 5-y');
+      expect(mapDoc).toContain('GEO_MAP');
+    });
+
+    it('should include an open-external fallback button with the correct URL', () => {
+      const doc = buildWidgetSrcdoc('TIMESERIES', ['ai'], 'today 5-y', 'today 5-y');
+      expect(doc).toContain('open_external_trends');
+      expect(doc).toContain('https://trends.google.com');
     });
   });
 });

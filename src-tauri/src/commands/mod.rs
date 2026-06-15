@@ -15,6 +15,7 @@ pub mod scraping;
 pub mod screening;
 pub mod summary;
 pub mod tags;
+pub mod trends;
 
 use crate::db::connection::DbState;
 use crate::error::AppError;

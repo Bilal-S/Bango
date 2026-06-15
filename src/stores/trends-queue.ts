@@ -18,6 +18,15 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
   const collapsed = ref<boolean>(false);
   const revision = ref<number>(0);
 
+  /**
+   * Queue orchestration state.
+   *
+   * When `halted` is true (set after any 429), widgets stop rendering until the
+   * user explicitly retries. Changing keywords/time-range also clears it so a
+   * fresh attempt can proceed.
+   */
+  const halted = ref<boolean>(false);
+
   const hasKeywords = computed(() => keywords.value.length > 0);
 
   const resolvedRange = computed(() => {
@@ -86,6 +95,7 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
     }
 
     keywords.value.push(clean);
+    halted.value = false; // adding a keyword is a fresh attempt
     revision.value++;
     return true;
   }
@@ -94,6 +104,7 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
     const idx = keywords.value.findIndex((k) => k.toLowerCase() === term.trim().toLowerCase());
     if (idx >= 0) {
       keywords.value.splice(idx, 1);
+      halted.value = false;
       revision.value++;
       return true;
     }
@@ -102,11 +113,13 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
 
   function clearAll() {
     keywords.value = [];
+    halted.value = false;
     revision.value++;
   }
 
   function setTimeRange(id: TimeRangeId) {
     timeRangeId.value = id;
+    halted.value = false;
     revision.value++;
   }
 
@@ -133,6 +146,17 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
     revision.value++;
   }
 
+  /** Called by the panel when any widget reports a 429 (preflight or runtime). */
+  function haltQueue() {
+    halted.value = true;
+  }
+
+  /** Called when the user explicitly retries — clears the halt flag. */
+  function resumeQueue() {
+    halted.value = false;
+    revision.value++;
+  }
+
   return {
     keywords,
     timeRangeId,
@@ -141,6 +165,7 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
     researchRange,
     collapsed,
     revision,
+    halted,
     hasKeywords,
     resolvedRange,
     addKeyword,
@@ -151,5 +176,7 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
     setResearchRange,
     toggleCollapsed,
     bumpRevision,
+    haltQueue,
+    resumeQueue,
   };
 });

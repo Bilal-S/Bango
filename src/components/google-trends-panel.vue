@@ -1,10 +1,102 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import { useTrendsQueueStore } from '../stores/trends-queue';
 import GoogleTrendsWidget from './google-trends-widget.vue';
-import { TIME_RANGE_PRESETS, type TimeRangeId } from '../utils/google-trends';
+import { TIME_RANGE_PRESETS, type TimeRangeId, nextRequestDelay } from '../utils/google-trends';
 
 const trendsQueue = useTrendsQueueStore();
+
+/**
+ * Serialized queue orchestration.
+ *
+ * The chart widget renders first. Once it reports a terminal status (success or
+ * non-429 error), we wait a randomized 2–4s pause (`nextRequestDelay`) and then
+ * release the map widget. If any widget reports a 429 (preflight or runtime),
+ * the queue halts and all subsequent renders are suppressed until the user
+ * clicks "Resume".
+ */
+type WidgetPhase = 'waiting' | 'active' | 'done';
+type LoadStatus = 'idle' | 'preflight' | 'loading' | 'success' | 'error';
+type ErrorReason = '429' | 'http' | 'network' | 'timeout' | 'preflight_429' | '';
+
+const chartPhase = ref<WidgetPhase>('waiting');
+const mapPhase = ref<WidgetPhase>('waiting');
+let mapReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+
+const chartReady = computed(() => chartPhase.value === 'active' && !trendsQueue.halted);
+const mapReady = computed(() => mapPhase.value === 'active' && !trendsQueue.halted);
+
+/** Reset the queue and activate the chart on the next tick. */
+function resetQueue() {
+  if (mapReleaseTimer) {
+    clearTimeout(mapReleaseTimer);
+    mapReleaseTimer = null;
+  }
+  chartPhase.value = 'waiting';
+  mapPhase.value = 'waiting';
+  // Defer activation to the next macrotask so the widget sees the transition
+  // waiting -> active and re-runs its watcher.
+  setTimeout(() => {
+    if (!trendsQueue.halted) chartPhase.value = 'active';
+  }, 0);
+}
+
+function processStatus(widget: 'chart' | 'map', status: LoadStatus, reason: ErrorReason) {
+  // Any 429 → halt everything.
+  if (reason === '429' || reason === 'preflight_429') {
+    trendsQueue.haltQueue();
+    if (mapReleaseTimer) {
+      clearTimeout(mapReleaseTimer);
+      mapReleaseTimer = null;
+    }
+    return;
+  }
+
+  // Only advance the queue when the chart finishes (success OR non-429 error).
+  if (
+    widget === 'chart' &&
+    chartPhase.value === 'active' &&
+    (status === 'success' || status === 'error')
+  ) {
+    chartPhase.value = 'done';
+    if (mapPhase.value === 'waiting') {
+      mapReleaseTimer = setTimeout(() => {
+        mapReleaseTimer = null;
+        if (!trendsQueue.halted) mapPhase.value = 'active';
+      }, nextRequestDelay());
+    }
+  }
+}
+
+function onChartStatus(status: LoadStatus, reason: ErrorReason) {
+  processStatus('chart', status, reason);
+}
+
+function onMapStatus(status: LoadStatus, reason: ErrorReason) {
+  processStatus('map', status, reason);
+}
+
+/**
+ * Bump the widget's revision to make it re-run preflight + render.
+ * Used by the widget's own retry button (via the @retry emit).
+ */
+function retryChart() {
+  chartPhase.value = 'active';
+  trendsQueue.bumpRevision();
+}
+
+function retryMap() {
+  if (mapPhase.value !== 'active') mapPhase.value = 'active';
+  trendsQueue.bumpRevision();
+}
+
+// Watch store revision — resets the queue when keywords/range change.
+watch(
+  () => trendsQueue.revision,
+  () => {
+    resetQueue();
+  }
+);
 
 // Offline detection
 const isOnline = ref(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -38,6 +130,8 @@ function stopResize() {
 onMounted(() => {
   window.addEventListener('online', updateOnlineStatus);
   window.addEventListener('offline', updateOnlineStatus);
+  // Kick off the first cycle.
+  resetQueue();
 });
 
 onUnmounted(() => {
@@ -45,6 +139,7 @@ onUnmounted(() => {
   window.removeEventListener('offline', updateOnlineStatus);
   document.removeEventListener('mousemove', handleResize);
   document.removeEventListener('mouseup', stopResize);
+  if (mapReleaseTimer) clearTimeout(mapReleaseTimer);
 });
 
 // View mode toggle
@@ -279,7 +374,11 @@ function applyCustomDates() {
           :keywords="trendsQueue.keywords"
           :range="trendsQueue.resolvedRange"
           :revision="trendsQueue.revision"
+          :ready-to-render="chartReady"
+          :rate-limited="trendsQueue.halted"
           class="h-full min-h-0"
+          @retry="retryChart"
+          @status-change="onChartStatus"
         />
         <GoogleTrendsWidget
           v-if="viewMode === 'dual' || viewMode === 'map'"
@@ -287,7 +386,11 @@ function applyCustomDates() {
           :keywords="trendsQueue.keywords"
           :range="trendsQueue.resolvedRange"
           :revision="trendsQueue.revision"
+          :ready-to-render="mapReady"
+          :rate-limited="trendsQueue.halted"
           class="h-full min-h-0"
+          @retry="retryMap"
+          @status-change="onMapStatus"
         />
       </div>
     </div>

@@ -210,6 +210,86 @@ export function buildExploreQuery(
 }
 
 /**
+ * Builds the inline monitor script injected at the top of the widget iframe <head>.
+ * Detects embed failures (429 rate limit, network errors, script load failures, timeouts)
+ * and reports status back to the parent Vue app via postMessage.
+ *
+ * Multiple detection signals (defense in depth):
+ * 1. Capture-phase 'error' listener — catches failed <script src> loads (e.g. loader 429).
+ * 2. fetch / XHR patches — catches HTTP errors on data requests from the document.
+ * 3. Watchdog timeout — backstop for silent failures.
+ *
+ * NOTE: The previous MutationObserver "success sentinel" was removed because it
+ * reported success when Google injected its inner iframe — but that iframe can
+ * itself go on to 429 invisibly (cross-origin). Success is now inferred solely
+ * by the absence of any error signal plus watchdog survival.
+ *
+ * A `settled` flag ensures only the first signal is reported.
+ */
+export function buildEmbedMonitorScript(): string {
+  return `
+(function() {
+  var settled = false;
+  var WATCHDOG_MS = 10000;
+
+  function report(status, reason, httpStatus) {
+    if (settled) return;
+    settled = true;
+    var payload = { type: "trends_embed_status", status: status };
+    if (reason) payload.reason = reason;
+    if (httpStatus != null) payload.httpStatus = httpStatus;
+    try { window.parent.postMessage(payload, "*"); } catch (e) {}
+  }
+
+  // 1. Capture-phase error listener: catches failed resource loads (loader script 429/network)
+  window.addEventListener("error", function(event) {
+    var target = event.target || event.srcElement;
+    if (target && target.tagName === "SCRIPT") {
+      report("error", "network");
+    }
+  }, true);
+
+  // 2. Patch fetch to detect HTTP errors on data requests from this document
+  if (window.fetch) {
+    var origFetch = window.fetch;
+    window.fetch = function() {
+      return origFetch.apply(this, arguments).then(function(resp) {
+        if (resp && resp.status >= 400) {
+          report("error", resp.status === 429 ? "429" : "http", resp.status);
+        }
+        return resp;
+      }, function() {
+        report("error", "network");
+        return Promise.reject.apply(Promise, arguments);
+      });
+    };
+  }
+
+  // 3. Patch XMLHttpRequest to detect HTTP errors
+  if (window.XMLHttpRequest) {
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+      this.addEventListener("load", function() {
+        if (this.status >= 400) {
+          report("error", this.status === 429 ? "429" : "http", this.status);
+        }
+      });
+      this.addEventListener("error", function() {
+        report("error", "network");
+      });
+      return origOpen.apply(this, arguments);
+    };
+  }
+
+  // 4. Watchdog: backstop for silent failures (success is implied by watchdog survival)
+  setTimeout(function() { report("timeout"); }, WATCHDOG_MS);
+  // Auto-report success slightly before the watchdog fires if no error was seen
+  setTimeout(function() { report("success"); }, WATCHDOG_MS - 500);
+})();
+  `.trim();
+}
+
+/**
  * Builds the renderExploreWidget JS calls.
  */
 export function buildTrendsSnippet(
@@ -245,11 +325,13 @@ export function buildWidgetSrcdoc(
 ): string {
   const snippet = buildTrendsSnippet(type, keywords, timeApi, queryDate);
   const externalUrl = buildExternalExploreUrl(keywords, queryDate);
+  const monitorScript = buildEmbedMonitorScript();
   return `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
+  <script>${monitorScript}</script>
   <style>
     html, body {
       margin: 0;
@@ -325,4 +407,38 @@ export function buildExternalExploreUrl(keywords: string[], queryDate: string): 
   const isCustomDate = /\d{4}-\d{2}-\d{2}/.test(queryDate);
   const legacyPart = isCustomDate ? '&legacy' : '';
   return `https://trends.google.com/trends/explore?date=${encodedDate}&q=${q}&hl=en${legacyPart}`;
+}
+
+/**
+ * Builds the embed URL that the iframe's inner loader will navigate to.
+ * Used for preflight HTTP probes via the Rust `check_trends_url` command
+ * so we can detect 429s *before* rendering the iframe.
+ *
+ * Mirrors the URL format that `trends.embed.renderExploreWidget` constructs
+ * internally: `/trends/embed/explore/{TYPE}?req={json}&tz={tz}&eq={query}`.
+ */
+export function buildEmbedUrl(
+  type: 'TIMESERIES' | 'GEO_MAP',
+  keywords: string[],
+  timeApi: string,
+  queryDate: string,
+  timezoneMinutes = new Date().getTimezoneOffset()
+): string {
+  const req = {
+    comparisonItem: JSON.parse(buildComparisonItems(keywords, timeApi)),
+    category: 0,
+    property: '',
+  };
+  const eq = buildExploreQuery(type, keywords, queryDate);
+  const base = 'https://trends.google.com/trends/embed/explore/';
+  return `${base}${type}?req=${encodeURIComponent(JSON.stringify(req))}&tz=${-timezoneMinutes}&eq=${encodeURIComponent(eq)}`;
+}
+
+/**
+ * Random delay between 2000ms and 3999ms — used to serialize Google Trends
+ * embed requests so we stay well under their rate-limit threshold.
+ * One chart request is followed by a 2–4s pause before the map request fires.
+ */
+export function nextRequestDelay(): number {
+  return 2000 + Math.floor(Math.random() * 2000);
 }
