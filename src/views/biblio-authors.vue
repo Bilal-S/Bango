@@ -340,6 +340,74 @@ async function handleExportSvg(): Promise<void> {
     console.error('SVG export failed', e);
   }
 }
+
+// ── CSV Export ───────────────────────────────────────────────────
+async function handleExportCsv(): Promise<void> {
+  try {
+    const filePath = await save({
+      defaultPath: 'author-rankings.csv',
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    });
+    if (!filePath) return;
+
+    const headers = [
+      'Rank',
+      'Author',
+      'Papers',
+      'Citations',
+      'h-index',
+      'i10',
+      'g-index',
+      'First Author',
+      'Last Author',
+      'Solo',
+      'Avg Citations/Paper',
+      'Avg Year',
+      'Recent (5y)',
+      'Institution',
+    ];
+    const lines: string[] = [headers.join(',')];
+
+    filteredRankings.value.forEach((a, idx) => {
+      const row = [
+        String(idx + 1),
+        `"${a.displayName.replace(/"/g, '""')}"`,
+        String(a.articleCount),
+        String(a.totalCitations),
+        String(a.estimatedHIndex),
+        String(a.i10Index),
+        String(a.gIndex),
+        String(a.firstAuthorCount),
+        String(a.lastAuthorCount),
+        String(a.soloPaperCount),
+        a.avgCitationsPerPaper !== null ? a.avgCitationsPerPaper.toFixed(1) : '',
+        a.avgYear !== null ? String(a.avgYear) : '',
+        String(a.recentPaperCount),
+        a.primaryInstitution ? `"${a.primaryInstitution.replace(/"/g, '""')}"` : '',
+      ];
+      lines.push(row.join(','));
+    });
+
+    await tauriCommand('write_text_to_file', { path: filePath, content: lines.join('\n') });
+  } catch (e) {
+    console.error('CSV export failed', e);
+  }
+}
+
+// ── Keyboard navigation ──────────────────────────────────────────
+function onRowKeydown(event: KeyboardEvent, author: AuthorRank): void {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    selectAuthor(author);
+  }
+}
+
+function onPanelKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeDetail();
+  }
+}
 </script>
 
 <template>
@@ -449,6 +517,10 @@ async function handleExportSvg(): Promise<void> {
               <button class="sidebar__export" @click="handleExportSvg">
                 <span class="material-symbols-outlined">share</span>
                 Export SVG
+              </button>
+              <button class="sidebar__export" @click="handleExportCsv">
+                <span class="material-symbols-outlined">table_view</span>
+                Export CSV
               </button>
             </section>
 
@@ -594,11 +666,13 @@ async function handleExportSvg(): Promise<void> {
                 <tr
                   v-for="(author, idx) in filteredRankings"
                   :key="author.id"
+                  :tabindex="0"
                   :class="[
                     'ranking-table__row',
                     { 'ranking-table__row--active': selectedAuthorId === author.id },
                   ]"
                   @click="selectAuthor(author)"
+                  @keydown="onRowKeydown($event, author)"
                 >
                   <td
                     v-for="col in columns"
@@ -650,7 +724,7 @@ async function handleExportSvg(): Promise<void> {
 
       <!-- ── Author Detail Panel ────────────────────────────── -->
       <Transition name="detail-slide">
-        <aside v-if="selectedAuthorId" class="author-panel">
+        <aside v-if="selectedAuthorId" class="author-panel" tabindex="-1" @keydown="onPanelKeydown">
           <div v-if="detailLoading" class="author-panel__loading">
             <span class="material-symbols-outlined author-panel__spin">progress_activity</span>
           </div>
@@ -1457,5 +1531,48 @@ async function handleExportSvg(): Promise<void> {
 .detail-slide-leave-to {
   transform: translateX(100%);
   opacity: 0;
+}
+
+/* ── Responsive: Detail panel as overlay on narrow screens ──── */
+@media (max-width: 768px) {
+  .author-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 100%;
+    max-width: 24rem;
+    z-index: 20;
+  }
+}
+@media (max-width: 480px) {
+  .author-panel {
+    max-width: 100%;
+  }
+  .author-panel__metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .ranking-table {
+    font-size: 0.75rem;
+  }
+  .ranking-table__th,
+  .ranking-table__td {
+    padding: 0.375rem 0.25rem;
+  }
+  .ranking-table__td--name {
+    max-width: 120px;
+  }
+  .ranking-table__td--inst {
+    max-width: 100px;
+  }
+}
+
+/* Keyboard focus visibility for accessibility */
+.ranking-table__row:focus-visible {
+  outline: 2px solid var(--color-primary, #4f46e5);
+  outline-offset: -2px;
+}
+.author-panel:focus-visible {
+  outline: none;
 }
 </style>
