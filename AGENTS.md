@@ -95,16 +95,23 @@ describe each durable boundary so agents can locate the right area. Create a chi
     Vec<JournalYearData>` (canonical titles via `journal_index` LEFT JOIN, fallback
     `UPPER(TRIM(journal))`). `productivity.rs` exposes `get_author_rankings`,
     `get_author_detail`, `get_author_productivity_kpis` — author-level h-index, i10,
-    g-index, first/last/solo counts scoped to included articles. `networks.rs` exposes
-    `get_cocitation_network_json` — on-demand co-citation computation with 4 normalization
-    modes (Raw, Cosine, Jaccard, Pearson), `CocitationScope` (included/all articles).
+    g-index, first/last/solo counts scoped to included articles. `networks/` is a directory
+    module (split from the former monolithic `networks.rs`) with one file per network type:
+    `persistence.rs` (generic network CRUD: save/load/delete nodes & edges), `labels.rs`
+    (shared `format_paper_label` helper), `coauthors.rs` (full + fractional edge building),
+    `citations.rs` (directed citation edges + unmatched-leaf nodes), `keywords.rs`
+    (keyword co-occurrence), and `cocitation.rs` (on-demand co-citation computation with 4
+    normalization modes: Raw, Cosine, Jaccard, Pearson; `CocitationScope` = included/all
+    articles). `mod.rs` re-exports the public API unchanged.
   - **`src-tauri/src/db/journal_repo.rs`** — journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.
   - **`src-tauri/tests/`** — Rust integration tests. Inline `#[cfg(test)] mod tests`
     blocks are extracted here to keep source files compact (helpers tested externally
     are `pub`). Repository/KPI tests live in `biblio_repo_tests.rs` (in-memory SQLite
-    via `run_migrations`). Unit-test extractions: `biblio_normalizer_test.rs`,
+    via `run_migrations`). Network builder & serializer unit tests (network CRUD,
+    co-author/keyword JSON, and the full co-citation suite) live in
+    `biblio_networks_test.rs`. Unit-test extractions: `biblio_normalizer_test.rs`,
     `biblio_models_test.rs`, `bibtex_parser_test.rs`, `bibtex_converter_test.rs`,
     `cr_parser_test.rs`, `doi_test.rs`, `n1_parser_test.rs`,
     `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation

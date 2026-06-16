@@ -83,11 +83,7 @@ fn test_db() -> Connection {
 fn import_main_articles(conn: &Connection) -> HashMap<String, String> {
     let content = read_fixture("co-citation.ris");
     let parse_result = parse_ris(&content).expect("Parse co-citation.ris failed");
-    assert_eq!(
-        parse_result.records.len(),
-        5,
-        "co-citation.ris should contain exactly 5 articles"
-    );
+    assert_eq!(parse_result.records.len(), 5, "co-citation.ris should contain exactly 5 articles");
 
     let new_articles: Vec<_> = parse_result.records.iter().map(ris_record_to_new_article).collect();
     let imported = article_repo::insert_articles_batch(conn, &new_articles, "co-citation.ris")
@@ -120,8 +116,8 @@ fn import_main_articles(conn: &Connection) -> HashMap<String, String> {
 /// to the same DB row across multiple articles.
 fn import_references_for_article(conn: &Connection, article_id: &str, fixture_name: &str) {
     let content = read_fixture(fixture_name);
-    let parse_result = parse_ris(&content)
-        .unwrap_or_else(|e| panic!("Parse {fixture_name} failed: {e}"));
+    let parse_result =
+        parse_ris(&content).unwrap_or_else(|e| panic!("Parse {fixture_name} failed: {e}"));
 
     for record in &parse_result.records {
         let new_paper = ris_record_to_reference_paper(record);
@@ -147,7 +143,8 @@ fn setup_full_dataset() -> (Connection, HashMap<String, String>) {
     ];
 
     for (doi, fixture) in fixture_map {
-        let article_id = doi_map.get(doi).unwrap_or_else(|| panic!("missing article for DOI {doi}"));
+        let article_id =
+            doi_map.get(doi).unwrap_or_else(|| panic!("missing article for DOI {doi}"));
         import_references_for_article(&conn, article_id, fixture);
     }
 
@@ -170,7 +167,11 @@ fn node_dois(json: &serde_json::Value) -> HashMap<String, String> {
 }
 
 /// Find an edge between two node IDs (undirected — checks both orderings).
-fn find_edge<'a>(edges: &'a [serde_json::Value], id_a: &str, id_b: &str) -> Option<&'a serde_json::Value> {
+fn find_edge<'a>(
+    edges: &'a [serde_json::Value],
+    id_a: &str,
+    id_b: &str,
+) -> Option<&'a serde_json::Value> {
     edges.iter().find(|e| {
         let s = e["source"].as_str().unwrap_or("");
         let t = e["target"].as_str().unwrap_or("");
@@ -258,9 +259,11 @@ fn cocitation_data_doi_dedup_produces_6_unique_papers() {
 
     // Verify in the DB directly: 6 distinct reference papers should exist.
     let paper_count: i64 = conn
-        .query_row("SELECT COUNT(DISTINCT doi) FROM reference_papers WHERE doi LIKE '10.3001/%'", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT COUNT(DISTINCT doi) FROM reference_papers WHERE doi LIKE '10.3001/%'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(paper_count, 6, "Should have exactly 6 unique reference papers (R1–R6)");
 
@@ -310,10 +313,7 @@ fn cocitation_data_cosine_normalization_r1_r2() {
     let r4_id = doi_to_id.get("10.3001/ref4").unwrap();
     let r3r4_edge = find_edge(edges, r3_id, r4_id).expect("R3–R4 edge missing");
     let cosine_34 = r3r4_edge["weight"].as_f64().unwrap();
-    assert!(
-        (cosine_34 - 0.5).abs() < 0.001,
-        "R3–R4 cosine should be 0.5, got {cosine_34}"
-    );
+    assert!((cosine_34 - 0.5).abs() < 0.001, "R3–R4 cosine should be 0.5, got {cosine_34}");
 }
 
 #[test]
@@ -338,10 +338,7 @@ fn cocitation_data_jaccard_normalization() {
 
     // c_ij=3, c_i=3, c_j=3 → jaccard = 3/(3+3−3) = 3/3 = 1.0
     let jaccard = edge["weight"].as_f64().unwrap();
-    assert!(
-        (jaccard - 1.0).abs() < 0.001,
-        "R1–R2 jaccard should be 1.0, got {jaccard}"
-    );
+    assert!((jaccard - 1.0).abs() < 0.001, "R1–R2 jaccard should be 1.0, got {jaccard}");
 
     // R3–R4: c_ij=1, c_i=2, c_j=2 → jaccard = 1/(2+2−1) = 1/3 ≈ 0.333
     let r3_id = doi_to_id.get("10.3001/ref3").unwrap();
@@ -478,10 +475,7 @@ fn cocitation_data_node_metadata_from_reference_papers() {
         .find(|n| n["doi"].as_str() == Some("10.3001/ref1"))
         .expect("R1 node not found");
 
-    assert_eq!(
-        r1["title"].as_str().unwrap(),
-        "Pattern Recognition and Machine Learning"
-    );
+    assert_eq!(r1["title"].as_str().unwrap(), "Pattern Recognition and Machine Learning");
     assert_eq!(r1["year"].as_i64(), Some(2006));
     assert_eq!(r1["journal"].as_str(), Some("Journal of Machine Learning Research"));
     // R1 is a shared reference, never promoted to an article.
