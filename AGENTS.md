@@ -107,7 +107,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
     via `run_migrations`). Unit-test extractions: `biblio_normalizer_test.rs`,
     `biblio_models_test.rs`, `bibtex_parser_test.rs`, `bibtex_converter_test.rs`,
     `cr_parser_test.rs`, `doi_test.rs`, `n1_parser_test.rs`,
-    `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`.
+    `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation
+    integration tests against RIS fixtures live in `cocitation_data_test.rs`.
 - **`src/`** — Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/views/`** — page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
     parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)
@@ -124,6 +125,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src/utils/`** — pure utilities. `chart-export.ts` (timeline CSV/SVG export via the
     `save()` + `write_text_to_file` pattern shared with `network-export.ts`).
   - **`src/router/index.ts`** — route table; lazy views are prefetched after `router.isReady()`.
+- **`tests/test-citations/`** — RIS fixture data for citation/reference system tests.
+  `main_articles.ris` (10 articles, DOIs `10.1001/art1`–`10.1010/art10`) with per-article
+  `_references.ris` and `_citations.ris` files (filename = DOI with `/`→`_`). A dedicated
+  co-citation dataset uses `co-citation.ris` (5 articles, `10.2001/cocite1`–`10.2001/cocite5`)
+  with 6 shared reference papers (`10.3001/ref1`–`10.3001/ref6`) spread across the
+  `_references.ris` files to produce deterministic co-citation pairs.
 - **`docs/superpowers/specs/bango-v4-spec.md`** — authoritative v4 product specification.
 - **`docs/design-reference/00-design-patterns.md`** — design tokens (Material 3 inspired).
 - **`.worktrees/`** — planning documents (`biblio-publication-timeline-plan-v3.md` is the

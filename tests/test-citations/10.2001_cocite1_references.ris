@@ -1,0 +1,40 @@
+TY  - JOUR
+AU  - Bishop, Christopher
+TI  - Pattern Recognition and Machine Learning
+T2  - Journal of Machine Learning Research
+AB  - This foundational textbook covers pattern recognition, neural networks, and machine learning theory including Bayesian methods and kernel techniques.
+SN  - 1532-4435
+PY  - 2006
+VL  - 1
+SP  - 1
+EP  - 738
+DO  - 10.3001/ref1
+ER  -
+
+TY  - JOUR
+AU  - Hastie, Trevor
+AU  - Tibshirani, Robert
+TI  - The Elements of Statistical Learning Theory
+T2  - Springer Series in Statistics
+AB  - A comprehensive treatment of statistical learning theory covering supervised learning, regression, classification, and regularization methods.
+SN  - 0387-9523
+PY  - 2009
+VL  - 2
+SP  - 1
+EP  - 745
+DO  - 10.3001/ref2
+ER  -
+
+TY  - JOUR
+AU  - Goodfellow, Ian
+AU  - Bengio, Yoshua
+TI  - Deep Learning Neural Network Architectures
+T2  - Nature
+AB  - We survey deep learning architectures including convolutional networks, recurrent networks, and transformer models for various applications.
+SN  - 0028-0836
+PY  - 2016
+VL  - 521
+SP  - 436
+EP  - 444
+DO  - 10.3001/ref3
+ER  -

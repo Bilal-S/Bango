@@ -1,0 +1,41 @@
+TY  - JOUR
+AU  - Goodfellow, Ian
+AU  - Bengio, Yoshua
+TI  - Deep Learning Neural Network Architectures
+T2  - Nature
+AB  - We survey deep learning architectures including convolutional networks, recurrent networks, and transformer models for various applications.
+SN  - 0028-0836
+PY  - 2016
+VL  - 521
+SP  - 436
+EP  - 444
+DO  - 10.3001/ref3
+ER  -
+
+TY  - JOUR
+AU  - Newman, Mark
+TI  - Network Analysis and Graph Theory Applications
+T2  - SIAM Review
+AB  - A comprehensive introduction to network analysis covering centrality measures, community detection, and spectral methods in graph theory.
+SN  - 0036-1445
+PY  - 2010
+VL  - 52
+IS  - 2
+SP  - 167
+EP  - 256
+DO  - 10.3001/ref4
+ER  -
+
+TY  - JOUR
+AU  - Shannon, Claude
+TI  - A Mathematical Theory of Communication
+T2  - Bell System Technical Journal
+AB  - The foundational paper establishing information theory, entropy, and channel capacity for digital communication systems.
+SN  - 0005-8580
+PY  - 1948
+VL  - 27
+IS  - 3
+SP  - 379
+EP  - 423
+DO  - 10.3001/ref6
+ER  -

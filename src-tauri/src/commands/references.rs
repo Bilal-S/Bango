@@ -485,7 +485,7 @@ pub struct ReferencePaperResult {
 }
 
 /// Convert a parsed RIS record into a NewReferencePaper for the reference papers table.
-fn ris_record_to_reference_paper(record: &RisRecord) -> NewReferencePaper {
+pub fn ris_record_to_reference_paper(record: &RisRecord) -> NewReferencePaper {
     NewReferencePaper {
         title: record.title.clone(),
         abstract_text: record.abstract_text.clone(),

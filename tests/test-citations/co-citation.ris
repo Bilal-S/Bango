@@ -1,0 +1,73 @@
+TY  - JOUR
+AU  - Researcher, Alpha
+AU  - Scholar, Beta
+TI  - Neural Networks for Environmental Monitoring: A Systematic Approach
+T2  - Environmental Modelling and Software
+AB  - We present a systematic methodology for applying neural networks to environmental monitoring data, building on foundational machine learning and statistical frameworks.
+SN  - 1364-8152
+PY  - 2024
+VL  - 175
+IS  - 3
+SP  - 210
+EP  - 225
+DO  - 10.2001/cocite1
+ER  -
+
+TY  - JOUR
+AU  - Analyst, Gamma
+AU  - Engineer, Delta
+TI  - Deep Learning Approaches for Climate Data Analysis
+T2  - Climatic Change
+AB  - This study applies deep learning architectures to large-scale climate datasets, leveraging established statistical and computational techniques.
+SN  - 0165-0009
+PY  - 2024
+VL  - 177
+IS  - 1
+SP  - 45
+EP  - 62
+DO  - 10.2001/cocite2
+ER  -
+
+TY  - JOUR
+AU  - Scientist, Epsilon
+AU  - Author, Zeta
+TI  - Machine Learning Techniques for Ecological Prediction
+T2  - Ecological Informatics
+AB  - We evaluate several machine learning techniques for predicting ecological outcomes, grounded in core statistical learning theory and optimization methods.
+SN  - 1574-9541
+PY  - 2024
+VL  - 80
+SP  - 101
+EP  - 115
+DO  - 10.2001/cocite3
+ER  -
+
+TY  - JOUR
+AU  - Professor, Eta
+AU  - Researcher, Theta
+TI  - Statistical Methods for Biodiversity Assessment
+T2  - Methods in Ecology and Evolution
+AB  - Our work introduces robust statistical methods for biodiversity assessment, drawing on foundational probability theory and network analysis.
+SN  - 2041-210X
+PY  - 2023
+VL  - 14
+IS  - 5
+SP  - 620
+EP  - 638
+DO  - 10.2001/cocite4
+ER  -
+
+TY  - JOUR
+AU  - Ecologist, Iota
+AU  - Modeler, Kappa
+TI  - Computational Tools for Conservation Planning
+T2  - Conservation Biology
+AB  - We develop computational decision-support tools for conservation planning, integrating network science and probability frameworks.
+SN  - 0888-8892
+PY  - 2023
+VL  - 37
+IS  - 4
+SP  - 890
+EP  - 905
+DO  - 10.2001/cocite5
+ER  -
