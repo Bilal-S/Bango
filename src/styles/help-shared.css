@@ -1,0 +1,271 @@
+/**
+ * Shared styles for Help Guide tab components.
+ *
+ * These classes are reused across multiple help tabs (About cards, Footer cards,
+ * Demo tile, intro sections). Import this file from each `help-tab-*.vue` component
+ * so the visual language stays consistent without duplicating CSS.
+ *
+ * NOTE: These styles are intentionally NOT scoped. Each consuming component wraps
+ * its template in a unique root class (e.g. `.ht-guide`, `.ht-biblio`) so the
+ * shared rules are namespaced by that parent selector at runtime.
+ */
+
+/* ===================== SHARED CONTAINER ===================== */
+
+.ht-subtitle {
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-body);
+  margin-top: var(--space-2);
+  line-height: var(--line-height-body);
+}
+
+/* ===================== INTRO SECTION ===================== */
+
+.ht-intro {
+  margin-bottom: var(--space-6);
+}
+
+.ht-intro__title {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.ht-intro__desc {
+  font-size: var(--font-size-body);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0;
+}
+
+/* ===================== ABOUT / LICENSE CARD ===================== */
+
+.ht-about {
+  margin-bottom: var(--space-8);
+}
+
+.ht-about-card {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+
+.ht-about-icon {
+  font-size: 22px;
+  color: #16a34a;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ht-about-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ht-about-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.ht-about-desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.ht-about-links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ht-about-links li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+}
+
+.ht-about-link-icon {
+  font-size: 16px;
+  color: #16a34a;
+  flex-shrink: 0;
+}
+
+.ht-about-link {
+  color: #4f46e5;
+  text-decoration: none;
+  font-weight: var(--font-weight-semibold);
+}
+
+.ht-about-link:hover {
+  text-decoration: underline;
+}
+
+/* ===================== FOOTER CARD (Settings CTA) ===================== */
+
+.ht-footer {
+  margin-top: var(--space-6);
+}
+
+.ht-footer-card {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+
+.ht-footer-icon {
+  font-size: 22px;
+  color: #b45309;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ht-footer-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.ht-footer-desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.ht-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background-color: #b45309;
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-family: inherit;
+}
+
+.ht-footer-btn:hover {
+  background-color: #92400e;
+}
+
+/* ===================== DEMO TILE ===================== */
+
+.ht-demo {
+  margin-bottom: var(--space-8);
+}
+
+.ht-demo-card {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  background-color: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+}
+
+.ht-demo-icon {
+  font-size: 22px;
+  color: #4f46e5;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.ht-demo-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ht-demo-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-bottom: var(--space-2);
+}
+
+.ht-demo-desc {
+  font-size: var(--font-size-caption);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin: 0 0 var(--space-3) 0;
+}
+
+.ht-demo-error {
+  font-size: var(--font-size-caption);
+  color: #dc2626;
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.ht-demo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background-color: #4f46e5;
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-family: inherit;
+}
+
+.ht-demo-btn:hover:not(:disabled) {
+  background-color: #4338ca;
+}
+
+.ht-demo-btn:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.ht-demo-btn-icon,
+.ht-demo-spinner {
+  font-size: 16px;
+}
+
+.ht-demo-spinner {
+  animation: ht-spin 1s linear infinite;
+}
+
+@keyframes ht-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===================== RESPONSIVE ===================== */
+
+@media (max-width: 767px) {
+  .ht-footer-card,
+  .ht-demo-card,
+  .ht-about-card {
+    flex-direction: column;
+  }
+}

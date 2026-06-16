@@ -1,0 +1,1004 @@
+<script setup lang="ts">
+import { onMounted, onUnmounted, ref, watch } from 'vue';
+import '@/styles/help-shared.css';
+
+/**
+ * Reference tab.
+ *
+ * A sidebar + scroll-spy layout with 12 detailed sections. Accepts an `initialHash`
+ * prop (from the parent shell's route hash) so deep-links like
+ * `/help?tab=reference#ref-references-citations` scroll to the right section on mount.
+ */
+
+const props = defineProps<{
+  initialHash?: string;
+}>();
+
+const activeRefSection = ref<string>('ref-dashboard');
+
+let scrollContainer: HTMLElement | null = null;
+let isScrollingManual = false;
+let manualScrollTimeout: number | null = null;
+
+function scrollToSection(id: string): void {
+  activeRefSection.value = id;
+  const el = document.getElementById(id);
+  if (el) {
+    isScrollingManual = true;
+    if (manualScrollTimeout) {
+      window.clearTimeout(manualScrollTimeout);
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    manualScrollTimeout = window.setTimeout(() => {
+      isScrollingManual = false;
+    }, 1000);
+  }
+}
+
+function selectRefSection(id: string): void {
+  scrollToSection(id);
+}
+
+function handleScroll(): void {
+  if (isScrollingManual) return;
+
+  const sections = document.querySelectorAll('div.ref-content > section.ref-section[id]');
+  let currentSectionId = activeRefSection.value;
+
+  const containerRect = scrollContainer?.getBoundingClientRect();
+  if (!containerRect) return;
+
+  const triggerPoint = containerRect.top + 120;
+
+  for (const sec of sections) {
+    const rect = sec.getBoundingClientRect();
+    if (rect.top <= triggerPoint) {
+      currentSectionId = sec.id;
+    }
+  }
+
+  if (currentSectionId && activeRefSection.value !== currentSectionId) {
+    activeRefSection.value = currentSectionId;
+  }
+}
+
+onMounted(() => {
+  // Apply deep-link hash from the parent shell if provided.
+  if (props.initialHash) {
+    const hashId = props.initialHash.startsWith('#')
+      ? props.initialHash.slice(1)
+      : props.initialHash;
+    if (hashId.startsWith('ref-')) {
+      if (hashId === 'ref-import-references-popup') {
+        activeRefSection.value = 'ref-references-citations';
+      } else {
+        activeRefSection.value = hashId;
+      }
+    }
+    requestAnimationFrame(() => {
+      const el = document.getElementById(hashId);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }
+
+  scrollContainer = document.querySelector('.app-shell__content');
+  if (scrollContainer) {
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+  }
+});
+
+onUnmounted(() => {
+  if (scrollContainer) {
+    scrollContainer.removeEventListener('scroll', handleScroll);
+  }
+  if (manualScrollTimeout) {
+    window.clearTimeout(manualScrollTimeout);
+  }
+});
+
+// Re-apply hash when the parent updates the prop (e.g. navigating while tab is mounted).
+watch(
+  () => props.initialHash,
+  (newHash) => {
+    if (!newHash) return;
+    const hashId = newHash.startsWith('#') ? newHash.slice(1) : newHash;
+    if (hashId.startsWith('ref-')) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(hashId);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }
+);
+</script>
+
+<template>
+  <div class="ht-reference" role="tabpanel">
+    <div class="ref-tab-layout">
+      <!-- Navigation Sidebar -->
+      <aside class="ref-sidebar" aria-label="Reference Navigation">
+        <nav class="ref-nav">
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-dashboard' }"
+            @click="selectRefSection('ref-dashboard')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">dashboard</span>
+            Project Dashboard
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-criteria' }"
+            @click="selectRefSection('ref-criteria')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">rule</span>
+            Criteria Editor
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-import' }"
+            @click="selectRefSection('ref-import')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">upload_file</span>
+            Import Bibliography
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-dedup' }"
+            @click="selectRefSection('ref-dedup')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">science</span>
+            Duplicate Resolution
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-tags' }"
+            @click="selectRefSection('ref-tags')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">sell</span>
+            Tags & Labels
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-screening' }"
+            @click="selectRefSection('ref-screening')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">analytics</span>
+            AI Screening Setup
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-review' }"
+            @click="selectRefSection('ref-review')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">description</span>
+            Article Detail Panels
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-references-citations' }"
+            @click="selectRefSection('ref-references-citations')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">link</span>
+            References & Citations
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-bibliometrics' }"
+            @click="selectRefSection('ref-bibliometrics')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">hub</span>
+            Bibliometrics Analysis
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-chat' }"
+            @click="selectRefSection('ref-chat')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">chat</span>
+            Chat Assistant
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-settings' }"
+            @click="selectRefSection('ref-settings')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">settings</span>
+            Settings & API Security
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-backup' }"
+            @click="selectRefSection('ref-backup')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">backup</span>
+            Backup & Restore
+          </button>
+        </nav>
+      </aside>
+
+      <!-- Main Content Area -->
+      <div class="ref-content">
+        <!-- SECTION: DASHBOARD -->
+        <section id="ref-dashboard" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">dashboard</span>
+            <h2 class="ref-section__title">Project Dashboard</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Project Dashboard</strong> is the home base of your systematic literature
+              review. It provides a real-time status summary of your article library and screening
+              progress.
+            </p>
+            <h3>Key Features</h3>
+            <ul>
+              <li>
+                <strong>Progress KPIs:</strong> Cards displaying the counts of articles in different
+                states: <em>Working</em> (unscreened), <em>Included</em>, <em>Rejected</em>, and
+                unresolved <em>Duplicates</em>.
+              </li>
+              <li>
+                <strong>Recent Activity Trail:</strong> An active chronological log showing the
+                latest system and user actions, such as imports, status overrides, and AI screening
+                updates.
+              </li>
+              <li>
+                <strong>Quick Actions:</strong> Navigation buttons to jump directly to key screening
+                tasks.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: CRITERIA EDITOR -->
+        <section id="ref-criteria" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">rule</span>
+            <h2 class="ref-section__title">Criteria Editor</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Before starting your AI screening, you must define the boundaries of your review. The
+              <strong>Criteria Editor</strong> allows you to formulate research aims and explicit
+              screening rules.
+            </p>
+            <h3>Key Features</h3>
+            <ul>
+              <li>
+                <strong>Research Aims:</strong> Free-text statements defining the broader research
+                context. These are sent as prompts to the LLM to guide screening decisions.
+              </li>
+              <li>
+                <strong>Inclusion / Exclusion Criteria:</strong> Explicit conditions articles must
+                meet (Inclusion) or must not meet (Exclusion).
+              </li>
+              <li>
+                <strong>Priority Conflict Resolution:</strong> Each criterion must be assigned a
+                priority (<em>Critical</em>, <em>High</em>, <em>Standard</em>, <em>Low</em>, or
+                <em>Optional</em>). If both inclusion and exclusion criteria match:
+                <ol>
+                  <li>The highest-priority matching criterion wins the decision.</li>
+                  <li>If priorities are tied, inclusion wins.</li>
+                  <li>If no criteria match at all, the article is excluded.</li>
+                </ol>
+              </li>
+            </ul>
+            <h3>Screen Controls & Buttons</h3>
+            <ul>
+              <li>
+                <strong>Add Aim / Add Criterion:</strong> Buttons that open input forms to add items
+                to the active list.
+              </li>
+              <li>
+                <strong>Priority Selector:</strong> Dropdown menus beside criteria to update
+                priority values.
+              </li>
+              <li>
+                <strong>Edit / Delete:</strong> Actions on each row to modify text or permanently
+                delete criteria.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: IMPORT BIBLIOGRAPHY -->
+        <section id="ref-import" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">upload_file</span>
+            <h2 class="ref-section__title">Import Bibliography</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Bango supports importing bibliography results exported from academic search engines.
+            </p>
+            <h3>Key Features</h3>
+            <ul>
+              <li>
+                <strong>Multi-Format Support:</strong> Reads both standard
+                <strong>RIS (.ris)</strong> and <strong>BibTeX (.bib)</strong> files.
+              </li>
+              <li>
+                <strong>Capacity Guard:</strong> The system enforces a project capacity limit of
+                <strong>10,000 articles</strong>. Imports that would exceed this threshold are
+                blocked.
+              </li>
+              <li>
+                <strong>Exclusion Filters:</strong> A preview list of imported papers allows you to
+                review metadata and manually deselect individual rows before writing them to the
+                database.
+              </li>
+              <li>
+                <strong>Metadata Validation:</strong> Articles missing essential fields (title,
+                abstract text, or authors) will raise warnings and be skipped during import.
+              </li>
+            </ul>
+            <h3>Format Examples</h3>
+            <div class="ref-example-grid">
+              <div>
+                <strong>RIS Format:</strong>
+                <pre class="ref-code">
+TY  - JOUR
+TI  - AI-Assisted Systematic Review Abstraction
+AU  - Soylu, Bilal
+JO  - Journal of Advanced Agentic Coding
+PY  - 2026
+AB  - This paper describes a novel system for abstract screening...
+KW  - systematic review
+KW  - LLM
+ER  - </pre
+                >
+              </div>
+              <div>
+                <strong>BibTeX Format:</strong>
+                <pre class="ref-code">
+@article{soylu2026ai,
+  title = {AI-Assisted Systematic Review Abstraction},
+  author = {Soylu, Bilal},
+  journal = {Journal of Advanced Agentic Coding},
+  year = {2026},
+  abstract = {This paper describes a novel system...},
+  keywords = {systematic review, LLM}
+}</pre
+                >
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECTION: DUPLICATE RESOLUTION -->
+        <section id="ref-dedup" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">science</span>
+            <h2 class="ref-section__title">Duplicate Resolution</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              When combining bibliography files from multiple databases, duplicate entries are
+              common. Bango runs a multi-strategy deduplication pipeline.
+            </p>
+            <h3>Deduplication Strategies</h3>
+            <ol>
+              <li>
+                <strong>DOI Exact:</strong> Matches DOI strings exactly. Auto-merges duplicates.
+              </li>
+              <li>
+                <strong>Title + Year Exact:</strong> Matches normalized title (similarity >= 95% via
+                Levenshtein distance) and exact year. Auto-merges.
+              </li>
+              <li>
+                <strong>Fuzzy Title + Year:</strong> Matches title with 70–94% similarity and exact
+                year. Flags for manual resolution.
+              </li>
+              <li>
+                <strong>Author + Title Partial:</strong> Matches first author's last name exactly
+                and normalized title similarity >= 80%. Flags for manual resolution.
+              </li>
+            </ol>
+            <h3>Screen Controls & Buttons</h3>
+            <ul>
+              <li>
+                <strong>Merge:</strong> Resolves the conflict by linking the duplicate record to the
+                parent article and marking it as read-only.
+              </li>
+              <li>
+                <strong>Keep Both:</strong> Dismisses the duplicate flag, keeping both records in
+                the active working set.
+              </li>
+              <li><strong>Skip:</strong> Defers decision to review later.</li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: TAGS & LABELS -->
+        <section id="ref-tags" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">sell</span>
+            <h2 class="ref-section__title">Tags & Labels</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>Categorize and track your literature using tags and labels.</p>
+            <h3>Tags vs. Labels</h3>
+            <ul>
+              <li>
+                <strong>Tags (Content categories):</strong> Used to classify the subject matter of
+                an article (e.g., <code>"randomized-control"</code>, <code>"neural-network"</code>).
+                Suggested by AI during screening or created manually by users.
+              </li>
+              <li>
+                <strong>Labels (Workflow markers):</strong> Used to track organization or audit
+                status (e.g., <code>"disputed"</code>, <code>"priority-read"</code>). Generated by
+                AI or managed manually.
+              </li>
+            </ul>
+            <h3>Screen Controls & Buttons</h3>
+            <ul>
+              <li>
+                <strong>Color Swatch:</strong> Click color buttons to assign specific colors to your
+                tags and labels.
+              </li>
+              <li>
+                <strong>Create Tag/Label:</strong> Input field at the top of the panels to add a new
+                category directly to the project vocabulary.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: AI SCREENING -->
+        <section id="ref-screening" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">analytics</span>
+            <h2 class="ref-section__title">AI Screening Setup</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>AI Screening</strong> view manages running your screening queue using
+              remote or local LLM models.
+            </p>
+            <h3>Required Checklist</h3>
+            <p>Before the screening worker can start, the system checks for:</p>
+            <ul>
+              <li>At least one Research Aim.</li>
+              <li>At least one Inclusion Criterion and one Exclusion Criterion.</li>
+              <li>A valid LLM Provider configuration and API key in Settings.</li>
+            </ul>
+            <h3>Behaviors & Exception Handling</h3>
+            <ul>
+              <li>
+                <strong>Token Limit Safeguard:</strong> The system estimates input sizes for each
+                abstract batch and prompts warnings if the estimated payload exceeds 80% of the
+                configured context window (requires at least 50,000 tokens context).
+              </li>
+              <li>
+                <strong>Rate Limiting (HTTP 429):</strong> If the remote provider throttles the
+                connection, Bango pauses and executes automatic retries using exponential backoff.
+                You can mitigate this by lowering concurrency or increasing request delays in
+                Settings.
+              </li>
+              <li>
+                <strong>Authentication Failure (HTTP 400/401):</strong> Occurs if API keys are
+                invalid or revoked. Check the Diagnostics log and verify configurations in Settings.
+              </li>
+              <li>
+                <strong>Screening Errors:</strong> API timeouts or malformed JSON responses leave
+                the article in <em>Working</em> status with the "Screening Error" flag enabled. You
+                can retry these individual records from the detail panel.
+              </li>
+            </ul>
+            <h3>Screen Controls & Buttons</h3>
+            <ul>
+              <li><strong>Start Screening:</strong> Launches the background async queue worker.</li>
+              <li>
+                <strong>Pause / Resume:</strong> Safely halts the queue execution or resumes it from
+                where it stopped.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: ARTICLE DETAIL PANELS -->
+        <section id="ref-review" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">description</span>
+            <h2 class="ref-section__title">Article Detail Panels</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The article viewer uses a dense 3-pane layout allowing you to read abstracts, inspect
+              metadata, examine AI reasoning, and download attachments.
+            </p>
+            <h3>Key Features</h3>
+            <ul>
+              <li>
+                <strong>Left Pane (Filters & Search):</strong> Query by title, year, tags, AI
+                confidence, or status.
+              </li>
+              <li>
+                <strong>Center Pane (Article Table):</strong> Scroll through matched articles and
+                status indicators.
+              </li>
+              <li>
+                <strong>Right Pane (Sliding Details Panel):</strong>
+                <ul>
+                  <li>
+                    <strong>AI Decision Card:</strong> Shows the suggested action, matching criteria
+                    list, and confidence.
+                  </li>
+                  <li>
+                    <strong>Full-Text Attachments:</strong> Attach PDFs or TXT files. Raw texts are
+                    extracted and cached locally in the full-text storage directory.
+                  </li>
+                  <li>
+                    <strong>Inline PDF Reader:</strong> Render and read attached documents
+                    side-by-side with the metadata.
+                  </li>
+                  <li>
+                    <strong>Audit Trail Timeline:</strong> View immutable histories of actions taken
+                    on the article (imports, status changes, manual overrides, error codes).
+                  </li>
+                </ul>
+              </li>
+            </ul>
+            <h3>Screen Controls & Buttons</h3>
+            <ul>
+              <li>
+                <strong>Include / Reject:</strong> Action buttons at the top of the detail panel
+                that override AI-assigned decisions. These are logged in the audit trail.
+              </li>
+              <li>
+                <strong>Attach File:</strong> File selection trigger that imports a PDF or text file
+                for full-text caching.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: REFERENCES & CITATIONS -->
+        <section id="ref-references-citations" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">link</span>
+            <h2 class="ref-section__title">References & Citations</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Bango tracks both backward references (articles cited by the paper) and forward
+              citations (articles that cite the paper) for included records.
+            </p>
+
+            <div id="ref-import-references-popup" class="ref-callout">
+              <h4>Import References Pop Up</h4>
+              <p>
+                To load specific reference datasets for a given article, click the
+                <strong>Import</strong> button on the References tab in the article details panel.
+                This opens the <strong>Import References Dialog</strong> where you can:
+              </p>
+              <ol>
+                <li>
+                  Select the citation direction: <strong>Backward (cited refs)</strong> or
+                  <strong>Forward (cited by)</strong>.
+                </li>
+                <li>
+                  Click <strong>Choose File</strong> to upload an RIS or BibTeX file matching that
+                  citation dataset.
+                </li>
+                <li>
+                  Review the parsed preview list, and click <strong>Add</strong> to import them.
+                </li>
+                <li>
+                  Click the <strong>Help</strong> link in the popup header to close the dialog and
+                  jump back to this reference chapter.
+                </li>
+              </ol>
+            </div>
+
+            <h3>Data Sources</h3>
+            <p>
+              Citation count fields (<code>num_cited</code> and <code>num_references</code>) are
+              automatically parsed from the <code>N1</code> field of bibliography files during
+              initial imports. Detailed citation lists can be obtained from:
+            </p>
+            <ul>
+              <li>
+                <strong>Web of Science:</strong> Export records selecting "Full Record and Cited
+                References" in RIS format.
+              </li>
+              <li>
+                <strong>Lens.org:</strong> Create a free account on
+                <a href="https://www.lens.org" target="_blank" rel="noopener noreferrer">lens.org</a
+                >, compile a collection, and export the citation/reference lists in RIS or BibTeX
+                format.
+              </li>
+            </ul>
+
+            <h3>Match Status States</h3>
+            <p>Once references are loaded, each reference paper has one of the following states:</p>
+            <ul>
+              <li>
+                <code>unmatched</code>: The paper is listed in the reference dataset but has not
+                been found or promoted in the library.
+              </li>
+              <li>
+                <code>matched</code>: The paper matches an existing article in the main library
+                (matched by DOI or title/author/year). Clicking the link icon will take you to that
+                library record.
+              </li>
+              <li>
+                <code>imported</code>: The paper has been promoted to a full article and is now
+                available in the working list.
+              </li>
+              <li><code>not_in_library</code>: No match exists in the current library.</li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: BIBLIOMETRICS -->
+        <section id="ref-bibliometrics" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">hub</span>
+            <h2 class="ref-section__title">Bibliometrics Analysis</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The Bibliometrics tab analyzes structural collaborations, citation density, and
+              keywords across six modules: Co-Authorship, Citation Network, Keyword Co-Occurrence,
+              Publication Timeline, Author Productivity, and Co-Citation Analysis. See the
+              <strong>Understanding Bibliometrics</strong> help tab for detailed explanations and
+              use cases for each module.
+            </p>
+            <h3>Modularity & Layout Algorithms</h3>
+            <p>
+              Bango uses a local modularity engine designed to map direct working relationships:
+            </p>
+            <div class="ref-comparison-wrapper">
+              <table class="ref-comparison-table">
+                <thead>
+                  <tr>
+                    <th>Feature</th>
+                    <th>Bango Engine</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Normalization</strong></td>
+                    <td>
+                      Uses <strong>Absolute Link Weights</strong> (actual co-authored papers).
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Clustering</strong></td>
+                    <td>
+                      Standard Louvain modularity optimization. Groups nodes into highly cohesive
+                      communities.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Visual Layout</strong></td>
+                    <td>
+                      ForceAtlas2 force-directed model. Highlights central hubs and direct
+                      departmental working groups.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>Analytical Features</h3>
+            <ul>
+              <li>
+                <strong>Normalize:</strong> Populates the bibliometric databases by parsing active
+                metadata within a single transaction to ensure maximum speed.
+              </li>
+              <li>
+                <strong>Louvain Clustering:</strong> Groups co-authors into color-coded
+                collaborative teams. Adjust the modularity slider to group or split cohorts.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: CHAT ASSISTANT -->
+        <section id="ref-chat" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">chat</span>
+            <h2 class="ref-section__title">Chat Assistant</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Chat Assistant</strong> provides a conversational interface to query your
+              systematic review database.
+            </p>
+            <h3>Key Features</h3>
+            <ul>
+              <li>
+                <strong>RAG (Retrieval-Augmented Generation):</strong> The assistant uses your
+                project's inclusion/exclusion criteria, research aims, and article abstracts as
+                context to answer questions.
+              </li>
+              <li>
+                <strong>Source Citations:</strong> Answers include direct citation badges linking to
+                referenced papers. Clicking a badge opens the corresponding article details panel.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: SETTINGS & SECURITY -->
+        <section id="ref-settings" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">settings</span>
+            <h2 class="ref-section__title">Settings & API Security</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>Configure AI connections, custom directories, and license flags.</p>
+            <h3>API Key Encryption</h3>
+            <p>
+              To protect your credentials, LLM API keys are encrypted locally using **AES-256-GCM**.
+              The decryption key is derived cryptographically from your local machine's hostname,
+              username, and a secure app salt. API keys are never included in project backups.
+            </p>
+            <h3>Configurable Options</h3>
+            <ul>
+              <li>
+                <strong>Full-Text Storage Directory:</strong> Defines where attached files are
+                cached. Defaults to <code>~/Documents/Bango/fulltext/</code> if unconfigured.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: BACKUP & RESTORE -->
+        <section id="ref-backup" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">backup</span>
+            <h2 class="ref-section__title">Backup & Restore</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Protect your systematic reviews by managing backups. Manage multiple projects one at a
+              time by exporting / importing the current project.
+            </p>
+            <h3>Backup Operations</h3>
+            <ul>
+              <li>
+                <strong>Export Backup:</strong> Exports all project variables (aims, criteria,
+                articles, tags, labels, and audit logs) into a single <code>.bango.json</code> file.
+                Note that system settings, LLM API keys, and the <em>Journal Index</em> reference
+                tables are excluded from the backup to preserve security and app settings across
+                installations.
+              </li>
+              <li>
+                <strong>Import Backup:</strong> Restores a project from a
+                <code>.bango.json</code> backup file. Importing will completely overwrite your
+                current project database. A warnings modal requires explicit confirmation before
+                initiating the overwrite.
+              </li>
+            </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.ht-reference {
+  /* Container */
+}
+
+.ref-tab-layout {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+  margin-top: var(--space-4);
+}
+
+.ref-sidebar {
+  position: sticky;
+  top: var(--space-4);
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+.ref-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background-color: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.ref-nav__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  text-align: left;
+  text-decoration: none;
+  border-radius: var(--radius-default);
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+  width: 100%;
+}
+
+.ref-nav__link:hover {
+  background-color: rgba(79, 70, 229, 0.04);
+  color: #4f46e5;
+}
+
+.ref-nav__link--active {
+  background-color: #eef2ff;
+  color: #4f46e5;
+}
+
+.ref-nav__icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.ref-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 100%;
+  padding-bottom: var(--space-8);
+}
+
+.ref-section {
+  background-color: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
+  scroll-margin-top: var(--space-4);
+}
+
+.ref-section__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.ref-section__icon {
+  color: #4f46e5;
+  font-size: 24px;
+}
+
+.ref-section__title {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin: 0;
+}
+
+.ref-section__body {
+  font-size: var(--font-size-body);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+}
+
+.ref-section__body h3 {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.ref-section__body h4 {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.ref-section__body ul,
+.ref-section__body ol {
+  margin: 0 0 var(--space-3) 0;
+  padding-left: var(--space-5);
+}
+
+.ref-section__body li {
+  margin-bottom: calc(var(--space-1) * 1.5);
+}
+
+.ref-section__body li:last-child {
+  margin-bottom: 0;
+}
+
+.ref-example-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+@media (min-width: 992px) {
+  .ref-example-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.ref-code {
+  background-color: #f8fafc;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-default);
+  padding: var(--space-3);
+  font-family: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: #334155;
+  overflow-x: auto;
+  margin-top: var(--space-2);
+}
+
+.ref-callout {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin: var(--space-4) 0;
+}
+
+.ref-callout h4 {
+  color: #16a34a;
+  margin-top: 0 !important;
+  margin-bottom: var(--space-2) !important;
+}
+
+.ref-comparison-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-default);
+  margin-top: var(--space-3);
+}
+
+.ref-comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-caption);
+  text-align: left;
+}
+
+.ref-comparison-table th,
+.ref-comparison-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.ref-comparison-table th {
+  background-color: #f8fafc;
+  color: var(--color-on-surface);
+  font-weight: var(--font-weight-semibold);
+}
+
+.ref-comparison-table tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 767px) {
+  .ref-tab-layout {
+    grid-template-columns: 1fr;
+  }
+  .ref-sidebar {
+    position: static;
+    max-height: none;
+  }
+}
+</style>

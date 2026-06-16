@@ -123,9 +123,14 @@ describe each durable boundary so agents can locate the right area. Create a chi
     (its secondary "Top Journals" chart auto-hides below `SECONDARY_CHART_MIN_VIEWPORT_HEIGHT`
     = 700px viewport height, driven by the reactive `height` ref from `use-viewport.ts`);
     `biblio-authors.vue` is the Author Productivity Ranking view (sortable table + slide-over
-    detail panel + Google Scholar external lookup icons).
+    detail panel + Google Scholar external lookup icons). `help-guide.vue` is the `/help` shell
+    (tab bar + `?tab=`/`#hash` deep-link routing) that renders one `help-tab-*.vue` component
+    per tab (guide, bibliometrics, troubleshooting, local-ai, reference); the Bibliometrics tab
+    documents all six completed modules.
   - **`src/components/`** — reusable components. `journal-info-card.vue` lazily loads
-    journal metadata via the `biblio_get_journal_info` command.
+    journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
+    `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
+    `src/styles/help-shared.css`.
   - **`src/composables/`** — Vue composables. `use-bibliometrics.ts` (shared KPI
     singleton, now exports `JournalYearData`), `use-journal-info.ts` (per-call lazy
     loader), `use-article-search.ts` (supports `yearFrom`/`yearTo`/`journal` route params).
