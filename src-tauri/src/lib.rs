@@ -231,6 +231,7 @@ pub fn run() {
             commands::biblio_cmd::biblio_get_author_rankings,
             commands::biblio_cmd::biblio_get_author_detail,
             commands::biblio_cmd::biblio_get_author_productivity_kpis,
+            commands::biblio_cmd::biblio_get_cocitation_network,
             commands::trends::check_trends_url,
         ]);
 

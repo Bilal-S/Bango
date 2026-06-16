@@ -358,9 +358,10 @@ watch(
   <div class="llm-config">
     <!-- Header -->
     <div class="llm-config__header">
-      <h1 class="page-title">LLM Configuration</h1>
+      <h1 class="page-title">Settings</h1>
       <p class="llm-config__subtitle">
-        Configure the Large Language Model endpoint and parameters for text generation tasks.
+        Configure AI provider parameters (note: AI models can make mistakes!), set preferences,
+        manage backups.
       </p>
     </div>
 
@@ -379,7 +380,7 @@ watch(
       <div class="llm-config__card llm-config__card--wide">
         <h2 class="llm-config__card-title">
           <span class="material-symbols-outlined text-primary">dns</span>
-          Connection Details
+          LLM Provider Connection Details
         </h2>
         <div class="field-group">
           <!-- Provider -->
@@ -571,7 +572,7 @@ watch(
       </div>
     </div>
 
-    <!-- Footer Actions -->
+    <!-- Action Buttons -->
     <div class="llm-config__footer">
       <div class="llm-config__status">
         <span

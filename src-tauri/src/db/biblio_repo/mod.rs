@@ -27,7 +27,8 @@ pub use institutions::{
 pub use networks::{
     auto_match_references_to_articles, build_citation_edges, build_coauthor_edges, delete_network,
     format_paper_label, get_citation_network_json, get_coauthor_network_json,
-    get_keyword_network_json, load_network, load_network_edges, load_network_nodes, save_network,
+    get_cocitation_network_json, get_keyword_network_json, load_network, load_network_edges,
+    load_network_nodes, save_network, CocitationNormalization, CocitationScope,
 };
 
 // Re-export kpis functions:

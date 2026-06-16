@@ -1045,25 +1045,50 @@ function onPanelKeydown(event: KeyboardEvent): void {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 16px;
-  height: 48px;
-  background: #e2e8f0;
-  border: none;
-  border-radius: 0 4px 4px 0;
-  cursor: pointer;
+  z-index: 30;
+  width: 14px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition:
+    left 0.3s,
+    background-color 0.15s,
+    border-color 0.15s,
+    width 0.15s;
 }
 .drawer-handle:hover {
-  background: #cbd5e1;
+  background: #eef2ff;
+  border-color: #a5b4fc;
+  width: 16px;
 }
 .drawer-handle-grip {
-  width: 2px;
-  height: 16px;
-  background: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+}
+.drawer-handle-grip::before,
+.drawer-handle-grip::after,
+.drawer-handle-grip {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 2px;
   border-radius: 1px;
+  background: #94a3b8;
+  transition: background-color 0.15s;
+}
+.drawer-handle:hover .drawer-handle-grip::before,
+.drawer-handle:hover .drawer-handle-grip::after,
+.drawer-handle:hover .drawer-handle-grip {
+  background: #6366f1;
 }
 
 /* ── Main canvas ─────────────────────────────────────────────── */

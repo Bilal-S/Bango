@@ -6,8 +6,22 @@ use crate::models::biblio::{
     BiblioStatus, BiblioTerm, YearCount,
 };
 // BiblioTerm is re-exported through biblio_repo — no direct use here
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Emitter;
+
+/// Parameters for the co-citation network command.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CocitationParams {
+    /// Scope: "included" (default) or "all".
+    pub scope: Option<String>,
+    /// Normalization mode: "raw", "cosine" (default), "jaccard", or "pearson".
+    pub normalization: Option<String>,
+    /// Minimum times a paper must be cited to be included. Default 2.
+    pub min_citation_count: Option<i32>,
+    /// Minimum co-citation count for an edge. Default 2.
+    pub min_co_citation: Option<i32>,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -294,4 +308,40 @@ pub async fn biblio_get_author_productivity_kpis(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     biblio_repo::get_author_productivity_kpis(&conn)
+}
+
+/// Get the co-citation network as JSON for graph rendering.
+///
+/// Computes co-citation on-demand from `article_reference_links` (type=1).
+/// All four normalization modes (raw, cosine, jaccard, pearson) are computed
+/// and returned in each edge; the frontend selects which to visualize.
+#[tauri::command]
+pub async fn biblio_get_cocitation_network(
+    db_state: tauri::State<'_, DbState>,
+    params: Option<CocitationParams>,
+) -> Result<serde_json::Value, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    let p = params.unwrap_or_default();
+    let scope = match p.scope.as_deref().unwrap_or("included") {
+        "all" => biblio_repo::CocitationScope::AllArticles,
+        _ => biblio_repo::CocitationScope::IncludedArticles,
+    };
+    let normalization = match p.normalization.as_deref().unwrap_or("cosine") {
+        "raw" => biblio_repo::CocitationNormalization::Raw,
+        "jaccard" => biblio_repo::CocitationNormalization::Jaccard,
+        "pearson" => biblio_repo::CocitationNormalization::Pearson,
+        _ => biblio_repo::CocitationNormalization::Cosine,
+    };
+
+    biblio_repo::get_cocitation_network_json(
+        &conn,
+        scope,
+        normalization,
+        p.min_citation_count.unwrap_or(2),
+        p.min_co_citation.unwrap_or(2),
+    )
 }

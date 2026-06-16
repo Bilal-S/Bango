@@ -19,6 +19,7 @@ const BiblioCitations = () => import('@/views/biblio-citations.vue');
 const BiblioKeywords = () => import('@/views/biblio-keywords.vue');
 const BiblioTimeline = () => import('@/views/biblio-timeline.vue');
 const BiblioAuthors = () => import('@/views/biblio-authors.vue');
+const BiblioCocitations = () => import('@/views/biblio-cocitations.vue');
 const HelpGuide = () => import('@/views/help-guide.vue');
 const ChatView = () => import('@/views/chat-view.vue');
 
@@ -82,6 +83,11 @@ const routes = [
         name: 'authors',
         component: BiblioAuthors,
       },
+      {
+        path: 'cocitations',
+        name: 'cocitations',
+        component: BiblioCocitations,
+      },
     ],
   },
   {
@@ -114,6 +120,7 @@ void router.isReady().then(() => {
     import('@/views/biblio-keywords.vue'),
     import('@/views/biblio-timeline.vue'),
     import('@/views/biblio-authors.vue'),
+    import('@/views/biblio-cocitations.vue'),
     import('@/views/chat-view.vue'),
   ]);
 });

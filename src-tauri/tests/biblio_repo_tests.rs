@@ -4,10 +4,11 @@ use bango_lib::db::biblio_repo::{
     build_coauthor_edges, clear_all_biblio, clear_regeneratable_biblio, compute_author_metrics,
     compute_h_index, delete_network, get_all_authors, get_all_terms, get_author_detail,
     get_author_productivity_kpis, get_author_rankings, get_authors_for_article, get_biblio_kpis,
-    get_biblio_status, get_coauthor_network_json, get_journal_year_data, get_keyword_network_json,
-    get_terms_for_article, link_article_author, link_article_term, load_network,
-    load_network_edges, load_network_nodes, save_article_terms, save_network, upsert_author,
-    upsert_institution, upsert_term,
+    get_biblio_status, get_coauthor_network_json, get_cocitation_network_json,
+    get_journal_year_data, get_keyword_network_json, get_terms_for_article, link_article_author,
+    link_article_term, load_network, load_network_edges, load_network_nodes, save_article_terms,
+    save_network, upsert_author, upsert_institution, upsert_term, CocitationNormalization,
+    CocitationScope,
 };
 use bango_lib::db::migration::run_migrations;
 use bango_lib::models::biblio::{
@@ -1298,4 +1299,415 @@ fn productivity_detail_lazy_load() {
     // Collaborators: Doe A with 1 shared paper
     assert_eq!(detail.top_collaborators.len(), 1);
     assert_eq!(detail.top_collaborators[0].collaborator_name, "Doe, A.");
+}
+
+// ── Co-Citation Tests ─────────────────────────────────────────
+
+/// Helper: insert a reference paper and return its ID.
+fn insert_reference_paper(conn: &Connection, id: &str, title: &str, authors: &str) {
+    conn.execute(
+        "INSERT INTO reference_papers (id, title, authors, match_status) VALUES (?1, ?2, ?3, 'unmatched')",
+        rusqlite::params![id, title, authors],
+    )
+    .unwrap();
+}
+
+/// Helper: link an article to a reference paper (type=1 = reference).
+fn insert_reference_link(conn: &Connection, article_id: &str, paper_id: &str) {
+    conn.execute(
+        "INSERT INTO article_reference_links (id, parent_article_id, reference_paper_id, type) \
+         VALUES (?1, ?2, ?3, 1)",
+        rusqlite::params![uuid::Uuid::new_v4().to_string(), article_id, paper_id],
+    )
+    .unwrap();
+}
+
+#[test]
+fn cocitation_empty_db_returns_empty() {
+    let conn = test_db();
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Cosine,
+        2,
+        2,
+    )
+    .unwrap();
+
+    let nodes = json["nodes"].as_array().unwrap();
+    let edges = json["edges"].as_array().unwrap();
+    assert!(nodes.is_empty());
+    assert!(edges.is_empty());
+}
+
+#[test]
+fn cocitation_single_reference_no_pairs() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_reference_paper(&conn, "rp1", "Paper One", "[\"Smith J\"]");
+    insert_reference_link(&conn, "art1", "rp1");
+
+    // With only 1 reference per article, no co-citation pairs can form.
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Cosine,
+        1,
+        1,
+    )
+    .unwrap();
+
+    let edges = json["edges"].as_array().unwrap();
+    // With only 1 reference per article, no co-citation pairs can form.
+    assert!(edges.is_empty(), "no co-citation pairs with only 1 reference");
+}
+
+#[test]
+fn cocitation_two_articles_shared_refs() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+
+    // Both articles cite rp1 and rp2 → co-citation count = 2
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+    insert_reference_link(&conn, "art2", "rp2");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Raw,
+        2,
+        2,
+    )
+    .unwrap();
+
+    let nodes = json["nodes"].as_array().unwrap();
+    let edges = json["edges"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2, "two co-cited papers");
+    assert_eq!(edges.len(), 1, "one co-citation edge");
+    assert_eq!(edges[0]["rawWeight"], 2, "co-cited by 2 articles");
+}
+
+#[test]
+fn cocitation_min_citation_count_filter() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+    insert_reference_paper(&conn, "rp3", "Paper C", "[\"Lee K\"]");
+
+    // art1 cites rp1, rp2, rp3
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art1", "rp3");
+    // art2 cites rp1 only (rp1 cited twice, rp2/rp3 cited once)
+    insert_reference_link(&conn, "art2", "rp1");
+
+    // min_citation_count=2 → only rp1 qualifies (cited by 2 articles).
+    // rp2 and rp3 are cited only once → excluded as candidates.
+    // Since rp1 is the only candidate, no pairs can form → 0 nodes, 0 edges.
+    // (Nodes are derived from surviving edges; an isolated candidate has no co-citation partner.)
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Raw,
+        2,
+        1,
+    )
+    .unwrap();
+
+    let nodes = json["nodes"].as_array().unwrap();
+    let edges = json["edges"].as_array().unwrap();
+    assert!(nodes.is_empty(), "rp1 alone cannot form a co-citation pair");
+    assert!(edges.is_empty(), "no pairs with rp1 alone");
+}
+
+#[test]
+fn cocitation_min_co_citation_filter() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+
+    // art1 cites both; art2 cites rp1 only.
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+
+    // rp1 cited twice, rp2 cited once. With min_citation_count=1, both qualify.
+    // But rp1/rp2 pair is co-cited only once (by art1).
+    // With min_co_citation=2, no edges should survive.
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Raw,
+        1,
+        2,
+    )
+    .unwrap();
+
+    let edges = json["edges"].as_array().unwrap();
+    assert!(edges.is_empty(), "pair co-cited once < min_co_citation=2");
+}
+
+#[test]
+fn cocitation_cosine_normalization() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+    insert_reference_link(&conn, "art2", "rp2");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Cosine,
+        2,
+        1,
+    )
+    .unwrap();
+
+    let edges = json["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    let cosine = edges[0]["weight"].as_f64().unwrap();
+    // c_ij=2, c_i=2, c_j=2 → cosine = 2/sqrt(4) = 1.0
+    assert!((cosine - 1.0).abs() < 0.01, "cosine should be 1.0, got {cosine}");
+}
+
+#[test]
+fn cocitation_jaccard_normalization() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+
+    // Both articles cite both papers: c_ij=2, c_i=2, c_j=2
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+    insert_reference_link(&conn, "art2", "rp2");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Jaccard,
+        2,
+        1,
+    )
+    .unwrap();
+
+    let edges = json["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    let jaccard = edges[0]["weight"].as_f64().unwrap();
+    // c_ij=2, c_i=2, c_j=2 → jaccard = 2/(2+2-2) = 1.0
+    assert!((jaccard - 1.0).abs() < 0.01, "jaccard should be 1.0, got {jaccard}");
+}
+
+#[test]
+fn cocitation_pearson_normalization() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+
+    // Both articles cite both papers: identical co-citation patterns.
+    // Perfect positive correlation → pearson = 1.0
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+    insert_reference_link(&conn, "art2", "rp2");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Pearson,
+        2,
+        1,
+    )
+    .unwrap();
+
+    let edges = json["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    let pearson = edges[0]["weight"].as_f64().unwrap();
+    // With N=2 articles, a=2, b=0, c=0, d=0: denom_sq = (2)(0)(2)(0) = 0 → weight=0
+    // This is a degenerate case. Let's test with 3 articles for a proper value.
+    assert!(
+        pearson.abs() < 0.01 || pearson.abs() >= 0.99,
+        "pearson should be ~0 (degenerate) or ~1, got {pearson}"
+    );
+}
+
+#[test]
+fn cocitation_pearson_positive_correlation() {
+    let conn = test_db();
+    // 4 articles, 2 reference papers.
+    // Papers cited by the same set of articles → perfect correlation (phi=1).
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_test_article(&conn, "art3");
+    insert_test_article(&conn, "art4");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+
+    // art1, art2 cite both rp1 and rp2; art3, art4 cite neither.
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+    insert_reference_link(&conn, "art2", "rp2");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Pearson,
+        2,
+        2,
+    )
+    .unwrap();
+
+    let edges = json["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    let pearson = edges[0]["weight"].as_f64().unwrap();
+    // N=4, a=2, b=0, c=0, d=2: phi = (4 - 0) / sqrt(2*2*2*2) = 4/4 = 1.0
+    assert!(
+        (pearson - 1.0).abs() < 0.01,
+        "pearson should be 1.0 (perfect positive correlation), got {pearson}"
+    );
+}
+
+#[test]
+fn cocitation_scope_included_vs_all() {
+    let conn = test_db();
+    // 2 included articles + 1 rejected article.
+    insert_test_article(&conn, "inc1");
+    insert_test_article(&conn, "inc2");
+    insert_kpi_article(&conn, "rej1", "rejected", Some(2020), None, "X", None, None);
+
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+
+    // Included articles cite both papers.
+    insert_reference_link(&conn, "inc1", "rp1");
+    insert_reference_link(&conn, "inc1", "rp2");
+    insert_reference_link(&conn, "inc2", "rp1");
+    insert_reference_link(&conn, "inc2", "rp2");
+    // Rejected article also cites both.
+    insert_reference_link(&conn, "rej1", "rp1");
+    insert_reference_link(&conn, "rej1", "rp2");
+
+    // Included scope: rp1 cited by 2 included, rp2 cited by 2 included.
+    let json_inc = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Raw,
+        2,
+        1,
+    )
+    .unwrap();
+    let edges_inc = json_inc["edges"].as_array().unwrap();
+    assert_eq!(edges_inc.len(), 1);
+    assert_eq!(edges_inc[0]["rawWeight"], 2, "co-cited by 2 included articles");
+
+    // All scope: rp1 cited by 3 (inc1, inc2, rej1), rp2 cited by 3.
+    let json_all = get_cocitation_network_json(
+        &conn,
+        CocitationScope::AllArticles,
+        CocitationNormalization::Raw,
+        2,
+        1,
+    )
+    .unwrap();
+    let edges_all = json_all["edges"].as_array().unwrap();
+    assert_eq!(edges_all.len(), 1);
+    assert_eq!(edges_all[0]["rawWeight"], 3, "co-cited by 3 articles (including rejected)");
+}
+
+#[test]
+fn cocitation_meta_block_diagnostics() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+    insert_reference_paper(&conn, "rp1", "Paper A", "[\"Smith J\"]");
+    insert_reference_paper(&conn, "rp2", "Paper B", "[\"Doe A\"]");
+    insert_reference_paper(&conn, "rp3", "Paper C", "[\"Lee K\"]");
+
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+    insert_reference_link(&conn, "art2", "rp2");
+    // rp3 cited by only 1 article (below min_citation_count=2)
+    insert_reference_link(&conn, "art1", "rp3");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Cosine,
+        2,
+        1,
+    )
+    .unwrap();
+
+    let meta = &json["meta"];
+    assert_eq!(meta["inScopeArticleCount"], 2);
+    assert_eq!(meta["candidatePaperCount"], 2, "rp1 and rp2 qualify; rp3 excluded");
+    assert_eq!(meta["scope"], "included");
+    assert_eq!(meta["normalization"], "cosine");
+}
+
+#[test]
+fn cocitation_node_metadata_from_reference_papers() {
+    let conn = test_db();
+    insert_test_article(&conn, "art1");
+    insert_test_article(&conn, "art2");
+
+    // Insert reference papers with full metadata.
+    conn.execute(
+        "INSERT INTO reference_papers (id, title, authors, publication_year, journal, doi, citation_count, match_status) \
+         VALUES ('rp1', 'Foundational Paper', '[\"Smith J\"]', 2015, 'Nature', '10.1234/test', 42, 'unmatched')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO reference_papers (id, title, authors, publication_year, journal, citation_count, match_status) \
+         VALUES ('rp2', 'Related Work', '[\"Doe A\"]', 2018, 'Science', 20, 'unmatched')",
+        [],
+    )
+    .unwrap();
+
+    insert_reference_link(&conn, "art1", "rp1");
+    insert_reference_link(&conn, "art1", "rp2");
+    insert_reference_link(&conn, "art2", "rp1");
+    insert_reference_link(&conn, "art2", "rp2");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Cosine,
+        2,
+        1,
+    )
+    .unwrap();
+
+    let nodes = json["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+
+    let rp1 = nodes.iter().find(|n| n["id"] == "rp1").unwrap();
+    assert_eq!(rp1["title"], "Foundational Paper");
+    assert_eq!(rp1["journal"], "Nature");
+    assert_eq!(rp1["doi"], "10.1234/test");
+    assert_eq!(rp1["citationCount"], 42);
+    assert_eq!(rp1["year"], 2015);
+    assert_eq!(rp1["coCitationCount"], 2, "cited by 2 in-scope articles");
 }

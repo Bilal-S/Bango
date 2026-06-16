@@ -95,7 +95,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     Vec<JournalYearData>` (canonical titles via `journal_index` LEFT JOIN, fallback
     `UPPER(TRIM(journal))`). `productivity.rs` exposes `get_author_rankings`,
     `get_author_detail`, `get_author_productivity_kpis` — author-level h-index, i10,
-    g-index, first/last/solo counts scoped to included articles.
+    g-index, first/last/solo counts scoped to included articles. `networks.rs` exposes
+    `get_cocitation_network_json` — on-demand co-citation computation with 4 normalization
+    modes (Raw, Cosine, Jaccard, Pearson), `CocitationScope` (included/all articles).
   - **`src-tauri/src/db/journal_repo.rs`** — journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.
@@ -123,7 +125,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
 - **`docs/superpowers/specs/bango-v4-spec.md`** — authoritative v4 product specification.
 - **`docs/design-reference/00-design-patterns.md`** — design tokens (Material 3 inspired).
 - **`.worktrees/`** — planning documents (`biblio-publication-timeline-plan-v3.md` is the
-  implemented plan). Not part of the shipped app.
+  implemented plan; `biblio-cocitation-requirmenents.md` is the Co-Citation Analysis
+  requirements spec; `biblio-plan.md` is the 8-screen bibliometric plan). Not part of the
+  shipped app.
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
 `-D warnings`) and `cargo test`.
