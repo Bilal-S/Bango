@@ -1026,7 +1026,15 @@ onUnmounted(() => {
   width: 16rem;
   overflow-y: auto;
   border-right: 1px solid #f1f5f9;
-  background: #fafbfc;
+  /* Transparent "well" — the inner .sidebar__scroll is the floating card.
+   * Matches the Citation/Network controls panel (bg-slate-50/30 + p-4).
+   * `display: flex; flex-direction: column` is required so the child's
+   * `margin: auto 0` centers it vertically (same technique the network
+   * views use via `class="my-auto"` on a flex-column aside). */
+  display: flex;
+  flex-direction: column;
+  background: rgb(248 250 252 / 0.3);
+  padding: 1rem;
   transition:
     opacity 0.3s,
     width 0.3s,
@@ -1040,8 +1048,16 @@ onUnmounted(() => {
   opacity: 0;
 }
 
+/* Floating controls card — solid white, vertically centered in the translucent
+ * well via margin auto (the parent .sidebar is a flex column). Rounded corners,
+ * subtle border + shadow match the Citation/Network controls card. */
 .sidebar__scroll {
+  background: #ffffff;
+  border: 1px solid rgb(226 232 240 / 0.8);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   padding: 1rem;
+  margin: auto 0;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
