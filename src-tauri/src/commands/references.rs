@@ -1,3 +1,4 @@
+use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
@@ -137,6 +138,9 @@ pub fn extract_cr_references(
             "system",
         );
     }
+
+    // References/citations feed citation and co-citation networks.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
 
     Ok(ExtractResult { papers_created, links_created, errors })
 }
@@ -338,6 +342,9 @@ pub fn promote_reference_to_article(
             "user",
         );
 
+        // Promoting/linking affects articles and reference matching.
+        app_settings_repo::mark_biblio_needs_refresh(&conn);
+
         return Ok(PromoteResult {
             article_id: existing_id,
             article_title: existing_article.title,
@@ -410,6 +417,9 @@ pub fn promote_reference_to_article(
         )),
         "user",
     );
+
+    // A new article was added to the library - bibliometrics need a rebuild.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
 
     Ok(PromoteResult { article_id: article.id, article_title: article.title, was_linked: false })
 }
@@ -748,6 +758,9 @@ pub fn import_references_for_article(
             "system",
         );
     }
+
+    // References/citations feed citation and co-citation networks.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
 
     Ok(ExtractResult { papers_created, links_created, errors })
 }

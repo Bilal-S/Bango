@@ -1,5 +1,6 @@
 use tauri::State;
 
+use crate::db::app_settings_repo;
 use crate::db::article_repo::{self, ArticleQuery};
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
@@ -50,7 +51,10 @@ pub fn update_article_status(
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    article_repo::update_article_status(&conn, &id, &new_status)
+    article_repo::update_article_status(&conn, &id, &new_status)?;
+    // Status changes (e.g. to/from 'included') alter the bibliometric corpus.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    Ok(())
 }
 
 #[tauri::command]
@@ -123,6 +127,8 @@ pub fn update_article_tags(
         Some(&format!("Tags updated: {} tag(s)", tag_ids.len())),
         "user",
     )?;
+    // Tag changes feed the keyword co-occurrence network.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
     Ok(())
 }
 
@@ -146,6 +152,8 @@ pub fn update_article_labels(
         Some(&format!("Labels updated: {} label(s)", label_ids.len())),
         "user",
     )?;
+    // Labels are part of article metadata used by bibliometrics.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
     Ok(())
 }
 
@@ -161,7 +169,16 @@ pub fn override_ai_decision(
         .conn
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-    article_repo::override_ai_decision(&conn, &id, &new_decision, &new_status, reasoning.as_deref())
+    article_repo::override_ai_decision(
+        &conn,
+        &id,
+        &new_decision,
+        &new_status,
+        reasoning.as_deref(),
+    )?;
+    // Overrides may change an article's status (included/rejected).
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    Ok(())
 }
 
 #[tauri::command]
@@ -231,6 +248,8 @@ pub fn bulk_update_article_status(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     article_repo::bulk_update_article_status(&conn, &ids, &new_status)?;
+    // Bulk status changes alter the bibliometric corpus.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
     Ok(())
 }
 
@@ -245,6 +264,8 @@ pub fn bulk_add_tag_to_articles(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     article_repo::bulk_add_tag_to_articles(&conn, &article_ids, &tag_name)?;
+    // Bulk tag changes feed the keyword co-occurrence network.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
     Ok(())
 }
 
@@ -259,6 +280,8 @@ pub fn bulk_add_label_to_articles(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     article_repo::bulk_add_label_to_articles(&conn, &article_ids, &label_name)?;
+    // Bulk label changes affect article metadata.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
     Ok(())
 }
 

@@ -218,6 +218,7 @@ pub fn run() {
             commands::references::get_reference_paper,
             commands::scraping::scrape_citation_chaser_cmd,
             commands::biblio_cmd::biblio_normalize,
+            commands::biblio_cmd::biblio_get_needs_refresh,
             commands::biblio_cmd::biblio_get_status,
             commands::biblio_cmd::biblio_get_authors,
             commands::biblio_cmd::biblio_get_terms,

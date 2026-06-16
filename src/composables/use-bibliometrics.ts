@@ -73,6 +73,16 @@ export function useBibliometrics() {
     }
   }
 
+  /** Whether the backend reports that bibliometric data is stale. */
+  async function fetchNeedsRefresh(): Promise<boolean> {
+    try {
+      return await tauriCommand<boolean>('biblio_get_needs_refresh');
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+      return false;
+    }
+  }
+
   /**
    * Unified normalization flow:
    * 1. Show progress overlay (normalizing = true)
@@ -128,13 +138,25 @@ export function useBibliometrics() {
     // This ensures the page renders with spinners BEFORE any IPC calls execute.
     setTimeout(async () => {
       await fetchKpis();
-      // Auto-normalize only when we have included articles AND no normalized data yet.
-      // The user can trigger re-normalization manually via the Refresh button.
-      if (kpis.value.includedCount > 0 && kpis.value.uniqueAuthors === 0) {
+      // Start the normalization/refresh cycle when the persisted stale flag is on.
+      // Mutations that affect bibliometrics (imports, references/citations, tag
+      // and label edits, status changes, AI screening) set this flag on the
+      // backend; biblio_normalize clears it once the transaction commits.
+      const needsRefresh = await fetchNeedsRefresh();
+      if (kpis.value.includedCount > 0 && needsRefresh) {
         runNormalization(); // not awaited - UI stays responsive
       }
     }, 0);
   });
 
-  return { kpis, loading, normalizing, progress, error, fetchKpis, runNormalization };
+  return {
+    kpis,
+    loading,
+    normalizing,
+    progress,
+    error,
+    fetchKpis,
+    fetchNeedsRefresh,
+    runNormalization,
+  };
 }

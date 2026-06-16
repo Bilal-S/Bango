@@ -217,6 +217,16 @@ pub async fn start_screening(
             .run_sync(&db.conn, &llm, delay_ms, criteria, aims, Some(app_handle.clone()))
             .await;
 
+        // Screening decisions change article statuses (included/rejected), which
+        // alters the bibliometric corpus. Mark it stale if any articles were
+        // actually processed (completed > 0).
+        let completed = engine.get_progress().await.completed;
+        if completed > 0 {
+            if let Ok(conn) = db.conn.lock() {
+                crate::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
+            }
+        }
+
         // Clear engine from state after completion
         let mut state_engine = screening.engine.write().await;
         *state_engine = None;

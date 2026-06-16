@@ -89,6 +89,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`. App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
+  - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
+    `fulltext_storage_dir`, `flag_premium`, and `biblio_needs_refresh` (the bibliometric
+    staleness flag). `mark_biblio_needs_refresh(conn)` is called by every mutation that
+    changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
+    reference/citation import + CR extraction + reference promotion in
+    `commands/references.rs`, tag/label/status/override/bulk edits in `commands/articles.rs`,
+    and AI screening completion in `commands/screening.rs`). `clear_biblio_needs_refresh`
+    runs only after `biblio_normalize` commits successfully; `get_biblio_needs_refresh`
+    powers the frontend `biblio_get_needs_refresh` command. Absent key = fresh (false).
   - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
@@ -116,6 +125,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `cr_parser_test.rs`, `doi_test.rs`, `n1_parser_test.rs`,
     `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation
     integration tests against RIS fixtures live in `cocitation_data_test.rs`.
+    `biblio_needs_refresh_test.rs` covers the staleness-flag round-trip (mark/clear/
+    absent-key default).
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/views/`** - page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
     parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)
@@ -138,8 +149,13 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
     Shared card chrome for these lives in `settings-card-shared.css`.
   - **`src/composables/`** - Vue composables. `use-bibliometrics.ts` (shared KPI
-    singleton, now exports `JournalYearData`), `use-journal-info.ts` (per-call lazy
-    loader), `use-article-search.ts` (supports `yearFrom`/`yearTo`/`journal` route params).
+    singleton, exports `JournalYearData`; on mount fetches KPIs then the
+    `biblio_get_needs_refresh` flag and auto-runs `runNormalization` when
+    `includedCount > 0 && needsRefresh` - this starts the Refresh cycle on dashboard
+    entry and the backend clears the flag after `biblio_normalize` commits;
+    `runNormalization` also drives the 8-step `biblio:progress` bar), `use-journal-info.ts`
+    (per-call lazy loader), `use-article-search.ts` (supports
+    `yearFrom`/`yearTo`/`journal` route params).
   - **`src/utils/`** - pure utilities. `chart-export.ts` (timeline CSV/SVG export via the
     `save()` + `write_text_to_file` pattern shared with `network-export.ts`).
   - **`src/styles/forms.css`** - global form/button/dialog primitives (`.field__*`, `.btn--*`,

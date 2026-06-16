@@ -4,6 +4,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::bibtex::converter::convert_bibtex_entries;
 use crate::bibtex::parser::parse_bibtex;
 use crate::commands::dedup::classify_imported_articles;
+use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
@@ -235,6 +236,9 @@ pub async fn import_ris_file(
 
         let remaining = article_repo::remaining_capacity(&conn)?;
 
+        // Imported articles affect bibliometrics - mark it stale.
+        app_settings_repo::mark_biblio_needs_refresh(&conn);
+
         Ok(ImportResult {
             imported_count: updated_articles.len(),
             skipped_count: skipped_validation,
@@ -383,6 +387,9 @@ pub async fn import_bibtex_file(
             .collect();
 
         let remaining = article_repo::remaining_capacity(&conn)?;
+
+        // Imported articles affect bibliometrics - mark it stale.
+        app_settings_repo::mark_biblio_needs_refresh(&conn);
 
         Ok(ImportResult {
             imported_count: updated_articles.len(),

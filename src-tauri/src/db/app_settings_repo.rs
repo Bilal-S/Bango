@@ -59,6 +59,35 @@ pub fn set_fulltext_storage_dir(conn: &Connection, path: Option<&str>) -> Result
     Ok(())
 }
 
+/// The `app_settings` key that records whether bibliometric normalized data
+/// is stale and needs to be rebuilt on the next visit to the Bibliometrics
+/// dashboard. Mutations that affect bibliometrics (imports, reference/citation
+/// imports, tag/label edits, status changes, AI screening) set this to "true".
+pub const BIBLIO_NEEDS_REFRESH_KEY: &str = "biblio_needs_refresh";
+
+/// Mark bibliometric data as stale. Called by any mutation that changes the
+/// underlying data bibliometrics depends on (articles, references, tags,
+/// labels, screening decisions). Non-fatal: errors are logged to stderr.
+pub fn mark_biblio_needs_refresh(conn: &Connection) {
+    if let Err(e) = set_setting(conn, BIBLIO_NEEDS_REFRESH_KEY, Some("true")) {
+        eprintln!("[biblio] failed to mark needs_refresh: {e}");
+    }
+}
+
+/// Mark bibliometric data as fresh. Called after `biblio_normalize` commits.
+pub fn clear_biblio_needs_refresh(conn: &Connection) {
+    if let Err(e) = set_setting(conn, BIBLIO_NEEDS_REFRESH_KEY, Some("false")) {
+        eprintln!("[biblio] failed to clear needs_refresh: {e}");
+    }
+}
+
+/// Whether bibliometric data is stale and should be re-normalized.
+/// Absent key is treated as not stale (fresh) so post-reset state (no
+/// articles) does not trigger an unnecessary normalization.
+pub fn get_biblio_needs_refresh(conn: &Connection) -> Result<bool, AppError> {
+    Ok(get_setting(conn, BIBLIO_NEEDS_REFRESH_KEY)?.map(|v| v == "true").unwrap_or(false))
+}
+
 /// Compute the platform-specific default storage directory:
 /// ~/Documents/Bango/fulltext/
 fn compute_default_storage_dir() -> String {

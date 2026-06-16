@@ -1,3 +1,4 @@
+use crate::db::app_settings_repo;
 use crate::db::biblio_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
@@ -8,6 +9,10 @@ use crate::models::biblio::{
 // BiblioTerm is re-exported through biblio_repo - no direct use here
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
+
+/// Total number of work steps reported by `biblio_normalize` via the
+/// `biblio:progress` event. Kept in sync with the emit calls below.
+const BIBLIO_NORMALIZE_TOTAL_STEPS: usize = 8;
 
 /// Parameters for the co-citation network command.
 #[derive(Deserialize, Default)]
@@ -39,11 +44,27 @@ struct NormalizeProgress {
     message: String,
 }
 
+/// Emit a `biblio:progress` event with the canonical total step count.
+fn emit_progress(app_handle: &tauri::AppHandle, step: usize, message: &str) {
+    let _ = app_handle.emit(
+        "biblio:progress",
+        NormalizeProgress {
+            step,
+            total_steps: BIBLIO_NORMALIZE_TOTAL_STEPS,
+            message: message.to_string(),
+        },
+    );
+}
+
 /// Run bibliometric normalization: extract and normalize all authors and terms
 /// from the articles table into the biblio_* tables.
 ///
 /// Uses a SQLite transaction to batch all writes into a single commit,
 /// reducing disk I/O from thousands of individual writes to one batched commit.
+///
+/// Reports progress through `BIBLIO_NORMALIZE_TOTAL_STEPS` steps via the
+/// `biblio:progress` event, then clears the `biblio_needs_refresh` flag once
+/// the transaction commits successfully.
 #[tauri::command]
 pub async fn biblio_normalize(
     db_state: tauri::State<'_, DbState>,
@@ -57,104 +78,63 @@ pub async fn biblio_normalize(
     let tx = conn.transaction()?;
 
     // Step 0: Start
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 0,
-            total_steps: 7,
-            message: "Starting normalization...".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 0, "Starting normalization...");
 
     // Clear previous normalization data (preserves AI-extracted and user-added terms)
     biblio_repo::clear_regeneratable_biblio(&tx)?;
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 1,
-            total_steps: 7,
-            message: "Cleared stale bibliometric data".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 1, "Cleared stale bibliometric data");
 
     // Extract and normalize authors from all articles
     let authors = biblio_repo::normalize_authors_from_articles(&tx)?;
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 2,
-            total_steps: 7,
-            message: "Normalized author data".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 2, "Normalized author data");
 
     // Parse raw affiliations → institutions + links
     let _affiliations = biblio_repo::normalize_affiliations(&tx)?;
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 3,
-            total_steps: 7,
-            message: "Normalized author affiliations".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 3, "Normalized author affiliations");
 
     // Extract terms from article keywords, titles, and abstracts
     let terms = biblio_repo::normalize_terms_from_articles(&tx)?;
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 4,
-            total_steps: 7,
-            message: "Normalized keywords and terms".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 4, "Normalized keywords and terms");
 
     // Compute author metrics (citations, avg year, h-index)
     biblio_repo::compute_author_metrics(&tx)?;
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 5,
-            total_steps: 7,
-            message: "Computed author metrics".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 5, "Computed author metrics");
 
     // Build coauthor edges (full counting + fractional counting)
     let _edges = biblio_repo::build_coauthor_edges(&tx)?;
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 6,
-            total_steps: 7,
-            message: "Built co-authorship networks".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 6, "Built co-authorship networks");
 
     // Auto-match reference papers to included articles before building citation
-    // edges.  This closes the gap where references imported without
+    // edges. This closes the gap where references imported without
     // auto-matching would never appear in the citation network.
     let _matched_refs = biblio_repo::auto_match_references_to_articles(&tx)?;
-    let _ = app_handle.emit(
-        "biblio:progress",
-        NormalizeProgress {
-            step: 7,
-            total_steps: 7,
-            message: "Auto-matched references to articles".to_string(),
-        },
-    );
+    emit_progress(&app_handle, 7, "Auto-matched references to articles");
 
-    // Build citation edges between included articles.
-    // This step runs silently (no progress event) because it is the final
-    // normalization step and completes quickly.
+    // Build citation edges between included articles (final work step).
     let _citation_edges = biblio_repo::build_citation_edges(&tx)?;
+    emit_progress(&app_handle, BIBLIO_NORMALIZE_TOTAL_STEPS, "Built citation network");
 
     let status = biblio_repo::get_biblio_status(&tx)?;
 
     tx.commit()?;
 
+    // Only clear the refresh flag after the transaction commits successfully.
+    app_settings_repo::clear_biblio_needs_refresh(&conn);
+
     Ok(NormalizeResult { authors, terms, status })
+}
+
+/// Whether bibliometric data is stale and should be re-normalized on the next
+/// visit to the Bibliometrics dashboard.
+#[tauri::command]
+pub async fn biblio_get_needs_refresh(
+    db_state: tauri::State<'_, DbState>,
+) -> Result<bool, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    app_settings_repo::get_biblio_needs_refresh(&conn)
 }
 
 #[tauri::command]
