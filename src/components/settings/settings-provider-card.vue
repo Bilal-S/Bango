@@ -333,6 +333,64 @@ watch(
               </div>
             </div>
           </div>
+
+          <!-- Test result / error feedback (directly under Model/API Key inputs) -->
+          <div
+            v-if="testResult"
+            class="provider-card__test-result"
+            :class="{ 'provider-card__test-result--success': testResult.success }"
+          >
+            <template v-if="testResult.success">
+              {{ testResult.message }}
+            </template>
+            <template v-else>
+              <!-- Matched error: show inline solution with collapsible raw response -->
+              <div v-if="llmErrorInfo.matched" class="provider-card__error-block">
+                <div class="provider-card__error-solution">
+                  <div class="provider-card__solution-header">
+                    <span class="material-symbols-outlined provider-card__solution-icon"
+                      >checklist</span
+                    >
+                    <strong>AI Configuration Problem (this is generally not a bug)</strong>
+                  </div>
+                  <p class="provider-card__solution-cause">
+                    <span class="provider-card__solution-label">Cause:</span>
+                    {{ llmErrorInfo.cause }}
+                  </p>
+                  <p class="provider-card__solution-text">
+                    <span class="provider-card__solution-label">Solution:</span>
+                    {{ llmErrorInfo.solution }}
+                  </p>
+                </div>
+                <button class="provider-card__raw-toggle" @click="showRawError = !showRawError">
+                  <span class="material-symbols-outlined" style="font-size: 16px">
+                    {{ showRawError ? 'expand_less' : 'expand_more' }}
+                  </span>
+                  {{ showRawError ? 'Hide raw response' : 'Show raw LLM response' }}
+                </button>
+                <div v-if="showRawError" class="provider-card__error-details">
+                  {{ llmErrorInfo.details }}
+                </div>
+                <a class="provider-card__error-link" :href="llmErrorInfo.helpLink">
+                  <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
+                    >open_in_new</span
+                  >
+                  View in Troubleshooting Guide
+                </a>
+              </div>
+              <!-- Unmatched error: show raw response directly -->
+              <div v-else class="provider-card__error-block">
+                <p class="provider-card__error-prefix">{{ llmErrorInfo.prefix }}</p>
+                <p class="provider-card__error-details">{{ llmErrorInfo.details }}</p>
+                <a class="provider-card__error-link" :href="llmErrorInfo.helpLink">
+                  <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
+                    >open_in_new</span
+                  >
+                  View Troubleshooting Guide
+                </a>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
 
@@ -461,61 +519,6 @@ watch(
           {{ testing ? 'Testing...' : 'Test Connection' }}
         </button>
       </div>
-    </div>
-
-    <!-- Test result / error feedback (inside the box) -->
-    <div
-      v-if="testResult"
-      class="provider-card__test-result"
-      :class="{ 'provider-card__test-result--success': testResult.success }"
-    >
-      <template v-if="testResult.success">
-        {{ testResult.message }}
-      </template>
-      <template v-else>
-        <!-- Matched error: show inline solution with collapsible raw response -->
-        <div v-if="llmErrorInfo.matched" class="provider-card__error-block">
-          <div class="provider-card__error-solution">
-            <div class="provider-card__solution-header">
-              <span class="material-symbols-outlined provider-card__solution-icon">checklist</span>
-              <strong>AI Configuration Problem (this is generally not a bug)</strong>
-            </div>
-            <p class="provider-card__solution-cause">
-              <span class="provider-card__solution-label">Cause:</span> {{ llmErrorInfo.cause }}
-            </p>
-            <p class="provider-card__solution-text">
-              <span class="provider-card__solution-label">Solution:</span>
-              {{ llmErrorInfo.solution }}
-            </p>
-          </div>
-          <button class="provider-card__raw-toggle" @click="showRawError = !showRawError">
-            <span class="material-symbols-outlined" style="font-size: 16px">
-              {{ showRawError ? 'expand_less' : 'expand_more' }}
-            </span>
-            {{ showRawError ? 'Hide raw response' : 'Show raw LLM response' }}
-          </button>
-          <div v-if="showRawError" class="provider-card__error-details">
-            {{ llmErrorInfo.details }}
-          </div>
-          <a class="provider-card__error-link" :href="llmErrorInfo.helpLink">
-            <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
-              >open_in_new</span
-            >
-            View in Troubleshooting Guide
-          </a>
-        </div>
-        <!-- Unmatched error: show raw response directly -->
-        <div v-else class="provider-card__error-block">
-          <p class="provider-card__error-prefix">{{ llmErrorInfo.prefix }}</p>
-          <p class="provider-card__error-details">{{ llmErrorInfo.details }}</p>
-          <a class="provider-card__error-link" :href="llmErrorInfo.helpLink">
-            <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
-              >open_in_new</span
-            >
-            View Troubleshooting Guide
-          </a>
-        </div>
-      </template>
     </div>
   </section>
 </template>
@@ -672,7 +675,6 @@ watch(
 
 /* Test Result */
 .provider-card__test-result {
-  margin-top: 1rem;
   padding: 0.75rem 1rem;
   background-color: #fef2f2;
   color: #991b1b;

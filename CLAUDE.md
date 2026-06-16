@@ -22,6 +22,7 @@
 - No `clone()` unless the borrow checker truly requires it. Prefer references.
 - Use `impl Trait` for return types in function signatures when appropriate.
 - Prefer iterators over `for` loops with mutable accumulators.
+- Do not use EmDash (—) in any generated user text or comments
 
 ### LLM Calls (Orchestrator Pattern)
 - All LLM calls MUST go through `LlmOrchestrator` (registered as Tauri managed state).
