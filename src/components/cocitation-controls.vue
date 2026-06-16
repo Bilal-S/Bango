@@ -25,11 +25,11 @@
       >
         <li
           v-for="s in suggestions"
-          :key="s"
+          :key="s.label"
           class="px-3 py-1.5 text-sm cursor-pointer hover:bg-indigo-50 text-slate-700 truncate"
           @mousedown.prevent="selectSuggestion(s)"
         >
-          {{ s }}
+          {{ s.display }}
         </li>
       </ul>
     </div>
@@ -307,7 +307,7 @@ const props = defineProps<{
   minCoCitation: number;
   colorMode: 'cluster' | 'temporal';
   layoutMode: 'fixed' | 'dynamic';
-  paperLabels: string[];
+  paperLabels: { label: string; display: string; searchText: string }[];
   minYear: number;
   maxYear: number;
   selectedClusters: number[];
@@ -340,10 +340,10 @@ const searchQuery = ref('');
 const showSuggestions = ref(false);
 const showExportMenu = ref(false);
 
-const suggestions = computed<string[]>(() => {
+const suggestions = computed<{ label: string; display: string; searchText: string }[]>(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (!q || q.length < 2) return [];
-  return props.paperLabels.filter((label) => label.toLowerCase().includes(q)).slice(0, 8);
+  return props.paperLabels.filter((p) => p.searchText.includes(q)).slice(0, 8);
 });
 
 const clusters = computed(() => {
@@ -366,16 +366,16 @@ function onSearchInput() {
 function selectFirstSuggestion() {
   if (suggestions.value.length > 0) {
     const first = suggestions.value[0]!;
-    searchQuery.value = first;
+    searchQuery.value = first.display;
     showSuggestions.value = false;
-    emit('locate-paper', first);
+    emit('locate-paper', first.label);
   }
 }
 
-function selectSuggestion(s: string) {
-  searchQuery.value = s;
+function selectSuggestion(s: { label: string; display: string; searchText: string }) {
+  searchQuery.value = s.display;
   showSuggestions.value = false;
-  emit('locate-paper', s);
+  emit('locate-paper', s.label);
   emit('filter-change', { search: searchQuery.value });
 }
 
