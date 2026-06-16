@@ -16,8 +16,11 @@ pub mod summary;
 pub mod utils;
 
 use commands::screening::ScreeningState;
+use commands::startup::StartupStatus;
 use db::connection::DbState;
+use db::schema_check::{check_schema, SchemaStatus};
 use llm::orchestrator::LlmOrchestrator;
+use tauri::Manager;
 
 /// Application-level feature flags set at startup.
 #[derive(Debug, Clone)]
@@ -32,7 +35,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            use tauri::Manager;
             let app_data_dir = app.path().app_data_dir().unwrap_or_else(|e| {
                 eprintln!("fatal: failed to get app data dir: {e}");
                 std::process::exit(1);
@@ -51,6 +53,23 @@ pub fn run() {
                 }
             };
 
+            // ── Startup schema detection ──
+            // Probe the live schema BEFORE running migrations so we can flag a
+            // legacy install (old `article_references` table) that the migration
+            // system cannot upgrade by itself (both old and new are user_version=1).
+            // The result is published to the frontend via managed state; the
+            // frontend triggers `perform_legacy_upgrade` when needed.
+            let schema_status = match check_schema(&conn) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("fatal: failed to probe database schema: {e:#}");
+                    std::process::exit(1);
+                }
+            };
+            if schema_status == SchemaStatus::Legacy {
+                eprintln!("[startup] legacy schema detected; upgrade will be triggered after webview loads");
+            }
+
             if let Err(e) = crate::db::migration::run_migrations(&conn) {
                 eprintln!("fatal: failed to run database migrations: {e:#}");
                 std::process::exit(1);
@@ -59,11 +78,13 @@ pub fn run() {
             // ── Journal Index: auto-load from bundled portal DB on first startup ──
             // IMPORTANT: journal_index is system-distributed reference data.
             // Do NOT include in project backup export/import or reset operations.
-            if let Err(e) = load_journal_index_if_empty(&conn, app) {
+            let resource_path = resolve_journal_resource_path(app.path());
+            if let Err(e) = load_journal_index_from_path(&conn, &resource_path) {
                 eprintln!("warning: failed to load journal index: {e:#}");
             }
 
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
+            app.manage(StartupStatus { schema: schema_status });
 
             // Parse CLI / env flags and persist feature flags to DB.
             let args: Vec<String> = std::env::args().collect();
@@ -114,6 +135,8 @@ pub fn run() {
         .manage(ScreeningState { engine: tokio::sync::RwLock::new(None) })
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
+            commands::startup::get_startup_status,
+            commands::startup::perform_legacy_upgrade,
             commands::import::parse_ris_file,
             commands::import::import_ris_file,
             commands::import::parse_bibtex_file,
@@ -245,48 +268,56 @@ pub fn run() {
     }
 }
 
-/// Load journal index from the bundled portal DB into the main database,
-/// but only if the journal_index table is currently empty (first startup).
-///
-/// IMPORTANT: journal_index is system-distributed reference data.
-/// It must survive project reset, and must not be exported/imported via backups.
-fn load_journal_index_if_empty(
-    conn: &rusqlite::Connection,
-    app: &tauri::App,
+/// `AppHandle`-based loader used by the legacy upgrade command after it
+/// rebuilds the schema. Looks up the bundled journal_index DB via the handle's
+/// resource path and bulk-copies records if the (newly recreated) table is empty.
+pub(crate) fn load_journal_index_if_empty_handle(
+    app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::Manager;
+    let guard = app.state::<DbState>();
+    let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+    let resource_path = resolve_journal_resource_path(app.path());
+    load_journal_index_from_path(&conn, &resource_path)
+}
 
-    // Check if journal_index already has data
+/// Resolve the path to the bundled `journal_index.db`, preferring the bundle
+/// resource dir and falling back to the source tree in dev mode.
+fn resolve_journal_resource_path(
+    path: &tauri::path::PathResolver<tauri::Wry>,
+) -> std::path::PathBuf {
+    let prod_path = match path.resource_dir() {
+        Ok(p) => p.join("journal_index.db"),
+        Err(_) => std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("journal_index.db"),
+    };
+    if prod_path.exists() {
+        return prod_path;
+    }
+    let src_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("journal_index.db");
+    if src_path.exists() {
+        eprintln!("[journal_index] dev-mode fallback: using source tree path {:?}", src_path);
+        return src_path;
+    }
+    // Neither found: return prod_path so the caller emits the "not found" warning.
+    prod_path
+}
+
+/// Core loader: ATTACH the portal DB and bulk-copy records if the table is empty.
+///
+/// IMPORTANT: journal_index is system-distributed reference data. It must
+/// survive project reset/upgrade and must not be exported/imported via backups.
+fn load_journal_index_from_path(
+    conn: &rusqlite::Connection,
+    resource_path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM journal_index", [], |row| row.get(0))?;
-
     if count > 0 {
         eprintln!("[journal_index] already populated ({} records), skipping load", count);
         return Ok(());
     }
-
-    // Try to find the bundled portal DB resource.
-    // Production: resource_dir() points to the bundle's resources folder.
-    // Dev mode (cargo tauri dev): resources are NOT copied to target/debug/,
-    //   so we fall back to the source tree via CARGO_MANIFEST_DIR.
-    let resource_path = {
-        let prod_path = app.path().resource_dir()?.join("journal_index.db");
-        if prod_path.exists() {
-            prod_path
-        } else {
-            let src_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("resources")
-                .join("journal_index.db");
-            if src_path.exists() {
-                eprintln!(
-                    "[journal_index] dev-mode fallback: using source tree path {:?}",
-                    src_path
-                );
-                src_path
-            } else {
-                prod_path // will trigger the "not found" warning below
-            }
-        }
-    };
 
     if !resource_path.exists() {
         eprintln!(
@@ -298,7 +329,6 @@ fn load_journal_index_if_empty(
 
     eprintln!("[journal_index] loading from bundled portal DB: {:?}", resource_path);
 
-    // ATTACH the portal DB and bulk-copy into the main database
     let portal_path = resource_path.to_string_lossy().to_string();
     conn.execute_batch(&format!(
         "ATTACH DATABASE '{}' AS portal;",

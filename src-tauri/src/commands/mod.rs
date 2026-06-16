@@ -13,6 +13,7 @@ pub mod prisma;
 pub mod references;
 pub mod scraping;
 pub mod screening;
+pub mod startup;
 pub mod summary;
 pub mod tags;
 pub mod trends;

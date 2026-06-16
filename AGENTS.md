@@ -115,6 +115,19 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.
+  - **`src-tauri/src/db/schema_check.rs`** + **`rebuild.rs`** - startup legacy-DB detection
+    and schema rebuild. `check_schema` classifies a live DB as `Current` / `Legacy` / `FreshDb`
+    via `sqlite_master` (the old and new v1 migrations both set `user_version=1`, so the pragma
+    cannot be trusted). `rebuild_schema` is the shared drop-all-tables (preserving
+    `journal_index`) + reset `user_version=0` + re-run migrations helper used by both
+    `commands::export_cmd::reset_project` and the legacy upgrade path.
+  - **`src-tauri/src/commands/startup.rs`** - exposes `get_startup_status` (reads the managed
+    `StartupStatus` set in `lib.rs` setup) and `perform_legacy_upgrade` (one-shot:
+    `export_legacy_project` -> write backup to `app_data_dir` -> `rebuild_schema` ->
+    journal reload -> `import_project`; backup file is never deleted).
+  - **`src-tauri/src/export/legacy_project.rs`** - reads the old single-table
+    `article_references` schema and emits a current-format `ProjectBackup` JSON, deduplicating
+    rows into `reference_papers` (by DOI -> title+authors+year) + `article_reference_links`.
   - **`src-tauri/tests/`** - Rust integration tests. Inline `#[cfg(test)] mod tests`
     blocks are extracted here to keep source files compact (helpers tested externally
     are `pub`). Repository/KPI tests live in `biblio_repo_tests.rs` (in-memory SQLite
@@ -126,7 +139,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation
     integration tests against RIS fixtures live in `cocitation_data_test.rs`.
     `biblio_needs_refresh_test.rs` covers the staleness-flag round-trip (mark/clear/
-    absent-key default).
+    absent-key default).  `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip (legacy article_references -> backup -> rebuild -> import).
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/views/`** - page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
     parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)

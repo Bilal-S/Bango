@@ -9,6 +9,8 @@ pub mod label_repo;
 pub mod llm_config_repo;
 pub mod migration;
 pub mod migrations;
+pub mod rebuild;
 pub mod reference_repo;
+pub mod schema_check;
 pub mod summary_repo;
 pub mod tag_repo;

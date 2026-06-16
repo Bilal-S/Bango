@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use crate::db::article_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
-use crate::db::migration;
+use crate::db::rebuild;
 use crate::error::AppError;
 use crate::export::project;
 use crate::export::ris_writer::{articles_to_ris, RisExportArticle};
@@ -54,7 +54,7 @@ fn articles_to_ris_export(
     articles_to_ris(&export_articles)
 }
 
-/// Build the criteria lookup map (id → text).
+/// Build the criteria lookup map (id -> text).
 fn build_criteria_map(conn: &rusqlite::Connection) -> Result<HashMap<String, String>, AppError> {
     Ok(criteria_repo::get_all_criteria(conn)?.into_iter().map(|c| (c.id, c.text)).collect())
 }
@@ -160,62 +160,11 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    // PRAGMA foreign_keys cannot be changed inside a transaction.
-    // Set it on the connection *before* starting one.
-    conn.execute("PRAGMA foreign_keys = OFF", [])?;
-
-    {
-        let tx = conn.transaction()?;
-
-        // Drop all tables so migrations can re-create them from scratch.
-        // Using DROP (not DELETE) avoids ALTER TABLE conflicts when
-        // migrations are re-run against an existing schema.
-        //
-        // IMPORTANT: journal_index is NOT dropped here - it is system-distributed
-        // reference data that survives project reset. It is populated via the
-        // import_journals script and auto-loaded from the bundled portal DB.
-        tx.execute_batch(
-            "DROP TABLE IF EXISTS article_reference_links;
-             DROP TABLE IF EXISTS reference_papers;
-             DROP TABLE IF EXISTS article_labels;
-             DROP TABLE IF EXISTS article_tags;
-             DROP TABLE IF EXISTS audit_entries;
-             DROP TABLE IF EXISTS articles;
-             DROP TABLE IF EXISTS criteria;
-             DROP TABLE IF EXISTS research_aims;
-             DROP TABLE IF EXISTS tags;
-             DROP TABLE IF EXISTS labels;
-             DROP TABLE IF EXISTS llm_config;
-             DROP TABLE IF EXISTS summary;
-             DROP TABLE IF EXISTS app_settings;
-             DROP INDEX IF EXISTS idx_articles_status;
-             DROP INDEX IF EXISTS idx_articles_duplicate_of;
-             DROP INDEX IF EXISTS idx_articles_screened_at;
-             DROP INDEX IF EXISTS idx_articles_data_length;
-             DROP INDEX IF EXISTS idx_articles_sequence_id;
-             DROP INDEX IF EXISTS idx_audit_entries_article_id;
-             DROP INDEX IF EXISTS idx_criteria_type;
-             DROP INDEX IF EXISTS idx_articles_changed_at;
-             DROP INDEX IF EXISTS uq_ref_papers_doi;
-             DROP INDEX IF EXISTS uq_ref_papers_title_authors_year;
-             DROP INDEX IF EXISTS idx_ref_papers_match;
-             DROP INDEX IF EXISTS idx_ref_papers_matched_article;
-             DROP INDEX IF EXISTS idx_ref_links_parent;
-             DROP INDEX IF EXISTS idx_ref_links_paper;
-             DROP INDEX IF EXISTS idx_ref_links_parent_type;",
-        )?;
-
-        tx.commit()?;
-    }
-
-    // Re-enable foreign keys (outside transaction)
-    conn.execute("PRAGMA foreign_keys = ON", [])?;
-
-    // Reset migration version to 0 so all migrations re-run from scratch.
-    conn.pragma_update(None, "user_version", 0)?;
-
-    // Re-run migrations to rebuild clean schema
-    migration::run_migrations(&conn)?;
+    // Delegate to the shared schema-rebuild helper, which drops every user
+    // table (preserving journal_index), resets user_version, and re-runs
+    // migrations. IMPORTANT: journal_index is system-distributed reference data
+    // that survives project reset; rebuild_schema intentionally does not drop it.
+    rebuild::rebuild_schema(&mut conn)?;
 
     Ok(())
 }
