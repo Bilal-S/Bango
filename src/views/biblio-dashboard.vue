@@ -142,13 +142,6 @@ const analysisModules: AnalysisModule[] = [
     icon: 'hub',
     color: '#3b82f6',
   },
-  {
-    id: 'source-impact',
-    label: 'Source Impact',
-    description: 'Compare journal and conference influence',
-    icon: 'campaign',
-    color: '#f97316',
-  },
 ];
 
 const isModuleActive = computed(() => route.name !== 'bibliometrics');

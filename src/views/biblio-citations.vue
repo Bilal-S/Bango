@@ -178,26 +178,27 @@ const stats = computed(() => ({
   clusterCount: clusterCount.value,
 }));
 
-/** Paper labels for autocomplete search. */
+/** Paper search entries for autocomplete search.
+ * Each entry contains:
+ * - `label`: the author (year) string used to locate the node
+ * - `display`: truncated title + label for the dropdown display
+ * - `searchText`: lowercase concatenation of all searchable fields
+ */
 const paperLabels = computed(() => {
   if (!graph.value) return [];
   return graph.value.nodes().map((id: string) => {
     const attrs = graph.value!.getNodeAttributes(id);
-    return attrs.label ?? id;
+    const label = (attrs.label as string) ?? id;
+    const title = (attrs.title as string) ?? '';
+    const authors = (attrs.authors as string) ?? '';
+    const doi = (attrs.doi as string) ?? '';
+    const shortTitle = title.length > 15 ? title.slice(0, 12) + '…' : title;
+    return {
+      label,
+      display: shortTitle ? `${shortTitle}:${label}` : label,
+      searchText: [label, title, authors, doi].join(' ').toLowerCase(),
+    };
   });
-});
-
-/** Paper titles for autocomplete suggestions. */
-const paperTitles = computed(() => {
-  const map = new Map<string, string>();
-  if (!graph.value) return map;
-  for (const id of graph.value.nodes()) {
-    const attrs = graph.value.getNodeAttributes(id);
-    const label = attrs.label ?? id;
-    const title = attrs.title ?? '';
-    if (title) map.set(label, title);
-  }
-  return map;
 });
 
 /** Citing papers for detail panel (incoming edges = papers that cite this one). */
@@ -512,7 +513,6 @@ async function onRecalculate() {
           :visible-edges="stats.visibleEdges"
           :cluster-count="stats.clusterCount"
           :paper-labels="paperLabels"
-          :paper-titles="paperTitles"
           :color-mode="colorMode"
           :layout-mode="layoutMode"
           :min-year="yearRange.min"

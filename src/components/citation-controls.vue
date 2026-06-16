@@ -25,12 +25,11 @@
       >
         <li
           v-for="s in suggestions"
-          :key="s.id"
+          :key="s.label"
           class="px-3 py-1.5 text-sm cursor-pointer hover:bg-indigo-50 text-slate-700 truncate"
           @mousedown.prevent="selectSuggestion(s)"
         >
-          {{ s.label }}
-          <span v-if="s.title" class="text-xs text-slate-400 ml-1 truncate">{{ s.title }}</span>
+          {{ s.display }}
         </li>
       </ul>
     </div>
@@ -375,8 +374,7 @@ const props = defineProps<{
   visibleNodes: number;
   visibleEdges: number;
   clusterCount: number;
-  paperLabels: string[];
-  paperTitles: Map<string, string>;
+  paperLabels: { label: string; display: string; searchText: string }[];
   colorMode: 'cluster' | 'temporal';
   layoutMode: 'fixed' | 'dynamic';
   minYear: number;
@@ -484,23 +482,10 @@ const isolationLabel = computed(() => {
   return `${props.isolationMode.label ?? props.isolationMode.nodeId} (${dirText})`;
 });
 
-interface PaperSuggestion {
-  id: string;
-  label: string;
-  title: string;
-}
-
-const suggestions = computed<PaperSuggestion[]>(() => {
+const suggestions = computed<{ label: string; display: string; searchText: string }[]>(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (!q || q.length < 2) return [];
-  return props.paperLabels
-    .filter((label) => label.toLowerCase().includes(q))
-    .slice(0, 8)
-    .map((label) => ({
-      id: label,
-      label,
-      title: props.paperTitles.get(label) ?? '',
-    }));
+  return props.paperLabels.filter((p) => p.searchText.includes(q)).slice(0, 8);
 });
 
 const maxCitationsLimit = computed(() => Math.max(10, Math.ceil(props.totalNodes / 2)));
@@ -525,14 +510,14 @@ function onSearchInput() {
 function selectFirstSuggestion() {
   if (suggestions.value.length > 0) {
     const first = suggestions.value[0]!;
-    searchQuery.value = first.label;
+    searchQuery.value = first.display;
     showSuggestions.value = false;
     emit('locate-paper', first.label);
   }
 }
 
-function selectSuggestion(s: PaperSuggestion) {
-  searchQuery.value = s.label;
+function selectSuggestion(s: { label: string; display: string; searchText: string }) {
+  searchQuery.value = s.display;
   showSuggestions.value = false;
   emit('locate-paper', s.label);
   emitFilters();

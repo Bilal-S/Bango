@@ -111,7 +111,7 @@ const paperLabels = computed(() => {
     const shortTitle = title.length > 15 ? title.slice(0, 15) + '…' : title;
     return {
       label,
-      display: shortTitle ? `${shortTitle} — ${label}` : label,
+      display: shortTitle ? `${shortTitle}:${label}` : label,
       searchText: [label, title, authors, doi].join(' ').toLowerCase(),
     };
   });
