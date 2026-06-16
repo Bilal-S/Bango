@@ -503,7 +503,7 @@ function dismissModal(): void {
 }
 
 .biblio__title-link:hover {
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
 }
 
 .biblio__back-icon {
@@ -535,7 +535,7 @@ function dismissModal(): void {
 
 .biblio__progress-icon {
   font-size: 18px;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
 }
 
 .biblio__progress-text {
@@ -554,7 +554,7 @@ function dismissModal(): void {
 
 .biblio__progress-fill {
   height: 100%;
-  background: var(--color-primary, #4f46e5);
+  background: var(--color-primary);
   border-radius: 2px;
   transition: width 0.3s ease-out;
 }
@@ -577,7 +577,7 @@ function dismissModal(): void {
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--color-surface-container-lowest);
   color: var(--color-on-surface);
   font-size: var(--font-size-body);
   font-family: inherit;
@@ -593,13 +593,13 @@ function dismissModal(): void {
 }
 
 .biblio__refresh-btn:hover:not(:disabled) {
-  border-color: #818cf8;
+  border-color: var(--color-primary);
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
 }
 
 .biblio__refresh-btn:active:not(:disabled) {
   transform: scale(0.95);
-  background: #f5f3ff;
+  background: var(--color-surface-container-low);
 }
 
 .biblio__refresh-btn:disabled {
@@ -645,7 +645,7 @@ function dismissModal(): void {
 }
 
 .kpi-card {
-  background-color: #ffffff;
+  background-color: var(--color-surface-container-lowest);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-4) var(--space-5);
@@ -762,7 +762,7 @@ function dismissModal(): void {
   align-items: center;
   gap: var(--space-4);
   width: 100%;
-  background-color: #ffffff;
+  background-color: var(--color-surface-container-lowest);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-4) var(--space-5);
@@ -778,7 +778,7 @@ function dismissModal(): void {
 }
 
 .module-card:hover {
-  border-color: #818cf8;
+  border-color: var(--color-primary);
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.15);
 }
 
@@ -819,7 +819,7 @@ function dismissModal(): void {
 
 .module-card:hover .module-card__arrow {
   transform: translateX(2px);
-  color: #6366f1;
+  color: var(--color-primary);
 }
 
 /* Inline Sparkline inside PUBS/YEAR KPI card */
@@ -922,7 +922,7 @@ function dismissModal(): void {
 }
 
 .biblio-modal {
-  background: #ffffff;
+  background: var(--color-surface-container-lowest);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
   padding: var(--space-8) var(--space-10);
@@ -937,7 +937,7 @@ function dismissModal(): void {
 
 .biblio-modal__icon {
   font-size: 40px;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
 }
 
 .biblio-modal__title {
@@ -959,7 +959,7 @@ function dismissModal(): void {
   align-items: center;
   justify-content: center;
   padding: var(--space-2) var(--space-8);
-  background: var(--color-primary, #4f46e5);
+  background: var(--color-primary);
   color: #ffffff;
   border: none;
   border-radius: var(--radius-md);

@@ -875,8 +875,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   height: 100%;
   width: 16rem;
   overflow-y: auto;
-  border-right: 1px solid #f1f5f9;
-  background: #fafbfc;
+  border-right: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-low);
   transition:
     opacity 0.3s,
     width 0.3s,
@@ -904,34 +904,34 @@ function onPanelKeydown(event: KeyboardEvent): void {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #94a3b8;
+  color: var(--color-outline);
   margin: 0;
 }
 .sidebar__select,
 .sidebar__input {
   padding: 0.375rem 0.5rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-outline-variant);
   border-radius: 0.375rem;
   font-size: 0.8125rem;
   font-family: inherit;
-  background: #fff;
-  color: #1e293b;
+  background: var(--color-surface-container-lowest);
+  color: var(--color-on-surface);
   outline: none;
   transition: border-color 0.15s;
 }
 .sidebar__select:focus,
 .sidebar__input:focus {
-  border-color: var(--color-primary, #4f46e5);
-  box-shadow: 0 0 0 1px var(--color-primary, #4f46e5);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 1px var(--color-primary);
 }
 .sidebar__stat-line {
   font-size: 0.75rem;
-  color: #475569;
+  color: var(--color-on-surface-variant);
   margin: 0;
 }
 .sidebar__hint {
   font-size: 0.6875rem;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
   line-height: 1.5;
   margin: 0;
 }
@@ -940,18 +940,18 @@ function onPanelKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 0.375rem;
   padding: 0.375rem 0.5rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-outline-variant);
   border-radius: 0.375rem;
   font-size: 0.75rem;
   font-family: inherit;
-  background: #fff;
-  color: #475569;
+  background: var(--color-surface-container-lowest);
+  color: var(--color-on-surface-variant);
   cursor: pointer;
   transition: border-color 0.15s;
 }
 .sidebar__export:hover {
-  border-color: var(--color-primary, #4f46e5);
-  color: var(--color-primary, #4f46e5);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 .sidebar__export .material-symbols-outlined {
   font-size: 0.875rem;
@@ -971,14 +971,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .dual-range-value {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--color-on-surface-variant);
 }
 .dual-range-reset {
   background: none;
   border: none;
   cursor: pointer;
   font-size: 0.6875rem;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
   padding: 0;
 }
 .dual-range-track {
@@ -991,14 +991,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
   left: 0;
   right: 0;
   height: 4px;
-  background: #e2e8f0;
+  background: var(--color-outline-variant);
   border-radius: 2px;
 }
 .dual-range-bar-active {
   position: absolute;
   top: 10px;
   height: 4px;
-  background: var(--color-primary, #4f46e5);
+  background: var(--color-primary);
   border-radius: 2px;
 }
 .dual-range-input {
@@ -1021,8 +1021,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #fff;
-  border: 2px solid var(--color-primary, #4f46e5);
+  background: var(--color-surface-container-lowest);
+  border: 2px solid var(--color-primary);
   cursor: pointer;
 }
 .dual-range-input::-moz-range-thumb {
@@ -1030,15 +1030,15 @@ function onPanelKeydown(event: KeyboardEvent): void {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #fff;
-  border: 2px solid var(--color-primary, #4f46e5);
+  background: var(--color-surface-container-lowest);
+  border: 2px solid var(--color-primary);
   cursor: pointer;
 }
 .dual-range-endpoints {
   display: flex;
   justify-content: space-between;
   font-size: 0.625rem;
-  color: #94a3b8;
+  color: var(--color-outline);
 }
 
 .drawer-handle {
@@ -1051,8 +1051,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
   border-left: none;
   border-radius: 0 8px 8px 0;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
@@ -1064,8 +1064,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
     width 0.15s;
 }
 .drawer-handle:hover {
-  background: #eef2ff;
-  border-color: #a5b4fc;
+  background: var(--color-surface-container);
+  border-color: var(--color-primary);
   width: 16px;
 }
 .drawer-handle-grip {
@@ -1088,7 +1088,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .drawer-handle:hover .drawer-handle-grip::before,
 .drawer-handle:hover .drawer-handle-grip::after,
 .drawer-handle:hover .drawer-handle-grip {
-  background: #6366f1;
+  background: var(--color-primary);
 }
 
 /* ── Main canvas ─────────────────────────────────────────────── */
@@ -1105,8 +1105,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   grid-template-columns: repeat(6, 1fr);
   gap: 0.75rem;
   padding: 1rem;
-  border-bottom: 1px solid #f1f5f9;
-  background: #fafbfc;
+  border-bottom: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-low);
   flex-shrink: 0;
 }
 @media (max-width: 1024px) {
@@ -1124,21 +1124,21 @@ function onPanelKeydown(event: KeyboardEvent): void {
   flex-direction: column;
   gap: 0.125rem;
   padding: 0.5rem;
-  background: #fff;
-  border: 1px solid #f1f5f9;
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
   border-radius: 0.375rem;
 }
 .kpi-mini__value {
   font-size: 1.125rem;
   font-weight: 700;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
   line-height: 1.2;
 }
 .kpi-mini__label {
   font-size: 0.625rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #94a3b8;
+  color: var(--color-outline);
   font-weight: 600;
 }
 
@@ -1152,7 +1152,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  color: #94a3b8;
+  color: var(--color-outline);
   padding: 2rem;
 }
 .authors-empty__icon {
@@ -1161,14 +1161,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 .authors-empty__text {
   font-size: 0.875rem;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
   margin: 0;
 }
 .chart-spin,
 .author-panel__spin {
   animation: authors-spin 1s linear infinite;
   font-size: 1.75rem;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
 }
 @keyframes authors-spin {
   from {
@@ -1183,12 +1183,12 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .splitter {
   height: 6px;
   cursor: row-resize;
-  background: #f1f5f9;
+  background: var(--color-surface-container-low);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--color-outline-variant);
   transition: background 0.15s;
   user-select: none;
   position: relative;
@@ -1205,19 +1205,19 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 .splitter:hover,
 .splitter--dragging {
-  background: #e2e8f0;
+  background: var(--color-outline-variant);
 }
 .splitter__grip {
   width: 32px;
   height: 2px;
-  background: #cbd5e1;
+  background: var(--color-outline-variant);
   border-radius: 1px;
   transition: background 0.15s;
   pointer-events: none;
 }
 .splitter:hover .splitter__grip,
 .splitter--dragging .splitter__grip {
-  background: var(--color-primary, #4f46e5);
+  background: var(--color-primary);
 }
 
 /* ── Scatter plot ────────────────────────────────────────────── */
@@ -1225,14 +1225,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
   padding: 0.5rem 1rem;
   flex-shrink: 0;
   overflow: hidden;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--color-outline-variant);
 }
 .scatter-title {
   font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #94a3b8;
+  color: var(--color-outline);
   margin: 0 0 0.25rem 0;
 }
 .scatter-chart {
@@ -1257,9 +1257,9 @@ function onPanelKeydown(event: KeyboardEvent): void {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #64748b;
-  border-bottom: 1px solid #e2e8f0;
-  background: #fafbfc;
+  color: var(--color-on-surface-variant);
+  border-bottom: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-low);
   position: sticky;
   top: 0;
   z-index: 1;
@@ -1273,10 +1273,10 @@ function onPanelKeydown(event: KeyboardEvent): void {
   transition: color 0.1s;
 }
 .ranking-table__th--sortable:hover {
-  color: #1e293b;
+  color: var(--color-on-surface);
 }
 .ranking-table__th--active {
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
 }
 .ranking-table__th-label {
   display: inline-flex;
@@ -1285,29 +1285,29 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 .ranking-table__sort-icon {
   font-size: 14px !important;
-  color: #cbd5e1;
+  color: var(--color-outline-variant);
   transition: color 0.1s;
 }
 .ranking-table__sort-icon--active {
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
 }
 .ranking-table__row {
   cursor: pointer;
   transition: background-color 0.1s;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--color-outline-variant);
 }
 .ranking-table__row:hover {
-  background: #f8fafc;
+  background: var(--color-surface-container-low);
 }
 .ranking-table__row--active {
-  background: #eef2ff;
+  background: var(--color-surface-container);
 }
 .ranking-table__row--active:hover {
-  background: #e0e7ff;
+  background: var(--color-surface-container-high);
 }
 .ranking-table__td {
   padding: 0.5rem;
-  color: #1e293b;
+  color: var(--color-on-surface);
   vertical-align: middle;
 }
 .ranking-table__td--num {
@@ -1327,7 +1327,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 .ranking-table__td--inst {
   font-size: 0.75rem;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1343,15 +1343,15 @@ function onPanelKeydown(event: KeyboardEvent): void {
   cursor: pointer;
   padding: 0.25rem;
   border-radius: 0.25rem;
-  color: #94a3b8;
+  color: var(--color-outline);
   display: inline-flex;
   transition:
     background-color 0.15s,
     color 0.15s;
 }
 .scholar-btn:hover {
-  background: #f1f5f9;
-  color: var(--color-primary, #4f46e5);
+  background: var(--color-surface-container-low);
+  color: var(--color-primary);
 }
 .scholar-btn .material-symbols-outlined {
   font-size: 1rem;
@@ -1362,8 +1362,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   position: relative;
   width: 20rem;
   flex-shrink: 0;
-  background: #ffffff;
-  border-left: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-surface-container-lowest);
+  border-left: 1px solid var(--color-outline-variant);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
@@ -1377,14 +1377,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
   justify-content: center;
   gap: 0.5rem;
   padding: 2rem 1rem;
-  color: #94a3b8;
+  color: var(--color-outline);
   flex: 1;
 }
 .author-panel__header {
   display: flex;
   align-items: center;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--color-outline-variant);
   flex-shrink: 0;
 }
 .author-panel__title-row {
@@ -1397,7 +1397,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .author-panel__title {
   font-size: 0.9375rem;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--color-on-surface);
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1411,7 +1411,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   cursor: pointer;
   padding: 0.25rem;
   border-radius: 0.25rem;
-  color: #94a3b8;
+  color: var(--color-outline);
   display: flex;
   transition:
     background-color 0.15s,
@@ -1420,8 +1420,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 .author-panel__scholar:hover,
 .author-panel__close:hover {
-  background: #f1f5f9;
-  color: var(--color-primary, #4f46e5);
+  background: var(--color-surface-container-low);
+  color: var(--color-primary);
 }
 .author-panel__scholar .material-symbols-outlined,
 .author-panel__close .material-symbols-outlined {
@@ -1441,7 +1441,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   gap: 0.5rem;
 }
 .author-panel__metric {
-  background: #f8fafc;
+  background: var(--color-surface-container-low);
   border-radius: 0.375rem;
   padding: 0.5rem;
   text-align: center;
@@ -1452,14 +1452,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .author-panel__metric-value {
   font-size: 1rem;
   font-weight: 700;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
   line-height: 1.1;
 }
 .author-panel__metric-label {
   font-size: 0.5625rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #94a3b8;
+  color: var(--color-outline);
   font-weight: 600;
 }
 .author-panel__subhead {
@@ -1467,7 +1467,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #94a3b8;
+  color: var(--color-outline);
   margin: 0 0 0.5rem 0;
 }
 .author-panel__section {
@@ -1489,18 +1489,18 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .author-panel__collab,
 .author-panel__paper {
   font-size: 0.75rem;
-  color: #334155;
+  color: var(--color-on-surface-variant);
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
 }
 .author-panel__inst-name {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--color-on-surface);
 }
 .author-panel__inst-loc {
   font-size: 0.6875rem;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
 }
 .author-panel__collab {
   flex-direction: row;
@@ -1509,17 +1509,17 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 .author-panel__collab-count {
   font-size: 0.6875rem;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
   font-weight: 600;
 }
 .author-panel__paper-title {
   font-weight: 500;
-  color: #1e293b;
+  color: var(--color-on-surface);
   line-height: 1.4;
 }
 .author-panel__paper-meta {
   font-size: 0.6875rem;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
 }
 .author-panel__view-btn {
   display: inline-flex;
@@ -1527,7 +1527,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   justify-content: center;
   gap: 0.375rem;
   padding: 0.5rem 0.75rem;
-  background: var(--color-primary, #4f46e5);
+  background: var(--color-primary);
   color: #ffffff;
   border: none;
   border-radius: 0.375rem;
@@ -1594,7 +1594,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 
 /* Keyboard focus visibility for accessibility */
 .ranking-table__row:focus-visible {
-  outline: 2px solid var(--color-primary, #4f46e5);
+  outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
 .author-panel:focus-visible {

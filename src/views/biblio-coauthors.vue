@@ -370,8 +370,8 @@ async function onRecalculate() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
   border-left: none;
   border-radius: 0 8px 8px 0;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
@@ -384,8 +384,8 @@ async function onRecalculate() {
 }
 
 .drawer-handle:hover {
-  background: #eef2ff;
-  border-color: #a5b4fc;
+  background: var(--color-surface-container);
+  border-color: var(--color-primary);
   width: 16px;
 }
 
@@ -412,6 +412,6 @@ async function onRecalculate() {
 .drawer-handle:hover .drawer-handle-grip::before,
 .drawer-handle:hover .drawer-handle-grip::after,
 .drawer-handle:hover .drawer-handle-grip {
-  background: #6366f1;
+  background: var(--color-primary);
 }
 </style>

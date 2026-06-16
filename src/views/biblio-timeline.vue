@@ -1025,7 +1025,7 @@ onUnmounted(() => {
   height: 100%;
   width: 16rem;
   overflow-y: auto;
-  border-right: 1px solid #f1f5f9;
+  border-right: 1px solid var(--color-outline-variant);
   /* Transparent "well" — the inner .sidebar__scroll is the floating card.
    * Matches the Citation/Network controls panel (bg-slate-50/30 + p-4).
    * `display: flex; flex-direction: column` is required so the child's
@@ -1033,7 +1033,7 @@ onUnmounted(() => {
    * views use via `class="my-auto"` on a flex-column aside). */
   display: flex;
   flex-direction: column;
-  background: rgb(248 250 252 / 0.3);
+  background: var(--color-surface-container-low);
   padding: 1rem;
   transition:
     opacity 0.3s,
@@ -1052,8 +1052,8 @@ onUnmounted(() => {
  * well via margin auto (the parent .sidebar is a flex column). Rounded corners,
  * subtle border + shadow match the Citation/Network controls card. */
 .sidebar__scroll {
-  background: #ffffff;
-  border: 1px solid rgb(226 232 240 / 0.8);
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
   border-radius: 0.75rem;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   padding: 1rem;
@@ -1074,20 +1074,20 @@ onUnmounted(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
   margin: 0;
 }
 
 .sidebar__hint {
   font-size: 0.6875rem;
-  color: #94a3b8;
+  color: var(--color-outline);
   font-style: italic;
   margin: 0;
 }
 
 .seg-toggle {
   display: flex;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-outline-variant);
   border-radius: 0.375rem;
   overflow: hidden;
 }
@@ -1096,10 +1096,10 @@ onUnmounted(() => {
   flex: 1;
   padding: 0.375rem 0.5rem;
   border: none;
-  background: #ffffff;
+  background: var(--color-surface-container-lowest);
   font-size: 0.75rem;
   font-weight: 500;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
   cursor: pointer;
   transition:
     background 0.15s,
@@ -1111,7 +1111,7 @@ onUnmounted(() => {
 }
 
 .seg-toggle__btn--active {
-  background: var(--color-primary, #4f46e5);
+  background: var(--color-primary);
   color: #ffffff;
 }
 
@@ -1120,7 +1120,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   font-size: 0.75rem;
-  color: #334155;
+  color: var(--color-on-surface-variant);
   cursor: pointer;
 }
 
@@ -1144,7 +1144,7 @@ onUnmounted(() => {
 .dual-range-value {
   font-size: 0.75rem;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--color-on-surface);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1152,7 +1152,7 @@ onUnmounted(() => {
   background: none;
   border: none;
   font-size: 0.625rem;
-  color: #4f46e5;
+  color: var(--color-primary);
   cursor: pointer;
   padding: 0;
 }
@@ -1168,7 +1168,7 @@ onUnmounted(() => {
   position: absolute;
   inset: 0 0 0 0;
   height: 0.375rem;
-  background: #e2e8f0;
+  background: var(--color-outline-variant);
   border-radius: 9999px;
   top: 50%;
   transform: translateY(-50%);
@@ -1177,7 +1177,7 @@ onUnmounted(() => {
 .dual-range-bar-active {
   position: absolute;
   height: 0.375rem;
-  background: #6366f1;
+  background: var(--color-primary);
   border-radius: 9999px;
   top: 50%;
   transform: translateY(-50%);
@@ -1201,8 +1201,8 @@ onUnmounted(() => {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
-  border: 2px solid #6366f1;
+  background: var(--color-surface-container-lowest);
+  border: 2px solid var(--color-primary);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
   cursor: pointer;
   position: relative;
@@ -1214,8 +1214,8 @@ onUnmounted(() => {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
-  border: 2px solid #6366f1;
+  background: var(--color-surface-container-lowest);
+  border: 2px solid var(--color-primary);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
   cursor: pointer;
   position: relative;
@@ -1234,7 +1234,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   font-size: 0.625rem;
-  color: #94a3b8;
+  color: var(--color-outline);
 }
 
 /* ── Journal list ────────────────────────────────────────────── */
@@ -1258,7 +1258,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.375rem;
   font-size: 0.75rem;
-  color: #334155;
+  color: var(--color-on-surface-variant);
   cursor: pointer;
   padding: 0.125rem 0;
 }
@@ -1277,7 +1277,7 @@ onUnmounted(() => {
 .sidebar__stat-line {
   margin: 0;
   font-size: 0.75rem;
-  color: #475569;
+  color: var(--color-on-surface-variant);
 }
 
 /* ── Sidebar actions row (reset + export dropdown) ────────────── */
@@ -1301,8 +1301,8 @@ onUnmounted(() => {
   flex-shrink: 0;
   border: none;
   border-radius: 0.5rem;
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-variant);
   cursor: pointer;
   font-family: inherit;
   transition:
@@ -1311,7 +1311,7 @@ onUnmounted(() => {
 }
 
 .sidebar__icon-btn:hover {
-  background: #e2e8f0;
+  background: var(--color-outline-variant);
 }
 
 .sidebar__icon-btn .material-symbols-outlined {
@@ -1332,8 +1332,8 @@ onUnmounted(() => {
   padding: 0.375rem 0.75rem;
   border: none;
   border-radius: 0.5rem;
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-variant);
   font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
@@ -1345,7 +1345,7 @@ onUnmounted(() => {
 
 .sidebar__action-btn:hover,
 .sidebar__action-btn--active {
-  background: #e2e8f0;
+  background: var(--color-outline-variant);
 }
 
 .sidebar__action-btn .material-symbols-outlined {
@@ -1364,8 +1364,8 @@ onUnmounted(() => {
   list-style: none;
   margin: 0;
   padding: 0;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
   border-radius: 0.5rem;
   box-shadow: 0 4px 12px rgb(15 23 42 / 0.12);
   overflow: hidden;
@@ -1378,18 +1378,18 @@ onUnmounted(() => {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.75rem;
-  color: #334155;
+  color: var(--color-on-surface-variant);
   cursor: pointer;
   transition: background-color 0.15s;
 }
 
 .sidebar__export-menu li:hover {
-  background: #eef2ff;
+  background: var(--color-surface-container);
 }
 
 .sidebar__export-menu li .material-symbols-outlined {
   font-size: 1rem;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
 }
 
 /* ── Drawer handle ───────────────────────────────────────────── */
@@ -1403,8 +1403,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--color-surface-container-low);
+  border: 1px solid var(--color-outline-variant);
   border-left: none;
   border-radius: 0 8px 8px 0;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.06);
@@ -1417,8 +1417,8 @@ onUnmounted(() => {
 }
 
 .drawer-handle:hover {
-  background: #eef2ff;
-  border-color: #a5b4fc;
+  background: var(--color-surface-container);
+  border-color: var(--color-primary);
   width: 16px;
 }
 
@@ -1444,7 +1444,7 @@ onUnmounted(() => {
 .drawer-handle:hover .drawer-handle-grip::before,
 .drawer-handle:hover .drawer-handle-grip::after,
 .drawer-handle:hover .drawer-handle-grip {
-  background: #6366f1;
+  background: var(--color-primary);
 }
 
 /* ── Main ────────────────────────────────────────────────────── */
@@ -1475,7 +1475,7 @@ onUnmounted(() => {
 .rematch-banner__btn {
   background: none;
   border: none;
-  color: #4f46e5;
+  color: var(--color-primary);
   font-weight: 600;
   cursor: pointer;
   font-size: inherit;
@@ -1495,8 +1495,8 @@ onUnmounted(() => {
   grid-template-columns: repeat(6, 1fr);
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  background: #ffffff;
-  border-bottom: 1px solid #f1f5f9;
+  background: var(--color-surface-container-lowest);
+  border-bottom: 1px solid var(--color-outline-variant);
 }
 
 @media (max-width: 900px) {
@@ -1514,7 +1514,7 @@ onUnmounted(() => {
 .kpi-mini__value {
   font-size: 1.125rem;
   font-weight: 800;
-  color: #1e293b;
+  color: var(--color-on-surface);
   line-height: 1.1;
 }
 
@@ -1522,7 +1522,7 @@ onUnmounted(() => {
   font-size: 0.625rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #94a3b8;
+  color: var(--color-outline);
   font-weight: 600;
 }
 
@@ -1532,7 +1532,7 @@ onUnmounted(() => {
   position: relative;
   overflow: hidden;
   padding: 0.5rem 1rem;
-  background: #ffffff;
+  background: var(--color-surface-container-lowest);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -1559,7 +1559,7 @@ onUnmounted(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
   margin: 0;
 }
 
@@ -1575,14 +1575,14 @@ onUnmounted(() => {
   justify-content: center;
   gap: 0.5rem;
   height: 100%;
-  color: #94a3b8;
+  color: var(--color-outline);
   font-size: 0.875rem;
 }
 
 .chart-spin {
   animation: chart-spin-anim 1s linear infinite;
   font-size: 2rem;
-  color: var(--color-primary, #4f46e5);
+  color: var(--color-primary);
 }
 
 @keyframes chart-spin-anim {
@@ -1606,7 +1606,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  color: #94a3b8;
+  color: var(--color-outline);
 }
 
 .timeline-empty__icon {
@@ -1622,8 +1622,8 @@ onUnmounted(() => {
 .year-panel {
   width: 18rem;
   flex-shrink: 0;
-  background: #ffffff;
-  border-left: 1px solid #e2e8f0;
+  background: var(--color-surface-container-lowest);
+  border-left: 1px solid var(--color-outline-variant);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
@@ -1635,7 +1635,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--color-outline-variant);
 }
 
 .year-panel__badge {
@@ -1651,7 +1651,7 @@ onUnmounted(() => {
   cursor: pointer;
   padding: 0.25rem;
   border-radius: 0.25rem;
-  color: #94a3b8;
+  color: var(--color-outline);
   display: flex;
   transition:
     background-color 0.15s,
@@ -1659,8 +1659,8 @@ onUnmounted(() => {
 }
 
 .year-panel__close:hover {
-  background: #f1f5f9;
-  color: #475569;
+  background: var(--color-surface-container-low);
+  color: var(--color-on-surface-variant);
 }
 
 .year-panel__close .material-symbols-outlined {
@@ -1685,13 +1685,13 @@ onUnmounted(() => {
 .year-panel__count-value {
   font-size: 1.75rem;
   font-weight: 800;
-  color: #1e293b;
+  color: var(--color-on-surface);
   line-height: 1;
 }
 
 .year-panel__count-label {
   font-size: 0.75rem;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
 }
 
 .year-panel__meta {
@@ -1709,14 +1709,14 @@ onUnmounted(() => {
   font-size: 0.625rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #94a3b8;
+  color: var(--color-outline);
   font-weight: 600;
 }
 
 .year-panel__meta-value {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #334155;
+  color: var(--color-on-surface-variant);
 }
 
 .year-panel__pill {
@@ -1748,7 +1748,7 @@ onUnmounted(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #64748b;
+  color: var(--color-on-surface-variant);
   margin: 0;
 }
 
@@ -1774,7 +1774,7 @@ onUnmounted(() => {
   background: transparent;
   border-radius: 0.25rem;
   font-size: 0.75rem;
-  color: #334155;
+  color: var(--color-on-surface-variant);
   cursor: pointer;
   text-align: left;
   font-family: inherit;
@@ -1782,11 +1782,11 @@ onUnmounted(() => {
 }
 
 .year-panel__journal-row:hover {
-  background: #f8fafc;
+  background: var(--color-surface-container-low);
 }
 
 .year-panel__journal-row--active {
-  background: #eef2ff;
+  background: var(--color-surface-container);
 }
 
 .year-panel__journal-name {
@@ -1801,7 +1801,7 @@ onUnmounted(() => {
 }
 
 .year-panel__journal-pct {
-  color: #94a3b8;
+  color: var(--color-outline);
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   width: 2rem;
@@ -1814,7 +1814,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 0.375rem;
   padding: 0.5rem 0.75rem;
-  background: var(--color-primary, #4f46e5);
+  background: var(--color-primary);
   color: #ffffff;
   border: none;
   border-radius: 0.375rem;
