@@ -580,6 +580,16 @@ function viewYearArticles(year: number): void {
   });
 }
 
+// ── Export dropdown state ──────────────────────────────────────
+const showExportMenu = ref(false);
+
+/** Dispatch the chosen export format from the dropdown. */
+function onExport(format: 'png' | 'svg'): void {
+  showExportMenu.value = false;
+  if (format === 'png') void handleExportPng();
+  else void handleExportSvg();
+}
+
 // ── Export via ApexCharts dataURI + Tauri save dialog ──────────
 async function handleExportPng(): Promise<void> {
   try {
@@ -800,20 +810,38 @@ onUnmounted(() => {
               <p class="sidebar__stat-line">{{ totalInRange }} articles in range</p>
             </section>
 
-            <!-- Export -->
-            <section class="sidebar__section">
-              <h4 class="sidebar__label">Export</h4>
-              <button class="sidebar__export" @click="handleExportPng">
-                <span class="material-symbols-outlined">image</span>
-                Export PNG
+            <!-- Actions: reset + export dropdown (matches Citation/Network controls pattern) -->
+            <div class="sidebar__actions">
+              <button
+                class="sidebar__icon-btn"
+                title="Reset All Filters"
+                aria-label="Reset All Filters"
+                @click="resetFilters"
+              >
+                <span class="material-symbols-outlined">restart_alt</span>
               </button>
-              <button class="sidebar__export" @click="handleExportSvg">
-                <span class="material-symbols-outlined">share</span>
-                Export SVG
-              </button>
-            </section>
-
-            <button class="sidebar__reset" @click="resetFilters">Reset All Filters</button>
+              <div class="sidebar__export-wrap">
+                <button
+                  class="sidebar__action-btn"
+                  :class="{ 'sidebar__action-btn--active': showExportMenu }"
+                  @click="showExportMenu = !showExportMenu"
+                >
+                  <span class="material-symbols-outlined">download</span>
+                  Export
+                  <span class="material-symbols-outlined sidebar__action-caret">expand_more</span>
+                </button>
+                <ul v-if="showExportMenu" class="sidebar__export-menu">
+                  <li @click="onExport('png')">
+                    <span class="material-symbols-outlined">image</span>
+                    PNG Image
+                  </li>
+                  <li @click="onExport('svg')">
+                    <span class="material-symbols-outlined">share</span>
+                    SVG Vector
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
         </aside>
         <button
@@ -1230,41 +1258,122 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.sidebar__reset,
-.sidebar__export {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.5rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.375rem;
-  background: #ffffff;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: #475569;
-  cursor: pointer;
-  font-family: inherit;
-  transition:
-    border-color 0.15s,
-    color 0.15s;
-}
-
-.sidebar__reset:hover,
-.sidebar__export:hover {
-  border-color: #818cf8;
-  color: #4f46e5;
-}
-
-.sidebar__reset .material-symbols-outlined,
-.sidebar__export .material-symbols-outlined {
-  font-size: 0.9375rem;
-}
-
 .sidebar__stat-line {
   margin: 0;
   font-size: 0.75rem;
   color: #475569;
+}
+
+/* ── Sidebar actions row (reset + export dropdown) ────────────── */
+/* Visually matches the Citation/Network controls action buttons:
+ * slate-100 background, slate-200 hover, rounded-lg, slate-600 text. */
+.sidebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.sidebar__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 0.5rem;
+  background: #f1f5f9;
+  color: #475569;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.sidebar__icon-btn:hover {
+  background: #e2e8f0;
+}
+
+.sidebar__icon-btn .material-symbols-outlined {
+  font-size: 1.125rem;
+}
+
+.sidebar__export-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.sidebar__action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.sidebar__action-btn:hover,
+.sidebar__action-btn--active {
+  background: #e2e8f0;
+}
+
+.sidebar__action-btn .material-symbols-outlined {
+  font-size: 1rem;
+}
+
+.sidebar__action-caret {
+  margin-left: auto;
+}
+
+.sidebar__export-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.25rem);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgb(15 23 42 / 0.12);
+  overflow: hidden;
+  z-index: 40;
+}
+
+.sidebar__export-menu li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: #334155;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.sidebar__export-menu li:hover {
+  background: #eef2ff;
+}
+
+.sidebar__export-menu li .material-symbols-outlined {
+  font-size: 1rem;
+  color: #64748b;
 }
 
 /* ── Drawer handle ───────────────────────────────────────────── */
