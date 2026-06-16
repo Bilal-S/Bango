@@ -111,7 +111,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
 - **`src/`** — Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/views/`** — page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
     parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)
-    render in its `<router-view>`. `biblio-timeline.vue` is the Publication Timeline view;
+    render in its `<router-view>`. `biblio-timeline.vue` is the Publication Timeline view
+    (its secondary "Top Journals" chart auto-hides below `SECONDARY_CHART_MIN_VIEWPORT_HEIGHT`
+    = 700px viewport height, driven by the reactive `height` ref from `use-viewport.ts`);
     `biblio-authors.vue` is the Author Productivity Ranking view (sortable table + slide-over
     detail panel + Google Scholar external lookup icons).
   - **`src/components/`** — reusable components. `journal-info-card.vue` lazily loads

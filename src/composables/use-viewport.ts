@@ -1,9 +1,11 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 const width = ref(typeof window !== 'undefined' ? window.innerWidth : 1280);
+const height = ref(typeof window !== 'undefined' ? window.innerHeight : 800);
 
 function onResize(): void {
   width.value = window.innerWidth;
+  height.value = window.innerHeight;
 }
 
 let listeners = 0;
@@ -33,6 +35,7 @@ export function useViewport() {
 
   return {
     width,
+    height,
     isSm,
     isMd,
     isLg,

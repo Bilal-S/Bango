@@ -5,12 +5,14 @@ import VueApexCharts from 'vue3-apexcharts';
 import type { ApexOptions, ApexYAxis } from 'apexcharts';
 import { useBibliometrics } from '@/composables/use-bibliometrics';
 import { useTimelineState } from '@/composables/use-timeline-state';
+import { useViewport } from '@/composables/use-viewport';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import JournalInfoCard from '@/components/journal-info-card.vue';
 
 const router = useRouter();
 const { kpis, loading, fetchKpis } = useBibliometrics();
 const state = useTimelineState();
+const { height: viewportHeight } = useViewport();
 
 // ── Journal Info Card selection ────────────────────────────────
 const selectedJournalKey = ref<string | null>(null);
@@ -114,9 +116,26 @@ const chartRef = ref<InstanceType<typeof VueApexCharts> | null>(null);
 
 // ApexCharts requires a NUMERIC pixel height. We base the chart heights on the
 // viewport so the charts fill the available space without needing ResizeObserver
-// (which had timing issues with conditional v-if rendering).
-const primaryChartHeight = computed(() => Math.max(280, Math.floor(window.innerHeight * 0.42)));
-const secondaryChartHeight = computed(() => Math.max(140, Math.floor(window.innerHeight * 0.22)));
+// (which had timing issues with conditional v-if rendering). `viewportHeight`
+// is a reactive ref from useViewport so charts recompute on resize.
+const primaryChartHeight = computed(() => Math.max(280, Math.floor(viewportHeight.value * 0.42)));
+const secondaryChartHeight = computed(() => Math.max(140, Math.floor(viewportHeight.value * 0.22)));
+
+/**
+ * Minimum viewport height (px) at which the secondary "Top Journals" chart is
+ * worth showing. Below this, vertical space is too tight for two charts, so we
+ * hide the secondary chart and let the primary chart expand to fill the area.
+ *
+ * Space budget at the cutoff: dashboard header (~60px) + KPI strip (~80px) +
+ * primary chart (~42% of viewport ≈ 294px @ 700) + secondary chart (256px) +
+ * paddings/gaps. 700px keeps both charts usable; below it the primary chart
+ * would be crushed.
+ */
+const SECONDARY_CHART_MIN_VIEWPORT_HEIGHT = 700;
+
+const showSecondaryChart = computed(
+  () => viewportHeight.value >= SECONDARY_CHART_MIN_VIEWPORT_HEIGHT
+);
 
 const OKABE_ITO_10 = [
   '#E69F00',
@@ -860,8 +879,8 @@ onUnmounted(() => {
                 class="chart-apex"
               />
             </div>
-            <!-- Secondary: top-10 journals horizontal bar -->
-            <div v-if="journalTotals.length > 0" class="chart-secondary">
+            <!-- Secondary: top-10 journals horizontal bar (hidden when viewport height is too short) -->
+            <div v-if="journalTotals.length > 0 && showSecondaryChart" class="chart-secondary">
               <h6 class="chart-secondary__title">Top Journals in Range</h6>
               <VueApexCharts
                 :key="journalChartKey"
