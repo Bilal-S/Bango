@@ -686,7 +686,7 @@ pub fn extract_json(raw: &str) -> String {
                 return arr;
             }
         }
-        // LLMs may omit the opening `{` — repair brace balance before returning
+        // LLMs may omit the opening `{` - repair brace balance before returning
         return balance_braces(inner);
     }
 

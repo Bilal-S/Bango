@@ -106,7 +106,7 @@
         class="relative w-9 h-5 rounded-full transition-colors cursor-pointer"
         :class="showMainPath ? 'bg-amber-500' : 'bg-slate-300'"
         :title="
-          showMainPath ? 'Main path highlight active — click to turn off' : 'Highlight main path'
+          showMainPath ? 'Main path highlight active - click to turn off' : 'Highlight main path'
         "
         @click="toggleMainPath"
       >
@@ -414,7 +414,7 @@ const emit = defineEmits<{
    */
   (e: 'unmatched-change', showUnmatched: boolean): void;
   /**
-   * Phase 2 — Time-Slice: emitted on every `input` event (dragging a slider
+   * Phase 2 - Time-Slice: emitted on every `input` event (dragging a slider
    * handle).  The parent applies the year-range filter immediately to hide/show
    * nodes but defers the expensive ForceAtlas2 re-layout until `change` (slider
    * release) is emitted via `year-range-commit`.
@@ -425,12 +425,12 @@ const emit = defineEmits<{
     filters?: { minCitations: number; showIsolated: boolean; search: string }
   ): void;
   /**
-   * Phase 2 — Time-Slice: emitted on `change` (slider release).  The parent runs
+   * Phase 2 - Time-Slice: emitted on `change` (slider release).  The parent runs
    * the ForceAtlas2 re-layout on the now-filtered subgraph.
    */
   (e: 'year-range-commit', range: [number, number]): void;
   /**
-   * Phase 3 — Main Path: emitted when the user toggles the SPC highlight.  The
+   * Phase 3 - Main Path: emitted when the user toggles the SPC highlight.  The
    * parent triggers the worker computation and applies the visual highlight.
    */
   (e: 'main-path-change', showMainPath: boolean): void;
@@ -457,7 +457,7 @@ const showSuggestions = ref(false);
 const showExportMenu = ref(false);
 
 /**
- * Phase 2 — Time-Slice year-range state.
+ * Phase 2 - Time-Slice year-range state.
  *
  * `yearStart` / `yearEnd` are local refs initialised to the full extent of the
  * data.  They are kept in sync with the parent's minYear/maxYear props so

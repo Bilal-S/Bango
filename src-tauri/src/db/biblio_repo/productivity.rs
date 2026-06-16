@@ -210,7 +210,7 @@ fn compute_g_index(citations: &[i64]) -> i32 {
     g
 }
 
-/// Get the full profile for a single author — lazy-loaded by the detail panel.
+/// Get the full profile for a single author - lazy-loaded by the detail panel.
 ///
 /// Reuses `get_author_pubs_by_year` and `get_institutions_by_author`, then adds
 /// top collaborators (from co-authorship edges) and recent papers.

@@ -1,0 +1,110 @@
+/**
+ * Shared card styling for the settings sub-components.
+ *
+ * Each settings card (Project Management, Screening Preferences,
+ * Full Text Storage, Diagnostics) imports this to keep its title,
+ * description, and action row visually consistent. Component-specific
+ * styles are layered in each component's own <style scoped> block.
+ */
+
+.settings-card {
+  background-color: var(--color-surface-container-lowest, #ffffff);
+  border-radius: var(--radius-xl, 0.75rem);
+  border: 1px solid var(--color-surface-variant, #e4e1ee);
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.settings-card__title {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--color-on-surface, #1b1b24);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-surface-variant, #e4e1ee);
+  margin-bottom: 1.5rem;
+}
+
+.settings-card__desc {
+  font-size: 13px;
+  color: var(--color-on-surface-variant, #464555);
+  margin-bottom: 1rem;
+}
+
+.settings-card__actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.settings-card__status {
+  font-size: 13px;
+  color: #166534;
+  background-color: #f0fdf4;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Toggle row (screening preferences) */
+.settings-card__toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.settings-card__toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  flex: 1;
+}
+
+.settings-card__toggle-label > span:first-child {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-on-surface, #1b1b24);
+}
+
+.settings-card__toggle-hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-on-surface-variant, #464555);
+}
+
+.settings-card__switch {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  border-radius: 9999px;
+  background-color: var(--color-surface-variant, #e4e1ee);
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.settings-card__switch--on {
+  background-color: var(--color-primary, #3525cd);
+}
+
+.settings-card__switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background-color: var(--color-surface-container-lowest, #ffffff);
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.settings-card__switch--on .settings-card__switch-thumb {
+  transform: translateX(20px);
+}

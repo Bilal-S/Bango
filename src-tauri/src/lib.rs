@@ -289,7 +289,7 @@ fn load_journal_index_if_empty(
 
     if !resource_path.exists() {
         eprintln!(
-            "[journal_index] no bundled portal DB at {:?} — skipping auto-load",
+            "[journal_index] no bundled portal DB at {:?} - skipping auto-load",
             resource_path
         );
         return Ok(());

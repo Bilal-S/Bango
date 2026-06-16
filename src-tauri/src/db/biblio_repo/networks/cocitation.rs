@@ -72,7 +72,7 @@ struct CocitationComputation {
 /// The result is filtered by `min_citation_count` (per-paper) and
 /// `min_co_citation` (per-pair).
 ///
-/// This function does NOT persist anything — it returns the computed data
+/// This function does NOT persist anything - it returns the computed data
 /// for the JSON serializer.
 fn compute_cocitation(
     conn: &Connection,

@@ -151,7 +151,7 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
     halted.value = true;
   }
 
-  /** Called when the user explicitly retries — clears the halt flag. */
+  /** Called when the user explicitly retries - clears the halt flag. */
   function resumeQueue() {
     halted.value = false;
     revision.value++;

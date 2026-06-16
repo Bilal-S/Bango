@@ -39,7 +39,7 @@ export function useFeatureFlags() {
 }
 
 /**
- * Internal — called once from `main.ts` during bootstrap.
+ * Internal - called once from `main.ts` during bootstrap.
  * Do not call from components; use `useFeatureFlags()` instead.
  */
 export function initFeatureFlags(): Promise<void> {

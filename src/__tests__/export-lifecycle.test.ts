@@ -232,7 +232,7 @@ describe('useExport', () => {
         defaultPath: 'errors-articles.ris',
         filters: [{ name: 'RIS File', extensions: ['ris'] }],
       });
-      // Flat args — no `request` wrapper
+      // Flat args - no `request` wrapper
       expect(tauriCommand).toHaveBeenCalledWith('export_ris_for_tab_to_file', {
         path: '/path/to/error-articles.ris',
         status: 'error',

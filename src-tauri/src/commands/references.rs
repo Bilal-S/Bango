@@ -345,7 +345,7 @@ pub fn promote_reference_to_article(
         });
     }
 
-    // No existing match — create a new article from the paper's metadata
+    // No existing match - create a new article from the paper's metadata
     let new_article = NewArticle {
         title: paper.title.clone(),
         abstract_text: paper.abstract_text.clone().unwrap_or_default(),

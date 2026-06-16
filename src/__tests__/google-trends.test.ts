@@ -188,7 +188,7 @@ describe('Google Trends Utilities', () => {
       expect(script).toContain('window.fetch');
       // 3. XMLHttpRequest patch for HTTP errors
       expect(script).toContain('XMLHttpRequest');
-      // 4. Watchdog timeout backstop (no more MutationObserver — see docstring)
+      // 4. Watchdog timeout backstop (no more MutationObserver - see docstring)
       expect(script).toMatch(/setTimeout/);
     });
 

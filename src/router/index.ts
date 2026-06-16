@@ -8,7 +8,7 @@ import ArticleList from '@/views/article-list.vue';
 const ImportRis = () => import('@/views/import-ris.vue');
 const DedupReview = () => import('@/views/dedup-review.vue');
 const CriteriaEditor = () => import('@/views/criteria-editor.vue');
-const LlmConfigView = () => import('@/views/llm-config.vue');
+const SettingsView = () => import('@/views/settings-view.vue');
 const TagLabelManagement = () => import('@/views/tag-label-management.vue');
 const ScreeningProgress = () => import('@/views/screening-progress.vue');
 const SummaryView = () => import('@/views/summary-view.vue');
@@ -95,7 +95,7 @@ const routes = [
     name: 'chat',
     component: ChatView,
   },
-  { path: '/settings', name: 'settings', component: LlmConfigView },
+  { path: '/settings', name: 'settings', component: SettingsView },
   { path: '/help', name: 'help', component: HelpGuide },
 ];
 
@@ -110,7 +110,7 @@ const router = createRouter({
 void router.isReady().then(() => {
   void Promise.all([
     import('@/views/criteria-editor.vue'),
-    import('@/views/llm-config.vue'),
+    import('@/views/settings-view.vue'),
     import('@/views/tag-label-management.vue'),
     import('@/views/import-ris.vue'),
     import('@/views/screening-progress.vue'),

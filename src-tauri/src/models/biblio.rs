@@ -236,13 +236,13 @@ pub struct BiblioKpis {
     pub year_to: Option<i32>,
     /// Average publications per year (total included / number of distinct years).
     pub pubs_per_year: Option<f64>,
-    /// Publications per year, ordered by year ASC — powers the mini bar chart.
+    /// Publications per year, ordered by year ASC - powers the mini bar chart.
     pub pubs_by_year: Vec<YearCount>,
     /// Average year-over-year growth rate across all consecutive year pairs (percentage).
     pub avg_growth_rate: Option<f64>,
-    /// Reference papers of included articles, grouped by publication_year — powers the References bar chart.
+    /// Reference papers of included articles, grouped by publication_year - powers the References bar chart.
     pub refs_by_year: Vec<YearCount>,
-    /// Normalized citations by year — actual detail records where available, decay-distributed otherwise.
+    /// Normalized citations by year - actual detail records where available, decay-distributed otherwise.
     pub citations_by_year: Vec<YearCount>,
     /// Per-journal, per-year counts for the timeline stacked view. Grouped by
     /// canonical `journal_title` when `journal_index_id` is set, else normalized raw title.
@@ -251,7 +251,7 @@ pub struct BiblioKpis {
 
 // ── Author Productivity models ─────────────────────────────────
 
-/// Author ranking row — one per normalized author.
+/// Author ranking row - one per normalized author.
 /// Extends BiblioAuthor with derived metrics for the productivity view.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -316,7 +316,7 @@ pub struct AuthorPaper {
 #[serde(rename_all = "camelCase")]
 pub struct AuthorProductivityKpis {
     pub total_authors: i32,
-    /// Sum of article_count across all authors (may exceed included articles — multi-author).
+    /// Sum of article_count across all authors (may exceed included articles - multi-author).
     pub total_papers: i64,
     pub avg_h_index: Option<f64>,
     pub max_h_index: i32,

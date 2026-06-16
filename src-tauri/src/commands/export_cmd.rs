@@ -171,7 +171,7 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
         // Using DROP (not DELETE) avoids ALTER TABLE conflicts when
         // migrations are re-run against an existing schema.
         //
-        // IMPORTANT: journal_index is NOT dropped here — it is system-distributed
+        // IMPORTANT: journal_index is NOT dropped here - it is system-distributed
         // reference data that survives project reset. It is populated via the
         // import_journals script and auto-loaded from the bundled portal DB.
         tx.execute_batch(

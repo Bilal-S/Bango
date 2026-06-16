@@ -560,7 +560,7 @@ fn test_all_view_search_filters_by_title() {
     );
 
     let query = ArticleQuery {
-        status: None, // All view — no status filter
+        status: None, // All view - no status filter
         search: Some("article".into()),
         sort_by: Some("title".into()),
         sort_dir: Some("asc".into()),
@@ -802,7 +802,7 @@ fn test_search_user_notes_null_no_crash() {
     let conn = setup_db();
     seed_working_articles(&conn, &[("Article With No Notes", Some(2020))]);
 
-    // user_notes is NULL for this article — search should not crash
+    // user_notes is NULL for this article - search should not crash
     let query = ArticleQuery {
         status: Some("working".into()),
         search: Some("something".into()),

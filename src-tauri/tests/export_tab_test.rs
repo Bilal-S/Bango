@@ -106,7 +106,7 @@ fn test_export_working_returns_only_working() {
 fn test_export_errors_returns_only_screened_working_articles() {
     let conn = setup_db();
 
-    // Working article that has been screened (has screened_at set) — this is an "error" article
+    // Working article that has been screened (has screened_at set) - this is an "error" article
     let a1 =
         article_repo::insert_article(&conn, &new_article("Screened With Error")).expect("insert");
     article_repo::move_to_working(&conn, &a1.id).expect("move");
@@ -114,12 +114,12 @@ fn test_export_errors_returns_only_screened_working_articles() {
     conn.execute("UPDATE articles SET screened_at = datetime('now') WHERE id = ?1", params![a1.id])
         .expect("update screened_at");
 
-    // Working article that has NOT been screened — should NOT appear in errors
+    // Working article that has NOT been screened - should NOT appear in errors
     let a2 =
         article_repo::insert_article(&conn, &new_article("Unscreened Working")).expect("insert");
     article_repo::move_to_working(&conn, &a2.id).expect("move");
 
-    // Included article — should NOT appear in errors
+    // Included article - should NOT appear in errors
     let a3 = article_repo::insert_article(&conn, &new_article("Included Article")).expect("insert");
     article_repo::move_to_working(&conn, &a3.id).expect("move");
     set_status(&conn, &a3.id, "included");
@@ -135,7 +135,7 @@ fn test_export_errors_returns_only_screened_working_articles() {
 fn test_export_errors_empty_when_no_screened_articles() {
     let conn = setup_db();
 
-    // Only unscreened working articles — no errors
+    // Only unscreened working articles - no errors
     let a1 = article_repo::insert_article(&conn, &new_article("Unscreened")).expect("insert");
     article_repo::move_to_working(&conn, &a1.id).expect("move");
 

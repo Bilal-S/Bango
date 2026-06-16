@@ -269,7 +269,7 @@ function viewAuthorArticles(displayName: string): void {
 function cellValue(author: AuthorRank, col: SortColumn, index: number): string | number {
   if (col.key === 'index') return index + 1;
   const val = author[col.key];
-  if (val === null || val === undefined) return '—';
+  if (val === null || val === undefined) return '-';
   if (typeof val === 'number') return col.label === 'Avg/Paper' ? val.toFixed(1) : val;
   return val;
 }
@@ -595,11 +595,11 @@ function onPanelKeydown(event: KeyboardEvent): void {
         <!-- KPI strip -->
         <section class="kpi-strip">
           <div class="kpi-mini">
-            <span class="kpi-mini__value">{{ kpis?.totalAuthors ?? '—' }}</span>
+            <span class="kpi-mini__value">{{ kpis?.totalAuthors ?? '-' }}</span>
             <span class="kpi-mini__label">Authors</span>
           </div>
           <div class="kpi-mini">
-            <span class="kpi-mini__value">{{ kpis?.totalPapers.toLocaleString() ?? '—' }}</span>
+            <span class="kpi-mini__value">{{ kpis?.totalPapers.toLocaleString() ?? '-' }}</span>
             <span class="kpi-mini__label">Total Papers</span>
           </div>
           <div class="kpi-mini">
@@ -607,13 +607,13 @@ function onPanelKeydown(event: KeyboardEvent): void {
               {{
                 kpis?.avgHIndex !== null && kpis?.avgHIndex !== undefined
                   ? kpis.avgHIndex.toFixed(1)
-                  : '—'
+                  : '-'
               }}
             </span>
             <span class="kpi-mini__label">Avg h-index</span>
           </div>
           <div class="kpi-mini">
-            <span class="kpi-mini__value">{{ kpis?.maxHIndex ?? '—' }}</span>
+            <span class="kpi-mini__value">{{ kpis?.maxHIndex ?? '-' }}</span>
             <span class="kpi-mini__label">Max h-index</span>
           </div>
           <div class="kpi-mini">
@@ -621,7 +621,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
               {{
                 kpis?.avgCitations !== null && kpis?.avgCitations !== undefined
                   ? kpis.avgCitations.toFixed(1)
-                  : '—'
+                  : '-'
               }}
             </span>
             <span class="kpi-mini__label">Avg Cites</span>
@@ -631,7 +631,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
               <template v-if="kpis?.yearFrom && kpis?.yearTo">
                 {{ kpis.yearFrom }}–{{ kpis.yearTo }}
               </template>
-              <template v-else>—</template>
+              <template v-else>-</template>
             </span>
             <span class="kpi-mini__label">Years</span>
           </div>
@@ -738,7 +738,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
                   </td>
                   <td class="ranking-table__td ranking-table__td--inst">
                     <span :title="author.primaryInstitution ?? ''">
-                      {{ author.primaryInstitution ?? '—' }}
+                      {{ author.primaryInstitution ?? '-' }}
                     </span>
                   </td>
                   <td class="ranking-table__td ranking-table__td--icon" @click.stop>
@@ -828,7 +828,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
                     {{
                       detail.rank.avgCitationsPerPaper !== null
                         ? detail.rank.avgCitationsPerPaper.toFixed(1)
-                        : '—'
+                        : '-'
                     }}
                   </span>
                   <span class="author-panel__metric-label">Avg/Paper</span>
@@ -878,7 +878,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
                   >
                     <span class="author-panel__paper-title" :title="p.title">{{ p.title }}</span>
                     <span class="author-panel__paper-meta">
-                      {{ p.publicationYear ?? '—' }} · {{ p.numCited ?? 0 }} cites
+                      {{ p.publicationYear ?? '-' }} · {{ p.numCited ?? 0 }} cites
                     </span>
                   </li>
                 </ul>

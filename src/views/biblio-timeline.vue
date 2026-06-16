@@ -26,7 +26,7 @@ const rangeMax = computed(
 );
 
 // Re-sync range bounds whenever the underlying dataset changes year span
-// (e.g. after a re-normalization). Not immediate — initial range is set
+// (e.g. after a re-normalization). Not immediate - initial range is set
 // in onMounted after the first fetchKpis() call completes.
 watch([rangeMin, rangeMax, () => kpis.value.includedCount], ([mn, mx, count]) => {
   if (count > 0) state.setRange(mn, mx);
@@ -108,7 +108,7 @@ const peakEntry = computed(() => {
   );
 });
 const avgPerYear = computed(() =>
-  filteredPubs.value.length > 0 ? (totalInRange.value / filteredPubs.value.length).toFixed(1) : '—'
+  filteredPubs.value.length > 0 ? (totalInRange.value / filteredPubs.value.length).toFixed(1) : '-'
 );
 
 // ── ApexCharts series & options ────────────────────────────────
@@ -615,7 +615,7 @@ async function handleExportSvg(): Promise<void> {
   try {
     // ApexCharts dataURI({ fileExt: 'svg' }) has reliability issues in
     // vue3-apexcharts (returns incomplete data). Instead, serialize the
-    // chart's SVG DOM element directly via XMLSerializer — reliable and
+    // chart's SVG DOM element directly via XMLSerializer - reliable and
     // produces the full SVG markup.
     const chartEl = document.querySelector('.chart-primary svg');
     if (!chartEl) {
@@ -656,7 +656,7 @@ function resetFilters(): void {
 
 // Capture unhandled promise rejections from ApexCharts internal SVG.js
 // operations (Element not found during chart destroy/update cycles).
-// These are non-fatal but noisy — log them once for diagnostics.
+// These are non-fatal but noisy - log them once for diagnostics.
 onMounted(async () => {
   const rejectionHandler = (e: PromiseRejectionEvent) => {
     const reason = e.reason instanceof Error ? e.reason.message : String(e.reason);
@@ -863,11 +863,11 @@ onUnmounted(() => {
             <span class="kpi-mini__label">Total Pubs</span>
           </div>
           <div class="kpi-mini">
-            <span class="kpi-mini__value">{{ peakEntry?.year ?? '—' }}</span>
+            <span class="kpi-mini__value">{{ peakEntry?.year ?? '-' }}</span>
             <span class="kpi-mini__label">Peak Year</span>
           </div>
           <div class="kpi-mini">
-            <span class="kpi-mini__value">{{ peakEntry?.count ?? '—' }}</span>
+            <span class="kpi-mini__value">{{ peakEntry?.count ?? '-' }}</span>
             <span class="kpi-mini__label">Peak Count</span>
           </div>
           <div class="kpi-mini">
@@ -879,7 +879,7 @@ onUnmounted(() => {
               {{
                 kpis.avgGrowthRate !== null
                   ? `${kpis.avgGrowthRate >= 0 ? '+' : ''}${kpis.avgGrowthRate.toFixed(1)}%`
-                  : '—'
+                  : '-'
               }}
             </span>
             <span class="kpi-mini__label">Avg Growth</span>
@@ -1026,7 +1026,7 @@ onUnmounted(() => {
   width: 16rem;
   overflow-y: auto;
   border-right: 1px solid var(--color-outline-variant);
-  /* Transparent "well" — the inner .sidebar__scroll is the floating card.
+  /* Transparent "well" - the inner .sidebar__scroll is the floating card.
    * Matches the Citation/Network controls panel (bg-slate-50/30 + p-4).
    * `display: flex; flex-direction: column` is required so the child's
    * `margin: auto 0` centers it vertically (same technique the network
@@ -1048,7 +1048,7 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-/* Floating controls card — solid white, vertically centered in the translucent
+/* Floating controls card - solid white, vertically centered in the translucent
  * well via margin auto (the parent .sidebar is a flex column). Rounded corners,
  * subtle border + shadow match the Citation/Network controls card. */
 .sidebar__scroll {

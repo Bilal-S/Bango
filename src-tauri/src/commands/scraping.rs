@@ -97,7 +97,7 @@ pub async fn scrape_citation_chaser_cmd(
     let cits_exist = get_cits && cits_path.exists();
 
     if refs_exist && cits_exist {
-        // Both needed files already cached — skip scraping entirely.
+        // Both needed files already cached - skip scraping entirely.
         return Ok(ScrapeResultDto {
             references_ris: get_refs.then_some(refs_path),
             citations_ris: get_cits.then_some(cits_path),

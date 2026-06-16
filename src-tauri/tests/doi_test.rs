@@ -114,7 +114,7 @@ fn test_trims_whitespace_around_placeholder() {
 #[test]
 fn test_non_placeholder_starting_with_na() {
     // "name" starts with "na" but is not a placeholder
-    // This should NOT be normalized away — it's a real (though unlikely) value
+    // This should NOT be normalized away - it's a real (though unlikely) value
     assert_eq!(normalize_doi(Some("name")), Some("name"));
 }
 

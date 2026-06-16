@@ -87,11 +87,11 @@ const props = defineProps<{
   recalculateTrigger: number;
   /** When set, non-isolated nodes are dimmed. Takes visual precedence over focus/cluster. */
   isolationMode: { nodeId: string; direction: IsolationDirection; label?: string } | null;
-  /** Phase 3 — Main Path (SPC): node IDs on the main path backbone. */
+  /** Phase 3 - Main Path (SPC): node IDs on the main path backbone. */
   mainPathNodes: Set<string>;
-  /** Phase 3 — Main Path (SPC): edge IDs on the main path. */
+  /** Phase 3 - Main Path (SPC): edge IDs on the main path. */
   mainPathEdges: Set<string>;
-  /** Phase 3 — Main Path (SPC): master toggle for the highlight. */
+  /** Phase 3 - Main Path (SPC): master toggle for the highlight. */
   showMainPath: boolean;
 }>();
 
@@ -307,7 +307,7 @@ watch(
 );
 
 /**
- * Phase 3 — Main Path (SPC): re-apply visual state when the toggle or the
+ * Phase 3 - Main Path (SPC): re-apply visual state when the toggle or the
  * computed node/edge sets change.
  */
 watch(

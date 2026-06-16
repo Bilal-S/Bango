@@ -14,15 +14,15 @@ const uniqueAuthors = computed(() => kpis.value.uniqueAuthors);
 const avgCitationsPerArticle = computed(() =>
   kpis.value.includedCount > 0
     ? (kpis.value.totalCitations / kpis.value.includedCount).toFixed(1)
-    : '—'
+    : '-'
 );
 const avgGrowthRate = computed(() =>
   kpis.value.avgGrowthRate !== null
     ? `${kpis.value.avgGrowthRate >= 0 ? '+' : ''}${kpis.value.avgGrowthRate.toFixed(1)}%`
-    : '—'
+    : '-'
 );
-const yearFrom = computed(() => kpis.value.yearFrom ?? '—');
-const yearTo = computed(() => kpis.value.yearTo ?? '—');
+const yearFrom = computed(() => kpis.value.yearFrom ?? '-');
+const yearTo = computed(() => kpis.value.yearTo ?? '-');
 const totalPubs = computed(() => kpis.value.pubsByYear.reduce((sum, yc) => sum + yc.count, 0));
 const maxPubsCount = computed(() => Math.max(1, ...kpis.value.pubsByYear.map((yc) => yc.count)));
 const hasPubsByYear = computed(() => kpis.value.pubsByYear.length > 0);
@@ -248,7 +248,7 @@ function dismissModal(): void {
 
     <!-- Default view: KPIs + Module Grid (shown when no child route active) -->
     <template v-else>
-      <!-- KPI Row — compact horizontal layout from High-Contrast Research Hub -->
+      <!-- KPI Row - compact horizontal layout from High-Contrast Research Hub -->
       <section class="biblio__kpis">
         <div class="kpi-card kpi-card--chart">
           <div class="kpi-card__row">

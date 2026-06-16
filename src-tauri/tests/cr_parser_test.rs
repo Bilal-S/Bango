@@ -317,24 +317,24 @@ fn parse_cr_entries_from_real_bibtex_patterns() {
     let papers = cr_parser::parse_cr_entries(&extras);
     assert_eq!(papers.len(), 6, "Should parse all 6 reference patterns");
 
-    // Ahrens — book with page
+    // Ahrens - book with page
     assert_eq!(papers[0].authors, vec!["Ahrens RJ"]);
     assert_eq!(papers[0].publication_year, Some(2004));
 
-    // Alexander — standard journal entry with DOI
+    // Alexander - standard journal entry with DOI
     assert_eq!(papers[1].doi.as_deref(), Some("10.1016/j.foreco.2017.04.005"));
     assert_eq!(papers[1].volume.as_deref(), Some("396"));
 
-    // Anonymous — book title
+    // Anonymous - book title
     assert_eq!(papers[2].authors, vec!["[Anonymous]"]);
     assert_eq!(papers[2].title.as_deref(), Some("Canadian System of Soil Classification"));
 
-    // Barton — minimal entry
+    // Barton - minimal entry
     assert_eq!(papers[3].publication_year, Some(2024));
 
-    // Johnstone — DOI array
+    // Johnstone - DOI array
     assert_eq!(papers[4].doi.as_deref(), Some("10.1139/x03-183"));
 
-    // Osterkamp — complex DOI
+    // Osterkamp - complex DOI
     assert!(papers[5].doi.as_ref().unwrap().starts_with("10.1002/"));
 }

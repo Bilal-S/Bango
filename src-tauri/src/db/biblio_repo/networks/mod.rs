@@ -1,12 +1,12 @@
 //! Bibliometric network builders and serializers.
 //!
 //! This module is organized by network type:
-//! - [`persistence`] — generic network CRUD (save/load/delete nodes & edges).
-//! - [`labels`] — shared paper-label formatter.
-//! - [`coauthors`] — co-authorship edge builder + JSON serializer.
-//! - [`citations`] — citation edge builder + JSON serializer (incl. unmatched leaves).
-//! - [`keywords`] — keyword co-occurrence JSON serializer.
-//! - [`cocitation`] — on-demand co-citation computation with 4 normalization modes.
+//! - [`persistence`] - generic network CRUD (save/load/delete nodes & edges).
+//! - [`labels`] - shared paper-label formatter.
+//! - [`coauthors`] - co-authorship edge builder + JSON serializer.
+//! - [`citations`] - citation edge builder + JSON serializer (incl. unmatched leaves).
+//! - [`keywords`] - keyword co-occurrence JSON serializer.
+//! - [`cocitation`] - on-demand co-citation computation with 4 normalization modes.
 
 mod citations;
 mod coauthors;

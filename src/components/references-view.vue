@@ -289,7 +289,7 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
               <div class="text-xs text-slate-500 mt-0.5">
                 {{ formatAuthors(paper.authors) }}
                 <span v-if="paper.publicationYear"> ({{ paper.publicationYear }})</span>
-                <span v-if="paper.journal"> — {{ paper.journal }}</span>
+                <span v-if="paper.journal"> - {{ paper.journal }}</span>
               </div>
             </div>
 

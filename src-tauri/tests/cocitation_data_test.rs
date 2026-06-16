@@ -1,9 +1,9 @@
 //! Integration test validating co-citation analysis against RIS fixture data.
 //!
 //! This test loads the dedicated co-citation dataset from `tests/test-citations/`:
-//!   - `co-citation.ris` — 5 main (citing) articles
-//!   - `10.2001_cocite{1..5}_references.ris` — shared reference papers R1–R6
-//!   - `10.2001_cocite{1..5}_citations.ris` — dummy citing papers (not used in co-citation)
+//!   - `co-citation.ris` - 5 main (citing) articles
+//!   - `10.2001_cocite{1..5}_references.ris` - shared reference papers R1–R6
+//!   - `10.2001_cocite{1..5}_citations.ris` - dummy citing papers (not used in co-citation)
 //!
 //! ## Dataset Topology
 //!
@@ -17,7 +17,7 @@
 //!
 //! ## Expected Co-Citation Counts (c_ij)
 //!
-//! - **R1–R2**: 3 (cocite1, cocite2, cocite3) — dominant pair
+//! - **R1–R2**: 3 (cocite1, cocite2, cocite3) - dominant pair
 //! - **R1–R3**: 1 (cocite1)
 //! - **R1–R4**: 1 (cocite2)
 //! - **R1–R5**: 1 (cocite3)
@@ -166,7 +166,7 @@ fn node_dois(json: &serde_json::Value) -> HashMap<String, String> {
         .collect()
 }
 
-/// Find an edge between two node IDs (undirected — checks both orderings).
+/// Find an edge between two node IDs (undirected - checks both orderings).
 fn find_edge<'a>(
     edges: &'a [serde_json::Value],
     id_a: &str,

@@ -158,7 +158,7 @@ The app manages a **single project** - there is no project selector or multi-pro
     "id": "uuid",
     "author_id": "uuid (references BiblioAuthor)",
     "institution_id": "uuid (references BiblioInstitution)",
-    "article_id": "uuid (references Article — context of the affiliation)"
+    "article_id": "uuid (references Article - context of the affiliation)"
   },
   "BiblioTerm": {
     "id": "uuid",

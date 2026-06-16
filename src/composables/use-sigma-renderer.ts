@@ -79,7 +79,7 @@ interface SigmaRendererOptions {
   defaultNodeSize?: number;
   /** Default edge color. Default '#e2e8f0' */
   defaultEdgeColor?: string;
-  /** Label render size threshold — labels hidden below this zoom level. Default 1.5 */
+  /** Label render size threshold - labels hidden below this zoom level. Default 1.5 */
   labelRenderSizeThreshold?: number;
   /**
    * Custom arrow-head dimensions for directed edges. The arrow program scales

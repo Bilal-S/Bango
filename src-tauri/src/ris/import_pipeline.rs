@@ -69,9 +69,9 @@ impl From<RisParseError> for ImportValidationError {
 /// lenient (references only warn, don't block import), or none.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValidationMode {
-    /// Full validation — records without title/abstract/authors are excluded.
+    /// Full validation - records without title/abstract/authors are excluded.
     Strict,
-    /// No validation — all records are accepted (used for reference imports).
+    /// No validation - all records are accepted (used for reference imports).
     None,
 }
 

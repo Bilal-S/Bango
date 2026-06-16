@@ -34,7 +34,7 @@ macro_rules! assert_some {
 
 // ── Shared expected data for the 3 WoS articles ─────────────────────────────
 
-/// Record 1: Mack et al. 2021 — "Carbon loss from boreal forest wildfires..."
+/// Record 1: Mack et al. 2021 - "Carbon loss from boreal forest wildfires..."
 mod mack {
     pub const TITLE: &str = "Carbon loss from boreal forest wildfires offset by increased \
         dominance of deciduous trees";
@@ -53,7 +53,7 @@ mod mack {
     pub const KW_COUNT_RIS: usize = 10; // Keywords-Plus in KW fields
 }
 
-/// Record 2: Chen et al. 2021 — "Future increases in Arctic lightning..."
+/// Record 2: Chen et al. 2021 - "Future increases in Arctic lightning..."
 mod chen {
     pub const TITLE: &str =
         "Future increases in Arctic lightning and fire risk for permafrost carbon";
@@ -72,7 +72,7 @@ mod chen {
     pub const KW_COUNT_RIS: usize = 10;
 }
 
-/// Record 3: Brodie et al. 2024 — "Forest thinning and prescribed burning..."
+/// Record 3: Brodie et al. 2024 - "Forest thinning and prescribed burning..."
 mod brodie {
     pub const TITLE: &str = "Forest thinning and prescribed burning treatments reduce wildfire \
         severity and buffer the impacts of severe fire weather";
@@ -213,7 +213,7 @@ fn ris_record3_brodie_core_fields() {
     assert_eq!(rec.authors[0], brodie::FIRST_AUTHOR);
     assert_eq!(rec.authors.len(), brodie::AUTHOR_COUNT_RIS);
 
-    // C7 article-number = 17 — used as start_page since SP is absent
+    // C7 article-number = 17 - used as start_page since SP is absent
     // In RIS, this record has C7=17 but no SP, so start_page should be Some("17")
     assert_some!(rec.start_page, brodie::START_PAGE.to_string());
 
@@ -287,7 +287,7 @@ fn bibtex_record1_mack_core_fields() {
     let rec = &records[0];
 
     assert_some!(rec.reference_type, "article".to_string());
-    // Title may contain newlines from BibTeX wrapping — normalize for comparison
+    // Title may contain newlines from BibTeX wrapping - normalize for comparison
     let title_norm = rec
         .title
         .as_deref()
@@ -301,7 +301,7 @@ fn bibtex_record1_mack_core_fields() {
     assert_some!(rec.doi, mack::DOI.to_string());
     assert_some!(rec.issn, mack::ISSN.to_string());
 
-    // Pages = "280+" — kept as-is (no stripping of '+')
+    // Pages = "280+" - kept as-is (no stripping of '+')
     assert_some!(rec.start_page, "280+".to_string());
     assert_eq!(rec.end_page, None, "Pages '280+' should not produce an end_page");
 
@@ -403,7 +403,7 @@ fn bibtex_record2_chen_core_fields() {
     assert_some!(rec.issue, chen::ISSUE.to_string());
     assert_some!(rec.doi, chen::DOI.to_string());
 
-    // Pages = "404+" — kept as-is
+    // Pages = "404+" - kept as-is
     assert_some!(rec.start_page, "404+".to_string());
     assert_eq!(rec.end_page, None);
 
@@ -629,7 +629,7 @@ fn bibtex_cr_entries_split_by_newline_not_period() {
     let content = read_asset("ExampleWReferences.bib");
     let parse_result = parse_bibtex(&content);
     let records = convert_bibtex_entries(&parse_result.entries);
-    let rec = &records[0]; // Mack — has 75 cited references
+    let rec = &records[0]; // Mack - has 75 cited references
 
     let cr = rec.extras.get("CR").expect("CR should be in extras");
 
@@ -643,7 +643,7 @@ fn bibtex_cr_entries_split_by_newline_not_period() {
         cr.len()
     );
 
-    // Verify no DOI fragments — a strong signal that period-splitting is NOT used
+    // Verify no DOI fragments - a strong signal that period-splitting is NOT used
     for (i, entry) in cr.iter().enumerate() {
         // A legitimate CR entry should contain a comma (WoS format: Author, Year, ...)
         // If it's a period-split fragment like "04" or "005", it won't have a comma
@@ -665,7 +665,7 @@ fn bibtex_cr_entries_preserve_full_dois() {
 
     let cr = rec.extras.get("CR").expect("CR should be in extras");
 
-    // Find the Alexander entry — it has DOI 10.1016/j.foreco.2017.04.005
+    // Find the Alexander entry - it has DOI 10.1016/j.foreco.2017.04.005
     let alexander = cr.iter().find(|r| r.contains("Alexander HD") && r.contains("2017"));
     assert!(alexander.is_some(), "Should find Alexander HD 2017 in CR entries");
     let entry = alexander.unwrap();

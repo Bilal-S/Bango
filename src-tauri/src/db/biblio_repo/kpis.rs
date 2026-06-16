@@ -23,11 +23,11 @@ pub fn get_biblio_kpis(conn: &Connection) -> Result<BiblioKpis, AppError> {
         )
         .unwrap_or(0);
 
-    // Unique normalized authors — always from biblio_authors (populated by normalization)
+    // Unique normalized authors - always from biblio_authors (populated by normalization)
     let unique_authors: i32 =
         conn.query_row("SELECT COUNT(*) FROM biblio_authors", [], |r| r.get(0)).unwrap_or(0);
 
-    // Publications by year — single query groups included articles by publication_year
+    // Publications by year - single query groups included articles by publication_year
     let mut stmt = conn.prepare(
         "SELECT publication_year, COUNT(*) AS cnt \
          FROM articles \

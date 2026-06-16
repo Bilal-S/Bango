@@ -84,17 +84,17 @@ Top-level source directories. No child `AGENTS.md` files exist yet; these entrie
 describe each durable boundary so agents can locate the right area. Create a child
 `AGENTS.md` under a folder only when that folder grows its own local rules.
 
-- **`src-tauri/src/`** — Rust backend (Tauri 2.x). Owned modules: `db/` (repos +
+- **`src-tauri/src/`** - Rust backend (Tauri 2.x). Owned modules: `db/` (repos +
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`. App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
-  - **`src-tauri/src/db/biblio_repo/`** — bibliometric repos (`kpis`, `authors`,
+  - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
     Vec<JournalYearData>` (canonical titles via `journal_index` LEFT JOIN, fallback
     `UPPER(TRIM(journal))`). `productivity.rs` exposes `get_author_rankings`,
-    `get_author_detail`, `get_author_productivity_kpis` — author-level h-index, i10,
+    `get_author_detail`, `get_author_productivity_kpis` - author-level h-index, i10,
     g-index, first/last/solo counts scoped to included articles. `networks/` is a directory
     module (split from the former monolithic `networks.rs`) with one file per network type:
     `persistence.rs` (generic network CRUD: save/load/delete nodes & edges), `labels.rs`
@@ -103,10 +103,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     (keyword co-occurrence), and `cocitation.rs` (on-demand co-citation computation with 4
     normalization modes: Raw, Cosine, Jaccard, Pearson; `CocitationScope` = included/all
     articles). `mod.rs` re-exports the public API unchanged.
-  - **`src-tauri/src/db/journal_repo.rs`** — journal_index lookup/match (`resolve_journal_id`,
+  - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.
-  - **`src-tauri/tests/`** — Rust integration tests. Inline `#[cfg(test)] mod tests`
+  - **`src-tauri/tests/`** - Rust integration tests. Inline `#[cfg(test)] mod tests`
     blocks are extracted here to keep source files compact (helpers tested externally
     are `pub`). Repository/KPI tests live in `biblio_repo_tests.rs` (in-memory SQLite
     via `run_migrations`). Network builder & serializer unit tests (network CRUD,
@@ -116,8 +116,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `cr_parser_test.rs`, `doi_test.rs`, `n1_parser_test.rs`,
     `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation
     integration tests against RIS fixtures live in `cocitation_data_test.rs`.
-- **`src/`** — Vue 3 + TypeScript + Tailwind v4 frontend.
-  - **`src/views/`** — page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
+- **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
+  - **`src/views/`** - page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
     parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)
     render in its `<router-view>`. `biblio-timeline.vue` is the Publication Timeline view
     (its secondary "Top Journals" chart auto-hides below `SECONDARY_CHART_MIN_VIEWPORT_HEIGHT`
@@ -127,25 +127,35 @@ describe each durable boundary so agents can locate the right area. Create a chi
     (tab bar + `?tab=`/`#hash` deep-link routing) that renders one `help-tab-*.vue` component
     per tab (guide, bibliometrics, troubleshooting, local-ai, reference); the Bibliometrics tab
     documents all six completed modules.
-  - **`src/components/`** — reusable components. `journal-info-card.vue` lazily loads
+  - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
-    `src/styles/help-shared.css`.
-  - **`src/composables/`** — Vue composables. `use-bibliometrics.ts` (shared KPI
+    `src/styles/help-shared.css`. `settings/` holds the five settings sub-components consumed by
+    `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
+    connection details + parameters + Revert/Get Models/Test Connection + test-result/error
+    feedback in one bordered `<section>`), `settings-project-management.vue` (import/export/delete
+    + dialogs), `settings-screening-preferences.vue` (2 localStorage-backed toggles),
+    `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
+    Shared card chrome for these lives in `settings-card-shared.css`.
+  - **`src/composables/`** - Vue composables. `use-bibliometrics.ts` (shared KPI
     singleton, now exports `JournalYearData`), `use-journal-info.ts` (per-call lazy
     loader), `use-article-search.ts` (supports `yearFrom`/`yearTo`/`journal` route params).
-  - **`src/utils/`** — pure utilities. `chart-export.ts` (timeline CSV/SVG export via the
+  - **`src/utils/`** - pure utilities. `chart-export.ts` (timeline CSV/SVG export via the
     `save()` + `write_text_to_file` pattern shared with `network-export.ts`).
-  - **`src/router/index.ts`** — route table; lazy views are prefetched after `router.isReady()`.
-- **`tests/test-citations/`** — RIS fixture data for citation/reference system tests.
+  - **`src/styles/forms.css`** - global form/button/dialog primitives (`.field__*`, `.btn--*`,
+    `.dialog`, `.spinner`) promoted from the former scoped `llm-config.vue`. Loaded via
+    `base.css`; low specificity so scoped rules in other views still win.
+  - **`src/router/index.ts`** - route table; lazy views are prefetched after `router.isReady()`.
+    `/settings` renders `settings-view.vue`.
+- **`tests/test-citations/`** - RIS fixture data for citation/reference system tests.
   `main_articles.ris` (10 articles, DOIs `10.1001/art1`–`10.1010/art10`) with per-article
   `_references.ris` and `_citations.ris` files (filename = DOI with `/`→`_`). A dedicated
   co-citation dataset uses `co-citation.ris` (5 articles, `10.2001/cocite1`–`10.2001/cocite5`)
   with 6 shared reference papers (`10.3001/ref1`–`10.3001/ref6`) spread across the
   `_references.ris` files to produce deterministic co-citation pairs.
-- **`docs/superpowers/specs/bango-v4-spec.md`** — authoritative v4 product specification.
-- **`docs/design-reference/00-design-patterns.md`** — design tokens (Material 3 inspired).
-- **`.worktrees/`** — planning documents (`biblio-publication-timeline-plan-v3.md` is the
+- **`docs/superpowers/specs/bango-v4-spec.md`** - authoritative v4 product specification.
+- **`docs/design-reference/00-design-patterns.md`** - design tokens (Material 3 inspired).
+- **`.worktrees/`** - planning documents (`biblio-publication-timeline-plan-v3.md` is the
   implemented plan; `biblio-cocitation-requirmenents.md` is the Co-Citation Analysis
   requirements spec; `biblio-plan.md` is the 8-screen bibliometric plan). Not part of the
   shipped app.

@@ -104,7 +104,7 @@ fn test_doi_dedup_same_doi_twice() {
         reference_repo::insert_or_find_paper(&conn, &paper).expect("insert 1 failed");
     assert!(was_created1);
 
-    // Insert same DOI with different title — should dedup
+    // Insert same DOI with different title - should dedup
     let paper2 =
         NewReferencePaper { title: Some("Paper A Duplicate".to_string()), ..paper.clone() };
     let (second, was_created2) =
@@ -354,7 +354,7 @@ fn test_promote_unmatched_paper_to_article() {
     )
     .expect("insert new article failed");
 
-    // Promote the paper — links it to the new article
+    // Promote the paper - links it to the new article
     reference_repo::promote_to_article(&conn, &inserted_paper.id, &new_article.id)
         .expect("promote_to_article failed");
 
@@ -437,7 +437,7 @@ fn test_unique_doi_constraint_rejects_duplicate() {
         reference_repo::insert_or_find_paper(&conn, &paper1).expect("insert 1 failed");
     assert!(created1);
 
-    // Try raw INSERT with same DOI — should fail due to unique constraint
+    // Try raw INSERT with same DOI - should fail due to unique constraint
     let result = conn.execute(
         "INSERT INTO reference_papers (id, title, authors, doi) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params!["dup-id", "Dup Paper", "[]", "10.1234/unique-doi-test"],
@@ -469,7 +469,7 @@ fn test_unique_title_authors_year_constraint() {
         reference_repo::insert_or_find_paper(&conn, &paper1).expect("insert 1 failed");
     assert!(created1);
 
-    // Try raw INSERT with same title+authors+year — should fail
+    // Try raw INSERT with same title+authors+year - should fail
     let authors_json = serde_json::to_string(&authors).unwrap();
     let result = conn.execute(
         "INSERT INTO reference_papers (id, title, authors, publication_year) VALUES (?1, ?2, ?3, ?4)",
@@ -498,7 +498,7 @@ fn test_dedup_by_title_authors_year_no_doi() {
 
     let authors = vec!["Zhang W".to_string()];
 
-    // First insert — no DOI
+    // First insert - no DOI
     let paper1 = NewReferencePaper {
         title: Some("Quantum Computing Survey".to_string()),
         authors: authors.clone(),
@@ -510,7 +510,7 @@ fn test_dedup_by_title_authors_year_no_doi() {
         reference_repo::insert_or_find_paper(&conn, &paper1).expect("insert 1 failed");
     assert!(created1);
 
-    // Second insert — same title+authors+year, no DOI — should dedup
+    // Second insert - same title+authors+year, no DOI - should dedup
     let paper2 = NewReferencePaper {
         title: Some("Quantum Computing Survey".to_string()),
         authors: authors.clone(),
@@ -529,7 +529,7 @@ fn test_empty_doi_normalized_to_null() {
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("Failed to run migrations");
 
-    // Insert with empty string DOI — should be normalized to NULL
+    // Insert with empty string DOI - should be normalized to NULL
     let paper1 =
         NewReferencePaper { doi: Some("".to_string()), ..make_paper("Paper with Empty DOI", None) };
     let (first, created1) =
@@ -537,7 +537,7 @@ fn test_empty_doi_normalized_to_null() {
     assert!(created1);
     assert!(first.doi.is_none(), "Empty DOI should be normalized to NULL");
 
-    // Insert another paper with empty string DOI — should succeed (NULL DOIs don't conflict)
+    // Insert another paper with empty string DOI - should succeed (NULL DOIs don't conflict)
     let paper2 = NewReferencePaper {
         doi: Some("".to_string()),
         ..make_paper("Paper with Empty DOI 2", None)
@@ -569,7 +569,7 @@ fn test_case_insensitive_title_dedup() {
         reference_repo::insert_or_find_paper(&conn, &paper1).expect("insert 1 failed");
     assert!(created1);
 
-    // Insert with uppercase title — should dedup (case-insensitive)
+    // Insert with uppercase title - should dedup (case-insensitive)
     let paper2 = NewReferencePaper {
         title: Some("Machine Learning Applications".to_string()),
         authors: authors.clone(),

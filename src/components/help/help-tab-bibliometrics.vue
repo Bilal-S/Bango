@@ -148,7 +148,7 @@ import '@/styles/help-shared.css';
           Unlike co-authorship, a citation network captures the flow of ideas. Each article is a
           node, and a directed edge from A to B means "A cites B." This reveals foundational
           (heavily-cited) works, recent derivatives, and the chronological lineage of a research
-          thread. Main-path analysis then extracts the backbone — the chain of papers that forms the
+          thread. Main-path analysis then extracts the backbone - the chain of papers that forms the
           intellectual spine of the field.
         </p>
 
@@ -231,17 +231,17 @@ import '@/styles/help-shared.css';
         </p>
         <ul>
           <li>
-            <strong>Metadata</strong> — author-supplied keywords from the original database records.
+            <strong>Metadata</strong> - author-supplied keywords from the original database records.
           </li>
           <li>
-            <strong>AI Noun Phrases</strong> — noun phrases extracted from abstracts by an LLM
+            <strong>AI Noun Phrases</strong> - noun phrases extracted from abstracts by an LLM
             during screening, capturing concepts the authors never tagged explicitly.
           </li>
-          <li><strong>Tags</strong> — the user-defined content tags assigned during screening.</li>
+          <li><strong>Tags</strong> - the user-defined content tags assigned during screening.</li>
           <li>
-            <strong>Labels</strong> — screening workflow labels (e.g. "disputed", "priority-read").
+            <strong>Labels</strong> - screening workflow labels (e.g. "disputed", "priority-read").
           </li>
-          <li><strong>User Added</strong> — custom keywords you add manually.</li>
+          <li><strong>User Added</strong> - custom keywords you add manually.</li>
         </ul>
         <p>
           Co-occurrence strength equals the number of articles in which two terms appear together.
@@ -294,7 +294,7 @@ import '@/styles/help-shared.css';
         <div>
           <h3 class="bm-section__title">4. Publication Timeline</h3>
           <p class="bm-section__subtitle">
-            Track publishing trends over time — your articles, their references, and their citations
+            Track publishing trends over time - your articles, their references, and their citations
             by year.
           </p>
         </div>
@@ -347,7 +347,7 @@ import '@/styles/help-shared.css';
         <ul>
           <li>Visualize the growth (or decline) of a research field over decades.</li>
           <li>
-            Show the gap between the age of your corpus and the age of its references — evidence of
+            Show the gap between the age of your corpus and the age of its references - evidence of
             a field building on classic vs. contemporary work.
           </li>
           <li>Identify "breakout years" that correlate with landmark publications.</li>
@@ -382,15 +382,15 @@ import '@/styles/help-shared.css';
         </p>
         <ul>
           <li>
-            <strong>h-index</strong> — an author has index h if h of their papers have at least h
+            <strong>h-index</strong> - an author has index h if h of their papers have at least h
             citations each. Balances productivity and impact.
           </li>
           <li>
-            <strong>i10-index</strong> — the number of papers with at least 10 citations. A Google
+            <strong>i10-index</strong> - the number of papers with at least 10 citations. A Google
             Scholar-style productivity measure.
           </li>
           <li>
-            <strong>g-index</strong> — gives more weight to highly-cited papers than h-index; the
+            <strong>g-index</strong> - gives more weight to highly-cited papers than h-index; the
             top g papers together receive g² citations.
           </li>
           <li>
@@ -451,8 +451,8 @@ import '@/styles/help-shared.css';
         <p>
           Two papers are <em>co-cited</em> when a third paper cites both of them. The more often
           they are co-cited, the more the academic community treats them as related. Co-citation
-          analysis therefore reveals intellectual structure <strong>from the outside</strong> —
-          based on how others group works together — rather than from the authors' own keywords or
+          analysis therefore reveals intellectual structure <strong>from the outside</strong> -
+          based on how others group works together - rather than from the authors' own keywords or
           collaborations. It is especially powerful for mapping the foundational literature of a
           field.
         </p>
@@ -467,19 +467,19 @@ import '@/styles/help-shared.css';
         </p>
         <ul>
           <li>
-            <strong>Raw</strong> — the absolute number of shared references. Preserves true
+            <strong>Raw</strong> - the absolute number of shared references. Preserves true
             intensity but favors prolific citing articles.
           </li>
           <li>
-            <strong>Cosine</strong> — raw count divided by the geometric mean of each pair's total
+            <strong>Cosine</strong> - raw count divided by the geometric mean of each pair's total
             references. The default; balances intensity and size.
           </li>
           <li>
-            <strong>Jaccard</strong> — shared references divided by the union of all references.
+            <strong>Jaccard</strong> - shared references divided by the union of all references.
             Penalizes pairs with many non-overlapping references.
           </li>
           <li>
-            <strong>Pearson</strong> — correlation coefficient across the reference vectors.
+            <strong>Pearson</strong> - correlation coefficient across the reference vectors.
             Emphasizes structural similarity regardless of raw frequency.
           </li>
         </ul>
@@ -506,7 +506,7 @@ import '@/styles/help-shared.css';
         <h4 class="bm-body__heading">Use cases</h4>
         <ul>
           <li>
-            Identify the "invisible colleges" — groups of papers the field consistently reads
+            Identify the "invisible colleges" - groups of papers the field consistently reads
             together even without formal collaboration.
           </li>
           <li>

@@ -5,7 +5,7 @@ use crate::models::biblio::{
     AuthorDetail, AuthorProductivityKpis, AuthorRank, BiblioAuthor, BiblioInstitution, BiblioKpis,
     BiblioStatus, BiblioTerm, YearCount,
 };
-// BiblioTerm is re-exported through biblio_repo — no direct use here
+// BiblioTerm is re-exported through biblio_repo - no direct use here
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 

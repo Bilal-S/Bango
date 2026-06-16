@@ -1139,7 +1139,7 @@ pub fn get_article_counts(
 }
 
 /// Post-import step: resolve `journal_index_id` for articles that have ISSN/eISSN/journal name
-/// but no journal link yet. Non-fatal — errors are silently ignored.
+/// but no journal link yet. Non-fatal - errors are silently ignored.
 pub fn resolve_journal_links(conn: &Connection, articles: &[Article]) -> usize {
     let mut resolved = 0usize;
     for article in articles {

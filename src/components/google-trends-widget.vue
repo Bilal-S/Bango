@@ -58,7 +58,7 @@ const isRateLimited = computed(
  * Preflight probe via the Rust side. Returns true if it's safe to render
  * the iframe, false if Google is currently rate-limiting us.
  *
- * On a 429 we DO NOT auto-retry — the queue manager is responsible for
+ * On a 429 we DO NOT auto-retry - the queue manager is responsible for
  * halting all subsequent renders until the user manually retries.
  */
 async function preflight(): Promise<boolean> {
@@ -85,7 +85,7 @@ async function preflight(): Promise<boolean> {
       setStatus('error', 'preflight_429');
       return false;
     }
-    // Other preflight failures (network, http) — proceed anyway, the iframe
+    // Other preflight failures (network, http) - proceed anyway, the iframe
     // might still succeed since this is just a probe.
     return true;
   } catch (err) {
@@ -149,7 +149,7 @@ function handleMessage(event: MessageEvent) {
     } else if (data.status === 'error') {
       setStatus('error', (data.reason as ErrorReason) || '');
     } else if (data.status === 'timeout') {
-      // Treat watchdog timeout as a soft error — surface fallback UI.
+      // Treat watchdog timeout as a soft error - surface fallback UI.
       setStatus('error', 'timeout');
     }
   }
@@ -325,7 +325,7 @@ function retry() {
           <span class="material-symbols-outlined text-xs">content_copy</span>
           Copy URL
         </button>
-        <!-- On 429 do not offer an immediate retry — that would worsen the rate limit. -->
+        <!-- On 429 do not offer an immediate retry - that would worsen the rate limit. -->
         <button
           v-if="!isRateLimited"
           class="inline-flex items-center gap-1 bg-white hover:bg-slate-100 text-slate-600 text-[10px] font-semibold px-2 py-1 rounded border border-slate-200 transition-colors cursor-pointer"

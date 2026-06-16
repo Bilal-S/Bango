@@ -20,7 +20,7 @@ const USER_AGENT: &str =
 /// Probes a Google Trends embed URL with a small ranged GET request.
 ///
 /// We use `Range: bytes=0-0` rather than HEAD because Google's CDN responds
-/// more reliably to GET, and we only need the status code — not the body.
+/// more reliably to GET, and we only need the status code - not the body.
 ///
 /// The request is issued from the Rust side (via `reqwest`) which is *not*
 /// subject to Tauri's HTTP capability system, so no capability grant is

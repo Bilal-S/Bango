@@ -1,6 +1,7 @@
 @import './fonts.css';
 @import 'tailwindcss';
 @import './tokens.css';
+@import './forms.css';
 
 @theme {
   /* Colors - Scholarly Precision */

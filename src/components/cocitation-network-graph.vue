@@ -179,7 +179,7 @@ function applyVisualState() {
     const baseColor = getNodeColor(n);
     const coCitationCount = g.getNodeAttribute(n, 'coCitationCount') ?? 0;
 
-    // Node sizes — use coCitationCount stored at build time.
+    // Node sizes - use coCitationCount stored at build time.
     const baseSize = g.getNodeAttribute(n, 'size') ?? 8;
 
     const isFocusedDimmed = isFocusActive && !focusNeighborsSet.has(n);

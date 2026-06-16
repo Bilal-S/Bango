@@ -189,7 +189,7 @@ CREATE TABLE IF NOT EXISTS journal_index (
     web_of_science_categories TEXT
 );
 
--- Unique indexes for ISSN/eISSN (partial — only non-empty values)
+-- Unique indexes for ISSN/eISSN (partial - only non-empty values)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_journal_issn
     ON journal_index(issn) WHERE issn IS NOT NULL AND issn != '';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_journal_eissn
@@ -267,7 +267,7 @@ CREATE INDEX IF NOT EXISTS idx_articles_sequence_id ON articles(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_articles_changed_at ON articles(changed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_entries_article_id ON audit_entries(article_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_type ON criteria(type);
--- Unique DOI (excluding NULLs — prevents duplicate papers with same DOI)
+-- Unique DOI (excluding NULLs - prevents duplicate papers with same DOI)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ref_papers_doi
     ON reference_papers(doi) WHERE doi IS NOT NULL;
 -- Unique title + authors + year combination

@@ -395,7 +395,7 @@ describe('setCountingMode', () => {
     await fetchNetwork();
 
     const g = graph.value!;
-    // Check the thinner edge (a1-a3) — it's the min in both ranges
+    // Check the thinner edge (a1-a3) - it's the min in both ranges
     // but the ratio differs: full 1/(3-1)=0.5 vs fractional 0.5/(1.5-0.5)=0.5
     // Both map to mid-range when ratio is same. Instead, check the thick edge's
     // fractional weight is now active.
@@ -405,7 +405,7 @@ describe('setCountingMode', () => {
     setCountingMode('fractional');
     expect(g.getEdgeAttribute(eid, 'weight')).toBe(1.5); // now fractional
 
-    // Thickness is recalculated — should still be within valid output range [0.5, 4]
+    // Thickness is recalculated - should still be within valid output range [0.5, 4]
     const thickness = g.getEdgeAttribute(eid, 'thickness') as number;
     expect(thickness).toBeGreaterThanOrEqual(0.5);
     expect(thickness).toBeLessThanOrEqual(4);

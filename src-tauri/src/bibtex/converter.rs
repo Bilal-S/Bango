@@ -199,7 +199,7 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
     // Normalize BibTeX "cited-references" field to "CR" for CR parser compatibility.
     // WoS BibTeX stores each cited reference on its own line inside braces.
     // The BibTeX parser preserves newlines within brace-delimited values.
-    // Each line ends with a period '.' — we split on newlines, not periods,
+    // Each line ends with a period '.' - we split on newlines, not periods,
     // to avoid breaking DOIs like "10.1016/j.foreco.2017.04.005".
     if let Some(cr_text) = field_map.get("cited-references") {
         let lines: Vec<String> = cr_text

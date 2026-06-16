@@ -68,7 +68,7 @@ async function handlePromote(): Promise<void> {
       wasLinked: boolean;
     }>('promote_reference_to_article', { referencePaperId: paper.value.id });
     const msg = result.wasLinked
-      ? `"${result.articleTitle}" already in library — linked to existing article`
+      ? `"${result.articleTitle}" already in library - linked to existing article`
       : `"${result.articleTitle}" added to library`;
     toast.show(msg, 'success');
     if (paper.value) {

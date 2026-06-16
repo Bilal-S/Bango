@@ -26,7 +26,7 @@
           <p class="text-[10px] text-slate-500 mt-0.5">Citations</p>
         </div>
         <div class="bg-slate-50 rounded-lg p-3 text-center">
-          <p class="text-lg font-bold text-indigo-600">{{ author.estimatedHIndex ?? '—' }}</p>
+          <p class="text-lg font-bold text-indigo-600">{{ author.estimatedHIndex ?? '-' }}</p>
           <p class="text-[10px] text-slate-500 mt-0.5">h-index</p>
         </div>
       </div>

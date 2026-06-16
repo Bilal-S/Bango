@@ -15,7 +15,7 @@ import type Graph from 'graphology';
  * Compute the **ancestry** of a node: every paper that the given paper
  * transitively *cites* (BFS over out-edges).
  *
- * The returned set does NOT include `nodeId` itself — callers that need the
+ * The returned set does NOT include `nodeId` itself - callers that need the
  * node included should add it explicitly.
  */
 export function computeAncestry(graph: Graph, nodeId: string): Set<string> {
@@ -82,7 +82,7 @@ export function computeProgeny(graph: Graph, nodeId: string): Set<string> {
 
 /**
  * Return the set of node IDs whose `year` attribute falls within `range`
- * (inclusive), or whose year is null/undefined (always included — we cannot
+ * (inclusive), or whose year is null/undefined (always included - we cannot
  * evaluate them).
  *
  * @param graph     A graphology graph with optional `year` node attributes.
@@ -125,14 +125,14 @@ export function computeSubgraphEdges(graph: Graph, nodeSet: Set<string>): Set<st
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 — Main Path Analysis (SPC: Search Path Count)
+// Phase 3 - Main Path Analysis (SPC: Search Path Count)
 // ---------------------------------------------------------------------------
 
 /**
  * Identify **back-edges** that violate temporal ordering.
  *
  * An edge `source → target` (source cites target) is a back-edge when
- * `year(target) > year(source)` — the cited paper is *newer* than the citing
+ * `year(target) > year(source)` - the cited paper is *newer* than the citing
  * paper, which is temporally impossible and indicates a data error.
  *
  * Edges where either endpoint has a null/undefined year are never flagged
@@ -158,7 +158,7 @@ export function findBackEdges(graph: Graph): Set<string> {
  * Nodes involved in cycles (not reachable to in-degree 0 after excluding
  * `skipEdges`) are omitted from the result.  This means the returned array
  * may be shorter than `graph.nodes()` when the graph still contains cycles
- * after back-edge removal — those nodes simply don't participate in the DP.
+ * after back-edge removal - those nodes simply don't participate in the DP.
  *
  * @param skipEdges  Edge IDs to ignore (e.g. back-edges from `findBackEdges`).
  * @returns           Node IDs in topological order (sources first).
@@ -265,7 +265,7 @@ export function computeSPC(graph: Graph): Map<string, number> {
  * sources exist, each is traced independently and the results are unioned.
  *
  * @param weights  SPC weights from `computeSPC`.
- * @returns         `{ nodes, edges }` — the node and edge IDs on the main path.
+ * @returns         `{ nodes, edges }` - the node and edge IDs on the main path.
  */
 export function traceMainPath(
   graph: Graph,
@@ -331,7 +331,7 @@ export function traceMainPath(
  *
  * Combines `computeSPC` + `traceMainPath`.  The graph is not mutated.
  *
- * @returns `{ nodes, edges }` — the node and edge IDs on the main path,
+ * @returns `{ nodes, edges }` - the node and edge IDs on the main path,
  *          or empty sets if no path exists.
  */
 export function computeMainPath(graph: Graph): { nodes: Set<string>; edges: Set<string> } {

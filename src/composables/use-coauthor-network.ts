@@ -43,7 +43,7 @@ function buildGraph(data: NetworkData): Graph {
       size: scale(node.weight, minW, maxW, 3, 20),
       x: Math.random() * 100,
       y: Math.random() * 100,
-      color: '#94a3b8', // default slate — will be overridden by clustering
+      color: '#94a3b8', // default slate - will be overridden by clustering
       weight: node.weight,
       totalCitations: node.totalCitations,
       avgYear: node.avgYear,
@@ -62,7 +62,7 @@ function buildGraph(data: NetworkData): Graph {
   const minFrac = Math.min(...fracWeights, 0.01);
   const maxFrac = Math.max(...fracWeights, 0.01);
 
-  // Add edges — store BOTH full and fractional weights
+  // Add edges - store BOTH full and fractional weights
   for (const edge of data.edges) {
     if (!g.hasNode(edge.source) || !g.hasNode(edge.target)) continue;
     // Avoid duplicate edges

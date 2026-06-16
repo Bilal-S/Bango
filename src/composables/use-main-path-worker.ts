@@ -33,7 +33,7 @@ export function useMainPathWorker(graph: Ref<Graph | null>) {
         type: 'module',
       });
       worker.value.onmessage = (event: MessageEvent<MainPathResponse>) => {
-        if (isUnmounted) return; // component is gone — drop stale results
+        if (isUnmounted) return; // component is gone - drop stale results
         mainPathNodes.value = new Set(event.data.nodes);
         mainPathEdges.value = new Set(event.data.edges);
         computing.value = false;

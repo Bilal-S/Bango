@@ -29,7 +29,7 @@ pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
         Err(e) => {
             // Fallback: use lopdf page-by-page extraction (degraded but doesn't panic)
             eprintln!(
-                "[pdf_extract] pdf-extract failed/panicked: {e} — falling back to lopdf extraction"
+                "[pdf_extract] pdf-extract failed/panicked: {e} - falling back to lopdf extraction"
             );
             let doc = LopdfDocument::load(file_path)
                 .map_err(|e2| format!("Fallback PDF load also failed: {e2}"))?;
@@ -53,7 +53,7 @@ pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
 /// (e.g. FromUtf16Error on malformed font maps) are converted to `Err`.
 fn extract_text_safe(file_path: &Path) -> Result<String, String> {
     std::panic::catch_unwind(|| pdf_extract::extract_text(file_path))
-        .map_err(|_| "PDF extraction panicked — the PDF may contain unsupported fonts".to_string())?
+        .map_err(|_| "PDF extraction panicked - the PDF may contain unsupported fonts".to_string())?
         .map_err(|e| format!("PDF extraction failed: {e}"))
 }
 

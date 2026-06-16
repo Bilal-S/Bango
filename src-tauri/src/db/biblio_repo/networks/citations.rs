@@ -334,7 +334,7 @@ pub fn get_citation_network_json(
         }
     }
 
-    // Diagnostic meta block — drives the frontend empty-state messaging.
+    // Diagnostic meta block - drives the frontend empty-state messaging.
     let included_article_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM articles WHERE status = 'included'", [], |r| r.get(0))
         .unwrap_or(0);

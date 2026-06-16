@@ -101,8 +101,8 @@ export function useBibliometrics() {
       }
     }
 
-    // Use setTimeout(0) — a macro-task that yields to the browser's render
-    // pipeline — so the progress bar actually paints before the IPC call starts.
+    // Use setTimeout(0) - a macro-task that yields to the browser's render
+    // pipeline - so the progress bar actually paints before the IPC call starts.
     await new Promise<void>((r) => setTimeout(r, 0));
     try {
       await tauriCommand<NormalizeResult>('biblio_normalize');
@@ -131,7 +131,7 @@ export function useBibliometrics() {
       // Auto-normalize only when we have included articles AND no normalized data yet.
       // The user can trigger re-normalization manually via the Refresh button.
       if (kpis.value.includedCount > 0 && kpis.value.uniqueAuthors === 0) {
-        runNormalization(); // not awaited — UI stays responsive
+        runNormalization(); // not awaited - UI stays responsive
       }
     }, 0);
   });

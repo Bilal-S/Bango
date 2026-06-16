@@ -39,7 +39,7 @@ defineEmits<{
           {{ progress.errors }} errors
         </span>
       </div>
-      <!-- Cancel button (while running) — styled like AI Screening Stop -->
+      <!-- Cancel button (while running) - styled like AI Screening Stop -->
       <button
         v-if="!done"
         class="btn btn--danger"
@@ -120,7 +120,7 @@ defineEmits<{
   color: var(--color-error);
 }
 
-/* Close button — icon-only, top-right */
+/* Close button - icon-only, top-right */
 .batch-ref-progress__close {
   display: flex;
   align-items: center;

@@ -104,7 +104,7 @@ describe('computeAncestry', () => {
       ['d', 'e'],
     ]);
     const result = computeAncestry(g, 'a');
-    expect(result.size).toBe(4); // b, c, d, e — no duplicates
+    expect(result.size).toBe(4); // b, c, d, e - no duplicates
     expect(result).toEqual(new Set(['b', 'c', 'd', 'e']));
   });
 });
@@ -279,7 +279,7 @@ describe('filterNodesByYearRange', () => {
     expect(result).toEqual(new Set(['a', 'b']));
   });
 
-  it('excludes nodes with null year when they are outside other range constraints — null always passes', () => {
+  it('excludes nodes with null year when they are outside other range constraints - null always passes', () => {
     // Even with a narrow range, null-year nodes are always included.
     const g = makeYearGraph(
       [
@@ -325,7 +325,7 @@ describe('filterNodesByYearRange', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase 3 — Main Path Analysis (SPC) tests
+// Phase 3 - Main Path Analysis (SPC) tests
 // ---------------------------------------------------------------------------
 
 /**
@@ -354,7 +354,7 @@ describe('findBackEdges', () => {
         { id: 'a', year: 2020 },
         { id: 'b', year: 2010 },
       ],
-      [['a', 'b']] // 2020 cites 2010 — fine
+      [['a', 'b']] // 2020 cites 2010 - fine
     );
     expect(findBackEdges(g).size).toBe(0);
   });
@@ -365,7 +365,7 @@ describe('findBackEdges', () => {
         { id: 'a', year: 2010 },
         { id: 'b', year: 2020 },
       ],
-      [['a', 'b']] // 2010 cites 2020 — impossible
+      [['a', 'b']] // 2010 cites 2020 - impossible
     );
     const back = findBackEdges(g);
     expect(back.size).toBe(1);
@@ -500,7 +500,7 @@ describe('computeSPC', () => {
         { id: 'old', year: 2000 },
         { id: 'new', year: 2020 },
       ],
-      [['old', 'new']] // 2000 cites 2020 — back-edge
+      [['old', 'new']] // 2000 cites 2020 - back-edge
     );
     const weights = computeSPC(g);
     expect(weights.size).toBe(0);
@@ -521,7 +521,7 @@ describe('traceMainPath', () => {
   });
 
   it('selects the higher-weight branch in a diamond', () => {
-    // a → b → d, a → c → d  — equal weights, either path valid.
+    // a → b → d, a → c → d  - equal weights, either path valid.
     // Just check we get a connected 3-node path.
     const g = makeGraph([
       ['a', 'b'],

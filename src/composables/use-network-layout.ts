@@ -19,7 +19,7 @@ export function applyCircularLayout(g: Graph, scale = 100): void {
 }
 
 /**
- * Standalone community detection — does NOT update any reactive ref.
+ * Standalone community detection - does NOT update any reactive ref.
  * Use this when you only need the cluster assignments on the graph.
  */
 export function detectCommunities(g: Graph): number {
@@ -73,7 +73,7 @@ async function runForceAtlas2Async(
  *
  * IMPORTANT: `isLayouting` and `clusterCount` are declared INSIDE the function
  * so each component instance gets its own reactive state.  A previous version
- * had these at module scope, creating a shared singleton across all callers —
+ * had these at module scope, creating a shared singleton across all callers -
  * meaning one component's layout run could clobber another's flags during route
  * transitions.
  */

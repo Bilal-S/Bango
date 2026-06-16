@@ -108,7 +108,7 @@ pub fn parse_ris(content: &str) -> Result<RisParseResult, AppError> {
         let has_tag = is_ris_tag_line(trimmed);
 
         if !has_tag {
-            // This is a continuation line — append to the last tag's value
+            // This is a continuation line - append to the last tag's value
             if let Some(ref tag) = last_tag {
                 if in_record {
                     append_continuation(tag, trimmed, &mut current);

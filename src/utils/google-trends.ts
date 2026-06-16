@@ -215,12 +215,12 @@ export function buildExploreQuery(
  * and reports status back to the parent Vue app via postMessage.
  *
  * Multiple detection signals (defense in depth):
- * 1. Capture-phase 'error' listener — catches failed <script src> loads (e.g. loader 429).
- * 2. fetch / XHR patches — catches HTTP errors on data requests from the document.
- * 3. Watchdog timeout — backstop for silent failures.
+ * 1. Capture-phase 'error' listener - catches failed <script src> loads (e.g. loader 429).
+ * 2. fetch / XHR patches - catches HTTP errors on data requests from the document.
+ * 3. Watchdog timeout - backstop for silent failures.
  *
  * NOTE: The previous MutationObserver "success sentinel" was removed because it
- * reported success when Google injected its inner iframe — but that iframe can
+ * reported success when Google injected its inner iframe - but that iframe can
  * itself go on to 429 invisibly (cross-origin). Success is now inferred solely
  * by the absence of any error signal plus watchdog survival.
  *
@@ -435,7 +435,7 @@ export function buildEmbedUrl(
 }
 
 /**
- * Random delay between 2000ms and 3999ms — used to serialize Google Trends
+ * Random delay between 2000ms and 3999ms - used to serialize Google Trends
  * embed requests so we stay well under their rate-limit threshold.
  * One chart request is followed by a 2–4s pause before the map request fires.
  */

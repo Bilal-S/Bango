@@ -31,16 +31,16 @@ fn extract_pdf_text_does_not_panic_on_expert_encoded_fonts() {
     // We expect either:
     //  - Ok(text) with non-empty content (pdf-extract 0.10 may handle it), or
     //  - Ok(text) with non-empty content via lopdf fallback, or
-    //  - Err(...) — acceptable if both extractors fail (but must not panic!)
+    //  - Err(...) - acceptable if both extractors fail (but must not panic!)
     match &result {
         Ok(text) => {
             assert!(
                 !text.trim().is_empty(),
-                "Extracted text should not be empty — lopdf fallback should produce some content"
+                "Extracted text should not be empty - lopdf fallback should produce some content"
             );
         }
         Err(e) => {
-            // Not ideal but acceptable — the important thing is no panic
+            // Not ideal but acceptable - the important thing is no panic
             eprintln!("Warning: PDF extraction returned error (but did not panic): {e}");
         }
     }

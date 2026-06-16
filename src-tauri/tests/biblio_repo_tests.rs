@@ -747,7 +747,7 @@ fn journal_distribution_uses_canonical_title() {
 #[test]
 fn journal_distribution_falls_back_to_normalized_raw() {
     let conn = test_db();
-    // Articles with NO journal_index_id — varied casing should normalize via UPPER(TRIM).
+    // Articles with NO journal_index_id - varied casing should normalize via UPPER(TRIM).
     insert_kpi_article(&conn, "a1", "included", Some(2020), None, "A", Some("Science"), None);
     insert_kpi_article(&conn, "a2", "included", Some(2020), None, "B", Some("science "), None);
     insert_kpi_article(&conn, "a3", "included", Some(2020), None, "C", Some("SCIENCE"), None);
@@ -874,7 +874,7 @@ fn get_journal_info_returns_metadata_and_aggregates() {
         Some("Nature"),
         Some("j1"),
     );
-    // A rejected article linked to the same journal — must NOT be counted.
+    // A rejected article linked to the same journal - must NOT be counted.
     insert_kpi_article(
         &conn,
         "a3",
@@ -1060,7 +1060,7 @@ fn productivity_rankings_scope_excludes_duplicates_only() {
     seed_productivity_article(&conn, "inc1", Some(2020), Some(5), &[("a", "A")]);
     seed_productivity_article(&conn, "wk1", Some(2021), Some(3), &[("b", "B")]);
     seed_productivity_article(&conn, "rej1", Some(2022), Some(1), &[("c", "C")]);
-    // Duplicate article — its author must NOT appear
+    // Duplicate article - its author must NOT appear
     conn.execute(
         "INSERT INTO articles (id, title, abstract_text, authors, status) VALUES ('dup1', 'T', 'Abs', 'D', 'duplicate')",
         [],

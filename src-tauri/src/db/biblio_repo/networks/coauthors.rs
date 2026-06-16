@@ -22,7 +22,7 @@ pub fn build_coauthor_edges(conn: &Connection) -> Result<usize, AppError> {
         article_authors.entry(article_id).or_default().push(author_id);
     }
 
-    // Create edges for each pair — both full and fractional counting
+    // Create edges for each pair - both full and fractional counting
     let mut full_counts: HashMap<(String, String), i32> = HashMap::new();
     let mut fractional_sums: HashMap<(String, String), f64> = HashMap::new();
     // Track max author count per edge (largest author list of any article contributing to this pair)

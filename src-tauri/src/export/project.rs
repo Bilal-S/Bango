@@ -61,7 +61,7 @@ pub struct LlmConfigBackup {
 }
 
 pub fn export_project(conn: &Connection) -> Result<String, AppError> {
-    // NOTE: journal_index is NOT exported — it is system-distributed reference data
+    // NOTE: journal_index is NOT exported - it is system-distributed reference data
     // that survives project reset and is populated via the import_journals script.
 
     let aims = serialize_table(conn, "SELECT * FROM research_aims")?;
@@ -195,7 +195,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         .unchecked_transaction()
         .map_err(|e| AppError::Import(format!("Failed to start import transaction: {}", e)))?;
 
-    // NOTE: journal_index is NOT cleared during import — it is system-distributed
+    // NOTE: journal_index is NOT cleared during import - it is system-distributed
     // reference data that survives project reset and backup/restore cycles.
 
     // Clear existing data (reverse dependency order)
@@ -527,7 +527,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
 
         if inserted == 0 {
-            // Constraint violation — find existing record and map IDs
+            // Constraint violation - find existing record and map IDs
             let existing_id =
                 find_existing_paper_id(&tx, doi.as_deref(), &title, &authors, publication_year);
             if let Some(eid) = existing_id {

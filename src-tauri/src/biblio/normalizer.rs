@@ -96,7 +96,7 @@ pub fn split_authors(authors_str: &str) -> Vec<String> {
                 return names;
             }
         }
-        // JSON parse failed — fall through to delimiter-based splitting
+        // JSON parse failed - fall through to delimiter-based splitting
     }
 
     // Try semicolon first (most common in RIS/BibTeX)
@@ -175,7 +175,7 @@ pub fn normalize_author_name(raw: &str) -> String {
         return format!("{} {}", last_name, initials.replace(' ', ""));
     }
 
-    // Single word — return as-is
+    // Single word - return as-is
     parts.join(" ")
 }
 
@@ -277,7 +277,7 @@ pub fn split_keywords(keywords_str: &str) -> Vec<String> {
     // ── JSON array detection ──────────────────────────────────────
     // The `articles.keywords` column is a JSON array of strings (written via
     // `serde_json::to_string`). Splitting it on `,` would produce broken
-    // fragments like `["Allura Red"` — so parse JSON first.
+    // fragments like `["Allura Red"` - so parse JSON first.
     if trimmed.starts_with('[') {
         if let Ok(arr) = serde_json::from_str::<serde_json::Value>(trimmed) {
             if let Some(items) = arr.as_array() {
@@ -296,7 +296,7 @@ pub fn split_keywords(keywords_str: &str) -> Vec<String> {
                 return kws;
             }
         }
-        // JSON parse failed — fall through to delimiter-based splitting
+        // JSON parse failed - fall through to delimiter-based splitting
     }
 
     // ── Delimiter-based fallback (RIS/plain-text) ─────────────────
@@ -312,7 +312,7 @@ pub fn split_keywords(keywords_str: &str) -> Vec<String> {
 ///
 /// Strips brackets, quotes, and stray JSON artifacts so the stored display
 /// value contains only the human-readable word(s). Defense-in-depth against
-/// malformed input — the canonical cleaning happens in `split_keywords`.
+/// malformed input - the canonical cleaning happens in `split_keywords`.
 pub fn sanitize_raw_term(term: &str) -> String {
     let trimmed = term.trim();
     if trimmed.is_empty() {

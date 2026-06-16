@@ -56,7 +56,7 @@ pub fn clean_wos_cr_line(line: &str) -> String {
 pub fn extract_doi(text: &str) -> Option<String> {
     let text = text.trim();
 
-    // Strip "DOI " prefix(es) — WoS sometimes produces "DOI DOI 10.xxx"
+    // Strip "DOI " prefix(es) - WoS sometimes produces "DOI DOI 10.xxx"
     let mut text = text;
     while let Some(stripped) = text.strip_prefix("DOI ") {
         text = stripped.trim();
@@ -127,7 +127,7 @@ pub fn parse_cr_line(cr_line: &str) -> Option<NewReferencePaper> {
     }
     // Clean up author: remove wrapping [] from {[}Anonymous] → [Anonymous]
     let author_clean = if author_str.starts_with('[') && author_str.ends_with(']') {
-        // Keep the brackets — they're meaningful for "[Anonymous]"
+        // Keep the brackets - they're meaningful for "[Anonymous]"
         author_str.to_string()
     } else {
         author_str.to_string()

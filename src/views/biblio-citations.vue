@@ -72,7 +72,7 @@ function refresh() {
 }
 
 /**
- * Phase 3 — Main Path (SPC): the worker composable manages the Web Worker
+ * Phase 3 - Main Path (SPC): the worker composable manages the Web Worker
  * lifecycle and exposes reactive node/edge ID sets for highlighting.
  */
 const {
@@ -108,7 +108,7 @@ const isolationMode = ref<{ nodeId: string; direction: IsolationDirection; label
 const showUnmatched = ref(false);
 
 /**
- * Phase 3 — Main Path (SPC): when true, the graph highlights the main path
+ * Phase 3 - Main Path (SPC): when true, the graph highlights the main path
  * backbone and dims all other nodes/edges.  Toggling triggers the worker.
  */
 const showMainPath = ref(false);
@@ -347,7 +347,7 @@ const debouncedApplyFilters = debounce(
 );
 
 /**
- * Phase 2 — Time-Slice: live drag handler.  Applies the year-range filter
+ * Phase 2 - Time-Slice: live drag handler.  Applies the year-range filter
  * immediately (hide/show nodes) but does NOT trigger a ForceAtlas2 re-layout.
  * The expensive layout is deferred until the slider is released (commit).
  */
@@ -359,7 +359,7 @@ function onYearRangeInput(
 }
 
 /**
- * Phase 2 — Time-Slice: commit handler (slider release).  Triggers the full
+ * Phase 2 - Time-Slice: commit handler (slider release).  Triggers the full
  * ForceAtlas2 re-layout on the now-filtered subgraph.
  */
 async function onYearRangeCommit(_range: [number, number]) {
@@ -388,7 +388,7 @@ async function onUnmatchedChange(newShowUnmatched: boolean) {
 }
 
 /**
- * Phase 3 — Main Path (SPC): toggle handler.  When turning on, trigger the
+ * Phase 3 - Main Path (SPC): toggle handler.  When turning on, trigger the
  * worker computation.  When turning off, clear the highlight state.
  */
 function onMainPathChange(newShowMainPath: boolean) {

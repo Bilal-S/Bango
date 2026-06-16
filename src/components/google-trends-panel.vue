@@ -90,7 +90,7 @@ function retryMap() {
   trendsQueue.bumpRevision();
 }
 
-// Watch store revision — resets the queue when keywords/range change.
+// Watch store revision - resets the queue when keywords/range change.
 watch(
   () => trendsQueue.revision,
   () => {

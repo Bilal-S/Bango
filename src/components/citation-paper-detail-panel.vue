@@ -55,7 +55,7 @@
           <span v-if="paper.journal" class="italic truncate">{{ paper.journal }}</span>
         </div>
 
-        <!-- Phase 3 — Main Path badge -->
+        <!-- Phase 3 - Main Path badge -->
         <div
           v-if="onMainPath"
           class="mt-3 inline-flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5"
@@ -120,7 +120,7 @@
             "
             :title="
               isAncestryActive
-                ? 'Ancestry isolated — click to return to Show All'
+                ? 'Ancestry isolated - click to return to Show All'
                 : 'Dim all nodes except this paper and its references (transitively)'
             "
             @click="onIsolateClick('ancestry')"
@@ -138,7 +138,7 @@
             "
             :title="
               isProgenyActive
-                ? 'Progeny isolated — click to return to Show All'
+                ? 'Progeny isolated - click to return to Show All'
                 : 'Dim all nodes except this paper and its citing papers (transitively)'
             "
             @click="onIsolateClick('progeny')"
@@ -212,7 +212,7 @@ const props = defineProps<{
   citedPapers: { id: string; label: string }[];
   /** Current isolation mode (null when not isolating). */
   isolationMode: { nodeId: string; direction: IsolationDirection } | null;
-  /** Phase 3 — Main Path (SPC): set of node IDs on the main path backbone. */
+  /** Phase 3 - Main Path (SPC): set of node IDs on the main path backbone. */
   mainPathNodes?: Set<string>;
 }>();
 
@@ -249,7 +249,7 @@ const emit = defineEmits<{
  * Handle an isolation button click.
  *
  * If the clicked direction is already active, toggle off (emit `clear-isolation`).
- * Otherwise, emit `isolate` with the new direction — the parent replaces the
+ * Otherwise, emit `isolate` with the new direction - the parent replaces the
  * isolation mode, which implicitly clears any previously-active direction.
  */
 function onIsolateClick(direction: IsolationDirection) {

@@ -34,7 +34,7 @@ const autoDownloadMap = ref(new Map<string, boolean>());
 
 /**
  * Check whether an auto-download operation is currently in progress for an article.
- * Reactive — safe to use in computed/template.
+ * Reactive - safe to use in computed/template.
  */
 export function isAutoDownloading(articleId: string): boolean {
   return autoDownloadMap.value.get(articleId) === true;
@@ -43,7 +43,7 @@ export function isAutoDownloading(articleId: string): boolean {
 /**
  * Auto-download references/citations via Citation Chaser and import them.
  *
- * Runs in the background — fire-and-forget from the caller's perspective.
+ * Runs in the background - fire-and-forget from the caller's perspective.
  * Double-submit is prevented by the module-level reactive `autoDownloadMap`.
  *
  * @param reloadFn  Called after successful import so the caller can refresh its list.
@@ -339,7 +339,7 @@ export function useBatchReferenceScraping() {
       const needsScraping = !!(article.doi && (needsRefs || needsCites));
 
       if (!needsScraping) {
-        // Article already has both or has no DOI — skip
+        // Article already has both or has no DOI - skip
         batchProgress.value = {
           ...batchProgress.value,
           completed: batchProgress.value.completed + 1,

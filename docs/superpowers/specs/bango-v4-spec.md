@@ -6,9 +6,9 @@ Fourth revision of the Bango specification. Compacts earlier instructions, remov
 
 ## 1. Product Overview
 
-Bango is a **desktop application** for AI-assisted systematic literature review. Researchers import RIS or BibTeX bibliography files, define inclusion/exclusion criteria, and use LLMs to screen article abstracts—producing a rigorously categorized set of articles with reasoning, tags, and labels.
+Bango is a **desktop application** for AI-assisted systematic literature review. Researchers import RIS or BibTeX bibliography files, define inclusion/exclusion criteria, and use LLMs to screen article abstracts-producing a rigorously categorized set of articles with reasoning, tags, and labels.
 
-Built with **Tauri 2.x** and **Vue 3 + TypeScript + Tailwind CSS v4** for a lightweight, offline-capable experience. All project data is stored locally in SQLite. The app manages a **single project**—the database and all state belong to one active review. Mobile support is deferred.
+Built with **Tauri 2.x** and **Vue 3 + TypeScript + Tailwind CSS v4** for a lightweight, offline-capable experience. All project data is stored locally in SQLite. The app manages a **single project**-the database and all state belong to one active review. Mobile support is deferred.
 
 ---
 

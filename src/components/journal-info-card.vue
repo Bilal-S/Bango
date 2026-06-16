@@ -6,7 +6,7 @@ import { useJournalInfo } from '@/composables/use-journal-info';
 const props = defineProps<{
   /** journal_index_id to load, or null to hide the card. */
   journalIndexId: string | null;
-  /** When true, the journal is a raw (unmatched) title — show the enrichment hint. */
+  /** When true, the journal is a raw (unmatched) title - show the enrichment hint. */
   isRaw?: boolean;
 }>();
 
@@ -80,7 +80,7 @@ function viewArticles(): void {
           <!-- Raw fallback hint -->
           <p v-if="isRaw" class="journal-card__raw-hint">
             <span class="material-symbols-outlined">info</span>
-            Not matched to the journal index — run Rematch to enrich.
+            Not matched to the journal index - run Rematch to enrich.
           </p>
 
           <!-- Metadata grid -->
@@ -125,7 +125,7 @@ function viewArticles(): void {
             </div>
             <div class="journal-card__stat">
               <span class="journal-card__stat-value">
-                {{ info.firstYear ?? '—' }}{{ info.firstYear && info.lastYear ? '–' : ''
+                {{ info.firstYear ?? '-' }}{{ info.firstYear && info.lastYear ? '–' : ''
                 }}{{ info.lastYear ?? '' }}
               </span>
               <span class="journal-card__stat-label">Years</span>

@@ -168,7 +168,7 @@ async function handlePromoteReference(paperId: string): Promise<void> {
         ref.matchedArticleId = result.articleId;
       }
       const msg = result.wasLinked
-        ? `"${result.articleTitle}" already in library — linked to existing article`
+        ? `"${result.articleTitle}" already in library - linked to existing article`
         : `"${result.articleTitle}" added to library`;
       toast.show(msg, 'success');
       emit('articlePromoted', result.articleId);
@@ -529,7 +529,7 @@ function handleAutoDownload(): void {
                 <span class="text-slate-400 block">
                   {{ paper.authors.join(', ') }}
                   <span v-if="paper.publicationYear"> ({{ paper.publicationYear }})</span>
-                  <span v-if="paper.journal"> — {{ paper.journal }}</span>
+                  <span v-if="paper.journal"> - {{ paper.journal }}</span>
                 </span>
               </li>
             </ul>
