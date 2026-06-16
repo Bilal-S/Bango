@@ -302,6 +302,28 @@ const sparklineSeries = computed(() => [
   { name: 'Publications', data: detail.value?.pubsByYear.map((p) => p.count) ?? [] },
 ]);
 
+// ── Export dropdown state ────────────────────────────────────────
+const showExportMenu = ref(false);
+
+/** Dispatch the chosen export format from the dropdown. */
+function onExport(format: 'png' | 'svg' | 'csv'): void {
+  showExportMenu.value = false;
+  if (format === 'png') void handleExportPng();
+  else if (format === 'svg') void handleExportSvg();
+  else void handleExportCsv();
+}
+
+/** Reset all sidebar filters + sort + selection to defaults. */
+function resetFilters(): void {
+  minPapers.value = 1;
+  topN.value = 0;
+  yearFrom.value = yearMin.value;
+  yearTo.value = yearMax.value;
+  sortColumn.value = 'estimatedHIndex';
+  sortDirection.value = 'desc';
+  selectedAuthorId.value = null;
+}
+
 // ── Export (PNG / SVG) ───────────────────────────────────────────
 async function handleExportPng(): Promise<void> {
   try {
@@ -507,23 +529,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
               <p class="sidebar__stat-line">{{ rankings.length }} total authors</p>
             </section>
 
-            <!-- Export -->
-            <section class="sidebar__section">
-              <h4 class="sidebar__label">Export</h4>
-              <button class="sidebar__export" @click="handleExportPng">
-                <span class="material-symbols-outlined">image</span>
-                Export PNG
-              </button>
-              <button class="sidebar__export" @click="handleExportSvg">
-                <span class="material-symbols-outlined">share</span>
-                Export SVG
-              </button>
-              <button class="sidebar__export" @click="handleExportCsv">
-                <span class="material-symbols-outlined">table_view</span>
-                Export CSV
-              </button>
-            </section>
-
             <!-- Legend -->
             <section class="sidebar__section">
               <h4 class="sidebar__label">Metrics</h4>
@@ -536,6 +541,43 @@ function onPanelKeydown(event: KeyboardEvent): void {
                 <strong>Scatter:</strong> X=Papers, Y=Citations, Size=h, Color=avg year
               </p>
             </section>
+
+            <!-- Actions: reset + export dropdown (matches Publication Timeline pattern) -->
+            <div class="sidebar__actions">
+              <button
+                class="sidebar__icon-btn"
+                title="Reset Filters"
+                aria-label="Reset Filters"
+                @click="resetFilters"
+              >
+                <span class="material-symbols-outlined">restart_alt</span>
+              </button>
+              <div class="sidebar__export-wrap">
+                <button
+                  class="sidebar__action-btn"
+                  :class="{ 'sidebar__action-btn--active': showExportMenu }"
+                  @click="showExportMenu = !showExportMenu"
+                >
+                  <span class="material-symbols-outlined">download</span>
+                  Export
+                  <span class="material-symbols-outlined sidebar__action-caret">expand_more</span>
+                </button>
+                <ul v-if="showExportMenu" class="sidebar__export-menu">
+                  <li @click="onExport('png')">
+                    <span class="material-symbols-outlined">image</span>
+                    PNG Image
+                  </li>
+                  <li @click="onExport('svg')">
+                    <span class="material-symbols-outlined">share</span>
+                    SVG Vector
+                  </li>
+                  <li @click="onExport('csv')">
+                    <span class="material-symbols-outlined">table_view</span>
+                    CSV Table
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
         </aside>
         <button
@@ -935,26 +977,116 @@ function onPanelKeydown(event: KeyboardEvent): void {
   line-height: 1.5;
   margin: 0;
 }
-.sidebar__export {
+/* ── Sidebar actions row (reset + export dropdown) ────────────── */
+/* Matches the Publication Timeline actions pattern: token-toned
+ * buttons separated from sections above by a horizontal line. */
+.sidebar__actions {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.5rem;
-  border: 1px solid var(--color-outline-variant);
-  border-radius: 0.375rem;
-  font-size: 0.75rem;
-  font-family: inherit;
-  background: var(--color-surface-container-lowest);
+  gap: 0.5rem;
+  border-top: 1px solid var(--color-outline-variant);
+  padding-top: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.sidebar__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 0.5rem;
+  background: var(--color-surface-container);
   color: var(--color-on-surface-variant);
   cursor: pointer;
-  transition: border-color 0.15s;
+  font-family: inherit;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
 }
-.sidebar__export:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+
+.sidebar__icon-btn:hover {
+  background: var(--color-surface-container-high);
 }
-.sidebar__export .material-symbols-outlined {
-  font-size: 0.875rem;
+
+.sidebar__icon-btn .material-symbols-outlined {
+  font-size: 1.125rem;
+}
+
+.sidebar__export-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.sidebar__action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.sidebar__action-btn:hover,
+.sidebar__action-btn--active {
+  background: var(--color-surface-container-high);
+}
+
+.sidebar__action-btn .material-symbols-outlined {
+  font-size: 1rem;
+}
+
+.sidebar__action-caret {
+  margin-left: auto;
+}
+
+.sidebar__export-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.25rem);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgb(15 23 42 / 0.12);
+  overflow: hidden;
+  z-index: 40;
+}
+
+.sidebar__export-menu li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.sidebar__export-menu li:hover {
+  background: var(--color-surface-container);
+}
+
+.sidebar__export-menu li .material-symbols-outlined {
+  font-size: 1rem;
+  color: var(--color-outline);
 }
 
 /* Dual-handle year range */
