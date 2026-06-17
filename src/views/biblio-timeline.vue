@@ -576,7 +576,9 @@ function closeJournalCard(): void {
 function viewYearArticles(year: number): void {
   void router.push({
     name: 'articles',
-    query: { yearFrom: year, yearTo: year, filterCollapsed: '1', from: 'timeline' },
+    // status: 'all' forces the All tab so articles are never filtered out by
+    // the default Working/Included smart-tab.
+    query: { yearFrom: year, yearTo: year, status: 'all', filterCollapsed: '1', from: 'timeline' },
   });
 }
 

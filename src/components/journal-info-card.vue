@@ -42,7 +42,14 @@ function viewArticles(): void {
   if (!info.value) return;
   void router.push({
     name: 'articles',
-    query: { journal: info.value.journalTitle, filterCollapsed: '1', from: 'timeline' },
+    // status: 'all' forces the All tab so articles are never filtered out by
+    // the default Working/Included smart-tab.
+    query: {
+      journal: info.value.journalTitle,
+      status: 'all',
+      filterCollapsed: '1',
+      from: 'timeline',
+    },
   });
 }
 </script>
