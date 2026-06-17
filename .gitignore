@@ -17,6 +17,7 @@ scripts/**/target/
 .DS_Store
 .cline/
 .fallowrc.jsonc
+.claude/
 
 # Environment
 .env
