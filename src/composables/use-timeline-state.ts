@@ -9,7 +9,7 @@ import { ref } from 'vue';
  * only holds the local *view* preferences.
  */
 
-export type TimelineChartMode = 'bars' | 'line' | 'stacked';
+type TimelineChartMode = 'bars' | 'line' | 'stacked';
 
 const yearFrom = ref<number | null>(null);
 const yearTo = ref<number | null>(null);

@@ -21,7 +21,7 @@ export interface AuthorRank {
   primaryInstitution: string | null;
 }
 
-export interface AuthorProductivityKpis {
+interface AuthorProductivityKpis {
   totalAuthors: number;
   totalPapers: number;
   avgHIndex: number | null;

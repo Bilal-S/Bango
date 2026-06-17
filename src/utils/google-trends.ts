@@ -15,7 +15,7 @@ export const TIME_RANGE_PRESETS: TimeRangePreset[] = [
 ];
 
 export const MAX_QUEUE_SIZE = 5;
-export const MAX_RANGE_DAYS = 1825; // 5 years
+const MAX_RANGE_DAYS = 1825; // 5 years
 
 function formatDate(date: Date): string {
   const y = date.getUTCFullYear();
@@ -292,7 +292,7 @@ export function buildEmbedMonitorScript(): string {
 /**
  * Builds the renderExploreWidget JS calls.
  */
-export function buildTrendsSnippet(
+function buildTrendsSnippet(
   type: 'TIMESERIES' | 'GEO_MAP',
   keywords: string[],
   timeApi: string,

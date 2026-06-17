@@ -6,7 +6,7 @@ export interface YearCount {
   count: number;
 }
 
-export interface JournalYearData {
+interface JournalYearData {
   /** Canonical `journal_title` when `journalIndexId` is set; else normalized raw title. */
   journal: string;
   year: number;

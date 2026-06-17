@@ -2,14 +2,12 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useTrendsQueueStore } from '../stores/trends-queue';
 import GoogleTrendsPanel from '../components/google-trends-panel.vue';
-import Graph from 'graphology';
 import KeywordNetworkGraph from '../components/keyword-network-graph.vue';
 import KeywordControls from '../components/keyword-controls.vue';
 import KeywordDetailPanel from '../components/keyword-detail-panel.vue';
 import { useKeywordNetwork } from '../composables/use-keyword-network';
-import { useNetworkLayout } from '../composables/use-network-layout';
+import { useNetworkView } from '../composables/use-network-view';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
-import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { KeywordNode } from '../types/biblio-keyword';
 
@@ -19,7 +17,7 @@ const {
   error,
   nodeCount,
   edgeCount,
-  clusterCount,
+  clusterCount: networkClusterCount,
   isLayouting,
   sources,
   minOccurrences,
@@ -27,58 +25,47 @@ const {
   fetchNetwork,
 } = useKeywordNetwork();
 
-const { applyLayout } = useNetworkLayout();
+const {
+  graphRef,
+  focusedNodeId,
+  visibleNodeCount,
+  visibleEdgeCount,
+  colorMode,
+  layoutMode,
+  selectedClusters,
+  sidebarCollapsed,
+  recalculateTrigger,
+  clusterCount,
+  yearRange,
+  focusNode,
+  locateByLabel,
+  onSelectCluster,
+  onClearClusters,
+  onLayoutModeChange,
+  onExportImage: exportImage,
+  onRecalculate,
+  resetViewState,
+} = useNetworkView({
+  graph,
+  exportPrefix: 'keyword-network',
+  yearAttribute: 'avgYear',
+  defaultYearRange: { min: 2000, max: 2026 },
+  recalculateIterations: 150,
+});
+
 const { applyKeywordGraphFilters } = useSigmaRenderer();
 
-const graphRef = ref<InstanceType<typeof KeywordNetworkGraph> | null>(null);
-
-function locateNode(nodeId: string) {
-  graphRef.value?.locateNode(nodeId);
-}
-function resetZoom() {
-  graphRef.value?.resetZoom();
-}
-function refresh() {
-  graphRef.value?.refresh();
-}
-
 const selectedKeyword = ref<KeywordNode | null>(null);
-const focusedNodeId = ref<string | null>(null);
-const visibleNodeCount = ref(0);
-const visibleEdgeCount = ref(0);
-const colorMode = ref<'cluster' | 'temporal'>('cluster');
-const layoutMode = ref<'fixed' | 'dynamic'>('fixed');
-const selectedClusters = ref<number[]>([]);
-const sidebarCollapsed = ref(false);
-const recalculateTrigger = ref(0);
 
 /** Year range from graph nodes' avgYear for temporal color gradient */
-const yearRange = computed(() => {
-  if (!graph.value) return { min: 2000, max: 2026 };
-  let min = Infinity;
-  let max = -Infinity;
-  graph.value.forEachNode((node) => {
-    const yr = graph.value!.getNodeAttribute(node, 'avgYear') as number | null;
-    if (yr !== null && yr !== undefined) {
-      if (yr < min) min = yr;
-      if (yr > max) max = yr;
-    }
-  });
-  if (min === Infinity || max === -Infinity) {
-    return { min: 2000, max: 2026 };
-  }
-  if (min === max) {
-    return { min: min - 1, max: min + 1 };
-  }
-  return { min: Math.floor(min), max: Math.ceil(max) };
-});
+// yearRange from composable is used directly (configured for avgYear).
 
 const stats = computed(() => ({
   totalNodes: nodeCount.value,
   totalEdges: edgeCount.value,
   visibleNodes: visibleNodeCount.value || nodeCount.value,
   visibleEdges: visibleEdgeCount.value || edgeCount.value,
-  clusterCount: clusterCount.value,
+  clusterCount: networkClusterCount.value || clusterCount.value,
 }));
 
 /** Keyword labels for autocomplete search */
@@ -100,7 +87,7 @@ onMounted(async () => {
 });
 
 function onNodeClick(nodeId: string | null) {
-  focusedNodeId.value = nodeId;
+  focusNode(nodeId);
   if (!nodeId) {
     selectedKeyword.value = null;
     return;
@@ -122,7 +109,7 @@ function onNodeClick(nodeId: string | null) {
 
 function onNavigateToKeyword(nodeId: string) {
   onNodeClick(nodeId);
-  locateNode(nodeId);
+  graphRef.value?.locateNode(nodeId);
 }
 
 async function onParamsChange(params: {
@@ -135,7 +122,7 @@ async function onParamsChange(params: {
   minCooccurrence.value = params.minCooccurrence;
 
   selectedKeyword.value = null;
-  focusedNodeId.value = null;
+  focusNode(null);
   selectedClusters.value = [];
 
   await fetchNetwork(layoutMode.value);
@@ -143,13 +130,6 @@ async function onParamsChange(params: {
     visibleNodeCount.value = nodeCount.value;
     visibleEdgeCount.value = edgeCount.value;
     recalculateTrigger.value++;
-  }
-}
-
-async function onLayoutModeChange(mode: 'fixed' | 'dynamic') {
-  layoutMode.value = mode;
-  if (graph.value) {
-    await onRecalculate();
   }
 }
 
@@ -164,40 +144,14 @@ function onFilterChange(filters: {
   visibleEdgeCount.value = result.visibleEdges;
 }
 
-/** Export network in chosen format (PNG or GEXF) via Tauri save dialog */
 async function onExportImage(format: NetworkExportFormat) {
-  try {
-    if (format === 'png') {
-      if (!graphRef.value?.renderer) return;
-      await exportNetworkPng(graphRef.value.renderer, 'keyword-network.png');
-    } else if (format === 'gexf') {
-      if (!graph.value) return;
-      await exportNetworkGexf(graph.value, 'keyword-network.gexf');
-    }
-  } catch (err) {
-    console.error('[export] Keyword network export failed:', err);
-  }
-}
-
-function onSelectCluster(clusterId: number) {
-  const idx = selectedClusters.value.indexOf(clusterId);
-  if (idx >= 0) {
-    selectedClusters.value.splice(idx, 1);
-  } else {
-    selectedClusters.value.push(clusterId);
-  }
-}
-
-function onClearClusters() {
-  selectedClusters.value = [];
+  const renderer = (graphRef.value as { renderer?: unknown } | null)?.renderer;
+  await exportImage(format, (renderer as Parameters<typeof exportImage>[1]) ?? null);
 }
 
 async function onResetAnalysis() {
-  colorMode.value = 'cluster';
-  layoutMode.value = 'fixed';
-  selectedClusters.value = [];
+  resetViewState();
   selectedKeyword.value = null;
-  focusedNodeId.value = null;
 
   // Set defaults and re-fetch
   sources.value = ['metadata', 'ai_extracted', 'tags', 'labels', 'user_added'];
@@ -209,61 +163,6 @@ async function onResetAnalysis() {
     visibleNodeCount.value = nodeCount.value;
     visibleEdgeCount.value = edgeCount.value;
     recalculateTrigger.value++;
-  }
-}
-
-async function onRecalculate() {
-  if (!graph.value) return;
-
-  isLayouting.value = true;
-  try {
-    // 1. Create a temporary undirected subgraph of visible nodes and edges
-    const sub = new Graph({ type: 'undirected', multi: false });
-
-    graph.value.forEachNode((node, attrs) => {
-      if (attrs.hidden !== true) {
-        sub.addNode(node, { ...attrs });
-      }
-    });
-
-    graph.value.forEachEdge((edge, attrs, source, target) => {
-      if (attrs.hidden !== true && sub.hasNode(source) && sub.hasNode(target)) {
-        sub.addUndirectedEdgeWithKey(edge, source, target, { ...attrs });
-      }
-    });
-
-    if (sub.order === 0) return;
-
-    // 2. Run Louvain and ForceAtlas2 layout on the subgraph
-    await applyLayout(sub, 150, layoutMode.value);
-
-    // 3. Write back coordinates and cluster to the parent graph
-    sub.forEachNode((node) => {
-      const newAttrs = sub.getNodeAttributes(node);
-      graph.value!.setNodeAttribute(node, 'x', newAttrs.x);
-      graph.value!.setNodeAttribute(node, 'y', newAttrs.y);
-      graph.value!.setNodeAttribute(node, 'cluster', newAttrs.cluster);
-    });
-
-    // 4. Force Sigma renderer to update and zoom to fit
-    resetZoom();
-    refresh();
-
-    // 5. Trigger computed statistics updates
-    recalculateTrigger.value++;
-  } finally {
-    isLayouting.value = false;
-  }
-}
-
-function onLocateKeyword(label: string) {
-  if (!graph.value) return;
-  const nodeId = graph.value.findNode(
-    (node) => (graph.value!.getNodeAttribute(node, 'label') as string) === label
-  );
-  if (nodeId) {
-    onNodeClick(nodeId);
-    locateNode(nodeId);
   }
 }
 
@@ -345,12 +244,12 @@ watch(
           @filter-change="onFilterChange"
           @params-change="onParamsChange"
           @layout-mode-change="onLayoutModeChange"
-          @locate-keyword="onLocateKeyword"
+          @locate-keyword="(label: string) => locateByLabel(label)"
           @export-image="onExportImage"
           @color-mode-change="colorMode = $event"
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"
-          @fit-screen="resetZoom"
+          @fit-screen="() => graphRef?.resetZoom()"
           @recalculate="onRecalculate"
           @reset-analysis="onResetAnalysis"
         />

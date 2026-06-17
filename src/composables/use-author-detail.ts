@@ -4,7 +4,7 @@ import type { YearCount } from './use-bibliometrics';
 import type { AuthorRank } from './use-author-rankings';
 
 /** Institution linked to an author (re-export of BiblioInstitution shape). */
-export interface AuthorInstitution {
+interface AuthorInstitution {
   id: string;
   normalizedName: string;
   country: string | null;
@@ -13,14 +13,14 @@ export interface AuthorInstitution {
 }
 
 /** A collaborator of the selected author, with co-authorship strength. */
-export interface AuthorCollaborator {
+interface AuthorCollaborator {
   collaboratorId: string;
   collaboratorName: string;
   sharedPapers: number;
 }
 
 /** A recent paper by the selected author (for the detail panel list). */
-export interface AuthorPaper {
+interface AuthorPaper {
   articleId: string;
   title: string;
   publicationYear: number | null;
@@ -31,7 +31,7 @@ export interface AuthorPaper {
 }
 
 /** Full author profile for the detail panel. */
-export interface AuthorDetail {
+interface AuthorDetail {
   rank: AuthorRank;
   pubsByYear: YearCount[];
   institutions: AuthorInstitution[];

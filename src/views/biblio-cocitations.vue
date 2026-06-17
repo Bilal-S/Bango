@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import Graph from 'graphology';
 import CocitationNetworkGraph from '../components/cocitation-network-graph.vue';
 import CocitationControls from '../components/cocitation-controls.vue';
 import CocitationDetailPanel from '../components/cocitation-detail-panel.vue';
 import CocitationHeatmap from '../components/cocitation-heatmap.vue';
 import { useCocitationNetwork } from '../composables/use-cocitation-network';
-import { useNetworkLayout } from '../composables/use-network-layout';
+import { useNetworkView } from '../composables/use-network-view';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
-import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CocitationNode, CocitationEdge } from '../types/biblio-cocitation';
 
@@ -24,68 +22,43 @@ const {
   getCoCitedPapers,
 } = useCocitationNetwork();
 
-const { isLayouting, applyLayout } = useNetworkLayout();
+const {
+  graphRef,
+  focusedNodeId,
+  visibleNodeCount,
+  colorMode,
+  layoutMode,
+  selectedClusters,
+  sidebarCollapsed,
+  recalculateTrigger,
+  clusterCount,
+  yearRange,
+  isLayouting,
+  applyLayout,
+  focusNode,
+  locateByLabel,
+  onSelectCluster,
+  onClearClusters,
+  onLayoutModeChange,
+  onExportImage: exportImage,
+  onRecalculate,
+  resetViewState,
+} = useNetworkView({
+  graph,
+  exportPrefix: 'cocitation-network',
+  graphType: 'undirected',
+  recalculateIterations: 150,
+});
+
 const { applyKeywordGraphFilters } = useSigmaRenderer();
 
-const graphRef = ref<InstanceType<typeof CocitationNetworkGraph> | null>(null);
-
-function locateNode(nodeId: string) {
-  graphRef.value?.locateNode(nodeId);
-}
-function resetZoom() {
-  graphRef.value?.resetZoom();
-}
-function refresh() {
-  graphRef.value?.refresh();
-}
-
-// Control state
+// Control state (co-citation-specific)
 const scope = ref<'included' | 'all'>('included');
 const normalization = ref<'raw' | 'cosine' | 'jaccard' | 'pearson'>('cosine');
 const minCitationCount = ref(2);
 const minCoCitation = ref(2);
 const selectedPaper = ref<CocitationNode | null>(null);
-const focusedNodeId = ref<string | null>(null);
-const visibleNodeCount = ref(0);
-const colorMode = ref<'cluster' | 'temporal'>('cluster');
-const layoutMode = ref<'fixed' | 'dynamic'>('fixed');
-const selectedClusters = ref<number[]>([]);
-const sidebarCollapsed = ref(false);
 const showHeatmap = ref(false);
-const recalculateTrigger = ref(0);
-
-/** Derive cluster count from graph node attributes (visible nodes only). */
-const clusterCount = computed(() => {
-  void recalculateTrigger.value;
-  void visibleNodeCount.value;
-  if (!graph.value) return 0;
-  const clusters = new Set<number>();
-  graph.value.forEachNode((node) => {
-    const isHidden = graph.value!.getNodeAttribute(node, 'hidden') as boolean | null;
-    if (isHidden !== true) {
-      const c = graph.value!.getNodeAttribute(node, 'cluster') as number | null;
-      if (c !== null && c !== undefined) clusters.add(c);
-    }
-  });
-  return clusters.size;
-});
-
-/** Year range from graph for temporal color gradient. */
-const yearRange = computed(() => {
-  if (!graph.value) return { min: 2000, max: 2024 };
-  let min = Infinity;
-  let max = -Infinity;
-  graph.value.forEachNode((node) => {
-    const yr = graph.value!.getNodeAttribute(node, 'year') as number | null;
-    if (yr !== null && yr !== undefined) {
-      if (yr < min) min = yr;
-      if (yr > max) max = yr;
-    }
-  });
-  if (min === Infinity || max === -Infinity) return { min: 2000, max: 2024 };
-  if (min === max) return { min: min - 1, max: min + 1 };
-  return { min: Math.floor(min), max: Math.ceil(max) };
-});
 
 const stats = computed(() => ({
   totalNodes: nodeCount.value,
@@ -94,12 +67,7 @@ const stats = computed(() => ({
   clusterCount: clusterCount.value,
 }));
 
-/** Paper search entries for autocomplete search.
- * Each entry contains:
- * - `label`: the author (year) string used to locate the node
- * - `display`: truncated title + label for the dropdown display
- * - `searchText`: lowercase concatenation of all searchable fields
- */
+/** Paper search entries for autocomplete search. */
 const paperLabels = computed(() => {
   if (!graph.value) return [];
   return graph.value.nodes().map((id: string) => {
@@ -185,7 +153,7 @@ async function doFetch() {
 }
 
 function onNodeClick(nodeId: string | null) {
-  focusedNodeId.value = nodeId;
+  focusNode(nodeId);
   if (!nodeId) {
     selectedPaper.value = null;
     return;
@@ -195,25 +163,18 @@ function onNodeClick(nodeId: string | null) {
 
 function onNavigateToPaper(nodeId: string) {
   onNodeClick(nodeId);
-  locateNode(nodeId);
+  graphRef.value?.locateNode(nodeId);
 }
 
 async function onParamsChange() {
   selectedPaper.value = null;
-  focusedNodeId.value = null;
+  focusNode(null);
   selectedClusters.value = [];
   await doFetch();
   if (graph.value) {
     await applyLayout(graph.value, 100, layoutMode.value);
     visibleNodeCount.value = nodeCount.value;
     recalculateTrigger.value++;
-  }
-}
-
-async function onLayoutModeChange(mode: 'fixed' | 'dynamic') {
-  layoutMode.value = mode;
-  if (graph.value) {
-    await onRecalculate();
   }
 }
 
@@ -227,93 +188,19 @@ function onFilterChange(filters: { search: string }) {
   visibleNodeCount.value = result.visibleNodes;
 }
 
-function onSelectCluster(clusterId: number) {
-  const idx = selectedClusters.value.indexOf(clusterId);
-  if (idx >= 0) {
-    selectedClusters.value.splice(idx, 1);
-  } else {
-    selectedClusters.value.push(clusterId);
-  }
-}
-
-function onClearClusters() {
-  selectedClusters.value = [];
-}
-
 async function onExportImage(format: NetworkExportFormat) {
-  try {
-    if (format === 'png') {
-      if (!graphRef.value?.renderer) return;
-      await exportNetworkPng(graphRef.value.renderer, 'cocitation-network.png');
-    } else if (format === 'gexf') {
-      if (!graph.value) return;
-      await exportNetworkGexf(graph.value, 'cocitation-network.gexf');
-    }
-  } catch (err) {
-    console.error('[export] Co-citation network export failed:', err);
-  }
-}
-
-function onLocatePaper(label: string) {
-  if (!graph.value) return;
-  const nodeId = graph.value.findNode(
-    (node) => (graph.value!.getNodeAttribute(node, 'label') as string) === label
-  );
-  if (nodeId) {
-    onNodeClick(nodeId);
-    locateNode(nodeId);
-  }
+  const renderer = (graphRef.value as { renderer?: unknown } | null)?.renderer;
+  await exportImage(format, (renderer as Parameters<typeof exportImage>[1]) ?? null);
 }
 
 async function onResetAnalysis() {
-  colorMode.value = 'cluster';
-  layoutMode.value = 'fixed';
+  resetViewState();
   scope.value = 'included';
   normalization.value = 'cosine';
   minCitationCount.value = 2;
   minCoCitation.value = 2;
-  selectedClusters.value = [];
   selectedPaper.value = null;
-  focusedNodeId.value = null;
   await onParamsChange();
-}
-
-async function onRecalculate() {
-  if (!graph.value) return;
-
-  isLayouting.value = true;
-  try {
-    const sub = new Graph({ type: 'undirected', multi: false });
-
-    graph.value.forEachNode((node, attrs) => {
-      if (attrs.hidden !== true) {
-        sub.addNode(node, { ...attrs });
-      }
-    });
-
-    graph.value.forEachEdge((edge, attrs, source, target) => {
-      if (attrs.hidden !== true && sub.hasNode(source) && sub.hasNode(target)) {
-        sub.addUndirectedEdgeWithKey(edge, source, target, { ...attrs });
-      }
-    });
-
-    if (sub.order === 0) return;
-
-    await applyLayout(sub, 150, layoutMode.value);
-
-    sub.forEachNode((node) => {
-      const newAttrs = sub.getNodeAttributes(node);
-      graph.value!.setNodeAttribute(node, 'x', newAttrs.x);
-      graph.value!.setNodeAttribute(node, 'y', newAttrs.y);
-      graph.value!.setNodeAttribute(node, 'cluster', newAttrs.cluster);
-    });
-
-    resetZoom();
-    refresh();
-    recalculateTrigger.value++;
-  } finally {
-    isLayouting.value = false;
-  }
 }
 </script>
 
@@ -362,7 +249,7 @@ async function onRecalculate() {
           "
           @color-mode-change="colorMode = $event"
           @layout-mode-change="onLayoutModeChange"
-          @locate-paper="onLocatePaper"
+          @locate-paper="(label: string) => locateByLabel(label)"
           @filter-change="onFilterChange"
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"

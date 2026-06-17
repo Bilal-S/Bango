@@ -2,7 +2,7 @@ import { ref } from 'vue';
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from './use-tauri-command';
 
-export interface ExclusionReason {
+interface ExclusionReason {
   criterionId: string;
   criterionText: string;
   count: number;

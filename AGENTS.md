@@ -183,15 +183,24 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
     Shared card chrome for these lives in `settings-card-shared.css`.
   - **`src/composables/`** - Vue composables. `use-bibliometrics.ts` (shared KPI
-    singleton, exports `JournalYearData`; on mount fetches KPIs then the
+    singleton; on mount fetches KPIs then the
     `biblio_get_needs_refresh` flag and auto-runs `runNormalization` when
     `includedCount > 0 && needsRefresh` - this starts the Refresh cycle on dashboard
     entry and the backend clears the flag after `biblio_normalize` commits;
     `runNormalization` also drives the 8-step `biblio:progress` bar), `use-journal-info.ts`
     (per-call lazy loader), `use-article-search.ts` (supports
-    `yearFrom`/`yearTo`/`journal` route params).
-  - **`src/utils/`** - pure utilities. `chart-export.ts` (timeline CSV/SVG export via the
-    `save()` + `write_text_to_file` pattern shared with `network-export.ts`).
+    `yearFrom`/`yearTo`/`journal` route params), `use-network-view.ts` (shared
+    view-state composable consumed by the four bibliometric network views
+    `biblio-coauthors`/`biblio-keywords`/`biblio-cocitations`/`biblio-citations`;
+    owns cross-cutting state - focus, visible counts, color/layout modes, cluster
+    selection, sidebar collapse - plus the identical handlers: cluster toggle,
+    layout-mode switch, PNG/GEXF export via `exportPrefix`, and subgraph
+    recalculate that respects `graphType: 'directed'|'undirected'` and
+    `yearAttribute: 'year'|'avgYear'`). Tested by `src/__tests__/use-network-view.test.ts`.
+  - **`src/utils/`** - pure utilities: `network-export.ts` (graph PNG/GEXF export via the
+    `save()` + `write_text_to_file` pattern), `formatters.ts`, `color.ts`, `debounce.ts`,
+    `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `llm-error.ts`,
+    `google-trends.ts` (Trends embed URL builder + date-range validators).
   - **`src/styles/forms.css`** - global form/button/dialog primitives (`.field__*`, `.btn--*`,
     `.dialog`, `.spinner`) promoted from the former scoped `llm-config.vue`. Loaded via
     `base.css`; low specificity so scoped rules in other views still win.

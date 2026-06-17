@@ -3,7 +3,7 @@ import { tauriCommand } from './use-tauri-command';
 import type { YearCount } from './use-bibliometrics';
 
 /** Full metadata + time-series for one journal_index row. */
-export interface JournalInfo {
+interface JournalInfo {
   id: string;
   journalTitle: string;
   issn: string | null;

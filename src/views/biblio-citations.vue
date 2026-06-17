@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import Graph from 'graphology';
 import { open } from '@tauri-apps/plugin-dialog';
 import CitationNetworkGraph from '../components/citation-network-graph.vue';
 import type { IsolationDirection } from '../components/citation-network-graph.vue';
@@ -8,12 +7,11 @@ import CitationControls from '../components/citation-controls.vue';
 import CitationPaperDetailPanel from '../components/citation-paper-detail-panel.vue';
 import ArticleDetailPanel from '../components/article-detail-panel.vue';
 import { useCitationNetwork } from '../composables/use-citation-network';
-import { useNetworkLayout } from '../composables/use-network-layout';
+import { useNetworkView } from '../composables/use-network-view';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { useMainPathWorker } from '../composables/use-main-path-worker';
 import { useArticleSearch } from '../composables/use-article-search';
 import { useToast } from '../composables/use-toast';
-import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
 import { debounce } from '../utils/debounce';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CitationNode } from '../types/biblio-citation';
@@ -31,17 +29,41 @@ const {
   getCitedPapers,
 } = useCitationNetwork();
 
-const { isLayouting, applyLayout } = useNetworkLayout();
+const {
+  graphRef,
+  focusedNodeId,
+  visibleNodeCount,
+  visibleEdgeCount,
+  colorMode,
+  layoutMode,
+  selectedClusters,
+  sidebarCollapsed,
+  recalculateTrigger,
+  clusterCount,
+  yearRange,
+  isLayouting,
+  applyLayout,
+  focusNode,
+  locateByLabel,
+  onSelectCluster,
+  onClearClusters,
+  onLayoutModeChange,
+  onExportImage: exportImage,
+  onRecalculate,
+  resetViewState,
+} = useNetworkView({
+  graph,
+  exportPrefix: 'citation-network',
+  graphType: 'directed',
+});
+
 const { applyCitationGraphFilters } = useSigmaRenderer();
 const toast = useToast();
 
 /**
  * Article detail panel (opened via "open linked record" from the citation
- * paper detail panel).  Re-uses the same ArticleDetailPanel used in the
+ * paper detail panel). Re-uses the same ArticleDetailPanel used in the
  * Articles view so the user sees the full record with notes/tags/labels etc.
- *
- * Flow: click open_in_new in citation panel → ArticleDetailPanel opens over
- * the citation panel → on close, the citation panel is shown again.
  */
 const {
   selectedArticle: detailArticle,
@@ -59,22 +81,22 @@ const {
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
 
-const graphRef = ref<InstanceType<typeof CitationNetworkGraph> | null>(null);
-
-function locateNode(nodeId: string) {
-  graphRef.value?.locateNode(nodeId);
-}
-function resetZoom() {
-  graphRef.value?.resetZoom();
-}
-function refresh() {
-  graphRef.value?.refresh();
-}
+const selectedPaper = ref<CitationNode | null>(null);
 
 /**
- * Phase 3 - Main Path (SPC): the worker composable manages the Web Worker
- * lifecycle and exposes reactive node/edge ID sets for highlighting.
+ * Isolation mode: when active, the graph dims all nodes except the selected
+ * paper and its ancestry (papers it cites) or progeny (papers citing it).
  */
+const isolationMode = ref<{ nodeId: string; direction: IsolationDirection; label?: string } | null>(
+  null
+);
+
+/** Whether unmatched reference papers should be requested and rendered. */
+const showUnmatched = ref(false);
+
+/** Phase 3 - Main Path (SPC) highlight toggle. */
+const showMainPath = ref(false);
+
 const {
   mainPathNodes,
   mainPathEdges,
@@ -83,40 +105,9 @@ const {
   clear: clearMainPath,
 } = useMainPathWorker(graph);
 
-const selectedPaper = ref<CitationNode | null>(null);
-const focusedNodeId = ref<string | null>(null);
-const visibleNodeCount = ref(0);
-const visibleEdgeCount = ref(0);
-const colorMode = ref<'cluster' | 'temporal'>('cluster');
-const layoutMode = ref<'fixed' | 'dynamic'>('fixed');
-const selectedClusters = ref<number[]>([]);
-const sidebarCollapsed = ref(false);
-
 /**
- * Isolation mode: when active, the graph dims all nodes except the selected
- * paper and its ancestry (papers it cites) or progeny (papers citing it).
- * `null` = no isolation (normal view).
- */
-const isolationMode = ref<{ nodeId: string; direction: IsolationDirection; label?: string } | null>(
-  null
-);
-
-/**
- * Whether unmatched reference papers should be requested from the backend and
- * rendered as dashed grey leaf nodes.  Toggling this triggers a network re-fetch.
- */
-const showUnmatched = ref(false);
-
-/**
- * Phase 3 - Main Path (SPC): when true, the graph highlights the main path
- * backbone and dims all other nodes/edges.  Toggling triggers the worker.
- */
-const showMainPath = ref(false);
-
-/**
- * Diagnostic empty-state: when there are included articles and reference papers
- * but zero edges, the citation graph cannot be drawn because no references have
- * been matched to included articles.  Surface a clear explanation to the user.
+ * Diagnostic empty-state: included articles + reference papers but zero edges
+ * means no references have been matched to included articles.
  */
 const isEmptyDueToNoMatches = computed(() => {
   const m = meta.value;
@@ -131,45 +122,6 @@ const isEmptyDueToNoMatches = computed(() => {
 
 const hasReferencePapers = computed(() => (meta.value?.referencePaperCount ?? 0) > 0);
 
-const recalculateTrigger = ref(0);
-
-/** Derive cluster count from graph node attributes (visible nodes only). */
-const clusterCount = computed(() => {
-  void recalculateTrigger.value;
-  void visibleNodeCount.value;
-  if (!graph.value) return 0;
-  const clusters = new Set<number>();
-  graph.value.forEachNode((node) => {
-    const isHidden = graph.value!.getNodeAttribute(node, 'hidden') as boolean | null;
-    if (isHidden !== true) {
-      const c = graph.value!.getNodeAttribute(node, 'cluster') as number | null;
-      if (c !== null && c !== undefined) clusters.add(c);
-    }
-  });
-  return clusters.size;
-});
-
-/** Year range from graph for temporal color gradient. */
-const yearRange = computed(() => {
-  if (!graph.value) return { min: 2000, max: 2024 };
-  let min = Infinity;
-  let max = -Infinity;
-  graph.value.forEachNode((node) => {
-    const yr = graph.value!.getNodeAttribute(node, 'year') as number | null;
-    if (yr !== null && yr !== undefined) {
-      if (yr < min) min = yr;
-      if (yr > max) max = yr;
-    }
-  });
-  if (min === Infinity || max === -Infinity) {
-    return { min: 2000, max: 2024 };
-  }
-  if (min === max) {
-    return { min: min - 1, max: min + 1 };
-  }
-  return { min: Math.floor(min), max: Math.ceil(max) };
-});
-
 const stats = computed(() => ({
   totalNodes: nodeCount.value,
   totalEdges: edgeCount.value,
@@ -178,12 +130,7 @@ const stats = computed(() => ({
   clusterCount: clusterCount.value,
 }));
 
-/** Paper search entries for autocomplete search.
- * Each entry contains:
- * - `label`: the author (year) string used to locate the node
- * - `display`: truncated title + label for the dropdown display
- * - `searchText`: lowercase concatenation of all searchable fields
- */
+/** Paper search entries for autocomplete search. */
 const paperLabels = computed(() => {
   if (!graph.value) return [];
   return graph.value.nodes().map((id: string) => {
@@ -201,7 +148,7 @@ const paperLabels = computed(() => {
   });
 });
 
-/** Citing papers for detail panel (incoming edges = papers that cite this one). */
+/** Citing papers for detail panel (incoming edges). */
 const citingPapers = computed(() => {
   if (!selectedPaper.value) return [];
   return getCitingPapers(selectedPaper.value.id).map((id) => {
@@ -210,7 +157,7 @@ const citingPapers = computed(() => {
   });
 });
 
-/** Cited papers for detail panel (outgoing edges = papers this one cites). */
+/** Cited papers for detail panel (outgoing edges). */
 const citedPapers = computed(() => {
   if (!selectedPaper.value) return [];
   return getCitedPapers(selectedPaper.value.id).map((id) => {
@@ -230,10 +177,8 @@ onMounted(async () => {
 });
 
 function onNodeClick(nodeId: string | null) {
-  focusedNodeId.value = nodeId;
+  focusNode(nodeId);
   if (!nodeId) {
-    // Closing the panel (via close button or graph background click) also
-    // resets isolation to "Show All" so the graph returns to full brightness.
     selectedPaper.value = null;
     isolationMode.value = null;
     return;
@@ -243,13 +188,10 @@ function onNodeClick(nodeId: string | null) {
 
 function onNavigateToPaper(nodeId: string) {
   onNodeClick(nodeId);
-  locateNode(nodeId);
+  graphRef.value?.locateNode(nodeId);
 }
 
-/**
- * Enter isolation mode for the currently-selected paper.
- * Called from the detail panel's "Isolate Ancestry" / "Isolate Progeny" buttons.
- */
+/** Enter isolation mode for the currently-selected paper. */
 function onIsolate(direction: IsolationDirection) {
   if (!selectedPaper.value) return;
   isolationMode.value = {
@@ -259,18 +201,12 @@ function onIsolate(direction: IsolationDirection) {
   };
 }
 
-/** Exit isolation mode and return to the normal full-brightness view. */
+/** Exit isolation mode. */
 function onClearIsolation() {
   isolationMode.value = null;
 }
 
-/**
- * Open the full article detail panel from the citation paper detail panel.
- * The linked record shares the same ID as the citation node (for matched/
- * included papers), so we can pass `paper.id` directly to `selectArticle`.
- *
- * On close, we keep `selectedPaper` intact so the citation panel re-appears.
- */
+/** Open the full article detail panel from the citation paper detail panel. */
 async function onOpenLinkedRecord(articleId: string) {
   try {
     await selectArticle(articleId);
@@ -280,7 +216,7 @@ async function onOpenLinkedRecord(articleId: string) {
   }
 }
 
-/** Close the article detail panel and return to the citation paper detail. */
+/** Close the article detail panel. */
 function onCloseArticleDetail() {
   showArticleDetail.value = false;
   isArticleDetailFullScreen.value = false;
@@ -288,7 +224,7 @@ function onCloseArticleDetail() {
   detailAuditTrail.value = [];
 }
 
-/** Attach a full-text PDF/text file to the article shown in the detail panel. */
+/** Attach a full-text PDF/text file to the article in the detail panel. */
 async function handleAttachFullText(articleId: string): Promise<void> {
   try {
     const selected = await open({
@@ -301,14 +237,6 @@ async function handleAttachFullText(articleId: string): Promise<void> {
     toast.show('Full text attached successfully.', 'success');
   } catch {
     toast.show('Failed to attach full text', 'error');
-  }
-}
-
-// Layout mode change triggers a full recalculate under the new layout strategy
-async function onLayoutModeChange(mode: 'fixed' | 'dynamic') {
-  layoutMode.value = mode;
-  if (graph.value) {
-    await onRecalculate();
   }
 }
 
@@ -346,11 +274,7 @@ const debouncedApplyFilters = debounce(
   50
 );
 
-/**
- * Phase 2 - Time-Slice: live drag handler.  Applies the year-range filter
- * immediately (hide/show nodes) but does NOT trigger a ForceAtlas2 re-layout.
- * The expensive layout is deferred until the slider is released (commit).
- */
+/** Time-Slice live drag handler (hide/show nodes, no re-layout). */
 function onYearRangeInput(
   range: [number, number],
   otherFilters?: { minCitations: number; showIsolated: boolean; search: string }
@@ -358,23 +282,16 @@ function onYearRangeInput(
   debouncedApplyFilters(range, otherFilters ?? { minCitations: 0, showIsolated: true, search: '' });
 }
 
-/**
- * Phase 2 - Time-Slice: commit handler (slider release).  Triggers the full
- * ForceAtlas2 re-layout on the now-filtered subgraph.
- */
+/** Time-Slice commit handler (slider release -> full re-layout). */
 async function onYearRangeCommit(_range: [number, number]) {
   await onRecalculate();
 }
 
-/**
- * Handle the "Show Unmatched References" toggle.  Toggling requires a backend
- * round-trip (unmatched leaves are added/removed server-side), so we re-fetch
- * the network and re-apply the layout.
- */
+/** Handle the "Show Unmatched References" toggle (backend round-trip). */
 async function onUnmatchedChange(newShowUnmatched: boolean) {
   showUnmatched.value = newShowUnmatched;
   selectedPaper.value = null;
-  focusedNodeId.value = null;
+  focusNode(null);
   selectedClusters.value = [];
   await fetchNetwork(showUnmatched.value);
   if (graph.value) {
@@ -382,15 +299,11 @@ async function onUnmatchedChange(newShowUnmatched: boolean) {
     visibleNodeCount.value = nodeCount.value;
     visibleEdgeCount.value = edgeCount.value;
     recalculateTrigger.value++;
-    // Re-run main path on the new graph if the highlight is currently active.
     if (showMainPath.value) computeMainPath();
   }
 }
 
-/**
- * Phase 3 - Main Path (SPC): toggle handler.  When turning on, trigger the
- * worker computation.  When turning off, clear the highlight state.
- */
+/** Main Path (SPC) toggle handler. */
 function onMainPathChange(newShowMainPath: boolean) {
   showMainPath.value = newShowMainPath;
   if (newShowMainPath) {
@@ -400,96 +313,15 @@ function onMainPathChange(newShowMainPath: boolean) {
   }
 }
 
-function onLocatePaper(label: string) {
-  if (!graph.value) return;
-  const nodeId = graph.value.findNode(
-    (node) => (graph.value!.getNodeAttribute(node, 'label') as string) === label
-  );
-  if (nodeId) {
-    onNodeClick(nodeId);
-    locateNode(nodeId);
-  }
-}
-
-/** Export network in chosen format (PNG or GEXF) via Tauri save dialog. */
 async function onExportImage(format: NetworkExportFormat) {
-  try {
-    if (format === 'png') {
-      if (!graphRef.value?.renderer) return;
-      await exportNetworkPng(graphRef.value.renderer, 'citation-network.png');
-    } else if (format === 'gexf') {
-      if (!graph.value) return;
-      await exportNetworkGexf(graph.value, 'citation-network.gexf');
-    }
-  } catch (err) {
-    console.error('[export] Citation network export failed:', err);
-  }
-}
-
-function onSelectCluster(clusterId: number) {
-  const idx = selectedClusters.value.indexOf(clusterId);
-  if (idx >= 0) {
-    selectedClusters.value.splice(idx, 1);
-  } else {
-    selectedClusters.value.push(clusterId);
-  }
-}
-
-function onClearClusters() {
-  selectedClusters.value = [];
+  const renderer = (graphRef.value as { renderer?: unknown } | null)?.renderer;
+  await exportImage(format, (renderer as Parameters<typeof exportImage>[1]) ?? null);
 }
 
 async function onResetAnalysis() {
-  colorMode.value = 'cluster';
-  layoutMode.value = 'fixed';
-  selectedClusters.value = [];
+  resetViewState();
   selectedPaper.value = null;
-  focusedNodeId.value = null;
   await onRecalculate();
-}
-
-async function onRecalculate() {
-  if (!graph.value) return;
-
-  isLayouting.value = true;
-  try {
-    // 1. Create a temporary directed subgraph of visible nodes and edges
-    const sub = new Graph({ type: 'directed', multi: false });
-
-    graph.value.forEachNode((node, attrs) => {
-      if (attrs.hidden !== true) {
-        sub.addNode(node, { ...attrs });
-      }
-    });
-
-    graph.value.forEachEdge((edge, attrs, source, target) => {
-      if (attrs.hidden !== true && sub.hasNode(source) && sub.hasNode(target)) {
-        sub.addDirectedEdgeWithKey(edge, source, target, { ...attrs });
-      }
-    });
-
-    if (sub.order === 0) return;
-
-    // 2. Run Louvain and ForceAtlas2 layout on the subgraph
-    await applyLayout(sub, 100, layoutMode.value);
-
-    // 3. Write back coordinates and cluster to the parent graph
-    sub.forEachNode((node) => {
-      const newAttrs = sub.getNodeAttributes(node);
-      graph.value!.setNodeAttribute(node, 'x', newAttrs.x);
-      graph.value!.setNodeAttribute(node, 'y', newAttrs.y);
-      graph.value!.setNodeAttribute(node, 'cluster', newAttrs.cluster);
-    });
-
-    // 4. Force Sigma renderer to update and zoom to fit
-    resetZoom();
-    refresh();
-
-    // 5. Trigger computed statistics updates
-    recalculateTrigger.value++;
-  } finally {
-    isLayouting.value = false;
-  }
 }
 </script>
 
@@ -523,7 +355,7 @@ async function onRecalculate() {
           :isolation-mode="isolationMode"
           @main-path-change="onMainPathChange"
           @filter-change="onFilterChange"
-          @locate-paper="onLocatePaper"
+          @locate-paper="(label: string) => locateByLabel(label)"
           @export-image="onExportImage"
           @color-mode-change="colorMode = $event"
           @layout-mode-change="onLayoutModeChange"
@@ -627,9 +459,7 @@ async function onRecalculate() {
       />
     </Transition>
 
-    <!-- Full article detail panel (opened from the citation paper detail panel).
-         On close, returns to the citation sidebar.  Supports full-screen
-         expansion which hides the graph canvas. -->
+    <!-- Full article detail panel (opened from the citation paper detail panel). -->
     <Transition name="detail-slide">
       <ArticleDetailPanel
         v-if="showArticleDetail && detailArticle"

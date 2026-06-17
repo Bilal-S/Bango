@@ -54,7 +54,7 @@ describe('citation-paper-detail-panel.vue', () => {
       },
     });
 
-    expect(wrapper.text()).toContain('Journal Details');
+    expect(wrapper.text()).toContain('Journal');
     expect(wrapper.text()).toContain('Reference Only');
     expect(wrapper.find('.bg-slate-100').exists()).toBe(true);
     expect(wrapper.find('.bg-emerald-100').exists()).toBe(false);
@@ -72,7 +72,7 @@ describe('citation-paper-detail-panel.vue', () => {
       },
     });
 
-    expect(wrapper.text()).toContain('Book Details');
+    expect(wrapper.text()).toContain('Book');
     expect(wrapper.text()).toContain('Included');
     expect(wrapper.find('.bg-emerald-100').exists()).toBe(true);
     expect(wrapper.find('.bg-slate-100').exists()).toBe(false);

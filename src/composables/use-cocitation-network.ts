@@ -2,7 +2,6 @@ import { ref, computed } from 'vue';
 import Graph from 'graphology';
 import { tauriCommand } from './use-tauri-command';
 import type {
-  CocitationEdge,
   CocitationMeta,
   CocitationNetworkData,
   CocitationNode,
@@ -176,6 +175,3 @@ export function useCocitationNetwork() {
     getCoCitedPapers,
   };
 }
-
-/** Re-export the edge type for component use. */
-export type { CocitationEdge };
