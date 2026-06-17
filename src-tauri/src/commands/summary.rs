@@ -12,7 +12,7 @@ use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::prisma::data;
 use crate::screening::engine as screening_engine;
 use crate::summary::engine::{self, SummaryInput};
-use crate::summary::prompt::{ArticleSummary, ScreeningData};
+use crate::summary::prompt::{ArticleSummary, ScreeningData, ARTICLE_SUMMARY_SYSTEM_PROMPT};
 
 #[tauri::command]
 pub async fn generate_summary(
@@ -117,10 +117,6 @@ pub fn get_saved_summary(
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
     summary_repo::get_summary(&conn)
 }
-
-/// AI Article Summary prompt from the spec.
-const ARTICLE_SUMMARY_SYSTEM_PROMPT: &str =
-    include_str!("../../../.worktrees/ai-article-summary.md");
 
 /// Generate an AI summary for a single article based on its full text.
 /// Calls the LLM, parses the JSON response, stores it in the database,

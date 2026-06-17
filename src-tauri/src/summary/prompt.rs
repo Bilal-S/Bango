@@ -31,6 +31,11 @@ pub struct SummaryPromptInput {
 
 pub const SYSTEM_PROMPT: &str = "You are an expert academic literature review writer. You produce well-structured, scholarly literature reviews with proper in-text citations and a complete references section. You only cite sources that are explicitly provided. You never fabricate references. You write in formal academic English with natural variation in sentence length. You never use em dashes.";
 
+/// System prompt for the single-article AI summary (full-text analysis).
+/// Produces a structured JSON-only response matching the `AiSummaryData`
+/// schema consumed by the frontend (`src/composables/use-ai-summary.ts`).
+pub const ARTICLE_SUMMARY_SYSTEM_PROMPT: &str = include_str!("ai_article_summary_prompt.md");
+
 /// Format screening statistics into a human-readable summary for the prompt.
 #[must_use]
 pub fn format_screening_summary(data: &ScreeningData) -> String {

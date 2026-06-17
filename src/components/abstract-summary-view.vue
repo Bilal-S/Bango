@@ -13,14 +13,18 @@ const aiSummaryData = computed<AiSummaryData | null>(() =>
   parseAiSummary(props.article.fullTextAiSummary)
 );
 
-// Active tab for Abstract/AI Summary
-const abstractTab = ref<'abstract' | 'aiSummary'>('abstract');
+// Default to the AI Summary tab when one exists, otherwise Abstract.
+const defaultTab = (): 'abstract' | 'aiSummary' => (aiSummaryData.value ? 'aiSummary' : 'abstract');
 
-// Watch article changes to reset tab
+// Active tab for Abstract/AI Summary
+const abstractTab = ref<'abstract' | 'aiSummary'>(defaultTab());
+
+// Reset to the default tab whenever the selected article changes so that
+// articles with an AI summary land on the AI Summary tab automatically.
 watch(
   () => props.article.id,
   () => {
-    abstractTab.value = 'abstract';
+    abstractTab.value = defaultTab();
   }
 );
 </script>
