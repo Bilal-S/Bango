@@ -67,6 +67,33 @@ export function doiLink(doi: string | null | undefined): string | undefined {
 }
 
 /**
+ * Average occurrences per year across the active span of a term.
+ *
+ * Computed as total occurrences divided by the inclusive year span
+ * (lastYear - firstYear + 1). Returns `null` when there is no year data.
+ *
+ * Examples:
+ * - 3 occurrences across 2018, 2020, 2024 -> 3 / 7 ≈ 0.43
+ * - 10 occurrences all in 2020             -> 10 / 1 = 10.0
+ */
+export function avgPerYear(
+  yearCounts: { year: number; count: number }[] | null | undefined
+): number | null {
+  if (!yearCounts || yearCounts.length === 0) return null;
+  let minYear = Infinity;
+  let maxYear = -Infinity;
+  let total = 0;
+  for (const yc of yearCounts) {
+    if (yc.year < minYear) minYear = yc.year;
+    if (yc.year > maxYear) maxYear = yc.year;
+    total += yc.count;
+  }
+  const span = maxYear - minYear + 1;
+  if (span <= 0) return null;
+  return total / span;
+}
+
+/**
  * Convert a short publication type code (e.g. JOUR, BOOK) to a human-friendly label.
  * Defaults to 'Publication' if clean code is not recognized or not provided.
  */
