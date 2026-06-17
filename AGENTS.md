@@ -212,7 +212,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
   co-citation dataset uses `co-citation.ris` (5 articles, `10.2001/cocite1`–`10.2001/cocite5`)
   with 6 shared reference papers (`10.3001/ref1`–`10.3001/ref6`) spread across the
   `_references.ris` files to produce deterministic co-citation pairs.
-- **`docs/superpowers/specs/bango-v4-spec.md`** - authoritative v4 product specification.
+- **`docs/bango-v4-spec.md`** - authoritative v4 product specification.
+- **`docs/CLAUDE.md`** - project coding rules (Rust/TS error handling, naming, LLM
+  orchestrator pattern, DB rules, testing conventions).
+- **`docs/test-coverage-report.md`** - coverage baseline + under-coverage analysis for
+  Rust (`cargo-llvm-cov`, ~52% lines) and Vue/TS (`@vitest/coverage-v8`, ~18% lines).
+  Lists 0%-covered modules/components/composables/stores and ranks highest-value gaps.
 - **`docs/design-reference/00-design-patterns.md`** - design tokens (Material 3 inspired).
 - **`.worktrees/`** - planning documents (`biblio-publication-timeline-plan-v3.md` is the
   implemented plan; `biblio-cocitation-requirmenents.md` is the Co-Citation Analysis
@@ -221,3 +226,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
 `-D warnings`) and `cargo test`.
+
+Coverage tooling: `npm run test:coverage` (Vue/TS via `@vitest/coverage-v8`, config in
+`vitest.config.ts`, report at `coverage/index.html`) and
+`cd src-tauri && cargo llvm-cov --html --output-dir target/llvm-cov/html` (Rust via
+`cargo-llvm-cov` + `llvm-tools-preview`, report at
+`src-tauri/target/llvm-cov/html/html/index.html`). Both artifact dirs are git-ignored.

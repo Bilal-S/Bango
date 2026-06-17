@@ -4,6 +4,9 @@ node_modules/
 # Build output
 dist/
 
+# Test coverage
+coverage/
+
 # Rust / Cargo
 src-tauri/target/
 src-tauri/Cargo.lock

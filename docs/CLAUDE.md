@@ -136,6 +136,39 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
 - Place Rust integration and database repository tests in the `src-tauri/tests/` directory.
 - Avoid large inline unit tests in library source files (e.g. database repository modules); instead, move them into standalone integration test files under `src-tauri/tests/` to keep the source code files compact and maintainable.
 
+### Coverage Goals
+
+- **Target: 70% line coverage for both Rust (`src-tauri/`) and Vue/TS (`src/`).**
+- Enforced via thresholds so coverage cannot regress:
+  - Vue/TS: `vitest.config.ts` `coverage.thresholds` (wired into `npm run check:all`
+    via `npm run test:coverage`).
+  - Rust: `npm run coverage:rust` runs `cargo llvm-cov --fail-under-lines 70` (run
+    separately from `check:all` because it requires `cargo-llvm-cov` + the
+    `llvm-tools-preview` rustup component and is slower than the TS suite).
+- Tooling & reproduction:
+  - Vue/TS: `npm run test:coverage` -> report at `coverage/index.html` (via
+    `@vitest/coverage-v8`).
+  - Rust: `cd src-tauri && cargo llvm-cov --html --output-dir target/llvm-cov/html`
+    -> report at `target/llvm-cov/html/html/index.html`.
+  - Both artifact dirs are git-ignored.
+- See `docs/test-coverage-report.md` for the current baseline and the ranked list of
+  highest-value coverage gaps.
+
+### Coverage Strategy
+
+- **Prefer testing extracted logic over `#[tauri::command]` shims.** Command handlers
+  require Tauri `State<DbState>` and cannot be unit-tested directly. Extract
+  non-trivial orchestration into `pub fn`s that accept `&Connection` (or pure inputs)
+  and test those; keep the command wrapper thin.
+- **Vue component tests**: mount via `@vue/test-utils` with a shared helper that mocks
+  `tauriCommand`, Pinia, and the router. Stub canvas/chart libraries (sigma, apexcharts)
+  to focus assertions on logic and template branches.
+- **Cover the cheap, pure layers first**: `src/utils/*`, `src/stores/*`, and pure Rust
+  models/repos yield high line coverage per unit of effort; defer heavy view/graph
+  components until last.
+- When adding or changing source code, add or update tests in the same change so
+  coverage does not regress.
+
 ## Tauri App Diagnostics & Testing
 
 - When diagnosing frontend behavior, viewports, UI latency, or screen freezes, the agent can run the Tauri desktop app and use the `tauri-pilot` MCP tools to:
