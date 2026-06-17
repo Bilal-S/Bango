@@ -216,11 +216,86 @@ jobs:
           }
 
   # ──────────────────────────────────────────────
+  # Build MSIX for GitHub Release (no Store publishing)
+  # ──────────────────────────────────────────────
+  build-msix-release:
+    name: Build MSIX (GitHub Release)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync version across config files
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const v = process.env.VERSION;
+
+            // package.json
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.version = v;
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+
+            // src-tauri/tauri.conf.json
+            const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
+            conf.version = v;
+            fs.writeFileSync("src-tauri/tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
+
+            // src-tauri/Cargo.toml
+            let cargo = fs.readFileSync("src-tauri/Cargo.toml", "utf8");
+            cargo = cargo.replace(/^version = ".*"/m, "version = \"" + v + "\"");
+            fs.writeFileSync("src-tauri/Cargo.toml", cargo);
+          '
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build app (no bundle)
+        run: npm run tauri build -- --no-bundle
+
+      - name: Install msixbundle-cli
+        run: cargo install msixbundle-cli
+
+      - name: Bundle MSIX
+        run: npm run tauri:windows:build -- --runner npm
+
+      - name: Upload MSIX to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/msix/*.msixbundle
+          name: 'Bango ${{ github.ref_name }}'
+          body: |
+            See the assets below to download the installer for your platform.
+
+            **Changes:** See the commit history since the last release for details.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ──────────────────────────────────────────────
   # Post-build: commit version-synced config files
   # ──────────────────────────────────────────────
   sync-version:
     name: Sync version to config files
-    needs: [build]
+    needs: [build, build-msix-release]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
