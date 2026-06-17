@@ -57,9 +57,9 @@
           <span>Source:</span>
           <span class="font-medium text-slate-700 capitalize">{{ hoveredNode.source }}</span>
         </div>
-        <div v-if="hoveredNode.avgYear" class="flex justify-between gap-4">
-          <span>Average Year:</span>
-          <span class="font-medium text-slate-700">{{ hoveredNode.avgYear.toFixed(1) }}</span>
+        <div v-if="hoveredAvgPerYear !== null" class="flex justify-between gap-4">
+          <span>Average/Year:</span>
+          <span class="font-medium text-slate-700">{{ hoveredAvgPerYear.toFixed(1) }} /yr</span>
         </div>
         <div
           v-if="hoveredNode.rawTerms && hoveredNode.rawTerms.length > 1"
@@ -82,6 +82,7 @@ import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { clusterColor } from '../types/biblio-network';
 import type { KeywordNode } from '../types/biblio-keyword';
 import { getTemporalColor } from '../utils/color';
+import { avgPerYear } from '../utils/formatters';
 
 const props = defineProps<{
   graph: Graph | null;
@@ -113,6 +114,9 @@ const { renderer, initRenderer, destroyRenderer, locateNode, resetZoom, refresh 
   useSigmaRenderer();
 
 const hasGraph = computed(() => (props.graph?.order ?? 0) > 0);
+
+/** Average occurrences per year for the hovered node (null when no year data). */
+const hoveredAvgPerYear = computed(() => avgPerYear(hoveredNode.value?.yearCounts));
 
 const tooltipPosition = computed(() => ({
   left: `${tooltipX.value + 12}px`,
@@ -274,6 +278,7 @@ function bindSigmaEvents() {
       weight: attrs.weight ?? 0,
       source: attrs.source ?? '',
       avgYear: attrs.avgYear ?? null,
+      yearCounts: attrs.yearCounts ?? [],
       rawTerms: attrs.rawTerms ?? [],
       cluster: attrs.cluster ?? null,
       color: getNodeColor(node),

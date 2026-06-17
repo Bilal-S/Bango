@@ -9,6 +9,7 @@ import {
   formatAuthors,
   doiLink,
   getPublicationTypeLabel,
+  avgPerYear,
 } from '@/utils/formatters';
 
 describe('formatters (extended)', () => {
@@ -135,6 +136,52 @@ describe('formatters (extended)', () => {
     it('returns the input unchanged when it already starts with http', () => {
       expect(doiLink('https://doi.org/10.1000/foo')).toBe('https://doi.org/10.1000/foo');
       expect(doiLink('http://example.com')).toBe('http://example.com');
+    });
+  });
+
+  describe('avgPerYear', () => {
+    it('returns null for null/undefined/empty input', () => {
+      expect(avgPerYear(null)).toBeNull();
+      expect(avgPerYear(undefined)).toBeNull();
+      expect(avgPerYear([])).toBeNull();
+    });
+    it('returns count when all occurrences are in a single year (span = 1)', () => {
+      const data = [{ year: 2020, count: 5 }];
+      expect(avgPerYear(data)).toBe(5);
+    });
+    it('aggregates multiple counts in the same year', () => {
+      // Two entries for 2020 (5 + 5 = 10 total), span 1 -> 10.0
+      const data = [
+        { year: 2020, count: 5 },
+        { year: 2020, count: 5 },
+      ];
+      expect(avgPerYear(data)).toBe(10);
+    });
+    it('divides total by the inclusive year span', () => {
+      // 3 occurrences across 2018, 2020, 2024 -> span = 2024 - 2018 + 1 = 7 -> 3/7
+      const data = [
+        { year: 2018, count: 1 },
+        { year: 2020, count: 1 },
+        { year: 2024, count: 1 },
+      ];
+      expect(avgPerYear(data)).toBeCloseTo(3 / 7, 10);
+    });
+    it('sums counts within each year before dividing by span', () => {
+      // 2019 (2), 2021 (4) -> total 6, span 3 -> 2.0
+      const data = [
+        { year: 2019, count: 2 },
+        { year: 2021, count: 4 },
+      ];
+      expect(avgPerYear(data)).toBeCloseTo(2.0, 10);
+    });
+    it('handles unsorted input correctly', () => {
+      // Same span/calculation as above but shuffled
+      const data = [
+        { year: 2024, count: 1 },
+        { year: 2018, count: 1 },
+        { year: 2020, count: 1 },
+      ];
+      expect(avgPerYear(data)).toBeCloseTo(3 / 7, 10);
     });
   });
 
