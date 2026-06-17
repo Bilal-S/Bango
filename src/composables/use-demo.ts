@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import type { Router } from 'vue-router';
 import { tauriCommand, isTauri } from '@/composables/use-tauri-command';
+import { useLoadingOverlay } from '@/composables/use-loading-overlay';
 import { ask } from '@tauri-apps/plugin-dialog';
 import demoProjectJson from '@/assets/demo-project.bango.json?raw';
 import { useArticlesStore } from '@/stores/articles';
@@ -18,6 +19,7 @@ import { useScreeningStore } from '@/stores/screening';
 export function useDemo(router: Router) {
   const demoLoading = ref(false);
   const demoError = ref<string | null>(null);
+  const { withOverlay } = useLoadingOverlay();
 
   async function loadDemo(): Promise<void> {
     if (demoLoading.value) return;
@@ -37,23 +39,25 @@ export function useDemo(router: Router) {
     demoLoading.value = true;
     demoError.value = null;
     try {
-      await tauriCommand('import_project_backup', {
-        request: { jsonContent: demoProjectJson },
+      await withOverlay('Loading Demo Project...', async () => {
+        await tauriCommand('import_project_backup', {
+          request: { jsonContent: demoProjectJson },
+        });
+        // Invalidate and re-fetch all stores
+        const stores = [
+          useArticlesStore(),
+          useCriteriaStore(),
+          useTagsStore(),
+          useLabelsStore(),
+          useLlmConfigStore(),
+          useAuditStore(),
+          useScreeningStore(),
+        ];
+        for (const store of stores) {
+          store.invalidate();
+        }
+        await Promise.all(stores.map((s) => s.fetchIfNeeded()));
       });
-      // Invalidate and re-fetch all stores
-      const stores = [
-        useArticlesStore(),
-        useCriteriaStore(),
-        useTagsStore(),
-        useLabelsStore(),
-        useLlmConfigStore(),
-        useAuditStore(),
-        useScreeningStore(),
-      ];
-      for (const store of stores) {
-        store.invalidate();
-      }
-      await Promise.all(stores.map((s) => s.fetchIfNeeded()));
       router.push('/');
     } catch (e: unknown) {
       demoError.value = e instanceof Error ? e.message : String(e);

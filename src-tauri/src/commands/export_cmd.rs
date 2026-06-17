@@ -119,7 +119,7 @@ pub struct ImportProjectRequest {
 }
 
 #[tauri::command]
-pub fn import_project_backup(
+pub async fn import_project_backup(
     db_state: State<'_, DbState>,
     request: ImportProjectRequest,
 ) -> Result<(), AppError> {
@@ -134,7 +134,16 @@ pub fn import_project_backup(
     eprintln!("[import_project_backup] DB lock acquired, calling import_project...");
     let result = project::import_project(&conn, &request.json_content);
     match &result {
-        Ok(()) => eprintln!("[import_project_backup] Import succeeded"),
+        Ok(()) => {
+            eprintln!("[import_project_backup] Import succeeded");
+            // Imported articles affect bibliometrics - mark the corpus as stale so
+            // the frontend auto-runs `biblio_normalize` when includedCount > 0.
+            // This mirrors the behavior of RIS import (`commands::import`) and
+            // status-change commands, which all call `mark_biblio_needs_refresh`.
+            // Non-fatal: if the settings write fails, the user can still trigger
+            // normalization manually from the bibliometrics dashboard.
+            crate::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
+        }
         Err(e) => eprintln!("[import_project_backup] Import failed: {:?}", e),
     }
     result

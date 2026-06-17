@@ -2,6 +2,7 @@
 import { provide, ref, watch } from 'vue';
 import { useViewport } from '@/composables/use-viewport';
 import { initialDataLoaded } from '@/composables/use-dashboard';
+import { useLoadingOverlay } from '@/composables/use-loading-overlay';
 import NavSidebar from './nav-sidebar.vue';
 import ToastContainer from './toast-container.vue';
 
@@ -63,6 +64,9 @@ watch(
   },
   { immediate: true }
 );
+
+// Global loading overlay for long-running operations (project import, demo load)
+const { isVisible: isOperationOverlayVisible, message: operationMessage } = useLoadingOverlay();
 </script>
 
 <template>
@@ -101,6 +105,16 @@ watch(
         <router-view />
       </div>
     </main>
+    <!-- Operation Loading Overlay (project import, demo load, etc.) -->
+    <Transition name="loading-fade">
+      <div v-if="isOperationOverlayVisible" class="loading-overlay">
+        <div class="loading-content">
+          <div class="loading-spinner"></div>
+          <p class="loading-text">{{ operationMessage }}</p>
+        </div>
+      </div>
+    </Transition>
+
     <ToastContainer />
   </div>
 </template>

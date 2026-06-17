@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from './use-tauri-command';
+import { useLoadingOverlay } from './use-loading-overlay';
 import { useArticlesStore } from '@/stores/articles';
 import { useCriteriaStore } from '@/stores/criteria';
 import { useTagsStore } from '@/stores/tags';
@@ -13,6 +14,7 @@ import { useSummary } from './use-summary';
 export function useExport() {
   const exporting = ref(false);
   const error = ref<string | null>(null);
+  const { withOverlay } = useLoadingOverlay();
 
   function invalidateAllStores(): void {
     useArticlesStore().invalidate();
@@ -118,11 +120,13 @@ export function useExport() {
     error.value = null;
     try {
       const content = await file.text();
-      await tauriCommand('import_project_backup', {
-        request: { jsonContent: content },
+      await withOverlay('Importing Project Backup...', async () => {
+        await tauriCommand('import_project_backup', {
+          request: { jsonContent: content },
+        });
+        await refreshAllStores();
+        useSummary().clearSummary();
       });
-      await refreshAllStores();
-      useSummary().clearSummary();
       return true;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
