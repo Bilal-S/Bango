@@ -48,30 +48,13 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # Surgical sed update — only the version line in each file changes.
+      # Avoids JSON.stringify/jq which would expand tauri.conf.json's compact arrays.
       - name: Sync version across config files
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node -e '
-            const fs = require("fs");
-            const v = process.env.VERSION;
-
-            // package.json
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.version = v;
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-
-            // src-tauri/tauri.conf.json
-            const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
-            conf.version = v;
-            fs.writeFileSync("src-tauri/tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
-
-            // src-tauri/Cargo.toml
-            let cargo = fs.readFileSync("src-tauri/Cargo.toml", "utf8");
-            cargo = cargo.replace(/^version = ".*"/m, "version = \"" + v + "\"");
-            fs.writeFileSync("src-tauri/Cargo.toml", cargo);
-          '
+        run: bash scripts/sync-version.sh "$VERSION"
 
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-latest'
@@ -97,12 +80,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # releaseBody intentionally omitted: CI must never set or overwrite
+          # the release body. It is authored on the GitHub Release directly.
           tagName: ${{ github.ref_name }}
           releaseName: 'Bango ${{ github.ref_name }}'
-          releaseBody: |
-            See the assets below to download the installer for your platform.
-
-            **Changes:** See the commit history since the last release for details.
           releaseDraft: false
           prerelease: false
 
@@ -135,30 +116,12 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # Surgical sed update — only the version line in each file changes.
       - name: Sync version across config files
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node -e '
-            const fs = require("fs");
-            const v = process.env.VERSION;
-
-            // package.json
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.version = v;
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-
-            // src-tauri/tauri.conf.json
-            const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
-            conf.version = v;
-            fs.writeFileSync("src-tauri/tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
-
-            // src-tauri/Cargo.toml
-            let cargo = fs.readFileSync("src-tauri/Cargo.toml", "utf8");
-            cargo = cargo.replace(/^version = ".*"/m, "version = \"" + v + "\"");
-            fs.writeFileSync("src-tauri/Cargo.toml", cargo);
-          '
+        run: bash scripts/sync-version.sh "$VERSION"
 
       - name: Install JS dependencies
         run: npm ci
@@ -177,10 +140,8 @@ jobs:
         with:
           files: src-tauri/target/msix/*.msixbundle
           name: 'Bango ${{ github.ref_name }}'
-          body: |
-            See the assets below to download the installer for your platform.
-
-            **Changes:** See the commit history since the last release for details.
+          # body intentionally omitted: CI must never set or overwrite the
+          # release body. It is authored on the GitHub Release directly.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -241,30 +202,12 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # Surgical sed update — only the version line in each file changes.
       - name: Sync version across config files
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          node -e '
-            const fs = require("fs");
-            const v = process.env.VERSION;
-
-            // package.json
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            pkg.version = v;
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
-
-            // src-tauri/tauri.conf.json
-            const conf = JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json", "utf8"));
-            conf.version = v;
-            fs.writeFileSync("src-tauri/tauri.conf.json", JSON.stringify(conf, null, 2) + "\n");
-
-            // src-tauri/Cargo.toml
-            let cargo = fs.readFileSync("src-tauri/Cargo.toml", "utf8");
-            cargo = cargo.replace(/^version = ".*"/m, "version = \"" + v + "\"");
-            fs.writeFileSync("src-tauri/Cargo.toml", cargo);
-          '
+        run: bash scripts/sync-version.sh "$VERSION"
 
       - name: Install JS dependencies
         run: npm ci
@@ -283,20 +226,20 @@ jobs:
         with:
           files: src-tauri/target/msix/*.msixbundle
           name: 'Bango ${{ github.ref_name }}'
-          body: |
-            See the assets below to download the installer for your platform.
-
-            **Changes:** See the commit history since the last release for details.
+          # body intentionally omitted: CI must never set or overwrite the
+          # release body. It is authored on the GitHub Release directly.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────
-  # Post-build: commit version-synced config files
+  # Read-only check: is a version-sync commit needed?
+  # Runs in parallel with the build jobs. Outputs sync_needed=true|false.
   # ──────────────────────────────────────────────
-  sync-version:
-    name: Sync version to config files
-    needs: [build, build-msix-release]
+  check-version-sync:
+    name: Check version sync
     runs-on: ubuntu-latest
+    outputs:
+      sync_needed: ${{ steps.check_version.outputs.sync_needed }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -326,20 +269,37 @@ jobs:
             echo "Version mismatch detected: pkg=$PKG conf=$CONF cargo=$CARGO → target=$VERSION"
           fi
 
+  # ──────────────────────────────────────────────
+  # Post-build: commit version-synced config files.
+  # SKIPPED ENTIRELY when check-version-sync reports no mismatch — no checkout,
+  # no file edits, no commit, no push, and never touches the GitHub Release.
+  # ──────────────────────────────────────────────
+  sync-version:
+    name: Sync version to config files
+    needs: [build, build-msix-release, check-version-sync]
+    if: needs.check-version-sync.outputs.sync_needed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Surgical sed update — only the version line in each file changes.
+      # This job never creates or modifies a GitHub Release or its body.
       - name: Sync version across config files
-        if: steps.check_version.outputs.sync_needed == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          # package.json
-          jq --arg v "$VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
-          # src-tauri/tauri.conf.json
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
-          # src-tauri/Cargo.toml
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+        run: bash scripts/sync-version.sh "$VERSION"
 
       - name: Commit and push version sync
-        if: steps.check_version.outputs.sync_needed == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
