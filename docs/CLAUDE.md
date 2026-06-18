@@ -139,15 +139,15 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
 ### Coverage Goals
 
 - **Target: 70% line coverage for both Rust (`src-tauri/`) and Vue/TS (`src/`).**
-- Enforced via thresholds so coverage cannot regress:
-  - Vue/TS: `vitest.config.ts` `coverage.thresholds` (wired into `npm run check:all`
-    via `npm run test:coverage`).
-  - Rust: `npm run coverage:rust` runs `cargo llvm-cov --fail-under-lines 70` (run
-    separately from `check:all` because it requires `cargo-llvm-cov` + the
-    `llvm-tools-preview` rustup component and is slower than the TS suite).
+- Coverage is **opt-in and not part of `npm run check:all`** (which runs type-check +
+  eslint + prettier + rustfmt + clippy + the plain Vitest suite). Run it on demand:
+  - Vue/TS: `npm run test:coverage` runs `vitest run --coverage`, which enforces the
+    `vitest.config.ts` `coverage.thresholds` block and writes `coverage/index.html`
+    (via `@vitest/coverage-v8`).
+  - Rust: `npm run coverage:rust` runs `cargo llvm-cov --fail-under-lines 70`
+    (requires `cargo-llvm-cov` + the `llvm-tools-preview` rustup component).
 - Tooling & reproduction:
-  - Vue/TS: `npm run test:coverage` -> report at `coverage/index.html` (via
-    `@vitest/coverage-v8`).
+  - Vue/TS: `npm run test:coverage` -> report at `coverage/index.html`.
   - Rust: `cd src-tauri && cargo llvm-cov --html --output-dir target/llvm-cov/html`
     -> report at `target/llvm-cov/html/html/index.html`.
   - Both artifact dirs are git-ignored.

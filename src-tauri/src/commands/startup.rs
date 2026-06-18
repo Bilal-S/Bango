@@ -5,9 +5,25 @@
 //! the schema, reloads the bundled journal index, and restores user data via
 //! `project::import_project`. The backup file is intentionally never deleted so
 //! the user can recover if anything goes wrong.
+//!
+//! Loop-safety (1.0.26 -> 2.x upgrade): a webview `window.location.reload()`
+//! runs in the SAME Rust process, so managed state is NOT recomputed. Earlier,
+//! `get_startup_status` returned a snapshot frozen at setup time, so after a
+//! successful upgrade the snapshot still said `Legacy` and the frontend
+//! re-triggered the upgrade on every reload -> endless loop. The snapshot is
+//! now kept honest by two independent layers:
+//!
+//! 1. `get_startup_status` re-probes the LIVE schema on every call (falling
+//!    back to the snapshot only if the live probe errors).
+//! 2. `perform_legacy_upgrade` updates the managed snapshot after a successful
+//!    rebuild.
+//!
+//! Either layer alone breaks the loop; both together make it structurally
+//! impossible.
 
 use std::fs;
 use std::io::Write;
+use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, State};
 
@@ -18,11 +34,32 @@ use crate::error::AppError;
 use crate::export::legacy_project::export_legacy_project;
 use crate::export::project::import_project;
 
-/// Startup schema classification stored as managed state at setup time so the
-/// frontend can read it without re-probing the (still locked) connection.
-#[derive(Debug, Clone, Copy)]
+/// Startup schema classification captured in `lib.rs` setup so the frontend
+/// has a snapshot available before any command runs. The field is wrapped in a
+/// `Mutex` so `perform_legacy_upgrade` can keep it honest after rebuilding the
+/// schema (layer 2 of loop-safety).
+///
+/// `get_startup_status` does NOT rely on this snapshot as the source of truth
+/// at query time: it re-probes the live schema. The snapshot exists only as a
+/// fallback (if the live probe fails) and as observability.
+#[derive(Debug)]
 pub struct StartupStatus {
-    pub schema: SchemaStatus,
+    pub schema: Mutex<SchemaStatus>,
+}
+
+impl StartupStatus {
+    /// Read the current snapshot value. A poisoned mutex is treated as
+    /// `Legacy` (fail-safe: the upgrade would rather re-run than silently skip).
+    fn snapshot(&self) -> SchemaStatus {
+        self.schema.lock().map(|g| *g).unwrap_or(SchemaStatus::Legacy)
+    }
+
+    /// Update the snapshot after a schema change (e.g. successful upgrade).
+    fn set(&self, status: SchemaStatus) {
+        if let Ok(mut g) = self.schema.lock() {
+            *g = status;
+        }
+    }
 }
 
 /// Frontend-facing schema status. `needsLegacyUpgrade` is true only for the
@@ -33,10 +70,37 @@ pub struct StartupStatusResponse {
     pub needs_legacy_upgrade: bool,
 }
 
-/// Read the startup schema status computed during setup.
+/// Decide whether the legacy upgrade is needed, given a live DB probe result
+/// and the setup-time snapshot fallback. Extracted as a pure function so it can
+/// be unit-tested without a Tauri runtime.
+///
+/// - Returns `true` only if the live probe says `Legacy`, OR (only when the
+///   live probe itself errored) the snapshot said `Legacy`.
+/// - Returns `false` for `Current`/`FreshDb` from the live probe.
+#[must_use]
+pub fn legacy_upgrade_needed(live: Result<SchemaStatus, AppError>, fallback: SchemaStatus) -> bool {
+    match live {
+        Ok(status) => status == SchemaStatus::Legacy,
+        Err(_) => fallback == SchemaStatus::Legacy,
+    }
+}
+
+/// Read the startup schema status. Re-probes the LIVE schema so a successful
+/// `perform_legacy_upgrade` is immediately reflected even though the webview
+/// reloads in the same process (layer 1 of loop-safety). If the live probe
+/// errors, falls back to the setup-time snapshot.
 #[tauri::command]
-pub fn get_startup_status(status: State<'_, StartupStatus>) -> StartupStatusResponse {
-    StartupStatusResponse { needs_legacy_upgrade: status.schema == SchemaStatus::Legacy }
+pub fn get_startup_status(
+    db_state: State<'_, DbState>,
+    status: State<'_, StartupStatus>,
+) -> StartupStatusResponse {
+    let snapshot = status.snapshot();
+    let live = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))
+        .and_then(|conn| check_schema(&conn));
+    StartupStatusResponse { needs_legacy_upgrade: legacy_upgrade_needed(live, snapshot) }
 }
 
 /// Result of a successful legacy upgrade, returned to the frontend so it can
@@ -59,6 +123,8 @@ pub struct LegacyUpgradeResult {
 ///    migrations (creates the current schema).
 /// 4. Reload the bundled journal index into the freshly created table.
 /// 5. `import_project(backup)` -> restore user data + auto journal rematch.
+/// 6. Update the managed `StartupStatus` snapshot so the post-reload
+///    `get_startup_status` call agrees with the live schema.
 ///
 /// The backup file is never deleted by this command. If any step fails, the
 /// returned `AppError` includes the backup path in its message when one was
@@ -67,6 +133,7 @@ pub struct LegacyUpgradeResult {
 pub fn perform_legacy_upgrade(
     app: AppHandle,
     db_state: State<'_, DbState>,
+    startup_status: State<'_, StartupStatus>,
 ) -> Result<LegacyUpgradeResult, AppError> {
     let app_data_dir = app
         .path()
@@ -144,6 +211,24 @@ pub fn perform_legacy_upgrade(
         })?;
         conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0)).unwrap_or(0)
     };
+
+    // 6. Keep the managed snapshot honest. The schema is now Current; publishing
+    //    that here means `get_startup_status` returns false even if its live
+    //    probe later fails for some reason (defense-in-depth against the reload
+    //    loop). Re-probe under the lock to avoid races with concurrent callers.
+    {
+        let post_status = db_state
+            .conn
+            .lock()
+            .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))
+            .and_then(|conn| check_schema(&conn));
+        match post_status {
+            Ok(s) => startup_status.set(s),
+            Err(e) => eprintln!(
+                "[legacy_upgrade] warning: post-upgrade schema probe failed (snapshot not updated): {e:#}"
+            ),
+        }
+    }
 
     eprintln!(
         "[legacy_upgrade] completed; restored {article_count} articles from {}",

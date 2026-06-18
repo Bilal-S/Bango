@@ -18,7 +18,7 @@ npm run test:coverage
 
 Coverage artifacts are git-ignored (`coverage/`, `src-tauri/target/`). The `@vitest/coverage-v8` devDependency and `test:coverage` script are in `package.json`; the `coverage` block is in `vitest.config.ts`.
 
-**Coverage goal: 70% lines for both stacks** (see `docs/CLAUDE.md` > Testing > Coverage Goals). Enforced via `vitest.config.ts` thresholds (Vue) and `npm run coverage:rust` (`cargo llvm-cov --fail-under-lines 70`).
+**Coverage goal: 70% lines for both stacks** (see `docs/CLAUDE.md` > Testing > Coverage Goals). Opt-in (NOT part of `npm run check:all`, which runs the plain Vitest suite): run `npm run test:coverage` (Vue, enforces `vitest.config.ts` thresholds) or `npm run coverage:rust` (`cargo llvm-cov --fail-under-lines 70`).
 
 ---
 

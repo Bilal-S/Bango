@@ -84,7 +84,7 @@ pub fn run() {
             }
 
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
-            app.manage(StartupStatus { schema: schema_status });
+            app.manage(StartupStatus { schema: std::sync::Mutex::new(schema_status) });
 
             // Parse CLI / env flags and persist feature flags to DB.
             let args: Vec<String> = std::env::args().collect();

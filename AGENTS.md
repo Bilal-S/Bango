@@ -122,10 +122,17 @@ describe each durable boundary so agents can locate the right area. Create a chi
     cannot be trusted). `rebuild_schema` is the shared drop-all-tables (preserving
     `journal_index`) + reset `user_version=0` + re-run migrations helper used by both
     `commands::export_cmd::reset_project` and the legacy upgrade path.
-  - **`src-tauri/src/commands/startup.rs`** - exposes `get_startup_status` (reads the managed
-    `StartupStatus` set in `lib.rs` setup) and `perform_legacy_upgrade` (one-shot:
-    `export_legacy_project` -> write backup to `app_data_dir` -> `rebuild_schema` ->
-    journal reload -> `import_project`; backup file is never deleted).
+  - **`src-tauri/src/commands/startup.rs`** - exposes `get_startup_status` and
+    `perform_legacy_upgrade` (one-shot: `export_legacy_project` -> write backup to
+    `app_data_dir` -> `rebuild_schema` -> journal reload -> `import_project`; backup file
+    is never deleted). **Loop-safety**: a webview `window.location.reload()` runs in the
+    same Rust process, so managed state is not recomputed. To prevent an endless reload
+    loop after a successful upgrade, `get_startup_status` re-probes the LIVE schema on
+    every call (falling back to the setup-time snapshot only if the live probe errors),
+    and `perform_legacy_upgrade` updates the managed `StartupStatus` snapshot (now a
+    `Mutex<SchemaStatus>`) post-success. Pure decision logic lives in
+    `legacy_upgrade_needed(live, fallback)`; the frontend adds a third
+    sessionStorage-based guard in `use-startup-upgrade.ts`.
   - **`src-tauri/src/export/project.rs`** - `ProjectBackup` serialize/deserialize. Exports only
     source tables (aims, criteria, articles, tags, labels, article_tags/labels, audit,
     reference_papers, article_reference_links, llm_config). The 9 `biblio_*` tables are NOT
@@ -149,7 +156,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation
     integration tests against RIS fixtures live in `cocitation_data_test.rs`.
     `biblio_needs_refresh_test.rs` covers the staleness-flag round-trip (mark/clear/
-    absent-key default).  `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip (legacy article_references -> backup -> rebuild -> import).
+    absent-key default). `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip
+    (legacy article_references -> backup -> rebuild -> import) plus the
+    `legacy_upgrade_needed(live, fallback)` pure decision function (live-probe-wins and
+    snapshot-fallback branches).
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).
@@ -182,7 +192,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
     + dialogs), `settings-screening-preferences.vue` (2 localStorage-backed toggles),
     `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
     Shared card chrome for these lives in `settings-card-shared.css`.
-  - **`src/composables/`** - Vue composables. `use-bibliometrics.ts` (shared KPI
+  - **`src/composables/`** - Vue composables. `use-startup-upgrade.ts`
+    (silent legacy DB upgrade orchestration: `getStartupStatus` calls the backend
+    `get_startup_status`, `performLegacyUpgrade` calls `perform_legacy_upgrade`;
+    `decideUpgrade(needsUpgrade, alreadyAttempted)` is the pure loop-guard decision
+    returning `'run'` | `'skip'` | `'stale'`, backed by a session-scoped
+    `sessionStorage` flag via `getUpgradeAttempted`/`markUpgradeAttempted`;
+    consumed by `main.ts` `bootstrap()`; tested by
+    `src/__tests__/composables/use-startup-upgrade.test.ts`),
+    `use-bibliometrics.ts` (shared KPI
     singleton; on mount fetches KPIs then the
     `biblio_get_needs_refresh` flag and auto-runs `runNormalization` when
     `includedCount > 0 && needsRefresh` - this starts the Refresh cycle on dashboard

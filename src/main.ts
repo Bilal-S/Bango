@@ -13,7 +13,13 @@ import { useScreeningStore } from './stores/screening';
 import { initialDataLoaded } from './composables/use-dashboard';
 import { initFeatureFlags, useFeatureFlags } from './composables/use-feature-flags';
 import { useToast } from './composables/use-toast';
-import { getStartupStatus, performLegacyUpgrade } from './composables/use-startup-upgrade';
+import {
+  decideUpgrade,
+  getStartupStatus,
+  getUpgradeAttempted,
+  markUpgradeAttempted,
+  performLegacyUpgrade,
+} from './composables/use-startup-upgrade';
 
 const app = createApp(App);
 app.use(createPinia());
@@ -26,12 +32,42 @@ app.mount('#app');
 async function bootstrap(): Promise<void> {
   // 1. Startup schema upgrade (silent). Must complete before any store reads
   //    from the DB, otherwise they would load from the pre-upgrade schema.
+  //
+  //    Loop-guard: a webview `window.location.reload()` runs in the SAME Rust
+  //    process, so managed backend state is not recomputed. The backend now
+  //    re-probes the live schema on each `get_startup_status` call (and
+  //    updates its snapshot after a successful upgrade), which alone breaks
+  //    the loop. The `decideUpgrade` + sessionStorage check below is the
+  //    defense-in-depth safety net: if both backend layers were ever
+  //    bypassed, we still refuse to re-run the upgrade in the same session
+  //    and instead surface a restart-required error.
   const needsUpgrade = await getStartupStatus();
-  if (needsUpgrade) {
+  const decision = decideUpgrade(needsUpgrade, getUpgradeAttempted());
+
+  if (decision === 'stale') {
+    // Loop guard tripped: backend still reports Legacy after we already
+    // attempted the upgrade this session. Do NOT reload. Surface a clear
+    // error so the user can restart the app (which starts a fresh session
+    // and re-probes the schema cleanly).
+    console.error(
+      '[startup_upgrade] stale signal: upgrade still reported as needed after an attempt this session. Aborting to prevent a reload loop; a full app restart is required.'
+    );
+    useToast().show(
+      'Database upgrade could not be verified. Please quit and restart Bango to continue.',
+      'error',
+      0
+    );
+    return;
+  }
+
+  if (decision === 'run') {
     const toast = useToast();
     // Persistent "in progress" toast (duration=0) so it stays visible during
     // the upgrade; it is dismissed explicitly on completion.
     toast.show('Database upgrade in progress...', 'info', 0);
+    // Record the attempt BEFORE awaiting so a concurrent bootstrap cannot
+    // double-run the upgrade. Session-scoped, so a real app restart clears it.
+    markUpgradeAttempted();
     try {
       const result = await performLegacyUpgrade();
       console.warn(
@@ -46,12 +82,17 @@ async function bootstrap(): Promise<void> {
         0
       );
       // On failure, reload so the user lands in a clean state (the backend
-      // keeps the backup file safe regardless).
+      // keeps the backup file safe regardless). The loop-guard token is
+      // already set, so even if the failure left a stale Legacy signal the
+      // next bootstrap will take the `'stale'` branch and refuse to loop.
       window.location.reload();
       return;
     }
     // Reload the webview so the app re-bootstraps against the freshly rebuilt
-    // schema. This mirrors a "restart normally" without a process-level relaunch.
+    // schema. The loop-guard token is set; if the backend live-probe layer
+    // works as expected, getStartupStatus() will now return false (Current)
+    // and bootstrap will proceed normally. If it somehow still returns true,
+    // the guard takes the `'stale'` branch and stops.
     window.location.reload();
     return;
   }

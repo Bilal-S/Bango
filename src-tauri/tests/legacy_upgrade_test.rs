@@ -201,3 +201,42 @@ fn full_legacy_upgrade_round_trip_preserves_data() {
         conn.query_row("SELECT COUNT(*) FROM article_reference_links", [], |r| r.get(0)).unwrap();
     assert_eq!(link_count, 3);
 }
+
+// ── legacy_upgrade_needed decision function ──
+// This is the pure logic layer 1 of loop-safety relies on. It must prefer the
+// live probe over the snapshot fallback, and only fall back when the live
+// probe itself errored.
+
+use bango_lib::commands::startup::legacy_upgrade_needed;
+use bango_lib::error::AppError;
+
+#[test]
+fn legacy_upgrade_needed_returns_true_when_live_probe_is_legacy() {
+    // Snapshot says Current, but live DB says Legacy -> must run upgrade.
+    assert!(legacy_upgrade_needed(Ok(SchemaStatus::Legacy), SchemaStatus::Current));
+}
+
+#[test]
+fn legacy_upgrade_needed_returns_false_when_live_probe_is_current() {
+    // This is the loop-breaker: snapshot still says Legacy (frozen at setup),
+    // but the live DB is now Current after the upgrade -> must NOT re-run.
+    assert!(!legacy_upgrade_needed(Ok(SchemaStatus::Current), SchemaStatus::Legacy));
+}
+
+#[test]
+fn legacy_upgrade_needed_returns_false_when_live_probe_is_fresh() {
+    assert!(!legacy_upgrade_needed(Ok(SchemaStatus::FreshDb), SchemaStatus::Legacy));
+}
+
+#[test]
+fn legacy_upgrade_needed_falls_back_to_snapshot_when_live_probe_errors() {
+    // If the live probe errors, fall back to the snapshot. Legacy snapshot ->
+    // run (fail-safe).
+    let err =
+        AppError::Database(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(1), None));
+    assert!(legacy_upgrade_needed(Err(err), SchemaStatus::Legacy));
+    // Current snapshot -> skip.
+    let err2 =
+        AppError::Database(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(1), None));
+    assert!(!legacy_upgrade_needed(Err(err2), SchemaStatus::Current));
+}
