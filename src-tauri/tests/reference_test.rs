@@ -1,5 +1,3 @@
-use rusqlite;
-
 use bango_lib::db::article_repo;
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
@@ -433,7 +431,7 @@ fn test_unique_doi_constraint_rejects_duplicate() {
 
     // Insert a paper with a DOI via insert_or_find
     let paper1 = make_paper("Original Paper", Some("10.1234/unique-doi-test"));
-    let (first, created1) =
+    let (_, created1) =
         reference_repo::insert_or_find_paper(&conn, &paper1).expect("insert 1 failed");
     assert!(created1);
 
@@ -465,7 +463,7 @@ fn test_unique_title_authors_year_constraint() {
         doi: None,
         ..make_paper("placeholder", None)
     };
-    let (first, created1) =
+    let (_, created1) =
         reference_repo::insert_or_find_paper(&conn, &paper1).expect("insert 1 failed");
     assert!(created1);
 

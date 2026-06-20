@@ -88,7 +88,6 @@ New test files added:
 ### Vue/TS (17.57% → ~26.5%)
 
 New test infrastructure:
-- `src/__tests__/helpers/mount.ts` - shared `mountComponent()` with Pinia + router.
 - `src/__tests__/helpers/fixtures.ts` - `makeArticle()` factory + `shimLocalStorage()` for happy-dom.
 
 New test files:
@@ -106,7 +105,7 @@ New test files:
 The largest remaining block is the **`commands/*.rs` shims** (~2633 lines at 0%). These require Tauri `State<DbState>` and cannot be unit-tested directly. Strategy (documented in `docs/CLAUDE.md`): extract non-trivial orchestration into `pub fn`s accepting `&Connection`, test those, keep command wrappers thin. Additional DB-repo deepening (`article_repo`, `reference_repo`, `export/project`) and `utils/pdf_extract` expansion will close the rest.
 
 ### Vue/TS (~44% gap)
-- **All 19 views remain untested** (template-heavy; need shallow mount with stubbed children). Infrastructure is ready via `mountComponent()`.
+- **All 19 views remain untested** (template-heavy; need shallow mount with stubbed children).
 - **~35 components remain at 0%** - presentational components are high-ROI for mounting tests.
 - **Network/graph composables** (`use-sigma-renderer`, `use-network-layout`, `use-citation-network`, etc.) need sigma/graphology mocking.
 - **Branch coverage** is weakest; many tests cover happy paths only.

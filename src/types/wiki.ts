@@ -42,15 +42,6 @@ export interface WikiRootInfo {
   defaultPath: string;
 }
 
-/** Page types in the wiki. Mirrors the frontmatter `type` field. */
-export type WikiPageType = 'concept' | 'author' | 'method' | 'synthesis' | 'source';
-
-/** Page status values. Mirrors the frontmatter `status` field. */
-export type WikiPageStatus = 'draft' | 'reviewed' | 'stale';
-
-/** Which content fallback was used for a raw/source page. */
-export type WikiContentSource = 'full_text' | 'ai_summary' | 'abstract' | 'metadata';
-
 /** Result of `wiki_export_raw`: counts of articles + user files processed. */
 export interface RawExportReport {
   articlesWritten: number;

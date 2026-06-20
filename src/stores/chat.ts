@@ -4,7 +4,7 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 import type { WikiChatMessage } from '@/types/wiki';
 
 /** Which retrieval source backs the next outgoing message. */
-export type ChatSource = 'articles' | 'wiki';
+type ChatSource = 'articles' | 'wiki';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
