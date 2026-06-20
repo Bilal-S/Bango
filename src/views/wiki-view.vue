@@ -3,6 +3,8 @@ import { onMounted, onUnmounted, ref, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useWiki } from '@/composables/use-wiki';
+import { useNavHistory } from '@/composables/use-nav-history';
+import { isMacPlatform } from '@/utils/platform';
 import type { WikiPageSummary } from '@/types/wiki';
 import WikiToolbar from '@/components/wiki/wiki-toolbar.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
@@ -49,7 +51,17 @@ const checkingLlm = ref(true);
 const isLlmConfigured = ref(false);
 
 const pages = ref<WikiPageSummary[]>([]);
-const selectedSlug = ref<string | null>(null);
+// Browser-like page navigation history (back/forward). `selectedSlug` is a
+// read-only computed alias over the history's current entry so the template
+// reads stay unchanged; all mutations go through `navHistory.navigate()` /
+// `goBack()` / `goForward()` / `clear()`.
+const navHistory = useNavHistory<string>();
+const selectedSlug = navHistory.current;
+const canGoBack = navHistory.canGoBack;
+const canGoForward = navHistory.canGoForward;
+// Platform-specific shortcut labels shown in the button tooltips.
+const backShortcutLabel = isMacPlatform() ? 'Cmd+[' : 'Alt+Left';
+const forwardShortcutLabel = isMacPlatform() ? 'Cmd+]' : 'Alt+Right';
 const mode = ref<'view' | 'edit'>('view');
 const searchQuery = ref('');
 const viewTab = ref<'pages' | 'graph'>('pages');
@@ -102,6 +114,7 @@ const typeLabels: Record<string, string> = {
 };
 
 onMounted(async () => {
+  window.addEventListener('keydown', onKeyDown);
   await Promise.all([checkLlmConfig(), refreshStatus(), startProgressListener()]);
   await loadPages();
   // First-visit prompt: if the user has included articles + an LLM configured
@@ -110,6 +123,40 @@ onMounted(async () => {
   // Auto-ingest if wiki is stale (articles changed since last ingest).
   await autoIngestIfStale();
 });
+
+/**
+ * Platform-aware back/forward keyboard shortcuts (browser parity).
+ * macOS: Cmd+[ / Cmd+] (also Cmd+Left / Cmd+Right).
+ * Windows/Linux: Alt+Left / Alt+Right.
+ *
+ * Disabled while focus is inside an input/textarea/contenteditable, during
+ * edit mode, on the Graph tab, or when there is no current page. Only calls
+ * `preventDefault()` when the combo is actually handled so unrelated shortcuts
+ * (e.g. Cmd+Left inside a text field) keep working.
+ */
+function onKeyDown(e: KeyboardEvent): void {
+  const t = e.target as HTMLElement | null;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+    return;
+  }
+  if (viewTab.value !== 'pages' || mode.value === 'edit' || !selectedSlug.value) return;
+
+  const mac = isMacPlatform();
+  const isBack =
+    (mac && e.metaKey && (e.key === '[' || e.key === 'ArrowLeft')) ||
+    (!mac && e.altKey && e.key === 'ArrowLeft');
+  const isForward =
+    (mac && e.metaKey && (e.key === ']' || e.key === 'ArrowRight')) ||
+    (!mac && e.altKey && e.key === 'ArrowRight');
+
+  if (isBack && canGoBack.value) {
+    e.preventDefault();
+    navHistory.goBack();
+  } else if (isForward && canGoForward.value) {
+    e.preventDefault();
+    navHistory.goForward();
+  }
+}
 
 /**
  * First-visit prompt: when prerequisites are met (LLM configured + included
@@ -143,7 +190,7 @@ async function rebuildWiki(): Promise<void> {
       `Rebuild complete: ${report.pagesWritten} pages written${report.errors.length > 0 ? `, ${report.errors.length} errors` : ''}.`,
       report.errors.length > 0 ? 'error' : 'success'
     );
-    selectedSlug.value = null;
+    navHistory.clear();
     await refreshStatus();
     await loadPages();
     graphPanelRef.value?.refresh();
@@ -166,7 +213,7 @@ async function autoIngestIfStale(): Promise<void> {
         `Wiki auto-updated: ${report.pagesWritten} pages written.`,
         report.errors.length > 0 ? 'error' : 'success'
       );
-      selectedSlug.value = null;
+      navHistory.clear();
       await loadPages();
       graphPanelRef.value?.refresh();
     } catch {
@@ -190,7 +237,7 @@ async function loadPages(): Promise<void> {
   try {
     pages.value = await listPages();
     if (pages.value.length > 0 && !selectedSlug.value) {
-      selectedSlug.value = pages.value[0]!.slug;
+      navHistory.navigate(pages.value[0]!.slug);
     }
   } catch {
     pages.value = [];
@@ -206,14 +253,14 @@ function goToArticles(): void {
 }
 
 function selectPage(slug: string): void {
-  selectedSlug.value = slug;
+  navHistory.navigate(slug);
   mode.value = 'view';
   // Switch from graph to pages view so the user sees the opened page.
   viewTab.value = 'pages';
 }
 
 function navigateToPage(slug: string): void {
-  selectedSlug.value = slug;
+  navHistory.navigate(slug);
   mode.value = 'view';
 }
 
@@ -251,18 +298,19 @@ async function handleAttachFullText(articleId: string): Promise<void> {
 
 async function onIngested(): Promise<void> {
   await refreshStatus();
-  selectedSlug.value = null;
+  navHistory.clear();
   await loadPages();
   graphPanelRef.value?.refresh();
 }
 
 async function onDeleted(): Promise<void> {
-  selectedSlug.value = null;
+  navHistory.clear();
   pages.value = [];
   await refreshStatus();
 }
 
 onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown);
   stopProgressListener();
 });
 
@@ -477,13 +525,35 @@ watch(searchQuery, async (q) => {
           class="wiki-view__actionbar flex items-center justify-between px-4 py-2 border-b border-slate-200 bg-white"
         >
           <span class="text-xs text-slate-500 font-mono">{{ selectedSlug }}</span>
-          <button
-            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded"
-            @click="startEdit"
-          >
-            <span class="material-symbols-outlined text-[16px]">edit</span>
-            Edit
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              class="wiki-nav-btn"
+              :class="{ 'wiki-nav-btn--disabled': !canGoBack }"
+              :disabled="!canGoBack"
+              :title="`Back (${backShortcutLabel})`"
+              :aria-label="`Back (${backShortcutLabel})`"
+              @click="navHistory.goBack()"
+            >
+              <span class="material-symbols-outlined text-[16px]">arrow_back</span>
+            </button>
+            <button
+              class="wiki-nav-btn"
+              :class="{ 'wiki-nav-btn--disabled': !canGoForward }"
+              :disabled="!canGoForward"
+              :title="`Forward (${forwardShortcutLabel})`"
+              :aria-label="`Forward (${forwardShortcutLabel})`"
+              @click="navHistory.goForward()"
+            >
+              <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </button>
+            <button
+              class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded"
+              @click="startEdit"
+            >
+              <span class="material-symbols-outlined text-[16px]">edit</span>
+              Edit
+            </button>
+          </div>
         </div>
 
         <WikiPageViewer
@@ -491,7 +561,7 @@ watch(searchQuery, async (q) => {
           :slug="selectedSlug"
           @navigate="navigateToPage"
           @view-article="viewArticle"
-          @close="selectedSlug = null"
+          @close="navHistory.clear()"
         />
 
         <WikiPageEditor v-else :slug="selectedSlug" @saved="onSaved" @cancel="mode = 'view'" />
@@ -693,6 +763,34 @@ watch(searchQuery, async (q) => {
 
 .wiki-view__actionbar {
   min-height: 2.25rem;
+}
+
+/* Back/Forward navigation icon buttons (left of Edit). */
+.wiki-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border: none;
+  background: transparent;
+  color: rgb(71 85 105);
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.wiki-nav-btn:hover:not(:disabled) {
+  background-color: rgb(241 245 249);
+  color: rgb(15 23 42);
+}
+
+.wiki-nav-btn--disabled,
+.wiki-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 @keyframes fade-in {

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::db::app_settings_repo;
 use crate::db::audit_repo;
@@ -450,14 +451,15 @@ pub fn wiki_get_graph(db_state: tauri::State<'_, DbState>) -> Result<engine::Wik
     Ok(graph)
 }
 
-/// Run the LLM wiki ingest: build prompt from raw sources, call the LLM,
-/// parse the response into pages, write them, rebuild FTS5, clear staleness.
+/// Run the LLM wiki ingest: build prompt batches from raw sources, dispatch
+/// them to the LLM in parallel (bounded by the orchestrator's concurrency
+/// limit), write the generated pages, rebuild FTS5, and clear staleness.
 #[tauri::command]
 pub async fn wiki_ingest(
     db_state: tauri::State<'_, DbState>,
     orchestrator: tauri::State<'_, std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>,
 ) -> Result<ingest::IngestReport, AppError> {
-    let prep = {
+    let (root, config) = {
         let conn = lock_conn(&db_state)?;
         let root = storage::resolve_root(&conn)?;
         let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
@@ -466,21 +468,14 @@ pub async fn wiki_ingest(
             )
         })?;
         raw_export::process_user_files(&root)?;
-        let (prompt, source_count, truncated) = ingest::build_ingest_prompt(&root)?;
-        (root, config, prompt, source_count, truncated)
+        (root, config)
     };
-    let (root, config, prompt, _src_count, _trunc) = prep;
 
-    let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
-                         contract strictly. Output wiki pages in the exact delimited format \
-                         requested. Use [[wikilinks]] to connect pages, and ALWAYS use the \
-                         exact lowercase kebab-case slug of the target page as the link text \
-                         (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). Do not use em dashes.";
-    let (response, _tokens) = orchestrator
-        .send(&config, system_prompt, &prompt, crate::llm::orchestrator::LlmRequestType::WikiIngest)
-        .await?;
+    let batches = ingest::build_ingest_prompt_batches(&root, config.context_window_tokens)?;
+    let sender: Arc<dyn ingest::IngestLlmSender> =
+        Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
+    let mut report = ingest::run_chunked_ingest(&root, batches, sender, None, (25, 95)).await?;
 
-    let mut report = ingest::write_pages_from_response(&root, &response, None).await?;
     let conn = lock_conn(&db_state)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
     Ok(report)
@@ -643,37 +638,31 @@ async fn wiki_rebuild_inner(
     emit_wiki_progress(app_handle, 10, "Wiki directory ready");
 
     // Step 1: Export included articles + process user files.
-    let root = {
+    let (root, config) = {
         let conn = lock_conn(db_state)?;
         let root = storage::resolve_root(&conn)?;
         raw_export::prepare_all(&conn, &root)?;
-        root
-    };
-    emit_wiki_progress(app_handle, 15, "Raw sources prepared");
-
-    // Step 2: Build prompt + call LLM.
-    let (prompt, _src_count, _trunc) = ingest::build_ingest_prompt(&root)?;
-    emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
-
-    let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
-                         contract strictly. Output wiki pages in the exact delimited format \
-                         requested. Use [[wikilinks]] to connect pages, and ALWAYS use the \
-                         exact lowercase kebab-case slug of the target page as the link text \
-                         (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). Do not use em dashes.";
-    let config = {
-        let conn = lock_conn(db_state)?;
-        crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )
-        })?
+        })?;
+        (root, config)
     };
-    let (response, _tokens) = orchestrator
-        .send(&config, system_prompt, &prompt, crate::llm::orchestrator::LlmRequestType::WikiIngest)
-        .await?;
+    emit_wiki_progress(app_handle, 15, "Raw sources prepared");
 
-    // Step 3: Parse + write + rebuild FTS5.
-    let mut report = ingest::write_pages_from_response(&root, &response, Some(app_handle)).await?;
+    // Step 2: Build prompt batches + dispatch them to the LLM in parallel.
+    // Each batch carries the full source index, so batches are independent and
+    // safe to run concurrently. Progress emits as each batch completes.
+    let batches = ingest::build_ingest_prompt_batches(&root, config.context_window_tokens)?;
+    let sender: Arc<dyn ingest::IngestLlmSender> =
+        Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
+    emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
+    let mut report =
+        ingest::run_chunked_ingest(&root, batches, sender, Some(app_handle), (25, 95)).await?;
+
+    // Step 3: Finalize (FTS5 rebuild + log + clear staleness).
+    emit_wiki_progress(app_handle, 95, "Indexing pages...");
     let conn = lock_conn(db_state)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
 
@@ -707,35 +696,29 @@ async fn wiki_export_and_ingest_inner(
 ) -> Result<ingest::IngestReport, AppError> {
     emit_wiki_progress(app_handle, 0, "Preparing raw sources...");
 
-    let root = {
+    let (root, config) = {
         let conn = lock_conn(db_state)?;
         let root = storage::resolve_root(&conn)?;
         raw_export::prepare_all(&conn, &root)?;
-        root
-    };
-    emit_wiki_progress(app_handle, 15, "Raw sources prepared");
-
-    let (prompt, _src_count, _trunc) = ingest::build_ingest_prompt(&root)?;
-    emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
-
-    let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
-                         contract strictly. Output wiki pages in the exact delimited format \
-                         requested. Use [[wikilinks]] to connect pages, and ALWAYS use the \
-                         exact lowercase kebab-case slug of the target page as the link text \
-                         (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). Do not use em dashes.";
-    let config = {
-        let conn = lock_conn(db_state)?;
-        crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+        let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )
-        })?
+        })?;
+        (root, config)
     };
-    let (response, _tokens) = orchestrator
-        .send(&config, system_prompt, &prompt, crate::llm::orchestrator::LlmRequestType::WikiIngest)
-        .await?;
+    emit_wiki_progress(app_handle, 15, "Raw sources prepared");
 
-    let mut report = ingest::write_pages_from_response(&root, &response, Some(app_handle)).await?;
+    // Build prompt batches + dispatch them to the LLM in parallel.
+    let batches = ingest::build_ingest_prompt_batches(&root, config.context_window_tokens)?;
+    let sender: Arc<dyn ingest::IngestLlmSender> =
+        Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
+    emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
+    let mut report =
+        ingest::run_chunked_ingest(&root, batches, sender, Some(app_handle), (25, 95)).await?;
+
+    // Finalize (FTS5 rebuild + log + clear staleness).
+    emit_wiki_progress(app_handle, 95, "Indexing pages...");
     let conn = lock_conn(db_state)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
 

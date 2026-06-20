@@ -81,6 +81,124 @@ describe('renderWikiMarkdown', () => {
     expect(out).toContain('>Sugar-Reduction<');
     expect(out).toContain('>OBESITY<');
   });
+
+  it('converts a bare UUID in prose to a wikilink', () => {
+    const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
+    const out = renderWikiMarkdown(`See changes ${uuid} for details.`);
+    expect(out).toContain('class="wikilink"');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    // Without source metadata the UUID is the visible link text, but it must
+    // be wrapped inside an anchor (clickable), not bare text.
+    expect(out).toContain(`>${uuid}</a>`);
+  });
+
+  it('uses source title as alias for a bare UUID when sources map has it', () => {
+    const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
+    const sources = new Map([[uuid, src(uuid, 'Sugar Levy Study', 2020)]]);
+    const out = renderWikiMarkdown(`See ${uuid}.`, { sources });
+    expect(out).toContain(`data-slug="${uuid}"`);
+    expect(out).toContain('>Sugar Levy Study (2020)<');
+    // Raw UUID should not appear as visible text.
+    expect(out).not.toContain(`>${uuid}<`);
+  });
+
+  it('uses pageTitles for bare UUID as a synthesis chip (priority over sources)', () => {
+    const uuid = '0e4822b6-b8bb-4ed0-8333-84336a07797b';
+    // Both maps have the UUID; pageTitles should win and produce a chip.
+    const sources = new Map([[uuid, src(uuid, 'Source Title', 2022)]]);
+    const pageTitles = new Map([[uuid, 'Wiki Page Display Title']]);
+    const out = renderWikiMarkdown(`Associated study: ${uuid}`, { sources, pageTitles });
+    // Synthesis chip with the wiki page title, NOT the source label.
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    expect(out).toContain('>Wiki Page Display Title<');
+    // Source label should NOT appear (pageTitles takes priority).
+    expect(out).not.toContain('Source Title');
+  });
+
+  it('renders bare UUID as synthesis chip when pageTitles has it (no sources)', () => {
+    const uuid = '0e4822b6-b8bb-4ed0-8333-84336a07797b';
+    const pageTitles = new Map([[uuid, 'Added Sugar in Australia']]);
+    const out = renderWikiMarkdown(`See ${uuid}.`, { pageTitles });
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain('>Added Sugar in Australia<');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    // Raw UUID hidden.
+    expect(out).not.toContain(`>${uuid}<`);
+  });
+
+  it('does not double-transform UUID already inside [[...]]', () => {
+    const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
+    const out = renderWikiMarkdown(`See [[${uuid}]].`);
+    // Should produce exactly one wikilink anchor, not nested ones.
+    const linkCount = (out.match(/class="wikilink"/g) || []).length;
+    expect(linkCount).toBe(1);
+    expect(out).toContain(`data-slug="${uuid}"`);
+  });
+
+  it('does not transform UUID inside [^art-...]', () => {
+    const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
+    const out = renderWikiMarkdown(`Claim [^art-${uuid}].`);
+    // Should be an art-ref anchor, not a wikilink.
+    expect(out).toContain('class="art-ref');
+    expect(out).not.toContain('class="wikilink"');
+  });
+
+  it('handles multiple bare UUIDs in one line (author profile pattern)', () => {
+    const uuids = [
+      'f399a079-dbe4-589b-84ff-057638871f43',
+      '6d2ec462-d1c7-57a0-acdb-7f8fd694fdf1',
+      'b1e146ea-477a-5f1d-83b7-d9331ec28e83',
+      'f764b86c-1516-5c8e-9997-88c61c50a683',
+    ];
+    const out = renderWikiMarkdown(
+      `Author on changes ${uuids[0]}, obesity ${uuids[1]}, purchases ${uuids[2]}, modelling ${uuids[3]}.`
+    );
+    for (const uuid of uuids) {
+      expect(out).toContain(`data-slug="${uuid}"`);
+    }
+    const linkCount = (out.match(/class="wikilink"/g) || []).length;
+    expect(linkCount).toBe(4);
+  });
+
+  it('converts [^art-uuid]: definition lines into synthesis wikilinks', () => {
+    const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
+    const sources = new Map([[uuid, src(uuid, 'Anticipatory changes', 2020)]]);
+    const md = `Some prose [^art-${uuid}].
+
+[^art-${uuid}]: Anticipatory changes in British household purchases (Rogers et al., 2020).`;
+    const out = renderWikiMarkdown(md, { sources });
+    // The definition line is replaced by a synthesis-styled wikilink chip.
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    expect(out).toContain('>Anticipatory changes (2020)<');
+    // The definition's citation text is gone (replaced by the chip).
+    expect(out).not.toContain('Rogers et al.');
+    expect(out).not.toContain(']:');
+  });
+
+  it('preserves inline [^art-uuid] refs alongside definition lines', () => {
+    const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
+    const sources = new Map([[uuid, src(uuid, 'Study Title', 2020)]]);
+    const md = `See this claim [^art-${uuid}].
+
+[^art-${uuid}]: Some citation text`;
+    const out = renderWikiMarkdown(md, { sources });
+    // Inline ref becomes an art-ref anchor.
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    // Definition line becomes a synthesis wikilink.
+    expect(out).toContain('wikilink--synthesis');
+    // Exactly one of each.
+    expect((out.match(/class="art-ref"/g) || []).length).toBe(1);
+    expect((out.match(/wikilink--synthesis/g) || []).length).toBe(1);
+  });
+
+  it('does not transform short hex-like text that is not a UUID', () => {
+    // "deadbeef" is 8 hex chars but lacks the UUID dashes/structure.
+    const out = renderWikiMarkdown('Short hex deadbeef and partial 12345678-1234.');
+    expect(out).not.toContain('class="wikilink"');
+  });
 });
 
 describe('formatArtRefLabel', () => {

@@ -108,11 +108,25 @@ describe each durable boundary so agents can locate the right area. Create a chi
     templates), `frontmatter.rs` (dependency-free YAML parser/serializer),
     `raw_export.rs` (included-article export + user-file extraction for PDF/TXT/HTML/etc),
     `fts.rs` (FTS5 BM25 search index), `ingest.rs` (LLM page generation: prompt builder,
-    `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild),
-    `engine.rs` (deterministic lint + `build_graph` for link graph visualization),
-    `chat.rs` (token-budgeted RAG chat over FTS5 index; self-heals the FTS table via
-    `fts::ensure_index_populated` when the index is empty OR its row count
+    `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild, **parallel chunked
+    ingest**), `engine.rs` (deterministic lint + `build_graph` for link graph
+    visualization), `chat.rs` (token-budgeted RAG chat over FTS5 index; self-heals the
+    FTS table via `fts::ensure_index_populated` when the index is empty OR its row count
     mismatches the number of `.md` pages on disk).
+    **Parallel chunked ingest** (`ingest.rs`): `wiki_ingest`, `wiki_rebuild`, and
+    `wiki_export_and_ingest` no longer make one monolithic LLM call. They split raw
+    sources into batches sized to `config.context_window_tokens * 0.4` (input budget;
+    remainder is available for output pages), dispatch all batches concurrently via a
+    `tokio::task::JoinSet` (bounded by the orchestrator's `max_concurrent_requests`
+    semaphore), and emit `wiki:progress` on every batch completion so the progress bar
+    moves smoothly across the 25-95% range. Each batch carries a compact full-source
+    index (title + slug) so the model can `[[link]]` across batches without sequential
+    slug-forwarding. Per-batch failures are tolerated (recorded in `report.errors`;
+    other batches still write). Key types: `IngestBatch`, `IngestLlmSender` (injectable
+    trait; production `OrchestratorIngestSender`, test `FakeSender`),
+    `build_ingest_prompt_batches`, `run_chunked_ingest`. The legacy single-call
+    `build_ingest_prompt` + `write_pages_from_response` remain for backward compat and
+    regression tests.
     `commands/wiki_cmd.rs` exposes
     all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
@@ -252,7 +266,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
     the split-pane editor (`wiki-page-editor.vue`), the sigma graph view
     (`wiki-graph-panel.vue` with ForceAtlas2 layout, color-coded by page type), and the
     toolbar (`wiki-toolbar.vue`: Re-scaffold one-click pipeline, Add Documents, Lint, Delete
-    Wiki, progress bar). Composable: `use-wiki.ts`; types: `types/wiki.ts`.
+    Wiki, progress bar). Composable: `use-wiki.ts`; types: `types/wiki.ts`. The
+    page action bar carries **Back/Forward** navigation icons (left of Edit) backed
+    by the generic `useNavHistory<string>` composable (see `src/composables/`), plus
+    platform-aware keyboard shortcuts registered via `window.addEventListener('keydown', ...)`
+    in `onMounted` / removed in `onUnmounted`: macOS `Cmd+[` / `Cmd+]` (and `Cmd+Left` /
+    `Cmd+Right`); Windows/Linux `Alt+Left` / `Alt+Right`. Shortcuts are disabled while focus
+    is in an input/textarea/contenteditable, in edit mode, on the Graph tab, or at the
+    history bounds. `selectedSlug` is a read-only computed alias over the history's current
+    entry; all mutations go through `navigate()` / `goBack()` / `goForward()` / `clear()`.
   - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
@@ -288,6 +310,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     layout-mode switch, PNG/GEXF export via `exportPrefix`, and subgraph
     recalculate that respects `graphType: 'directed'|'undirected'` and
     `yearAttribute: 'year'|'avgYear'`). Tested by `src/__tests__/use-network-view.test.ts`.
+    `use-nav-history.ts` (generic `<T>` browser-like navigation history: `navigate`
+    pushes + truncates forward history + skips duplicates; `goBack`/`goForward` no-op at
+    bounds; `clear` wipes the stack. Consumed by `wiki-view.vue` for Back/Forward page
+    navigation. Pure logic, no DOM/Tauri deps; tested by
+    `src/__tests__/composables/use-nav-history.test.ts`.
   - **`src/utils/`** - pure utilities: `network-export.ts` (graph PNG/GEXF export via the
     `save()` + `write_text_to_file` pattern), `formatters.ts`, `color.ts`, `debounce.ts`,
     `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `llm-error.ts`,
@@ -298,7 +325,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     HTML-escapes slug/alias text, strips `/raw/*.md` artifact lines, then runs
     `marked.parse`. Consumed by both `wiki-page-viewer.vue` (with a sources map) and
     `chat-view.vue` assistant bubbles (sources optional). Pure function, unit-tested in
-    `src/__tests__/utils/wiki-markdown.test.ts`).
+    `src/__tests__/utils/wiki-markdown.test.ts`), `platform.ts` (`isMacPlatform()` reads
+    `navigator.platform`; `SHORTCUT_MODIFIER` constant resolves to `'Cmd'` or `'Alt'`.
+    Dependency-free, resilient to `navigator` absence. Used by `wiki-view.vue` to pick the
+    correct back/forward keyboard shortcut modifier. Tested by
+    `src/__tests__/utils/platform.test.ts`).
   - **`src/stores/chat.ts`** - Pinia chat store. Holds `selectedArticleIds`, `messages`,
     `loading`, `error`, plus the retrieval-source state `source: 'articles'|'wiki'`
     (default `'articles'`; mutually exclusive) and `wikiReady` (drives the chat-view wiki

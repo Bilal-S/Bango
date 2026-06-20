@@ -14,10 +14,11 @@ const emit = defineEmits<{
   viewArticle: [articleId: string];
 }>();
 
-const { getPage, listSources } = useWiki();
+const { getPage, listSources, listPages } = useWiki();
 
 const page = ref<WikiPage | null>(null);
 const sources = ref<Map<string, WikiSourceInfo>>(new Map());
+const pageTitles = ref<Map<string, string>>(new Map());
 const loading = ref(false);
 const error = ref<string | null>(null);
 
@@ -33,6 +34,22 @@ async function loadSources(): Promise<void> {
     sources.value = map;
   } catch {
     // Non-fatal: references will show as raw IDs.
+  }
+}
+
+/** Load wiki page titles once so bare UUIDs in prose can render as
+ *  synthesis-styled chips with human-readable titles instead of raw UUIDs. */
+async function loadPageTitles(): Promise<void> {
+  if (pageTitles.value.size > 0) return;
+  try {
+    const pages = await listPages();
+    const map = new Map<string, string>();
+    for (const p of pages) {
+      map.set(p.slug, p.title);
+    }
+    pageTitles.value = map;
+  } catch {
+    // Non-fatal: bare UUIDs fall back to source labels or raw UUIDs.
   }
 }
 
@@ -54,7 +71,10 @@ function parseSourceArticles(raw: string | null): string[] {
  */
 const renderedBody = computed(() => {
   if (!page.value) return '';
-  return renderWikiMarkdown(page.value.body, { sources: sources.value });
+  return renderWikiMarkdown(page.value.body, {
+    sources: sources.value,
+    pageTitles: pageTitles.value,
+  });
 });
 
 /** Load the page when the slug changes. */
@@ -66,7 +86,7 @@ async function loadPage(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    await loadSources();
+    await Promise.all([loadSources(), loadPageTitles()]);
     page.value = await getPage(props.slug);
     if (!page.value) {
       error.value = `Page "${props.slug}" not found.`;
@@ -252,6 +272,24 @@ watch(() => props.slug, loadPage, { immediate: true });
 
 .wiki-page-viewer :deep(.wikilink:hover) {
   text-decoration-style: solid;
+}
+
+/* Synthesis-styled wikilink chip (from [^art-uuid]: definition lines). */
+.wiki-page-viewer :deep(.wikilink--synthesis) {
+  display: inline-block;
+  background: rgb(168 85 247 / 0.12); /* purple-500 @ 12% */
+  color: rgb(126 34 206); /* purple-800 */
+  border: 1px solid rgb(168 85 247 / 0.3);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.8em;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.wiki-page-viewer :deep(.wikilink--synthesis:hover) {
+  background: rgb(168 85 247 / 0.2);
 }
 
 .wiki-page-viewer :deep(.art-ref) {

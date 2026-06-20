@@ -14,15 +14,19 @@
 //! 6. Append a run entry to `wiki/log.md`.
 //! 7. Rebuild the FTS5 index.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use async_trait::async_trait;
 use rusqlite::Connection;
+use tauri::Emitter;
 
 use crate::error::AppError;
+use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
+use crate::models::llm_config::LlmConfig;
 use crate::wiki::frontmatter::{self, Frontmatter};
 use crate::wiki::fts;
 use crate::wiki::raw_export;
-use tauri::Emitter;
 
 /// The maximum number of characters of raw source to send to the LLM.
 /// Conservative to stay within typical context windows.
@@ -239,6 +243,325 @@ fn sanitize_slug(slug: &str) -> String {
     let cleaned: String =
         slug.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' }).collect();
     cleaned.trim_matches('-').to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Chunked / parallel ingest
+// ---------------------------------------------------------------------------
+
+/// Fraction of the configured context window reserved for the input prompt.
+/// The remainder is available for the model's output (the wiki pages).
+const INPUT_BUDGET_FRACTION: f64 = 0.4;
+
+/// Hard cap on the number of input chars per batch, regardless of the
+/// configured context window. Protects against pathological oversized calls.
+const MAX_BATCH_INPUT_CHARS: usize = 80_000;
+
+/// Approximate token count for a chunk of text (1 token ~= 4 chars).
+#[must_use]
+fn estimate_tokens(text: &str) -> usize {
+    text.len() / 4
+}
+
+/// Compute the input character budget for one batch from the configured context
+/// window. Falls back to `MAX_SOURCE_CHARS` when the configured window is
+/// unusable (zero / negative).
+#[must_use]
+fn batch_input_char_budget(context_window_tokens: i32) -> usize {
+    if context_window_tokens <= 0 {
+        return MAX_SOURCE_CHARS;
+    }
+    let tokens = (f64::from(context_window_tokens) * INPUT_BUDGET_FRACTION) as usize;
+    let chars = tokens.saturating_mul(4);
+    chars.clamp(4_000, MAX_BATCH_INPUT_CHARS)
+}
+
+/// A single source document loaded from `raw/` and ready for batching.
+#[derive(Debug, Clone)]
+pub struct RawSource {
+    /// `slug` frontmatter value (or empty when absent).
+    pub slug: String,
+    /// `title` frontmatter value (or "Untitled").
+    pub title: String,
+    /// Full Markdown body (frontmatter stripped).
+    pub body: String,
+    /// Original path on disk (for debugging / error messages).
+    pub path: PathBuf,
+}
+
+/// A compiled ingest batch: the prompt to send to the LLM plus metadata.
+#[derive(Debug, Clone)]
+pub struct IngestBatch {
+    /// Index of this batch within the run (0-based).
+    pub index: usize,
+    /// Total number of batches in the run.
+    pub total: usize,
+    /// Source slugs included in this batch's `sources_text`.
+    pub source_slugs: Vec<String>,
+    /// The full user prompt (contract + source index + sources + instructions).
+    pub prompt: String,
+}
+
+/// Load and parse every `raw/*.md` source into a `RawSource`.
+pub fn load_raw_sources(root: &Path) -> Result<Vec<RawSource>, AppError> {
+    let raw_files = raw_export::list_raw_files(root)?;
+    let mut sources = Vec::with_capacity(raw_files.len());
+    for (path, fm) in raw_files {
+        let (_fm, body) = frontmatter::read_file(&path)?;
+        let title = fm.get("title").unwrap_or("Untitled").to_string();
+        let slug = fm.get("slug").unwrap_or("").to_string();
+        sources.push(RawSource { slug, title, body, path });
+    }
+    Ok(sources)
+}
+
+/// Build a compact, metadata-only index of ALL sources. Embedded in every
+/// batch prompt so the model can `[[link]]` to sources it does not fully
+/// process — this is what keeps batches independent and parallelizable.
+fn build_source_index(sources: &[RawSource]) -> String {
+    let mut out = String::new();
+    for s in sources {
+        let slug = if s.slug.is_empty() { "unknown" } else { &s.slug };
+        out.push_str(&format!("- {} [[{}]]\n", s.title, slug));
+    }
+    out
+}
+
+/// Build a single batch's prompt from the contract, the full source index,
+/// the batch's source bodies, and the standard instructions block.
+fn build_batch_prompt(contract: &str, source_index: &str, batch_sources: &[&RawSource]) -> String {
+    let mut sources_text = String::new();
+    for s in batch_sources {
+        let slug = if s.slug.is_empty() { "unknown" } else { &s.slug };
+        sources_text.push_str(&format!(
+            "### Source: {} (slug: {})\n\n{}\n\n---\n\n",
+            s.title, slug, s.body
+        ));
+    }
+    format!(
+        "{contract}\n\n\
+         # Full Source Index (for cross-referencing)\n\n\
+         The complete set of source documents in this wiki run is listed below. \
+         You may create [[wikilinks]] to any of them, even if you are not asked to \
+         fully process that source in this batch:\n\n\
+         {source_index}\n\n\
+         # Raw Sources for THIS Batch\n\n\
+         {sources_text}\n\n\
+         # Instructions\n\n\
+         Synthesize the above sources into wiki pages. Output each page in this exact format:\n\n\
+         <!-- PAGE:slug -->\n\
+         ---\n\
+         id: <slug>\n\
+         title: \"<title>\"\n\
+         type: concept | author | method | synthesis\n\
+         slug: <kebab-case-slug>\n\
+         summary: \"<1-2 sentence summary>\"\n\
+         status: draft\n\
+         links: []\n\
+         ---\n\
+         <Markdown body with [[wikilinks]] to other pages>\n\n\
+         IMPORTANT: Create a wiki page for EVERY source document in THIS batch. Do not skip \
+         any. Each source should appear in at least one page. \
+         Do NOT include raw file paths (/raw/...), file names, or source_file references \
+         in your output. Use [^art-id] source references or [[wikilinks]] instead. \
+         Generate concept, synthesis, and author pages for prominent entities. Use [[slug]] \
+         links to connect related pages (you may link to sources from the Full Source Index). \
+         Each page must start with the <!-- PAGE:slug --> delimiter."
+    )
+}
+
+/// Split the raw sources into batches sized to the configured input budget.
+///
+/// Each batch carries the full source index (so the model can cross-link to
+/// sources outside its batch), making the batches independent and safe to run
+/// in parallel. Returns an empty `Vec` when there are no sources.
+pub fn build_ingest_prompt_batches(
+    root: &Path,
+    context_window_tokens: i32,
+) -> Result<Vec<IngestBatch>, AppError> {
+    let contract = std::fs::read_to_string(root.join("AGENTS.md")).unwrap_or_default();
+    let sources = load_raw_sources(root)?;
+    if sources.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let budget = batch_input_char_budget(context_window_tokens);
+    let source_index = build_source_index(&sources);
+    // Reserve room for the contract + source index + instructions overhead.
+    let overhead = estimate_tokens(&contract) + estimate_tokens(&source_index) + 600;
+    let overhead_chars = overhead.saturating_mul(4);
+    let usable_budget = budget.saturating_sub(overhead_chars).max(2_000);
+
+    // Accumulate (slugs, prompt) tuples, then convert to IngestBatch at the end.
+    let mut batches: Vec<(Vec<String>, String)> = Vec::new();
+    let mut current: Vec<&RawSource> = Vec::new();
+    let mut current_len: usize = 0;
+
+    for src in &sources {
+        // Entry header + body + separator.
+        let slug = if src.slug.is_empty() { "unknown" } else { &src.slug };
+        let entry_len = src.body.len() + slug.len() + src.title.len() + 40;
+        if !current.is_empty() && current_len + entry_len > usable_budget {
+            // Flush current batch.
+            let prompt = build_batch_prompt(&contract, &source_index, &current);
+            let slugs: Vec<String> = current.iter().map(|s| s.slug.clone()).collect();
+            batches.push((slugs, prompt));
+            current.clear();
+            current_len = 0;
+        }
+        current.push(src);
+        current_len += entry_len;
+    }
+    if !current.is_empty() {
+        let prompt = build_batch_prompt(&contract, &source_index, &current);
+        let slugs: Vec<String> = current.iter().map(|s| s.slug.clone()).collect();
+        batches.push((slugs, prompt));
+    }
+
+    let total = batches.len();
+    Ok(batches
+        .into_iter()
+        .enumerate()
+        .map(|(i, (slugs, prompt))| IngestBatch { index: i, total, source_slugs: slugs, prompt })
+        .collect())
+}
+
+/// Injectable LLM sender for the chunked ingest. Production wraps the
+/// `LlmOrchestrator`; tests provide a deterministic, latency-simulating fake.
+#[async_trait]
+pub trait IngestLlmSender: Send + Sync {
+    /// Send one batch prompt and return the raw LLM response text.
+    async fn send(&self, prompt: &str) -> Result<String, AppError>;
+}
+
+/// Production sender: delegates to the shared `LlmOrchestrator`.
+pub struct OrchestratorIngestSender {
+    orchestrator: Arc<LlmOrchestrator>,
+    config: LlmConfig,
+    system_prompt: &'static str,
+}
+
+impl OrchestratorIngestSender {
+    #[must_use]
+    pub fn new(orchestrator: Arc<LlmOrchestrator>, config: LlmConfig) -> Self {
+        Self { orchestrator, config, system_prompt: INGEST_SYSTEM_PROMPT }
+    }
+}
+
+#[async_trait]
+impl IngestLlmSender for OrchestratorIngestSender {
+    async fn send(&self, prompt: &str) -> Result<String, AppError> {
+        let (response, _tokens) = self
+            .orchestrator
+            .send(&self.config, self.system_prompt, prompt, LlmRequestType::WikiIngest)
+            .await?;
+        Ok(response)
+    }
+}
+
+/// Static system prompt shared by the chunked and legacy single-call paths.
+pub const INGEST_SYSTEM_PROMPT: &str = "You are a research knowledge-base synthesizer. Follow \
+     the AGENTS.md contract strictly. Output wiki pages in the exact delimited format requested. \
+     Use [[wikilinks]] to connect pages, and ALWAYS use the exact lowercase kebab-case slug of \
+     the target page as the link text (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). \
+     Do not use em dashes.";
+
+/// Run the chunked, parallel ingest pipeline.
+///
+/// - Dispatches all batches concurrently via a `tokio::task::JoinSet`. The
+///   orchestrator's semaphore bounds actual in-flight LLM calls
+///   (`max_concurrent_requests`), so no extra concurrency knob is needed.
+/// - Collects results as they complete (`join_next`), writing each batch's
+///   pages to disk immediately and emitting `wiki:progress` on every completion
+///   (so the progress bar moves smoothly regardless of batch finish order).
+/// - Tolerates per-batch failures: a failed batch is recorded in
+///   `report.errors`; the remaining batches still write their pages.
+///
+/// `progress_range` is `(start_pct, end_pct)` — the slice of the 0–100 pipeline
+/// bar that the LLM + write phase should occupy (e.g. `(25, 95)`).
+pub async fn run_chunked_ingest(
+    root: &Path,
+    batches: Vec<IngestBatch>,
+    sender: Arc<dyn IngestLlmSender>,
+    app_handle: Option<&tauri::AppHandle>,
+    progress_range: (usize, usize),
+) -> Result<IngestReport, AppError> {
+    let mut report = IngestReport::default();
+    if batches.is_empty() {
+        return Ok(report);
+    }
+
+    // Ensure wiki/ output dirs exist before any batch writes.
+    crate::wiki::storage::scaffold_tree(root)?;
+
+    let total_batches = batches.len();
+    let (start_pct, end_pct) = progress_range;
+    let span = end_pct.saturating_sub(start_pct).max(1);
+
+    // Spawn one task per batch. Each task sends its prompt and returns the
+    // parsed pages (parsing inside the task keeps the main loop tight).
+    let mut join_set: tokio::task::JoinSet<Result<(usize, Vec<ParsedPage>), AppError>> =
+        tokio::task::JoinSet::new();
+    for batch in batches {
+        let sender = Arc::clone(&sender);
+        join_set.spawn(async move {
+            let response = sender.send(&batch.prompt).await?;
+            Ok((batch.index, parse_llm_pages(&response)))
+        });
+    }
+
+    // Collect as they complete. Track how many have finished so the progress
+    // bar advances monotonically regardless of completion order.
+    let mut completed = 0usize;
+    while let Some(res) = join_set.join_next().await {
+        completed += 1;
+        match res {
+            Ok(Ok((batch_index, pages))) => {
+                report.pages_written += pages.len();
+                for page in &pages {
+                    if let Err(e) = write_page(root, page) {
+                        report.errors.push(format!("Failed to write page {}: {}", page.slug, e));
+                    }
+                }
+                if let Some(handle) = app_handle {
+                    let pct = start_pct + (completed * span) / total_batches.max(1);
+                    let _ = handle.emit(
+                        "wiki:progress",
+                        crate::commands::wiki_cmd::WikiProgress {
+                            step: pct.min(end_pct),
+                            total_steps: crate::commands::wiki_cmd::WIKI_PIPELINE_TOTAL_STEPS,
+                            message: format!(
+                                "Processed batch {completed}/{total_batches} (batch {}): {} pages",
+                                batch_index + 1,
+                                pages.len()
+                            ),
+                        },
+                    );
+                }
+            }
+            Ok(Err(e)) => {
+                report.errors.push(format!("Batch LLM call failed: {e}"));
+                if let Some(handle) = app_handle {
+                    let pct = start_pct + (completed * span) / total_batches.max(1);
+                    let _ = handle.emit(
+                        "wiki:progress",
+                        crate::commands::wiki_cmd::WikiProgress {
+                            step: pct.min(end_pct),
+                            total_steps: crate::commands::wiki_cmd::WIKI_PIPELINE_TOTAL_STEPS,
+                            message: format!("Batch failed ({completed}/{total_batches}): {e}"),
+                        },
+                    );
+                }
+            }
+            Err(join_err) => {
+                report.errors.push(format!("Batch task panicked: {join_err}"));
+            }
+        }
+        // Yield so emitted events flush to the webview between completions.
+        tokio::task::yield_now().await;
+    }
+
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -471,5 +794,253 @@ See [[alpha]].
         assert_eq!(sanitize_slug("sugar-tax!"), "sugar-tax");
         assert_eq!(sanitize_slug("foo bar baz"), "foo-bar-baz");
         assert_eq!(sanitize_slug("---leading"), "leading");
+    }
+
+    // -----------------------------------------------------------------
+    // Chunked / parallel ingest
+    // -----------------------------------------------------------------
+
+    /// Write `n` raw source files with bodies of roughly `body_chars` each.
+    fn write_many_sources(root: &Path, n: usize, body_chars: usize) {
+        std::fs::create_dir_all(root.join("raw")).unwrap();
+        std::fs::write(root.join("AGENTS.md"), "# Contract").unwrap();
+        for i in 0..n {
+            let mut fm = Frontmatter::default();
+            let id = format!("art-{i}");
+            let title = format!("Article {i}");
+            fm.set("id", &id);
+            fm.set("title", &title);
+            fm.set("type", "source");
+            fm.set("slug", &id);
+            fm.set("status", "draft");
+            fm.set("summary", "");
+            fm.set("links", "[]");
+            let body = "x".repeat(body_chars);
+            frontmatter::write_file(&root.join(format!("raw/{id}.md")), &fm, &body).unwrap();
+        }
+    }
+
+    #[test]
+    fn batch_input_char_budget_uses_fraction_of_context_window() {
+        // 50_000 tokens * 0.4 * 4 chars/token = 80_000, but capped at MAX_BATCH_INPUT_CHARS.
+        assert_eq!(batch_input_char_budget(50_000), MAX_BATCH_INPUT_CHARS);
+        // 10_000 tokens * 0.4 * 4 = 16_000 chars.
+        assert_eq!(batch_input_char_budget(10_000), 16_000);
+        // Zero/negative falls back to MAX_SOURCE_CHARS.
+        assert_eq!(batch_input_char_budget(0), MAX_SOURCE_CHARS);
+        assert_eq!(batch_input_char_budget(-1), MAX_SOURCE_CHARS);
+        // Tiny window clamps to the 4_000 floor.
+        assert_eq!(batch_input_char_budget(1), 4_000);
+    }
+
+    #[test]
+    fn build_ingest_prompt_batches_single_batch_when_small() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_many_sources(root, 2, 500);
+
+        let batches = build_ingest_prompt_batches(root, 50_000).unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].index, 0);
+        assert_eq!(batches[0].total, 1);
+        assert_eq!(batches[0].source_slugs, vec!["art-0".to_string(), "art-1".to_string()]);
+        // Single batch still carries the full source index + the instructions.
+        assert!(batches[0].prompt.contains("Full Source Index"));
+        assert!(batches[0].prompt.contains("Article 0"));
+        assert!(batches[0].prompt.contains("Article 1"));
+        assert!(batches[0].prompt.contains("<!-- PAGE:slug -->"));
+    }
+
+    #[test]
+    fn build_ingest_prompt_batches_splits_large_corpus() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        // 20 sources * 2000 chars = 40_000 chars of bodies. With a small
+        // context window (2_000 tokens -> 3_200 chars budget), this must split
+        // into multiple batches.
+        write_many_sources(root, 20, 2000);
+
+        let batches = build_ingest_prompt_batches(root, 2_000).unwrap();
+        assert!(batches.len() > 1, "expected multiple batches, got {}", batches.len());
+
+        // Every batch index + total is consistent.
+        for (i, b) in batches.iter().enumerate() {
+            assert_eq!(b.index, i);
+            assert_eq!(b.total, batches.len());
+        }
+
+        // The union of all batch source_slugs covers every source exactly once.
+        let mut all: Vec<String> = batches.iter().flat_map(|b| b.source_slugs.clone()).collect();
+        all.sort();
+        let mut expected: Vec<String> = (0..20).map(|i| format!("art-{i}")).collect();
+        expected.sort();
+        assert_eq!(all, expected, "every source must appear in exactly one batch");
+    }
+
+    #[test]
+    fn build_ingest_prompt_batches_carries_full_source_index_in_every_batch() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_many_sources(root, 6, 2000);
+
+        let batches = build_ingest_prompt_batches(root, 2_000).unwrap();
+        assert!(batches.len() > 1);
+        // Each batch prompt must reference ALL 6 sources in the index, even
+        // though each batch only fully processes a subset. This is what makes
+        // batches independently cross-linkable in parallel.
+        for b in &batches {
+            for i in 0..6 {
+                let title = format!("Article {i}");
+                assert!(
+                    b.prompt.contains(&title),
+                    "batch {} prompt missing source index entry '{}'",
+                    b.index,
+                    title
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn build_ingest_prompt_batches_empty_when_no_sources() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("raw")).unwrap();
+        std::fs::write(root.join("AGENTS.md"), "# Contract").unwrap();
+
+        let batches = build_ingest_prompt_batches(root, 50_000).unwrap();
+        assert!(batches.is_empty());
+    }
+
+    /// Fake sender: sleeps to simulate LLM latency, then returns one page per
+    /// source slug embedded in the prompt. Lets us exercise the parallel path
+    /// deterministically.
+    struct FakeSender {
+        delay_ms: u64,
+        /// When set, the batch whose prompt contains this substring errors.
+        fail_marker: Option<String>,
+    }
+
+    #[async_trait]
+    impl IngestLlmSender for FakeSender {
+        async fn send(&self, prompt: &str) -> Result<String, AppError> {
+            if let Some(marker) = &self.fail_marker {
+                if prompt.contains(marker) {
+                    return Err(AppError::Import(format!("simulated failure for {marker}")));
+                }
+            }
+            if self.delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+            }
+            // Emit one PAGE per (slug: ...) occurrence in the batch sources.
+            let mut out = String::new();
+            for cap in regex::Regex::new(r"slug: (art-\d+)").unwrap().captures_iter(prompt) {
+                let slug = &cap[1];
+                out.push_str(&format!(
+                    "<!-- PAGE:{slug} -->\n---\nid: {slug}\ntitle: \"{slug}\"\ntype: concept\n\
+                     slug: {slug}\nsummary: \"\"\nstatus: draft\nlinks: []\n---\n\n# {slug}\n\nBody.\n\n"
+                ));
+            }
+            Ok(out)
+        }
+    }
+
+    #[tokio::test]
+    async fn run_chunked_ingest_processes_batches_in_parallel_and_writes_all_pages() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        crate::wiki::storage::scaffold_tree(root).unwrap();
+        // 6 sources, small window -> multiple batches.
+        write_many_sources(root, 6, 2000);
+
+        let batches = build_ingest_prompt_batches(root, 2_000).unwrap();
+        let n_batches = batches.len();
+        assert!(n_batches > 1);
+
+        let sender: Arc<dyn IngestLlmSender> =
+            Arc::new(FakeSender { delay_ms: 30, fail_marker: None });
+        let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+
+        // One page per source (6) regardless of how many batches.
+        assert_eq!(report.pages_written, 6);
+        assert!(report.errors.is_empty(), "unexpected errors: {:?}", report.errors);
+
+        // All pages landed on disk.
+        for i in 0..6 {
+            let slug = format!("art-{i}");
+            assert!(root.join(format!("wiki/concepts/{slug}.md")).exists(), "missing {slug}");
+        }
+    }
+
+    #[tokio::test]
+    async fn run_chunked_ingest_continues_on_single_batch_failure() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        crate::wiki::storage::scaffold_tree(root).unwrap();
+        write_many_sources(root, 6, 2000);
+
+        let batches = build_ingest_prompt_batches(root, 2_000).unwrap();
+        // Force the batch that fully processes art-0 to fail. Use the unique
+        // "Raw Sources for THIS Batch" header marker so only that one batch
+        // errors (every batch carries art-0 in the shared source index).
+        let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender {
+            delay_ms: 0,
+            fail_marker: Some("### Source: Article 0".to_string()),
+        });
+        let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+
+        // At least one error recorded, but other batches' pages still written.
+        assert!(!report.errors.is_empty(), "expected at least one batch error");
+        // art-1 through art-5 should still be on disk (5 pages).
+        let mut present = 0;
+        for i in 0..6 {
+            if root.join(format!("wiki/concepts/art-{i}.md")).exists() {
+                present += 1;
+            }
+        }
+        assert!(
+            present >= 5,
+            "expected >=5 pages written despite one batch failure, got {present}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_chunked_ingest_empty_when_no_batches() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        crate::wiki::storage::scaffold_tree(root).unwrap();
+
+        let sender: Arc<dyn IngestLlmSender> =
+            Arc::new(FakeSender { delay_ms: 0, fail_marker: None });
+        let report = run_chunked_ingest(root, Vec::new(), sender, None, (25, 95)).await.unwrap();
+        assert_eq!(report.pages_written, 0);
+        assert!(report.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_chunked_ingest_parallel_is_faster_than_sequential_sum() {
+        // Sanity check that batches actually run concurrently: with 4 batches
+        // each sleeping 100ms, total wall time should be well under 4*100ms.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        crate::wiki::storage::scaffold_tree(root).unwrap();
+        write_many_sources(root, 8, 2000);
+
+        let batches = build_ingest_prompt_batches(root, 2_000).unwrap();
+        assert!(batches.len() >= 3);
+
+        let sender: Arc<dyn IngestLlmSender> =
+            Arc::new(FakeSender { delay_ms: 100, fail_marker: None });
+        let start = std::time::Instant::now();
+        let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+        let elapsed = start.elapsed();
+
+        // If sequential, elapsed >= batches * 100ms. Allow generous headroom
+        // for scheduler jitter; the point is to prove concurrency.
+        assert!(report.pages_written > 0);
+        assert!(
+            elapsed < std::time::Duration::from_millis(400),
+            "parallel ingest took too long ({elapsed:?}); concurrency not effective"
+        );
     }
 }

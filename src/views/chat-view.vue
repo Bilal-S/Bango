@@ -10,6 +10,7 @@ import type { WikiStatus } from '@/types/wiki';
 import { marked } from 'marked';
 import { renderWikiMarkdown } from '@/utils/wiki-markdown';
 import { useArticleSearch } from '@/composables/use-article-search';
+import { useWiki } from '@/composables/use-wiki';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
 
@@ -35,6 +36,12 @@ const checkingWiki = ref(true);
 const wikiNavStack = ref<string[]>([]);
 const wikiPanelOpen = computed(() => wikiNavStack.value.length > 0);
 const wikiSlug = computed(() => wikiNavStack.value[wikiNavStack.value.length - 1] ?? null);
+
+/** Wiki page slug-to-title map. Loaded once when the wiki is ready so that
+ *  bare UUIDs in wiki-sourced chat bubbles can render as synthesis-styled
+ *  chips with human-readable titles instead of raw UUIDs. */
+const wikiPageTitles = ref<Map<string, string>>(new Map());
+const { listPages: wikiListPages } = useWiki();
 
 const {
   selectedArticle: detailArticle,
@@ -89,6 +96,20 @@ async function checkWikiStatus() {
     // If the wiki became unavailable while wiki mode was on, drop back to articles.
     if (!chatStore.wikiReady && chatStore.source === 'wiki') {
       chatStore.setSource('articles');
+    }
+    // Load page titles so wiki chat bubbles can render bare UUIDs as
+    // synthesis-styled chips with human-readable titles.
+    if (chatStore.wikiReady && wikiPageTitles.value.size === 0) {
+      try {
+        const pages = await wikiListPages();
+        const map = new Map<string, string>();
+        for (const p of pages) {
+          map.set(p.slug, p.title);
+        }
+        wikiPageTitles.value = map;
+      } catch {
+        // Non-fatal: bare UUIDs fall back to raw text.
+      }
     }
   } catch {
     chatStore.setWikiReady(false);
@@ -187,7 +208,7 @@ function formatAuthorsList(authors: string[]): string {
  */
 function renderMessage(msg: { role: string; content: string; source?: string }): string {
   if (msg.source === 'wiki') {
-    return renderWikiMarkdown(msg.content);
+    return renderWikiMarkdown(msg.content, { pageTitles: wikiPageTitles.value });
   }
   return marked.parse(msg.content) as string;
 }
@@ -1061,6 +1082,24 @@ async function handleAttachFullText(articleId: string): Promise<void> {
 }
 .markdown-content :deep(.wikilink:hover) {
   text-decoration-style: solid;
+}
+
+/* Synthesis-styled wikilink chip (from [^art-uuid]: definition lines). */
+.markdown-content :deep(.wikilink--synthesis) {
+  display: inline-block;
+  background: rgb(168 85 247 / 0.12); /* purple-500 @ 12% */
+  color: rgb(126 34 206); /* purple-800 */
+  border: 1px solid rgb(168 85 247 / 0.3);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.8em;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.markdown-content :deep(.wikilink--synthesis:hover) {
+  background: rgb(168 85 247 / 0.2);
 }
 .markdown-content :deep(.art-ref) {
   display: inline;
