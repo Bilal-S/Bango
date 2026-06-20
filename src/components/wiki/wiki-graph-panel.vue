@@ -25,6 +25,10 @@ let graphologyGraph: Graph | null = null;
 // dimensions (Sigma throws "Container has no width" when the element is
 // display:none / not yet laid out, e.g. when the Graph tab is hidden at mount).
 let containerObserver: ResizeObserver | null = null;
+// Re-entrancy guard: prevents overlapping `render()` invocations from killing
+// a Sigma instance mid-construction (happens when the ResizeObserver fires
+// while a refresh is already in progress, or on rapid tab switches).
+let isRendering = false;
 
 /** Disconnect the container ResizeObserver if one is active. */
 function disconnectContainerObserver(): void {
@@ -173,8 +177,31 @@ async function loadAndRender(): Promise<void> {
   }
 }
 
-/** Build a graphology graph from WikiGraph data and render with sigma. */
+/**
+ * Build a graphology graph from WikiGraph data and render with sigma.
+ *
+ * This is a thin re-entrancy guard wrapper around `renderInner()`. Sigma
+ * construction is synchronous but the surrounding `loadAndRender` is async,
+ * and the ResizeObserver deferral can fire while a refresh is already in
+ * flight (e.g. user clicks Graph tab during a rebuild). The guard ensures
+ * only one `renderInner()` runs at a time; a skipped call is harmless because
+ * the in-flight render picks up the latest `graph.value`.
+ */
 function render(): void {
+  if (isRendering) return;
+  isRendering = true;
+  try {
+    renderInner();
+  } finally {
+    isRendering = false;
+  }
+}
+
+/**
+ * Inner render: the actual Sigma construction. Separated from `render()` so
+ * the re-entrancy guard always releases `isRendering`, even if this throws.
+ */
+function renderInner(): void {
   if (!containerRef.value || !graph.value) return;
 
   // Guard: Sigma reads container dimensions at construction time and throws
@@ -182,16 +209,23 @@ function render(): void {
   // is hidden (v-show -> display:none) at mount, or when onMounted fires
   // before the browser performs layout. Defer init via a one-shot
   // ResizeObserver that re-calls render() once the element has a real size.
+  //
+  // IMPORTANT: the observer is NOT disconnected here or in its own callback.
+  // It is disconnected inside renderInner() AFTER Sigma is successfully
+  // constructed (see end of this function). Previously the observer was
+  // disconnected inside its callback before re-calling render(), so if the
+  // deferred render failed to append a canvas there was no retry path and the
+  // panel stayed silently blank with no error.
   const { clientWidth, clientHeight } = containerRef.value;
   if (clientWidth === 0 || clientHeight === 0) {
-    disconnectContainerObserver();
+    // Avoid stacking multiple observers if render is re-entered while hidden.
+    if (containerObserver) return;
     const container = containerRef.value;
     containerObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          disconnectContainerObserver();
-          // Re-attempt now that the container is laid out.
+          // Observer disconnect happens inside renderInner() on success.
           render();
           return;
         }
@@ -225,9 +259,19 @@ function render(): void {
   }
 
   // Add edges (only between known nodes — broken links are skipped).
+  // Dedupe: the wiki graph may contain duplicate edges (the LLM can emit the
+  // same [[target]] link multiple times from a single page). graphology in
+  // `multi: false` mode throws on the second addEdge with the same endpoints,
+  // which would abort render() mid-construction (killing the old sigma before
+  // the new one is created — leaving the panel blank). Track seen endpoint
+  // pairs and skip duplicates.
   const knownSlugs = new Set(graph.value.nodes.map((n) => n.slug));
+  const seenEdges = new Set<string>();
   for (const edge of graph.value.edges) {
     if (knownSlugs.has(edge.source) && knownSlugs.has(edge.target)) {
+      const key = `${edge.source}\u0000${edge.target}`;
+      if (seenEdges.has(key)) continue;
+      seenEdges.add(key);
       g.addEdge(edge.source, edge.target, {
         size: 1,
         color: '#cbd5e1',
@@ -288,6 +332,25 @@ function render(): void {
 
   // Apply any existing filters after render.
   applyFilters();
+
+  // SUCCESS: Sigma constructed. NOW it is safe to disconnect the deferral
+  // observer (it has done its job). Doing this here rather than inside the
+  // observer callback guarantees that if Sigma construction failed to append
+  // a canvas, the observer stays attached and can retry on the next
+  // resize/layout pass.
+  disconnectContainerObserver();
+
+  // Verify Sigma actually attached a canvas. If it didn't, surface a visible
+  // error (Retry state) instead of leaving the panel silently blank. This
+  // converts the previous silent-no-canvas failure into an actionable state.
+  if (containerRef.value && !containerRef.value.querySelector('canvas')) {
+    if (sigma) {
+      sigma.kill();
+      sigma = null;
+    }
+    error.value =
+      'Graph renderer failed to initialize (no canvas). Click Retry, or rebuild the wiki.';
+  }
 }
 
 onMounted(loadAndRender);
