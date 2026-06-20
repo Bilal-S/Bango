@@ -88,6 +88,35 @@ pub fn get_biblio_needs_refresh(conn: &Connection) -> Result<bool, AppError> {
     Ok(get_setting(conn, BIBLIO_NEEDS_REFRESH_KEY)?.map(|v| v == "true").unwrap_or(false))
 }
 
+/// The `app_settings` key that records whether the LLM Wiki needs to be
+/// re-ingested. Set by any mutation that changes the wiki's raw sources
+/// (article import, status -> included, full-text attach, AI summary regen).
+/// Cleared after a successful `wiki_ingest`.
+pub const WIKI_NEEDS_REFRESH_KEY: &str = "wiki_needs_refresh";
+
+/// Mark wiki data as stale. Called by any mutation that changes the wiki's
+/// raw sources (article import, status -> included, full-text attach, AI
+/// summary regen). Non-fatal: errors are logged to stderr.
+pub fn mark_wiki_needs_refresh(conn: &Connection) {
+    if let Err(e) = set_setting(conn, WIKI_NEEDS_REFRESH_KEY, Some("true")) {
+        eprintln!("[wiki] failed to mark needs_refresh: {e}");
+    }
+}
+
+/// Mark wiki data as fresh. Called after a successful `wiki_ingest`.
+pub fn clear_wiki_needs_refresh(conn: &Connection) {
+    if let Err(e) = set_setting(conn, WIKI_NEEDS_REFRESH_KEY, Some("false")) {
+        eprintln!("[wiki] failed to clear needs_refresh: {e}");
+    }
+}
+
+/// Whether the wiki is stale and should be re-ingested.
+/// Absent key is treated as not stale (fresh) so post-reset state (no
+/// included articles, no wiki) does not trigger an unnecessary ingest.
+pub fn get_wiki_needs_refresh(conn: &Connection) -> Result<bool, AppError> {
+    Ok(get_setting(conn, WIKI_NEEDS_REFRESH_KEY)?.map(|v| v == "true").unwrap_or(false))
+}
+
 /// Compute the platform-specific default storage directory:
 /// ~/Documents/Bango/fulltext/
 fn compute_default_storage_dir() -> String {

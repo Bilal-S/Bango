@@ -776,6 +776,92 @@ ER  - </pre
             </ul>
           </div>
         </section>
+
+        <!-- Wiki -->
+        <section id="wiki" class="help-section">
+          <h2 class="help-section__title">Wiki</h2>
+          <p class="help-section__intro">
+            The Wiki is an Obsidian-style knowledge base built from your included articles by the
+            LLM. It synthesizes concepts, authors, methods, and themes into linked Markdown pages
+            with
+            <code>[[wikilinks]]</code> and source references.
+          </p>
+
+          <div class="help-section__content">
+            <h3>Getting Started</h3>
+            <ol>
+              <li>
+                <strong>Configure an LLM provider</strong> in Settings (the Wiki uses the LLM to
+                generate pages).
+              </li>
+              <li>
+                <strong>Include articles</strong> in your project (the Wiki is built from the
+                included corpus).
+              </li>
+              <li>
+                Click <strong>Re-Scaffold</strong> in the Wiki toolbar. This automatically:
+                <ul>
+                  <li>Scaffolds the <code>wiki-root/</code> directory tree</li>
+                  <li>Exports included articles as raw Markdown sources</li>
+                  <li>Processes user-added documents (PDF, TXT, HTML)</li>
+                  <li>Synthesizes wiki pages via the LLM</li>
+                  <li>Builds the FTS5 search index</li>
+                </ul>
+              </li>
+            </ol>
+
+            <h3>Adding Documents</h3>
+            <p>
+              Click <strong>Add Documents</strong> to upload PDF, TXT, or HTML files. The wiki
+              automatically rebuilds after adding, incorporating the new content.
+            </p>
+
+            <h3>Browsing Pages</h3>
+            <p>
+              The sidebar lists all wiki pages grouped by type (Concepts, Authors, Methods,
+              Synthesis). Click any page to read it. <code>[[Wikilinks]]</code> are clickable and
+              navigate between pages. Source references (green badges) open the article detail panel
+              as a slide-over.
+            </p>
+
+            <h3>Graph View</h3>
+            <p>
+              Toggle to the <strong>Graph</strong> tab to see an interactive network graph of all
+              wiki pages and their links. Nodes are color-coded by type; click a node to open that
+              page.
+            </p>
+
+            <h3>Editing Pages</h3>
+            <p>
+              Click <strong>Edit</strong> on any page to modify its title, summary, and body. The
+              split-pane editor shows a live Markdown preview.
+            </p>
+
+            <h3>Searching</h3>
+            <p>
+              Use the search box in the sidebar to filter pages by title, summary, or slug. For
+              full-text search (BM25 ranking), type 3+ characters.
+            </p>
+
+            <h3>Linting</h3>
+            <p>
+              Click <strong>Lint</strong> to check for broken links, orphan pages, duplicate slugs,
+              and missing frontmatter. This is a deterministic check (no LLM required).
+            </p>
+
+            <h3>Wiki Chat</h3>
+            <p>
+              Use <strong>Chat with Wiki</strong> to ask questions about your knowledge base. The
+              LLM searches the wiki via FTS5 BM25 and answers with citations to wiki pages.
+            </p>
+
+            <h3>Deleting</h3>
+            <p>
+              <strong>Delete Wiki</strong> removes all generated pages but keeps raw sources and
+              templates. You can rebuild at any time with Re-Scaffold.
+            </p>
+          </div>
+        </section>
       </div>
     </div>
   </div>

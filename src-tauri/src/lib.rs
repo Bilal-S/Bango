@@ -14,6 +14,7 @@ pub mod scraping;
 pub mod screening;
 pub mod summary;
 pub mod utils;
+pub mod wiki;
 
 use commands::screening::ScreeningState;
 use commands::startup::StartupStatus;
@@ -257,6 +258,26 @@ pub fn run() {
             commands::biblio_cmd::biblio_get_author_productivity_kpis,
             commands::biblio_cmd::biblio_get_cocitation_network,
             commands::trends::check_trends_url,
+            commands::wiki_cmd::wiki_get_status,
+            commands::wiki_cmd::wiki_get_root_dir,
+            commands::wiki_cmd::wiki_set_root_dir,
+            commands::wiki_cmd::wiki_init,
+            commands::wiki_cmd::wiki_export_raw,
+            commands::wiki_cmd::wiki_add_raw_file,
+            commands::wiki_cmd::wiki_list_raw_files,
+            commands::wiki_cmd::wiki_search,
+            commands::wiki_cmd::wiki_lint,
+            commands::wiki_cmd::wiki_get_page,
+            commands::wiki_cmd::wiki_update_page,
+            commands::wiki_cmd::wiki_delete_page,
+            commands::wiki_cmd::wiki_delete_wiki,
+            commands::wiki_cmd::wiki_chat,
+            commands::wiki_cmd::wiki_get_graph,
+            commands::wiki_cmd::wiki_ingest,
+            commands::wiki_cmd::wiki_list_pages,
+            commands::wiki_cmd::wiki_list_sources,
+            commands::wiki_cmd::wiki_rebuild,
+            commands::wiki_cmd::wiki_export_and_ingest,
         ]);
 
     #[cfg(debug_assertions)]

@@ -30,6 +30,8 @@ pub enum LlmRequestType {
     SummaryGeneration,
     TestConnection,
     Chat,
+    WikiIngest,
+    WikiChat,
 }
 
 /// Centralized LLM request coordinator.

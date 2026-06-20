@@ -33,6 +33,7 @@ const navItems: NavItem[] = [
   { label: 'AI Summary', icon: 'auto_awesome', route: '/summary' },
   { label: 'Bibliometrics', icon: 'graph_3', route: '/bibliometrics' },
   { label: 'Chat', icon: 'chat_add_on', route: '/chat' },
+  { label: 'Wiki', icon: 'local_library', route: '/wiki' },
   { label: 'Settings', icon: 'settings', route: '/settings' },
 ];
 

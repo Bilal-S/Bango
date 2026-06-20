@@ -2,6 +2,7 @@
 @import 'tailwindcss';
 @import './tokens.css';
 @import './forms.css';
+@import './markdown.css';
 
 @theme {
   /* Colors - Scholarly Precision */

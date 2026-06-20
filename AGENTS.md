@@ -86,12 +86,13 @@ describe each durable boundary so agents can locate the right area. Create a chi
 
 - **`src-tauri/src/`** - Rust backend (Tauri 2.x). Owned modules: `db/` (repos +
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
-  `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`. App entry
+  `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
+  (LLM knowledge base; see `wiki/` entry below). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
   - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
-    `fulltext_storage_dir`, `flag_premium`, and `biblio_needs_refresh` (the bibliometric
-    staleness flag). `mark_biblio_needs_refresh(conn)` is called by every mutation that
+    `fulltext_storage_dir`, `flag_premium`, `biblio_needs_refresh` (the bibliometric
+    staleness flag), and `wiki_needs_refresh` (the LLM Wiki staleness flag). `mark_biblio_needs_refresh(conn)` is called by every mutation that
     changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
     project backup restore in `commands/export_cmd::import_project_backup`,
     reference/citation import + CR extraction + reference promotion in
@@ -99,6 +100,30 @@ describe each durable boundary so agents can locate the right area. Create a chi
     and AI screening completion in `commands/screening.rs`). `clear_biblio_needs_refresh`
     runs only after `biblio_normalize` commits successfully; `get_biblio_needs_refresh`
     powers the frontend `biblio_get_needs_refresh` command. Absent key = fresh (false).
+  - **`src-tauri/src/wiki/`** - LLM Wiki knowledge-base module (all phases complete).
+    Generates and maintains a local-first Obsidian-style Markdown knowledge base from the
+    `included` article corpus. Modules: `storage.rs` (resolves `wiki-root/`, scaffolds
+    `raw/`, `wiki/{concepts,authors,methods,synthesis}/`, `templates/`, `AGENTS.md`,
+    `log.md`), `agents_contract.rs` (ingest + lint rules contract), `templates.rs` (page
+    templates), `frontmatter.rs` (dependency-free YAML parser/serializer),
+    `raw_export.rs` (included-article export + user-file extraction for PDF/TXT/HTML/etc),
+    `fts.rs` (FTS5 BM25 search index), `ingest.rs` (LLM page generation: prompt builder,
+    `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild),
+    `engine.rs` (deterministic lint + `build_graph` for link graph visualization),
+    `chat.rs` (token-budgeted RAG chat over FTS5 index). `commands/wiki_cmd.rs` exposes
+    all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
+    `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
+    `wiki_get_page`, `wiki_update_page`, `wiki_delete_page`, `wiki_delete_wiki`,
+    `wiki_chat`, `wiki_get_graph`, `wiki_ingest`, `wiki_list_pages`, `wiki_list_sources`,
+    `wiki_rebuild` (one-click full pipeline: scaffold + export + ingest + FTS5, emits
+    `wiki:progress` events), `wiki_export_and_ingest` (export + ingest after Add Documents).
+    The `wiki_needs_refresh` flag triple lives in `app_settings_repo.rs`; cleared after
+    `wiki_ingest`/`wiki_rebuild` commits. Frontend: `wiki-view.vue` (sidebar + viewer +
+    editor + graph + article detail slide-over), `wiki-toolbar.vue` (Re-scaffold, Add
+    Documents, Lint, Delete Wiki, progress bar), `wiki-page-viewer.vue` (Markdown +
+    `[[wikilink]]` + `[^art-id]` source ref resolution), `wiki-page-editor.vue` (split-pane
+    editor), `wiki-graph-panel.vue` (sigma + ForceAtlas2 graph). Composable: `use-wiki.ts`.
+    Design and phasing: `.worktrees/llmwiki-plan.md`.
   - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
@@ -181,7 +206,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
     detail panel + Google Scholar external lookup icons). `help-guide.vue` is the `/help` shell
     (tab bar + `?tab=`/`#hash` deep-link routing) that renders one `help-tab-*.vue` component
     per tab (guide, bibliometrics, troubleshooting, local-ai, reference); the Bibliometrics tab
-    documents all six completed modules.
+    documents all six completed modules. `wiki-view.vue` is the `/wiki` route (flat, below
+    `/chat` in `nav-sidebar.vue` with the `local_library` icon). Ships the empty-state gates
+    (LLM configured, included articles > 0, wiki initialized), the sidebar (page list
+    grouped by type + client-side search filter), the page viewer (`wiki-page-viewer.vue`
+    with `[[wikilink]]` + `[^art-id]` source ref resolution + article detail slide-over),
+    the split-pane editor (`wiki-page-editor.vue`), the sigma graph view
+    (`wiki-graph-panel.vue` with ForceAtlas2 layout, color-coded by page type), and the
+    toolbar (`wiki-toolbar.vue`: Re-scaffold one-click pipeline, Add Documents, Lint, Delete
+    Wiki, progress bar). Composable: `use-wiki.ts`; types: `types/wiki.ts`.
   - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in

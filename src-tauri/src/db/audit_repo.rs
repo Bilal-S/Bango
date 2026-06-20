@@ -128,6 +128,7 @@ fn parse_action(s: &str) -> AuditAction {
         "dedup_auto" => AuditAction::DedupAuto,
         "reference_import" => AuditAction::ReferenceImport,
         "reference_match" => AuditAction::ReferenceMatch,
+        "wiki_ingest_error" => AuditAction::WikiIngestError,
         _ => AuditAction::StatusChange,
     }
 }
