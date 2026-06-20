@@ -51,6 +51,17 @@ const selectedSlug = ref<string | null>(null);
 const mode = ref<'view' | 'edit'>('view');
 const searchQuery = ref('');
 const viewTab = ref<'pages' | 'graph'>('pages');
+const collapsedSections = ref<Set<string>>(new Set());
+
+function toggleSection(type: string): void {
+  const next = new Set(collapsedSections.value);
+  if (next.has(type)) {
+    next.delete(type);
+  } else {
+    next.add(type);
+  }
+  collapsedSections.value = next;
+}
 const graphPanelRef = ref<InstanceType<typeof WikiGraphPanel> | null>(null);
 
 const needsSetup = computed(() => {
@@ -345,11 +356,21 @@ watch(searchQuery, async (q) => {
       </div>
     </div>
 
-    <div v-else-if="viewTab === 'graph'" class="flex-1 min-h-0">
-      <WikiGraphPanel ref="graphPanelRef" @select-page="selectPage" />
+    <div
+      v-show="viewTab === 'graph'"
+      class="wiki-view__main flex-1 flex min-h-0"
+      :class="{ hidden: viewTab !== 'graph' }"
+    >
+      <div class="flex-1 min-h-0">
+        <WikiGraphPanel ref="graphPanelRef" @select-page="selectPage" />
+      </div>
     </div>
 
-    <div v-else class="wiki-view__main flex-1 flex min-h-0">
+    <div
+      v-show="viewTab === 'pages'"
+      class="wiki-view__main flex-1 flex min-h-0"
+      :class="{ hidden: viewTab !== 'pages' }"
+    >
       <aside class="wiki-view__sidebar w-72 border-r border-slate-200 bg-white flex flex-col">
         <div class="p-3 border-b border-slate-200">
           <input
@@ -369,11 +390,14 @@ watch(searchQuery, async (q) => {
               :key="pageType"
               class="wiki-page-group"
             >
-              <div class="wiki-page-group__header">
-                {{ typeLabels[pageType] || pageType }}
+              <div class="wiki-page-group__header" @click="toggleSection(pageType)">
+                <span class="material-symbols-outlined wiki-page-group__caret">{{
+                  collapsedSections.has(pageType) ? 'chevron_right' : 'expand_more'
+                }}</span>
+                <span class="wiki-page-group__label">{{ typeLabels[pageType] || pageType }}</span>
                 <span class="wiki-page-group__count">{{ groupPages.length }}</span>
               </div>
-              <ul class="wiki-page-list">
+              <ul v-show="!collapsedSections.has(pageType)" class="wiki-page-list">
                 <li
                   v-for="p in groupPages"
                   :key="p.slug"
@@ -532,7 +556,7 @@ watch(searchQuery, async (q) => {
 .wiki-page-group__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.25rem;
   padding: 0.5rem 0.75rem 0.25rem;
   font-size: 0.65rem;
   font-weight: 700;
@@ -543,6 +567,22 @@ watch(searchQuery, async (q) => {
   position: sticky;
   top: 0;
   z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wiki-page-group__header:hover {
+  background: rgb(241 245 249);
+}
+
+.wiki-page-group__caret {
+  font-size: 16px !important;
+  color: rgb(148 163 184);
+  flex-shrink: 0;
+}
+
+.wiki-page-group__label {
+  flex: 1;
 }
 
 .wiki-page-group__count {

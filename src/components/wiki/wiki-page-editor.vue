@@ -88,7 +88,7 @@ watch(() => props.slug, loadPage, { immediate: true });
       <div class="wiki-page-editor__toolbar">
         <h2>Edit: {{ originalPage.title }}</h2>
         <div class="wiki-page-editor__actions">
-          <button class="btn btn--secondary" :disabled="!isDirty || saving" @click="emit('cancel')">
+          <button class="btn btn--secondary" :disabled="saving" @click="emit('cancel')">
             Cancel
           </button>
           <button class="btn btn--primary" :disabled="!isDirty || saving" @click="handleSave">

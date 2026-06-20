@@ -26,6 +26,8 @@ let graphologyGraph: Graph | null = null;
 const hiddenTypes = ref<Set<string>>(new Set());
 const searchQuery = ref('');
 const legendExpanded = ref(true);
+const orphansOnly = ref(false);
+const hoveredNode = ref<string | null>(null);
 
 /** Color map for page types. */
 const typeColors: Record<string, string> = {
@@ -56,18 +58,84 @@ function toggleType(type: string): void {
   applyFilters();
 }
 
-/** Apply type + search filters to the graphology graph. */
+/** Toggle orphans-only filter. */
+function toggleOrphans(): void {
+  orphansOnly.value = !orphansOnly.value;
+  applyFilters();
+}
+
+/** Reset all filters to default state. */
+function resetFilters(): void {
+  searchQuery.value = '';
+  hiddenTypes.value = new Set();
+  orphansOnly.value = false;
+  hoveredNode.value = null;
+  applyFilters();
+  // Reset zoom and pan to default view.
+  if (sigma) {
+    const camera = sigma.getCamera();
+    camera.animate({ ratio: 1, x: 0.5, y: 0.5 }, { duration: 300 });
+  }
+}
+
+/** Clear the search query. */
+function clearSearch(): void {
+  searchQuery.value = '';
+  applyFilters();
+}
+
+/** Apply type + search + orphan + hover filters to the graphology graph. */
 function applyFilters(): void {
   const g = graphologyGraph;
   if (!g) return;
   const q = searchQuery.value.trim().toLowerCase();
+  const hov = hoveredNode.value;
+
+  // If hovering, collect connected node set.
+  let connectedSet: Set<string> | null = null;
+  if (hov && g.hasNode(hov)) {
+    connectedSet = new Set([hov]);
+    g.forEachNeighbor(hov, (n) => connectedSet!.add(n));
+  }
+
   g.forEachNode((node, attrs) => {
     const pageType = (attrs.pageType as string) ?? '';
     const typeHidden = hiddenTypes.value.has(pageType);
     const label = ((attrs.label as string) ?? '').toLowerCase();
     const labelMatch = q === '' || label.includes(q);
-    g.setNodeAttribute(node, 'hidden', typeHidden || !labelMatch);
+
+    // Orphans filter: only show nodes with no connections.
+    let orphanMatch = true;
+    if (orphansOnly.value) {
+      const degree = g.degree(node);
+      orphanMatch = degree === 0;
+    }
+
+    // Hover dimming: dim nodes not connected to hovered node.
+    let hoverDim = false;
+    if (connectedSet && !connectedSet.has(node)) {
+      hoverDim = true;
+    }
+
+    const hidden = typeHidden || !labelMatch || !orphanMatch;
+    g.setNodeAttribute(node, 'hidden', hidden);
+    // Store original color for hover restore.
+    const origColor = (attrs.origColor as string) ?? (attrs.color as string);
+    g.setNodeAttribute(node, 'origColor', origColor);
+    g.setNodeAttribute(node, 'color', hoverDim ? '#e2e8f0' : origColor);
   });
+
+  // Dim edges not connected to hovered node.
+  g.forEachEdge((edge, attrs, source, target) => {
+    const origColor = (attrs.origColor as string) ?? (attrs.color as string);
+    g.setEdgeAttribute(edge, 'origColor', origColor);
+    if (connectedSet && (!connectedSet.has(source) || !connectedSet.has(target))) {
+      g.setEdgeAttribute(edge, 'color', '#f1f5f9');
+    } else {
+      g.setEdgeAttribute(edge, 'color', origColor);
+    }
+  });
+
   sigma?.refresh();
 }
 
@@ -113,6 +181,7 @@ function render(): void {
       label: node.title,
       size,
       color,
+      origColor: color,
       x: Math.random() * 100,
       y: Math.random() * 100,
       pageType: node.pageType,
@@ -126,6 +195,7 @@ function render(): void {
       g.addEdge(edge.source, edge.target, {
         size: 1,
         color: '#cbd5e1',
+        origColor: '#cbd5e1',
         type: 'arrow',
       });
     }
@@ -158,13 +228,26 @@ function render(): void {
       circle: NodeCircleProgram,
     },
     edgeProgramClasses: {
-      arrow: createEdgeArrowProgram(),
+      arrow: createEdgeArrowProgram({
+        lengthToThicknessRatio: 5,
+        widenessToThicknessRatio: 4,
+      }),
     },
   });
 
   // Click handler: select the clicked node.
   sigma.on('clickNode', ({ node }) => {
     emit('selectPage', node);
+  });
+
+  // Hover handlers: highlight connected nodes + edges.
+  sigma.on('enterNode', ({ node }) => {
+    hoveredNode.value = node;
+    applyFilters();
+  });
+  sigma.on('leaveNode', () => {
+    hoveredNode.value = null;
+    applyFilters();
   });
 
   // Apply any existing filters after render.
@@ -233,10 +316,31 @@ defineExpose({ refresh: loadAndRender });
       <div class="flex items-center gap-3 font-mono text-slate-600">
         <span>{{ stats.nodes }} nodes</span>
         <span>{{ stats.edges }} edges</span>
-        <span v-if="stats.orphans > 0" class="text-amber-600">{{ stats.orphans }} orphans</span>
+        <button
+          v-if="stats.orphans > 0"
+          type="button"
+          class="cursor-pointer transition-all rounded px-1"
+          :class="
+            orphansOnly
+              ? 'text-amber-700 bg-amber-100 ring-1 ring-amber-300 font-semibold'
+              : 'text-amber-600 hover:text-amber-700'
+          "
+          :title="orphansOnly ? 'Show all nodes' : 'Show orphans only'"
+          @click="toggleOrphans"
+        >
+          {{ stats.orphans }} orphans
+        </button>
         <button
           type="button"
-          class="ml-auto flex items-center cursor-pointer text-slate-400 hover:text-slate-600 transition-colors"
+          class="ml-auto flex items-center cursor-pointer text-slate-400 hover:text-indigo-600 transition-colors"
+          title="Reset all filters"
+          @click="resetFilters"
+        >
+          <span class="material-symbols-outlined text-[16px]">restart_alt</span>
+        </button>
+        <button
+          type="button"
+          class="flex items-center cursor-pointer text-slate-400 hover:text-slate-600 transition-colors"
           :title="legendExpanded ? 'Collapse' : 'Expand'"
           @click="legendExpanded = !legendExpanded"
         >
@@ -257,9 +361,18 @@ defineExpose({ refresh: loadAndRender });
             v-model="searchQuery"
             type="text"
             placeholder="Filter nodes..."
-            class="w-full pl-7 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+            class="w-full pl-7 pr-6 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
             @input="applyFilters"
           />
+          <button
+            v-if="searchQuery"
+            type="button"
+            class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-4 h-4 text-slate-400 hover:text-slate-600 cursor-pointer"
+            title="Clear search"
+            @click="clearSearch"
+          >
+            <span class="material-symbols-outlined text-[14px]">close</span>
+          </button>
         </div>
 
         <!-- Legend (clickable toggles) -->
@@ -291,7 +404,7 @@ defineExpose({ refresh: loadAndRender });
       v-if="graph && graph.nodes.length > 0"
       class="absolute bottom-3 left-3 z-10 text-[10px] text-slate-400 bg-white/80 px-2 py-1 rounded"
     >
-      Click a node to open its page. Drag to pan. Scroll to zoom.
+      Click a node to open its page. Hover to highlight connections. Drag to pan. Scroll to zoom.
     </div>
   </div>
 </template>
