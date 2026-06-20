@@ -226,7 +226,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     detail panel + Google Scholar external lookup icons). `help-guide.vue` is the `/help` shell
     (tab bar + `?tab=`/`#hash` deep-link routing) that renders one `help-tab-*.vue` component
     per tab (guide, bibliometrics, troubleshooting, local-ai, reference); the Bibliometrics tab
-    documents all six completed modules. `wiki-view.vue` is the `/wiki` route (flat, below
+    documents all six completed modules. `help-tab-reference.vue` is the sidebar +
+    scroll-spy Reference tab; the Wiki section (`ref-wiki`, nav icon `local_library`) sits
+    under Chat Assistant and covers the wiki-root layout, getting-started workflow, supported
+    document file-type matrix, FTS5 token-optimized chat, and Obsidian integration.
+    `wiki-view.vue` is the `/wiki` route (flat, below
     `chat-view.vue` is the `/chat` route. It renders the article-RAG chat (explicit
     selected articles via `send_chat_message`) AND the wiki-RAG chat: a Wiki toggle button
     (icon `local_library`) sits right of the `(+)` icon, visible only when

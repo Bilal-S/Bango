@@ -200,6 +200,14 @@ watch(
           </button>
           <button
             class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-wiki' }"
+            @click="selectRefSection('ref-wiki')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">local_library</span>
+            Wiki
+          </button>
+          <button
+            class="ref-nav__link"
             :class="{ 'ref-nav__link--active': activeRefSection === 'ref-settings' }"
             @click="selectRefSection('ref-settings')"
           >
@@ -723,6 +731,225 @@ ER  - </pre
           </div>
         </section>
 
+        <!-- SECTION: WIKI -->
+        <section id="ref-wiki" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">local_library</span>
+            <h2 class="ref-section__title">Wiki</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Wiki</strong> is a local-first, Obsidian-style knowledge base that Bango's
+              LLM builds from your <em>included</em> articles. Instead of a flat list of papers, you
+              get a linked, navigable synthesis of concepts, authors, methods, and themes, with
+              every claim traced back to its source article.
+            </p>
+
+            <div class="ref-callout">
+              <h4>Why a Wiki?</h4>
+              <p>
+                A systematic review often ends as a static table. The Wiki turns that table into a
+                living knowledge graph: the LLM extracts entities (sugar tax, SDIL, key authors,
+                methods), cross-links them with <code>[[wikilinks]]</code>, and cites each fact with
+                a source reference like <code>[^art-123]</code> that jumps back to the original
+                article. It is the fastest way to understand the landscape of your corpus.
+              </p>
+            </div>
+
+            <h3>Where Your Documents Live</h3>
+            <p>
+              The Wiki is stored as plain Markdown on your disk, as a sibling of the full-text
+              directory:
+            </p>
+            <pre class="ref-code">
+~/Documents/Bango/
+  fulltext/          # article PDFs and text extracts
+  wiki-root/         # the LLM Wiki (plain Markdown)
+    AGENTS.md        # the LLM's workflow contract (read on every ingest)
+    raw/             # sources: article exports and your dropped files
+    wiki/            # generated pages (concepts/ authors/ methods/ synthesis/)
+      log.md         # append-only audit trail of ingest and lint runs
+    templates/       # page skeletons the LLM follows</pre
+            >
+            <p>
+              If you set a custom <strong>Full-Text Storage Directory</strong> in Settings, the
+              wiki-root is placed alongside it. Every file is plain <code>.md</code> - you own it
+              and can edit it in any text editor.
+            </p>
+
+            <h3>Getting Started (General Workflow)</h3>
+            <p>Three prerequisites gate the Wiki, shown as readiness indicators in the toolbar:</p>
+            <ol>
+              <li>
+                <strong>Configure an LLM provider</strong> in Settings (the Wiki uses the LLM to
+                synthesize pages).
+              </li>
+              <li>
+                <strong>Include at least one article</strong> (the Wiki is built from the
+                <code>status = 'included'</code> corpus; rejected/working articles are ignored).
+              </li>
+              <li>
+                Click <strong>Initialize Wiki</strong> (first time) or
+                <strong>Rebuild Wiki</strong> in the Wiki toolbar. The one-click pipeline runs:
+                <ul>
+                  <li>Scaffolds the <code>wiki-root/</code> directory tree</li>
+                  <li>Exports included articles as raw Markdown sources into <code>raw/</code></li>
+                  <li>Processes any user-added documents into companion <code>.md</code> files</li>
+                  <li>
+                    Synthesizes wiki pages via the LLM (concepts, authors, methods, synthesis)
+                  </li>
+                  <li>Builds the FTS5 full-text search index</li>
+                </ul>
+              </li>
+            </ol>
+            <p>
+              After the corpus changes (new imports, status flips to included, full-text attached),
+              the toolbar shows a <strong>stale</strong> badge. Click <strong>Rebuild Wiki</strong>
+              to regenerate.
+            </p>
+
+            <h3>Adding Documents</h3>
+            <p>
+              The <strong>Add Documents</strong> button has two on-ramps:
+              <strong>From Web</strong> (paste one or more URLs; Bango fetches and extracts the
+              text) and <strong>From Local Drive</strong> (pick one or more files). Added documents
+              are processed into companion <code>.md</code> files and a fresh ingest runs
+              automatically. Supported file types:
+            </p>
+            <div class="ref-comparison-wrapper">
+              <table class="ref-comparison-table">
+                <thead>
+                  <tr>
+                    <th>Format</th>
+                    <th>How it is handled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>.pdf</code></td>
+                    <td>Text extracted with the built-in PDF engine (same as full-text attach).</td>
+                  </tr>
+                  <tr>
+                    <td><code>.txt</code> <code>.text</code> <code>.log</code></td>
+                    <td>Read verbatim as plain text.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.html</code> <code>.htm</code></td>
+                    <td>Tags stripped, entities decoded, whitespace collapsed.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.rtf</code></td>
+                    <td>RTF control words stripped to clean text.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.csv</code></td>
+                    <td>Parsed and rendered as a Markdown table.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.md</code></td>
+                    <td>Passed through verbatim.</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <code>.json</code> <code>.xml</code> source code (<code>.rs</code>
+                      <code>.py</code> <code>.js</code> <code>.ts</code> ...)
+                    </td>
+                    <td>Wrapped in a fenced code block (verbatim, no reformatting).</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <em>Note:</em> Office formats (<code>.docx</code>, <code>.xlsx</code>, etc.) are not
+              supported - export them to PDF or TXT first. Originals you add are always kept as the
+              source of truth; the companion <code>.md</code> is regenerated idempotently.
+            </p>
+
+            <h3>Browsing & Editing Pages</h3>
+            <ul>
+              <li>
+                <strong>Sidebar:</strong> lists all pages grouped by type (Concepts, Authors,
+                Methods, Synthesis). Use the search box to filter by title or summary.
+              </li>
+              <li>
+                <strong>Reading:</strong> <code>[[wikilinks]]</code> are clickable and navigate
+                between pages. Source references (e.g. <code>[^art-123]</code>) open the article
+                detail panel as a slide-over.
+              </li>
+              <li>
+                <strong>Editing:</strong> Click <strong>Edit</strong> on any page to modify its
+                title, summary, and body. The split-pane editor shows a live Markdown preview. Pages
+                you mark <code>status: reviewed</code> are protected from being overwritten by the
+                next LLM ingest.
+              </li>
+              <li>
+                <strong>Graph View:</strong> An interactive network graph of all pages and their
+                links (ForceAtlas2 layout, color-coded by type). Click a node to open that page.
+              </li>
+            </ul>
+
+            <h3>Health Check (Lint)</h3>
+            <p>
+              <strong>Health Check</strong> runs a deterministic check (no LLM required) for broken
+              links, orphan pages (zero inbound links), duplicate slugs, and missing frontmatter.
+              Rebuilding the Wiki regenerates all pages and fixes most link/orphan issues.
+            </p>
+
+            <h3>Chat with Wiki (Token-Optimized RAG)</h3>
+            <p>
+              The article Chat Assistant dumps all selected article abstracts into the prompt, which
+              does not scale to a wiki of hundreds of pages. The
+              <strong>Wiki chat mode</strong> (toggle the Wiki icon in the Chat view, right of the
+              <code>(+)</code> button) uses a token-efficient retrieval design:
+            </p>
+            <ul>
+              <li>
+                <strong>FTS5 BM25 retrieval:</strong> your question is matched against the wiki's
+                SQLite full-text index (offline, no new dependencies). The top matching pages are
+                retrieved, ranked by relevance.
+              </li>
+              <li>
+                <strong>Token budget:</strong> each page's cost is estimated. If the total would
+                exceed 50% of your configured context window, pages are downgraded from their full
+                <code>body</code> to just their <code>summary</code> field - keeping the prompt lean
+                and within limits.
+              </li>
+              <li>
+                <strong>Cited answers:</strong> the assistant responds with citations rendered as
+                clickable links that open a Wiki reader slide-over (with a back-stack for chained
+                navigation).
+              </li>
+            </ul>
+
+            <h3>Using with Obsidian (or any Markdown tool)</h3>
+            <p>
+              Because the Wiki is plain Markdown with <code>[[wikilinks]]</code>, you can open the
+              <code>wiki-root/</code> folder directly in
+              <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a>
+              (free) or any Markdown editor as a read-only companion view. Bango remains the source
+              of truth: edits you make inside Bango rebuild the FTS index, so chat and search stay
+              in sync. Obsidian is <em>optional</em> - everything works inside Bango without it.
+            </p>
+
+            <h3>Deleting & Resetting</h3>
+            <ul>
+              <li>
+                <strong>Delete Wiki</strong> (Wiki toolbar) removes generated pages but keeps raw
+                sources and templates. Rebuild at any time.
+              </li>
+              <li>
+                <strong>Delete All Data</strong> (Settings) wipes the database AND the entire
+                on-disk <code>wiki-root/</code> directory.
+              </li>
+              <li>
+                <strong>Backups:</strong> the <code>.bango.json</code> backup does
+                <strong>not</strong> include the Wiki directory - it lives on disk and must be
+                copied manually if you want to preserve it.
+              </li>
+            </ul>
+          </div>
+        </section>
+
         <!-- SECTION: SETTINGS & SECURITY -->
         <section id="ref-settings" class="ref-section">
           <header class="ref-section__header">
@@ -774,92 +1001,6 @@ ER  - </pre
                 initiating the overwrite.
               </li>
             </ul>
-          </div>
-        </section>
-
-        <!-- Wiki -->
-        <section id="wiki" class="help-section">
-          <h2 class="help-section__title">Wiki</h2>
-          <p class="help-section__intro">
-            The Wiki is an Obsidian-style knowledge base built from your included articles by the
-            LLM. It synthesizes concepts, authors, methods, and themes into linked Markdown pages
-            with
-            <code>[[wikilinks]]</code> and source references.
-          </p>
-
-          <div class="help-section__content">
-            <h3>Getting Started</h3>
-            <ol>
-              <li>
-                <strong>Configure an LLM provider</strong> in Settings (the Wiki uses the LLM to
-                generate pages).
-              </li>
-              <li>
-                <strong>Include articles</strong> in your project (the Wiki is built from the
-                included corpus).
-              </li>
-              <li>
-                Click <strong>Re-Scaffold</strong> in the Wiki toolbar. This automatically:
-                <ul>
-                  <li>Scaffolds the <code>wiki-root/</code> directory tree</li>
-                  <li>Exports included articles as raw Markdown sources</li>
-                  <li>Processes user-added documents (PDF, TXT, HTML)</li>
-                  <li>Synthesizes wiki pages via the LLM</li>
-                  <li>Builds the FTS5 search index</li>
-                </ul>
-              </li>
-            </ol>
-
-            <h3>Adding Documents</h3>
-            <p>
-              Click <strong>Add Documents</strong> to upload PDF, TXT, or HTML files. The wiki
-              automatically rebuilds after adding, incorporating the new content.
-            </p>
-
-            <h3>Browsing Pages</h3>
-            <p>
-              The sidebar lists all wiki pages grouped by type (Concepts, Authors, Methods,
-              Synthesis). Click any page to read it. <code>[[Wikilinks]]</code> are clickable and
-              navigate between pages. Source references (green badges) open the article detail panel
-              as a slide-over.
-            </p>
-
-            <h3>Graph View</h3>
-            <p>
-              Toggle to the <strong>Graph</strong> tab to see an interactive network graph of all
-              wiki pages and their links. Nodes are color-coded by type; click a node to open that
-              page.
-            </p>
-
-            <h3>Editing Pages</h3>
-            <p>
-              Click <strong>Edit</strong> on any page to modify its title, summary, and body. The
-              split-pane editor shows a live Markdown preview.
-            </p>
-
-            <h3>Searching</h3>
-            <p>
-              Use the search box in the sidebar to filter pages by title, summary, or slug. For
-              full-text search (BM25 ranking), type 3+ characters.
-            </p>
-
-            <h3>Linting</h3>
-            <p>
-              Click <strong>Lint</strong> to check for broken links, orphan pages, duplicate slugs,
-              and missing frontmatter. This is a deterministic check (no LLM required).
-            </p>
-
-            <h3>Wiki Chat</h3>
-            <p>
-              Use <strong>Chat with Wiki</strong> to ask questions about your knowledge base. The
-              LLM searches the wiki via FTS5 BM25 and answers with citations to wiki pages.
-            </p>
-
-            <h3>Deleting</h3>
-            <p>
-              <strong>Delete Wiki</strong> removes all generated pages but keeps raw sources and
-              templates. You can rebuild at any time with Re-Scaffold.
-            </p>
           </div>
         </section>
       </div>
