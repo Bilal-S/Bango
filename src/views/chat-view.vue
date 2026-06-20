@@ -13,6 +13,7 @@ import { useArticleSearch } from '@/composables/use-article-search';
 import { useWiki } from '@/composables/use-wiki';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
+import type { WikiSourceInfo } from '@/types/wiki';
 
 const router = useRouter();
 const toast = useToast();
@@ -42,6 +43,26 @@ const wikiSlug = computed(() => wikiNavStack.value[wikiNavStack.value.length - 1
  *  chips with human-readable titles instead of raw UUIDs. */
 const wikiPageTitles = ref<Map<string, string>>(new Map());
 const { listPages: wikiListPages } = useWiki();
+
+/**
+ * Derived source-metadata map (article id -> WikiSourceInfo) built reactively
+ * from the loaded `articles` list. Passed to `renderWikiMarkdown` so bare
+ * article UUIDs in wiki-sourced chat prose render as green `.art-ref` chips
+ * that open the article detail panel, instead of pink wiki chips.
+ */
+const wikiSources = computed(() => {
+  const map = new Map<string, WikiSourceInfo>();
+  for (const a of articles.value) {
+    map.set(a.id, {
+      id: a.id,
+      title: a.title,
+      authors: a.authors ?? [],
+      year: a.publicationYear ?? null,
+      doi: a.doi ?? null,
+    });
+  }
+  return map;
+});
 
 const {
   selectedArticle: detailArticle,
@@ -208,7 +229,14 @@ function formatAuthorsList(authors: string[]): string {
  */
 function renderMessage(msg: { role: string; content: string; source?: string }): string {
   if (msg.source === 'wiki') {
-    return renderWikiMarkdown(msg.content, { pageTitles: wikiPageTitles.value });
+    return renderWikiMarkdown(msg.content, {
+      sources: wikiSources.value,
+      pageTitles: wikiPageTitles.value,
+      // Chat view: articles win over wiki pages for bare UUID resolution, so
+      // an article UUID renders as a green art-ref (article detail) even when
+      // a synthesis wiki page exists for the same UUID.
+      articlePriority: true,
+    });
   }
   return marked.parse(msg.content) as string;
 }

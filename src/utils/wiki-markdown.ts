@@ -6,6 +6,10 @@
  * 1. `[^art-{id}]` footnotes -> article source references (`.art-ref`).
  * 2. `[[slug]]` and `[[slug|alias]]` -> wiki page links (`.wikilink`).
  *
+ * Also detects bare article UUIDs in prose and converts them to clickable
+ * `.art-ref` (article detail) or `.wikilink--synthesis` (wiki reader) anchors
+ * depending on which metadata map they match.
+ *
  * Also strips `/raw/...md` artifact lines that the LLM sometimes emits.
  *
  * Used by both `wiki-page-viewer.vue` (with a populated sources map) and the
@@ -16,15 +20,21 @@ import { marked } from 'marked';
 import type { WikiSourceInfo } from '@/types/wiki';
 
 export interface RenderWikiMarkdownOptions {
-  /** Source metadata map for `[^art-id]` resolution. If absent, refs render as
-   * short IDs with the `art-ref--missing` class. */
+  /** Source metadata map for `[^art-id]` resolution and bare-UUID article
+   * links. If absent, refs render as short IDs with the `art-ref--missing`
+   * class. When a bare UUID matches a `sources` entry, the renderer emits a
+   * green `.art-ref` anchor (article detail) instead of a wiki link. */
   sources?: Map<string, WikiSourceInfo>;
   /** Wiki page slug-to-title map. When a bare UUID matches a wiki page slug,
    * the renderer emits a synthesis-styled chip with the page's title instead
-   * of showing the raw UUID. Takes priority over `sources` for bare UUIDs
-   * because a bare UUID in wiki prose is most likely a cross-reference to
-   * another wiki page. */
+   * of showing the raw UUID. */
   pageTitles?: Map<string, string>;
+  /** Bare-UUID resolution priority for the chat view. When `true`, `sources`
+   * (articles) is checked before `pageTitles` (wiki pages) so a UUID that
+   * exists in both renders as a green `.art-ref` (article detail) rather than
+   * a pink `.wikilink--synthesis` (wiki reader). Defaults to `false`, which
+   * keeps the wiki-page-viewer behavior where wiki pages win for bare UUIDs. */
+  articlePriority?: boolean;
 }
 
 /**
@@ -59,6 +69,13 @@ function escapeText(value: string): string {
   return value.replace(/&/g, ENT_AMP).replace(/</g, ENT_LT).replace(/>/g, ENT_GT);
 }
 
+/** Build a green `.art-ref` anchor for an article UUID with its source label. */
+function makeArtRef(uuid: string, source: WikiSourceInfo): string {
+  const label = escapeText(formatArtRefLabel(source));
+  const titleAttr = escapeAttr(source.title);
+  return `<a class="art-ref" data-art-id="${uuid}" title="${titleAttr}">${label}</a>`;
+}
+
 /**
  * Render wiki Markdown to an HTML string.
  *
@@ -71,37 +88,43 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   if (!text) return '';
   const sources = opts?.sources;
   const pageTitles = opts?.pageTitles;
+  const articlePriority = opts?.articlePriority === true;
   let out = text;
 
-  // 0. Bare UUID -> synthesis wikilink chip, [[uuid|Title]], or [[uuid]].
+  // 0. Bare UUID -> green art-ref, pink synthesis chip, or indigo wikilink.
   //    The LLM sometimes emits bare article UUIDs in prose (e.g. "see changes
   //    f399a079-...-43 and obesity 6d2ec462-...-f1") without the `[[...]]`
   //    bracket syntax. This pass detects those bare UUIDs and converts them:
-  //    - If the UUID matches a wiki page slug (pageTitles), emit a
-  //      synthesis-styled chip with the page's human-readable title (a bare
-  //      UUID in wiki prose is most likely a cross-reference to another wiki
-  //      page, not a redundant article link).
-  //    - Else if source metadata is available, emit [[uuid|Title (Year)]] so
-  //      step 2 produces a regular wikilink with a human-readable alias.
-  //    - Else emit [[uuid]] (clickable, visible UUID).
+  //    - If `articlePriority` is set (chat view) and the UUID matches a source
+  //      article, emit a green `.art-ref` (opens article detail).
+  //    - Else if the UUID matches a wiki page slug (pageTitles), emit a pink
+  //      synthesis-styled chip (opens wiki reader).
+  //    - Else if source metadata is available, emit a green `.art-ref` (opens
+  //      article detail). This branch replaced the former `[[uuid|Title]]`
+  //      emission so article UUIDs render as article links, not wiki links.
+  //    - Else emit [[uuid]] (indigo wikilink, clickable, visible UUID).
   //    The lookbehinds exclude UUIDs that are already inside `[[...]]`
   //    (preceded by `[` or `|`) or inside `[^art-...]` (preceded by `art-`).
   out = out.replace(
     /(?<![[|])(?<!art-)\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi,
     (_match: string, uuid: string) => {
-      // Priority 1: wiki page title -> synthesis chip.
+      const source = sources?.get(uuid);
       const pageTitle = pageTitles?.get(uuid);
+      // Chat view: articles take priority over wiki pages.
+      if (articlePriority && source) {
+        return makeArtRef(uuid, source);
+      }
+      // Default / wiki viewer: wiki page title -> synthesis chip (pink).
       if (pageTitle) {
         const label = escapeText(pageTitle);
         const safeSlug = escapeAttr(uuid);
         return `<a class="wikilink wikilink--synthesis" data-slug="${safeSlug}">${label}</a>`;
       }
-      // Priority 2: article source metadata -> wikilink with alias.
-      const source = sources?.get(uuid);
+      // Source metadata -> green art-ref (article detail).
       if (source) {
-        return `[[${uuid}|${formatArtRefLabel(source)}]]`;
+        return makeArtRef(uuid, source);
       }
-      // Priority 3: plain wikilink (clickable, visible UUID).
+      // Fallback: plain wikilink (indigo, clickable, visible UUID).
       return `[[${uuid}]]`;
     }
   );
@@ -126,9 +149,7 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   out = out.replace(/\[\^art-([a-f0-9-]+)\]/g, (_match, artId: string) => {
     const source = sources?.get(artId);
     if (source) {
-      const label = escapeText(formatArtRefLabel(source));
-      const titleAttr = escapeAttr(source.title);
-      return `<a class="art-ref" data-art-id="${artId}" title="${titleAttr}">${label}</a>`;
+      return makeArtRef(artId, source);
     }
     const shortId = artId.slice(0, 8);
     return `<a class="art-ref art-ref--missing" data-art-id="${artId}">[${shortId}]</a>`;

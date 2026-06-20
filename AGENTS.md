@@ -253,8 +253,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     + article context pills, shows a "Wiki mode" banner, and routes sends through
     `wiki_chat` (BM25 FTS5 RAG) instead of `send_chat_message`. Each message records its
     `source` (`'articles'|'wiki'`) so the bubble shows a `wiki` badge and the assistant
-    body is rendered via `src/utils/wiki-markdown.ts` (turning `[[slug]]` citations into
-    clickable `.wikilink` spans and `[^art-id]` into `.art-ref` spans). Clicking a
+    body is rendered via `src/utils/wiki-markdown.ts` with `articlePriority: true` plus a
+    reactively-derived `wikiSources` map (article id -> WikiSourceInfo, built from the
+    loaded `articles` list) and the `wikiPageTitles` map, so bare article UUIDs in wiki
+    prose render as green `.art-ref` chips (article detail) while wiki-page UUIDs render
+    as pink `.wikilink--synthesis` chips (wiki reader). `[^art-id]` becomes `.art-ref`. Clicking a
     wikilink opens a right-side **Wiki reader slide-over** (`WikiPageViewer` with a
     `wikiNavStack` back-stack so inner navigation chains and a Back/Close chrome returns
     to the chat); opening it closes the article detail slide-over and vice-versa (mutually
@@ -323,9 +326,14 @@ describe each durable boundary so agents can locate the right area. Create a chi
     converts `[[slug]]` / `[[slug|alias]]` to `.wikilink` anchors and `[^art-id]`
     footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs),
     HTML-escapes slug/alias text, strips `/raw/*.md` artifact lines, then runs
-    `marked.parse`. Consumed by both `wiki-page-viewer.vue` (with a sources map) and
-    `chat-view.vue` assistant bubbles (sources optional). Pure function, unit-tested in
-    `src/__tests__/utils/wiki-markdown.test.ts`), `platform.ts` (`isMacPlatform()` reads
+    `marked.parse`. Bare UUIDs in prose are auto-linked: `articlePriority: true`
+    (chat view) resolves `sources` first -> green `.art-ref` (article detail);
+    otherwise `pageTitles` wins -> pink `.wikilink--synthesis` (wiki reader).
+    Article-matched UUIDs always emit `.art-ref` (green, article detail) instead of
+    the former `[[uuid|alias]]` (which became an indigo wiki link). Consumed by both
+    `wiki-page-viewer.vue` (sources + pageTitles, default priority) and `chat-view.vue`
+    assistant bubbles (sources + pageTitles + `articlePriority: true`). Pure function,
+    unit-tested in `src/__tests__/utils/wiki-markdown.test.ts`), `platform.ts` (`isMacPlatform()` reads
     `navigator.platform`; `SHORTCUT_MODIFIER` constant resolves to `'Cmd'` or `'Alt'`.
     Dependency-free, resilient to `navigator` absence. Used by `wiki-view.vue` to pick the
     correct back/forward keyboard shortcut modifier. Tested by

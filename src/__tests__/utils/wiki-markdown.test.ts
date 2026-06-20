@@ -92,14 +92,38 @@ describe('renderWikiMarkdown', () => {
     expect(out).toContain(`>${uuid}</a>`);
   });
 
-  it('uses source title as alias for a bare UUID when sources map has it', () => {
+  it('emits a green art-ref for a bare UUID when the sources map has it', () => {
     const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
     const sources = new Map([[uuid, src(uuid, 'Sugar Levy Study', 2020)]]);
     const out = renderWikiMarkdown(`See ${uuid}.`, { sources });
-    expect(out).toContain(`data-slug="${uuid}"`);
+    // Article UUIDs now render as green art-refs (article detail), not wiki links.
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
     expect(out).toContain('>Sugar Levy Study (2020)<');
+    // It should NOT be a wikilink.
+    expect(out).not.toContain('class="wikilink');
     // Raw UUID should not appear as visible text.
     expect(out).not.toContain(`>${uuid}<`);
+  });
+
+  it('articlePriority makes sources win over pageTitles for bare UUIDs (chat view)', () => {
+    const uuid = '0e4822b6-b8bb-4ed0-8333-84336a07797b';
+    // Both maps have the UUID. With articlePriority the article (green art-ref)
+    // wins; without it the wiki page (pink synthesis chip) wins.
+    const sources = new Map([[uuid, src(uuid, 'Article Title', 2022)]]);
+    const pageTitles = new Map([[uuid, 'Wiki Page Title']]);
+    const out = renderWikiMarkdown(`See ${uuid}.`, {
+      sources,
+      pageTitles,
+      articlePriority: true,
+    });
+    // Green art-ref to the article, not a wiki chip.
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    expect(out).toContain('>Article Title (2022)<');
+    // Wiki chip / wiki page title must NOT appear.
+    expect(out).not.toContain('wikilink--synthesis');
+    expect(out).not.toContain('Wiki Page Title');
   });
 
   it('uses pageTitles for bare UUID as a synthesis chip (priority over sources)', () => {
