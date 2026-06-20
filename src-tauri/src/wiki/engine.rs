@@ -135,8 +135,14 @@ pub fn lint(root: &Path) -> Result<LintReport, AppError> {
         }
 
         // Broken wikilinks: extract [[target]] from body, check slug set.
+        // Comparison is case-insensitive (Obsidian convention): a link like
+        // `[[Sugar-Reduction]]` resolves to a page whose slug is
+        // `sugar-reduction`. This avoids false-positive broken links when the
+        // LLM emits Title-Cased wikilinks.
+        let slug_set_lower: std::collections::HashSet<String> =
+            slug_to_path.keys().map(|s| s.to_lowercase()).collect();
         for target in extract_wikilinks(body) {
-            if !slug_to_path.contains_key(&target) {
+            if !slug_set_lower.contains(&target.to_lowercase()) {
                 report.push(
                     path,
                     &slug,
@@ -338,6 +344,12 @@ fn collect_pages(
         if path.is_dir() {
             collect_pages(&path, out)?;
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            // Skip the system audit log (wiki/log.md). It is a bookkeeping file
+            // appended by `ingest::finalize_ingest`, not a knowledge-base page;
+            // it has no frontmatter, so linting it produces 7 spurious errors.
+            if path.file_name().and_then(|n| n.to_str()) == Some("log.md") {
+                continue;
+            }
             let (fm, body) = frontmatter::read_file(&path)?;
             out.push((path, fm, body));
         }
@@ -381,6 +393,72 @@ mod tests {
         assert_eq!(report.errors, 0);
         // No broken links, no missing fields, no duplicates.
         assert!(report.issues.iter().all(|i| i.severity != LintSeverity::Error));
+    }
+
+    #[test]
+    fn log_md_is_exempt_from_lint() {
+        // The system audit log (wiki/log.md) has no frontmatter; it must be
+        // skipped entirely so it does not produce 7 spurious errors.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_page(root, "concepts", "alpha", "Alpha", "# Alpha");
+        // Write a log.md with no frontmatter (mirrors ingest::finalize_ingest).
+        std::fs::write(
+            root.join("wiki/log.md"),
+            "# Wiki Audit Log\n\nAppend-only record of ingest and lint runs.\n",
+        )
+        .unwrap();
+
+        let report = lint(root).unwrap();
+        // log.md is not counted as a page.
+        assert_eq!(report.page_count, 1, "log.md should not be counted as a page");
+        // No errors at all (log.md's missing fields are not flagged).
+        assert_eq!(report.errors, 0, "log.md should not produce errors");
+        // And no issue mentions log.md.
+        assert!(
+            !report.issues.iter().any(|i| i.page == "log.md"),
+            "log.md should not appear in any issue"
+        );
+    }
+
+    #[test]
+    fn broken_link_check_is_case_insensitive() {
+        // A Title-Cased wikilink like [[Sugar-Reduction]] should resolve to a
+        // page whose slug is `sugar-reduction` (Obsidian convention), so it is
+        // NOT flagged as broken.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_page(
+            root,
+            "concepts",
+            "sugar-reduction",
+            "Sugar Reduction",
+            "# Sugar Reduction
+See [[Sugar-Reduction]] and [[OBESITY]].",
+        );
+        // `obesity` page exists (lowercase slug); the link [[OBESITY]] should resolve.
+        write_page(root, "concepts", "obesity", "Obesity", "# Obesity");
+
+        let report = lint(root).unwrap();
+        // No broken-link warnings: both [[Sugar-Reduction]] and [[OBESITY]] resolve.
+        let broken: Vec<_> =
+            report.issues.iter().filter(|i| i.kind == LintKind::BrokenLink).collect();
+        assert!(
+            broken.is_empty(),
+            "case-insensitive links should not be flagged broken: {broken:?}"
+        );
+
+        // Sanity: a genuinely missing target IS still flagged.
+        write_page(
+            root,
+            "concepts",
+            "gamma",
+            "Gamma",
+            "# Gamma
+See [[nonexistent]].",
+        );
+        let report2 = lint(root).unwrap();
+        assert!(report2.issues.iter().any(|i| i.kind == LintKind::BrokenLink));
     }
 
     #[test]

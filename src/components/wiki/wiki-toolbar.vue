@@ -207,8 +207,19 @@ async function handleLint(): Promise<void> {
   try {
     const report = await lintWiki();
     lintReport.value = report;
-    const summary = `${report.errors} errors, ${report.warnings} warnings, ${report.infos} infos`;
-    toast.show(`Lint complete: ${summary}.`, report.errors > 0 ? 'error' : 'success');
+    const total = report.errors + report.warnings + report.infos;
+    if (total === 0) {
+      toast.show('Lint complete: clean. No issues found.', 'success');
+    } else {
+      const summary = `${report.errors} errors, ${report.warnings} warnings, ${report.infos} infos`;
+      // Rebuild regenerates all pages via the LLM with the hardened prompt,
+      // which fixes most broken-link / orphan issues. Recommend it whenever
+      // any issue is present.
+      toast.show(
+        `Lint complete: ${summary}. Rebuild recommended.`,
+        report.errors > 0 ? 'error' : 'warning'
+      );
+    }
   } catch (e) {
     toast.show('Failed to lint wiki', 'error');
   } finally {
@@ -282,13 +293,13 @@ function needsRefresh(): boolean {
     <button
       class="wiki-toolbar__btn wiki-toolbar__btn--primary"
       :disabled="false"
-      title="Create the wiki-root directory tree, AGENTS.md contract, and templates"
+      title="Regenerate all wiki pages from raw sources (scaffolds the tree, re-exports included articles, and re-runs the LLM ingest). Fixes broken links and stale content."
       @click="handleInit"
     >
       <span class="material-symbols-outlined text-[18px]">{{
         isInitialized() ? 'sync' : 'add_circle'
       }}</span>
-      <span>{{ isInitialized() ? 'Re-scaffold' : 'Initialize Wiki' }}</span>
+      <span>{{ isInitialized() ? 'Rebuild Wiki' : 'Initialize Wiki' }}</span>
     </button>
 
     <!-- Status pill (hidden during progress) -->

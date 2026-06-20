@@ -679,15 +679,16 @@ fn ingest_parse_llm_pages_extracts_pages() {
     assert_eq!(pages[0].frontmatter.get("title"), Some("Alpha"));
 }
 
-#[test]
-fn ingest_run_from_response_writes_and_indexes() {
+#[tokio::test]
+async fn ingest_run_from_response_writes_and_indexes() {
     let conn = test_db();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     bango_lib::wiki::storage::scaffold_tree(root).unwrap();
 
     let response = "<!-- PAGE:concept-1 -->\n---\nid: concept-1\ntitle: \"Concept One\"\ntype: concept\nslug: concept-1\nsummary: \"A concept\"\nstatus: draft\nlinks: []\n---\n\n# Concept One\n\nA test concept.";
-    let report = ingest::run_ingest_from_response(&conn, root, response).unwrap();
+    let mut report = ingest::write_pages_from_response(root, response, None).await.unwrap();
+    ingest::finalize_ingest(&conn, root, &mut report).unwrap();
     assert_eq!(report.pages_written, 1);
     assert!(root.join("wiki/concepts/concept-1.md").exists());
 

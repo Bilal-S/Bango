@@ -8,6 +8,15 @@ vi.mock('@/composables/use-tauri-command', () => ({
   tauriCommand: (...args: unknown[]) => mockTauriCommand(...args),
 }));
 
+// Hoisted mock for the dynamic `import('@tauri-apps/api/event')` inside
+// `startProgressListener`. `vi.mock` is hoisted by Vitest, so it intercepts
+// the runtime `import()` call regardless of when the test runs.
+const mockUnlisten = vi.fn();
+const mockListen = vi.fn().mockResolvedValue(mockUnlisten);
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: (...args: unknown[]) => mockListen(...args),
+}));
+
 import { useWiki } from '@/composables/use-wiki';
 
 describe('use-wiki', () => {
@@ -362,6 +371,132 @@ describe('use-wiki', () => {
       const wiki = useWiki();
       const result = await wiki.getGraph();
       expect(result.nodes).toHaveLength(0);
+    });
+  });
+
+  describe('ingestWiki', () => {
+    it('calls wiki_ingest and refreshes status after success', async () => {
+      const report = {
+        rawSourcesRead: 3,
+        pagesWritten: 5,
+        pagesSkipped: 0,
+        sourceCharsTruncated: false,
+        errors: [],
+      };
+      mockTauriCommand
+        .mockResolvedValueOnce(report) // wiki_ingest
+        .mockResolvedValueOnce({ configured: true }); // refreshStatus
+      const wiki = useWiki();
+      const result = await wiki.ingestWiki();
+      expect(mockTauriCommand).toHaveBeenNthCalledWith(1, 'wiki_ingest');
+      expect(result.pagesWritten).toBe(5);
+      expect(result.errors).toEqual([]);
+    });
+  });
+
+  describe('rebuild', () => {
+    it('calls wiki_rebuild and refreshes status after success', async () => {
+      const report = {
+        rawSourcesRead: 2,
+        pagesWritten: 4,
+        pagesSkipped: 1,
+        sourceCharsTruncated: true,
+        errors: ['warn'],
+      };
+      mockTauriCommand
+        .mockResolvedValueOnce(report) // wiki_rebuild
+        .mockResolvedValueOnce({ configured: true }); // refreshStatus
+      const wiki = useWiki();
+      const result = await wiki.rebuild();
+      expect(mockTauriCommand).toHaveBeenNthCalledWith(1, 'wiki_rebuild');
+      expect(result.pagesWritten).toBe(4);
+      expect(result.sourceCharsTruncated).toBe(true);
+    });
+  });
+
+  describe('exportAndIngest', () => {
+    it('calls wiki_export_and_ingest and refreshes status after success', async () => {
+      const report = {
+        rawSourcesRead: 1,
+        pagesWritten: 2,
+        pagesSkipped: 0,
+        sourceCharsTruncated: false,
+        errors: [],
+      };
+      mockTauriCommand
+        .mockResolvedValueOnce(report) // wiki_export_and_ingest
+        .mockResolvedValueOnce({ configured: true }); // refreshStatus
+      const wiki = useWiki();
+      const result = await wiki.exportAndIngest();
+      expect(mockTauriCommand).toHaveBeenNthCalledWith(1, 'wiki_export_and_ingest');
+      expect(result.pagesWritten).toBe(2);
+    });
+  });
+
+  describe('addRawUrl', () => {
+    it('calls wiki_add_raw_url with the url', async () => {
+      mockTauriCommand.mockResolvedValue('/tmp/wiki-root/raw/web-page.md');
+      const wiki = useWiki();
+      const result = await wiki.addRawUrl('https://example.com/page');
+      expect(mockTauriCommand).toHaveBeenCalledWith('wiki_add_raw_url', {
+        url: 'https://example.com/page',
+      });
+      expect(result).toBe('/tmp/wiki-root/raw/web-page.md');
+    });
+  });
+
+  describe('listSources', () => {
+    it('calls wiki_list_sources and returns source metadata', async () => {
+      const sources = [
+        { id: 'art-1', title: 'Article 1', authors: ['Doe, J'], year: 2024, doi: '10.1/x' },
+        { id: 'art-2', title: 'Article 2', authors: [], year: null, doi: null },
+      ];
+      mockTauriCommand.mockResolvedValue(sources);
+      const wiki = useWiki();
+      const result = await wiki.listSources();
+      expect(mockTauriCommand).toHaveBeenCalledWith('wiki_list_sources');
+      expect(result).toHaveLength(2);
+      expect(result[0]?.id).toBe('art-1');
+      expect(result[1]?.year).toBeNull();
+    });
+  });
+
+  describe('resetState', () => {
+    it('clears all shared singleton state', async () => {
+      // Populate state by fetching status.
+      mockTauriCommand.mockResolvedValue({ configured: true, pageCount: 5 });
+      const wiki = useWiki();
+      await wiki.refreshStatus();
+      expect(wiki.status.value).not.toBeNull();
+      expect(wiki.loading.value).toBe(false);
+
+      wiki.resetState();
+      expect(wiki.status.value).toBeNull();
+      expect(wiki.loading.value).toBe(false);
+      expect(wiki.error.value).toBeNull();
+      expect(wiki.initializing.value).toBe(false);
+      expect(wiki.progress.value).toBeNull();
+    });
+  });
+
+  describe('progress listener', () => {
+    it('startProgressListener attaches a wiki:progress listener', async () => {
+      mockListen.mockClear();
+      mockUnlisten.mockClear();
+
+      const wiki = useWiki();
+      await wiki.startProgressListener();
+      expect(mockListen).toHaveBeenCalledWith('wiki:progress', expect.any(Function));
+      // Cleanup.
+      wiki.stopProgressListener();
+      expect(mockUnlisten).toHaveBeenCalled();
+    });
+
+    it('stopProgressListener is a no-op when never started', () => {
+      mockUnlisten.mockClear();
+      const wiki = useWiki();
+      expect(() => wiki.stopProgressListener()).not.toThrow();
+      expect(mockUnlisten).not.toHaveBeenCalled();
     });
   });
 

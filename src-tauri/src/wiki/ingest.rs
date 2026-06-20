@@ -348,8 +348,8 @@ A major public health concern related to [[sugar-tax]].
         assert!(root.join("wiki/authors/jane-doe.md").exists());
     }
 
-    #[test]
-    fn run_ingest_from_response_writes_pages_and_clears_flag() {
+    #[tokio::test]
+    async fn run_ingest_from_response_writes_pages_and_clears_flag() {
         let conn = Connection::open_in_memory().unwrap();
         crate::db::migration::run_migrations(&conn).unwrap();
         let tmp = TempDir::new().unwrap();
@@ -388,7 +388,8 @@ links: []
 
 See [[alpha]].
 "#;
-        let report = run_ingest_from_response(&conn, root, response).unwrap();
+        let mut report = write_pages_from_response(root, response, None).await.unwrap();
+        finalize_ingest(&conn, root, &mut report).unwrap();
         assert_eq!(report.pages_written, 2);
         assert!(report.errors.is_empty());
 

@@ -35,6 +35,52 @@ pub fn ensure_table(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Ensure the FTS5 table exists AND is in sync with the wiki pages on disk.
+/// Self-heals two desync cases:
+///
+/// 1. **Empty index, pages on disk** - happens after a schema rebuild /
+///    `rebuild_schema` / DB reset that drops the FTS table while leaving the
+///    `wiki/*.md` files intact.
+/// 2. **Count mismatch** - the index has a different number of rows than there
+///    are `.md` pages on disk. Happens when pages were added/removed on disk
+///    by an ingest run that predates the rebuild-on-mutation fix, or any other
+///    path that wrote pages without touching the index. (Detects added OR
+///    removed pages via a cheap count comparison, not a full content diff.)
+///
+/// Returns `true` if a rebuild was performed, `false` if the index was already
+/// in sync (or there are no pages to index). Read paths (`wiki_chat`,
+/// `wiki_search`) call this instead of `ensure_table` so the first access after
+/// a desync transparently recovers with no user action.
+pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, AppError> {
+    ensure_table(conn)?;
+    let row_count: i64 = conn
+        .query_row(&format!("SELECT COUNT(*) FROM {FTS_TABLE}"), [], |row| row.get(0))
+        .unwrap_or(0);
+    let pages = collect_wiki_pages(root)?;
+    let disk_count = pages.len() as i64;
+
+    if row_count == 0 {
+        // Case 1: empty index. Rebuild only if there are pages to index.
+        if !pages.is_empty() {
+            rebuild_index(conn, root)?;
+            return Ok(true);
+        }
+        // No pages on disk and empty index -> nothing to do.
+        return Ok(false);
+    }
+
+    // Case 2: index non-empty but row count differs from disk count. Rebuild
+    // to pick up added/removed pages. (When counts match we assume in-sync;
+    // in-place edits of existing pages are handled by the rebuild-on-mutation
+    // hooks in `wiki_update_page` / `wiki_delete_page`.)
+    if row_count != disk_count {
+        rebuild_index(conn, root)?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
 /// Rebuild the index from scratch by scanning `wiki/` for `.md` files.
 /// Drops and recreates the FTS table, then inserts every page.
 pub fn rebuild_index(conn: &Connection, root: &Path) -> Result<usize, AppError> {
@@ -111,12 +157,21 @@ pub struct WikiPageHit {
 
 /// BM25-ranked search over the FTS5 index. Returns up to `limit` hits.
 ///
-/// The query is escaped for FTS5 by quoting it as a phrase match. This is a
-/// conservative approach that prevents syntax errors from user input.
+/// The user query is converted to a safe FTS5 MATCH expression by
+/// `build_match_query`: tokens are split on whitespace/punctuation, stop words
+/// are dropped, and each remaining token is phrase-quoted (so FTS5 treats it
+/// as a literal string, never as an operator) and OR-joined. This retrieves
+/// any page containing any meaningful term, ranked by BM25 — the standard
+/// RAG-over-FTS5 pattern. (The previous implementation phrase-quoted the whole
+/// question, which only matched documents containing those exact words in that
+/// exact sequence, so natural-language questions like "Who is J Adams?"
+/// returned zero hits.)
 pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<WikiPageHit>, AppError> {
-    // Build a safe FTS5 MATCH query: phrase-quote the whole query.
-    // Double any embedded double quotes first.
-    let safe_query = format!("\"{}\"", query.replace('"', "\"\""));
+    let safe_query = build_match_query(query);
+    // Empty query (e.g. only stop words / punctuation) -> no results, no error.
+    if safe_query.is_empty() {
+        return Ok(Vec::new());
+    }
     let limit_i = limit.max(1) as i64;
 
     let mut stmt = conn.prepare(
@@ -147,6 +202,65 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<WikiPa
         hits.push(row?);
     }
     Ok(hits)
+}
+
+/// A small set of English stop words dropped from the MATCH query to avoid
+/// surfacing only pages that happen to contain common particles. Tokens here
+/// are matched case-insensitively against lowercased input.
+const STOP_WORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it",
+    "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these",
+    "they", "this", "to", "was", "will", "with", "who", "what", "when", "where", "why", "how", "i",
+    "you", "we", "he", "she", "they", "me", "him", "her", "us", "do", "does", "did", "can",
+    "could", "would", "should", "my", "your", "our",
+];
+
+/// Build a safe, effective FTS5 MATCH expression from a natural-language query.
+///
+/// - Splits on any non-alphanumeric character (so punctuation/whitespace both
+///   separate tokens).
+/// - Lowercases for stop-word comparison (FTS5's `unicode61` tokenizer is
+///   case-insensitive, so casing in the emitted query is irrelevant).
+/// - Drops stop words (`who`, `is`, `the`, ...).
+/// - Phrase-quotes each remaining token with embedded `"` doubled, so FTS5
+///   treats the token as a literal string (never an operator like `AND`/`OR`/
+///   `*`/`:`).
+/// - OR-joins the quoted tokens so any page containing any meaningful term is
+///   a candidate, BM25-ranked.
+/// - If stop-word stripping removes everything, falls back to OR-joining all
+///   literal tokens (so a query like "the and is" still searches rather than
+///   silently returning nothing).
+/// - Returns an empty `String` only when there are no alphanumeric tokens at
+///   all (e.g. `"???"`); callers treat that as "no results".
+#[must_use]
+pub fn build_match_query(query: &str) -> String {
+    // Split on any run of non-alphanumeric characters.
+    let raw_tokens: Vec<String> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase())
+        .collect();
+    if raw_tokens.is_empty() {
+        return String::new();
+    }
+
+    // Prefer tokens that are not stop words; fall back to all tokens if that
+    // would leave nothing.
+    let stop = |t: &str| STOP_WORDS.contains(&t);
+    let meaningful: Vec<&String> = raw_tokens.iter().filter(|t| !stop(t.as_str())).collect();
+    let tokens: Vec<&String> =
+        if meaningful.is_empty() { raw_tokens.iter().collect() } else { meaningful };
+
+    tokens
+        .iter()
+        .map(|t| {
+            // Phrase-quote each token, doubling any embedded double quote so
+            // FTS5 reads it literally.
+            let escaped = t.replace('"', "\"\"");
+            format!("\"{escaped}\"")
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 /// Collect all wiki `.md` file paths (for listing in the UI).
@@ -333,6 +447,210 @@ mod tests {
         // No duplicates.
         let hits = search(&conn, "alpha", 10).unwrap();
         assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn ensure_index_populated_rebuilds_when_empty_but_pages_exist() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "sugar-tax", "Sugar Tax", "sugar tax levy");
+        write_wiki_page(root, "authors", "jane-doe", "Jane Doe", "nutrition researcher");
+
+        let conn = Connection::open_in_memory().unwrap();
+        // Table exists but is empty (the desync state after a schema rebuild).
+        ensure_table(&conn).unwrap();
+        let hits_before = search(&conn, "sugar", 5).unwrap();
+        assert!(hits_before.is_empty(), "index should be empty before self-heal");
+
+        // Self-heal fires because there are pages on disk but 0 indexed rows.
+        let rebuilt = ensure_index_populated(&conn, root).unwrap();
+        assert!(rebuilt, "should report a rebuild was performed");
+        let hits_after = search(&conn, "sugar", 5).unwrap();
+        assert!(!hits_after.is_empty(), "search should find results after self-heal");
+        let slugs: Vec<&str> = hits_after.iter().map(|h| h.slug.as_str()).collect();
+        assert!(slugs.contains(&"sugar-tax"));
+    }
+
+    #[test]
+    fn ensure_index_populated_returns_false_when_already_populated() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "alpha content");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // Already populated -> no rebuild needed.
+        let rebuilt = ensure_index_populated(&conn, root).unwrap();
+        assert!(!rebuilt, "should not rebuild an already-populated index");
+    }
+
+    #[test]
+    fn ensure_index_populated_returns_false_when_no_pages_exist() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        // Scaffold wiki/ dir but with no pages.
+        std::fs::create_dir_all(root.join("wiki")).unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        let rebuilt = ensure_index_populated(&conn, root).unwrap();
+        assert!(!rebuilt, "should not rebuild when there are no pages to index");
+    }
+
+    #[test]
+    fn ensure_index_populated_rebuilds_when_index_count_mismatches_disk() {
+        // Reproduces the "J Adams on disk but not in Chat" staleness: pages
+        // exist on disk, the index is non-empty, but its row count differs
+        // from the disk page count (e.g. a new page was added by an ingest run
+        // that did not refresh the index).
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        // Start with 3 pages and a fully-built index.
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "alpha content");
+        write_wiki_page(root, "concepts", "beta", "Beta", "beta content");
+        write_wiki_page(root, "authors", "jane-doe", "Jane Doe", "nutrition researcher");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+        // Sanity: index has 3 rows, "jane-doe" is retrievable.
+        assert!(search(&conn, "jane", 5).unwrap().iter().any(|h| h.slug == "jane-doe"));
+
+        // Add a 4th page on disk WITHOUT rebuilding the index (simulates a
+        // stale index after an ingest that pre-dates the mutation hooks).
+        write_wiki_page(root, "authors", "j-adams", "J Adams", "adams sugar policy");
+        // The new page is not yet retrievable.
+        assert!(
+            search(&conn, "adams", 5).unwrap().is_empty(),
+            "new page should not be in the stale index"
+        );
+
+        // Self-heal detects the count mismatch (index=3, disk=4) and rebuilds.
+        let rebuilt = ensure_index_populated(&conn, root).unwrap();
+        assert!(rebuilt, "should rebuild on count mismatch");
+        // Now the previously-missing page is retrievable.
+        let hits = search(&conn, "adams", 5).unwrap();
+        assert!(
+            hits.iter().any(|h| h.slug == "j-adams"),
+            "J Adams should be retrievable after self-heal"
+        );
+    }
+
+    #[test]
+    fn ensure_index_populated_rebuilds_when_index_has_more_rows_than_disk() {
+        // Inverse case: a page was deleted on disk without updating the index.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "alpha content");
+        write_wiki_page(root, "concepts", "beta", "Beta", "beta content");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // Delete one page from disk (bypassing wiki_delete_page).
+        std::fs::remove_file(root.join("wiki/concepts/beta.md")).unwrap();
+
+        // Index still has 2 rows but disk has 1 -> mismatch -> rebuild.
+        let rebuilt = ensure_index_populated(&conn, root).unwrap();
+        assert!(rebuilt, "should rebuild when index has stale extra rows");
+        // The deleted page is no longer retrievable.
+        assert!(search(&conn, "beta", 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_finds_pages_by_any_token_in_natural_language_question() {
+        // Regression: the old phrase-query implementation returned 0 hits for
+        // multi-word natural-language questions because no page contained the
+        // exact phrase. The token-based OR query must find pages by any term.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(
+            root,
+            "authors",
+            "author-adams-j",
+            "J Adams",
+            "J Adams appears across several SDIL studies on household purchases.",
+        );
+        write_wiki_page(root, "concepts", "sugar-tax", "Sugar Tax", "levy on sugary drinks");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // Natural-language question (the exact case the bug was reported on).
+        let hits = search(&conn, "Who is J Adams?", 5).unwrap();
+        assert!(!hits.is_empty(), "natural-language question must find pages");
+        assert!(hits.iter().any(|h| h.slug == "author-adams-j"), "should find the J Adams page");
+    }
+
+    #[test]
+    fn build_match_query_drops_stop_words_and_or_joins_meaningful_tokens() {
+        // "Who is J Adams?" -> stop words (who, is) dropped -> "J" OR "Adams".
+        let q = build_match_query("Who is J Adams?");
+        assert_eq!(q, "\"j\" OR \"adams\"");
+    }
+
+    #[test]
+    fn build_match_query_handles_punctuation_as_token_separator() {
+        // Punctuation splits tokens; only meaningful tokens are emitted.
+        let q = build_match_query("What is the sugar-tax?");
+        assert_eq!(q, "\"sugar\" OR \"tax\"");
+    }
+
+    #[test]
+    fn build_match_query_treats_fts_operators_as_literal_tokens() {
+        // FTS5 keywords and wildcards must be phrase-quoted so they are treated
+        // as literal strings, not operators.
+        let q = build_match_query("sugar AND tax OR levy*");
+        // "and"/"or" are stop words -> dropped. "sugar", "tax", "levy" quoted.
+        assert_eq!(q, "\"sugar\" OR \"tax\" OR \"levy\"");
+        // Ensure the literal operator strings are quoted (not bare).
+        assert!(!q.contains(" OR AND") && !q.contains(" OR OR"));
+    }
+
+    #[test]
+    fn build_match_query_falls_back_to_all_tokens_when_only_stop_words() {
+        // If every token is a stop word, fall back to OR-joining all of them
+        // rather than returning an empty query.
+        let q = build_match_query("the and is");
+        assert_eq!(q, "\"the\" OR \"and\" OR \"is\"");
+    }
+
+    #[test]
+    fn build_match_query_returns_empty_when_no_alphanumeric_tokens() {
+        // Pure punctuation / empty -> empty string -> caller returns no hits.
+        assert_eq!(build_match_query("??? !!!"), "");
+        assert_eq!(build_match_query(""), "");
+    }
+
+    #[test]
+    fn build_match_query_single_token_no_or() {
+        // A single meaningful token is emitted as one phrase-quoted term.
+        assert_eq!(build_match_query("sugar"), "\"sugar\"");
+        // "the sugar" -> stop word dropped -> single token.
+        assert_eq!(build_match_query("the sugar"), "\"sugar\"");
+    }
+
+    #[test]
+    fn search_returns_empty_for_pure_stopword_question_without_erroring() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "alpha content");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // A question with only stop words falls back to searching them; they
+        // aren't in the index, so 0 hits — but no error.
+        let hits = search(&conn, "the and is", 5).unwrap();
+        assert!(hits.is_empty());
+
+        // Pure punctuation -> empty query -> empty hits, no error.
+        let hits2 = search(&conn, "???", 5).unwrap();
+        assert!(hits2.is_empty());
     }
 
     #[test]

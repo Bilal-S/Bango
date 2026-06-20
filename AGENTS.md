@@ -110,20 +110,34 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `fts.rs` (FTS5 BM25 search index), `ingest.rs` (LLM page generation: prompt builder,
     `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild),
     `engine.rs` (deterministic lint + `build_graph` for link graph visualization),
-    `chat.rs` (token-budgeted RAG chat over FTS5 index). `commands/wiki_cmd.rs` exposes
+    `chat.rs` (token-budgeted RAG chat over FTS5 index; self-heals the FTS table via
+    `fts::ensure_index_populated` when the index is empty OR its row count
+    mismatches the number of `.md` pages on disk).
+    `commands/wiki_cmd.rs` exposes
     all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
     `wiki_get_page`, `wiki_update_page`, `wiki_delete_page`, `wiki_delete_wiki`,
     `wiki_chat`, `wiki_get_graph`, `wiki_ingest`, `wiki_list_pages`, `wiki_list_sources`,
+    `wiki_search` rebuilds the FTS index if empty, `wiki_update_page` / `wiki_delete_page`
+    rebuild it on every edit/delete so chat + search stay in sync with user changes.
     `wiki_rebuild` (one-click full pipeline: scaffold + export + ingest + FTS5, emits
     `wiki:progress` events), `wiki_export_and_ingest` (export + ingest after Add Documents).
     The `wiki_needs_refresh` flag triple lives in `app_settings_repo.rs`; cleared after
     `wiki_ingest`/`wiki_rebuild` commits. Frontend: `wiki-view.vue` (sidebar + viewer +
     editor + graph + article detail slide-over), `wiki-toolbar.vue` (Re-scaffold, Add
-    Documents, Lint, Delete Wiki, progress bar), `wiki-page-viewer.vue` (Markdown +
-    `[[wikilink]]` + `[^art-id]` source ref resolution), `wiki-page-editor.vue` (split-pane
-    editor), `wiki-graph-panel.vue` (sigma + ForceAtlas2 graph). Composable: `use-wiki.ts`.
+    Documents, Lint, Delete Wiki, progress bar), `wiki-page-viewer.vue` (Markdown render via
+    the shared `src/utils/wiki-markdown.ts` - `[[wikilink]]` + `[^art-id]` source ref
+    resolution), `wiki-page-editor.vue` (split-pane editor), `wiki-graph-panel.vue`
+    (sigma + ForceAtlas2 graph). Composable: `use-wiki.ts`.
     Design and phasing: `.worktrees/llmwiki-plan.md`.
+    **Chat-with-Wiki integration**: `useChatStore.source: 'articles'|'wiki'` (mutually
+    exclusive) switches the `/chat` view between `send_chat_message` (article RAG) and
+    `wiki_chat` (BM25 FTS5 RAG). A Wiki toggle button (icon `local_library`) in `chat-view.vue`
+    sits right of the `(+)` icon, visible only when `wikiReady` (wiki initialized AND
+    `pageCount > 0`). Wiki-sourced assistant bubbles render via `src/utils/wiki-markdown.ts`
+    so `[[slug]]` citations become clickable links that open a right-side Wiki reader
+    slide-over (`WikiPageViewer` with a back-stack). The wiki-toolbar no longer owns a
+    Chat button.
   - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
@@ -207,6 +221,20 @@ describe each durable boundary so agents can locate the right area. Create a chi
     (tab bar + `?tab=`/`#hash` deep-link routing) that renders one `help-tab-*.vue` component
     per tab (guide, bibliometrics, troubleshooting, local-ai, reference); the Bibliometrics tab
     documents all six completed modules. `wiki-view.vue` is the `/wiki` route (flat, below
+    `chat-view.vue` is the `/chat` route. It renders the article-RAG chat (explicit
+    selected articles via `send_chat_message`) AND the wiki-RAG chat: a Wiki toggle button
+    (icon `local_library`) sits right of the `(+)` icon, visible only when
+    `chatStore.wikiReady` (wiki initialized AND `pageCount > 0`, populated from
+    `wiki_get_status`). When active it gets an indigo halo/fill, hides the `(+)` button
+    + article context pills, shows a "Wiki mode" banner, and routes sends through
+    `wiki_chat` (BM25 FTS5 RAG) instead of `send_chat_message`. Each message records its
+    `source` (`'articles'|'wiki'`) so the bubble shows a `wiki` badge and the assistant
+    body is rendered via `src/utils/wiki-markdown.ts` (turning `[[slug]]` citations into
+    clickable `.wikilink` spans and `[^art-id]` into `.art-ref` spans). Clicking a
+    wikilink opens a right-side **Wiki reader slide-over** (`WikiPageViewer` with a
+    `wikiNavStack` back-stack so inner navigation chains and a Back/Close chrome returns
+    to the chat); opening it closes the article detail slide-over and vice-versa (mutually
+    exclusive). `wiki-view.vue` is the `/wiki` route (flat, below
     `/chat` in `nav-sidebar.vue` with the `local_library` icon). Ships the empty-state gates
     (LLM configured, included articles > 0, wiki initialized), the sidebar (page list
     grouped by type + client-side search filter), the page viewer (`wiki-page-viewer.vue`
@@ -251,7 +279,22 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src/utils/`** - pure utilities: `network-export.ts` (graph PNG/GEXF export via the
     `save()` + `write_text_to_file` pattern), `formatters.ts`, `color.ts`, `debounce.ts`,
     `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `llm-error.ts`,
-    `google-trends.ts` (Trends embed URL builder + date-range validators).
+    `google-trends.ts` (Trends embed URL builder + date-range validators),
+    `wiki-markdown.ts` (shared wiki Markdown renderer: `renderWikiMarkdown(text, opts?)`
+    converts `[[slug]]` / `[[slug|alias]]` to `.wikilink` anchors and `[^art-id]`
+    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs),
+    HTML-escapes slug/alias text, strips `/raw/*.md` artifact lines, then runs
+    `marked.parse`. Consumed by both `wiki-page-viewer.vue` (with a sources map) and
+    `chat-view.vue` assistant bubbles (sources optional). Pure function, unit-tested in
+    `src/__tests__/utils/wiki-markdown.test.ts`).
+  - **`src/stores/chat.ts`** - Pinia chat store. Holds `selectedArticleIds`, `messages`,
+    `loading`, `error`, plus the retrieval-source state `source: 'articles'|'wiki'`
+    (default `'articles'`; mutually exclusive) and `wikiReady` (drives the chat-view wiki
+    toggle visibility). `sendMessage(text)` branches: `source==='wiki'` calls
+    `wiki_chat` (history-only payload, no articleIds); otherwise calls `send_chat_message`
+    with `selectedArticleIds`. Each pushed message records its `source` for bubble
+    rendering. `toggleWikiMode()` flips the source; `clearChat()` resets it to
+    `'articles'`. Tested by `src/__tests__/chat.test.ts`.
   - **`src/styles/forms.css`** - global form/button/dialog primitives (`.field__*`, `.btn--*`,
     `.dialog`, `.spinner`) promoted from the former scoped `llm-config.vue`. Loaded via
     `base.css`; low specificity so scoped rules in other views still win.

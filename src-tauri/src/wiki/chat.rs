@@ -34,20 +34,23 @@ pub async fn wiki_chat(
     question: &str,
     history: &[ChatMessage],
 ) -> Result<String, AppError> {
-    // 1. Resolve the wiki root + ensure the FTS table exists.
-    let _root = {
+    // 1. Resolve the wiki root.
+    let root = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         crate::wiki::storage::resolve_root(&conn)?
     };
 
-    // 2. BM25 search for the most relevant wiki pages.
+    // 2. BM25 search for the most relevant wiki pages. `ensure_index_populated`
+    //    self-heals the desync where pages exist on disk but the FTS table is
+    //    empty (e.g. after a schema rebuild / DB reset that dropped the table
+    //    but left the wiki/*.md files intact).
     let hits = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
-        fts::ensure_table(&conn)?;
+        fts::ensure_index_populated(&conn, &root)?;
         fts::search(&conn, question, MAX_HITS)?
     };
 
@@ -66,13 +69,42 @@ pub async fn wiki_chat(
         })?
     };
 
-    // 5. Build prompts.
-    let system_prompt = "You are a research wiki assistant. Answer the researcher's question using \
-                         the provided wiki page context. Cite pages by their slug in [[double brackets]] \
-                         when the answer draws on a specific page. Do not invent information. If the wiki \
-                         context does not cover the question, say so explicitly and suggest which page \
-                         might need to be created or expanded. Format your response in clean Markdown.";
+    // 5. Build prompts (delegated to a pure, testable helper).
+    let (system_prompt, user_prompt) = build_wiki_prompts(&context, history, question);
 
+    // 6. Send through the orchestrator.
+    let (response, _tokens) =
+        orchestrator.send(&config, system_prompt, &user_prompt, LlmRequestType::WikiChat).await?;
+
+    Ok(response)
+}
+
+/// The wiki-chat system prompt (static). Returned by `build_wiki_prompts` and
+/// exposed for tests so the prompt contract is documented alongside its tests.
+#[must_use]
+pub fn wiki_chat_system_prompt() -> &'static str {
+    "You are a research wiki assistant. Answer the researcher's question using \
+     the provided wiki page context. Cite pages by their slug in [[double brackets]] \
+     when the answer draws on a specific page. Do not invent information. If the wiki \
+     context does not cover the question, say so explicitly and suggest which page \
+     might need to be created or expanded. Format your response in clean Markdown."
+}
+
+/**
+ * Build the (system, user) prompt pair for `wiki_chat`.
+ *
+ * Pure & testable: no DB, no orchestrator. `context` is the token-budgeted
+ * string produced by `build_context`; when empty, the user prompt asks the
+ * model to tell the user to ingest sources. `history` is rendered as
+ * `User: ... / Assistant: ...` lines. The final line is always
+ * `User: {question}\nAssistant:`.
+ */
+#[must_use]
+pub fn build_wiki_prompts(
+    context: &str,
+    history: &[ChatMessage],
+    question: &str,
+) -> (&'static str, String) {
     let mut user_prompt = String::new();
     if context.is_empty() {
         user_prompt.push_str(
@@ -81,7 +113,7 @@ pub async fn wiki_chat(
         );
     } else {
         user_prompt.push_str("Wiki page context (BM25-ranked, most relevant first):\n\n");
-        user_prompt.push_str(&context);
+        user_prompt.push_str(context);
         user_prompt.push_str("\n\n");
     }
 
@@ -96,11 +128,7 @@ pub async fn wiki_chat(
 
     user_prompt.push_str(&format!("User: {question}\nAssistant:"));
 
-    // 6. Send through the orchestrator.
-    let (response, _tokens) =
-        orchestrator.send(&config, system_prompt, &user_prompt, LlmRequestType::WikiChat).await?;
-
-    Ok(response)
+    (wiki_chat_system_prompt(), user_prompt)
 }
 
 /// Build a token-budgeted context string from BM25 hits.
@@ -251,5 +279,73 @@ mod tests {
         assert!(entry.contains("Alpha"));
         assert!(entry.contains("the summary"));
         assert!(entry.contains("the body"));
+    }
+
+    fn msg(role: &str, content: &str) -> ChatMessage {
+        ChatMessage { role: role.to_string(), content: content.to_string() }
+    }
+
+    #[test]
+    fn wiki_chat_system_prompt_mentions_citations_and_non_invention() {
+        let s = wiki_chat_system_prompt();
+        assert!(s.contains("research wiki assistant"));
+        assert!(s.contains("[[double brackets]]"));
+        assert!(s.contains("Do not invent information"));
+        assert!(s.contains("Markdown"));
+    }
+
+    #[test]
+    fn build_wiki_prompts_with_context_includes_context_block_and_question() {
+        let ctx = "## [[alpha]] - Alpha\n\nbody text";
+        let (system, user) = build_wiki_prompts(ctx, &[], "What is alpha?");
+        // System prompt is the static contract.
+        assert_eq!(system, wiki_chat_system_prompt());
+        // The provided context is embedded.
+        assert!(user.contains("Wiki page context (BM25-ranked"));
+        assert!(user.contains("[[alpha]]"));
+        assert!(user.contains("body text"));
+        // The "ingest first" fallback must NOT appear when context is present.
+        assert!(!user.contains("ingest sources first"));
+        // Final line carries the question.
+        assert!(user.ends_with("User: What is alpha?\nAssistant:"));
+    }
+
+    #[test]
+    fn build_wiki_prompts_empty_context_asks_model_to_tell_user_to_ingest() {
+        let (_system, user) = build_wiki_prompts("", &[], "anything");
+        assert!(user.contains("does not yet contain any indexed pages"));
+        assert!(user.contains("ingest sources first"));
+        // Still ends with the question prompt.
+        assert!(user.contains("User: anything\nAssistant:"));
+    }
+
+    #[test]
+    fn build_wiki_prompts_renders_history_in_order() {
+        let history = vec![msg("user", "q1"), msg("assistant", "a1"), msg("user", "q2")];
+        let (_system, user) = build_wiki_prompts("", &history, "q3");
+        assert!(user.contains("Conversation history:"));
+        let q1 = user.find("User: q1").unwrap_or(usize::MAX);
+        let a1 = user.find("Assistant: a1").unwrap_or(usize::MAX);
+        let q2 = user.find("User: q2").unwrap_or(usize::MAX);
+        let q3 = user.find("User: q3").unwrap_or(usize::MAX);
+        // History precedes the final question, in order.
+        assert!(q1 < a1);
+        assert!(a1 < q2);
+        assert!(q2 < q3);
+    }
+
+    #[test]
+    fn build_wiki_prompts_omits_history_section_when_empty() {
+        let (_system, user) = build_wiki_prompts("ctx", &[], "q");
+        assert!(!user.contains("Conversation history:"));
+    }
+
+    #[test]
+    fn build_wiki_prompts_treats_unknown_role_as_assistant() {
+        // Any role string other than exactly "user" renders as "Assistant".
+        let history = vec![msg("system", "sys note")];
+        let (_system, user) = build_wiki_prompts("", &history, "q");
+        assert!(user.contains("Assistant: sys note"));
+        assert!(!user.contains("User: sys note"));
     }
 }

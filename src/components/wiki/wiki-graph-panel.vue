@@ -21,6 +21,18 @@ const stats = ref({ nodes: 0, edges: 0, orphans: 0 });
 
 let sigma: Sigma | null = null;
 let graphologyGraph: Graph | null = null;
+// ResizeObserver used to defer Sigma init until the container has non-zero
+// dimensions (Sigma throws "Container has no width" when the element is
+// display:none / not yet laid out, e.g. when the Graph tab is hidden at mount).
+let containerObserver: ResizeObserver | null = null;
+
+/** Disconnect the container ResizeObserver if one is active. */
+function disconnectContainerObserver(): void {
+  if (containerObserver) {
+    containerObserver.disconnect();
+    containerObserver = null;
+  }
+}
 
 // ── Filter state ──────────────────────────────────────────────
 const hiddenTypes = ref<Set<string>>(new Set());
@@ -165,6 +177,30 @@ async function loadAndRender(): Promise<void> {
 function render(): void {
   if (!containerRef.value || !graph.value) return;
 
+  // Guard: Sigma reads container dimensions at construction time and throws
+  // "Container has no width" when they are 0. This happens when the Graph tab
+  // is hidden (v-show -> display:none) at mount, or when onMounted fires
+  // before the browser performs layout. Defer init via a one-shot
+  // ResizeObserver that re-calls render() once the element has a real size.
+  const { clientWidth, clientHeight } = containerRef.value;
+  if (clientWidth === 0 || clientHeight === 0) {
+    disconnectContainerObserver();
+    const container = containerRef.value;
+    containerObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          disconnectContainerObserver();
+          // Re-attempt now that the container is laid out.
+          render();
+          return;
+        }
+      }
+    });
+    containerObserver.observe(container);
+    return;
+  }
+
   // Destroy any existing renderer.
   if (sigma) {
     sigma.kill();
@@ -256,6 +292,7 @@ function render(): void {
 
 onMounted(loadAndRender);
 onUnmounted(() => {
+  disconnectContainerObserver();
   if (sigma) {
     sigma.kill();
     sigma = null;

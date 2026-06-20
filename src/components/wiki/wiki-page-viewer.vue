@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
-import { marked } from 'marked';
 import { useWiki } from '@/composables/use-wiki';
+import { renderWikiMarkdown } from '@/utils/wiki-markdown';
 import type { WikiPage, WikiSourceInfo } from '@/types/wiki';
 
 const props = defineProps<{
@@ -36,13 +36,6 @@ async function loadSources(): Promise<void> {
   }
 }
 
-/** Format an article reference label: "Title (Year)". */
-function formatArtRef(source: WikiSourceInfo): string {
-  const year = source.year ? ` (${source.year})` : '';
-  const title = source.title.length > 60 ? source.title.slice(0, 57) + '...' : source.title;
-  return `${title}${year}`;
-}
-
 /** Parse the source_articles JSON array from frontmatter. */
 function parseSourceArticles(raw: string | null): string[] {
   if (!raw) return [];
@@ -54,37 +47,14 @@ function parseSourceArticles(raw: string | null): string[] {
   }
 }
 
-/** Render Markdown body with [[wikilinks]] and [^art-id] references converted to links. */
+/**
+ * Render Markdown body with [[wikilinks]] and [^art-id] references converted to
+ * clickable spans. Delegated to the shared renderer so the chat view and the
+ * wiki viewer produce identical click targets and styling hooks.
+ */
 const renderedBody = computed(() => {
   if (!page.value) return '';
-  let text = page.value.body;
-
-  // 1. Convert [^art-{id}] footnotes to clickable source references.
-  text = text.replace(/\[\^art-([a-f0-9-]+)\]/g, (_match, artId: string) => {
-    const source = sources.value.get(artId);
-    if (source) {
-      const label = formatArtRef(source).replace(/"/g, '"');
-      return `<a class="art-ref" data-art-id="${artId}" title="${source.title.replace(/"/g, '"')}">${label}</a>`;
-    }
-    // Fallback: show a shortened ID if the source isn't found.
-    const shortId = artId.slice(0, 8);
-    return `<a class="art-ref art-ref--missing" data-art-id="${artId}">[${shortId}]</a>`;
-  });
-
-  // 2. Convert [[slug]] and [[slug|alias]] to wikilinks.
-  text = text.replace(
-    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
-    (_match, slug: string, alias?: string) => {
-      const linkText = alias?.trim() || slug.trim();
-      const safeSlug = slug.trim().replace(/"/g, '"');
-      return `<a class="wikilink" data-slug="${safeSlug}">${linkText}</a>`;
-    }
-  );
-
-  // 3. Strip lines containing /raw/ file paths (LLM artifact, not user-facing).
-  text = text.replace(/^.*\/raw\/[^\s)]+\.md.*$/gim, '');
-
-  return marked.parse(text) as string;
+  return renderWikiMarkdown(page.value.body, { sources: sources.value });
 });
 
 /** Load the page when the slug changes. */

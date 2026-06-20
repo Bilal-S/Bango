@@ -279,7 +279,10 @@ pub fn wiki_search(
     limit: Option<usize>,
 ) -> Result<Vec<fts::WikiPageHit>, AppError> {
     let conn = lock_conn(&db_state)?;
-    fts::ensure_table(&conn)?;
+    let root = storage::resolve_root(&conn)?;
+    // Self-heal: rebuild the index if it is empty but pages exist on disk
+    // (e.g. after a schema rebuild / DB reset that dropped the FTS table).
+    fts::ensure_index_populated(&conn, &root)?;
     fts::search(&conn, &query, limit.unwrap_or(10))
 }
 
@@ -369,6 +372,11 @@ pub fn wiki_update_page(
                 new_fm.set("status", "draft");
             }
             frontmatter::write_file(&path, &new_fm, &body)?;
+            // Keep the FTS5 index in sync so wiki_chat / wiki_search reflect
+            // the edited title/summary/body immediately. A full rebuild is
+            // cheap (dozens to low-hundreds of local pages) and avoids fragile
+            // per-row sync logic.
+            fts::rebuild_index(&conn, &root)?;
             return Ok(WikiPage {
                 slug: new_fm.get("slug").unwrap_or("").to_string(),
                 title,
@@ -397,6 +405,9 @@ pub fn wiki_delete_page(
         let (fm, _body) = frontmatter::read_file(&path)?;
         if fm.get("slug") == Some(slug.as_str()) {
             std::fs::remove_file(&path)?;
+            // Keep the FTS5 index in sync so the deleted page is no longer
+            // returned by wiki_chat / wiki_search.
+            fts::rebuild_index(&conn, &root)?;
             return Ok(true);
         }
     }
@@ -462,7 +473,9 @@ pub async fn wiki_ingest(
 
     let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
                          contract strictly. Output wiki pages in the exact delimited format \
-                         requested. Use [[wikilinks]] to connect pages. Do not use em dashes.";
+                         requested. Use [[wikilinks]] to connect pages, and ALWAYS use the \
+                         exact lowercase kebab-case slug of the target page as the link text \
+                         (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). Do not use em dashes.";
     let (response, _tokens) = orchestrator
         .send(&config, system_prompt, &prompt, crate::llm::orchestrator::LlmRequestType::WikiIngest)
         .await?;
@@ -644,7 +657,9 @@ async fn wiki_rebuild_inner(
 
     let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
                          contract strictly. Output wiki pages in the exact delimited format \
-                         requested. Use [[wikilinks]] to connect pages. Do not use em dashes.";
+                         requested. Use [[wikilinks]] to connect pages, and ALWAYS use the \
+                         exact lowercase kebab-case slug of the target page as the link text \
+                         (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). Do not use em dashes.";
     let config = {
         let conn = lock_conn(db_state)?;
         crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
@@ -705,7 +720,9 @@ async fn wiki_export_and_ingest_inner(
 
     let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
                          contract strictly. Output wiki pages in the exact delimited format \
-                         requested. Use [[wikilinks]] to connect pages. Do not use em dashes.";
+                         requested. Use [[wikilinks]] to connect pages, and ALWAYS use the \
+                         exact lowercase kebab-case slug of the target page as the link text \
+                         (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). Do not use em dashes.";
     let config = {
         let conn = lock_conn(db_state)?;
         crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {

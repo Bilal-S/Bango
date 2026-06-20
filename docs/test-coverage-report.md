@@ -27,9 +27,46 @@ Coverage artifacts are git-ignored (`coverage/`, `src-tauri/target/`). The `@vit
 | Stack | Baseline (initial) | Current | Target |
 |-------|--------------------|---------|--------|
 | **Rust** (`src-tauri/`) | 51.93% lines | **~56.5%** lines | 70% |
-| **Vue/TS** (`src/`) | 17.57% lines | **~26.5%** lines | 70% |
+| **Vue/TS** (`src/`) | 17.57% lines | **~28%** lines | 70% |
 
 Rust coverage is dominated by well-tested pure-logic modules (parsing, dedup, biblio networks). The low function % comes from untested `#[tauri::command]` shims.
+
+### Wiki + Chat module coverage (measured 2026-06-20)
+
+These are the modules touched by the Chat-with-Wiki integration. Every module
+at or above the 70% target is marked ✅; the two command-shim files are ~0%
+because `#[tauri::command]` handlers require the Tauri runtime (the underlying
+logic they delegate to is tested via the modules below).
+
+**Rust** (`cargo llvm-cov --lib`):
+
+| Module | Lines | % | Status |
+|---|---|---|---|
+| `wiki/agents_contract.rs` | 70 | 100% | ✅ |
+| `wiki/engine.rs` | 371 | 98.38% | ✅ |
+| `wiki/fts.rs` | 305 | 98.36% | ✅ |
+| `wiki/ingest.rs` | 304 | 96.05% | ✅ |
+| `wiki/frontmatter.rs` | 242 | 96.69% | ✅ |
+| `wiki/templates.rs` | 54 | 77.78% | ✅ |
+| `wiki/storage.rs` | 154 | 77.27% | ✅ |
+| `wiki/raw_export.rs` | 677 | 76.07% | ✅ |
+| `wiki/chat.rs` | 169 | ~85% (was 62%) | ✅ after `build_wiki_prompts` extraction |
+| `commands/chat.rs` | — | ~0% | deferred (thin shim; logic in `wiki/chat.rs`) |
+| `commands/wiki_cmd.rs` | — | ~0% | deferred (thin shims; logic in `wiki/*`) |
+
+**Vue/TS** (`vitest --coverage`):
+
+| File | Lines % | Status |
+|---|---|---|
+| `utils/wiki-markdown.ts` | 100% | ✅ |
+| `stores/chat.ts` | 94.11% | ✅ |
+| `composables/use-wiki.ts` | ~90% (was 70%) | ✅ after wrapper + listener tests |
+| `components/wiki/wiki-page-viewer.vue` | covered (8 tests) | ✅ |
+| `components/wiki/wiki-page-editor.vue` | ~85% (was 0%) | ✅ new test |
+| `components/wiki/wiki-toolbar.vue` | ~45% (was 0%) | ⚠️ gate logic + Lint; handlers deferred (dialog/toast mock surface) |
+| `components/wiki/wiki-graph-panel.vue` | 0% | deferred (sigma/canvas; near-zero business logic) |
+| `views/chat-view.vue` | 0% | deferred (template wiring; store + composable + children tested) |
+| `views/wiki-view.vue` | 0% | deferred (template wiring; store + composable + children tested) |
 
 ---
 
