@@ -29,12 +29,14 @@ const {
 const toast = useToast();
 const addingRaw = ref(false);
 const showAddMenu = ref(false);
+const showActionsMenu = ref(false);
 const showWebDialog = ref(false);
 const urlInput = ref('');
 const fetchingUrl = ref(false);
 const linting = ref(false);
 const ingesting = ref(false);
 const deleting = ref(false);
+const rebuilding = ref(false);
 const lintReport = ref<import('@/types/wiki').LintReport | null>(null);
 
 async function handleInit(): Promise<void> {
@@ -50,6 +52,7 @@ async function handleInit(): Promise<void> {
 
 /** Full rebuild: scaffold + export raw + ingest in one async pipeline. */
 async function handleRebuild(): Promise<void> {
+  rebuilding.value = true;
   try {
     const report = await rebuild();
     toast.show(
@@ -59,6 +62,8 @@ async function handleRebuild(): Promise<void> {
     emit('ingested');
   } catch (e) {
     toast.show('Failed to rebuild wiki', 'error');
+  } finally {
+    rebuilding.value = false;
   }
 }
 
@@ -137,7 +142,7 @@ async function handleAddRawFile(): Promise<void> {
       );
       emit('ingested');
     } catch {
-      toast.show('Documents added, but ingest failed. Click Re-scaffold to retry.', 'error');
+      toast.show('Documents added, but ingest failed. Click Rebuild Wiki to retry.', 'error');
     }
   } catch {
     toast.show('Failed to add files', 'error');
@@ -197,11 +202,11 @@ async function handleAddFromWeb(): Promise<void> {
     );
     emit('ingested');
   } catch {
-    toast.show('Pages fetched, but ingest failed. Click Re-scaffold to retry.', 'error');
+    toast.show('Pages fetched, but ingest failed. Click Rebuild Wiki to retry.', 'error');
   }
 }
 
-/** Run the lint engine and store the report for display. */
+/** Run the lint engine (Health Check) and store the report for display. */
 async function handleLint(): Promise<void> {
   linting.value = true;
   try {
@@ -209,19 +214,19 @@ async function handleLint(): Promise<void> {
     lintReport.value = report;
     const total = report.errors + report.warnings + report.infos;
     if (total === 0) {
-      toast.show('Lint complete: clean. No issues found.', 'success');
+      toast.show('Health check complete: clean. No issues found.', 'success');
     } else {
       const summary = `${report.errors} errors, ${report.warnings} warnings, ${report.infos} infos`;
       // Rebuild regenerates all pages via the LLM with the hardened prompt,
       // which fixes most broken-link / orphan issues. Recommend it whenever
       // any issue is present.
       toast.show(
-        `Lint complete: ${summary}. Rebuild recommended.`,
+        `Health check complete: ${summary}. Rebuild recommended.`,
         report.errors > 0 ? 'error' : 'warning'
       );
     }
   } catch (e) {
-    toast.show('Failed to lint wiki', 'error');
+    toast.show('Failed to run health check', 'error');
   } finally {
     linting.value = false;
   }
@@ -285,23 +290,185 @@ function hasIncludedArticles(): boolean {
 function needsRefresh(): boolean {
   return props.status?.needsRefresh === true;
 }
+
+/** Close the Actions menu when a menu item fires. */
+function closeActionsMenu(): void {
+  showActionsMenu.value = false;
+}
+
+/** The two dropdown menus on the toolbar (mutually exclusive). */
+type MenuName = 'add' | 'actions';
+
+/**
+ * Toggle one dropdown menu open/closed and force the other closed, so only one
+ * menu is ever visible at a time. Clicking the already-open menu closes it.
+ */
+function toggleMenu(menu: MenuName): void {
+  if (menu === 'add') {
+    showAddMenu.value = !showAddMenu.value;
+    showActionsMenu.value = false;
+  } else {
+    showActionsMenu.value = !showActionsMenu.value;
+    showAddMenu.value = false;
+  }
+}
+
+/** The current rebuild/ingest state label shown in the Actions menu. */
+function rebuildLabel(): string {
+  return isInitialized() ? 'Rebuild Wiki' : 'Initialize Wiki';
+}
 </script>
 
 <template>
   <div class="wiki-toolbar flex items-center gap-2 flex-wrap">
-    <!-- Initialize / Re-scaffold -->
-    <button
-      class="wiki-toolbar__btn wiki-toolbar__btn--primary"
-      :disabled="false"
-      title="Regenerate all wiki pages from raw sources (scaffolds the tree, re-exports included articles, and re-runs the LLM ingest). Fixes broken links and stale content."
-      @click="handleInit"
-    >
-      <span class="material-symbols-outlined text-[18px]">{{
-        isInitialized() ? 'sync' : 'add_circle'
-      }}</span>
-      <span>{{ isInitialized() ? 'Rebuild Wiki' : 'Initialize Wiki' }}</span>
-    </button>
+    <!-- LEFT: Add Documents + Actions -->
+    <!-- Add Documents dropdown -->
+    <div class="relative">
+      <button
+        class="wiki-toolbar__btn"
+        :disabled="addingRaw || fetchingUrl || !isInitialized()"
+        :title="
+          isInitialized() ? 'Add documents from web or local drive' : 'Initialize the wiki first'
+        "
+        @click="toggleMenu('add')"
+      >
+        <span class="material-symbols-outlined text-[18px]">{{
+          addingRaw || fetchingUrl ? 'hourglass_top' : 'attach_file_add'
+        }}</span>
+        <span>{{ addingRaw || fetchingUrl ? 'Adding...' : 'Add Documents' }}</span>
+        <span class="material-symbols-outlined text-[16px]">arrow_drop_down</span>
+      </button>
+      <div v-if="showAddMenu" class="wiki-toolbar__menu" @click="showAddMenu = false">
+        <button
+          class="wiki-toolbar__menu-item"
+          @click="
+            () => {
+              showAddMenu = false;
+              showWebDialog = true;
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">language</span>
+          From Web
+        </button>
+        <button
+          class="wiki-toolbar__menu-item"
+          @click="
+            () => {
+              showAddMenu = false;
+              void handleAddRawFile();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">folder_open</span>
+          From Local Drive
+        </button>
+      </div>
+    </div>
 
+    <!-- Actions dropdown -->
+    <div class="relative">
+      <button
+        class="wiki-toolbar__btn"
+        :disabled="rebuilding"
+        title="Rebuild, ingest, health check, or delete the wiki"
+        @click="toggleMenu('actions')"
+      >
+        <span class="material-symbols-outlined text-[18px]">{{
+          rebuilding ? 'hourglass_top' : 'play_circle'
+        }}</span>
+        <span>{{ rebuilding ? 'Working...' : 'Actions' }}</span>
+        <span class="material-symbols-outlined text-[16px]">arrow_drop_down</span>
+      </button>
+      <div v-if="showActionsMenu" class="wiki-toolbar__menu" @click.self="showActionsMenu = false">
+        <!-- Rebuild Wiki -->
+        <button
+          class="wiki-toolbar__menu-item"
+          :disabled="rebuilding"
+          title="Regenerate all wiki pages from raw sources — fixes broken links and stale content"
+          @click="
+            () => {
+              closeActionsMenu();
+              void handleInit();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">sync</span>
+          {{ rebuildLabel() }}
+        </button>
+        <!-- Ingest -->
+        <button
+          class="wiki-toolbar__menu-item"
+          :disabled="ingesting || !isInitialized()"
+          :title="
+            isInitialized()
+              ? 'Use the LLM to synthesize raw sources into wiki pages'
+              : 'Initialize the wiki first'
+          "
+          @click="
+            () => {
+              closeActionsMenu();
+              void handleIngest();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">auto_awesome</span>
+          {{ ingesting ? 'Ingesting...' : 'Ingest' }}
+        </button>
+        <!-- Health Check (was Lint) -->
+        <button
+          class="wiki-toolbar__menu-item"
+          :disabled="linting || !isInitialized()"
+          :title="
+            isInitialized()
+              ? 'Check for broken links, orphans, duplicates, missing frontmatter'
+              : 'Initialize the wiki first'
+          "
+          @click="
+            () => {
+              closeActionsMenu();
+              void handleLint();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">fact_check</span>
+          {{ linting ? 'Checking...' : 'Health Check' }}
+        </button>
+        <!-- Divider -->
+        <hr class="wiki-toolbar__menu-divider" />
+        <!-- Delete Wiki -->
+        <button
+          class="wiki-toolbar__menu-item wiki-toolbar__menu-item--danger"
+          :disabled="deleting || !isInitialized()"
+          title="Delete all generated wiki pages (keeps raw sources)"
+          @click="
+            () => {
+              closeActionsMenu();
+              handleDeleteWiki();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px]">delete_sweep</span>
+          {{ deleting ? 'Deleting...' : 'Delete Wiki' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Progress bar (when active, replaces stats on the left) -->
+    <div v-if="progress" class="wiki-toolbar__progress">
+      <div class="wiki-toolbar__progress-track">
+        <div
+          class="wiki-toolbar__progress-fill"
+          :style="{ width: `${(progress.step / progress.totalSteps) * 100}%` }"
+        ></div>
+      </div>
+      <span class="wiki-toolbar__progress-label">{{ progress.message }}</span>
+    </div>
+
+    <!-- Spacer pushes stats to the right -->
+    <div v-if="!progress" class="flex-1"></div>
+
+    <!-- RIGHT: Status pill + readiness gates -->
     <!-- Status pill (hidden during progress) -->
     <div v-if="status && !progress" class="wiki-toolbar__pill" :title="`root: ${status.rootDir}`">
       <span class="material-symbols-outlined text-[14px]">folder</span>
@@ -324,53 +491,6 @@ function needsRefresh(): boolean {
         }}</span>
         {{ status.includedArticleCount }} included
       </span>
-    </div>
-
-    <!-- Add Documents dropdown -->
-    <div class="relative">
-      <button
-        class="wiki-toolbar__btn"
-        :disabled="addingRaw || fetchingUrl || !isInitialized()"
-        :title="
-          isInitialized() ? 'Add documents from web or local drive' : 'Initialize the wiki first'
-        "
-        @click="showAddMenu = !showAddMenu"
-      >
-        <span class="material-symbols-outlined text-[18px]">{{
-          addingRaw || fetchingUrl ? 'hourglass_top' : 'attach_file_add'
-        }}</span>
-        <span>{{ addingRaw || fetchingUrl ? 'Adding...' : 'Add Documents' }}</span>
-        <span class="material-symbols-outlined text-[16px]">arrow_drop_down</span>
-      </button>
-      <div
-        v-if="showAddMenu"
-        class="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[180px] py-1"
-      >
-        <button
-          class="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-          @click="
-            () => {
-              showAddMenu = false;
-              showWebDialog = true;
-            }
-          "
-        >
-          <span class="material-symbols-outlined text-[16px] text-slate-500">language</span>
-          From Web
-        </button>
-        <button
-          class="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-          @click="
-            () => {
-              showAddMenu = false;
-              void handleAddRawFile();
-            }
-          "
-        >
-          <span class="material-symbols-outlined text-[16px] text-slate-500">folder_open</span>
-          From Local Drive
-        </button>
-      </div>
     </div>
 
     <!-- From Web dialog -->
@@ -404,65 +524,6 @@ function needsRefresh(): boolean {
       </div>
     </div>
 
-    <!-- Placeholder slots for future phases.
-         Ingest, Lint, Delete Wiki, Chat with Wiki, Open in Obsidian
-         will be wired in Phases 3-5. The disabled state communicates scope. -->
-    <!-- Phase 3/6: Ingest (LLM synthesize raw sources into wiki pages) -->
-    <button
-      class="wiki-toolbar__btn"
-      :disabled="ingesting || !isInitialized()"
-      :title="
-        isInitialized()
-          ? 'Use the LLM to synthesize raw sources into wiki pages'
-          : 'Initialize the wiki first'
-      "
-      @click="handleIngest"
-    >
-      <span class="material-symbols-outlined text-[18px]">{{
-        ingesting ? 'hourglass_top' : 'auto_awesome'
-      }}</span>
-      <span>{{ ingesting ? 'Ingesting...' : 'Ingest' }}</span>
-    </button>
-    <!-- Phase 4: Lint (deterministic, no LLM required) -->
-    <button
-      class="wiki-toolbar__btn"
-      :disabled="linting || !isInitialized()"
-      :title="
-        isInitialized()
-          ? 'Check for broken links, orphans, duplicates, missing frontmatter'
-          : 'Initialize the wiki first'
-      "
-      @click="handleLint"
-    >
-      <span class="material-symbols-outlined text-[18px]">{{
-        linting ? 'hourglass_top' : 'fact_check'
-      }}</span>
-      <span>{{ linting ? 'Linting...' : 'Lint' }}</span>
-    </button>
-    <!-- Progress bar (text overlaid on top) -->
-    <div v-if="progress" class="wiki-toolbar__progress">
-      <div class="wiki-toolbar__progress-track">
-        <div
-          class="wiki-toolbar__progress-fill"
-          :style="{ width: `${(progress.step / progress.totalSteps) * 100}%` }"
-        ></div>
-      </div>
-      <span class="wiki-toolbar__progress-label">{{ progress.message }}</span>
-    </div>
-
-    <!-- Delete Wiki -->
-    <button
-      class="wiki-toolbar__btn wiki-toolbar__btn--danger"
-      :disabled="deleting || !isInitialized()"
-      title="Delete all generated wiki pages (keeps raw sources)"
-      @click="handleDeleteWiki"
-    >
-      <span class="material-symbols-outlined text-[18px]">{{
-        deleting ? 'hourglass_top' : 'delete_sweep'
-      }}</span>
-      <span>{{ deleting ? 'Deleting...' : 'Delete Wiki' }}</span>
-    </button>
-
     <!-- Delete confirmation dialog -->
     <div v-if="showDeleteDialog" class="dialog-overlay" @click.self="showDeleteDialog = false">
       <div class="dialog dialog--danger">
@@ -471,7 +532,7 @@ function needsRefresh(): boolean {
           <span class="material-symbols-outlined">warning</span>
           <span>
             This will permanently delete all generated wiki pages. Raw sources and templates are
-            preserved. You can rebuild at any time with Re-scaffold.
+            preserved. You can rebuild at any time with Rebuild Wiki.
           </span>
         </div>
         <div class="dialog__actions">
@@ -516,15 +577,6 @@ function needsRefresh(): boolean {
   cursor: not-allowed;
 }
 
-.wiki-toolbar__btn--danger {
-  border-color: rgb(254 202 202);
-  color: rgb(220 38 38);
-}
-
-.wiki-toolbar__btn--danger:hover:not(:disabled) {
-  background-color: rgb(254 242 242);
-}
-
 .wiki-toolbar__btn--primary {
   background-color: rgb(99 102 241); /* indigo-600 */
   border-color: rgb(99 102 241);
@@ -534,6 +586,65 @@ function needsRefresh(): boolean {
 .wiki-toolbar__btn--primary:hover:not(:disabled) {
   background-color: rgb(79 70 229); /* indigo-700 */
   color: #fff;
+}
+
+/* Shared dropdown menu styling */
+.wiki-toolbar__menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.25rem;
+  background: #fff;
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.5rem;
+  box-shadow:
+    0 4px 6px -1px rgb(0 0 0 / 0.1),
+    0 2px 4px -2px rgb(0 0 0 / 0.1);
+  z-index: 50;
+  min-width: 200px;
+  padding: 0.25rem 0;
+}
+
+.wiki-toolbar__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgb(71 85 105); /* slate-600 */
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.wiki-toolbar__menu-item:hover:not(:disabled) {
+  background-color: rgb(248 250 252); /* slate-50 */
+  color: rgb(15 23 42); /* slate-900 */
+}
+
+.wiki-toolbar__menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wiki-toolbar__menu-item--danger {
+  color: rgb(220 38 38); /* red-600 */
+}
+
+.wiki-toolbar__menu-item--danger:hover:not(:disabled) {
+  background-color: rgb(254 242 242); /* red-50 */
+}
+
+.wiki-toolbar__menu-divider {
+  border: none;
+  border-top: 1px solid rgb(226 232 240);
+  margin: 0.25rem 0;
 }
 
 .wiki-toolbar__pill {
@@ -636,7 +747,7 @@ function needsRefresh(): boolean {
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid rgb(199 210 254);
+  border: 2px solid rgb(199 210 224);
   border-top-color: rgb(99 102 241);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;

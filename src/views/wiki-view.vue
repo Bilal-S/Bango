@@ -11,7 +11,8 @@ import WikiGraphPanel from '@/components/wiki/wiki-graph-panel.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
-import { open } from '@tauri-apps/plugin-dialog';
+import { shouldPromptInit } from './wiki-init-prompt';
+import { ask, open } from '@tauri-apps/plugin-dialog';
 
 const router = useRouter();
 const toast = useToast();
@@ -25,6 +26,7 @@ const {
   startProgressListener,
   stopProgressListener,
   exportAndIngest,
+  rebuild,
 } = useWiki();
 
 const {
@@ -102,9 +104,53 @@ const typeLabels: Record<string, string> = {
 onMounted(async () => {
   await Promise.all([checkLlmConfig(), refreshStatus(), startProgressListener()]);
   await loadPages();
+  // First-visit prompt: if the user has included articles + an LLM configured
+  // but hasn't initialized the wiki yet, offer to build it now.
+  await promptInitIfReady();
   // Auto-ingest if wiki is stale (articles changed since last ingest).
   await autoIngestIfStale();
 });
+
+/**
+ * First-visit prompt: when prerequisites are met (LLM configured + included
+ * articles) but the wiki isn't initialized, ask the user via a native Tauri
+ * OK/Cancel dialog whether to build it now. On OK, run the full rebuild
+ * (scaffold + export raw + ingest). On Cancel, do nothing (the user can use
+ * Actions -> Rebuild Wiki later).
+ */
+async function promptInitIfReady(): Promise<void> {
+  if (!shouldPromptInit(status.value, isLlmConfigured.value)) return;
+  const confirmed = await ask(
+    'You have included articles and an LLM provider configured. ' +
+      'Do you want to initialize the wiki system now? ' +
+      'You can rebuild later from the Actions menu.',
+    { title: 'Initialize Wiki', kind: 'info', okLabel: 'Rebuild', cancelLabel: 'Not now' }
+  );
+  if (confirmed) {
+    await rebuildWiki();
+  }
+}
+
+/**
+ * Full rebuild: scaffold + export raw + ingest. Shared by the first-visit
+ * prompt. (The toolbar's Rebuild Wiki action uses its own handler that emits
+ * events back here; this local version is for the prompt path.)
+ */
+async function rebuildWiki(): Promise<void> {
+  try {
+    const report = await rebuild();
+    toast.show(
+      `Rebuild complete: ${report.pagesWritten} pages written${report.errors.length > 0 ? `, ${report.errors.length} errors` : ''}.`,
+      report.errors.length > 0 ? 'error' : 'success'
+    );
+    selectedSlug.value = null;
+    await refreshStatus();
+    await loadPages();
+    graphPanelRef.value?.refresh();
+  } catch {
+    toast.show('Failed to rebuild wiki', 'error');
+  }
+}
 
 /** Check if wiki needs refresh and auto-trigger export + ingest. */
 async function autoIngestIfStale(): Promise<void> {
@@ -124,7 +170,7 @@ async function autoIngestIfStale(): Promise<void> {
       await loadPages();
       graphPanelRef.value?.refresh();
     } catch {
-      // Non-fatal: user can manually rebuild via Re-scaffold.
+      // Non-fatal: user can manually rebuild via Actions -> Rebuild Wiki.
     }
   }
 }
@@ -349,9 +395,9 @@ watch(searchQuery, async (q) => {
         </div>
         <h3 class="text-lg font-semibold text-slate-900 mb-2">Initialize Your Wiki</h3>
         <p class="text-sm text-slate-500 mb-6 leading-relaxed">
-          Click <strong>Re-Scaffold</strong> in the toolbar to scaffold the
-          <code class="wiki-code">wiki-root/</code> directory tree. Then use
-          <strong>Add Documents</strong> to build the knowledge base.
+          Open the <strong>Actions</strong> menu and choose <strong>Rebuild Wiki</strong> to
+          scaffold the <code class="wiki-code">wiki-root/</code> directory tree and generate pages
+          from your included articles.
         </p>
       </div>
     </div>
@@ -415,8 +461,8 @@ watch(searchQuery, async (q) => {
           <div v-else-if="!hasPages" class="p-4 text-center">
             <p class="text-xs text-slate-400 mb-2">No pages yet.</p>
             <p class="text-xs text-slate-400">
-              Use <strong>Re-Scaffold</strong> or <strong>Add Documents</strong> to generate wiki
-              pages.
+              Use <strong>Actions &rarr; Rebuild Wiki</strong> or <strong>Add Documents</strong> to
+              generate wiki pages.
             </p>
           </div>
           <div v-else class="p-4 text-center">
