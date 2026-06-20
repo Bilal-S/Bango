@@ -159,6 +159,8 @@ pub fn build_ingest_prompt(root: &Path) -> Result<(String, usize, bool), AppErro
          <Markdown body with [[wikilinks]] to other pages>\n\n\
          IMPORTANT: Create a wiki page for EVERY source document. Do not skip any sources. Each \
          source should appear in at least one page. \
+         Do NOT include raw file paths (/raw/...), file names, or source_file references \
+         in your output. Use [^art-id] source references or [[wikilinks]] instead. \
          Generate at least 3-5 concept pages, 1-2 synthesis pages, and author pages for \
          prominent authors. Use [[slug]] links to connect related pages. Each page must \
          start with the <!-- PAGE:slug --> delimiter."

@@ -145,6 +145,13 @@ fn hash_str(s: &str) -> String {
     hex_encode(&hasher.finalize())
 }
 
+/// Hash raw bytes for idempotency checks.
+fn hash_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex_encode(&hasher.finalize())
+}
+
 /// Hash a file's bytes for idempotency checks.
 fn hash_file(path: &Path) -> Result<String, AppError> {
     let bytes = std::fs::read(path)?;
@@ -548,6 +555,28 @@ pub fn add_user_file(root: &Path, source_path: &Path) -> Result<PathBuf, AppErro
     let companion = raw_dir.join(format!("{slug}.md"));
     let body = user_file_body(&stem, &content, kind);
     let fm = user_file_frontmatter(&slug, &stem, &file_name, kind, &source_hash);
+    frontmatter::write_file(&companion, &fm, &body)?;
+
+    Ok(companion)
+}
+
+/// Add raw text content directly (e.g. from a fetched URL) as a companion `.md` file.
+/// Returns the path to the companion file.
+pub fn add_raw_content(
+    root: &Path,
+    title: &str,
+    content: &str,
+    source_label: &str,
+) -> Result<PathBuf, AppError> {
+    let raw_dir = root.join("raw");
+    std::fs::create_dir_all(&raw_dir)?;
+
+    let slug = format!("user-{}", slugify(title));
+    let source_hash = hash_bytes(content.as_bytes());
+    let kind = RawSourceKind::UserText;
+    let companion = raw_dir.join(format!("{slug}.md"));
+    let body = user_file_body(title, content, kind);
+    let fm = user_file_frontmatter(&slug, title, source_label, kind, &source_hash);
     frontmatter::write_file(&companion, &fm, &body)?;
 
     Ok(companion)

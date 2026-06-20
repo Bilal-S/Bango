@@ -25,6 +25,7 @@ let graphologyGraph: Graph | null = null;
 // ── Filter state ──────────────────────────────────────────────
 const hiddenTypes = ref<Set<string>>(new Set());
 const searchQuery = ref('');
+const legendExpanded = ref(true);
 
 /** Color map for page types. */
 const typeColors: Record<string, string> = {
@@ -233,44 +234,56 @@ defineExpose({ refresh: loadAndRender });
         <span>{{ stats.nodes }} nodes</span>
         <span>{{ stats.edges }} edges</span>
         <span v-if="stats.orphans > 0" class="text-amber-600">{{ stats.orphans }} orphans</span>
-      </div>
-
-      <!-- Search filter -->
-      <div class="relative">
-        <span
-          class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-[14px] text-slate-400 pointer-events-none"
-          >search</span
-        >
-        <input
-          v-model="searchQuery"
-          type="text"
-          placeholder="Filter nodes..."
-          class="w-full pl-7 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-          @input="applyFilters"
-        />
-      </div>
-
-      <!-- Legend (clickable toggles) -->
-      <div class="flex items-center gap-2 flex-wrap">
         <button
-          v-for="item in legendItems"
-          :key="item.type"
           type="button"
-          class="flex items-center gap-1.5 cursor-pointer transition-opacity"
-          :class="{ 'opacity-40': hiddenTypes.has(item.type) }"
-          :title="hiddenTypes.has(item.type) ? `Show ${item.label}` : `Hide ${item.label}`"
-          @click="toggleType(item.type)"
+          class="ml-auto flex items-center cursor-pointer text-slate-400 hover:text-slate-600 transition-colors"
+          :title="legendExpanded ? 'Collapse' : 'Expand'"
+          @click="legendExpanded = !legendExpanded"
         >
-          <span
-            class="inline-block w-4 h-4 rounded-full transition-all"
-            :style="{ backgroundColor: item.color }"
-            :class="{
-              'ring-2 ring-offset-1 ring-slate-400': !hiddenTypes.has(item.type),
-            }"
-          ></span>
-          <span class="text-slate-600">{{ item.label }}</span>
+          <span class="material-symbols-outlined text-[16px]">{{
+            legendExpanded ? 'expand_less' : 'expand_more'
+          }}</span>
         </button>
       </div>
+
+      <template v-if="legendExpanded">
+        <!-- Search filter -->
+        <div class="relative">
+          <span
+            class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-[14px] text-slate-400 pointer-events-none"
+            >search</span
+          >
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="Filter nodes..."
+            class="w-full pl-7 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+            @input="applyFilters"
+          />
+        </div>
+
+        <!-- Legend (clickable toggles) -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <button
+            v-for="item in legendItems"
+            :key="item.type"
+            type="button"
+            class="flex items-center gap-1.5 cursor-pointer transition-opacity"
+            :class="{ 'opacity-40': hiddenTypes.has(item.type) }"
+            :title="hiddenTypes.has(item.type) ? `Show ${item.label}` : `Hide ${item.label}`"
+            @click="toggleType(item.type)"
+          >
+            <span
+              class="inline-block w-4 h-4 rounded-full transition-all"
+              :style="{ backgroundColor: item.color }"
+              :class="{
+                'ring-2 ring-offset-1 ring-slate-400': !hiddenTypes.has(item.type),
+              }"
+            ></span>
+            <span class="text-slate-600">{{ item.label }}</span>
+          </button>
+        </div>
+      </template>
     </div>
 
     <!-- Hint (bottom-left) -->

@@ -81,6 +81,9 @@ const renderedBody = computed(() => {
     }
   );
 
+  // 3. Strip lines containing /raw/ file paths (LLM artifact, not user-facing).
+  text = text.replace(/^.*\/raw\/[^\s)]+\.md.*$/gim, '');
+
   return marked.parse(text) as string;
 });
 

@@ -264,6 +264,7 @@ pub fn run() {
             commands::wiki_cmd::wiki_init,
             commands::wiki_cmd::wiki_export_raw,
             commands::wiki_cmd::wiki_add_raw_file,
+            commands::wiki_cmd::wiki_add_raw_url,
             commands::wiki_cmd::wiki_list_raw_files,
             commands::wiki_cmd::wiki_search,
             commands::wiki_cmd::wiki_lint,

@@ -199,6 +199,44 @@ pub fn wiki_add_raw_file(
     Ok(companion.to_string_lossy().to_string())
 }
 
+/// Fetch a URL, extract its text content, and add it as a wiki raw source.
+#[tauri::command]
+pub async fn wiki_add_raw_url(
+    db_state: tauri::State<'_, DbState>,
+    url: String,
+) -> Result<String, AppError> {
+    // Derive a title from the last path segment or host.
+    let title = url
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty() && !s.contains(':'))
+        .unwrap_or("web-page")
+        .to_string();
+
+    // Fetch the page.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("Mozilla/5.0 (compatible; BangoWiki/1.0)")
+        .build()
+        .map_err(|e| AppError::Import(format!("HTTP client error: {e}")))?;
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| AppError::Import(format!("Failed to fetch '{url}': {e}")))?;
+    let html = response
+        .text()
+        .await
+        .map_err(|e| AppError::Import(format!("Failed to read response from '{url}': {e}")))?;
+
+    // Resolve wiki root and add the content.
+    let conn = lock_conn(&db_state)?;
+    let root = storage::resolve_root(&conn)?;
+    let companion = raw_export::add_raw_content(&root, &title, &html, &url)?;
+    Ok(companion.to_string_lossy().to_string())
+}
+
 /// A raw file entry for the listing command.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

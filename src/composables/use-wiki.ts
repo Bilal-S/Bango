@@ -99,6 +99,11 @@ export function useWiki() {
     return companionPath;
   }
 
+  /** Fetch a URL and add its content as a wiki raw source. */
+  async function addRawUrl(url: string): Promise<string> {
+    return tauriCommand<string>('wiki_add_raw_url', { url });
+  }
+
   /** List all `.md` raw sources with their parsed metadata. */
   async function listRawFiles(): Promise<RawFileEntry[]> {
     return tauriCommand<RawFileEntry[]>('wiki_list_raw_files');
@@ -242,6 +247,7 @@ export function useWiki() {
     initWiki,
     exportRaw,
     addRawFile,
+    addRawUrl,
     listRawFiles,
     searchWiki,
     lintWiki,

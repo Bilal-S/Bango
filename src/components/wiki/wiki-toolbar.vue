@@ -16,10 +16,22 @@ const emit = defineEmits<{
   deleted: [];
 }>();
 
-const { initWiki, addRawFile, lintWiki, deleteWiki, rebuild, exportAndIngest, progress } =
-  useWiki();
+const {
+  initWiki,
+  addRawFile,
+  addRawUrl,
+  lintWiki,
+  deleteWiki,
+  rebuild,
+  exportAndIngest,
+  progress,
+} = useWiki();
 const toast = useToast();
 const addingRaw = ref(false);
+const showAddMenu = ref(false);
+const showWebDialog = ref(false);
+const urlInput = ref('');
+const fetchingUrl = ref(false);
 const linting = ref(false);
 const ingesting = ref(false);
 const deleting = ref(false);
@@ -131,6 +143,61 @@ async function handleAddRawFile(): Promise<void> {
     toast.show('Failed to add files', 'error');
   } finally {
     addingRaw.value = false;
+  }
+}
+
+/** Fetch URLs from the web dialog and add them as raw sources. */
+async function handleAddFromWeb(): Promise<void> {
+  const raw = urlInput.value.trim();
+  if (!raw) return;
+
+  // Parse URLs: split by newline and/or comma.
+  const urls = raw
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && /^https?:\/\//i.test(s));
+
+  if (urls.length === 0) {
+    toast.show('No valid URLs found. URLs must start with http:// or https://', 'error');
+    return;
+  }
+
+  fetchingUrl.value = true;
+  let added = 0;
+  let failed = 0;
+  for (const url of urls) {
+    try {
+      await addRawUrl(url);
+      added++;
+    } catch {
+      failed++;
+    }
+  }
+
+  fetchingUrl.value = false;
+  showWebDialog.value = false;
+  urlInput.value = '';
+
+  if (added === 0) {
+    toast.show('Failed to fetch any URLs.', 'error');
+    return;
+  }
+
+  toast.show(
+    `Fetched ${added} page${added > 1 ? 's' : ''}${failed > 0 ? `, ${failed} failed` : ''}. Building wiki...`,
+    'info'
+  );
+  emit('rawPrepared');
+  // Auto-chain: export raw + ingest.
+  try {
+    const report = await exportAndIngest();
+    toast.show(
+      `Wiki rebuilt: ${report.pagesWritten} pages written${report.errors.length > 0 ? `, ${report.errors.length} errors` : ''}.`,
+      report.errors.length > 0 ? 'error' : 'success'
+    );
+    emit('ingested');
+  } catch {
+    toast.show('Pages fetched, but ingest failed. Click Re-scaffold to retry.', 'error');
   }
 }
 
@@ -248,22 +315,83 @@ function needsRefresh(): boolean {
       </span>
     </div>
 
-    <!-- Phase 2: Add a user file to raw/ -->
-    <button
-      class="wiki-toolbar__btn"
-      :disabled="addingRaw || !isInitialized()"
-      :title="
-        isInitialized()
-          ? 'Pick a PDF/TXT/HTML/RTF/CSV/MD/JSON/code file to add to raw/'
-          : 'Initialize the wiki first'
-      "
-      @click="handleAddRawFile"
-    >
-      <span class="material-symbols-outlined text-[18px]">{{
-        addingRaw ? 'hourglass_top' : 'attach_file_add'
-      }}</span>
-      <span>{{ addingRaw ? 'Adding...' : 'Add Documents' }}</span>
-    </button>
+    <!-- Add Documents dropdown -->
+    <div class="relative">
+      <button
+        class="wiki-toolbar__btn"
+        :disabled="addingRaw || fetchingUrl || !isInitialized()"
+        :title="
+          isInitialized() ? 'Add documents from web or local drive' : 'Initialize the wiki first'
+        "
+        @click="showAddMenu = !showAddMenu"
+      >
+        <span class="material-symbols-outlined text-[18px]">{{
+          addingRaw || fetchingUrl ? 'hourglass_top' : 'attach_file_add'
+        }}</span>
+        <span>{{ addingRaw || fetchingUrl ? 'Adding...' : 'Add Documents' }}</span>
+        <span class="material-symbols-outlined text-[16px]">arrow_drop_down</span>
+      </button>
+      <div
+        v-if="showAddMenu"
+        class="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[180px] py-1"
+      >
+        <button
+          class="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+          @click="
+            () => {
+              showAddMenu = false;
+              showWebDialog = true;
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">language</span>
+          From Web
+        </button>
+        <button
+          class="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+          @click="
+            () => {
+              showAddMenu = false;
+              void handleAddRawFile();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">folder_open</span>
+          From Local Drive
+        </button>
+      </div>
+    </div>
+
+    <!-- From Web dialog -->
+    <div v-if="showWebDialog" class="dialog-overlay" @click.self="showWebDialog = false">
+      <div class="dialog">
+        <h3 class="dialog__title">Add from Web</h3>
+        <p class="dialog__desc">
+          Enter one or more URLs (separated by new lines or commas). HTML content will be extracted
+          and added as wiki sources.
+        </p>
+        <textarea
+          v-model="urlInput"
+          rows="5"
+          class="field__input font-mono text-sm"
+          placeholder="https://example.com/article1&#10;https://example.com/article2"
+          :disabled="fetchingUrl"
+        ></textarea>
+        <div class="dialog__actions">
+          <button class="btn btn--secondary" :disabled="fetchingUrl" @click="showWebDialog = false">
+            Cancel
+          </button>
+          <button
+            class="btn btn--primary"
+            :disabled="fetchingUrl || !urlInput.trim()"
+            @click="handleAddFromWeb"
+          >
+            <span v-if="fetchingUrl" class="wiki-toolbar__spinner"></span>
+            {{ fetchingUrl ? 'Fetching...' : 'Fetch & Add' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Placeholder slots for future phases.
          Ingest, Lint, Delete Wiki, Chat with Wiki, Open in Obsidian
@@ -490,6 +618,22 @@ function needsRefresh(): boolean {
   }
   50% {
     opacity: 0.7;
+  }
+}
+
+.wiki-toolbar__spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgb(199 210 254);
+  border-top-color: rgb(99 102 241);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>
