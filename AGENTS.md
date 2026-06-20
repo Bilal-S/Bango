@@ -160,7 +160,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     via `sqlite_master` (the old and new v1 migrations both set `user_version=1`, so the pragma
     cannot be trusted). `rebuild_schema` is the shared drop-all-tables (preserving
     `journal_index`) + reset `user_version=0` + re-run migrations helper used by both
-    `commands::export_cmd::reset_project` and the legacy upgrade path.
+    `commands::export_cmd::reset_project` and the legacy upgrade path. `DROP_TABLES` includes
+    the lazily-created `wiki_pages_fts` FTS5 virtual table (it is not created by migrations);
+    it self-heals via `fts::ensure_index_populated` on the next wiki read. `reset_project`
+    additionally deletes the entire on-disk `wiki-root/` directory (resolved BEFORE the schema
+    rebuild, while `app_settings` still holds the path config); wiki deletion is non-fatal.
   - **`src-tauri/src/commands/startup.rs`** - exposes `get_startup_status` and
     `perform_legacy_upgrade` (one-shot: `export_legacy_project` -> write backup to
     `app_data_dir` -> `rebuild_schema` -> journal reload -> `import_project`; backup file
@@ -198,7 +202,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     absent-key default). `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip
     (legacy article_references -> backup -> rebuild -> import) plus the
     `legacy_upgrade_needed(live, fallback)` pure decision function (live-probe-wins and
-    snapshot-fallback branches).
+    snapshot-fallback branches). `reset_project_test.rs` covers `reset_project_inner`
+    (Delete All Data): verifies the on-disk `wiki-root/` directory is deleted, `app_settings`
+    is cleared after rebuild, and the reset succeeds even when the wiki root is missing.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).
@@ -250,7 +256,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
     connection details + parameters + Revert/Get Models/Test Connection + test-result/error
     feedback in one bordered `<section>`), `settings-project-management.vue` (import/export/delete
-    + dialogs), `settings-screening-preferences.vue` (2 localStorage-backed toggles),
+    + dialogs; Delete All Data also wipes the on-disk Wiki and resets
+    `useWiki`/`useChatStore.wikiReady`; Export dialog warns that the Bango Documents
+    directory - full-text PDFs + Wiki - is NOT backed up), `settings-screening-preferences.vue` (2 localStorage-backed toggles),
     `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
     Shared card chrome for these lives in `settings-card-shared.css`.
   - **`src/composables/`** - Vue composables. `use-startup-upgrade.ts`
@@ -296,8 +304,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     rendering. `toggleWikiMode()` flips the source; `clearChat()` resets it to
     `'articles'`. Tested by `src/__tests__/chat.test.ts`.
   - **`src/styles/forms.css`** - global form/button/dialog primitives (`.field__*`, `.btn--*`,
-    `.dialog`, `.spinner`) promoted from the former scoped `llm-config.vue`. Loaded via
-    `base.css`; low specificity so scoped rules in other views still win.
+    `.dialog`, `.dialog__danger-box`, `.dialog__info-box`, `.spinner`) promoted from the
+    former scoped `llm-config.vue`. Loaded via `base.css`; low specificity so scoped rules
+    in other views still win.
   - **`src/router/index.ts`** - route table; lazy views are prefetched after `router.isReady()`.
     `/settings` renders `settings-view.vue`.
 - **`tests/test-citations/`** - RIS fixture data for citation/reference system tests.

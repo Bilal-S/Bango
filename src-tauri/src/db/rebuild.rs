@@ -43,6 +43,12 @@ const DROP_TABLES: &[&str] = &[
     "biblio_authors",
     // Legacy v1 schema (single-table references model)
     "article_references",
+    // Wiki FTS5 virtual table. Created lazily by `wiki::fts::ensure_table`
+    // (not by migrations), so it must be dropped here explicitly. It is
+    // recreated on demand by `ensure_index_populated` (self-heal) when wiki
+    // pages are next read. Safe for the legacy upgrade path: the wiki
+    // directory on disk is preserved, so the index is rebuilt from it.
+    "wiki_pages_fts",
 ];
 
 /// Indexes created by migrations that must be dropped alongside their tables.

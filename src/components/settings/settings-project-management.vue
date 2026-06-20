@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { invoke } from '@tauri-apps/api/core';
 import { useExport } from '@/composables/use-export';
 
 const { error, exportProject, importProject, resetProject } = useExport();
@@ -11,6 +12,33 @@ const showExportDialog = ref(false);
 const showDeleteDialog = ref(false);
 const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
+
+/** The effective Bango Documents directory path (parent of the fulltext dir).
+ * Shown in the Export dialog so the user knows what is NOT backed up. Fetched
+ * from `get_fulltext_storage_dir`; `null` while loading or if the call fails. */
+const bangoDocsDir = ref<string | null>(null);
+
+interface StorageInfo {
+  effectivePath: string;
+  isCustom: boolean;
+  defaultPath: string;
+}
+
+onMounted(async () => {
+  try {
+    const info = await invoke<StorageInfo>('get_fulltext_storage_dir');
+    // The fulltext dir is `~/Documents/Bango/fulltext`; the Bango Documents
+    // root (which also holds `wiki-root/`) is its parent. If the user set a
+    // custom dir that does not end in `fulltext`, it is its own root.
+    const path = info.effectivePath;
+    bangoDocsDir.value = path.endsWith('fulltext')
+      ? path.slice(0, Math.max(0, path.length - 'fulltext'.length)).replace(/[\\/]+$/, '')
+      : path;
+  } catch {
+    // Non-fatal: the warning shows without the concrete path.
+    bangoDocsDir.value = null;
+  }
+});
 
 function handleImportFile(event: Event): void {
   const target = event.target as HTMLInputElement;
@@ -112,6 +140,17 @@ async function doDeleteProject(): Promise<void> {
           Export your project data to a <code>.bango.json</code> file. Note: API keys are NOT
           included in the backup.
         </p>
+        <div class="dialog__info-box">
+          <span class="material-symbols-outlined">info</span>
+          <p>
+            The backup includes articles, criteria, tags, labels, and references, but it does
+            <strong>not</strong> back up the Bango Documents directory. Full-text PDFs and the
+            generated Wiki are stored on disk and must be manually copied or moved to preserve
+            them.<template v-if="bangoDocsDir"
+              ><br />Documents directory: <code>{{ bangoDocsDir }}</code></template
+            >
+          </p>
+        </div>
         <div class="dialog__actions">
           <button class="btn btn--outline" @click="showExportDialog = false">Cancel</button>
           <button class="btn btn--primary" @click="doExportProject">Export Backup</button>
@@ -127,8 +166,8 @@ async function doDeleteProject(): Promise<void> {
           <span class="material-symbols-outlined">warning</span>
           <p>
             This will permanently delete
-            <strong>all articles, criteria, tags, labels, and settings</strong>. This action cannot
-            be undone.
+            <strong>all articles, criteria, tags, labels, Wiki, and settings</strong>. This action
+            cannot be undone.
           </p>
         </div>
         <div class="field">

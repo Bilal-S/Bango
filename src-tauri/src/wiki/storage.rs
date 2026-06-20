@@ -111,6 +111,23 @@ pub fn compute_default_root(fulltext_storage_dir: &Path) -> PathBuf {
     derive_bango_root(fulltext_storage_dir).join(WIKI_ROOT_DIR_NAME)
 }
 
+/// Delete the entire wiki-root directory tree (including `AGENTS.md`,
+/// `templates/`, `raw/`, and `wiki/`). Used by `reset_project` (Delete All
+/// Data) so a full project reset also clears the on-disk wiki. Unlike
+/// `wipe_generated`, nothing is preserved.
+pub fn delete_wiki_root(root: &Path) -> Result<(), AppError> {
+    if root.exists() {
+        std::fs::remove_dir_all(root).map_err(|e| {
+            AppError::Import(format!(
+                "Failed to delete wiki-root directory '{}': {}",
+                root.display(),
+                e
+            ))
+        })?;
+    }
+    Ok(())
+}
+
 /// Wipe the generated content (`raw/` + `wiki/`), keeping the root, `AGENTS.md`,
 /// `templates/`, and `log.md`. Used by `wiki_delete_wiki`.
 pub fn wipe_generated(root: &Path) -> Result<(), AppError> {
@@ -178,6 +195,31 @@ mod tests {
         scaffold_tree(&root).unwrap();
         // second call must not error
         scaffold_tree(&root).unwrap();
+    }
+
+    #[test]
+    fn delete_wiki_root_removes_entire_tree() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("wiki-root");
+        scaffold_tree(&root).unwrap();
+        std::fs::write(root.join("AGENTS.md"), "# contract").unwrap();
+        std::fs::write(root.join("templates/concept.md"), "# template").unwrap();
+        std::fs::write(root.join("raw/art-1.md"), "x").unwrap();
+        std::fs::write(root.join("wiki/concepts/c.md"), "y").unwrap();
+
+        delete_wiki_root(&root).unwrap();
+
+        // The entire wiki-root directory (and everything under it) is gone.
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn delete_wiki_root_is_noop_when_missing() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("does-not-exist");
+        // Does not error when the directory does not exist.
+        delete_wiki_root(&root).unwrap();
+        assert!(!root.exists());
     }
 
     #[test]

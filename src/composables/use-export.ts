@@ -9,7 +9,9 @@ import { useLabelsStore } from '@/stores/labels';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
+import { useChatStore } from '@/stores/chat';
 import { useSummary } from './use-summary';
+import { useWiki } from './use-wiki';
 
 export function useExport() {
   const exporting = ref(false);
@@ -145,6 +147,12 @@ export function useExport() {
       await tauriCommand('reset_project');
       invalidateAllStores();
       useSummary().clearSummary();
+      // Delete All Data also wipes the on-disk Wiki (backend deletes the
+      // wiki-root directory). Reset the wiki singleton state and the chat
+      // store's wiki readiness flag so the UI reflects the empty state
+      // (wiki toggle hidden, wiki view shows the first-visit gate).
+      useWiki().resetState();
+      useChatStore().setWikiReady(false);
       return true;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);

@@ -11,6 +11,7 @@ use crate::db::rebuild;
 use crate::error::AppError;
 use crate::export::project;
 use crate::export::ris_writer::{articles_to_ris, RisExportArticle};
+use crate::wiki::storage;
 
 /// Helper: convert articles into RIS string, resolving criteria labels.
 fn articles_to_ris_export(
@@ -162,6 +163,41 @@ pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> 
     std::fs::write(path, bytes).map_err(AppError::Io)
 }
 
+/// Reset the project: rebuild the DB schema (dropping all user tables) and
+/// delete the on-disk wiki-root directory. `journal_index` is preserved by
+/// `rebuild_schema`. The wiki root must be resolved BEFORE the schema rebuild
+/// because `app_settings` (which holds `fulltext_storage_dir` and the optional
+/// `wiki_root_dir` override) is dropped by `rebuild_schema`.
+///
+/// Wiki deletion is **non-fatal**: if resolving or deleting the wiki root
+/// fails, the DB reset still succeeds (the error is logged to stderr). The
+/// user can delete the directory manually if needed.
+///
+/// Extracted from the `reset_project` command wrapper so it can be tested with
+/// a plain `&mut Connection` (no Tauri state required).
+pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppError> {
+    // 1. Resolve the wiki root while `app_settings` is still available.
+    //    `resolve_root` also ensures the dir exists (creating an empty one if
+    //    missing), which is harmless: we delete it next.
+    let wiki_root = storage::resolve_root(conn).map_err(|e| {
+        eprintln!("[reset_project] failed to resolve wiki root: {e}");
+        e
+    });
+
+    // 2. Rebuild the DB schema (drops all user tables + wiki_pages_fts,
+    //    resets user_version, re-runs migrations). journal_index is preserved.
+    rebuild::rebuild_schema(conn)?;
+
+    // 3. Delete the on-disk wiki-root directory (non-fatal on failure).
+    if let Ok(root) = &wiki_root {
+        if let Err(e) = storage::delete_wiki_root(root) {
+            eprintln!("[reset_project] failed to delete wiki root '{}': {e}", root.display());
+        }
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
     let mut conn = db_state
@@ -169,11 +205,5 @@ pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    // Delegate to the shared schema-rebuild helper, which drops every user
-    // table (preserving journal_index), resets user_version, and re-runs
-    // migrations. IMPORTANT: journal_index is system-distributed reference data
-    // that survives project reset; rebuild_schema intentionally does not drop it.
-    rebuild::rebuild_schema(&mut conn)?;
-
-    Ok(())
+    reset_project_inner(&mut conn)
 }
