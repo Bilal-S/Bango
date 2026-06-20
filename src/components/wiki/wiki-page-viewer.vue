@@ -86,7 +86,7 @@ const renderedBody = computed(() => {
 
 /** Load the page when the slug changes. */
 async function loadPage(): Promise<void> {
-  if (!props.slug) {
+  if (!props.slug || typeof props.slug !== 'string') {
     page.value = null;
     return;
   }

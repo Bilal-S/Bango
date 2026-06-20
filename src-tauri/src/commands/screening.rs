@@ -224,6 +224,7 @@ pub async fn start_screening(
         if completed > 0 {
             if let Ok(conn) = db.conn.lock() {
                 crate::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
+                crate::db::app_settings_repo::mark_wiki_needs_refresh(&conn);
             }
         }
 

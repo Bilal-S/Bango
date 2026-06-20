@@ -41,8 +41,9 @@ pub struct IngestReport {
 
 /// Run the full ingest pipeline. Requires an LLM response string (the caller
 /// obtains it via the orchestrator; this function is split for testability).
-pub fn run_ingest_from_response(
-    conn: &Connection,
+/// Write wiki pages from the LLM response (async, with per-page progress).
+/// Does NOT touch the DB connection — caller must call `finalize_ingest` afterwards.
+pub async fn write_pages_from_response(
     root: &Path,
     llm_response: &str,
     app_handle: Option<&tauri::AppHandle>,
@@ -60,10 +61,11 @@ pub fn run_ingest_from_response(
     let total_pages = parsed_pages.len();
     for (i, page) in parsed_pages.iter().enumerate() {
         if let Some(handle) = app_handle {
+            let pct = 50 + ((i + 1) * 50 / total_pages.max(1));
             let _ = handle.emit(
                 "wiki:progress",
                 crate::commands::wiki_cmd::WikiProgress {
-                    step: 3,
+                    step: pct.min(99),
                     total_steps: crate::commands::wiki_cmd::WIKI_PIPELINE_TOTAL_STEPS,
                     message: format!("Writing page {}/{}: {}", i + 1, total_pages, page.slug),
                 },
@@ -72,9 +74,21 @@ pub fn run_ingest_from_response(
         if let Err(e) = write_page(root, page) {
             report.errors.push(format!("Failed to write {}: {}", page.slug, e));
         }
+        // Yield to the async runtime so emitted progress events are delivered.
+        tokio::task::yield_now().await;
     }
 
-    // 4. Rebuild the FTS5 index.
+    Ok(report)
+}
+
+/// Finalize ingest: rebuild FTS5, append log, clear staleness flag.
+/// Kept synchronous (no .await) since it uses &Connection.
+pub fn finalize_ingest(
+    conn: &Connection,
+    root: &Path,
+    report: &mut IngestReport,
+) -> Result<(), AppError> {
+    // Rebuild the FTS5 index.
     if let Err(e) = fts::ensure_table(conn) {
         report.errors.push(format!("FTS table creation failed: {e}"));
     }
@@ -82,7 +96,7 @@ pub fn run_ingest_from_response(
         report.errors.push(format!("FTS rebuild failed: {e}"));
     }
 
-    // 5. Append a log entry.
+    // Append a log entry.
     let log_path = root.join("wiki").join("log.md");
     let log_body = std::fs::read_to_string(&log_path).unwrap_or_default();
     let entry = format!(
@@ -94,10 +108,10 @@ pub fn run_ingest_from_response(
     let new_log = frontmatter::append_log_entry(&log_body, &entry);
     let _ = std::fs::write(&log_path, new_log);
 
-    // 6. Clear the staleness flag.
+    // Clear the staleness flag.
     crate::db::app_settings_repo::clear_wiki_needs_refresh(conn);
 
-    Ok(report)
+    Ok(())
 }
 
 /// Build the user prompt from raw sources + the AGENTS.md contract.
@@ -143,6 +157,8 @@ pub fn build_ingest_prompt(root: &Path) -> Result<(String, usize, bool), AppErro
          links: []\n\
          ---\n\
          <Markdown body with [[wikilinks]] to other pages>\n\n\
+         IMPORTANT: Create a wiki page for EVERY source document. Do not skip any sources. Each \
+         source should appear in at least one page. \
          Generate at least 3-5 concept pages, 1-2 synthesis pages, and author pages for \
          prominent authors. Use [[slug]] links to connect related pages. Each page must \
          start with the <!-- PAGE:slug --> delimiter."

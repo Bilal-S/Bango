@@ -24,6 +24,7 @@ const {
   searchWiki,
   startProgressListener,
   stopProgressListener,
+  exportAndIngest,
 } = useWiki();
 
 const {
@@ -90,7 +91,32 @@ const typeLabels: Record<string, string> = {
 onMounted(async () => {
   await Promise.all([checkLlmConfig(), refreshStatus(), startProgressListener()]);
   await loadPages();
+  // Auto-ingest if wiki is stale (articles changed since last ingest).
+  await autoIngestIfStale();
 });
+
+/** Check if wiki needs refresh and auto-trigger export + ingest. */
+async function autoIngestIfStale(): Promise<void> {
+  if (
+    status.value?.initialized &&
+    isLlmConfigured.value &&
+    status.value?.needsRefresh &&
+    (status.value?.includedArticleCount ?? 0) > 0
+  ) {
+    try {
+      const report = await exportAndIngest();
+      toast.show(
+        `Wiki auto-updated: ${report.pagesWritten} pages written.`,
+        report.errors.length > 0 ? 'error' : 'success'
+      );
+      selectedSlug.value = null;
+      await loadPages();
+      graphPanelRef.value?.refresh();
+    } catch {
+      // Non-fatal: user can manually rebuild via Re-scaffold.
+    }
+  }
+}
 
 async function checkLlmConfig(): Promise<void> {
   try {

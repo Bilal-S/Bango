@@ -429,8 +429,9 @@ pub async fn wiki_ingest(
         .send(&config, system_prompt, &prompt, crate::llm::orchestrator::LlmRequestType::WikiIngest)
         .await?;
 
+    let mut report = ingest::write_pages_from_response(&root, &response, None).await?;
     let conn = lock_conn(&db_state)?;
-    let report = ingest::run_ingest_from_response(&conn, &root, &response, None)?;
+    ingest::finalize_ingest(&conn, &root, &mut report)?;
     Ok(report)
 }
 
@@ -523,7 +524,7 @@ pub fn wiki_list_sources(
 }
 
 /// Total steps in the wiki rebuild pipeline (for the progress bar).
-pub const WIKI_PIPELINE_TOTAL_STEPS: usize = 4;
+pub const WIKI_PIPELINE_TOTAL_STEPS: usize = 100;
 
 /// Progress payload emitted via the `wiki:progress` event.
 #[derive(Serialize, Clone)]
@@ -588,7 +589,7 @@ async fn wiki_rebuild_inner(
         let root = storage::resolve_root(&conn)?;
         storage::scaffold_tree(&root)?;
     }
-    emit_wiki_progress(app_handle, 1, "Wiki directory ready");
+    emit_wiki_progress(app_handle, 10, "Wiki directory ready");
 
     // Step 1: Export included articles + process user files.
     let root = {
@@ -597,11 +598,11 @@ async fn wiki_rebuild_inner(
         raw_export::prepare_all(&conn, &root)?;
         root
     };
-    emit_wiki_progress(app_handle, 2, "Raw sources prepared");
+    emit_wiki_progress(app_handle, 15, "Raw sources prepared");
 
     // Step 2: Build prompt + call LLM.
     let (prompt, _src_count, _trunc) = ingest::build_ingest_prompt(&root)?;
-    emit_wiki_progress(app_handle, 3, "Generating wiki pages via LLM...");
+    emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
 
     let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
                          contract strictly. Output wiki pages in the exact delimited format \
@@ -619,10 +620,11 @@ async fn wiki_rebuild_inner(
         .await?;
 
     // Step 3: Parse + write + rebuild FTS5.
+    let mut report = ingest::write_pages_from_response(&root, &response, Some(app_handle)).await?;
     let conn = lock_conn(db_state)?;
-    let report = ingest::run_ingest_from_response(&conn, &root, &response, Some(app_handle))?;
+    ingest::finalize_ingest(&conn, &root, &mut report)?;
 
-    emit_wiki_progress(app_handle, 4, &format!("Done: {} pages written", report.pages_written));
+    emit_wiki_progress(app_handle, 100, &format!("Done: {} pages written", report.pages_written));
     Ok(report)
 }
 
@@ -658,10 +660,10 @@ async fn wiki_export_and_ingest_inner(
         raw_export::prepare_all(&conn, &root)?;
         root
     };
-    emit_wiki_progress(app_handle, 1, "Raw sources prepared");
+    emit_wiki_progress(app_handle, 15, "Raw sources prepared");
 
     let (prompt, _src_count, _trunc) = ingest::build_ingest_prompt(&root)?;
-    emit_wiki_progress(app_handle, 2, "Generating wiki pages via LLM...");
+    emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
 
     let system_prompt = "You are a research knowledge-base synthesizer. Follow the AGENTS.md \
                          contract strictly. Output wiki pages in the exact delimited format \
@@ -678,10 +680,11 @@ async fn wiki_export_and_ingest_inner(
         .send(&config, system_prompt, &prompt, crate::llm::orchestrator::LlmRequestType::WikiIngest)
         .await?;
 
+    let mut report = ingest::write_pages_from_response(&root, &response, Some(app_handle)).await?;
     let conn = lock_conn(db_state)?;
-    let report = ingest::run_ingest_from_response(&conn, &root, &response, Some(app_handle))?;
+    ingest::finalize_ingest(&conn, &root, &mut report)?;
 
-    emit_wiki_progress(app_handle, 4, &format!("Done: {} pages written", report.pages_written));
+    emit_wiki_progress(app_handle, 100, &format!("Done: {} pages written", report.pages_written));
     Ok(report)
 }
 

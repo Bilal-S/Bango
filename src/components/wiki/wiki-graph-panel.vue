@@ -20,6 +20,11 @@ const graph = ref<WikiGraph | null>(null);
 const stats = ref({ nodes: 0, edges: 0, orphans: 0 });
 
 let sigma: Sigma | null = null;
+let graphologyGraph: Graph | null = null;
+
+// ── Filter state ──────────────────────────────────────────────
+const hiddenTypes = ref<Set<string>>(new Set());
+const searchQuery = ref('');
 
 /** Color map for page types. */
 const typeColors: Record<string, string> = {
@@ -29,6 +34,41 @@ const typeColors: Record<string, string> = {
   synthesis: '#a855f7', // purple
   source: '#64748b', // slate
 };
+
+/** Legend items for the type colors (with type key for filtering). */
+const legendItems = [
+  { type: 'concept', label: 'Concepts', color: typeColors.concept! },
+  { type: 'author', label: 'Authors', color: typeColors.author! },
+  { type: 'method', label: 'Methods', color: typeColors.method! },
+  { type: 'synthesis', label: 'Synthesis', color: typeColors.synthesis! },
+];
+
+/** Toggle a page type in the hidden set. */
+function toggleType(type: string): void {
+  const next = new Set(hiddenTypes.value);
+  if (next.has(type)) {
+    next.delete(type);
+  } else {
+    next.add(type);
+  }
+  hiddenTypes.value = next;
+  applyFilters();
+}
+
+/** Apply type + search filters to the graphology graph. */
+function applyFilters(): void {
+  const g = graphologyGraph;
+  if (!g) return;
+  const q = searchQuery.value.trim().toLowerCase();
+  g.forEachNode((node, attrs) => {
+    const pageType = (attrs.pageType as string) ?? '';
+    const typeHidden = hiddenTypes.value.has(pageType);
+    const label = ((attrs.label as string) ?? '').toLowerCase();
+    const labelMatch = q === '' || label.includes(q);
+    g.setNodeAttribute(node, 'hidden', typeHidden || !labelMatch);
+  });
+  sigma?.refresh();
+}
 
 /** Build and render the graph. */
 async function loadAndRender(): Promise<void> {
@@ -102,6 +142,9 @@ function render(): void {
     },
   });
 
+  // Store reference for filtering.
+  graphologyGraph = g;
+
   // Create sigma renderer.
   sigma = new Sigma(g, containerRef.value, {
     renderEdgeLabels: false,
@@ -122,15 +165,10 @@ function render(): void {
   sigma.on('clickNode', ({ node }) => {
     emit('selectPage', node);
   });
-}
 
-/** Legend items for the type colors. */
-const legendItems = [
-  { label: 'Concepts', color: typeColors.concept! },
-  { label: 'Authors', color: typeColors.author! },
-  { label: 'Methods', color: typeColors.method! },
-  { label: 'Synthesis', color: typeColors.synthesis! },
-];
+  // Apply any existing filters after render.
+  applyFilters();
+}
 
 onMounted(loadAndRender);
 onUnmounted(() => {
@@ -138,6 +176,7 @@ onUnmounted(() => {
     sigma.kill();
     sigma = null;
   }
+  graphologyGraph = null;
 });
 
 // Expose a refresh method for the parent to call after ingest.
@@ -185,24 +224,52 @@ defineExpose({ refresh: loadAndRender });
       </div>
     </div>
 
-    <!-- Stats + Legend overlay (top-right) -->
+    <!-- Stats + Search + Legend overlay (top-right) -->
     <div
       v-if="graph && graph.nodes.length > 0"
-      class="absolute top-3 right-3 z-10 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200 shadow-sm p-3 text-xs space-y-2"
+      class="absolute top-3 right-3 z-10 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200 shadow-sm p-3 text-xs space-y-2 min-w-[200px]"
     >
       <div class="flex items-center gap-3 font-mono text-slate-600">
         <span>{{ stats.nodes }} nodes</span>
         <span>{{ stats.edges }} edges</span>
         <span v-if="stats.orphans > 0" class="text-amber-600">{{ stats.orphans }} orphans</span>
       </div>
+
+      <!-- Search filter -->
+      <div class="relative">
+        <span
+          class="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-[14px] text-slate-400 pointer-events-none"
+          >search</span
+        >
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="Filter nodes..."
+          class="w-full pl-7 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+          @input="applyFilters"
+        />
+      </div>
+
+      <!-- Legend (clickable toggles) -->
       <div class="flex items-center gap-2 flex-wrap">
-        <div v-for="item in legendItems" :key="item.label" class="flex items-center gap-1">
+        <button
+          v-for="item in legendItems"
+          :key="item.type"
+          type="button"
+          class="flex items-center gap-1.5 cursor-pointer transition-opacity"
+          :class="{ 'opacity-40': hiddenTypes.has(item.type) }"
+          :title="hiddenTypes.has(item.type) ? `Show ${item.label}` : `Hide ${item.label}`"
+          @click="toggleType(item.type)"
+        >
           <span
-            class="inline-block w-2.5 h-2.5 rounded-full"
+            class="inline-block w-4 h-4 rounded-full transition-all"
             :style="{ backgroundColor: item.color }"
+            :class="{
+              'ring-2 ring-offset-1 ring-slate-400': !hiddenTypes.has(item.type),
+            }"
           ></span>
-          <span class="text-slate-500">{{ item.label }}</span>
-        </div>
+          <span class="text-slate-600">{{ item.label }}</span>
+        </button>
       </div>
     </div>
 

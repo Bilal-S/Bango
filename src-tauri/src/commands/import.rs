@@ -238,6 +238,7 @@ pub async fn import_ris_file(
 
         // Imported articles affect bibliometrics - mark it stale.
         app_settings_repo::mark_biblio_needs_refresh(&conn);
+        app_settings_repo::mark_wiki_needs_refresh(&conn);
 
         Ok(ImportResult {
             imported_count: updated_articles.len(),
@@ -390,6 +391,7 @@ pub async fn import_bibtex_file(
 
         // Imported articles affect bibliometrics - mark it stale.
         app_settings_repo::mark_biblio_needs_refresh(&conn);
+        app_settings_repo::mark_wiki_needs_refresh(&conn);
 
         Ok(ImportResult {
             imported_count: updated_articles.len(),

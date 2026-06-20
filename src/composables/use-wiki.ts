@@ -116,6 +116,7 @@ export function useWiki() {
 
   /** Get a single wiki page by slug (returns null if not found). */
   async function getPage(slug: string): Promise<WikiPage | null> {
+    if (!slug) return null;
     return tauriCommand<WikiPage | null>('wiki_get_page', { slug });
   }
 

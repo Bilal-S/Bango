@@ -16,16 +16,8 @@ const emit = defineEmits<{
   deleted: [];
 }>();
 
-const {
-  initWiki,
-  addRawFile,
-  lintWiki,
-  ingestWiki,
-  deleteWiki,
-  rebuild,
-  exportAndIngest,
-  progress,
-} = useWiki();
+const { initWiki, addRawFile, lintWiki, deleteWiki, rebuild, exportAndIngest, progress } =
+  useWiki();
 const toast = useToast();
 const addingRaw = ref(false);
 const linting = ref(false);
@@ -58,13 +50,12 @@ async function handleRebuild(): Promise<void> {
   }
 }
 
-/** Prepare raw sources: export included articles + process user-dropped files. */
-/** Open a file picker and add the selected file to `raw/`. */
+/** Open a file picker and add one or more selected files to `raw/`. */
 async function handleAddRawFile(): Promise<void> {
   addingRaw.value = true;
   try {
     const selected = await open({
-      multiple: false,
+      multiple: true,
       filters: [
         {
           name: 'Documents',
@@ -100,9 +91,30 @@ async function handleAddRawFile(): Promise<void> {
         },
       ],
     });
-    if (!selected) return;
-    await addRawFile(selected);
-    toast.show('File added. Building wiki...', 'info');
+    if (!selected || (Array.isArray(selected) && selected.length === 0)) return;
+
+    // Normalize to array — multiple: true returns string[] | null.
+    const files: string[] = Array.isArray(selected) ? selected : [selected];
+
+    let added = 0;
+    let skipped = 0;
+    for (const filePath of files) {
+      try {
+        await addRawFile(filePath);
+        added++;
+      } catch {
+        // Unsupported file type or extraction error — skip.
+        skipped++;
+      }
+    }
+
+    if (added === 0) {
+      toast.show('No supported files were added.', 'error');
+      return;
+    }
+
+    const summary = `Added ${added} file${added > 1 ? 's' : ''}${skipped > 0 ? `, ${skipped} skipped` : ''}. Building wiki...`;
+    toast.show(summary, 'info');
     emit('rawPrepared');
     // Auto-chain: export raw + ingest.
     try {
@@ -113,10 +125,10 @@ async function handleAddRawFile(): Promise<void> {
       );
       emit('ingested');
     } catch {
-      toast.show('Document added, but ingest failed. Click Re-scaffold to retry.', 'error');
+      toast.show('Documents added, but ingest failed. Click Re-scaffold to retry.', 'error');
     }
-  } catch (e) {
-    toast.show('Failed to add file', 'error');
+  } catch {
+    toast.show('Failed to add files', 'error');
   } finally {
     addingRaw.value = false;
   }
@@ -139,9 +151,14 @@ async function handleLint(): Promise<void> {
 
 /** Run the LLM ingest: synthesize raw sources into wiki pages. */
 async function handleIngest(): Promise<void> {
+  // Check if ingestion is needed.
+  if (!needsRefresh()) {
+    toast.show('Wiki is up to date. No new documents to ingest.', 'info');
+    return;
+  }
   ingesting.value = true;
   try {
-    const report = await ingestWiki();
+    const report = await exportAndIngest();
     toast.show(
       `Ingest complete: ${report.pagesWritten} pages written${report.errors.length > 0 ? `, ${report.errors.length} errors` : ''}.`,
       report.errors.length > 0 ? 'error' : 'success'
