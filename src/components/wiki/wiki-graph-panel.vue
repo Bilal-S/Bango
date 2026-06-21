@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import { NodeCircleProgram, createEdgeArrowProgram } from 'sigma/rendering';
@@ -18,6 +18,30 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const graph = ref<WikiGraph | null>(null);
 const stats = ref({ nodes: 0, edges: 0, orphans: 0 });
+
+// Hover tooltip state (mirrors citation-network-graph.vue): the full node
+// title + summary + page type show in a Vue-rendered popover positioned via
+// sigma's `moveBody` event, while the on-graph label is truncated to 25 chars
+// so long LLM titles don't overflow the canvas.
+const hoveredNode = ref<{
+  label: string;
+  summary: string;
+  pageType: string;
+  inbound: number;
+  outbound: number;
+} | null>(null);
+const tooltipX = ref(0);
+const tooltipY = ref(0);
+
+const tooltipPosition = computed(() => ({
+  left: `${tooltipX.value + 12}px`,
+  top: `${tooltipY.value - 8}px`,
+}));
+
+/** Truncate a node label for display on the graph canvas (25 chars + ellipsis). */
+function truncateLabel(title: string, max = 25): string {
+  return title.length > max ? title.slice(0, max) + '...' : title;
+}
 
 let sigma: Sigma | null = null;
 let graphologyGraph: Graph | null = null;
@@ -43,7 +67,9 @@ const hiddenTypes = ref<Set<string>>(new Set());
 const searchQuery = ref('');
 const legendExpanded = ref(true);
 const orphansOnly = ref(false);
-const hoveredNode = ref<string | null>(null);
+// The slug of the hovered node, used by `applyFilters` for connection dimming.
+// (The tooltip data lives in the `hoveredNode` object ref above.)
+const hoveredSlug = ref<string | null>(null);
 
 /** Color map for page types. */
 const typeColors: Record<string, string> = {
@@ -85,6 +111,7 @@ function resetFilters(): void {
   searchQuery.value = '';
   hiddenTypes.value = new Set();
   orphansOnly.value = false;
+  hoveredSlug.value = null;
   hoveredNode.value = null;
   applyFilters();
   // Reset zoom and pan to default view.
@@ -105,7 +132,7 @@ function applyFilters(): void {
   const g = graphologyGraph;
   if (!g) return;
   const q = searchQuery.value.trim().toLowerCase();
-  const hov = hoveredNode.value;
+  const hov = hoveredSlug.value;
 
   // If hovering, collect connected node set.
   let connectedSet: Set<string> | null = null;
@@ -243,18 +270,23 @@ function renderInner(): void {
 
   const g = new Graph({ multi: false, type: 'directed' });
 
-  // Add nodes.
+  // Add nodes. The on-canvas label is truncated to 25 chars; the full title +
+  // summary are stored as attributes for the hover tooltip.
   for (const node of graph.value.nodes) {
     const color = typeColors[node.pageType] ?? '#94a3b8';
     const size = 5 + Math.min(Math.max(node.inbound, node.outbound), 10);
     g.addNode(node.slug, {
-      label: node.title,
+      label: truncateLabel(node.title),
+      fullTitle: node.title,
+      summary: node.summary ?? '',
       size,
       color,
       origColor: color,
       x: Math.random() * 100,
       y: Math.random() * 100,
       pageType: node.pageType,
+      inbound: node.inbound,
+      outbound: node.outbound,
     });
   }
 
@@ -320,14 +352,35 @@ function renderInner(): void {
     emit('selectPage', node);
   });
 
-  // Hover handlers: highlight connected nodes + edges.
+  // Hover handlers: highlight connected nodes + edges + populate the tooltip.
   sigma.on('enterNode', ({ node }) => {
-    hoveredNode.value = node;
+    hoveredSlug.value = node;
     applyFilters();
+    // Populate the Vue-rendered tooltip from the node attributes.
+    const attrs = g.getNodeAttributes(node);
+    hoveredNode.value = {
+      label: (attrs.fullTitle as string) ?? node,
+      summary: (attrs.summary as string) ?? '',
+      pageType: (attrs.pageType as string) ?? '',
+      inbound: (attrs.inbound as number) ?? 0,
+      outbound: (attrs.outbound as number) ?? 0,
+    };
   });
   sigma.on('leaveNode', () => {
+    hoveredSlug.value = null;
     hoveredNode.value = null;
     applyFilters();
+  });
+
+  // Track mouse position for tooltip placement (relative to the container).
+  sigma.on('moveBody', (payload) => {
+    const mouseEvt = payload.event.original as MouseEvent;
+    if (!mouseEvt.x) return;
+    const rect = containerRef.value?.getBoundingClientRect();
+    if (rect) {
+      tooltipX.value = mouseEvt.x - rect.left;
+      tooltipY.value = mouseEvt.y - rect.top;
+    }
   });
 
   // Apply any existing filters after render.
@@ -506,5 +559,36 @@ defineExpose({ refresh: loadAndRender });
     >
       Click a node to open its page. Hover to highlight connections. Drag to pan. Scroll to zoom.
     </div>
+
+    <!-- Hover tooltip (full title + summary; mirrors citation-network-graph.vue) -->
+    <div
+      v-if="hoveredNode"
+      class="absolute z-30 pointer-events-none bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs max-w-[260px] wiki-graph-tooltip"
+      :style="tooltipPosition"
+    >
+      <p class="font-semibold text-slate-800">{{ hoveredNode.label }}</p>
+      <p v-if="hoveredNode.summary" class="text-slate-500 mt-0.5 wiki-graph-tooltip__summary">
+        {{ hoveredNode.summary }}
+      </p>
+      <div class="flex gap-3 mt-1 text-slate-500">
+        <span class="flex items-center gap-0.5">
+          <span class="material-symbols-outlined text-[10px]">arrow_downward</span>
+          {{ hoveredNode.inbound }} linked from
+        </span>
+        <span class="flex items-center gap-0.5">
+          <span class="material-symbols-outlined text-[10px]">arrow_upward</span>
+          {{ hoveredNode.outbound }} links to
+        </span>
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.wiki-graph-tooltip__summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+</style>

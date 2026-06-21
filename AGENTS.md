@@ -177,7 +177,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     Documents, Lint, Delete Wiki, progress bar), `wiki-page-viewer.vue` (Markdown render via
     the shared `src/utils/wiki-markdown.ts` - `[[wikilink]]` + `[^art-id]` source ref
     resolution), `wiki-page-editor.vue` (split-pane editor), `wiki-graph-panel.vue`
-    (sigma + ForceAtlas2 graph). Composable: `use-wiki.ts`.
+    (sigma + ForceAtlas2 graph). Node labels truncate to 25 chars + ellipsis
+    on the canvas; a Vue hover tooltip (mirroring `citation-network-graph.vue`)
+    shows the full title + page `summary` + inbound/outbound counts via
+    sigma's `moveBody` event. The `GraphNode.summary` field is populated from
+    frontmatter by `engine::build_graph`. Composable: `use-wiki.ts`.
     Design and phasing: `.worktrees/llmwiki-plan.md`.
     **Chat-with-Wiki integration**: `useChatStore.source: 'articles'|'wiki'` (mutually
     exclusive) switches the `/chat` view between `send_chat_message` (article RAG) and

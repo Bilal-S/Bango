@@ -213,6 +213,11 @@ pub struct GraphNode {
     pub page_type: String,
     pub inbound: usize,
     pub outbound: usize,
+    /// Page summary from frontmatter, for the graph hover tooltip.
+    /// Empty string when absent (serde serializes it, but the frontend treats
+    /// empty as "no summary").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
 }
 
 /// A directed graph edge (a `[[wikilink]]` from source to target).
@@ -240,8 +245,8 @@ pub fn build_graph(root: &Path) -> Result<WikiGraph, AppError> {
         collect_pages(&wiki_dir, &mut pages)?;
     }
 
-    // Build slug set + title/type lookup.
-    let mut slug_info: HashMap<String, (String, String)> = HashMap::new(); // slug -> (title, type)
+    // Build slug set + title/type/summary lookup.
+    let mut slug_info: HashMap<String, (String, String, String)> = HashMap::new(); // slug -> (title, type, summary)
     let mut outbound_count: HashMap<String, usize> = HashMap::new();
     let mut inbound_count: HashMap<String, usize> = HashMap::new();
     let mut edges: Vec<GraphEdge> = Vec::new();
@@ -253,7 +258,8 @@ pub fn build_graph(root: &Path) -> Result<WikiGraph, AppError> {
         }
         let title = fm.get("title").unwrap_or("").to_string();
         let page_type = fm.get("type").unwrap_or("").to_string();
-        slug_info.insert(slug.clone(), (title, page_type));
+        let summary = fm.get("summary").unwrap_or("").to_string();
+        slug_info.insert(slug.clone(), (title, page_type, summary));
 
         let targets = extract_wikilinks(body);
         let out = targets.len();
@@ -267,10 +273,11 @@ pub fn build_graph(root: &Path) -> Result<WikiGraph, AppError> {
     // Build nodes (only for known slugs; edges to unknown slugs are "broken").
     let mut nodes: Vec<GraphNode> = slug_info
         .iter()
-        .map(|(slug, (title, page_type))| GraphNode {
+        .map(|(slug, (title, page_type, summary))| GraphNode {
             slug: slug.clone(),
             title: title.clone(),
             page_type: page_type.clone(),
+            summary: summary.clone(),
             inbound: inbound_count.get(slug).copied().unwrap_or(0),
             outbound: outbound_count.get(slug).copied().unwrap_or(0),
         })
@@ -625,5 +632,38 @@ See [[nonexistent]].",
         let graph = build_graph(tmp.path()).unwrap();
         assert!(graph.nodes.is_empty());
         assert!(graph.edges.is_empty());
+    }
+
+    #[test]
+    fn graph_node_includes_summary_from_frontmatter() {
+        // The graph hover tooltip shows the page summary, so build_graph must
+        // propagate the frontmatter `summary` field onto each GraphNode.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let dir = root.join("wiki/concepts");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut fm = Frontmatter::default();
+        fm.set("id", "alpha");
+        fm.set("title", "Alpha");
+        fm.set("type", "concept");
+        fm.set("slug", "alpha");
+        fm.set("status", "draft");
+        fm.set("summary", "A short overview of the alpha concept.");
+        frontmatter::write_file(&dir.join("alpha.md"), &fm, "# Alpha").unwrap();
+
+        let graph = build_graph(root).unwrap();
+        let alpha = graph.nodes.iter().find(|n| n.slug == "alpha").unwrap();
+        assert_eq!(alpha.summary, "A short overview of the alpha concept.");
+    }
+
+    #[test]
+    fn graph_node_summary_empty_when_frontmatter_omits_it() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_page(root, "concepts", "alpha", "Alpha", "# Alpha");
+
+        let graph = build_graph(root).unwrap();
+        let alpha = graph.nodes.iter().find(|n| n.slug == "alpha").unwrap();
+        assert_eq!(alpha.summary, "");
     }
 }

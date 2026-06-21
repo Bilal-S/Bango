@@ -124,6 +124,8 @@ export interface GraphNode {
   pageType: string;
   inbound: number;
   outbound: number;
+  /** Page summary (frontmatter) for the hover tooltip. Omitted when absent. */
+  summary?: string;
 }
 
 /** A directed graph edge ([[wikilink]] from source to target). */
