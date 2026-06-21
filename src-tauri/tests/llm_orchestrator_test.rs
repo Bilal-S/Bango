@@ -4,7 +4,7 @@
 //! - Enforces concurrency limits (semaphore)
 //! - Enforces rate limiting (delay between requests)
 //! - Handles concurrent requests without deadlock or recursion
-//! - Grows capacity via `update_settings`
+//! - Sets exact capacity via `update_settings` (grows AND shrinks)
 //! - Reports available permits
 
 use std::sync::Arc;
@@ -59,6 +59,82 @@ async fn update_settings_changes_delay() {
     // Delay is internal; verify no panic
     orch.update_settings(3, 500).await;
     assert_eq!(orch.available_permits(), 3);
+}
+
+#[tokio::test]
+async fn update_settings_shrinks_semaphore() {
+    // Regression for flaw 1: the old `add_permits` approach could only grow,
+    // so lowering the limit was silently ignored (capacity stayed at 5).
+    let orch = LlmOrchestrator::new(5, 0);
+    assert_eq!(orch.available_permits(), 5);
+
+    orch.update_settings(2, 0).await;
+    assert_eq!(orch.available_permits(), 2, "limit should shrink from 5 to 2");
+
+    // Going back up also works (exact-set semantics, not monotonic).
+    orch.update_settings(8, 0).await;
+    assert_eq!(orch.available_permits(), 8);
+}
+
+#[tokio::test]
+async fn update_settings_does_not_inflate_capacity_when_permits_in_flight() {
+    // Regression for flaw 2: the old code compared the NEW max against
+    // `available_permits()` (the free count) instead of capacity. With one
+    // permit in flight it read `available = capacity - 1`, then added
+    // `capacity - (capacity - 1) = 1` permit on every save of the same value,
+    // growing capacity without bound. The fix swaps a fresh semaphore, so
+    // saving the SAME value while a permit is in flight must leave capacity
+    // unchanged.
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_chunked_body(|w| {
+            std::thread::sleep(Duration::from_millis(300)); // hold a permit
+            w.write_all(openai_chat_response("ok", 5).as_bytes()).unwrap();
+            Ok(())
+        })
+        .expect(1)
+        .create_async()
+        .await;
+
+    let orch = Arc::new(LlmOrchestrator::new(5, 0));
+    let config = mock_openai_config(&server.url());
+
+    // Start one slow request so one permit is in flight (available drops 5->4).
+    let orch_clone = Arc::clone(&orch);
+    let config_clone = config.clone();
+    let handle = tokio::spawn(async move {
+        orch_clone.send(&config_clone, "sys", "usr", LlmRequestType::Screening).await
+    });
+
+    // Wait until the in-flight request has acquired its permit.
+    let acquired = tokio::time::timeout(Duration::from_millis(200), async {
+        while orch.available_permits() == 5 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(acquired.is_ok(), "in-flight request should consume a permit");
+    assert_eq!(orch.available_permits(), 4, "one permit should be in flight");
+
+    // Save the SAME concurrency value.
+    // Old bug: capacity 5 -> 6 (add_permits(5-4)). Fix: stays 5 (fresh swap).
+    orch.update_settings(5, 0).await;
+
+    // Let the in-flight request finish; its permit was on the swapped-out
+    // semaphore, so returning it must NOT inflate the new semaphore.
+    let r = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    assert!(r.is_ok() && r.unwrap().is_ok());
+
+    assert_eq!(
+        orch.available_permits(),
+        5,
+        "saving the same value with a permit in flight must not inflate capacity"
+    );
+
+    mock.assert_async().await;
 }
 
 // ─── Rate limiting ─────────────────────────────────────────────────
@@ -435,6 +511,67 @@ async fn save_config_growing_concurrency_allows_more_parallelism() {
 }
 
 #[tokio::test]
+async fn save_config_lowering_concurrency_caps_peak() {
+    // Behavioral regression for flaw 1: lowering the limit from the UI must
+    // actually reduce the enforced concurrency. Under the old bug, shrinking
+    // was a no-op, so the old limit (5) would have been enforced instead of
+    // the newly saved 2, and peak concurrency would hit 5.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let mut server = mockito::Server::new_async().await;
+    let max_concurrent = Arc::new(AtomicUsize::new(0));
+    let current_concurrent = Arc::new(AtomicUsize::new(0));
+    let max_cc = max_concurrent.clone();
+    let cc = current_concurrent.clone();
+
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", "Bearer test-key")
+        .with_status(200)
+        .with_chunked_body(move |w| {
+            let prev = cc.fetch_add(1, Ordering::SeqCst);
+            let new_count = prev + 1;
+            let mut peak = max_cc.load(Ordering::SeqCst);
+            if new_count > peak {
+                peak = new_count;
+                max_cc.store(peak, Ordering::SeqCst);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            cc.fetch_sub(1, Ordering::SeqCst);
+            w.write_all(openai_chat_response("ok", 5).as_bytes()).unwrap();
+            Ok(())
+        })
+        .expect(6)
+        .create_async()
+        .await;
+
+    // Start high, then LOWER to 2 with nothing in flight (clean swap).
+    let orch = Arc::new(LlmOrchestrator::new(5, 0));
+    orch.update_settings(2, 0).await;
+    assert_eq!(orch.available_permits(), 2, "limit should shrink to 2");
+
+    let config = mock_openai_config(&server.url());
+    let mut handles = vec![];
+    for _ in 0..6 {
+        let orch = orch.clone();
+        let config = config.clone();
+        handles.push(tokio::spawn(async move {
+            orch.send(&config, "sys", "usr", LlmRequestType::Screening).await
+        }));
+    }
+    for h in handles {
+        let r = tokio::time::timeout(Duration::from_secs(15), h).await;
+        assert!(r.is_ok());
+        assert!(r.unwrap().is_ok());
+    }
+
+    let peak = max_concurrent.load(Ordering::SeqCst);
+    assert!(peak <= 2, "After lowering to 2, peak concurrent requests should be <= 2, was {peak}");
+
+    mock.assert_async().await;
+}
+
+#[tokio::test]
 async fn save_config_zero_concurrency_clamps_to_one() {
     let orch = LlmOrchestrator::new(3, 0);
     assert_eq!(orch.available_permits(), 3);
@@ -454,11 +591,13 @@ async fn save_config_zero_concurrency_clamps_to_one() {
 }
 
 #[tokio::test]
-async fn save_config_multiple_updates_accumulate_correctly() {
+async fn save_config_multiple_updates_set_exact_capacity() {
+    // Each save sets the EXACT capacity (not monotonic accumulation).
+    // Previously update_settings could only grow, so 5 -> 3 left capacity at 5.
     let orch = LlmOrchestrator::new(2, 0);
     assert_eq!(orch.available_permits(), 2);
 
-    // Simulate multiple saves: 2 → 5 → 3 → 10
+    // Simulate multiple saves: 2 -> 5 -> 3 -> 10
     let mut config = fake_config();
 
     config.max_concurrent_requests = 5;
@@ -467,8 +606,8 @@ async fn save_config_multiple_updates_accumulate_correctly() {
 
     config.max_concurrent_requests = 3;
     simulate_save_config(&orch, &config).await;
-    // update_settings only grows, so should remain at 5
-    assert!(orch.available_permits() >= 5);
+    // update_settings now sets exact capacity, so it shrinks to 3.
+    assert_eq!(orch.available_permits(), 3);
 
     config.max_concurrent_requests = 10;
     simulate_save_config(&orch, &config).await;

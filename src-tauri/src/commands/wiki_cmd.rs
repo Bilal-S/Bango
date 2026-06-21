@@ -155,11 +155,7 @@ pub fn wiki_init(db_state: tauri::State<'_, DbState>) -> Result<WikiInitResult, 
     let root = storage::resolve_root(&conn)?;
     storage::scaffold_tree(&root)?;
 
-    let agents_path = root.join("AGENTS.md");
-    let created = !agents_path.exists();
-    std::fs::write(&agents_path, agents_contract::agents_md_content())
-        .map_err(|e| AppError::Import(format!("Failed to write AGENTS.md: {}", e)))?;
-
+    let created = ensure_initialized(&root)?;
     templates::write_all(&root.join("templates"))?;
 
     // Initialize wiki/log.md if missing (lives inside wiki/ output dir).
@@ -173,6 +169,27 @@ pub fn wiki_init(db_state: tauri::State<'_, DbState>) -> Result<WikiInitResult, 
     }
 
     Ok(WikiInitResult { root_dir: root.to_string_lossy().to_string(), created })
+}
+
+/// Ensure the wiki is initialized by writing `AGENTS.md` if it is missing.
+///
+/// Self-healing guard: `wiki_ingest` and `wiki_rebuild` call this at the top
+/// of their pipelines so an uninitialized wiki is transparently initialized
+/// before any LLM work begins. This prevents the "pages on disk but invisible
+/// in the UI" state that occurred when `AGENTS.md` was deleted (the status
+/// command reports `initialized: false` based on `AGENTS.md` presence, which
+/// gated the entire wiki-view UI even though generated pages existed).
+///
+/// Returns `true` if `AGENTS.md` was newly created, `false` if it already
+/// existed. Idempotent: never overwrites an existing `AGENTS.md`.
+pub fn ensure_initialized(root: &std::path::Path) -> Result<bool, AppError> {
+    let agents_path = root.join("AGENTS.md");
+    if agents_path.exists() {
+        return Ok(false);
+    }
+    std::fs::write(&agents_path, agents_contract::agents_md_content())
+        .map_err(|e| AppError::Import(format!("Failed to write AGENTS.md: {}", e)))?;
+    Ok(true)
 }
 
 /// Prepare raw sources: export included articles AND process user-dropped files.
@@ -415,8 +432,14 @@ pub fn wiki_delete_page(
     Ok(false)
 }
 
-/// Delete the entire wiki output (the `wiki/` subtree) and reset the
-/// staleness flag. Keeps `raw/`, `templates/`, and `AGENTS.md`.
+/// Delete the entire wiki output (the `wiki/` subtree). Keeps `raw/`,
+/// `templates/`, and `AGENTS.md`.
+///
+/// Does NOT touch the `wiki_needs_refresh` staleness flag. That flag signals
+/// "the article corpus changed since the last ingest" and is set by corpus-
+/// mutation sites (imports, status changes, full-text attachments). Setting it
+/// here would make `wiki-view.vue`'s `autoIngestIfStale` immediately rebuild
+/// what the user just deleted. The user can manually rebuild via the toolbar.
 #[tauri::command]
 pub fn wiki_delete_wiki(db_state: tauri::State<'_, DbState>) -> Result<(), AppError> {
     let conn = lock_conn(&db_state)?;
@@ -427,7 +450,6 @@ pub fn wiki_delete_wiki(db_state: tauri::State<'_, DbState>) -> Result<(), AppEr
     }
     // Re-scaffold the empty wiki tree + log.md.
     storage::scaffold_tree(&root)?;
-    crate::db::app_settings_repo::mark_wiki_needs_refresh(&conn);
     Ok(())
 }
 
@@ -468,10 +490,17 @@ pub async fn wiki_ingest(
             )
         })?;
         raw_export::process_user_files(&root)?;
+        // Self-heal: ensure AGENTS.md exists so the wiki-view UI does not gate
+        // the generated pages behind the "Initialize" empty-state.
+        let _ = ensure_initialized(&root);
         (root, config)
     };
 
-    let batches = ingest::build_ingest_prompt_batches(&root, config.context_window_tokens)?;
+    // Build batches (with author manifest if multi-batch) inside a DB scope.
+    let batches = {
+        let mut conn = lock_conn(&db_state)?;
+        build_batches_with_manifest(&mut conn, &root, &config)?
+    };
     let sender: Arc<dyn ingest::IngestLlmSender> =
         Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
     let mut report = ingest::run_chunked_ingest(&root, batches, sender, None, (25, 95)).await?;
@@ -479,6 +508,50 @@ pub async fn wiki_ingest(
     let conn = lock_conn(&db_state)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
     Ok(report)
+}
+
+/// Build ingest batches, applying the author-manifest optimization only when
+/// the corpus splits into multiple batches. For single-batch runs the LLM sees
+/// all sources at once and produces a self-consistent page set, so the manifest
+/// (and author pre-seeding) is skipped entirely.
+///
+/// When `batches.len() > 1`:
+/// 1. Run the full bibliometric normalization pipeline to populate
+///    `biblio_authors` (with metrics) + `biblio_terms` + co-author networks.
+/// 2. Build the `AuthorManifest` from the now-populated `biblio_authors`.
+/// 3. Pre-seed `wiki/authors/` with boilerplate author pages.
+/// 4. Rebuild the batches with the manifest injected into every prompt.
+fn build_batches_with_manifest(
+    conn: &mut rusqlite::Connection,
+    root: &std::path::Path,
+    config: &crate::models::llm_config::LlmConfig,
+) -> Result<Vec<ingest::IngestBatch>, AppError> {
+    // First pass: build batches without the manifest to check the count.
+    let batches = ingest::build_ingest_prompt_batches(root, config.context_window_tokens, None)?;
+    if batches.len() <= 1 {
+        return Ok(batches);
+    }
+
+    // Multi-batch: run the full 8-step bibliometric normalization pipeline so
+    // `biblio_authors` (with metrics), `biblio_terms`, `biblio_article_terms`,
+    // and the co-author/citation networks are all populated. The manifest reads
+    // from `biblio_authors` + `biblio_article_terms` to build rich author pages
+    // with articles, deduplicated keywords, and co-author links. This is the
+    // single source of truth; there is no raw-frontmatter fallback.
+    crate::db::biblio_repo::run_full_normalization(conn)?;
+
+    // Build the manifest from the now-populated `biblio_authors` table.
+    let manifest = ingest::build_author_manifest(conn)?;
+    if !manifest.entries.is_empty() {
+        // Pre-seed boilerplate author pages. Reviewed (user-edited) pages are
+        // preserved. Errors are non-fatal: the LLM can still produce author
+        // pages itself, and the consolidation pass will dedup them.
+        let _ = ingest::preseed_authors(root, &manifest);
+        ingest::build_ingest_prompt_batches(root, config.context_window_tokens, Some(&manifest))
+    } else {
+        // No authors in the corpus: skip the manifest entirely.
+        ingest::build_ingest_prompt_batches(root, config.context_window_tokens, None)
+    }
 }
 
 /// Lightweight page summary for the sidebar list (no body).
@@ -629,11 +702,12 @@ async fn wiki_rebuild_inner(
 ) -> Result<ingest::IngestReport, AppError> {
     emit_wiki_progress(app_handle, 0, "Starting wiki rebuild...");
 
-    // Step 0: Scaffold (ensure wiki-root exists).
+    // Step 0: Scaffold (ensure wiki-root exists) + self-heal AGENTS.md.
     {
         let conn = lock_conn(db_state)?;
         let root = storage::resolve_root(&conn)?;
         storage::scaffold_tree(&root)?;
+        let _ = ensure_initialized(&root);
     }
     emit_wiki_progress(app_handle, 10, "Wiki directory ready");
 
@@ -653,8 +727,13 @@ async fn wiki_rebuild_inner(
 
     // Step 2: Build prompt batches + dispatch them to the LLM in parallel.
     // Each batch carries the full source index, so batches are independent and
-    // safe to run concurrently. Progress emits as each batch completes.
-    let batches = ingest::build_ingest_prompt_batches(&root, config.context_window_tokens)?;
+    // safe to run concurrently. Progress emits as each batch completes. When
+    // the corpus splits into multiple batches, the author manifest + pre-seed
+    // optimization is applied to prevent cross-batch duplication.
+    let batches = {
+        let mut conn = lock_conn(db_state)?;
+        build_batches_with_manifest(&mut conn, &root, &config)?
+    };
     let sender: Arc<dyn ingest::IngestLlmSender> =
         Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
     emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");
@@ -705,12 +784,20 @@ async fn wiki_export_and_ingest_inner(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
             )
         })?;
+        // Self-heal: ensure AGENTS.md exists so the wiki-view UI does not gate
+        // the generated pages behind the "Initialize" empty-state.
+        let _ = ensure_initialized(&root);
         (root, config)
     };
     emit_wiki_progress(app_handle, 15, "Raw sources prepared");
 
-    // Build prompt batches + dispatch them to the LLM in parallel.
-    let batches = ingest::build_ingest_prompt_batches(&root, config.context_window_tokens)?;
+    // Build prompt batches + dispatch them to the LLM in parallel. When the
+    // corpus splits into multiple batches, the author manifest + pre-seed
+    // optimization is applied to prevent cross-batch duplication.
+    let batches = {
+        let mut conn = lock_conn(db_state)?;
+        build_batches_with_manifest(&mut conn, &root, &config)?
+    };
     let sender: Arc<dyn ingest::IngestLlmSender> =
         Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
     emit_wiki_progress(app_handle, 25, "Generating wiki pages via LLM...");

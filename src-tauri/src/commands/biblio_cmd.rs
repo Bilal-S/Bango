@@ -59,12 +59,14 @@ fn emit_progress(app_handle: &tauri::AppHandle, step: usize, message: &str) {
 /// Run bibliometric normalization: extract and normalize all authors and terms
 /// from the articles table into the biblio_* tables.
 ///
-/// Uses a SQLite transaction to batch all writes into a single commit,
-/// reducing disk I/O from thousands of individual writes to one batched commit.
+/// Delegates the DB work to `biblio_repo::run_full_normalization` (which wraps
+/// the 8-step pipeline in a single transaction) and emits progress events
+/// around it. The shared pure function is also called by the wiki ingest path
+/// so multi-batch wiki ingest does not depend on the user having visited the
+/// Bibliometrics dashboard first.
 ///
-/// Reports progress through `BIBLIO_NORMALIZE_TOTAL_STEPS` steps via the
-/// `biblio:progress` event, then clears the `biblio_needs_refresh` flag once
-/// the transaction commits successfully.
+/// Clears the `biblio_needs_refresh` flag once the transaction commits
+/// successfully.
 #[tauri::command]
 pub async fn biblio_normalize(
     db_state: tauri::State<'_, DbState>,
@@ -75,48 +77,11 @@ pub async fn biblio_normalize(
         .lock()
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
 
-    let tx = conn.transaction()?;
-
-    // Step 0: Start
     emit_progress(&app_handle, 0, "Starting normalization...");
-
-    // Clear previous normalization data (preserves AI-extracted and user-added terms)
-    biblio_repo::clear_regeneratable_biblio(&tx)?;
-    emit_progress(&app_handle, 1, "Cleared stale bibliometric data");
-
-    // Extract and normalize authors from all articles
-    let authors = biblio_repo::normalize_authors_from_articles(&tx)?;
-    emit_progress(&app_handle, 2, "Normalized author data");
-
-    // Parse raw affiliations → institutions + links
-    let _affiliations = biblio_repo::normalize_affiliations(&tx)?;
-    emit_progress(&app_handle, 3, "Normalized author affiliations");
-
-    // Extract terms from article keywords, titles, and abstracts
-    let terms = biblio_repo::normalize_terms_from_articles(&tx)?;
-    emit_progress(&app_handle, 4, "Normalized keywords and terms");
-
-    // Compute author metrics (citations, avg year, h-index)
-    biblio_repo::compute_author_metrics(&tx)?;
-    emit_progress(&app_handle, 5, "Computed author metrics");
-
-    // Build coauthor edges (full counting + fractional counting)
-    let _edges = biblio_repo::build_coauthor_edges(&tx)?;
-    emit_progress(&app_handle, 6, "Built co-authorship networks");
-
-    // Auto-match reference papers to included articles before building citation
-    // edges. This closes the gap where references imported without
-    // auto-matching would never appear in the citation network.
-    let _matched_refs = biblio_repo::auto_match_references_to_articles(&tx)?;
-    emit_progress(&app_handle, 7, "Auto-matched references to articles");
-
-    // Build citation edges between included articles (final work step).
-    let _citation_edges = biblio_repo::build_citation_edges(&tx)?;
+    let (authors, terms) = biblio_repo::run_full_normalization(&mut conn)?;
     emit_progress(&app_handle, BIBLIO_NORMALIZE_TOTAL_STEPS, "Built citation network");
 
-    let status = biblio_repo::get_biblio_status(&tx)?;
-
-    tx.commit()?;
+    let status = biblio_repo::get_biblio_status(&conn)?;
 
     // Only clear the refresh flag after the transaction commits successfully.
     app_settings_repo::clear_biblio_needs_refresh(&conn);

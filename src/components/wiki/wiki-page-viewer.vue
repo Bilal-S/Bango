@@ -74,6 +74,11 @@ const renderedBody = computed(() => {
   return renderWikiMarkdown(page.value.body, {
     sources: sources.value,
     pageTitles: pageTitles.value,
+    // Author pages: each publication's [^art-{uuid}] ref should open the wiki
+    // synthesis page (slug = uuid) rather than the article detail, since the
+    // synthesis page already links to the source and the "Sources" footer at
+    // the bottom of the author page covers direct article access.
+    linkArtRefsToSynthesis: page.value.pageType === 'author',
   });
 });
 

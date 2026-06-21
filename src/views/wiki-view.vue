@@ -13,8 +13,7 @@ import WikiGraphPanel from '@/components/wiki/wiki-graph-panel.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
-import { shouldPromptInit } from './wiki-init-prompt';
-import { ask, open } from '@tauri-apps/plugin-dialog';
+import { open } from '@tauri-apps/plugin-dialog';
 
 const router = useRouter();
 const toast = useToast();
@@ -22,9 +21,11 @@ const {
   status,
   loading,
   error,
+  initializing,
   refreshStatus,
   listPages,
   searchWiki,
+  initWiki,
   startProgressListener,
   stopProgressListener,
   exportAndIngest,
@@ -117,12 +118,33 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeyDown);
   await Promise.all([checkLlmConfig(), refreshStatus(), startProgressListener()]);
   await loadPages();
-  // First-visit prompt: if the user has included articles + an LLM configured
-  // but hasn't initialized the wiki yet, offer to build it now.
-  await promptInitIfReady();
   // Auto-ingest if wiki is stale (articles changed since last ingest).
   await autoIngestIfStale();
 });
+
+/**
+ * Initialize + rebuild in one click. Used by the inline "Initialize Your Wiki"
+ * empty-state card. Writes AGENTS.md (init), then runs the full pipeline
+ * (scaffold + export raw + ingest). The native Tauri popup was removed in
+ * favor of this in-page card so the prompt is non-blocking and visually
+ * consistent with the other readiness gates (LLM config, no articles).
+ */
+async function initializeAndBuild(): Promise<void> {
+  try {
+    await initWiki();
+    const report = await rebuild();
+    toast.show(
+      `Wiki ready: ${report.pagesWritten} pages written${report.errors.length > 0 ? `, ${report.errors.length} errors` : ''}.`,
+      report.errors.length > 0 ? 'error' : 'success'
+    );
+    navHistory.clear();
+    await refreshStatus();
+    await loadPages();
+    graphPanelRef.value?.refresh();
+  } catch {
+    toast.show('Failed to initialize and build wiki', 'error');
+  }
+}
 
 /**
  * Platform-aware back/forward keyboard shortcuts (browser parity).
@@ -155,47 +177,6 @@ function onKeyDown(e: KeyboardEvent): void {
   } else if (isForward && canGoForward.value) {
     e.preventDefault();
     navHistory.goForward();
-  }
-}
-
-/**
- * First-visit prompt: when prerequisites are met (LLM configured + included
- * articles) but the wiki isn't initialized, ask the user via a native Tauri
- * OK/Cancel dialog whether to build it now. On OK, run the full rebuild
- * (scaffold + export raw + ingest). On Cancel, do nothing (the user can use
- * Actions -> Rebuild Wiki later).
- */
-async function promptInitIfReady(): Promise<void> {
-  if (!shouldPromptInit(status.value, isLlmConfigured.value)) return;
-  const confirmed = await ask(
-    'You have included articles and an LLM provider configured. ' +
-      'Do you want to initialize the wiki system now? ' +
-      'You can rebuild later from the Actions menu.',
-    { title: 'Initialize Wiki', kind: 'info', okLabel: 'Rebuild', cancelLabel: 'Not now' }
-  );
-  if (confirmed) {
-    await rebuildWiki();
-  }
-}
-
-/**
- * Full rebuild: scaffold + export raw + ingest. Shared by the first-visit
- * prompt. (The toolbar's Rebuild Wiki action uses its own handler that emits
- * events back here; this local version is for the prompt path.)
- */
-async function rebuildWiki(): Promise<void> {
-  try {
-    const report = await rebuild();
-    toast.show(
-      `Rebuild complete: ${report.pagesWritten} pages written${report.errors.length > 0 ? `, ${report.errors.length} errors` : ''}.`,
-      report.errors.length > 0 ? 'error' : 'success'
-    );
-    navHistory.clear();
-    await refreshStatus();
-    await loadPages();
-    graphPanelRef.value?.refresh();
-  } catch {
-    toast.show('Failed to rebuild wiki', 'error');
   }
 }
 
@@ -439,14 +420,28 @@ watch(searchQuery, async (q) => {
         <div
           class="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600"
         >
-          <span class="material-symbols-outlined text-[32px]">auto_stories</span>
+          <span class="material-symbols-outlined text-[32px]">{{
+            initializing ? 'progress_activity' : 'auto_stories'
+          }}</span>
         </div>
         <h3 class="text-lg font-semibold text-slate-900 mb-2">Initialize Your Wiki</h3>
         <p class="text-sm text-slate-500 mb-6 leading-relaxed">
-          Open the <strong>Actions</strong> menu and choose <strong>Rebuild Wiki</strong> to
-          scaffold the <code class="wiki-code">wiki-root/</code> directory tree and generate pages
-          from your included articles.
+          The Wiki uses the LLM to synthesize your {{ status?.includedArticleCount ?? 0 }} included
+          articles into a linked knowledge base. Initialize now to scaffold the
+          <code class="wiki-code">wiki-root/</code> directory and generate pages.
         </p>
+        <button
+          class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="initializing"
+          @click="initializeAndBuild"
+        >
+          <span
+            v-if="initializing"
+            class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"
+          ></span>
+          <span v-else class="material-symbols-outlined text-[18px]">auto_awesome</span>
+          {{ initializing ? 'Building Wiki...' : 'Initialize & Build Wiki' }}
+        </button>
       </div>
     </div>
 

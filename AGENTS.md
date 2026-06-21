@@ -127,6 +127,35 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `build_ingest_prompt_batches`, `run_chunked_ingest`. The legacy single-call
     `build_ingest_prompt` + `write_pages_from_response` remain for backward compat and
     regression tests.
+    **Multi-batch consolidation** (gated on `batches.len() > 1`): when the corpus
+    splits into multiple parallel batches, independent batches often produce
+    near-duplicate pages for the same concept (`childhood-obesity` vs
+    `obesity-childhood`). To prevent fragmentation, `run_chunked_ingest` collects all
+    `ParsedPage`s across batches, runs a **deterministic** `consolidate_pages` pass
+    (no LLM merge calls), rewrites inbound `[[wikilinks]]` to canonical slugs via
+    `rewrite_page_links`, then writes the consolidated set. Detection: two
+    same-type (non-author) pages merge when (a) slugs match case-insensitively, OR
+    (b) stemmed-token Jaccard similarity of slugs >= `DEDUP_JACCARD_THRESHOLD` (0.5),
+    OR (c) they share >= `DEDUP_SHARED_SOURCES_MIN` (2) `source_articles`. Merge is
+    lossless: the duplicate body is appended under `## Additional perspectives`;
+    `source_articles` + `tags` are unioned. Author pages are pre-seeded and excluded
+    from merging. `AuthorManifest` + `preseed_authors` + `build_author_manifest`
+    derive canonical author slugs from `biblio_authors` (populated by running
+    `run_full_normalization` first - the full 8-step bibliometric pipeline
+    extracted into a pure `pub fn run_full_normalization(conn)` in
+    `biblio_repo/normalization.rs` and shared by both `biblio_normalize` and the
+    wiki ingest path, so there is no raw-frontmatter fallback) and inject a
+    "DO NOT create author pages" section into every batch prompt so batches link
+    to the same author slugs instead of inventing their own. Each pre-seeded
+    author page is a rich hub: metrics line (h-index, total citations,
+    first-author count, papers/year), Publications list with `[^art-id]`
+    footnotes + real `source_articles` frontmatter, Research Areas
+    (deduplicated keywords aggregated from `biblio_article_terms`), and
+    Frequent Collaborators (`[[author-slug]]` links derived from shared-paper
+    counts).
+    Single-batch runs (`batches.len() == 1`) skip all consolidation - the LLM sees
+    all sources at once and produces a self-consistent page set, so the manifest,
+    pre-seed, dedup, and link rewrite are zero-cost no-ops.
     `commands/wiki_cmd.rs` exposes
     all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
@@ -136,6 +165,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
     rebuild it on every edit/delete so chat + search stay in sync with user changes.
     `wiki_rebuild` (one-click full pipeline: scaffold + export + ingest + FTS5, emits
     `wiki:progress` events), `wiki_export_and_ingest` (export + ingest after Add Documents).
+    **Self-healing init guard**: `ensure_initialized(root)` writes `AGENTS.md` when
+    missing; called at the top of `wiki_init`, `wiki_ingest`, `wiki_rebuild`, and
+    `wiki_export_and_ingest` so an uninitialized wiki transparently recovers instead of
+    leaving generated pages invisible behind the wiki-view "Initialize" empty-state gate
+    (`initialized` is `AGENTS.md`-presence-based). Idempotent: never overwrites an existing
+    `AGENTS.md`. Tested in `wiki_ensure_initialized_test.rs`.
     The `wiki_needs_refresh` flag triple lives in `app_settings_repo.rs`; cleared after
     `wiki_ingest`/`wiki_rebuild` commits. Frontend: `wiki-view.vue` (sidebar + viewer +
     editor + graph + article detail slide-over), `wiki-toolbar.vue` (Re-scaffold, Add
@@ -219,6 +254,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     snapshot-fallback branches). `reset_project_test.rs` covers `reset_project_inner`
     (Delete All Data): verifies the on-disk `wiki-root/` directory is deleted, `app_settings`
     is cleared after rebuild, and the reset succeeds even when the wiki root is missing.
+    `wiki_consolidation_test.rs` covers the multi-batch consolidation pipeline
+    (cross-batch dup merge + link rewrite + single-batch skip + unrelated-page
+    preservation) using injectable `IngestLlmSender` fakes.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).
@@ -324,8 +362,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `google-trends.ts` (Trends embed URL builder + date-range validators),
     `wiki-markdown.ts` (shared wiki Markdown renderer: `renderWikiMarkdown(text, opts?)`
     converts `[[slug]]` / `[[slug|alias]]` to `.wikilink` anchors and `[^art-id]`
-    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs),
-    HTML-escapes slug/alias text, strips `/raw/*.md` artifact lines, then runs
+    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs).
+    On author pages the viewer passes `linkArtRefsToSynthesis: true` so each
+    publication's `[^art-{uuid}]` opens the wiki synthesis page (slug = uuid,
+    pink `.wikilink--synthesis` chip) instead of the article detail; the flag
+    falls back to a green `.art-ref` when no synthesis page exists for the uuid.
+    The renderer HTML-escapes slug/alias text, strips `/raw/*.md` artifact lines
+    (including title-based paths with spaces), collapses dangling non-UUID
+    footnote refs (so `[^title]` / `[^1]` markers don't leak as literal text
+    but `[^uuid]` is resolved, not stripped), then runs
     `marked.parse`. Bare UUIDs in prose are auto-linked: `articlePriority: true`
     (chat view) resolves `sources` first -> green `.art-ref` (article detail);
     otherwise `pageTitles` wins -> pink `.wikilink--synthesis` (wiki reader).

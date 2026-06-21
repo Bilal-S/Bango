@@ -212,6 +212,53 @@ pub fn clear_regeneratable_biblio(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Run the full bibliometric normalization pipeline inside a single
+/// transaction. This is the pure DB core of `biblio_normalize` (no Tauri state,
+/// no `app_handle`, no progress events) so it can be called from both the
+/// `biblio_normalize` command and the wiki ingest path.
+///
+/// Steps (in order):
+/// 1. Clear stale regeneratable biblio data (preserves AI-extracted + user-added terms).
+/// 2. Extract + normalize authors from all included articles.
+/// 3. Parse raw affiliations into institutions + links.
+/// 4. Extract terms (keywords + noun phrases) from article metadata.
+/// 5. Compute author metrics (total_citations, avg_year, estimated_h_index).
+/// 6. Build co-author edges (full + fractional counting).
+/// 7. Auto-match reference papers to included articles.
+/// 8. Build citation edges between included articles.
+///
+/// Returns `(authors_created, terms_created)` on success.
+pub fn run_full_normalization(conn: &mut Connection) -> Result<(usize, usize), AppError> {
+    let tx = conn.transaction()?;
+
+    // Step 1: Clear stale data (preserves AI-extracted and user-added terms).
+    clear_regeneratable_biblio(&tx)?;
+
+    // Step 2: Normalize authors from all included articles.
+    let authors = normalize_authors_from_articles(&tx)?;
+
+    // Step 3: Parse raw affiliations -> institutions + links.
+    let _affiliations = normalize_affiliations(&tx)?;
+
+    // Step 4: Extract terms from article keywords, titles, and abstracts.
+    let terms = normalize_terms_from_articles(&tx)?;
+
+    // Step 5: Compute author metrics (citations, avg year, h-index).
+    crate::db::biblio_repo::compute_author_metrics(&tx)?;
+
+    // Step 6: Build coauthor edges (full counting + fractional counting).
+    let _edges = crate::db::biblio_repo::build_coauthor_edges(&tx)?;
+
+    // Step 7: Auto-match reference papers to included articles.
+    let _matched_refs = crate::db::biblio_repo::auto_match_references_to_articles(&tx)?;
+
+    // Step 8: Build citation edges between included articles.
+    let _citation_edges = crate::db::biblio_repo::build_citation_edges(&tx)?;
+
+    tx.commit()?;
+    Ok((authors, terms))
+}
+
 /// Get bibliometrics status (row counts).
 pub fn get_biblio_status(conn: &Connection) -> Result<BiblioStatus, AppError> {
     let author_count: i32 =

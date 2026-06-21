@@ -6,7 +6,7 @@
 //! - Rate limiting (`request_delay_ms`)
 //! - Unified error logging
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Semaphore;
@@ -38,8 +38,16 @@ pub enum LlmRequestType {
 ///
 /// Registered as Tauri managed state. All LLM calls flow through here
 /// to enforce concurrency limits and rate limiting from `LlmConfig`.
+///
+/// The concurrency limit is enforced by a `tokio::sync::Semaphore` wrapped in
+/// a `std::sync::RwLock<Arc<Semaphore>>`. `tokio::Semaphore` only supports
+/// growing (`add_permits`), not shrinking, so `update_settings` swaps in a
+/// fresh semaphore of the exact new size instead of mutating the old one.
+/// `send()` clones the `Arc<Semaphore>` under a brief read lock and drops the
+/// guard before awaiting permit acquisition, so settings updates are never
+/// blocked by in-flight requests and no lock guard is held across an `.await`.
 pub struct LlmOrchestrator {
-    semaphore: Arc<Semaphore>,
+    semaphore: RwLock<Arc<Semaphore>>,
     last_request: Arc<tokio::sync::Mutex<Instant>>,
     request_delay_ms: Arc<tokio::sync::Mutex<u64>>,
 }
@@ -48,7 +56,7 @@ impl LlmOrchestrator {
     /// Create a new orchestrator with the given concurrency limit and delay.
     pub fn new(max_concurrent: usize, request_delay_ms: u64) -> Self {
         Self {
-            semaphore: Arc::new(Semaphore::new(max_concurrent.max(1))),
+            semaphore: RwLock::new(Arc::new(Semaphore::new(max_concurrent.max(1)))),
             last_request: Arc::new(tokio::sync::Mutex::new(
                 Instant::now() - Duration::from_millis(request_delay_ms.max(1)),
             )),
@@ -57,12 +65,24 @@ impl LlmOrchestrator {
     }
 
     /// Update concurrency/delay settings when LLM config changes.
+    ///
+    /// Replaces the semaphore with a fresh one of the exact requested size.
+    /// This correctly handles both growing and shrinking the limit (the
+    /// previous `add_permits` approach could only grow, and used
+    /// `available_permits` instead of capacity, causing unbounded growth when
+    /// requests were in-flight during a save).
+    ///
+    /// In-flight requests holding permits on the old semaphore are unaffected;
+    /// they keep the old `Arc<Semaphore>` alive until their permit drops. This
+    /// means a lower limit takes effect for *new* acquisitions only - there is
+    /// a brief transient window where (old in-flight + new capacity) may exceed
+    /// the new limit. This is acceptable for an advisory LLM rate limiter and
+    /// avoids preemptively cancelling running requests.
     pub async fn update_settings(&self, max_concurrent: usize, request_delay_ms: u64) {
-        // Grow semaphore if needed (shrinking is not supported by tokio::Semaphore)
-        let current = self.semaphore.available_permits();
-        if max_concurrent > current {
-            self.semaphore.add_permits(max_concurrent - current);
-        }
+        let new_sem = Arc::new(Semaphore::new(max_concurrent.max(1)));
+        // Recover from poison (a panicked lock holder) rather than unwinding:
+        // an `Arc<Semaphore>` is never left structurally inconsistent by a panic.
+        *self.semaphore.write().unwrap_or_else(|p| p.into_inner()) = new_sem;
         *self.request_delay_ms.lock().await = request_delay_ms;
     }
 
@@ -76,9 +96,11 @@ impl LlmOrchestrator {
         user_prompt: &str,
         request_type: LlmRequestType,
     ) -> Result<(String, usize), AppError> {
-        // 1. Acquire semaphore permit (waits if at concurrency limit)
-        let _permit = self
-            .semaphore
+        // 1. Acquire semaphore permit (waits if at concurrency limit).
+        // Clone the Arc under a brief read lock, then drop the guard before
+        // awaiting so update_settings is never blocked by an active request.
+        let sem = self.semaphore.read().unwrap_or_else(|p| p.into_inner()).clone();
+        let _permit = sem
             .acquire()
             .await
             .map_err(|_| AppError::Import("LLM orchestrator closed".to_string()))?;
@@ -163,7 +185,12 @@ impl LlmOrchestrator {
     }
 
     /// Get number of available semaphore permits (for diagnostics).
+    ///
+    /// Reflects the *current* semaphore only. Immediately after
+    /// `update_settings`, permits held on the previous semaphore are not
+    /// counted, so this may briefly under-report real in-flight work during
+    /// the swap transient window.
     pub fn available_permits(&self) -> usize {
-        self.semaphore.available_permits()
+        self.semaphore.read().unwrap_or_else(|p| p.into_inner()).available_permits()
     }
 }

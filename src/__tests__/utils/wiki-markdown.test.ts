@@ -55,6 +55,84 @@ describe('renderWikiMarkdown', () => {
     expect(out).toContain('Rest');
   });
 
+  it('strips /raw/ paths that contain spaces (title-based filenames)', () => {
+    // Regression: an older pre-seeder used the article title as the raw
+    // filename, producing paths like `/raw/Impact of the UK....md`. The strip
+    // regex must not bail out at the first space.
+    const text =
+      'Publications\n\n[^Impact of the UK soft drinks levy]: /raw/Impact of the UK soft drinks levy.md\n\nRest';
+    const out = renderWikiMarkdown(text);
+    expect(out).not.toContain('/raw/');
+    expect(out).not.toContain('Impact of the UK soft drinks levy.md');
+    expect(out).toContain('Publications');
+    expect(out).toContain('Rest');
+  });
+
+  it('collapses dangling [^<title>] refs that do not start with art-', () => {
+    // Regression: an older pre-seeder emitted inline refs as `[^<title>]`
+    // (no `art-` prefix). The renderer should drop the bracketed marker
+    // instead of leaking literal `[^...]` text into the rendered output.
+    const out = renderWikiMarkdown('See "Title One" [^Title One] and "Title Two" [^Title Two].');
+    expect(out).not.toContain('[^');
+    expect(out).toContain('Title One');
+    expect(out).toContain('Title Two');
+  });
+
+  it('leaves [^art-{uuid}] refs intact (handled in step 1, not step 4)', () => {
+    const sources = new Map([['abc123', src('abc123', 'A Study', 2024)]]);
+    const out = renderWikiMarkdown('Claim [^art-abc123].', { sources });
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain('data-art-id="abc123"');
+  });
+
+  it('linkArtRefsToSynthesis converts [^art-uuid] to a synthesis chip when a page exists', () => {
+    // Author-page use case: the publication ref should open the wiki synthesis
+    // page (slug = uuid), not the article detail.
+    const uuid = 'f764b86c-1516-5c8e-9997-88c61c50a683';
+    const sources = new Map([[uuid, src(uuid, 'Impact of the UK soft drinks levy', 2024)]]);
+    const pageTitles = new Map([[uuid, 'UK Soft Drinks Levy - Health Impact']]);
+    const out = renderWikiMarkdown(`"Paper Title" [^art-${uuid}]`, {
+      sources,
+      pageTitles,
+      linkArtRefsToSynthesis: true,
+    });
+    // Pink synthesis chip pointing at the wiki page, with the page title label.
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    expect(out).toContain('>UK Soft Drinks Levy - Health Impact<');
+    // It must NOT be a green art-ref (no article-detail link).
+    expect(out).not.toContain('class="art-ref"');
+    expect(out).not.toContain(`data-art-id="${uuid}"`);
+  });
+
+  it('linkArtRefsToSynthesis falls back to green art-ref when no synthesis page exists', () => {
+    // Graceful degradation: when the LLM never created a synthesis page for an
+    // article, the ref should still resolve to the article detail (green
+    // art-ref) rather than disappearing or showing a raw id.
+    const uuid = 'f764b86c-1516-5c8e-9997-88c61c50a683';
+    const sources = new Map([[uuid, src(uuid, 'A Study', 2024)]]);
+    // No pageTitles entry for this uuid -> no synthesis page.
+    const out = renderWikiMarkdown(`Claim [^art-${uuid}].`, {
+      sources,
+      linkArtRefsToSynthesis: true,
+    });
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    expect(out).not.toContain('wikilink--synthesis');
+  });
+
+  it('default (no flag) keeps [^art-uuid] as a green art-ref even when a synthesis page exists', () => {
+    // Non-author pages (concept, synthesis, method) and chat-view must keep
+    // the default green art-ref behavior. The flag is opt-in.
+    const uuid = 'f764b86c-1516-5c8e-9997-88c61c50a683';
+    const sources = new Map([[uuid, src(uuid, 'A Study', 2024)]]);
+    const pageTitles = new Map([[uuid, 'Synthesis Page Title']]);
+    const out = renderWikiMarkdown(`Claim [^art-${uuid}].`, { sources, pageTitles });
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    expect(out).not.toContain('wikilink--synthesis');
+  });
+
   it('escapes HTML in slug / alias so attributes stay safe', () => {
     const out = renderWikiMarkdown('[[evil"slug|naughty"text]]');
     // The quote in the slug must be encoded in the attribute value.
@@ -216,6 +294,141 @@ describe('renderWikiMarkdown', () => {
     // Exactly one of each.
     expect((out.match(/class="art-ref"/g) || []).length).toBe(1);
     expect((out.match(/wikilink--synthesis/g) || []).length).toBe(1);
+  });
+
+  it('resolves [^{uuid}] footnote refs without the art- prefix', () => {
+    // LLM variant: `[^uuid]` (no `art-` prefix). Should resolve to a green
+    // art-ref when source metadata is available, instead of being stripped by
+    // step 4 or left as literal `[^...]` text.
+    const uuid = '4b7d9601-6ea4-46fa-8df6-44a79c6150ac';
+    const sources = new Map([[uuid, src(uuid, 'Dyes and Sugars in Kids Foods', 2015)]]);
+    const out = renderWikiMarkdown(`Claim [^${uuid}].`, { sources });
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    expect(out).toContain('>Dyes and Sugars in Kids Foods (2015)<');
+    // The raw [^uuid] construct must not leak as literal text.
+    expect(out).not.toContain('[^');
+  });
+
+  it('resolves [^art-UUID] case-insensitively (uppercase prefix)', () => {
+    // LLM variant: `[^ART-uuid]` or `[^Art-uuid]`. The prefix match must be
+    // case-insensitive so these resolve instead of surviving as literal text.
+    const uuid = 'd0f4daf1-2524-4fbf-906d-f3b9cc4263e7';
+    const sources = new Map([[uuid, src(uuid, 'FD&C Dyes Study', 2013)]]);
+    const out = renderWikiMarkdown(`See [^ART-${uuid}] and [^Art-${uuid}].`, { sources });
+    expect((out.match(/class="art-ref"/g) || []).length).toBe(2);
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    expect(out).not.toContain('[^ART-');
+    expect(out).not.toContain('[^Art-');
+  });
+
+  it('converts [^{uuid}]: definition lines (no art- prefix) into synthesis chips', () => {
+    // LLM variant: footnote definition without the `art-` prefix.
+    const uuid = '0e4822b6-b8bb-4ed0-8333-84336a07797b';
+    const sources = new Map([[uuid, src(uuid, 'Added Sugar in Australia', 2022)]]);
+    const md = `Some prose [^${uuid}].
+
+[^${uuid}]: Cross-sectional study of Australian households.`;
+    const out = renderWikiMarkdown(md, { sources });
+    // Definition line becomes a synthesis chip.
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    expect(out).toContain('>Added Sugar in Australia (2022)<');
+    // The definition's citation text is gone (replaced by the chip).
+    expect(out).not.toContain('Cross-sectional study');
+  });
+
+  it('resolves all UUID variants in the user-reported LLM example text', () => {
+    // Exact-shape regression for the user's reported "Dietary Sources and
+    // Co-exposures" page: bare UUIDs in prose + a [[wikilink]] should ALL
+    // resolve to chips/links, with no raw UUIDs in the rendered output.
+    const uuid1 = '4b7d9601-6ea4-46fa-8df6-44a79c6150ac';
+    const uuid2 = 'd0f4daf1-2524-4fbf-906d-f3b9cc4263e7';
+    const uuid3 = '0e4822b6-b8bb-4ed0-8333-84336a07797b';
+    const pageTitles = new Map<string, string>([
+      [uuid1, 'Dyes and Sugars in Childrens Foods'],
+      [uuid2, 'FD&C Certified Food Dyes'],
+      [uuid3, 'Added Sugar Purchases in Australia'],
+    ]);
+    const md = `Children's foods frequently contain both high sugar densities and substantial amounts of artificial food colors ${uuid1}, ${uuid2}.
+Major food categories contributing to household added sugar purchases include chocolate, sweets, soft drinks, and ice cream ${uuid3}.
+Low-income households purchase significantly more added sugar than high-income households ${uuid3}. This makes them benefit most from [[soft-drinks-industry-levy]].`;
+    const out = renderWikiMarkdown(md, { pageTitles });
+    // All three UUIDs resolved to synthesis chips.
+    for (const uuid of [uuid1, uuid2, uuid3]) {
+      expect(out).toContain(`data-slug="${uuid}"`);
+      expect(out).not.toContain(`>${uuid}<`);
+    }
+    // The [[wikilink]] also resolved.
+    expect(out).toContain('data-slug="soft-drinks-industry-levy"');
+  });
+
+  it('does not strip [^{uuid}] constructs in step 4 even if step 1 missed them', () => {
+    // Safety net: if a future change breaks step 1's resolution of `[^uuid]`,
+    // step 4 must NOT strip the construct (which would lose the UUID). The
+    // UUID should survive as visible text so the user can still read it.
+    const uuid = '4b7d9601-6ea4-46fa-8df6-44a79c6150ac';
+    // No sources / pageTitles -> step 1 falls through to the missing-ref span
+    // (NOT stripped by step 4 because the content is UUID-shaped).
+    const out = renderWikiMarkdown(`Claim [^${uuid}].`);
+    expect(out).toContain(uuid);
+    expect(out).not.toContain(`[^${uuid}]`);
+  });
+
+  it('resolves [[{uuid}]] wikilink brackets to a synthesis chip when pageTitles has it', () => {
+    // The LLM often emits article UUIDs inside [[...]] brackets (the canonical
+    // wikilink syntax). Without resolution the raw UUID shows as link text,
+    // which is unreadable. When pageTitles has the UUID, render a pink
+    // synthesis chip with the page title instead.
+    const uuid = '4b7d9601-6ea4-46fa-8df6-44a79c6150ac';
+    const pageTitles = new Map([[uuid, 'Dyes and Sugars in Childrens Foods']]);
+    const out = renderWikiMarkdown(`See [[${uuid}]] for details.`, { pageTitles });
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    expect(out).toContain('>Dyes and Sugars in Childrens Foods<');
+    // The raw UUID must NOT appear as visible link text.
+    expect(out).not.toContain(`>${uuid}<`);
+  });
+
+  it('resolves [[{uuid}]] to a green art-ref when sources has it and articlePriority is set', () => {
+    // Chat view: articlePriority makes sources win over pageTitles for UUID
+    // slugs inside [[...]], matching the bare-UUID behavior.
+    const uuid = '4b7d9601-6ea4-46fa-8df6-44a79c6150ac';
+    const sources = new Map([[uuid, src(uuid, 'Dyes Study', 2015)]]);
+    const pageTitles = new Map([[uuid, 'Wiki Page Title']]);
+    const out = renderWikiMarkdown(`See [[${uuid}]].`, {
+      sources,
+      pageTitles,
+      articlePriority: true,
+    });
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    expect(out).toContain('>Dyes Study (2015)<');
+    expect(out).not.toContain('wikilink--synthesis');
+  });
+
+  it('falls back to a plain wikilink for [[{uuid}]] when no metadata matches', () => {
+    // No pageTitles / sources entry: the UUID slug should still render as a
+    // clickable wikilink (indigo) with the raw UUID as text, so the user can
+    // navigate to it if the page exists under that slug.
+    const uuid = '4b7d9601-6ea4-46fa-8df6-44a79c6150ac';
+    const out = renderWikiMarkdown(`See [[${uuid}]].`);
+    expect(out).toContain('class="wikilink"');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    expect(out).toContain(`>${uuid}<`);
+    expect(out).not.toContain('wikilink--synthesis');
+  });
+
+  it('preserves [[{uuid}|alias]] wikilinks (alias overrides UUID resolution)', () => {
+    // When the LLM provides an explicit alias, respect it as the visible text
+    // rather than resolving the UUID. This matches the [[slug|alias]] contract.
+    const uuid = '4b7d9601-6ea4-46fa-8df6-44a79c6150ac';
+    const pageTitles = new Map([[uuid, 'Page Title']]);
+    const out = renderWikiMarkdown(`See [[${uuid}|this study]] for details.`, { pageTitles });
+    expect(out).toContain('>this study<');
+    expect(out).toContain(`data-slug="${uuid}"`);
+    // Should NOT use the pageTitles label (alias wins).
+    expect(out).not.toContain('>Page Title<');
   });
 
   it('does not transform short hex-like text that is not a UUID', () => {

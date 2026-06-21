@@ -40,5 +40,5 @@ pub use productivity::{get_author_detail, get_author_productivity_kpis, get_auth
 // Re-export normalization functions:
 pub use normalization::{
     clear_all_biblio, clear_regeneratable_biblio, get_biblio_status, normalize_affiliations,
-    normalize_authors_from_articles, normalize_terms_from_articles,
+    normalize_authors_from_articles, normalize_terms_from_articles, run_full_normalization,
 };

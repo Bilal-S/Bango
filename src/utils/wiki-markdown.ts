@@ -35,6 +35,13 @@ export interface RenderWikiMarkdownOptions {
    * a pink `.wikilink--synthesis` (wiki reader). Defaults to `false`, which
    * keeps the wiki-page-viewer behavior where wiki pages win for bare UUIDs. */
   articlePriority?: boolean;
+  /** When `true`, `[^art-{uuid}]` refs render as a pink `.wikilink--synthesis`
+   * chip that opens the wiki synthesis page (slug = uuid) instead of a green
+   * `.art-ref` that opens the article detail. Used by the author-page viewer so
+   * each publication links to its synthesis page (which itself links to the
+   * source). Falls back to a green `.art-ref` when no synthesis page exists in
+   * `pageTitles` for the uuid. Defaults to `false` (green art-refs everywhere). */
+  linkArtRefsToSynthesis?: boolean;
 }
 
 /**
@@ -104,9 +111,13 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //      emission so article UUIDs render as article links, not wiki links.
   //    - Else emit [[uuid]] (indigo wikilink, clickable, visible UUID).
   //    The lookbehinds exclude UUIDs that are already inside `[[...]]`
-  //    (preceded by `[` or `|`) or inside `[^art-...]` (preceded by `art-`).
+  //    (preceded by `[` or `|`), inside `[^art-...]` (preceded by `art-`), or
+  //    inside `[^uuid]` footnote refs (preceded by `^`). The `^` exclusion is
+  //    critical: without it, step 0 would convert the bare UUID inside
+  //    `[^uuid]` into `[[uuid]]` before step 1 can resolve the whole `[^uuid]`
+  //    construct, causing step 4 to strip it and lose the UUID entirely.
   out = out.replace(
-    /(?<![[|])(?<!art-)\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi,
+    /(?<![[|])(?<!\^)(?<!art-)\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gi,
     (_match: string, uuid: string) => {
       const source = sources?.get(uuid);
       const pageTitle = pageTitles?.get(uuid);
@@ -129,25 +140,42 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
     }
   );
 
-  // 0.5. [^art-{uuid}]: definition lines -> synthesis-colored wikilinks.
+  // 0.5. [^{uuid}]: and [^art-{uuid}]: definition lines -> synthesis chips.
   //      The LLM emits footnote definitions at the bottom of each page like
-  //      `[^art-uuid]: citation text`. The inline ref (step 1) already
-  //      produces the article link, so the definition is redundant for
-  //      article access — but the UUID also names a synthesis wiki page,
-  //      which is NOT redundant. Convert each definition line into a
-  //      synthesis-styled wikilink chip that opens the wiki page, using
-  //      the source title as the visible label when available. Runs before
-  //      step 1 so the `[^art-uuid]` prefix is consumed here (not matched
-  //      again as an inline ref).
-  out = out.replace(/^\[\^art-([a-f0-9-]+)\]:[^\n]*$/gim, (_m, artId: string) => {
+  //      `[^art-uuid]: citation text` (sometimes `[^uuid]:` without the
+  //      `art-` prefix). The inline ref (step 1) already produces the article
+  //      link, so the definition is redundant for article access — but the UUID
+  //      also names a synthesis wiki page, which is NOT redundant. Convert each
+  //      definition line into a synthesis-styled wikilink chip that opens the
+  //      wiki page, using the source title as the visible label when available.
+  //      Runs before step 1 so the `[^...]` prefix is consumed here (not
+  //      matched again as an inline ref). Case-insensitive so `[^ART-uuid]:`
+  //      is also caught.
+  out = out.replace(/^\[\^(?:art-)?([a-f0-9-]+)\]:[^\n]*$/gim, (_m, artId: string) => {
     const source = sources?.get(artId);
     const label = source ? escapeText(formatArtRefLabel(source)) : escapeText(artId);
     return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(artId)}">${label}</a>`;
   });
 
-  // 1. [^art-{id}] footnotes -> clickable source references.
-  out = out.replace(/\[\^art-([a-f0-9-]+)\]/g, (_match, artId: string) => {
+  // 1. [^art-{uuid}] and [^{uuid}] footnotes -> clickable source references,
+  //    OR synthesis chips. Accepts both the `[^art-uuid]` (canonical) and
+  //    `[^uuid]` (LLM variant, no prefix) forms, case-insensitively
+  //    (`[^ART-uuid]` also matches). When `linkArtRefsToSynthesis` is set
+  //    (author-page viewer) and a wiki synthesis page exists for the uuid
+  //    (pageTitles), emit a pink synthesis chip so the ref opens the synthesis
+  //    page. Otherwise emit the default green `.art-ref` (article detail).
+  //    Falls through to the missing-ref span when no source metadata is
+  //    available either. Runs before step 4 so these constructs are resolved
+  //    rather than stripped as dangling refs.
+  const linkToSynthesis = opts?.linkArtRefsToSynthesis === true;
+  out = out.replace(/\[\^(?:art-)?([a-f0-9-]+)\]/gi, (_match, artId: string) => {
     const source = sources?.get(artId);
+    const pageTitle = pageTitles?.get(artId);
+    if (linkToSynthesis && pageTitle) {
+      const label = escapeText(pageTitle);
+      const safeSlug = escapeAttr(artId);
+      return `<a class="wikilink wikilink--synthesis" data-slug="${safeSlug}">${label}</a>`;
+    }
     if (source) {
       return makeArtRef(artId, source);
     }
@@ -160,14 +188,60 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //    like `[[Sugar-Reduction]]` resolve to the real page (slug
   //    `sugar-reduction`) when the consumer looks it up by exact slug. The
   //    visible link text preserves the original casing/alias.
+  //
+  //    UUID-shaped slugs (`[[{uuid}]]`) get special treatment: the LLM often
+  //    emits article UUIDs inside wikilink brackets, and showing the raw UUID
+  //    as link text is unreadable. When the slug is a UUID, resolve it against
+  //    `pageTitles` (synthesis chip) or `sources` (green art-ref) to produce a
+  //    human-readable label — mirroring the bare-UUID resolution in step 0.
+  //    If the UUID matches neither map, it falls through to the default
+  //    wikilink (indigo, visible UUID) so the user can still click it.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   out = out.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_match, slug: string, alias?: string) => {
-    const linkText = alias?.trim() || slug.trim();
-    const safeSlug = escapeAttr(slug.trim().toLowerCase());
+    const trimmedSlug = slug.trim();
+    // UUID-shaped slug: resolve to a synthesis chip or art-ref with a label.
+    if (UUID_RE.test(trimmedSlug) && !alias) {
+      const uuid = trimmedSlug;
+      const pageTitle = pageTitles?.get(uuid);
+      const source = sources?.get(uuid);
+      // Default / wiki viewer: pageTitles wins (pink synthesis chip).
+      if (!articlePriority && pageTitle) {
+        return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
+      }
+      // Chat view with articlePriority: sources win (green art-ref).
+      if (source) {
+        return makeArtRef(uuid, source);
+      }
+      // pageTitles fallback (when articlePriority is true but no source).
+      if (pageTitle) {
+        return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
+      }
+      // No metadata: default wikilink with the raw UUID as text (still clickable).
+    }
+    const linkText = alias?.trim() || trimmedSlug;
+    const safeSlug = escapeAttr(trimmedSlug.toLowerCase());
     return `<a class="wikilink" data-slug="${safeSlug}">${escapeText(linkText)}</a>`;
   });
 
-  // 3. Strip lines containing /raw/ file paths (LLM artifact, not user-facing).
-  out = out.replace(/^.*\/raw\/[^\s)]+\.md.*$/gim, '');
+  // 3. Strip lines containing /raw/ file paths (artifact, not user-facing).
+  //    The path may contain spaces when an older pre-seeder used the article
+  //    title as the filename (e.g. `/raw/Impact of the UK....md`), so the char
+  //    class allows anything but a newline or `)` (which closes Markdown
+  //    links). UUID-based paths (no spaces) still match.
+  out = out.replace(/^.*\/raw\/[^\n)]+\.md.*$/gim, '');
+
+  // 4. Collapse dangling footnote refs that don't start with `art-` and aren't
+  //    UUID-shaped. The renderer resolves `[^art-{uuid}]` and `[^{uuid}]` in
+  //    step 1; step 0 already converted any bare UUIDs inside `[^...]`. Other
+  //    forms - `[^<title>]` from an older pre-seeder, or `[^1]` numeric
+  //    Markdown footnotes whose definition was stripped above - would
+  //    otherwise render as literal `[^...]` text. Drop the bracketed marker,
+  //    leaving the surrounding prose clean. The second lookahead
+  //    `(?![0-9a-f]{8}-)` is a safety net so a UUID-shaped ref that somehow
+  //    escaped steps 0/1 is NOT stripped (it would leave a visible UUID that
+  //    the user can still read). Runs last so resolved refs above are
+  //    already converted and only truly dangling refs remain.
+  out = out.replace(/\[\^(?!art-)(?![0-9a-f-])[^\]\n]+\]/gi, '');
 
   return marked.parse(out) as string;
 }
