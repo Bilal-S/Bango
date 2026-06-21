@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import { NodeCircleProgram, createEdgeArrowProgram } from 'sigma/rendering';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { useWiki } from '@/composables/use-wiki';
 import type { WikiGraph } from '@/types/wiki';
+
+const props = defineProps<{
+  /** The slug of the wiki page currently viewed in the parent. When set and
+   * present in the graph, the camera animates to center on that node so the
+   * user lands on the graph already focused on the page they were reading.
+   * Mirrors the bibliometric co-authorship "focus after selection" behavior. */
+  focusSlug?: string | null;
+}>();
 
 const emit = defineEmits<{
   selectPage: [slug: string];
@@ -197,11 +205,52 @@ async function loadAndRender(): Promise<void> {
       return;
     }
     render();
+    // After the graph is laid out + Sigma is ready, center on the focused
+    // node (the page the user is currently viewing) so the graph opens
+    // already focused on it. Deferred via nextTick so Sigma's first frame
+    // (which computes the camera's default framing) has flushed; otherwise
+    // the animate() call can be overwritten by the initial viewport setup.
+    if (props.focusSlug) {
+      await nextTick();
+      focusOnNode(props.focusSlug);
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
   }
+}
+
+/**
+ * Animate the camera to center + zoom on the node with the given slug.
+ *
+ * Reads the node's post-layout position via Sigma's `getNodeDisplayData`
+ * (which reflects ForceAtlas2-assigned x/y) and animates the camera to it
+ * with a gentle zoom-in (`ratio: 0.5` — Sigma's default viewport ratio is 1;
+ * lower values zoom in). Mirrors the bibliometric co-authorship "focus after
+ * selection" behavior.
+ *
+ * Defensive: no-op when Sigma/graph isn't ready, when the slug isn't in the
+ * graph, or when the resolved coordinates are NaN/Infinity (which would
+ * animate the camera off-graph and produce a blank-looking canvas).
+ */
+function focusOnNode(slug: string): void {
+  if (!sigma || !graphologyGraph) return;
+  if (!graphologyGraph.hasNode(slug)) return;
+  const displayData = sigma.getNodeDisplayData(slug);
+  if (!displayData) return;
+  // Guard against NaN / non-finite coordinates (stale or uncomputed layout)
+  // which would animate the camera off-graph and look blank.
+  if (
+    !Number.isFinite(displayData.x) ||
+    !Number.isFinite(displayData.y) ||
+    Number.isNaN(displayData.x) ||
+    Number.isNaN(displayData.y)
+  ) {
+    return;
+  }
+  const camera = sigma.getCamera();
+  camera.animate({ x: displayData.x, y: displayData.y, ratio: 0.5 }, { duration: 500 });
 }
 
 /**
@@ -416,8 +465,9 @@ onUnmounted(() => {
   graphologyGraph = null;
 });
 
-// Expose a refresh method for the parent to call after ingest.
-defineExpose({ refresh: loadAndRender });
+// Expose `refresh` (re-fetch + re-render after ingest) and `focusOnNode`
+// (imperative camera-center on a slug) for the parent.
+defineExpose({ refresh: loadAndRender, focusOnNode });
 </script>
 
 <template>

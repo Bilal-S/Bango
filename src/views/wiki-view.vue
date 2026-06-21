@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed, watch } from 'vue';
+import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useWiki } from '@/composables/use-wiki';
@@ -294,6 +294,17 @@ async function onDeleted(): Promise<void> {
   await refreshStatus();
 }
 
+/** When the user switches to the Graph tab, focus the camera on the node for
+ * the page they were viewing. Deferred via nextTick so the tab flip + any
+ * ResizeObserver-deferred Sigma init completes first; the focusOnNode method
+ * is defensive (no-op when Sigma isn't ready or the node has no coordinates). */
+watch(viewTab, async (tab) => {
+  if (tab === 'graph' && selectedSlug.value) {
+    await nextTick();
+    graphPanelRef.value?.focusOnNode(selectedSlug.value);
+  }
+});
+
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
   stopProgressListener();
@@ -455,7 +466,7 @@ watch(searchQuery, async (q) => {
       :class="{ hidden: viewTab !== 'graph' }"
     >
       <div class="flex-1 min-h-0">
-        <WikiGraphPanel ref="graphPanelRef" @select-page="selectPage" />
+        <WikiGraphPanel ref="graphPanelRef" :focus-slug="selectedSlug" @select-page="selectPage" />
       </div>
     </div>
 
