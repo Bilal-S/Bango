@@ -14,6 +14,7 @@ import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
 import { open } from '@tauri-apps/plugin-dialog';
+import { openPath } from '@tauri-apps/plugin-opener';
 
 const router = useRouter();
 const toast = useToast();
@@ -260,6 +261,33 @@ function onSaved(): void {
 async function viewArticle(articleId: string): Promise<void> {
   await selectArticle(articleId);
   showArticleDetail.value = true;
+}
+
+/** Open an external document (uploaded via Add Documents) in the OS default
+ * viewer. The slug resolves to a raw-file entry whose `sourceFile` is the
+ * original filename (lives in `wiki-root/raw/`). Uses the same `openPath`
+ * mechanism as the full-text reader's "Open Externally" button. */
+async function openSource(slug: string): Promise<void> {
+  try {
+    const rawList =
+      await tauriCommand<import('@/types/wiki').RawFileEntry[]>('wiki_list_raw_files');
+    const entry = rawList.find((f) => f.slug === slug);
+    if (!entry || !entry.sourceFile) {
+      toast.show('Source file not found.', 'error');
+      return;
+    }
+    const root = status.value?.rootDir;
+    if (!root) {
+      toast.show('Wiki root directory is not configured.', 'error');
+      return;
+    }
+    // Build the absolute path to the original file inside wiki-root/raw/.
+    const sep = root.includes('\\') ? '\\' : '/';
+    const fullPath = `${root}${sep}raw${sep}${entry.sourceFile}`;
+    await openPath(fullPath);
+  } catch {
+    toast.show('Failed to open source file.', 'error');
+  }
 }
 
 function onCloseArticleDetail(): void {
@@ -571,6 +599,7 @@ watch(searchQuery, async (q) => {
           :slug="selectedSlug"
           @navigate="navigateToPage"
           @view-article="viewArticle"
+          @open-source="openSource"
           @close="navHistory.clear()"
         />
 
