@@ -83,37 +83,21 @@ pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, Ap
 
 /// Rebuild the index from scratch by scanning `wiki/` for `.md` files.
 /// Drops and recreates the FTS table, then inserts every page.
+///
+/// Uses `collect_wiki_pages` (which excludes top-level internal files like
+/// `log.md` / `index.md`) so the FTS search index matches the page list shown
+/// in the UI — internal infrastructure never surfaces in chat or search.
 pub fn rebuild_index(conn: &Connection, root: &Path) -> Result<usize, AppError> {
     // Drop existing content and recreate.
     conn.execute_batch(&format!("DELETE FROM {FTS_TABLE};"))?;
     ensure_table(conn)?;
 
     let wiki_dir = root.join("wiki");
-    let mut count = 0usize;
-    if wiki_dir.exists() {
-        index_directory(conn, &wiki_dir, &wiki_dir, &mut count)?;
+    let pages = collect_wiki_pages(root)?;
+    for path in &pages {
+        index_single_file(conn, path, &wiki_dir)?;
     }
-    Ok(count)
-}
-
-/// Recursively index all `.md` files under `dir`.
-fn index_directory(
-    conn: &Connection,
-    dir: &Path,
-    wiki_root: &Path,
-    count: &mut usize,
-) -> Result<(), AppError> {
-    let entries = std::fs::read_dir(dir)?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            index_directory(conn, &path, wiki_root, count)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            index_single_file(conn, &path, wiki_root)?;
-            *count += 1;
-        }
-    }
-    Ok(())
+    Ok(pages.len())
 }
 
 /// Index a single wiki `.md` file into the FTS table.
@@ -263,7 +247,17 @@ pub fn build_match_query(query: &str) -> String {
         .join(" OR ")
 }
 
+/// Top-level wiki `.md` files that are internal infrastructure (not wiki
+/// "pages"). These are excluded from the page list shown in the UI and from
+/// the FTS search index so they don't surface as navigable pages. A same-named
+/// file inside a subdirectory (e.g. `wiki/concepts/log.md`) is still listed —
+/// only direct children of `wiki/` are filtered.
+const INTERNAL_WIKI_FILES: &[&str] = &["log", "index"];
+
 /// Collect all wiki `.md` file paths (for listing in the UI).
+///
+/// Excludes top-level internal infrastructure files (`log.md`, `index.md`) so
+/// the audit trail and master catalog don't surface as navigable pages.
 pub fn collect_wiki_pages(root: &Path) -> Result<Vec<PathBuf>, AppError> {
     let wiki_dir = root.join("wiki");
     if !wiki_dir.exists() {
@@ -271,6 +265,19 @@ pub fn collect_wiki_pages(root: &Path) -> Result<Vec<PathBuf>, AppError> {
     }
     let mut out = Vec::new();
     collect_md_recursive(&wiki_dir, &mut out)?;
+    // Exclude top-level internal infrastructure files (log.md, index.md) —
+    // they have no frontmatter slug/type and would surface as raw "log" /
+    // "index" entries in the sidebar. Only direct children of wiki/ are
+    // filtered; a wiki/concepts/log.md page is still listed.
+    out.retain(|path| {
+        let is_top_level =
+            path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) == Some("wiki");
+        if !is_top_level {
+            return true;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        !INTERNAL_WIKI_FILES.contains(&stem)
+    });
     // Sort by filename stem for stable display.
     out.sort_by(|a, b| {
         a.file_stem()
@@ -669,5 +676,66 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let pages = collect_wiki_pages(tmp.path()).unwrap();
         assert!(pages.is_empty());
+    }
+
+    #[test]
+    fn collect_wiki_pages_excludes_top_level_log_and_index() {
+        // Internal infrastructure files at the wiki/ root must not surface as
+        // navigable pages in the sidebar or the FTS search index.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "a");
+        // Top-level internal files (no frontmatter; raw audit trail / catalog).
+        let wiki_dir = root.join("wiki");
+        std::fs::write(wiki_dir.join("log.md"), "# Wiki Audit Log\n\nentry.").unwrap();
+        std::fs::write(wiki_dir.join("index.md"), "# Wiki Index\n\n- [alpha](concepts/alpha.md)")
+            .unwrap();
+
+        let pages = collect_wiki_pages(root).unwrap();
+        let stems: Vec<&str> =
+            pages.iter().filter_map(|p| p.file_stem().and_then(|s| s.to_str())).collect();
+        assert!(stems.contains(&"alpha"), "concept page should be listed");
+        assert!(!stems.contains(&"log"), "top-level log.md must be excluded");
+        assert!(!stems.contains(&"index"), "top-level index.md must be excluded");
+        assert_eq!(pages.len(), 1, "only the concept page should be listed");
+    }
+
+    #[test]
+    fn collect_wiki_pages_keeps_subdirectory_log_or_index() {
+        // A same-named page inside a subdir is a legitimate wiki page and must
+        // still be listed — only direct children of wiki/ are filtered.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "a");
+        write_wiki_page(root, "concepts", "log", "Log Concept", "a logging concept page");
+        write_wiki_page(root, "authors", "index", "Index Author", "an author named Index");
+
+        let pages = collect_wiki_pages(root).unwrap();
+        let stems: Vec<&str> =
+            pages.iter().filter_map(|p| p.file_stem().and_then(|s| s.to_str())).collect();
+        assert!(stems.contains(&"alpha"));
+        assert!(stems.contains(&"log"), "wiki/concepts/log.md must be listed");
+        assert!(stems.contains(&"index"), "wiki/authors/index.md must be listed");
+        assert_eq!(pages.len(), 3);
+    }
+
+    #[test]
+    fn rebuild_index_excludes_top_level_log_and_index() {
+        // The FTS index must also exclude internal files so chat / search do
+        // not surface them as retrievable pages.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "sugar-tax", "Sugar Tax", "sugar tax levy");
+        std::fs::write(root.join("wiki/log.md"), "ingest run audit entry mentioning sugar")
+            .unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        let count = rebuild_index(&conn, root).unwrap();
+        assert_eq!(count, 1, "log.md must not be indexed");
+        // The log.md content mentions sugar but must NOT be retrievable.
+        let hits = search(&conn, "sugar", 5).unwrap();
+        assert!(hits.iter().all(|h| h.slug == "sugar-tax"), "log.md must not surface in search");
+        assert_eq!(hits.len(), 1);
     }
 }

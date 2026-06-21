@@ -66,7 +66,10 @@ const forwardShortcutLabel = isMacPlatform() ? 'Cmd+]' : 'Alt+Right';
 const mode = ref<'view' | 'edit'>('view');
 const searchQuery = ref('');
 const viewTab = ref<'pages' | 'graph'>('pages');
-const collapsedSections = ref<Set<string>>(new Set());
+// Authors is collapsed by default — it's a long list (one page per corpus
+// author) that dominates the sidebar when expanded. Concepts / Sources /
+// Methods / Synthesis start expanded.
+const collapsedSections = ref<Set<string>>(new Set(['author']));
 
 function toggleSection(type: string): void {
   const next = new Set(collapsedSections.value);
@@ -112,6 +115,7 @@ const typeLabels: Record<string, string> = {
   author: 'Authors',
   method: 'Methods',
   synthesis: 'Synthesis',
+  source: 'Sources',
 };
 
 onMounted(async () => {

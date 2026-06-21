@@ -156,6 +156,31 @@ describe each durable boundary so agents can locate the right area. Create a chi
     Single-batch runs (`batches.len() == 1`) skip all consolidation - the LLM sees
     all sources at once and produces a self-consistent page set, so the manifest,
     pre-seed, dedup, and link rewrite are zero-cost no-ops.
+    **Deterministic 4-layer pre-seed matrix** (`build_batches_with_manifest` in
+    `commands/wiki_cmd.rs`, runs unconditionally before the LLM on every
+    single-batch AND multi-batch run): (1) `preseed_authors` writes rich author
+    pages from `biblio_authors` (metrics, publications, research areas,
+    collaborators); (2) `preseed_synthesis_from_ai_summaries` writes one
+    `wiki/synthesis/{article_id}.md` per included article that has a
+    `full_text_ai_summary` JSON blob — slug = article UUID (so `[[uuid]]` links
+    resolve), body = `summary_150_250_words` digest + `key_insights` bullets,
+    `tags` = keyword-derived `[[concept-slug]]` candidates; (3)
+    `preseed_concept_hubs` writes top-25 `wiki/concepts/{term-slug}.md` hub
+    pages from `biblio_terms`, each linking to its articles (`[[uuid]]`) +
+    co-occurring concepts; (4) **`preseed_document_source_pages`** writes one
+    `wiki/sources/{user-slug}.md` per user-uploaded document (Add Documents →
+    PDF/TXT/web, identified by `source_kind: user_*`) so external documents get
+    a first-class wiki node and `[^art-user-slug]` / `[[user-slug]]` citations
+    resolve to a navigable page instead of "Page not found". This layer mirrors
+    the article→synthesis symmetry: every raw source has a corresponding wiki
+    node. All four respect `status: reviewed` (user-edited) pages. Together they
+    form a connected graph backbone (author ↔ synthesis ↔ concept ↔ source) that
+    exists before the LLM runs, so the wiki is never missing
+    author/synthesis/concept/source pages regardless of which LLM model is used.
+    Tested in `wiki_deterministic_test.rs`. Design + phases 4-5 (LLM prompt
+    narrowing, `concepts` field in AI summary schema) in
+    `.worktrees/wiki-improvement-plan.md`; external-document ingestion +
+    linking design in `.worktrees/wiki-improvement-plan2.md`.
     `commands/wiki_cmd.rs` exposes
     all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
@@ -382,7 +407,17 @@ describe each durable boundary so agents can locate the right area. Create a chi
     the former `[[uuid|alias]]` (which became an indigo wiki link). Consumed by both
     `wiki-page-viewer.vue` (sources + pageTitles, default priority) and `chat-view.vue`
     assistant bubbles (sources + pageTitles + `articlePriority: true`). Pure function,
-    unit-tested in `src/__tests__/utils/wiki-markdown.test.ts`), `platform.ts` (`isMacPlatform()` reads
+    unit-tested in `src/__tests__/utils/wiki-markdown.test.ts`).
+    **External-document citation routing** (regression fix for
+    `[^art-user-youcantbuild]` mangled-HTML bug): the footnote regexes accept any
+    kebab/snake slug (`[a-z0-9_-]+`), not just hex UUID chars, so refs to uploaded
+    documents resolve. Smart click routing: non-UUID ids with a `pageTitles` entry
+    (the Layer-1 source page) route to a pink `.wikilink--synthesis` chip opening the
+    wiki source page; UUID ids with `sources` stay green `.art-ref` (article detail).
+    `raw_export.rs::resolve_user_file_title` enriches PDF titles via `lopdf` (reads
+    the `/Title` entry from the Info dictionary) so the pre-seeded source page + the
+    LLM prompt use the document's real title instead of the filename stem.
+    `platform.ts` (`isMacPlatform()` reads
     `navigator.platform`; `SHORTCUT_MODIFIER` constant resolves to `'Cmd'` or `'Alt'`.
     Dependency-free, resilient to `navigator` absence. Used by `wiki-view.vue` to pick the
     correct back/forward keyboard shortcut modifier. Tested by

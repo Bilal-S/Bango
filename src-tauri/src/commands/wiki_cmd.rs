@@ -510,47 +510,70 @@ pub async fn wiki_ingest(
     Ok(report)
 }
 
-/// Build ingest batches, applying the author-manifest optimization only when
-/// the corpus splits into multiple batches. For single-batch runs the LLM sees
-/// all sources at once and produces a self-consistent page set, so the manifest
-/// (and author pre-seeding) is skipped entirely.
+/// Build ingest batches with the deterministic pre-seed foundation:
 ///
-/// When `batches.len() > 1`:
-/// 1. Run the full bibliometric normalization pipeline to populate
-///    `biblio_authors` (with metrics) + `biblio_terms` + co-author networks.
-/// 2. Build the `AuthorManifest` from the now-populated `biblio_authors`.
-/// 3. Pre-seed `wiki/authors/` with boilerplate author pages.
-/// 4. Rebuild the batches with the manifest injected into every prompt.
+/// 1. Run the full 8-step bibliometric normalization so `biblio_authors`
+///    (with metrics), `biblio_terms`, and `biblio_article_terms` are populated.
+/// 2. **Pre-seed author pages** (`wiki/authors/`) from `biblio_authors`.
+/// 3. **Pre-seed synthesis pages** (`wiki/synthesis/`) from each included
+///    article's `full_text_ai_summary` JSON — no LLM call needed.
+/// 4. **Pre-seed concept hubs** (`wiki/concepts/`) from the top-N terms in
+///    `biblio_terms` — no LLM call needed.
+/// 5. Inject the author manifest into every batch prompt (so the LLM links to
+///    canonical author slugs instead of inventing its own).
+///
+/// This deterministic foundation runs unconditionally (both single-batch and
+/// multi-batch runs), guaranteeing author + synthesis + concept pages exist
+/// regardless of which LLM model is used or how many batches the corpus splits
+/// into. The LLM's role becomes cross-cutting thematic synthesis only.
+///
+/// Reviewed (user-edited) pages of each type are preserved by the pre-seeders.
 fn build_batches_with_manifest(
     conn: &mut rusqlite::Connection,
     root: &std::path::Path,
     config: &crate::models::llm_config::LlmConfig,
 ) -> Result<Vec<ingest::IngestBatch>, AppError> {
-    // First pass: build batches without the manifest to check the count.
-    let batches = ingest::build_ingest_prompt_batches(root, config.context_window_tokens, None)?;
-    if batches.len() <= 1 {
-        return Ok(batches);
-    }
-
-    // Multi-batch: run the full 8-step bibliometric normalization pipeline so
+    // Run the full 8-step bibliometric normalization pipeline so
     // `biblio_authors` (with metrics), `biblio_terms`, `biblio_article_terms`,
-    // and the co-author/citation networks are all populated. The manifest reads
-    // from `biblio_authors` + `biblio_article_terms` to build rich author pages
-    // with articles, deduplicated keywords, and co-author links. This is the
-    // single source of truth; there is no raw-frontmatter fallback.
-    crate::db::biblio_repo::run_full_normalization(conn)?;
+    // and the co-author/citation networks are all populated. This is the
+    // single source of truth for all three pre-seed layers.
+    //
+    // Non-fatal: if normalization fails (e.g. empty corpus), we still proceed
+    // so the LLM can operate on the raw sources alone. The pre-seeders will
+    // simply find no rows and write nothing.
+    let _ = crate::db::biblio_repo::run_full_normalization(conn);
 
-    // Build the manifest from the now-populated `biblio_authors` table.
+    // Phase 1: Pre-seed author pages from `biblio_authors`.
     let manifest = ingest::build_author_manifest(conn)?;
     if !manifest.entries.is_empty() {
-        // Pre-seed boilerplate author pages. Reviewed (user-edited) pages are
-        // preserved. Errors are non-fatal: the LLM can still produce author
-        // pages itself, and the consolidation pass will dedup them.
+        // Errors are non-fatal: the LLM can still produce author pages itself,
+        // and the consolidation pass will dedup them.
         let _ = ingest::preseed_authors(root, &manifest);
-        ingest::build_ingest_prompt_batches(root, config.context_window_tokens, Some(&manifest))
-    } else {
-        // No authors in the corpus: skip the manifest entirely.
+    }
+
+    // Phase 2: Pre-seed synthesis pages from AI summaries.
+    // Each included article with a `full_text_ai_summary` gets a synthesis page
+    // whose slug = the article UUID (so [[uuid]] links resolve automatically).
+    let _ = ingest::preseed_synthesis_from_ai_summaries(conn, root);
+
+    // Phase 3: Pre-seed concept hubs from `biblio_terms`.
+    // Caps at 25 terms so the concept layer stays curated + high-signal.
+    let _ = ingest::preseed_concept_hubs(conn, root, 25);
+
+    // Layer 1 (External Documents): Pre-seed source pages for user-uploaded
+    // documents (Add Documents). Each external doc in `raw/` with a
+    // `source_kind: user_*` gets a first-class wiki node at
+    // `wiki/sources/{slug}.md` so `[[user-slug]]` wikilinks and
+    // `[^art-user-slug]` footnote refs resolve to a navigable page.
+    let _ = ingest::preseed_document_source_pages(root);
+
+    // Rebuild batches with the manifest injected (when non-empty). The
+    // manifest's `to_prompt_section()` directive tells the LLM NOT to create
+    // author pages and to link to the canonical slugs instead.
+    if manifest.entries.is_empty() {
         ingest::build_ingest_prompt_batches(root, config.context_window_tokens, None)
+    } else {
+        ingest::build_ingest_prompt_batches(root, config.context_window_tokens, Some(&manifest))
     }
 }
 

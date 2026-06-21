@@ -40,6 +40,17 @@ pub fn agents_md_content() -> &'static str {
      7. Regenerate /wiki/index.md with the full page list grouped by type.\n\
      8. Append a run entry to /wiki/log.md (timestamp, counts, model, tokens).\n\
      \n\
+     ## External Documents (Add Documents)\n\
+     User-uploaded files (PDF/TXT/web) live in /raw with slugs prefixed `user-` and\n\
+     `source_kind: user_*`. A pre-seeded wiki source page exists for each under\n\
+     /wiki/sources/{slug}.md, so both citation forms resolve:\n\
+     - `[^art-user-slug]` footnote refs render as a clickable chip opening the\n\
+       source page (NOT the article detail, since user-* slugs are not articles).\n\
+     - `[[user-slug]]` wikilinks open the same source page.\n\
+     Use the document's slug (from the Full Source Index) when citing. Do NOT\n\
+     create duplicate source pages for uploaded documents; link to the existing\n\
+     pre-seeded ones.\n\
+     \n\
      ## Lint Workflow (deterministic, no LLM required)\n\
      1. Walk /wiki/**/*.md, parse frontmatter + [[links]].\n\
      2. Build link graph. Detect:\n\

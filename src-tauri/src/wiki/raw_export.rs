@@ -19,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+use lopdf::{Document as LopdfDocument, Object as LopdfObject};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
@@ -456,8 +457,56 @@ fn sanitize_filename(s: &str) -> String {
     }
 }
 
+/// Try to read a PDF's embedded title from its Info dictionary via `lopdf`.
+///
+/// Returns `Some(title)` when the PDF has a non-empty `/Title` entry, `None`
+/// otherwise (including unparseable or image-only PDFs). The caller falls back
+/// to the filename stem when this returns `None`, preserving the prior
+/// behavior for PDFs without metadata.
+fn extract_pdf_title(path: &Path) -> Option<String> {
+    let doc = LopdfDocument::load(path).ok()?;
+    let info = doc.trailer.get(b"Info").ok()?;
+    let resolved = doc.dereference(info).ok()?.1;
+    let info_dict = resolved.as_dict().ok()?;
+    let title_obj = info_dict.get(b"Title").ok()?;
+    let title_resolved = doc.dereference(title_obj).ok()?.1;
+    let text = match title_resolved {
+        LopdfObject::String(bytes, _) => String::from_utf8_lossy(bytes).to_string(),
+        _ => return None,
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// Resolve the effective title + slug for a user file.
+///
+/// For PDFs, prefers the embedded `/Title` from the Info dictionary when it is
+/// non-empty (gives a much cleaner title than the filename stem — e.g.
+/// "You Can't Build an AI Workforce..." instead of "user-youcantbuild"). Falls
+/// back to the filename stem for PDFs without metadata and for all other file
+/// types.
+fn resolve_user_file_title(stem: &str, path: &Path, kind: RawSourceKind) -> (String, String) {
+    if kind == RawSourceKind::UserPdf {
+        if let Some(pdf_title) = extract_pdf_title(path) {
+            // Derive the slug from the PDF title too, but keep the `user-`
+            // prefix so source pages route correctly. Use the existing
+            // `slugify` so the result is kebab-case ascii.
+            let slug = format!("user-{}", slugify(&pdf_title));
+            return (pdf_title, slug);
+        }
+    }
+    let slug = format!("user-{}", slugify(stem));
+    (stem.to_string(), slug)
+}
+
 /// Process all non-`.md` files in `raw/`: extract each to a companion `.md`.
-/// Idempotent via `source_hash`.
+/// Idempotent via `source_hash`. For PDFs, the embedded `/Title` (when
+/// present) is used as the frontmatter `title` and slug source, giving cleaner
+/// wiki source-page names than the raw filename stem.
 pub fn process_user_files(root: &Path) -> Result<RawExportReport, AppError> {
     let raw_dir = root.join("raw");
     std::fs::create_dir_all(&raw_dir)?;
@@ -482,7 +531,7 @@ pub fn process_user_files(root: &Path) -> Result<RawExportReport, AppError> {
 
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("untitled").to_string();
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("untitled").to_string();
-        let slug = format!("user-{}", slugify(&stem));
+        let (title, slug) = resolve_user_file_title(&stem, &path, kind);
         let companion_path = raw_dir.join(format!("{slug}.md"));
 
         let source_hash = match hash_file(&path) {
@@ -502,8 +551,8 @@ pub fn process_user_files(root: &Path) -> Result<RawExportReport, AppError> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let body = user_file_body(&stem, &content, kind);
-        let fm = user_file_frontmatter(&slug, &stem, &file_name, kind, &source_hash);
+        let body = user_file_body(&title, &content, kind);
+        let fm = user_file_frontmatter(&slug, &title, &file_name, kind, &source_hash);
         frontmatter::write_file(&companion_path, &fm, &body)?;
         report.user_files_written += 1;
     }
@@ -551,10 +600,12 @@ pub fn add_user_file(root: &Path, source_path: &Path) -> Result<PathBuf, AppErro
     }
     let (content, kind) = extract_user_file(&dest)?;
     let source_hash = hash_file(&dest)?;
-    let slug = format!("user-{}", slugify(&stem));
+    // Use the PDF-title-aware resolver so added PDFs get the same enriched
+    // title + slug as batch-processed ones (`process_user_files`).
+    let (title, slug) = resolve_user_file_title(&stem, &dest, kind);
     let companion = raw_dir.join(format!("{slug}.md"));
-    let body = user_file_body(&stem, &content, kind);
-    let fm = user_file_frontmatter(&slug, &stem, &file_name, kind, &source_hash);
+    let body = user_file_body(&title, &content, kind);
+    let fm = user_file_frontmatter(&slug, &title, &file_name, kind, &source_hash);
     frontmatter::write_file(&companion, &fm, &body)?;
 
     Ok(companion)

@@ -229,6 +229,9 @@ fn write_page(root: &Path, page: &ParsedPage) -> Result<(), AppError> {
         "author" => "authors",
         "method" => "methods",
         "synthesis" => "synthesis",
+        // External-document source pages (uploaded via Add Documents). Lives
+        // under `wiki/sources/` so the sidebar filter + graph can group them.
+        "source" => "sources",
         _ => "concepts",
     };
     let dir = root.join("wiki").join(subdir);
@@ -312,21 +315,31 @@ pub struct CoauthorLink {
 }
 
 impl AuthorManifest {
-    /// Render the manifest as a prompt section directing the LLM not to create
-    /// author pages and to use the listed slugs for `[[author]]` links.
-    /// Returns an empty string when the manifest is empty (so it can be
-    /// unconditionally interpolated).
+    /// Render the manifest as a prompt section with a two-part directive:
+    ///
+    /// 1. **Known authors** (in the manifest) → "link to their pre-seeded page using the
+    ///    EXACT slug — do NOT create a duplicate page for them."
+    /// 2. **Unknown authors** (mentioned in uploaded documents but NOT in the manifest) →
+    ///    "you SHOULD create a new author page" with slug `author-{lastname}-{initial}`,
+    ///    linked to the uploaded document.
+    ///
+    /// This split prevents the blanket "DO NOT create author pages" from blocking
+    /// legitimate new-author pages derived from user-uploaded documents (Add Documents).
+    ///
+    /// Returns an empty string when the manifest is empty (so it can be unconditionally
+    /// interpolated). When empty, there are no pre-seeded author pages to protect, so the
+    /// LLM is free to create author pages normally.
     #[must_use]
     fn to_prompt_section(&self) -> String {
         if self.entries.is_empty() {
             return String::new();
         }
         let mut out = String::new();
-        out.push_str("# Author Pages (Pre-Seeded - DO NOT CREATE)\n\n");
+        out.push_str("# Author Pages (Pre-Seeded - LINK, DON'T DUPLICATE)\n\n");
         out.push_str(
-            "Author pages have already been generated deterministically from the project's \
-             bibliometric data. Do NOT output any page with `type: author`. Instead, when you \
-             mention an author, link to their pre-seeded page using the EXACT slug below:\n\n",
+            "Author pages for the following authors have already been generated from the \
+             project's bibliometric data. When you mention one of these authors, link to \
+             their pre-seeded page using the EXACT slug. Do NOT create a new page for them:\n\n",
         );
         for entry in &self.entries {
             let variants = if entry.raw_variants.is_empty() {
@@ -341,8 +354,16 @@ impl AuthorManifest {
         }
         out.push_str(
             "\nWhen a source lists an author whose name matches one of the variants above \
-             (case-insensitive), use the canonical slug for the link. Do not invent new author \
-             slugs.\n\n",
+             (case-insensitive), use the canonical slug for the link.\n\n",
+        );
+        out.push_str("## New Authors from Uploaded Documents\n\n");
+        out.push_str(
+            "If an uploaded document mentions an author who is NOT in the list above (i.e., \
+             an author not in the article corpus), you SHOULD create a new author page:\n\
+             - Slug: `author-{lastname}-{initial}` (e.g. `author-doe-j` for \"Jane Doe\").\n\
+             - type: author, status: draft.\n\
+             - Link to the uploaded document via [[document-slug]] or [^art-document-slug].\n\
+             - Include any biographical details, affiliations, or research areas mentioned.\n\n",
         );
         out
     }
@@ -652,6 +673,484 @@ fn render_author_page(entry: &AuthorManifestEntry) -> (Frontmatter, String) {
 }
 
 // ---------------------------------------------------------------------------
+// Deterministic synthesis + concept pre-seed (Phases 2 & 3)
+// ---------------------------------------------------------------------------
+
+/// A parsed AI summary JSON blob — the deterministic source for synthesis pages.
+/// All fields are optional; the pre-seeder skips articles whose summary is
+/// missing or unparseable.
+#[derive(Debug, Default)]
+struct ParsedAiSummary {
+    summary: Option<String>,
+    key_insights: Vec<String>,
+    keywords: Vec<String>,
+    field: Option<String>,
+    subfield: Option<String>,
+}
+
+/// Parse an article's `full_text_ai_summary` JSON blob into a `ParsedAiSummary`.
+/// Returns `None` when the blob is empty or unparseable (the caller skips that
+/// article gracefully).
+fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    let get_str = |key: &str| {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let get_str_array = |key: &str| -> Vec<String> {
+        value
+            .get(key)
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        if let Some(s) = v.as_str() {
+                            let t = s.trim().to_string();
+                            if t.is_empty() {
+                                None
+                            } else {
+                                Some(t)
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    Some(ParsedAiSummary {
+        summary: get_str("summary_150_250_words"),
+        key_insights: get_str_array("key_insights"),
+        keywords: get_str_array("keywords"),
+        field: get_str("field"),
+        subfield: get_str("subfield"),
+    })
+}
+
+/// An included article row with its AI summary, for synthesis pre-seeding.
+struct ArticleWithSummary {
+    id: String,
+    title: String,
+    year: Option<i32>,
+    ai_summary_json: Option<String>,
+}
+
+/// Query included articles that have an AI summary, plus their title/year.
+fn fetch_articles_with_summaries(conn: &Connection) -> Result<Vec<ArticleWithSummary>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, publication_year, full_text_ai_summary \
+         FROM articles \
+         WHERE status = 'included' AND full_text_ai_summary IS NOT NULL AND full_text_ai_summary != ''",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ArticleWithSummary {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            year: row.get(2)?,
+            ai_summary_json: row.get(3)?,
+        })
+    })?;
+    let articles: Vec<ArticleWithSummary> = rows.filter_map(Result::ok).collect();
+    Ok(articles)
+}
+
+/// Pre-seed `wiki/synthesis/{article_id}.md` for every included article that
+/// has an AI summary. Each page uses the article UUID as its slug (matching the
+/// existing `[[uuid]]` / `[^art-uuid]` convention) and its `source_articles`
+/// frontmatter is the singleton `[article_id]`.
+///
+/// The body is the `summary_150_250_words` digest + a "Key Insights" bulleted
+/// section (when present). Keywords become `[[concept-slug]]` candidates in the
+/// `tags` frontmatter so the graph connects to the Phase-3 concept hubs.
+///
+/// Reviewed (user-edited) synthesis pages are preserved. Articles without an AI
+/// summary (or with unparseable JSON) are skipped — the LLM can still produce a
+/// synthesis page for them.
+///
+/// Returns the count of pages written.
+pub fn preseed_synthesis_from_ai_summaries(
+    conn: &Connection,
+    root: &Path,
+) -> Result<usize, AppError> {
+    let synth_dir = root.join("wiki").join("synthesis");
+    std::fs::create_dir_all(&synth_dir)?;
+    let articles = fetch_articles_with_summaries(conn)?;
+    let mut written = 0;
+    for article in articles {
+        let path = synth_dir.join(format!("{}.md", sanitize_slug(&article.id)));
+        // Respect reviewed pages (user has edited them).
+        if let Ok((existing_fm, _)) = frontmatter::read_file(&path) {
+            if existing_fm.get("status") == Some("reviewed") {
+                continue;
+            }
+        }
+        let Some(parsed) = article.ai_summary_json.as_deref().and_then(parse_ai_summary) else {
+            continue;
+        };
+        let Some(ref digest) = parsed.summary else {
+            // AI summary exists but has no digest field — skip (let the LLM handle).
+            continue;
+        };
+        let (fm, body) = render_synthesis_page(&article, &parsed, digest);
+        frontmatter::write_file(&path, &fm, &body)?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Render the frontmatter + body for a synthesis page from an article's AI
+/// summary. Pure function (no I/O) so it is trivially testable.
+fn render_synthesis_page(
+    article: &ArticleWithSummary,
+    parsed: &ParsedAiSummary,
+    digest: &str,
+) -> (Frontmatter, String) {
+    let mut fm = Frontmatter::default();
+    fm.set("id", &article.id);
+    fm.set("title", &article.title);
+    fm.set("type", "synthesis");
+    fm.set("slug", &article.id);
+    // Summary: the first sentence of the digest, truncated for the sidebar.
+    let summary_preview = digest.split('.').next().unwrap_or(digest).trim().to_string();
+    let summary_capped = if summary_preview.len() > 160 {
+        format!("{}...", &summary_preview[..160])
+    } else if summary_preview.is_empty() {
+        format!("Synthesis of {}.", article.title)
+    } else {
+        format!("{}.", summary_preview)
+    };
+    fm.set("summary", &summary_capped);
+    fm.set("status", "draft");
+    fm.set("source_articles", &format!("[\"{}\"]", article.id));
+    fm.set("content_source", "ai_summary");
+    // tags + links: keywords as concept-slug candidates. `tags` drives FTS5 +
+    // graph grouping; `links` (matching the concept-hub convention) ensures the
+    // graph builder creates explicit synthesis→concept edges from frontmatter,
+    // not just body [[wikilinks]].
+    let concept_slugs: Vec<String> = parsed.keywords.iter().map(|k| concept_slug(k)).collect();
+    let keyword_tags: Vec<String> = concept_slugs.iter().map(|s| format!("\"{}\"", s)).collect();
+    fm.set("tags", &format!("[{}]", keyword_tags.join(", ")));
+    let concept_links: Vec<String> =
+        concept_slugs.iter().map(|s| format!("\"[[{}]]\"", s)).collect();
+    fm.set("links", &format!("[{}]", concept_links.join(", ")));
+    if let Some(ref field) = parsed.field {
+        fm.set("field", field);
+    }
+    if let Some(ref subfield) = parsed.subfield {
+        fm.set("subfield", subfield);
+    }
+
+    let mut body = String::new();
+    body.push_str(&format!("# {}\n\n", article.title));
+    let year_str = article.year.map(|y| format!(" ({})", y)).unwrap_or_default();
+    body.push_str(&format!("## Summary\n\n{}{}\n", digest, year_str));
+    if !parsed.key_insights.is_empty() {
+        body.push_str("\n## Key Insights\n\n");
+        for insight in &parsed.key_insights {
+            body.push_str(&format!("- {}\n", insight));
+        }
+    }
+    if !parsed.keywords.is_empty() {
+        body.push_str("\n## Keywords\n\n");
+        let links: Vec<String> =
+            parsed.keywords.iter().map(|k| format!("[[{}]]", concept_slug(k))).collect();
+        body.push_str(&links.join(", "));
+        body.push('\n');
+    }
+    (fm, body)
+}
+
+/// A term row with its frequency + article IDs, for concept hub pre-seeding.
+struct TermRow {
+    raw_term: String,
+    normalized_term: String,
+    frequency: i64,
+    article_ids: Vec<String>,
+    co_terms: Vec<String>,
+}
+
+/// Query the top-N terms by total frequency across included articles, with the
+/// list of articles each appears in + the top co-occurring terms.
+fn fetch_top_terms(conn: &Connection, limit: usize) -> Result<Vec<TermRow>, AppError> {
+    // Top terms by total frequency.
+    let mut stmt = conn.prepare(
+        "SELECT bt.id, bt.raw_term, bt.normalized_term, SUM(bat.frequency) as total_freq \
+         FROM biblio_terms bt \
+         JOIN biblio_article_terms bat ON bat.term_id = bt.id \
+         JOIN articles a ON a.id = bat.article_id \
+         WHERE a.status = 'included' \
+         GROUP BY bt.normalized_term \
+         ORDER BY total_freq DESC \
+         LIMIT ?1",
+    )?;
+    let top: Vec<(String, String, String, i64)> = stmt
+        .query_map(rusqlite::params![limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?
+        .filter_map(Result::ok)
+        .collect();
+    if top.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Clone the normalized terms so the set owns them (avoids borrowing `top`,
+    // which we consume by-value in the for loop below).
+    let normalized_set: std::collections::HashSet<String> =
+        top.iter().map(|(_, _, n, _)| n.clone()).collect();
+
+    let mut out = Vec::with_capacity(top.len());
+    for (term_id, raw_term, normalized_term, frequency) in top {
+        // Articles containing this term.
+        let article_ids: Vec<String> = conn
+            .prepare(
+                "SELECT a.id FROM articles a \
+                 JOIN biblio_article_terms bat ON bat.article_id = a.id \
+                 WHERE bat.term_id = ?1 AND a.status = 'included' \
+                 ORDER BY a.publication_year DESC NULLS LAST",
+            )?
+            .query_map(rusqlite::params![term_id], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .collect();
+
+        // Co-occurring terms: terms that share the most articles with this one.
+        let co_terms: Vec<String> = conn
+            .prepare(
+                "SELECT bt2.normalized_term as co_term, COUNT(*) as shared \
+                 FROM biblio_article_terms bat1 \
+                 JOIN biblio_article_terms bat2 \
+                   ON bat1.article_id = bat2.article_id AND bat2.term_id != bat1.term_id \
+                 JOIN biblio_terms bt2 ON bt2.id = bat2.term_id \
+                 WHERE bat1.term_id = ?1 \
+                 GROUP BY bt2.normalized_term \
+                 ORDER BY shared DESC \
+                 LIMIT 5",
+            )?
+            .query_map(rusqlite::params![term_id], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .filter(|t| normalized_set.contains(t.as_str()))
+            .collect();
+
+        out.push(TermRow { raw_term, normalized_term, frequency, article_ids, co_terms });
+    }
+    Ok(out)
+}
+
+/// Pre-seed `wiki/concepts/{term-slug}.md` for the top-N terms by frequency.
+/// Each concept page is a hub linking to the articles that contain the term
+/// (`[[{article_id}]]` synthesis links) and to co-occurring concepts.
+///
+/// Reviewed (user-edited) concept pages are preserved. Terms with no articles
+/// are skipped (defensive — the query already filters by included articles).
+///
+/// Returns the count of pages written.
+pub fn preseed_concept_hubs(
+    conn: &Connection,
+    root: &Path,
+    limit: usize,
+) -> Result<usize, AppError> {
+    let concepts_dir = root.join("wiki").join("concepts");
+    std::fs::create_dir_all(&concepts_dir)?;
+    let terms = fetch_top_terms(conn, limit)?;
+    let mut written = 0;
+    for term in terms {
+        if term.article_ids.is_empty() {
+            continue;
+        }
+        let slug = concept_slug(&term.normalized_term);
+        let path = concepts_dir.join(format!("{}.md", slug));
+        if let Ok((existing_fm, _)) = frontmatter::read_file(&path) {
+            if existing_fm.get("status") == Some("reviewed") {
+                continue;
+            }
+        }
+        let (fm, body) = render_concept_hub(&term, &slug);
+        frontmatter::write_file(&path, &fm, &body)?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Render the frontmatter + body for a concept hub page. Pure function.
+fn render_concept_hub(term: &TermRow, slug: &str) -> (Frontmatter, String) {
+    let mut fm = Frontmatter::default();
+    fm.set("id", slug);
+    fm.set("title", &term.raw_term);
+    fm.set("type", "concept");
+    fm.set("slug", slug);
+    fm.set("summary", &format!("{} articles mention {}.", term.article_ids.len(), term.raw_term));
+    fm.set("status", "draft");
+    let source_ids: Vec<String> = term.article_ids.iter().map(|id| format!("\"{}\"", id)).collect();
+    fm.set("source_articles", &format!("[{}]", source_ids.join(", ")));
+    fm.set("content_source", "metadata");
+    // tags: co-occurring term slugs (concept-to-concept links).
+    let co_tags: Vec<String> =
+        term.co_terms.iter().map(|t| format!("\"{}\"", concept_slug(t))).collect();
+    fm.set("tags", &format!("[{}]", co_tags.join(", ")));
+    // links: co-occurring concepts as [[slug]].
+    let co_links: Vec<String> =
+        term.co_terms.iter().map(|t| format!("\"[[{}]]\"", concept_slug(t))).collect();
+    fm.set("links", &format!("[{}]", co_links.join(", ")));
+
+    let mut body = String::new();
+    body.push_str(&format!("# {}\n\n", term.raw_term));
+    body.push_str(&format!(
+        "Found in {} included articles (total frequency: {}).\n",
+        term.article_ids.len(),
+        term.frequency
+    ));
+    body.push_str("\n## Relevant Studies\n\n");
+    for id in &term.article_ids {
+        body.push_str(&format!("- [[{}]]\n", id));
+    }
+    if !term.co_terms.is_empty() {
+        body.push_str("\n## Related Concepts\n\n");
+        let links: Vec<String> =
+            term.co_terms.iter().map(|t| format!("[[{}]]", concept_slug(t))).collect();
+        body.push_str(&links.join(", "));
+        body.push('\n');
+    }
+    (fm, body)
+}
+
+/// Derive a deterministic, kebab-case slug for a concept from its term text.
+/// Reuses the author-slug squeezing logic (collapse consecutive dashes).
+fn concept_slug(term: &str) -> String {
+    let mut cleaned: String = term
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    let mut prev_dash = false;
+    let mut squeezed = String::with_capacity(cleaned.len());
+    for c in cleaned.drain(..) {
+        if c == '-' {
+            if !prev_dash {
+                squeezed.push('-');
+            }
+            prev_dash = true;
+        } else {
+            squeezed.push(c);
+            prev_dash = false;
+        }
+    }
+    let squeezed = squeezed.trim_matches('-').to_string();
+    if squeezed.is_empty() {
+        "concept-unnamed".to_string()
+    } else {
+        squeezed
+    }
+}
+
+// ---------------------------------------------------------------------------
+// External-document source pages (Layer 1: pre-seed for uploaded documents)
+// ---------------------------------------------------------------------------
+
+/// A raw source row representing a user-uploaded document.
+struct UserDocRow {
+    slug: String,
+    title: String,
+    source_kind: String,
+    source_file: Option<String>,
+}
+
+/// Collect user-uploaded documents from `raw/*.md` (files with `source_kind`
+/// starting `user_`). Article exports (type `source` but no `source_kind`) are
+/// skipped — they are corpus articles, not external documents.
+fn collect_user_documents(root: &Path) -> Result<Vec<UserDocRow>, AppError> {
+    let raw_files = raw_export::list_raw_files(root)?;
+    let mut out = Vec::new();
+    for (_path, fm) in raw_files {
+        let Some(source_kind) = fm.get("source_kind") else {
+            continue;
+        };
+        if !source_kind.starts_with("user_") {
+            continue;
+        }
+        let slug = fm.get("slug").unwrap_or("").to_string();
+        let title = fm.get("title").unwrap_or(&slug).to_string();
+        let source_file = fm.get("source_file").map(str::to_string);
+        out.push(UserDocRow { slug, title, source_kind: source_kind.to_string(), source_file });
+    }
+    Ok(out)
+}
+
+/// Pre-seed `wiki/sources/{slug}.md` for every user-uploaded document in
+/// `raw/`. Each page is a first-class wiki node for the external document so
+/// `[[user-slug]]` wikilinks and `[^art-user-slug]` footnote references the
+/// LLM emits resolve to a navigable page instead of "Page not found".
+///
+/// This mirrors how included articles get pre-seeded synthesis pages (slug =
+/// article UUID): uploaded documents get pre-seeded source pages (slug =
+/// `user-...`). The two on-ramps are symmetric — every raw source has a
+/// corresponding wiki node.
+///
+/// Reviewed (user-edited) source pages are preserved. Documents without a
+/// recognized `source_kind` (not starting `user_`) are skipped — they are
+/// corpus articles handled by the synthesis pre-seeder.
+///
+/// Returns the count of pages written.
+pub fn preseed_document_source_pages(root: &Path) -> Result<usize, AppError> {
+    let sources_dir = root.join("wiki").join("sources");
+    std::fs::create_dir_all(&sources_dir)?;
+    let docs = collect_user_documents(root)?;
+    let mut written = 0;
+    for doc in docs {
+        let path = sources_dir.join(format!("{}.md", sanitize_slug(&doc.slug)));
+        // Respect reviewed pages (user has edited them).
+        if let Ok((existing_fm, _)) = frontmatter::read_file(&path) {
+            if existing_fm.get("status") == Some("reviewed") {
+                continue;
+            }
+        }
+        let (fm, body) = render_document_source_page(&doc);
+        frontmatter::write_file(&path, &fm, &body)?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Render the frontmatter + body for an external-document source page.
+/// Pure function (no I/O) so it is trivially testable.
+fn render_document_source_page(doc: &UserDocRow) -> (Frontmatter, String) {
+    let mut fm = Frontmatter::default();
+    fm.set("id", &doc.slug);
+    fm.set("title", &doc.title);
+    fm.set("type", "source");
+    fm.set("slug", &doc.slug);
+    fm.set("summary", &format!("Imported document: {}.", doc.title));
+    fm.set("status", "draft");
+    // Self-reference: the source_articles field is the document's own slug so
+    // the wiki-page-viewer "Sources" footer + provenance chain resolve. The
+    // `[^art-{slug}]` footnote ref renderer (Layer 4 routing) also uses this
+    // to link the citation back to this page.
+    fm.set("source_articles", &format!("[\"{}\"]", doc.slug));
+    fm.set("content_source", &doc.source_kind);
+    if let Some(ref source_file) = doc.source_file {
+        fm.set("source_file", source_file);
+    }
+    fm.set("links", "[]");
+
+    let mut body = String::new();
+    body.push_str(&format!("# {}\n\n", doc.title));
+    body.push_str("Imported document added via Add Documents. ");
+    body.push_str("The extracted text lives in the corresponding `raw/` companion `.md` ");
+    body.push_str("and is available to the wiki as a citable source.\n");
+    (fm, body)
+}
+
+// ---------------------------------------------------------------------------
 // Chunked / parallel ingest
 // ---------------------------------------------------------------------------
 
@@ -741,6 +1240,39 @@ fn build_source_index(sources: &[RawSource]) -> String {
     out
 }
 
+/// Build a prompt section listing the external documents (uploaded via Add
+/// Documents) in the batch. Each entry shows the slug + title so the LLM knows
+/// exactly which `[[user-slug]]` / `[^art-user-slug]` link to use when citing
+/// an uploaded document.
+///
+/// Returns an empty string when the batch contains no user documents (so it can
+/// be unconditionally interpolated without adding noise to corpus-only runs).
+fn build_external_docs_section(batch_sources: &[&RawSource]) -> String {
+    // Heuristic: a source is an external document when its slug starts with
+    // `user-`. Article exports use UUIDs as slugs; uploaded files use
+    // `user-{kebab}`.
+    let user_docs: Vec<&RawSource> =
+        batch_sources.iter().filter(|s| s.slug.starts_with("user-")).copied().collect();
+    if user_docs.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    out.push_str("# External Documents (Pre-Seeded Source Pages)\n\n");
+    out.push_str(
+        "The following uploaded documents already have a pre-seeded wiki source page \
+         (type: source) under /wiki/sources/{slug}.md. When you cite one of these, use the \
+         document's slug in a [[wikilink]] or [^art-slug] footnote ref — it resolves to the \
+         source page automatically. Do NOT create a duplicate source page for them:\n\n",
+    );
+    for doc in user_docs {
+        out.push_str(&format!("- [[{}]] - {}\n", doc.slug, doc.title));
+    }
+    out.push_str(
+        "\nUse these exact slugs when referencing the uploaded documents in your output.\n\n",
+    );
+    out
+}
+
 /// Build a single batch's prompt from the contract, the full source index,
 /// the batch's source bodies, and the standard instructions block.
 fn build_batch_prompt(
@@ -759,6 +1291,7 @@ fn build_batch_prompt(
     }
     let manifest_section =
         author_manifest.map(AuthorManifest::to_prompt_section).unwrap_or_default();
+    let external_docs_section = build_external_docs_section(batch_sources);
     format!(
         "{contract}\n\n\
          # Full Source Index (for cross-referencing)\n\n\
@@ -767,6 +1300,7 @@ fn build_batch_prompt(
          fully process that source in this batch:\n\n\
          {source_index}\n\n\
          {manifest_section}\
+         {external_docs_section}\
          # Raw Sources for THIS Batch\n\n\
          {sources_text}\n\n\
          # Instructions\n\n\
@@ -782,13 +1316,21 @@ fn build_batch_prompt(
          links: []\n\
          ---\n\
          <Markdown body with [[wikilinks]] to other pages>\n\n\
-         IMPORTANT: Create a wiki page for EVERY source document in THIS batch. Do not skip \
-         any. Each source should appear in at least one page. \
-         Do NOT include raw file paths (/raw/...), file names, or source_file references \
-         in your output. Use [^art-id] source references or [[wikilinks]] instead. \
-         Generate concept, synthesis, and author pages for prominent entities. Use [[slug]] \
-         links to connect related pages (you may link to sources from the Full Source Index). \
-         Each page must start with the <!-- PAGE:slug --> delimiter."
+         IMPORTANT: Author pages (for corpus authors), synthesis pages (one per \
+         included article, derived from AI summaries), and concept pages (top \
+         terms from the keyword index) have ALREADY been pre-seeded \
+         deterministically. Do NOT create duplicate pages for them. Link to \
+         the existing pages instead using the slugs shown in the source index \
+         and the author manifest section above. \
+         Focus your output on THEMATIC CROSS-CUTTING synthesis pages that \
+         connect multiple sources (e.g. 'Sugar Reformulation', 'Health \
+         Inequalities Impact') and any NEW author pages for authors that \
+         appear only in uploaded documents (see the author directive above). \
+         Do NOT include raw file paths (/raw/...), file names, or source_file \
+         references in your output. Use [^art-id] source references or \
+         [[wikilinks]] instead. Use [[slug]] links to connect related pages \
+         (you may link to sources from the Full Source Index). Each page must \
+         start with the <!-- PAGE:slug --> delimiter."
     )
 }
 
@@ -1752,7 +2294,16 @@ See [[alpha]].
         assert_eq!(batches.len(), 1);
         assert!(batches[0].prompt.contains("Author Pages (Pre-Seeded"));
         assert!(batches[0].prompt.contains("[[author-smith-j]]"));
-        assert!(batches[0].prompt.contains("Do NOT output any page with `type: author`"));
+        // Phase 6: the directive splits known (link, don't duplicate) from
+        // unknown (create new) authors.
+        assert!(batches[0].prompt.contains("LINK, DON'T DUPLICATE"));
+        assert!(batches[0].prompt.contains("New Authors from Uploaded Documents"));
+        assert!(batches[0].prompt.contains("you SHOULD create a new author page"));
+        // Gap 1: Phase-4 prompt wording must also be present so a revert is
+        // caught. The thematic-only directive narrows the LLM's output to
+        // cross-cutting synthesis + new-author pages.
+        assert!(batches[0].prompt.contains("ALREADY been pre-seeded"));
+        assert!(batches[0].prompt.contains("THEMATIC CROSS-CUTTING"));
     }
 
     /// Fake sender: sleeps to simulate LLM latency, then returns one page per

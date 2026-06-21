@@ -436,6 +436,100 @@ Low-income households purchase significantly more added sugar than high-income h
     const out = renderWikiMarkdown('Short hex deadbeef and partial 12345678-1234.');
     expect(out).not.toContain('class="wikilink"');
   });
+
+  // ------------------------------------------------------------------
+  // External document (user-slug) references — regression for the
+  // `[^art-user-youcantbuild]` mangled-HTML bug. The id capture must accept
+  // non-hex slugs (`user-...`, `author-...`) so refs to uploaded documents
+  // resolve to chips instead of leaking as literal text that Markdown mangles.
+  // ------------------------------------------------------------------
+
+  it('resolves [^art-user-slug] to a synthesis chip when pageTitles has the source page', () => {
+    // Regression: the live symptom was `effort ^art-user-youcantbuild.`
+    // rendering as a broken `<a href="a class=...` because the regex only
+    // matched hex ids. After the fix the ref resolves to a wiki chip that
+    // opens the pre-seeded source page (Layer 1).
+    const slug = 'user-youcantbuild';
+    const pageTitles = new Map([[slug, "You Can't Build an AI Workforce"]]);
+    const out = renderWikiMarkdown(`effort [^art-${slug}].`, { pageTitles });
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain(`data-slug="${slug}"`);
+    // The apostrophe is HTML-escaped to &#39; by escapeText (correct, safe).
+    expect(out).toContain('>You Can&#39;t Build an AI Workforce<');
+    // No mangled href attribute, no literal ^art- leak.
+    expect(out).not.toContain('href="a class');
+    expect(out).not.toContain(`^art-${slug}`);
+  });
+
+  it('resolves [^user-slug] (no art- prefix) to a synthesis chip', () => {
+    // LLM variant without the `art-` prefix should also resolve.
+    const slug = 'user-report-2024';
+    const pageTitles = new Map([[slug, 'Annual Report 2024']]);
+    const out = renderWikiMarkdown(`See [^${slug}].`, { pageTitles });
+    expect(out).toContain('wikilink--synthesis');
+    expect(out).toContain(`data-slug="${slug}"`);
+    expect(out).toContain('>Annual Report 2024<');
+    expect(out).not.toContain(`[^${slug}]`);
+  });
+
+  it('resolves [^art-user-slug]: definition lines to synthesis chips', () => {
+    // Footnote definition blocks the LLM emits at page bottom.
+    const slug = 'user-youcantbuild';
+    const pageTitles = new Map([[slug, 'AI Workforce Article']]);
+    const md = `Some prose [^art-${slug}].
+
+[^art-${slug}]: Full citation text for the document.`;
+    const out = renderWikiMarkdown(md, { pageTitles });
+    // Inline ref + definition both resolve; definition's citation text gone.
+    const chips = out.match(/wikilink--synthesis/g) || [];
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    expect(out).toContain(`data-slug="${slug}"`);
+    expect(out).not.toContain('Full citation text');
+    expect(out).not.toContain(']:');
+  });
+
+  it('falls back to green art-ref for [^art-user-slug] when sources has it but no wiki page', () => {
+    // No pageTitles entry but the raw source list includes the user file.
+    // The click still goes somewhere useful (article/source detail).
+    const slug = 'user-notes';
+    const sources = new Map([[slug, src(slug, 'My Notes File', null)]]);
+    const out = renderWikiMarkdown(`See [^art-${slug}].`, { sources });
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${slug}"`);
+    expect(out).toContain('>My Notes File<');
+    expect(out).not.toContain('wikilink--synthesis');
+  });
+
+  it('renders missing-ref span for [^art-user-slug] with no matching metadata', () => {
+    // Neither pageTitles nor sources know the slug -> graceful missing span.
+    const out = renderWikiMarkdown('See [^art-user-unknown].');
+    expect(out).toContain('art-ref--missing');
+    expect(out).toContain('data-art-id="user-unknown"');
+    // No mangled HTML.
+    expect(out).not.toContain('href="a class');
+  });
+
+  it('resolves [[user-slug]] wikilink to a source page (standard wikilink path)', () => {
+    // A bare [[user-slug]] wikilink the LLM emits for an uploaded doc. This
+    // goes through the standard wikilink resolver (step 2) and produces a
+    // clickable indigo link to the source page.
+    const out = renderWikiMarkdown('See [[user-youcantbuild]] for context.');
+    expect(out).toContain('class="wikilink"');
+    expect(out).toContain('data-slug="user-youcantbuild"');
+  });
+
+  it('does not route UUID article refs to wiki pages when source metadata exists', () => {
+    // Regression guard: the new non-UUID routing must not capture real UUID
+    // article refs. A UUID in sources stays a green art-ref even when
+    // pageTitles also has it (default behavior, no linkArtRefsToSynthesis).
+    const uuid = 'f399a079-dbe4-589b-84ff-057638871f43';
+    const sources = new Map([[uuid, src(uuid, 'Article Title', 2020)]]);
+    const pageTitles = new Map([[uuid, 'Synthesis Page']]);
+    const out = renderWikiMarkdown(`Claim [^art-${uuid}].`, { sources, pageTitles });
+    expect(out).toContain('class="art-ref"');
+    expect(out).toContain(`data-art-id="${uuid}"`);
+    expect(out).not.toContain('wikilink--synthesis');
+  });
 });
 
 describe('formatArtRefLabel', () => {
