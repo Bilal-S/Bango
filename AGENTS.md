@@ -199,7 +199,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     The `wiki_needs_refresh` flag triple lives in `app_settings_repo.rs`; cleared after
     `wiki_ingest`/`wiki_rebuild` commits. Frontend: `wiki-view.vue` (sidebar + viewer +
     editor + graph + article detail slide-over), `wiki-toolbar.vue` (Re-scaffold, Add
-    Documents, Lint, Delete Wiki, progress bar), `wiki-page-viewer.vue` (Markdown render via
+    Documents, Lint, Delete Wiki, progress bar, and a single-purpose Chat button that
+    deep-links into `/chat` with Wiki mode pre-enabled - gated on LLM configured +
+    wiki initialized with pages), `wiki-page-viewer.vue` (Markdown render via
     the shared `src/utils/wiki-markdown.ts` - `[[wikilink]]` + `[^art-id]` source ref
     resolution), `wiki-page-editor.vue` (split-pane editor), `wiki-graph-panel.vue`
     (sigma + ForceAtlas2 graph). Node labels truncate to 25 chars + ellipsis
@@ -214,8 +216,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     sits right of the `(+)` icon, visible only when `wikiReady` (wiki initialized AND
     `pageCount > 0`). Wiki-sourced assistant bubbles render via `src/utils/wiki-markdown.ts`
     so `[[slug]]` citations become clickable links that open a right-side Wiki reader
-    slide-over (`WikiPageViewer` with a back-stack). The wiki-toolbar no longer owns a
-    Chat button.
+    slide-over (`WikiPageViewer` with a back-stack). The wiki-toolbar owns a Chat
+    button that deep-links into `/chat` with `chatStore.setWikiReady(true)` +
+    `chatStore.setSource('wiki')` pre-applied, so the user lands in Wiki-mode RAG
+    chat in one click (gated on LLM configured + wiki initialized with pages).
   - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
@@ -335,8 +339,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     with `[[wikilink]]` + `[^art-id]` source ref resolution + article detail slide-over),
     the split-pane editor (`wiki-page-editor.vue`), the sigma graph view
     (`wiki-graph-panel.vue` with ForceAtlas2 layout, color-coded by page type), and the
-    toolbar (`wiki-toolbar.vue`: Re-scaffold one-click pipeline, Add Documents, Lint, Delete
-    Wiki, progress bar). Composable: `use-wiki.ts`; types: `types/wiki.ts`. The
+    toolbar (`wiki-toolbar.vue`: Re-scaffold one-click pipeline, Add Documents, Lint,
+    Delete Wiki, progress bar, plus a single-purpose Chat button that deep-links into
+    `/chat` with Wiki mode pre-enabled). Composable: `use-wiki.ts`; types: `types/wiki.ts`. The
     page action bar carries **Back/Forward** navigation icons (left of Edit) backed
     by the generic `useNavHistory<string>` composable (see `src/composables/`), plus
     platform-aware keyboard shortcuts registered via `window.addEventListener('keydown', ...)`

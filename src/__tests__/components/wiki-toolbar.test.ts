@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
+import { createRouter, createMemoryHistory } from 'vue-router';
 import type { WikiStatus } from '@/types/wiki';
 
 const mockTauriCommand = vi.fn();
@@ -29,6 +31,24 @@ function makeStatus(overrides: Partial<WikiStatus> = {}): WikiStatus {
   };
 }
 
+/** Mount helper: the toolbar uses `useRouter()` + `useChatStore()`, so each
+ *  mount needs a fresh Pinia and a router instance installed as plugins. */
+function mountToolbar(props: { status: WikiStatus | null; isLlmConfigured?: boolean }) {
+  const pinia = createPinia();
+  setActivePinia(pinia);
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div/>' } },
+      { path: '/chat', component: { template: '<div/>' } },
+    ],
+  });
+  return mount(WikiToolbar, {
+    props,
+    global: { plugins: [pinia, router] },
+  });
+}
+
 /** Open the Actions dropdown and return its menu items. */
 function getActionsItems(wrapper: ReturnType<typeof mount>) {
   const actionsBtn = wrapper.findAll('button').find((b) => b.text().includes('Actions'));
@@ -54,54 +74,55 @@ describe('wiki-toolbar.vue', () => {
   });
 
   it('renders Add Documents and Actions buttons on the left', () => {
-    const wrapper = mount(WikiToolbar, { props: { status: makeStatus() } });
+    const wrapper = mountToolbar({ status: makeStatus() });
     const buttons = wrapper.findAll('button');
     const labels = buttons.map((b) => b.text());
-    // Add Documents and Actions are both present.
+    // Add Documents, Actions, and Chat are all present.
     expect(labels.some((t) => t.includes('Add Documents'))).toBe(true);
     expect(labels.some((t) => t.includes('Actions'))).toBe(true);
+    expect(labels.some((t) => t.includes('Chat'))).toBe(true);
   });
 
   it('renders status pill with page + raw counts', () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ pageCount: 12, rawCount: 7 }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ pageCount: 12, rawCount: 7 }),
     });
     expect(wrapper.text()).toContain('12 pages');
     expect(wrapper.text()).toContain('7 raw');
   });
 
   it('shows the stale badge when needsRefresh is true', () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ needsRefresh: true }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ needsRefresh: true }),
     });
     expect(wrapper.text()).toContain('stale');
   });
 
   it('does not show the stale badge when needsRefresh is false', () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ needsRefresh: false }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ needsRefresh: false }),
     });
     expect(wrapper.text()).not.toContain('stale');
   });
 
   it('shows the included-articles gate with ok styling when > 0', () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ includedArticleCount: 9 }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ includedArticleCount: 9 }),
     });
     expect(wrapper.text()).toContain('9 included');
     expect(wrapper.find('.wiki-toolbar__gate--ok').exists()).toBe(true);
   });
 
   it('renders the gate without ok styling when 0 included articles', () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ includedArticleCount: 0 }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ includedArticleCount: 0 }),
     });
     expect(wrapper.text()).toContain('0 included');
     expect(wrapper.find('.wiki-toolbar__gate--ok').exists()).toBe(false);
   });
 
   it('opening one dropdown closes the other (mutually exclusive)', async () => {
-    const wrapper = mount(WikiToolbar, { props: { status: makeStatus() } });
+    const wrapper = mountToolbar({ status: makeStatus() });
 
     // Open the Actions menu.
     await openActionsMenu(wrapper);
@@ -128,7 +149,7 @@ describe('wiki-toolbar.vue', () => {
   });
 
   it('Actions menu contains Rebuild Wiki, Ingest, Health Check, Delete Wiki', async () => {
-    const wrapper = mount(WikiToolbar, { props: { status: makeStatus() } });
+    const wrapper = mountToolbar({ status: makeStatus() });
     const items = await openActionsMenu(wrapper);
     const texts = items.map((i) => i.text());
     expect(texts.some((t) => t.includes('Rebuild Wiki'))).toBe(true);
@@ -138,8 +159,8 @@ describe('wiki-toolbar.vue', () => {
   });
 
   it('Actions menu shows Initialize Wiki (not Rebuild) when not initialized', async () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ initialized: false }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: false }),
     });
     const items = await openActionsMenu(wrapper);
     const texts = items.map((i) => i.text());
@@ -148,8 +169,8 @@ describe('wiki-toolbar.vue', () => {
   });
 
   it('disables Ingest / Health Check / Delete items when not initialized', async () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ initialized: false }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: false }),
     });
     const items = await openActionsMenu(wrapper);
     // Rebuild (Initialize) is enabled; the other three are disabled.
@@ -172,7 +193,7 @@ describe('wiki-toolbar.vue', () => {
       slugs: ['alpha', 'beta', 'gamma'],
     };
     mockTauriCommand.mockResolvedValue(report);
-    const wrapper = mount(WikiToolbar, { props: { status: makeStatus() } });
+    const wrapper = mountToolbar({ status: makeStatus() });
 
     const items = await openActionsMenu(wrapper);
     const healthBtn = items.find((i) => i.text().includes('Health Check'));
@@ -184,8 +205,8 @@ describe('wiki-toolbar.vue', () => {
   });
 
   it('does not call wiki_export_and_ingest from Ingest when needsRefresh is false', async () => {
-    const wrapper = mount(WikiToolbar, {
-      props: { status: makeStatus({ needsRefresh: false }) },
+    const wrapper = mountToolbar({
+      status: makeStatus({ needsRefresh: false }),
     });
     const items = await openActionsMenu(wrapper);
     const ingestBtn = items.find((i) => i.text().includes('Ingest'));
@@ -193,5 +214,45 @@ describe('wiki-toolbar.vue', () => {
     await ingestBtn!.trigger('click');
     await flushPromises();
     expect(mockTauriCommand).not.toHaveBeenCalledWith('wiki_export_and_ingest', expect.anything());
+  });
+
+  it('enables the Chat button when LLM is configured and wiki has pages', () => {
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: true, pageCount: 5 }),
+      isLlmConfigured: true,
+    });
+    const chatBtn = wrapper.findAll('button').find((b) => b.text().includes('Chat'));
+    expect(chatBtn).toBeTruthy();
+    expect(chatBtn!.attributes('disabled')).toBeUndefined();
+  });
+
+  it('disables the Chat button when LLM is not configured', () => {
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: true, pageCount: 5 }),
+      isLlmConfigured: false,
+    });
+    const chatBtn = wrapper.findAll('button').find((b) => b.text().includes('Chat'));
+    expect(chatBtn).toBeTruthy();
+    expect(chatBtn!.attributes('disabled')).toBeDefined();
+  });
+
+  it('disables the Chat button when the wiki has no pages', () => {
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: true, pageCount: 0 }),
+      isLlmConfigured: true,
+    });
+    const chatBtn = wrapper.findAll('button').find((b) => b.text().includes('Chat'));
+    expect(chatBtn).toBeTruthy();
+    expect(chatBtn!.attributes('disabled')).toBeDefined();
+  });
+
+  it('disables the Chat button when the wiki is not initialized', () => {
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: false, pageCount: 0 }),
+      isLlmConfigured: true,
+    });
+    const chatBtn = wrapper.findAll('button').find((b) => b.text().includes('Chat'));
+    expect(chatBtn).toBeTruthy();
+    expect(chatBtn!.attributes('disabled')).toBeDefined();
   });
 });

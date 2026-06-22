@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useWiki } from '@/composables/use-wiki';
 import { useToast } from '@/composables/use-toast';
+import { useChatStore } from '@/stores/chat';
 import type { WikiStatus } from '@/types/wiki';
 
 const props = defineProps<{
   status: WikiStatus | null;
+  /** Whether an LLM provider is configured. The Chat button is gated on this. */
+  isLlmConfigured?: boolean;
 }>();
+
+const router = useRouter();
+const chatStore = useChatStore();
 
 const emit = defineEmits<{
   initialized: [];
@@ -317,6 +324,27 @@ function toggleMenu(menu: MenuName): void {
 function rebuildLabel(): string {
   return isInitialized() ? 'Rebuild Wiki' : 'Initialize Wiki';
 }
+
+/** Whether the Chat button should be enabled. Requires an LLM provider, an
+ *  initialized wiki, and at least one generated page. */
+const canChat = computed(() => {
+  return (
+    props.isLlmConfigured === true &&
+    !!props.status?.initialized &&
+    (props.status?.pageCount ?? 0) > 0
+  );
+});
+
+/** Jump to the Chat view with Wiki mode pre-enabled so the user can chat
+ *  against the wiki knowledge base (FTS5 RAG). Proactively sets
+ *  `wikiReady=true` so the wiki toggle is visible immediately on arrival;
+ *  `chat-view` reconfirms readiness on mount and downgrades only if the wiki
+ *  is genuinely unavailable. */
+function handleChat(): void {
+  chatStore.setWikiReady(true);
+  chatStore.setSource('wiki');
+  void router.push('/chat');
+}
 </script>
 
 <template>
@@ -453,6 +481,21 @@ function rebuildLabel(): string {
         </button>
       </div>
     </div>
+
+    <!-- Chat: deep-link into the Chat view with Wiki mode pre-enabled. -->
+    <button
+      class="wiki-toolbar__btn"
+      :disabled="!canChat"
+      :title="
+        canChat
+          ? 'Chat with your wiki knowledge base (FTS5 search)'
+          : 'Requires a configured LLM and an initialized wiki with pages'
+      "
+      @click="handleChat"
+    >
+      <span class="material-symbols-outlined text-[18px]">chat_add_on</span>
+      <span>Chat</span>
+    </button>
 
     <!-- Progress bar (when active, replaces stats on the left) -->
     <div v-if="progress" class="wiki-toolbar__progress">

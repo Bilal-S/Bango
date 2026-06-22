@@ -382,6 +382,7 @@ watch(searchQuery, async (q) => {
       <WikiToolbar
         v-if="status"
         :status="status"
+        :is-llm-configured="isLlmConfigured"
         @initialized="
           async () => {
             await refreshStatus();
