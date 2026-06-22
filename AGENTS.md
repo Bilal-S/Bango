@@ -100,6 +100,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
     and AI screening completion in `commands/screening.rs`). `clear_biblio_needs_refresh`
     runs only after `biblio_normalize` commits successfully; `get_biblio_needs_refresh`
     powers the frontend `biblio_get_needs_refresh` command. Absent key = fresh (false).
+    `mark_wiki_needs_refresh(conn)` is called by every mutation that changes the Wiki's
+    content sources (`full_text` attach/delete in `commands/full_text.rs`, AI-summary
+    regen in `commands/summary.rs::generate_article_ai_summary`) plus the same corpus
+    mutations that set the biblio flag (RIS/BibTeX import, project backup restore,
+    reference/citation import, tag/label/status/override/bulk edits, AI screening
+    completion). `clear_wiki_needs_refresh` runs only after `wiki_ingest`/`wiki_rebuild`
+    commits; `get_wiki_needs_refresh` powers the frontend `wiki_get_needs_refresh`
+    command that drives the `autoIngestIfStale()` flow in `wiki-view.vue`. Absent key =
+    fresh (false). Tested in `wiki_full_text_refresh_test.rs`.
   - **`src-tauri/src/wiki/`** - LLM Wiki knowledge-base module (all phases complete).
     Generates and maintains a local-first Obsidian-style Markdown knowledge base from the
     `included` article corpus. Modules: `storage.rs` (resolves `wiki-root/`, scaffolds
@@ -295,7 +304,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation
     integration tests against RIS fixtures live in `cocitation_data_test.rs`.
     `biblio_needs_refresh_test.rs` covers the staleness-flag round-trip (mark/clear/
-    absent-key default). `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip
+    absent-key default). `wiki_full_text_refresh_test.rs` covers the wiki staleness-flag
+    pairing with content-source mutations (`full_text` attach/delete, AI-summary regen)
+    plus the wiki-flag round-trip. `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip
     (legacy article_references -> backup -> rebuild -> import) plus the
     `legacy_upgrade_needed(live, fallback)` pure decision function (live-probe-wins and
     snapshot-fallback branches). `reset_project_test.rs` covers `reset_project_inner`

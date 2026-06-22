@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager, State};
 
+use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
@@ -210,6 +211,11 @@ pub async fn generate_article_ai_summary(
             Some("AI summary generated from full text"),
             "ai",
         )?;
+        // The AI summary is the 2nd-priority content source for the wiki
+        // (full_text → ai_summary → abstract). Regenerating it changes the
+        // synthesis page the next ingest produces.
+        app_settings_repo::mark_wiki_needs_refresh(&conn);
+        app_settings_repo::mark_biblio_needs_refresh(&conn);
     }
 
     // 6. Emit success event

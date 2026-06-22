@@ -96,6 +96,11 @@ pub fn attach_full_text(
     // Update database
     article_repo::update_full_text(&conn, &article_id, &full_text, &dest_filename)?;
 
+    // Full text is the top-priority content source for the wiki (full_text →
+    // ai_summary → abstract). Attaching it changes what the next ingest produces.
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+
     // Create audit entry
     crate::db::audit_repo::create_entry(
         &conn,
@@ -143,6 +148,12 @@ pub fn delete_full_text(
 
     // Clear DB references
     article_repo::clear_full_text(&conn, &article_id)?;
+
+    // Removing the full text downgrades the content source for the wiki ingest
+    // (falls back to ai_summary or abstract). Mark stale so the next visit
+    // re-ingests with the correct content.
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
 
     // Create audit entry
     crate::db::audit_repo::create_entry(

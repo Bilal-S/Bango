@@ -168,20 +168,34 @@ const typeLabels: Record<string, string> = {
 
 onMounted(async () => {
   window.addEventListener('keydown', onKeyDown);
-  await Promise.all([checkLlmConfig(), refreshStatus(), startProgressListener()]);
-  await loadPages();
-  // Auto-ingest if wiki is stale (articles changed since last ingest).
-  await autoIngestIfStale();
+  await startProgressListener();
+  await runReadinessChecks();
   // On-demand drift check: detect external edits to wiki .md files and
   // re-index transparently. Runs lock-free on the backend; the toast drives
   // the UX. Debounced 30s so navigation back-and-forth doesn't re-check.
   await checkForUpdatesOnMount();
 });
 
+/** Re-run all readiness checks (LLM config, wiki status, pages, stale ingest)
+ *  whenever the user re-enters the Wiki view. This is critical because the
+ *  view is keep-alive cached: `onMounted` only fires once for the component's
+ *  lifetime, so without re-checking in `onActivated`, the empty-state gates
+ *  (LLM configured, included articles > 0, wiki initialized) stay frozen at
+ *  whatever value they had on first mount — e.g. the "LLM Provider Not
+ *  Configured" card would persist even after the user configures an LLM in
+ *  Settings and returns. All four calls are idempotent backend reads. */
+async function runReadinessChecks(): Promise<void> {
+  await Promise.all([checkLlmConfig(), refreshStatus()]);
+  await loadPages();
+  // Auto-ingest if wiki is stale (articles changed since last ingest).
+  await autoIngestIfStale();
+}
+
 /** Re-check for external edits whenever the user re-enters the Wiki view
  *  (keep-alive re-activation). Respects the 30s debounce in useWiki so quick
  *  Wiki <-> Chat navigation does not re-check. */
 onActivated(async () => {
+  await runReadinessChecks();
   await checkForUpdatesOnMount();
   // If returning to the Graph tab, fix the stale Sigma canvas dimensions
   // that result from the container being display:none while away.
@@ -293,6 +307,11 @@ async function autoIngestIfStale(): Promise<void> {
 }
 
 async function checkLlmConfig(): Promise<void> {
+  // Reset the loading flag on every call (not just the first mount) so the
+  // spinner shows while re-checking on keep-alive re-activation. Without
+  // this, the stale `isLlmConfigured` value drives the empty-state gates
+  // until the fresh fetch resolves.
+  checkingLlm.value = true;
   try {
     isLlmConfigured.value = await tauriCommand<boolean>('has_llm_config');
   } catch {
