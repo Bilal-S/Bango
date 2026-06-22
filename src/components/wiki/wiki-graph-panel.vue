@@ -465,9 +465,21 @@ onUnmounted(() => {
   graphologyGraph = null;
 });
 
-// Expose `refresh` (re-fetch + re-render after ingest) and `focusOnNode`
-// (imperative camera-center on a slug) for the parent.
-defineExpose({ refresh: loadAndRender, focusOnNode });
+/** Force the graph to re-render at the current container dimensions. Called
+ *  by the parent when switching to the Graph tab or re-entering the Wiki view
+ *  via keep-alive, both of which can leave the Sigma canvas with stale (0x0 or
+ *  wrong) dimensions because the container was display:none. Reuses the
+ *  existing `render()` path which kills the old Sigma, reads the current
+ *  container size, and creates a fresh renderer. */
+async function handleResize(): Promise<void> {
+  if (!graph.value || graph.value.nodes.length === 0) return;
+  render();
+}
+
+// Expose `refresh` (re-fetch + re-render after ingest), `focusOnNode`
+// (imperative camera-center on a slug), and `handleResize` (fix stale canvas
+// dimensions on tab switch / keep-alive re-entry) for the parent.
+defineExpose({ refresh: loadAndRender, focusOnNode, handleResize });
 </script>
 
 <template>

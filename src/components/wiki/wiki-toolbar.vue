@@ -21,6 +21,9 @@ const emit = defineEmits<{
   rawPrepared: [];
   ingested: [];
   deleted: [];
+  /** Reset the wiki view to its start state (clear selection, search, graph,
+   *  edit mode). Emitted by the reset icon button next to Chat. */
+  reset: [];
 }>();
 
 const {
@@ -544,6 +547,19 @@ function handleChat(): void {
     >
       <span class="material-symbols-outlined text-[18px]">chat_add_on</span>
       <span>Chat</span>
+    </button>
+
+    <!-- Reset: restore the wiki view to its start state (clear selected page,
+         search query, graph tab, edit mode, article-detail slide-over).
+         Disabled until the wiki is initialized. -->
+    <button
+      v-if="isInitialized()"
+      class="wiki-toolbar__btn wiki-toolbar__btn--icon"
+      title="Reset wiki view to start state"
+      aria-label="Reset wiki view"
+      @click="emit('reset')"
+    >
+      <span class="material-symbols-outlined text-[18px]">restart_alt</span>
     </button>
 
     <!-- Progress bar (when active, replaces stats on the left) -->

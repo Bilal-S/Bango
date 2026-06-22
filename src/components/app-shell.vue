@@ -102,7 +102,16 @@ const { isVisible: isOperationOverlayVisible, message: operationMessage } = useL
         <span class="app-shell__mobile-title">Bango</span>
       </header>
       <div class="app-shell__content">
-        <router-view />
+        <!-- Keep-alive caches ONLY the Wiki view so its state (selected page,
+             search query, graph tab, edit mode, scroll position) survives
+             navigation away and back. Other routes are uncached to avoid
+             memory bloat. `include` matches the component name set via
+             `defineOptions({ name: 'WikiView' })` in wiki-view.vue. -->
+        <router-view v-slot="{ Component }">
+          <keep-alive include="WikiView">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </div>
     </main>
     <!-- Operation Loading Overlay (project import, demo load, etc.) -->

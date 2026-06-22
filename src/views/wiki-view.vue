@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue';
+import { onMounted, onActivated, onUnmounted, ref, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useWiki } from '@/composables/use-wiki';
@@ -16,6 +16,11 @@ import { useArticleSearch } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
+
+// Name the component so <keep-alive include="WikiView"> in app-shell.vue
+// can cache it across navigation. Vue 3 <script setup> components are
+// anonymous by default.
+defineOptions({ name: 'WikiView' });
 
 const router = useRouter();
 const toast = useToast();
@@ -171,6 +176,19 @@ onMounted(async () => {
   // re-index transparently. Runs lock-free on the backend; the toast drives
   // the UX. Debounced 30s so navigation back-and-forth doesn't re-check.
   await checkForUpdatesOnMount();
+});
+
+/** Re-check for external edits whenever the user re-enters the Wiki view
+ *  (keep-alive re-activation). Respects the 30s debounce in useWiki so quick
+ *  Wiki <-> Chat navigation does not re-check. */
+onActivated(async () => {
+  await checkForUpdatesOnMount();
+  // If returning to the Graph tab, fix the stale Sigma canvas dimensions
+  // that result from the container being display:none while away.
+  if (viewTab.value === 'graph') {
+    await nextTick();
+    graphPanelRef.value?.handleResize();
+  }
 });
 
 /**
@@ -388,14 +406,40 @@ async function onDeleted(): Promise<void> {
   await refreshStatus();
 }
 
+/** Reset the wiki view to its start state: clear the selected page + nav
+ *  history, search query, graph tab, edit mode, and article-detail slide-over.
+ *  Re-selects the first page. Does NOT re-fetch status or re-run the drift
+ *  check (those are handled by onMounted / onActivated). Bound to the toolbar's
+ *  reset button. */
+function resetView(): void {
+  navHistory.clear();
+  searchQuery.value = '';
+  searchHits.value = null;
+  isSearching.value = false;
+  viewTab.value = 'pages';
+  mode.value = 'view';
+  showArticleDetail.value = false;
+  isArticleDetailFullScreen.value = false;
+  collapsedSections.value = new Set(['author']);
+  // Re-select the first page (mirrors loadPages initial selection).
+  if (pages.value.length > 0) {
+    navHistory.navigate(pages.value[0]!.slug);
+  }
+}
+
 /** When the user switches to the Graph tab, focus the camera on the node for
  * the page they were viewing. Deferred via nextTick so the tab flip + any
  * ResizeObserver-deferred Sigma init completes first; the focusOnNode method
  * is defensive (no-op when Sigma isn't ready or the node has no coordinates). */
 watch(viewTab, async (tab) => {
-  if (tab === 'graph' && selectedSlug.value) {
+  if (tab === 'graph') {
     await nextTick();
-    graphPanelRef.value?.focusOnNode(selectedSlug.value);
+    // Fix stale Sigma canvas dimensions that result from the container being
+    // display:none while the Pages tab was active.
+    graphPanelRef.value?.handleResize();
+    if (selectedSlug.value) {
+      graphPanelRef.value?.focusOnNode(selectedSlug.value);
+    }
   }
 });
 
@@ -449,6 +493,7 @@ watch(searchQuery, (q) => {
         v-if="status"
         :status="status"
         :is-llm-configured="isLlmConfigured"
+        @reset="resetView"
         @initialized="
           async () => {
             await refreshStatus();
