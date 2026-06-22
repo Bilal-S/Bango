@@ -107,7 +107,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `log.md`), `agents_contract.rs` (ingest + lint rules contract), `templates.rs` (page
     templates), `frontmatter.rs` (dependency-free YAML parser/serializer),
     `raw_export.rs` (included-article export + user-file extraction for PDF/TXT/HTML/etc),
-    `fts.rs` (FTS5 BM25 search index), `ingest.rs` (LLM page generation: prompt builder,
+    `fts.rs` (FTS5 BM25 search index + **two-tier external-edit drift detection**), `ingest.rs` (LLM page generation: prompt builder,
     `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild, **parallel chunked
     ingest**), `engine.rs` (deterministic lint + `build_graph` for link graph
     visualization), `chat.rs` (token-budgeted RAG chat over FTS5 index; self-heals the
@@ -186,10 +186,24 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
     `wiki_get_page`, `wiki_update_page`, `wiki_delete_page`, `wiki_delete_wiki`,
     `wiki_chat`, `wiki_get_graph`, `wiki_ingest`, `wiki_list_pages`, `wiki_list_sources`,
-    `wiki_search` rebuilds the FTS index if empty, `wiki_update_page` / `wiki_delete_page`
-    rebuild it on every edit/delete so chat + search stay in sync with user changes.
     `wiki_rebuild` (one-click full pipeline: scaffold + export + ingest + FTS5, emits
-    `wiki:progress` events), `wiki_export_and_ingest` (export + ingest after Add Documents).
+    `wiki:progress` events), `wiki_export_and_ingest` (export + ingest after Add Documents),
+    and `wiki_check_for_updates`. `wiki_search` rebuilds the FTS index if empty;
+    `wiki_update_page` / `wiki_delete_page` rebuild it on every edit/delete so chat + search
+    stay in sync with user changes (both use `rebuild_index_with_manifest` so the drift
+    manifest stays in sync too).
+    **External-edit drift detection** (`wiki_check_for_updates`, async): detects when
+    external programs edit `wiki/**/*.md` files and re-indexes them transparently WITHOUT
+    re-running the LLM ingest. Runs entirely on the tokio runtime - all file reads + per-file
+    SHA-256 hashing happen lock-free; the `DbState` mutex is held only for millisecond-scale
+    SQLite writes (FTS5 rebuild + manifest rewrite + dir-hash update). Two tiers keep the
+    common case cheap: tier-1 is a stat-only directory fingerprint (`wiki_dir_hash` in
+    `app_settings`) that short-circuits when nothing changed; tier-2 is the
+    `wiki_index_manifest` table (per-file content hashes) that distinguishes real edits from
+    `touch`. Triggers: Wiki view `onMounted`, Chat view `onMounted` (when wiki-ready), and
+    the toolbar "Check for Updates" button (manual, bypasses the 30s debounce in
+    `use-wiki.ts`). Emits `wiki:files-changed` on rebuild. Toast UX: "Checking for Wiki
+    updates..." -> "Wiki updated: N pages re-indexed." / "Wiki is up to date."
     **Self-healing init guard**: `ensure_initialized(root)` writes `AGENTS.md` when
     missing; called at the top of `wiki_init`, `wiki_ingest`, `wiki_rebuild`, and
     `wiki_export_and_ingest` so an uninitialized wiki transparently recovers instead of
@@ -244,7 +258,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `journal_index`) + reset `user_version=0` + re-run migrations helper used by both
     `commands::export_cmd::reset_project` and the legacy upgrade path. `DROP_TABLES` includes
     the lazily-created `wiki_pages_fts` FTS5 virtual table (it is not created by migrations);
-    it self-heals via `fts::ensure_index_populated` on the next wiki read. `reset_project`
+    it self-heals via `fts::ensure_index_populated` on the next wiki read. Also dropped: the `wiki_index_manifest` drift-detection cache (created by migration v002), which self-heals via `wiki_check_for_updates`. `reset_project`
     additionally deletes the entire on-disk `wiki-root/` directory (resolved BEFORE the schema
     rebuild, while `app_settings` still holds the path config); wiki deletion is non-fatal.
   - **`src-tauri/src/commands/startup.rs`** - exposes `get_startup_status` and
@@ -289,7 +303,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     is cleared after rebuild, and the reset succeeds even when the wiki root is missing.
     `wiki_consolidation_test.rs` covers the multi-batch consolidation pipeline
     (cross-batch dup merge + link rewrite + single-batch skip + unrelated-page
-    preservation) using injectable `IngestLlmSender` fakes.
+    preservation) using injectable `IngestLlmSender` fakes. `wiki_index_drift_test.rs`
+    covers the two-tier external-edit drift detection (external body edit -> rebuild,
+    `touch` -> dir-hash update only, page add/delete -> path-set drift, internal edit
+    via `rebuild_index_with_manifest` -> no false-positive, empty-wiki baseline clear,
+    order-independent fingerprint, manifest round-trip).
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).

@@ -25,6 +25,118 @@ fn lock_conn<'a>(
         .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))
 }
 
+/// Result of `wiki_check_for_updates`. Drives the frontend toast UX.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckUpdatesResult {
+    /// `true` when external edits were detected and the FTS5 index + manifest
+    /// were rebuilt. `false` when the index was already in sync (or the wiki
+    /// is empty / not initialized).
+    pub rebuilt: bool,
+    /// Number of pages currently in the index (useful for the toast message).
+    pub pages_reindexed: usize,
+}
+
+/// On-demand drift check: detect external edits to `wiki/**/*.md` files and
+/// re-index them transparently without re-running the LLM ingest.
+///
+/// **Never blocks the UI.** Runs as an async Tauri command on the tokio
+/// runtime. All filesystem work (page reads + per-file hashing) happens
+/// **lock-free**; the `DbState` mutex is held only for the millisecond-scale
+/// SQLite writes (manifest read/write, FTS5 rebuild, dir-hash update).
+///
+/// Two-tier detection keeps the common case cheap:
+/// 1. **Tier 1 (directory fingerprint):** stat-only SHA-256 over
+///   `(rel_path, mtime, size)` for every page. Stored in `app_settings` under
+///   `wiki_dir_hash`. Equal -> nothing changed, return immediately.
+/// 2. **Tier 2 (per-file content hashes):** the `wiki_index_manifest` table
+///   stores one SHA-256 per file. When tier-1 drifts, compare per-file hashes.
+///   If content is identical (e.g. `touch`) -> update only the dir hash. If
+///   any file's content hash differs (or the path set changed) -> rebuild
+///   FTS5 + rewrite the manifest.
+///
+/// Triggered from:
+/// - Wiki view `onMounted` (debounced 30s).
+/// - Chat view `onMounted` (wiki mode available).
+/// - "Check for Updates" button in the wiki toolbar Actions menu (manual,
+///   bypasses the debounce).
+#[tauri::command]
+pub async fn wiki_check_for_updates(
+    db_state: tauri::State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+) -> Result<CheckUpdatesResult, AppError> {
+    // Step 1: resolve the wiki root (microsecond lock).
+    let root = {
+        let conn = lock_conn(&db_state)?;
+        storage::resolve_root(&conn)?
+    };
+
+    // Skip entirely if the wiki was never initialized (no AGENTS.md). Avoids
+    // hashing an empty/nonexistent wiki/ tree on every chat-view mount.
+    if !root.join("AGENTS.md").exists() {
+        return Ok(CheckUpdatesResult { rebuilt: false, pages_reindexed: 0 });
+    }
+
+    // Step 2: LOCK-FREE filesystem work (the slow part).
+    // Read every wiki page from disk + compute the tier-1 directory fingerprint
+    // (stat-only) and the tier-2 per-file content hashes (file reads).
+    let rows = fts::collect_page_rows(&root)?;
+    let dir_hash = fts::compute_directory_fingerprint(&rows);
+    let file_hashes = fts::compute_file_hashes(&rows)?;
+
+    // Step 3: tier-1 fast path + tier-2 diff (microsecond lock for reads).
+    let (stored_dir_hash, stored_manifest): (
+        Option<String>,
+        std::collections::HashMap<String, String>,
+    ) = {
+        let conn = lock_conn(&db_state)?;
+        (fts::get_dir_hash(&conn), fts::read_manifest(&conn)?)
+    };
+
+    // No pages on disk: clear any stale baseline and report nothing to do.
+    if dir_hash.is_none() {
+        if stored_dir_hash.is_some() || !stored_manifest.is_empty() {
+            let conn = lock_conn(&db_state)?;
+            fts::set_dir_hash(&conn, None);
+            fts::write_manifest(&conn, &[])?;
+        }
+        return Ok(CheckUpdatesResult { rebuilt: false, pages_reindexed: 0 });
+    }
+
+    // Tier 1: directory fingerprint matches -> nothing changed.
+    if dir_hash.as_deref() == stored_dir_hash.as_deref() {
+        return Ok(CheckUpdatesResult { rebuilt: false, pages_reindexed: rows.len() });
+    }
+
+    // Tier 2: per-file content hash diff.
+    let drifted = fts::manifest_drifted(&stored_manifest, &file_hashes);
+    if !drifted {
+        // mtime/size changed but content is identical (e.g. `touch`). Update
+        // only the dir hash so the next check is a fast-path hit.
+        let conn = lock_conn(&db_state)?;
+        fts::set_dir_hash(&conn, dir_hash.as_deref());
+        return Ok(CheckUpdatesResult { rebuilt: false, pages_reindexed: rows.len() });
+    }
+
+    // Step 4: drift confirmed -> rebuild FTS5 + manifest + dir hash (brief lock).
+    let pages_count = {
+        let conn = lock_conn(&db_state)?;
+        fts::ensure_table(&conn)?;
+        conn.execute_batch(&format!("DELETE FROM {};", fts::FTS_TABLE))?;
+        let wiki_dir = root.join("wiki");
+        fts::insert_page_rows(&conn, &rows, &wiki_dir)?;
+        fts::write_manifest(&conn, &file_hashes)?;
+        fts::set_dir_hash(&conn, dir_hash.as_deref());
+        rows.len()
+    };
+
+    // Step 5: notify the frontend so open wiki/chat views can refresh.
+    let _ =
+        app_handle.emit("wiki:files-changed", serde_json::json!({ "pagesReindexed": pages_count }));
+
+    Ok(CheckUpdatesResult { rebuilt: true, pages_reindexed: pages_count })
+}
+
 /// Effective wiki root + status metadata returned by `wiki_get_status`.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -393,8 +505,10 @@ pub fn wiki_update_page(
             // Keep the FTS5 index in sync so wiki_chat / wiki_search reflect
             // the edited title/summary/body immediately. A full rebuild is
             // cheap (dozens to low-hundreds of local pages) and avoids fragile
-            // per-row sync logic.
-            fts::rebuild_index(&conn, &root)?;
+            // per-row sync logic. Uses `rebuild_index_with_manifest` so the
+            // drift-detection manifest stays in sync too (otherwise the next
+            // `wiki_check_for_updates` would false-positive a rebuild).
+            fts::rebuild_index_with_manifest(&conn, &root)?;
             return Ok(WikiPage {
                 slug: new_fm.get("slug").unwrap_or("").to_string(),
                 title,
@@ -424,8 +538,10 @@ pub fn wiki_delete_page(
         if fm.get("slug") == Some(slug.as_str()) {
             std::fs::remove_file(&path)?;
             // Keep the FTS5 index in sync so the deleted page is no longer
-            // returned by wiki_chat / wiki_search.
-            fts::rebuild_index(&conn, &root)?;
+            // returned by wiki_chat / wiki_search. Uses
+            // `rebuild_index_with_manifest` so the drift-detection manifest
+            // stays in sync too.
+            fts::rebuild_index_with_manifest(&conn, &root)?;
             return Ok(true);
         }
     }

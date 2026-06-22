@@ -31,6 +31,7 @@ const {
   deleteWiki,
   rebuild,
   exportAndIngest,
+  checkForUpdates,
   progress,
 } = useWiki();
 const toast = useToast();
@@ -44,6 +45,7 @@ const linting = ref(false);
 const ingesting = ref(false);
 const deleting = ref(false);
 const rebuilding = ref(false);
+const checkingUpdates = ref(false);
 const lintReport = ref<import('@/types/wiki').LintReport | null>(null);
 
 async function handleInit(): Promise<void> {
@@ -236,6 +238,34 @@ async function handleLint(): Promise<void> {
     toast.show('Failed to run health check', 'error');
   } finally {
     linting.value = false;
+  }
+}
+
+/**
+ * Manually trigger the on-demand drift check (bypasses the 30s debounce).
+ * Detects external edits to wiki .md files and re-indexes them without an
+ * LLM re-ingest. Emits `ingested` when pages were re-indexed so the parent
+ * view refreshes the page list + graph.
+ */
+async function handleCheckUpdates(): Promise<void> {
+  checkingUpdates.value = true;
+  toast.show('Checking for Wiki updates...', 'info');
+  try {
+    const result = await checkForUpdates(true);
+    if (!result) {
+      // Debounced (shouldn't happen with force=true, but guard anyway).
+      return;
+    }
+    if (result.rebuilt) {
+      toast.show(`Wiki updated: ${result.pagesReindexed} pages re-indexed.`, 'success');
+      emit('ingested');
+    } else {
+      toast.show('Wiki is up to date.', 'info', 1500);
+    }
+  } catch {
+    toast.show('Failed to check for wiki updates', 'error');
+  } finally {
+    checkingUpdates.value = false;
   }
 }
 
@@ -461,6 +491,25 @@ function handleChat(): void {
         >
           <span class="material-symbols-outlined text-[16px] text-slate-500">fact_check</span>
           {{ linting ? 'Checking...' : 'Health Check' }}
+        </button>
+        <!-- Check for Updates: detect external edits to wiki pages + re-index -->
+        <button
+          class="wiki-toolbar__menu-item"
+          :disabled="checkingUpdates || !isInitialized()"
+          :title="
+            isInitialized()
+              ? 'Detect external edits to wiki pages and re-index them'
+              : 'Initialize the wiki first'
+          "
+          @click="
+            () => {
+              closeActionsMenu();
+              void handleCheckUpdates();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">update</span>
+          {{ checkingUpdates ? 'Checking...' : 'Check for Updates' }}
         </button>
         <!-- Divider -->
         <hr class="wiki-toolbar__menu-divider" />

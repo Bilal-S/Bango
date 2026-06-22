@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
 import type {
+  CheckUpdatesResult,
   LintReport,
   RawExportReport,
   RawFileEntry,
@@ -32,6 +33,12 @@ const error = ref<string | null>(null);
 const initializing = ref(false);
 const progress = ref<WikiProgress | null>(null);
 let progressUnlisten: (() => void) | null = null;
+
+// Debounce for the on-demand drift check (`checkForUpdates`). Auto-triggers
+// (Wiki/Chat view onMounted) respect the cooldown so navigation back-and-forth
+// doesn't re-check; the manual toolbar button bypasses it via `force: true`.
+const CHECK_DEBOUNCE_MS = 30_000;
+let lastCheckAt = 0;
 
 export function useWiki() {
   /** Fetch the current wiki status from the backend. */
@@ -223,6 +230,27 @@ export function useWiki() {
     return report;
   }
 
+  /**
+   * On-demand drift check: detect external edits to wiki .md files and
+   * re-index them transparently without re-running the LLM ingest.
+   *
+   * Runs entirely on the backend tokio runtime (lock-free file work + brief
+   * SQLite writes), so the UI never freezes. The caller drives the toast UX:
+   * show "Checking for Wiki updates..." before calling, then surface result.
+   *
+   * `force` bypasses the 30s debounce. Auto-triggers (Wiki / Chat view
+   * onMounted) pass false; the manual toolbar button passes true.
+   * Returns the CheckUpdatesResult, or null when debounced (skipped).
+   */
+  async function checkForUpdates(force = false): Promise<CheckUpdatesResult | null> {
+    const now = Date.now();
+    if (!force && now - lastCheckAt < CHECK_DEBOUNCE_MS) {
+      return null; // debounced — too soon since the last auto-check
+    }
+    lastCheckAt = now;
+    return tauriCommand<CheckUpdatesResult>('wiki_check_for_updates');
+  }
+
   /** Reset all shared state (for tests). */
   function resetState(): void {
     status.value = null;
@@ -230,6 +258,7 @@ export function useWiki() {
     error.value = null;
     initializing.value = false;
     progress.value = null;
+    lastCheckAt = 0;
   }
 
   return {
@@ -262,6 +291,7 @@ export function useWiki() {
     ingestWiki,
     rebuild,
     exportAndIngest,
+    checkForUpdates,
     resetState,
   };
 }

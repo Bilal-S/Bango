@@ -11,12 +11,19 @@
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
+use sha2::{Digest, Sha256};
 
+use crate::db::app_settings_repo;
 use crate::error::AppError;
 use crate::wiki::frontmatter;
 
 /// The FTS5 virtual table name.
 pub const FTS_TABLE: &str = "wiki_pages_fts";
+
+/// The `app_settings` key holding the tier-1 directory fingerprint (stat-based
+/// hash over all wiki pages). Absent means "no baseline" → first check
+/// populates it.
+pub const WIKI_DIR_HASH_KEY: &str = "wiki_dir_hash";
 
 /// Ensure the FTS5 table exists. Idempotent.
 pub fn ensure_table(conn: &Connection) -> Result<(), AppError> {
@@ -87,42 +94,276 @@ pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, Ap
 /// Uses `collect_wiki_pages` (which excludes top-level internal files like
 /// `log.md` / `index.md`) so the FTS search index matches the page list shown
 /// in the UI — internal infrastructure never surfaces in chat or search.
+///
+/// This is the thin wrapper that does both the file reads (filesystem) and the
+/// FTS5 inserts (DB) in one call. Callers that need to keep the DB lock window
+/// small (e.g. the on-demand drift check) should call `collect_page_rows`
+/// (no DB) followed by `insert_page_rows` (DB only) directly, then
+/// `write_manifest` + `set_dir_hash`.
 pub fn rebuild_index(conn: &Connection, root: &Path) -> Result<usize, AppError> {
     // Drop existing content and recreate.
     conn.execute_batch(&format!("DELETE FROM {FTS_TABLE};"))?;
     ensure_table(conn)?;
 
     let wiki_dir = root.join("wiki");
-    let pages = collect_wiki_pages(root)?;
-    for path in &pages {
-        index_single_file(conn, path, &wiki_dir)?;
-    }
-    Ok(pages.len())
+    let rows = collect_page_rows(root)?;
+    insert_page_rows(conn, &rows, &wiki_dir)?;
+    Ok(rows.len())
 }
 
-/// Index a single wiki `.md` file into the FTS table.
-fn index_single_file(conn: &Connection, path: &Path, wiki_root: &Path) -> Result<(), AppError> {
-    let (fm, body) = frontmatter::read_file(path)?;
-    let slug = fm.get("slug").unwrap_or("").to_string();
-    let title = fm.get("title").unwrap_or("").to_string();
-    let summary = fm.get("summary").unwrap_or("").to_string();
-    let page_type = fm.get("type").unwrap_or("").to_string();
-    let source_articles = fm.get("source_articles").unwrap_or("").to_string();
-    // Store a relative path from the wiki dir for compactness.
-    let file_path = path
-        .strip_prefix(wiki_root.parent().unwrap_or(Path::new("")))
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
+/// One wiki page parsed from disk, ready to insert into FTS5. Built by
+/// `collect_page_rows` (filesystem-only, no DB) so the drift check can do all
+/// file I/O without holding the DB lock.
+#[derive(Debug, Clone)]
+pub struct PageRow {
+    /// Absolute path to the `.md` file on disk.
+    pub abs_path: PathBuf,
+    /// Relative path from the wiki-root (stable across wiki-root moves;
+    /// used as the manifest PK).
+    pub rel_path: String,
+    pub slug: String,
+    pub title: String,
+    pub summary: String,
+    pub body: String,
+    pub page_type: String,
+    pub source_articles: String,
+}
 
-    conn.execute(
-        &format!(
-            "INSERT INTO {FTS_TABLE} (slug, title, summary, body, page_type, source_articles, file_path)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);"
-        ),
-        rusqlite::params![slug, title, summary, body, page_type, source_articles, file_path],
-    )?;
+/// Read every wiki page from disk into a `Vec<PageRow>`.
+///
+/// **Filesystem-only — does not touch the DB.** This lets the on-demand drift
+/// check (`wiki_check_for_updates`) do all file I/O lock-free, then take the
+/// DB lock only for the fast SQLite writes (`insert_page_rows` + manifest).
+pub fn collect_page_rows(root: &Path) -> Result<Vec<PageRow>, AppError> {
+    let pages = collect_wiki_pages(root)?;
+    let mut rows = Vec::with_capacity(pages.len());
+    for path in pages {
+        let (fm, body) = frontmatter::read_file(&path)?;
+        let rel_path = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().to_string();
+        rows.push(PageRow {
+            abs_path: path,
+            rel_path,
+            slug: fm.get("slug").unwrap_or("").to_string(),
+            title: fm.get("title").unwrap_or("").to_string(),
+            summary: fm.get("summary").unwrap_or("").to_string(),
+            body,
+            page_type: fm.get("type").unwrap_or("").to_string(),
+            source_articles: fm.get("source_articles").unwrap_or("").to_string(),
+        });
+    }
+    Ok(rows)
+}
+
+/// Insert a batch of pre-collected page rows into the FTS5 table.
+///
+/// **DB-only — does no file I/O.** Pairs with `collect_page_rows` so callers
+/// can split the lock-free filesystem work from the DB work. The caller is
+/// responsible for `DELETE FROM {FTS_TABLE}` first (see `rebuild_index` /
+/// `rebuild_index_with_manifest`).
+pub fn insert_page_rows(conn: &Connection, rows: &[PageRow], root: &Path) -> Result<(), AppError> {
+    for row in rows {
+        // Store a relative path from the wiki dir for compactness (matches
+        // the original `index_single_file` behavior for back-compat with the
+        // `file_path` column the frontend already reads).
+        let file_path = row
+            .abs_path
+            .strip_prefix(root.parent().unwrap_or(Path::new("")))
+            .unwrap_or(&row.abs_path)
+            .to_string_lossy()
+            .to_string();
+        conn.execute(
+            &format!(
+                "INSERT INTO {FTS_TABLE} (slug, title, summary, body, page_type, source_articles, file_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);"
+            ),
+            rusqlite::params![
+                row.slug,
+                row.title,
+                row.summary,
+                row.body,
+                row.page_type,
+                row.source_articles,
+                file_path,
+            ],
+        )?;
+    }
     Ok(())
+}
+
+// ─── Two-tier drift detection (manifest + directory fingerprint) ───────────
+//
+// `wiki_check_for_updates` uses these to detect when external programs edit
+// `wiki/**/*.md` files without re-ingesting. Two tiers keep the common case
+// cheap:
+//
+// - **Tier 1 (directory fingerprint):** one SHA-256 over the sorted set of
+//   `(rel_path, mtime_sec, mtime_nsec, size)` tuples for every page. Stored
+//   in `app_settings` under `WIKI_DIR_HASH_KEY`. Equal -> nothing changed,
+//   return immediately (one stat walk, zero file reads).
+// - **Tier 2 (per-file content hashes):** the `wiki_index_manifest` table
+//   stores one SHA-256 per file. When tier-1 drifts, compare per-file hashes.
+//   If content is identical (e.g. `touch`) -> update only the dir hash. If
+//   any file's content hash differs (or the path set changed) -> rebuild
+//   FTS5 + rewrite the manifest.
+
+/// Compute the tier-1 directory fingerprint: SHA-256 over the sorted
+/// `(rel_path, mtime_sec, mtime_nsec, size)` tuples for every page.
+///
+/// **Stat-only — does not read file contents.** This is the cheap fast path
+/// that lets `wiki_check_for_updates` skip tier-2 entirely when nothing
+/// changed on disk. The sort by `rel_path` makes the hash stable regardless
+/// of filesystem readdir order.
+///
+/// Returns `None` when there are no pages (so the caller can clear any stale
+/// stored hash and skip the check).
+#[must_use]
+pub fn compute_directory_fingerprint(pages: &[PageRow]) -> Option<String> {
+    if pages.is_empty() {
+        return None;
+    }
+    // Sort by rel_path for a stable, order-independent digest.
+    let mut entries: Vec<(&str, std::time::SystemTime, u64)> = pages
+        .iter()
+        .filter_map(|p| {
+            let meta = std::fs::metadata(&p.abs_path).ok()?;
+            let mtime = meta.modified().ok()?;
+            let size = meta.len();
+            Some((p.rel_path.as_str(), mtime, size))
+        })
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut hasher = Sha256::new();
+    for (rel, mtime, size) in &entries {
+        hasher.update(rel.as_bytes());
+        // Durations since UNIX epoch; falls back to 0 if the mtime is before
+        // the epoch (shouldn't happen for real files, but keeps the hash total).
+        let dur = mtime.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        hasher.update(dur.as_secs().to_string().as_bytes());
+        hasher.update(dur.subsec_nanos().to_string().as_bytes());
+        hasher.update(size.to_string().as_bytes());
+    }
+    Some(hex_encode(&hasher.finalize()))
+}
+
+/// SHA-256 of a file's bytes. Used for the tier-2 per-file content hash.
+fn hash_file_contents(path: &Path) -> Result<String, AppError> {
+    let bytes = std::fs::read(path)?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(hex_encode(&hasher.finalize()))
+}
+
+/// Compute the tier-2 per-file content hash list: `(rel_path, sha256)` for
+/// every page. **Reads file contents** (the slower path); only called when the
+/// tier-1 directory fingerprint has already detected drift.
+pub fn compute_file_hashes(pages: &[PageRow]) -> Result<Vec<(String, String)>, AppError> {
+    let mut out = Vec::with_capacity(pages.len());
+    for p in pages {
+        out.push((p.rel_path.clone(), hash_file_contents(&p.abs_path)?));
+    }
+    Ok(out)
+}
+
+/// Read the entire `wiki_index_manifest` table into a `{ rel_path -> hash }`
+/// map. Empty (not error) if the table is missing — `ensure_table` handles
+/// creation lazily.
+pub fn read_manifest(
+    conn: &Connection,
+) -> Result<std::collections::HashMap<String, String>, AppError> {
+    let mut map = std::collections::HashMap::new();
+    let mut stmt = match conn.prepare("SELECT file_path, content_hash FROM wiki_index_manifest") {
+        Ok(s) => s,
+        Err(_) => return Ok(map), // table missing — treat as empty.
+    };
+    let rows =
+        stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+    for row in rows {
+        let (path, hash) = row?;
+        map.insert(path, hash);
+    }
+    Ok(map)
+}
+
+/// Atomically replace the `wiki_index_manifest` table contents with the given
+/// `(rel_path, hash)` rows. `DELETE` + batch `INSERT` in one call.
+pub fn write_manifest(conn: &Connection, rows: &[(String, String)]) -> Result<(), AppError> {
+    conn.execute_batch("DELETE FROM wiki_index_manifest;")?;
+    let mut stmt =
+        conn.prepare("INSERT INTO wiki_index_manifest (file_path, content_hash) VALUES (?1, ?2);")?;
+    for (path, hash) in rows {
+        stmt.execute(rusqlite::params![path, hash])?;
+    }
+    Ok(())
+}
+
+/// Decide whether the FTS5 index needs a rebuild given the on-disk per-file
+/// hashes vs the stored manifest.
+///
+/// - Returns `true` if any file's content hash changed OR the path set
+///   changed (file added/removed).
+/// - Returns `false` if every path has the same content hash AND the path
+///   sets are identical (e.g. only `touch` changed mtimes).
+#[must_use]
+pub fn manifest_drifted(
+    stored: &std::collections::HashMap<String, String>,
+    disk: &[(String, String)],
+) -> bool {
+    if stored.len() != disk.len() {
+        return true;
+    }
+    disk.iter().any(|(path, hash)| stored.get(path).map(String::as_str) != Some(hash.as_str()))
+}
+
+/// Read the stored tier-1 directory fingerprint from `app_settings`.
+/// `None` means "no baseline yet" (first run, or the setting was cleared by a
+/// schema rebuild/reset).
+#[must_use]
+pub fn get_dir_hash(conn: &Connection) -> Option<String> {
+    app_settings_repo::get_setting(conn, WIKI_DIR_HASH_KEY).ok().flatten()
+}
+
+/// Write the tier-1 directory fingerprint to `app_settings`. Non-fatal: errors
+/// are logged to stderr but do not fail the caller (the next check re-derives
+/// it from disk).
+pub fn set_dir_hash(conn: &Connection, hash: Option<&str>) {
+    if let Err(e) = app_settings_repo::set_setting(conn, WIKI_DIR_HASH_KEY, hash) {
+        eprintln!("[wiki] warning: failed to persist wiki_dir_hash: {e}");
+    }
+}
+
+/// Full rebuild of FTS5 + manifest + dir hash in one shot.
+///
+/// Use this from every internal mutation path (`wiki_update_page`,
+/// `wiki_delete_page`, `finalize_ingest`) so the manifest stays in sync with
+/// the index. Without it, the on-demand check would false-positive a drift on
+/// the next run after an internal edit.
+///
+/// Does both the file reads and the DB writes; safe to call from synchronous
+/// command handlers (the existing mutation paths already do this).
+pub fn rebuild_index_with_manifest(conn: &Connection, root: &Path) -> Result<usize, AppError> {
+    // Filesystem: collect pages + compute per-file hashes.
+    let rows = collect_page_rows(root)?;
+    let file_hashes = compute_file_hashes(&rows)?;
+    let dir_hash = compute_directory_fingerprint(&rows);
+
+    // DB: wipe + rebuild FTS5, rewrite manifest, update dir hash.
+    conn.execute_batch(&format!("DELETE FROM {FTS_TABLE};"))?;
+    ensure_table(conn)?;
+    let wiki_dir = root.join("wiki");
+    insert_page_rows(conn, &rows, &wiki_dir)?;
+    write_manifest(conn, &file_hashes)?;
+    set_dir_hash(conn, dir_hash.as_deref());
+    Ok(rows.len())
+}
+
+/// Lowercase hex encoding (no external dep). Mirrors `raw_export::hex_encode`.
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
 }
 
 /// A search hit returned by `search`.
@@ -737,5 +978,119 @@ mod tests {
         let hits = search(&conn, "sugar", 5).unwrap();
         assert!(hits.iter().all(|h| h.slug == "sugar-tax"), "log.md must not surface in search");
         assert_eq!(hits.len(), 1);
+    }
+
+    // ── Two-tier drift detection helpers ───────────────────────────────
+
+    #[test]
+    fn compute_directory_fingerprint_none_for_empty() {
+        let rows: Vec<PageRow> = Vec::new();
+        assert!(compute_directory_fingerprint(&rows).is_none());
+    }
+
+    #[test]
+    fn compute_directory_fingerprint_changes_on_body_edit() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "alpha body v1");
+
+        let rows1 = collect_page_rows(root).unwrap();
+        let hash1 = compute_directory_fingerprint(&rows1).unwrap();
+
+        // Edit the body; the stat-based fingerprint changes (mtime + size).
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "alpha body v2 with more words");
+
+        let rows2 = collect_page_rows(root).unwrap();
+        let hash2 = compute_directory_fingerprint(&rows2).unwrap();
+        assert_ne!(hash1, hash2, "fingerprint must change when a file is edited");
+    }
+
+    #[test]
+    fn compute_directory_fingerprint_is_order_independent() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "zebra", "Zebra", "z");
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "a");
+
+        let mut rows = collect_page_rows(root).unwrap();
+        let hash1 = compute_directory_fingerprint(&rows).unwrap();
+        rows.reverse();
+        let hash2 = compute_directory_fingerprint(&rows).unwrap();
+        assert_eq!(hash1, hash2, "fingerprint must be order-independent (sorted by rel_path)");
+    }
+
+    #[test]
+    fn manifest_drifted_detects_content_change() {
+        let mut stored = std::collections::HashMap::new();
+        stored.insert("wiki/concepts/alpha.md".to_string(), "hash-a-v1".to_string());
+        stored.insert("wiki/concepts/beta.md".to_string(), "hash-b-v1".to_string());
+
+        let disk_same = vec![
+            ("wiki/concepts/alpha.md".to_string(), "hash-a-v1".to_string()),
+            ("wiki/concepts/beta.md".to_string(), "hash-b-v1".to_string()),
+        ];
+        assert!(!manifest_drifted(&stored, &disk_same), "identical hashes -> no drift");
+
+        let disk_changed = vec![
+            ("wiki/concepts/alpha.md".to_string(), "hash-a-v2".to_string()),
+            ("wiki/concepts/beta.md".to_string(), "hash-b-v1".to_string()),
+        ];
+        assert!(manifest_drifted(&stored, &disk_changed), "changed hash -> drift");
+    }
+
+    #[test]
+    fn manifest_drifted_detects_path_set_change() {
+        let mut stored = std::collections::HashMap::new();
+        stored.insert("wiki/concepts/alpha.md".to_string(), "hash-a".to_string());
+
+        // Added file.
+        let disk_added = vec![
+            ("wiki/concepts/alpha.md".to_string(), "hash-a".to_string()),
+            ("wiki/concepts/beta.md".to_string(), "hash-b".to_string()),
+        ];
+        assert!(manifest_drifted(&stored, &disk_added), "added file -> drift");
+
+        // Removed file.
+        let disk_removed: Vec<(String, String)> = Vec::new();
+        assert!(manifest_drifted(&stored, &disk_removed), "removed file -> drift");
+    }
+
+    #[test]
+    fn rebuild_index_with_manifest_writes_manifest_and_dir_hash() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_wiki_page(root, "concepts", "alpha", "Alpha", "alpha body");
+        write_wiki_page(root, "authors", "jane", "Jane", "jane body");
+
+        let conn = Connection::open_in_memory().unwrap();
+        // Note: no run_migrations here; the manifest table is created by the
+        // v002 migration. Use an empty in-memory DB + create the table manually
+        // so this test doesn't depend on the full migration suite.
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE wiki_index_manifest (
+                 file_path TEXT PRIMARY KEY,
+                 content_hash TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        ensure_table(&conn).unwrap();
+
+        let count = rebuild_index_with_manifest(&conn, root).unwrap();
+        assert_eq!(count, 2);
+
+        // Manifest has 2 rows.
+        let manifest = read_manifest(&conn).unwrap();
+        assert_eq!(manifest.len(), 2);
+
+        // Dir hash is populated.
+        assert!(get_dir_hash(&conn).is_some());
+
+        // A second call is idempotent: same manifest + dir hash, no duplicates.
+        let count2 = rebuild_index_with_manifest(&conn, root).unwrap();
+        assert_eq!(count2, 2);
+        let manifest2 = read_manifest(&conn).unwrap();
+        assert_eq!(manifest2.len(), 2);
     }
 }

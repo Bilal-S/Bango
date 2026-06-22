@@ -93,11 +93,13 @@ pub fn finalize_ingest(
     root: &Path,
     report: &mut IngestReport,
 ) -> Result<(), AppError> {
-    // Rebuild the FTS5 index.
+    // Rebuild the FTS5 index + the drift-detection manifest + dir hash in one
+    // shot so the on-demand `wiki_check_for_updates` doesn't false-positive a
+    // drift immediately after an ingest.
     if let Err(e) = fts::ensure_table(conn) {
         report.errors.push(format!("FTS table creation failed: {e}"));
     }
-    if let Err(e) = fts::rebuild_index(conn, root) {
+    if let Err(e) = fts::rebuild_index_with_manifest(conn, root) {
         report.errors.push(format!("FTS rebuild failed: {e}"));
     }
 

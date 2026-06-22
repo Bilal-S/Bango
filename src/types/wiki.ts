@@ -179,3 +179,11 @@ export interface RawFileEntry {
   sourceFile: string | null;
   status: string;
 }
+
+/** Result of `wiki_check_for_updates`: whether external edits were re-indexed. */
+export interface CheckUpdatesResult {
+  /** `true` when drift was detected and the FTS5 index + manifest were rebuilt. */
+  rebuilt: boolean;
+  /** Number of pages currently in the index. */
+  pagesReindexed: number;
+}

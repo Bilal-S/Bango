@@ -2,10 +2,15 @@
 import { ref, watch, computed } from 'vue';
 import { useWiki } from '@/composables/use-wiki';
 import { renderWikiMarkdown } from '@/utils/wiki-markdown';
+import { highlightSearchTerms } from '@/utils/highlight';
 import type { WikiPage, WikiSourceInfo, RawFileEntry } from '@/types/wiki';
 
 const props = defineProps<{
   slug: string | null;
+  /** Optional sidebar search query. When non-empty, occurrences of the search
+   *  terms in the rendered body are wrapped in `<mark class="wiki-search-highlight">`
+   *  so the user can see where the term appears. Default empty (no highlight). */
+  highlightQuery?: string;
 }>();
 
 const emit = defineEmits<{
@@ -139,7 +144,7 @@ function sourceDisplayName(artId: string): string {
  */
 const renderedBody = computed(() => {
   if (!page.value) return '';
-  return renderWikiMarkdown(page.value.body, {
+  const html = renderWikiMarkdown(page.value.body, {
     sources: sources.value,
     pageTitles: pageTitles.value,
     // Author pages: each publication's [^art-{uuid}] ref should open the wiki
@@ -148,6 +153,9 @@ const renderedBody = computed(() => {
     // the bottom of the author page covers direct article access.
     linkArtRefsToSynthesis: page.value.pageType === 'author',
   });
+  // Apply search-term highlighting (yellow <mark>) when a sidebar query is
+  // active. Operates only on text segments - tags/attributes are untouched.
+  return props.highlightQuery ? highlightSearchTerms(html, props.highlightQuery) : html;
 });
 
 /** Load the page when the slug changes. */
@@ -393,6 +401,14 @@ watch(() => props.slug, loadPage, { immediate: true });
   color: rgb(148 163 184);
   background: rgb(241 245 249);
   border-color: rgb(226 232 240);
+}
+
+/* Search-term highlight (active sidebar search query). */
+.wiki-page-viewer :deep(.wiki-search-highlight) {
+  background: rgb(253 224 71); /* yellow-300 */
+  color: rgb(15 23 42);
+  padding: 0 0.125rem;
+  border-radius: 0.125rem;
 }
 
 .wiki-page-viewer__sources {

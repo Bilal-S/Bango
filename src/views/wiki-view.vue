@@ -5,6 +5,7 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 import { useWiki } from '@/composables/use-wiki';
 import { useNavHistory } from '@/composables/use-nav-history';
 import { isMacPlatform } from '@/utils/platform';
+import { debounce } from '@/utils/debounce';
 import type { WikiPageSummary } from '@/types/wiki';
 import WikiToolbar from '@/components/wiki/wiki-toolbar.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
@@ -31,6 +32,7 @@ const {
   stopProgressListener,
   exportAndIngest,
   rebuild,
+  checkForUpdates,
 } = useWiki();
 
 const {
@@ -53,6 +55,34 @@ const checkingLlm = ref(true);
 const isLlmConfigured = ref(false);
 
 const pages = ref<WikiPageSummary[]>([]);
+
+// -- Full-text sidebar search ----------------------------------------------
+// The sidebar search unions two sources:
+// 1. Client-side filter (instant, per keystroke): title/summary/slug.
+// 2. FTS5 BM25 search (debounced 250ms, backend): searches body content too.
+// The index is kept fresh by the drift-detection feature.
+const searchHits = ref<Set<string> | null>(null);
+const isSearching = ref(false);
+
+const runSearch = debounce(async (query: string) => {
+  if (query !== searchQuery.value.trim()) return;
+  isSearching.value = true;
+  try {
+    const hits = await searchWiki(query, 100);
+    if (query === searchQuery.value.trim()) {
+      searchHits.value = new Set(hits.map((h) => h.slug));
+    }
+  } catch {
+    if (query === searchQuery.value.trim()) {
+      searchHits.value = null;
+    }
+  } finally {
+    if (query === searchQuery.value.trim()) {
+      isSearching.value = false;
+    }
+  }
+}, 250);
+
 // Browser-like page navigation history (back/forward). `selectedSlug` is a
 // read-only computed alias over the history's current entry so the template
 // reads stay unchanged; all mutations go through `navHistory.navigate()` /
@@ -92,13 +122,25 @@ const hasPages = computed(() => pages.value.length > 0);
 
 const filteredPages = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return pages.value;
-  return pages.value.filter(
+  if (!q) {
+    return pages.value;
+  }
+  // Client-side instant filter on metadata fields.
+  const clientMatches = pages.value.filter(
     (p) =>
       p.title.toLowerCase().includes(q) ||
       p.summary.toLowerCase().includes(q) ||
       p.slug.toLowerCase().includes(q)
   );
+  // Union with FTS5 body-content matches (when available).
+  if (searchHits.value && searchHits.value.size > 0) {
+    const clientSlugs = new Set(clientMatches.map((p) => p.slug));
+    const ftsOnly = pages.value.filter(
+      (p) => searchHits.value!.has(p.slug) && !clientSlugs.has(p.slug)
+    );
+    return [...clientMatches, ...ftsOnly];
+  }
+  return clientMatches;
 });
 
 const pagesByType = computed(() => {
@@ -125,7 +167,31 @@ onMounted(async () => {
   await loadPages();
   // Auto-ingest if wiki is stale (articles changed since last ingest).
   await autoIngestIfStale();
+  // On-demand drift check: detect external edits to wiki .md files and
+  // re-index transparently. Runs lock-free on the backend; the toast drives
+  // the UX. Debounced 30s so navigation back-and-forth doesn't re-check.
+  await checkForUpdatesOnMount();
 });
+
+/**
+ * Trigger the on-mount drift check. Silently skips when the wiki is not
+ * initialized or when the debounce window is active. When drift is detected
+ * and re-indexed, refreshes the page list + graph so the user sees the new
+ * content immediately.
+ */
+async function checkForUpdatesOnMount(): Promise<void> {
+  if (!status.value?.initialized) return;
+  try {
+    const result = await checkForUpdates(false);
+    if (result?.rebuilt) {
+      toast.show(`Wiki updated: ${result.pagesReindexed} pages re-indexed.`, 'success');
+      await loadPages();
+      graphPanelRef.value?.refresh();
+    }
+  } catch {
+    // Non-fatal: the manual "Check for Updates" toolbar button is available.
+  }
+}
 
 /**
  * Initialize + rebuild in one click. Used by the inline "Initialize Your Wiki"
@@ -338,14 +404,14 @@ onUnmounted(() => {
   stopProgressListener();
 });
 
-watch(searchQuery, async (q) => {
-  if (q && q.trim().length >= 3) {
-    try {
-      const hits = await searchWiki(q.trim(), 50);
-      void hits;
-    } catch {
-      // Fallback to client-side filtering.
-    }
+watch(searchQuery, (q) => {
+  const trimmed = q.trim();
+  if (trimmed.length >= 2) {
+    searchHits.value = null;
+    void runSearch(trimmed);
+  } else {
+    searchHits.value = null;
+    isSearching.value = false;
   }
 });
 </script>
@@ -513,7 +579,7 @@ watch(searchQuery, async (q) => {
             placeholder="Search pages..."
           />
           <div class="mt-1 text-[10px] text-slate-400">
-            {{ filteredPages.length }} of {{ pages.length }} pages
+            {{ isSearching ? 'Searching...' : `${filteredPages.length} of ${pages.length} pages` }}
           </div>
         </div>
         <div class="flex-1 overflow-y-auto">
@@ -598,6 +664,7 @@ watch(searchQuery, async (q) => {
         <WikiPageViewer
           v-if="mode === 'view'"
           :slug="selectedSlug"
+          :highlight-query="searchQuery"
           @navigate="navigateToPage"
           @view-article="viewArticle"
           @open-source="openSource"

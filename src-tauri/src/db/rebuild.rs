@@ -49,6 +49,11 @@ const DROP_TABLES: &[&str] = &[
     // pages are next read. Safe for the legacy upgrade path: the wiki
     // directory on disk is preserved, so the index is rebuilt from it.
     "wiki_pages_fts",
+    // Wiki index manifest: per-file content hashes used by
+    // `wiki_check_for_updates` to detect external edits. A derived cache
+    // (created by migration v002) that self-heals from disk on the next
+    // check, exactly like `wiki_pages_fts`.
+    "wiki_index_manifest",
 ];
 
 /// Indexes created by migrations that must be dropped alongside their tables.

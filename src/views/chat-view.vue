@@ -42,7 +42,7 @@ const wikiSlug = computed(() => wikiNavStack.value[wikiNavStack.value.length - 1
  *  bare UUIDs in wiki-sourced chat bubbles can render as synthesis-styled
  *  chips with human-readable titles instead of raw UUIDs. */
 const wikiPageTitles = ref<Map<string, string>>(new Map());
-const { listPages: wikiListPages } = useWiki();
+const { listPages: wikiListPages, checkForUpdates: wikiCheckForUpdates } = useWiki();
 
 /**
  * Derived source-metadata map (article id -> WikiSourceInfo) built reactively
@@ -136,6 +136,20 @@ async function checkWikiStatus() {
     chatStore.setWikiReady(false);
   } finally {
     checkingWiki.value = false;
+  }
+
+  // When the wiki is ready, proactively run the on-demand drift check so
+  // wiki-mode chat answers reflect any external edits made since the last
+  // visit. Runs lock-free on the backend; debounced 30s via useWiki.
+  if (chatStore.wikiReady) {
+    try {
+      const result = await wikiCheckForUpdates(false);
+      if (result?.rebuilt) {
+        toast.show(`Wiki updated: ${result.pagesReindexed} pages re-indexed.`, 'success');
+      }
+    } catch {
+      // Non-fatal: wiki chat still works with the existing index.
+    }
   }
 }
 

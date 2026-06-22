@@ -279,6 +279,7 @@ pub fn run() {
             commands::wiki_cmd::wiki_list_sources,
             commands::wiki_cmd::wiki_rebuild,
             commands::wiki_cmd::wiki_export_and_ingest,
+            commands::wiki_cmd::wiki_check_for_updates,
         ]);
 
     #[cfg(debug_assertions)]
