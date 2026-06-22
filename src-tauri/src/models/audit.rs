@@ -34,6 +34,7 @@ pub enum AuditAction {
     DedupAuto,
     ReferenceImport,
     ReferenceMatch,
+    WikiIngestError,
 }
 
 impl AuditAction {
@@ -56,6 +57,7 @@ impl AuditAction {
             Self::DedupAuto => "dedup_auto",
             Self::ReferenceImport => "reference_import",
             Self::ReferenceMatch => "reference_match",
+            Self::WikiIngestError => "wiki_ingest_error",
         }
     }
 }

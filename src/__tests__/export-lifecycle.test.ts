@@ -54,8 +54,20 @@ vi.mock('@/stores/screening', () => ({
     fetchIfNeeded: vi.fn().mockResolvedValue(undefined),
   })),
 }));
+
+// Singleton mocks for wiki + chat: return the same object instance on every
+// call so test assertions on `resetState` / `setWikiReady` observe the same
+// mock fn the composable used internally.
+const wikiResetStateMock = vi.fn();
+const chatSetWikiReadyMock = vi.fn();
+vi.mock('@/stores/chat', () => ({
+  useChatStore: vi.fn(() => ({ setWikiReady: chatSetWikiReadyMock })),
+}));
 vi.mock('@/composables/use-summary', () => ({
   useSummary: vi.fn(() => ({ clearSummary: vi.fn() })),
+}));
+vi.mock('@/composables/use-wiki', () => ({
+  useWiki: vi.fn(() => ({ resetState: wikiResetStateMock })),
 }));
 
 import { save } from '@tauri-apps/plugin-dialog';
@@ -332,6 +344,18 @@ describe('useExport', () => {
       expect(error.value).toBeNull();
     });
 
+    it('resets wiki singleton and clears chat wiki readiness', async () => {
+      // Delete All Data also wipes the on-disk wiki; the composable must reset
+      // the wiki singleton state and the chat store's wikiReady flag.
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+      const { resetProject } = useExport();
+      await resetProject();
+
+      expect(wikiResetStateMock).toHaveBeenCalledTimes(1);
+      expect(chatSetWikiReadyMock).toHaveBeenCalledWith(false);
+    });
+
     it('sets error on reset failure', async () => {
       vi.mocked(tauriCommand).mockRejectedValue(new Error('Reset failed'));
 
@@ -340,6 +364,9 @@ describe('useExport', () => {
 
       expect(result).toBe(false);
       expect(error.value).toBe('Reset failed');
+      // Wiki/chat reset is skipped when the backend reset fails.
+      expect(wikiResetStateMock).not.toHaveBeenCalled();
+      expect(chatSetWikiReadyMock).not.toHaveBeenCalled();
     });
   });
 });

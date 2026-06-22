@@ -22,6 +22,7 @@ const BiblioAuthors = () => import('@/views/biblio-authors.vue');
 const BiblioCocitations = () => import('@/views/biblio-cocitations.vue');
 const HelpGuide = () => import('@/views/help-guide.vue');
 const ChatView = () => import('@/views/chat-view.vue');
+const WikiView = () => import('@/views/wiki-view.vue');
 
 const routes = [
   { path: '/', name: 'dashboard', component: Dashboard },
@@ -95,6 +96,11 @@ const routes = [
     name: 'chat',
     component: ChatView,
   },
+  {
+    path: '/wiki',
+    name: 'wiki',
+    component: WikiView,
+  },
   { path: '/settings', name: 'settings', component: SettingsView },
   { path: '/help', name: 'help', component: HelpGuide },
 ];
@@ -122,6 +128,7 @@ void router.isReady().then(() => {
     import('@/views/biblio-authors.vue'),
     import('@/views/biblio-cocitations.vue'),
     import('@/views/chat-view.vue'),
+    import('@/views/wiki-view.vue'),
   ]);
 });
 

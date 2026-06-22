@@ -1,0 +1,227 @@
+/**
+ * Markdown typography styles for rendered wiki content.
+ *
+ * Applied to `.markdown-content` containers (wiki-page-viewer, wiki-page-editor preview).
+ * Uses `:deep()`-friendly plain selectors since content is injected via `v-html`.
+ */
+
+.markdown-content {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: rgb(30 41 59);
+  word-wrap: break-word;
+}
+
+/* Headings */
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  font-weight: 700;
+  color: rgb(15 23 42);
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.3;
+}
+
+.markdown-content h1 {
+  font-size: 1.5rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 2px solid rgb(226 232 240);
+}
+
+.markdown-content h2 {
+  font-size: 1.25rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid rgb(241 245 249);
+}
+
+.markdown-content h3 {
+  font-size: 1.1rem;
+}
+
+.markdown-content h4 {
+  font-size: 1rem;
+}
+
+.markdown-content h5 {
+  font-size: 0.9rem;
+  color: rgb(71 85 105);
+}
+
+.markdown-content h6 {
+  font-size: 0.85rem;
+  color: rgb(100 116 139);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Paragraphs */
+.markdown-content p {
+  margin: 0.75rem 0;
+}
+
+/* Links */
+.markdown-content a {
+  color: rgb(79 70 229);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-content a:hover {
+  color: rgb(67 56 202);
+}
+
+/* Lists */
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
+}
+
+.markdown-content ul {
+  list-style-type: disc;
+}
+
+.markdown-content ol {
+  list-style-type: decimal;
+}
+
+.markdown-content li {
+  margin: 0.25rem 0;
+}
+
+.markdown-content li > ul,
+.markdown-content li > ol {
+  margin: 0.25rem 0;
+}
+
+/* Task lists (GFM) */
+.markdown-content li:has(> input[type='checkbox']) {
+  list-style: none;
+  margin-left: -1.25rem;
+}
+
+.markdown-content input[type='checkbox'] {
+  margin-right: 0.5rem;
+  accent-color: rgb(99 102 241);
+}
+
+/* Tables */
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  display: block;
+}
+
+.markdown-content thead {
+  background: rgb(248 250 252);
+}
+
+.markdown-content th {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font-weight: 600;
+  color: rgb(15 23 42);
+  border: 1px solid rgb(226 232 240);
+  white-space: nowrap;
+}
+
+.markdown-content td {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgb(226 232 240);
+  vertical-align: top;
+}
+
+.markdown-content tbody tr:nth-child(even) {
+  background: rgb(248 250 252);
+}
+
+/* Blockquotes */
+.markdown-content blockquote {
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 4px solid rgb(99 102 241);
+  background: rgb(238 242 255 / 50%);
+  color: rgb(71 85 105);
+  font-style: italic;
+}
+
+.markdown-content blockquote p {
+  margin: 0.25rem 0;
+}
+
+/* Inline code */
+.markdown-content code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8em;
+  background: rgb(241 245 249);
+  color: rgb(190 24 93);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+}
+
+/* Code blocks */
+.markdown-content pre {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: rgb(15 23 42);
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.markdown-content pre code {
+  background: none;
+  color: rgb(226 232 240);
+  padding: 0;
+  font-size: 0.8rem;
+  border-radius: 0;
+}
+
+/* Horizontal rule */
+.markdown-content hr {
+  margin: 1.5rem 0;
+  border: none;
+  border-top: 2px solid rgb(226 232 240);
+}
+
+/* Images */
+.markdown-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+/* Strong / emphasis */
+.markdown-content strong {
+  font-weight: 700;
+  color: rgb(15 23 42);
+}
+
+.markdown-content em {
+  font-style: italic;
+}
+
+/* Strikethrough (GFM) */
+.markdown-content del {
+  text-decoration: line-through;
+  color: rgb(148 163 184);
+}
+
+/* Definition lists (if present) */
+.markdown-content dt {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.markdown-content dd {
+  margin-left: 1.5rem;
+  margin-bottom: 0.5rem;
+}

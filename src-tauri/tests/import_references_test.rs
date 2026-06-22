@@ -69,7 +69,6 @@ mod chen {
     pub const START_PAGE: &str = "404";
     pub const NUM_CITED: i32 = 201; // Total Times Cited
     pub const NUM_REFERENCES: i32 = 89;
-    pub const KW_COUNT_RIS: usize = 10;
 }
 
 /// Record 3: Brodie et al. 2024 - "Forest thinning and prescribed burning..."

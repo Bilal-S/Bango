@@ -200,6 +200,14 @@ watch(
           </button>
           <button
             class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-wiki' }"
+            @click="selectRefSection('ref-wiki')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">local_library</span>
+            Wiki
+          </button>
+          <button
+            class="ref-nav__link"
             :class="{ 'ref-nav__link--active': activeRefSection === 'ref-settings' }"
             @click="selectRefSection('ref-settings')"
           >
@@ -719,6 +727,453 @@ ER  - </pre
                 <strong>Source Citations:</strong> Answers include direct citation badges linking to
                 referenced papers. Clicking a badge opens the corresponding article details panel.
               </li>
+              <li>
+                <strong>Two retrieval modes:</strong> the default <strong>Article Chat</strong>
+                (dumps selected article summaries into the prompt) and the token-optimized
+                <strong>Wiki Chat</strong> (BM25 retrieval over the wiki index - see the
+                <a href="#" @click.prevent="selectRefSection('ref-wiki')">Wiki section</a> for why
+                this scales to hundreds of pages).
+              </li>
+            </ul>
+
+            <h3>Bango Chat vs. Copy-Pasting into a Plain LLM / Obsidian</h3>
+            <p>
+              The defining cost of an LLM query is the <strong>input token count</strong> - the
+              context you send with every question. Bango's two chat modes are engineered to
+              minimize that cost, and the difference compounds with every follow-up question:
+            </p>
+            <div class="ref-comparison-wrapper">
+              <table class="ref-comparison-table">
+                <thead>
+                  <tr>
+                    <th>Approach</th>
+                    <th>Tokens per question</th>
+                    <th>Scales to</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <strong>Bango Article Chat</strong><br />
+                      <span class="text-xs text-slate-500">(<code>send_chat_message</code>)</span>
+                    </td>
+                    <td>
+                      <strong>~7,500 tokens</strong> for 10 articles. Each article's
+                      <code>summary_text</code> (~3,000 chars ÷ 4 chars/token) is re-sent on
+                      <em>every</em> question. Fine for small, targeted selections.
+                    </td>
+                    <td>~20 articles before hitting typical 16K-token context limits.</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <strong>Bango Wiki Chat</strong><br />
+                      <span class="text-xs text-slate-500">(<code>wiki_chat</code>)</span>
+                    </td>
+                    <td>
+                      <strong>~3,000 tokens, flat.</strong> The question is BM25-matched against the
+                      SQLite FTS5 index; only the top 3–5 matching pages are retrieved, capped at a
+                      <code>12,000-char</code> (~3,000-token) budget. Overflow pages are listed as
+                      titles only ("see also").
+                    </td>
+                    <td>
+                      Hundreds of pages. Retrieval picks the relevant subset regardless of corpus
+                      size - a 5-page wiki and a 500-page wiki cost roughly the same.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Manual Obsidian + LLM</strong></td>
+                    <td>
+                      You copy-paste notes by hand. No retrieval, no budgeting - easy to overflow
+                      the context window or pay for tokens you never use.
+                    </td>
+                    <td>Unmanageable past ~10 notes per question.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="ref-callout">
+              <h4>Why the token budget matters</h4>
+              <p>
+                At typical LLM pricing (~$3 / 1M input tokens for mid-tier models), 100 follow-up
+                questions on a 10-article selection costs about <strong>$2.25</strong> in Article
+                Chat vs. <strong>$0.90</strong> in Wiki Chat - and only the latter keeps working as
+                your corpus grows. The FTS5 index is built once (during wiki ingest) and queried
+                offline in milliseconds; there is no per-question embedding API call.
+              </p>
+            </div>
+
+            <h3>Screen Controls & Buttons</h3>
+            <ul>
+              <li>
+                <strong>Article selection <code>(+)</code>:</strong> choose which articles to
+                include as context for Article Chat.
+              </li>
+              <li>
+                <strong>Wiki toggle:</strong> the
+                <span class="material-symbols-outlined ref-inline-icon">local_library</span> icon
+                (right of the <code>(+)</code> button) switches to Wiki Chat mode. Visible only when
+                the wiki is initialized and has pages.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: WIKI -->
+        <section id="ref-wiki" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">local_library</span>
+            <h2 class="ref-section__title">Wiki</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Wiki</strong> is a local-first, Obsidian-style knowledge base that Bango's
+              LLM builds from your <em>included</em> articles. Instead of a flat list of papers, you
+              get a linked, navigable synthesis of concepts, authors, methods, and themes, with
+              every claim traced back to its source article.
+            </p>
+
+            <div class="ref-callout">
+              <h4>Why a Wiki?</h4>
+              <p>
+                A systematic review often ends as a static table. The Wiki turns that table into a
+                living knowledge graph: the LLM extracts entities (sugar tax, SDIL, key authors,
+                methods), cross-links them with <code>[[wikilinks]]</code>, and cites each fact with
+                a source reference like <code>[^art-123]</code> that jumps back to the original
+                article. It is the fastest way to understand the landscape of your corpus.
+              </p>
+            </div>
+
+            <h3>Why Bango Instead of Pure Obsidian?</h3>
+            <p>
+              You can open the generated <code>wiki-root/</code> folder in
+              <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a>
+              as a read-only companion view (the Markdown is fully portable). But Bango and a plain
+              Obsidian vault are not interchangeable - Bango's wiki is the <em>output</em> of a
+              review pipeline that Obsidian has no equivalent of:
+            </p>
+
+            <h4>1. The corpus is already reviewed and normalized</h4>
+            <p>
+              Every page in the Bango wiki is built from articles with
+              <code>status = 'included'</code> - meaning each source has already passed:
+            </p>
+            <ul>
+              <li>
+                <strong>Deduplication</strong> (4 strategies: DOI exact, title+year ≥ 95%, fuzzy
+                70–94%, author+title ≥ 80%).
+              </li>
+              <li>
+                <strong>AI screening</strong> against your aims/criteria with priority-based
+                conflict resolution.
+              </li>
+              <li>
+                <strong>Your manual review</strong> (Include/Reject overrides, full-text attachment,
+                notes).
+              </li>
+              <li>
+                <strong>Bibliometric normalization</strong> - the 8-step
+                <code>biblio_normalize</code> pipeline populates canonical author, keyword, and
+                institution tables that the wiki pre-seeds from (see next point).
+              </li>
+            </ul>
+            <p>
+              In Obsidian, you would manually curate which sources are worth synthesizing - there is
+              no deduplicated, screened, normalized corpus to build on.
+            </p>
+
+            <h4>2. Deterministic 4-layer pre-seed matrix (before the LLM runs)</h4>
+            <p>
+              This is the core advantage. Before the LLM generates a single page, Bango writes a
+              connected graph backbone from the normalized metadata - so the wiki is never missing
+              key structural pages, regardless of which LLM model you use:
+            </p>
+            <div class="ref-comparison-wrapper">
+              <table class="ref-comparison-table">
+                <thead>
+                  <tr>
+                    <th>Layer</th>
+                    <th>What Bango writes deterministically (no LLM)</th>
+                    <th>Obsidian equivalent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Author pages</strong></td>
+                    <td>
+                      One per corpus author, with h-index, total citations, first-author count,
+                      papers/year, frequent collaborators as <code>[[links]]</code> - all derived
+                      from the <code>biblio_authors</code> table, not LLM-hallucinated.
+                    </td>
+                    <td>You write each by hand, or nothing.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Synthesis pages</strong></td>
+                    <td>
+                      One per included article, built from the structured
+                      <code>full_text_ai_summary</code> JSON (summary + key insights). Slug =
+                      article UUID so <code>[^art-uuid]</code> citations resolve.
+                    </td>
+                    <td>One note per paper, written by hand.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Concept hubs</strong></td>
+                    <td>
+                      Top-25 keyword pages, statistically derived from <code>biblio_terms</code>
+                      co-occurrence - not guessed by the LLM.
+                    </td>
+                    <td>You decide what concepts matter, manually.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Source pages</strong></td>
+                    <td>
+                      One per uploaded external document (PDF / web / TXT), so external sources get
+                      a first-class wiki node and their citations resolve.
+                    </td>
+                    <td>Each external doc is an orphan note unless you link it.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              The result: a connected graph (author ↔ synthesis ↔ concept ↔ source) exists
+              <strong>before</strong> the LLM runs. The LLM then enriches it with concept
+              relationships, method groupings, and cross-cutting synthesis - but the backbone is
+              always there.
+            </p>
+
+            <h4>3. Ingest is batched, parallel, and self-consolidating</h4>
+            <p>Bango's ingest engine is designed to handle large corpora efficiently:</p>
+            <ul>
+              <li>
+                <strong>Token-budgeted batching:</strong> raw sources are split into batches sized
+                to <code>40%</code> of your configured context window (the remainder is reserved for
+                the model's output). Example: a 50K-token context → ~80K chars per batch; 20
+                articles × 2,000 chars = 40,000 chars fits in <strong>one</strong> batch.
+              </li>
+              <li>
+                <strong>Parallel dispatch:</strong> all batches run concurrently via a Bango
+                Orchestrator, bounded by your available LLM Context Size. Each batch carries a
+                compact full-source index so the model can link across batches.
+              </li>
+              <li>
+                <strong>Deterministic consolidation:</strong> when multiple batches run, a no-LLM
+                merge pass deduplicates near-identical pages (slug Jaccard similarity ≥ 0.5, or ≥ 2
+                shared source articles), rewrites inbound links to canonical slugs, and unions the
+                frontmatter. This prevents the <code>childhood-obesity</code> vs
+                <code>obesity-childhood</code> fragmentation that independent LLM calls would
+                otherwise produce.
+              </li>
+              <li>
+                <strong>Cost example:</strong> a 50-article corpus on a 128K-token model typically
+                ingests in 2–3 parallel batches (~$0.05–0.10 total at mid-tier pricing). The same
+                corpus processed one-note-at-a-time through an Obsidian plugin would cost 10–50×
+                more in API calls and produce inconsistent cross-linking.
+              </li>
+            </ul>
+
+            <div class="ref-callout">
+              <h4>Obsidian's role</h4>
+              <p>
+                Obsidian shines as a <strong>reading and annotation surface</strong> for the wiki
+                Bango generates - its graph view, backlinks panel, and mobile sync are excellent for
+                exploration. But it cannot <em>produce</em> the wiki: it has no dedup pipeline, no
+                criteria-based screening, no bibliometric normalization, and no batched
+                cross-consolidating LLM ingest. Use Bango to generate and maintain the wiki; use
+                Obsidian (optionally) to read it.
+              </p>
+            </div>
+
+            <h3>Where Your Documents Live</h3>
+            <p>
+              The Wiki is stored as plain Markdown on your disk, as a sibling of the full-text
+              directory:
+            </p>
+            <pre class="ref-code">
+~/Documents/Bango/
+  fulltext/          # article PDFs and text extracts
+  wiki-root/         # the LLM Wiki (plain Markdown)
+    AGENTS.md        # the LLM's workflow contract (read on every ingest)
+    raw/             # sources: article exports and your dropped files
+    wiki/            # generated pages (concepts/ authors/ methods/ synthesis/)
+      log.md         # append-only audit trail of ingest and lint runs
+    templates/       # page skeletons the LLM follows</pre
+            >
+            <p>
+              If you set a custom <strong>Full-Text Storage Directory</strong> in Settings, the
+              wiki-root is placed alongside it. Every file is plain <code>.md</code> - you own it
+              and can edit it in any text editor.
+            </p>
+
+            <h3>Getting Started (General Workflow)</h3>
+            <p>Three prerequisites gate the Wiki, shown as readiness indicators in the toolbar:</p>
+            <ol>
+              <li>
+                <strong>Configure an LLM provider</strong> in Settings (the Wiki uses the LLM to
+                synthesize pages).
+              </li>
+              <li>
+                <strong>Include at least one article</strong> (the Wiki is built from the
+                <code>status = 'included'</code> corpus; rejected/working articles are ignored).
+              </li>
+              <li>
+                Click <strong>Initialize Wiki</strong> (first time) or
+                <strong>Rebuild Wiki</strong> in the Wiki toolbar. The one-click pipeline runs:
+                <ul>
+                  <li>Scaffolds the <code>wiki-root/</code> directory tree</li>
+                  <li>Exports included articles as raw Markdown sources into <code>raw/</code></li>
+                  <li>Processes any user-added documents into companion <code>.md</code> files</li>
+                  <li>
+                    Synthesizes wiki pages via the LLM (concepts, authors, methods, synthesis)
+                  </li>
+                  <li>Builds the FTS5 full-text search index</li>
+                </ul>
+              </li>
+            </ol>
+            <p>
+              After the corpus changes (new imports, status flips to included, full-text attached),
+              the toolbar shows a <strong>stale</strong> badge. Click <strong>Rebuild Wiki</strong>
+              to regenerate.
+            </p>
+
+            <h3>Adding Documents</h3>
+            <p>
+              The <strong>Add Documents</strong> button has two on-ramps:
+              <strong>From Web</strong> (paste one or more URLs; Bango fetches and extracts the
+              text) and <strong>From Local Drive</strong> (pick one or more files). Added documents
+              are processed into companion <code>.md</code> files and a fresh ingest runs
+              automatically. Supported file types:
+            </p>
+            <div class="ref-comparison-wrapper">
+              <table class="ref-comparison-table">
+                <thead>
+                  <tr>
+                    <th>Format</th>
+                    <th>How it is handled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>.pdf</code></td>
+                    <td>Text extracted with the built-in PDF engine (same as full-text attach).</td>
+                  </tr>
+                  <tr>
+                    <td><code>.txt</code> <code>.text</code> <code>.log</code></td>
+                    <td>Read verbatim as plain text.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.html</code> <code>.htm</code></td>
+                    <td>Tags stripped, entities decoded, whitespace collapsed.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.rtf</code></td>
+                    <td>RTF control words stripped to clean text.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.csv</code></td>
+                    <td>Parsed and rendered as a Markdown table.</td>
+                  </tr>
+                  <tr>
+                    <td><code>.md</code></td>
+                    <td>Passed through verbatim.</td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <code>.json</code> <code>.xml</code> source code (<code>.rs</code>
+                      <code>.py</code> <code>.js</code> <code>.ts</code> ...)
+                    </td>
+                    <td>Wrapped in a fenced code block (verbatim, no reformatting).</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <em>Note:</em> Office formats (<code>.docx</code>, <code>.xlsx</code>, etc.) are not
+              supported - export them to PDF or TXT first. Originals you add are always kept as the
+              source of truth; the companion <code>.md</code> is regenerated idempotently.
+            </p>
+
+            <h3>Browsing & Editing Pages</h3>
+            <ul>
+              <li>
+                <strong>Sidebar:</strong> lists all pages grouped by type (Concepts, Authors,
+                Methods, Synthesis). Use the search box to filter by title or summary.
+              </li>
+              <li>
+                <strong>Reading:</strong> <code>[[wikilinks]]</code> are clickable and navigate
+                between pages. Source references (e.g. <code>[^art-123]</code>) open the article
+                detail panel as a slide-over.
+              </li>
+              <li>
+                <strong>Editing:</strong> Click <strong>Edit</strong> on any page to modify its
+                title, summary, and body. The split-pane editor shows a live Markdown preview. Pages
+                you mark <code>status: reviewed</code> are protected from being overwritten by the
+                next LLM ingest.
+              </li>
+              <li>
+                <strong>Graph View:</strong> An interactive network graph of all pages and their
+                links (ForceAtlas2 layout, color-coded by type). Click a node to open that page.
+              </li>
+            </ul>
+
+            <h3>Health Check (Lint)</h3>
+            <p>
+              <strong>Health Check</strong> runs a deterministic check (no LLM required) for broken
+              links, orphan pages (zero inbound links), duplicate slugs, and missing frontmatter.
+              Rebuilding the Wiki regenerates all pages and fixes most link/orphan issues.
+            </p>
+
+            <h3>Chat with Wiki (Token-Optimized RAG)</h3>
+            <p>
+              The article Chat Assistant dumps all selected article abstracts into the prompt, which
+              does not scale to a wiki of hundreds of pages. The
+              <strong>Wiki chat mode</strong> (toggle the Wiki icon in the Chat view, right of the
+              <code>(+)</code> button) uses a token-efficient retrieval design:
+            </p>
+            <ul>
+              <li>
+                <strong>FTS5 BM25 retrieval:</strong> your question is matched against the wiki's
+                SQLite full-text index (offline, no new dependencies). The top matching pages are
+                retrieved, ranked by relevance.
+              </li>
+              <li>
+                <strong>Token budget:</strong> each page's cost is estimated. If the total would
+                exceed 50% of your configured context window, pages are downgraded from their full
+                <code>body</code> to just their <code>summary</code> field - keeping the prompt lean
+                and within limits.
+              </li>
+              <li>
+                <strong>Cited answers:</strong> the assistant responds with citations rendered as
+                clickable links that open a Wiki reader slide-over (with a back-stack for chained
+                navigation).
+              </li>
+            </ul>
+
+            <h3>Using with Obsidian (or any Markdown tool)</h3>
+            <p>
+              Because the Wiki is plain Markdown with <code>[[wikilinks]]</code>, you can open the
+              <code>wiki-root/</code> folder directly in
+              <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a>
+              (free) or any Markdown editor as a read-only companion view. Bango remains the source
+              of truth: edits you make inside Bango rebuild the FTS index, so chat and search stay
+              in sync. Obsidian is <em>optional</em> - everything works inside Bango without it.
+            </p>
+
+            <h3>Deleting & Resetting</h3>
+            <ul>
+              <li>
+                <strong>Delete Wiki</strong> (Wiki toolbar) removes generated pages but keeps raw
+                sources and templates. Rebuild at any time.
+              </li>
+              <li>
+                <strong>Delete All Data</strong> (Settings) wipes the database AND the entire
+                on-disk <code>wiki-root/</code> directory.
+              </li>
+              <li>
+                <strong>Backups:</strong> the <code>.bango.json</code> backup does
+                <strong>not</strong> include the Wiki directory - it lives on disk and must be
+                copied manually if you want to preserve it.
+              </li>
             </ul>
           </div>
         </section>
@@ -877,6 +1332,17 @@ ER  - </pre
 .ref-section__icon {
   color: #4f46e5;
   font-size: 24px;
+}
+
+/* Inline Material Symbols icon within body prose (e.g. the `local_library` wiki
+   toggle reference in the Chat section). Sized to sit on the text baseline. */
+.ref-inline-icon {
+  font-size: 16px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+  color: #4f46e5;
+  user-select: none;
 }
 
 .ref-section__title {

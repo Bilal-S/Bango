@@ -86,12 +86,13 @@ describe each durable boundary so agents can locate the right area. Create a chi
 
 - **`src-tauri/src/`** - Rust backend (Tauri 2.x). Owned modules: `db/` (repos +
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
-  `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`. App entry
+  `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
+  (LLM knowledge base; see `wiki/` entry below). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
   - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
-    `fulltext_storage_dir`, `flag_premium`, and `biblio_needs_refresh` (the bibliometric
-    staleness flag). `mark_biblio_needs_refresh(conn)` is called by every mutation that
+    `fulltext_storage_dir`, `flag_premium`, `biblio_needs_refresh` (the bibliometric
+    staleness flag), and `wiki_needs_refresh` (the LLM Wiki staleness flag). `mark_biblio_needs_refresh(conn)` is called by every mutation that
     changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
     project backup restore in `commands/export_cmd::import_project_backup`,
     reference/citation import + CR extraction + reference promotion in
@@ -99,6 +100,122 @@ describe each durable boundary so agents can locate the right area. Create a chi
     and AI screening completion in `commands/screening.rs`). `clear_biblio_needs_refresh`
     runs only after `biblio_normalize` commits successfully; `get_biblio_needs_refresh`
     powers the frontend `biblio_get_needs_refresh` command. Absent key = fresh (false).
+  - **`src-tauri/src/wiki/`** - LLM Wiki knowledge-base module (all phases complete).
+    Generates and maintains a local-first Obsidian-style Markdown knowledge base from the
+    `included` article corpus. Modules: `storage.rs` (resolves `wiki-root/`, scaffolds
+    `raw/`, `wiki/{concepts,authors,methods,synthesis}/`, `templates/`, `AGENTS.md`,
+    `log.md`), `agents_contract.rs` (ingest + lint rules contract), `templates.rs` (page
+    templates), `frontmatter.rs` (dependency-free YAML parser/serializer),
+    `raw_export.rs` (included-article export + user-file extraction for PDF/TXT/HTML/etc),
+    `fts.rs` (FTS5 BM25 search index), `ingest.rs` (LLM page generation: prompt builder,
+    `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild, **parallel chunked
+    ingest**), `engine.rs` (deterministic lint + `build_graph` for link graph
+    visualization), `chat.rs` (token-budgeted RAG chat over FTS5 index; self-heals the
+    FTS table via `fts::ensure_index_populated` when the index is empty OR its row count
+    mismatches the number of `.md` pages on disk).
+    **Parallel chunked ingest** (`ingest.rs`): `wiki_ingest`, `wiki_rebuild`, and
+    `wiki_export_and_ingest` no longer make one monolithic LLM call. They split raw
+    sources into batches sized to `config.context_window_tokens * 0.4` (input budget;
+    remainder is available for output pages), dispatch all batches concurrently via a
+    `tokio::task::JoinSet` (bounded by the orchestrator's `max_concurrent_requests`
+    semaphore), and emit `wiki:progress` on every batch completion so the progress bar
+    moves smoothly across the 25-95% range. Each batch carries a compact full-source
+    index (title + slug) so the model can `[[link]]` across batches without sequential
+    slug-forwarding. Per-batch failures are tolerated (recorded in `report.errors`;
+    other batches still write). Key types: `IngestBatch`, `IngestLlmSender` (injectable
+    trait; production `OrchestratorIngestSender`, test `FakeSender`),
+    `build_ingest_prompt_batches`, `run_chunked_ingest`. The legacy single-call
+    `build_ingest_prompt` + `write_pages_from_response` remain for backward compat and
+    regression tests.
+    **Multi-batch consolidation** (gated on `batches.len() > 1`): when the corpus
+    splits into multiple parallel batches, independent batches often produce
+    near-duplicate pages for the same concept (`childhood-obesity` vs
+    `obesity-childhood`). To prevent fragmentation, `run_chunked_ingest` collects all
+    `ParsedPage`s across batches, runs a **deterministic** `consolidate_pages` pass
+    (no LLM merge calls), rewrites inbound `[[wikilinks]]` to canonical slugs via
+    `rewrite_page_links`, then writes the consolidated set. Detection: two
+    same-type (non-author) pages merge when (a) slugs match case-insensitively, OR
+    (b) stemmed-token Jaccard similarity of slugs >= `DEDUP_JACCARD_THRESHOLD` (0.5),
+    OR (c) they share >= `DEDUP_SHARED_SOURCES_MIN` (2) `source_articles`. Merge is
+    lossless: the duplicate body is appended under `## Additional perspectives`;
+    `source_articles` + `tags` are unioned. Author pages are pre-seeded and excluded
+    from merging. `AuthorManifest` + `preseed_authors` + `build_author_manifest`
+    derive canonical author slugs from `biblio_authors` (populated by running
+    `run_full_normalization` first - the full 8-step bibliometric pipeline
+    extracted into a pure `pub fn run_full_normalization(conn)` in
+    `biblio_repo/normalization.rs` and shared by both `biblio_normalize` and the
+    wiki ingest path, so there is no raw-frontmatter fallback) and inject a
+    "DO NOT create author pages" section into every batch prompt so batches link
+    to the same author slugs instead of inventing their own. Each pre-seeded
+    author page is a rich hub: metrics line (h-index, total citations,
+    first-author count, papers/year), Publications list with `[^art-id]`
+    footnotes + real `source_articles` frontmatter, Research Areas
+    (deduplicated keywords aggregated from `biblio_article_terms`), and
+    Frequent Collaborators (`[[author-slug]]` links derived from shared-paper
+    counts).
+    Single-batch runs (`batches.len() == 1`) skip all consolidation - the LLM sees
+    all sources at once and produces a self-consistent page set, so the manifest,
+    pre-seed, dedup, and link rewrite are zero-cost no-ops.
+    **Deterministic 4-layer pre-seed matrix** (`build_batches_with_manifest` in
+    `commands/wiki_cmd.rs`, runs unconditionally before the LLM on every
+    single-batch AND multi-batch run): (1) `preseed_authors` writes rich author
+    pages from `biblio_authors` (metrics, publications, research areas,
+    collaborators); (2) `preseed_synthesis_from_ai_summaries` writes one
+    `wiki/synthesis/{article_id}.md` per included article that has a
+    `full_text_ai_summary` JSON blob — slug = article UUID (so `[[uuid]]` links
+    resolve), body = `summary_150_250_words` digest + `key_insights` bullets,
+    `tags` = keyword-derived `[[concept-slug]]` candidates; (3)
+    `preseed_concept_hubs` writes top-25 `wiki/concepts/{term-slug}.md` hub
+    pages from `biblio_terms`, each linking to its articles (`[[uuid]]`) +
+    co-occurring concepts; (4) **`preseed_document_source_pages`** writes one
+    `wiki/sources/{user-slug}.md` per user-uploaded document (Add Documents →
+    PDF/TXT/web, identified by `source_kind: user_*`) so external documents get
+    a first-class wiki node and `[^art-user-slug]` / `[[user-slug]]` citations
+    resolve to a navigable page instead of "Page not found". This layer mirrors
+    the article→synthesis symmetry: every raw source has a corresponding wiki
+    node. All four respect `status: reviewed` (user-edited) pages. Together they
+    form a connected graph backbone (author ↔ synthesis ↔ concept ↔ source) that
+    exists before the LLM runs, so the wiki is never missing
+    author/synthesis/concept/source pages regardless of which LLM model is used.
+    Tested in `wiki_deterministic_test.rs`. Design + phases 4-5 (LLM prompt
+    narrowing, `concepts` field in AI summary schema) in
+    `.worktrees/wiki-improvement-plan.md`; external-document ingestion +
+    linking design in `.worktrees/wiki-improvement-plan2.md`.
+    `commands/wiki_cmd.rs` exposes
+    all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
+    `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
+    `wiki_get_page`, `wiki_update_page`, `wiki_delete_page`, `wiki_delete_wiki`,
+    `wiki_chat`, `wiki_get_graph`, `wiki_ingest`, `wiki_list_pages`, `wiki_list_sources`,
+    `wiki_search` rebuilds the FTS index if empty, `wiki_update_page` / `wiki_delete_page`
+    rebuild it on every edit/delete so chat + search stay in sync with user changes.
+    `wiki_rebuild` (one-click full pipeline: scaffold + export + ingest + FTS5, emits
+    `wiki:progress` events), `wiki_export_and_ingest` (export + ingest after Add Documents).
+    **Self-healing init guard**: `ensure_initialized(root)` writes `AGENTS.md` when
+    missing; called at the top of `wiki_init`, `wiki_ingest`, `wiki_rebuild`, and
+    `wiki_export_and_ingest` so an uninitialized wiki transparently recovers instead of
+    leaving generated pages invisible behind the wiki-view "Initialize" empty-state gate
+    (`initialized` is `AGENTS.md`-presence-based). Idempotent: never overwrites an existing
+    `AGENTS.md`. Tested in `wiki_ensure_initialized_test.rs`.
+    The `wiki_needs_refresh` flag triple lives in `app_settings_repo.rs`; cleared after
+    `wiki_ingest`/`wiki_rebuild` commits. Frontend: `wiki-view.vue` (sidebar + viewer +
+    editor + graph + article detail slide-over), `wiki-toolbar.vue` (Re-scaffold, Add
+    Documents, Lint, Delete Wiki, progress bar), `wiki-page-viewer.vue` (Markdown render via
+    the shared `src/utils/wiki-markdown.ts` - `[[wikilink]]` + `[^art-id]` source ref
+    resolution), `wiki-page-editor.vue` (split-pane editor), `wiki-graph-panel.vue`
+    (sigma + ForceAtlas2 graph). Node labels truncate to 25 chars + ellipsis
+    on the canvas; a Vue hover tooltip (mirroring `citation-network-graph.vue`)
+    shows the full title + page `summary` + inbound/outbound counts via
+    sigma's `moveBody` event. The `GraphNode.summary` field is populated from
+    frontmatter by `engine::build_graph`. Composable: `use-wiki.ts`.
+    Design and phasing: `.worktrees/llmwiki-plan.md`.
+    **Chat-with-Wiki integration**: `useChatStore.source: 'articles'|'wiki'` (mutually
+    exclusive) switches the `/chat` view between `send_chat_message` (article RAG) and
+    `wiki_chat` (BM25 FTS5 RAG). A Wiki toggle button (icon `local_library`) in `chat-view.vue`
+    sits right of the `(+)` icon, visible only when `wikiReady` (wiki initialized AND
+    `pageCount > 0`). Wiki-sourced assistant bubbles render via `src/utils/wiki-markdown.ts`
+    so `[[slug]]` citations become clickable links that open a right-side Wiki reader
+    slide-over (`WikiPageViewer` with a back-stack). The wiki-toolbar no longer owns a
+    Chat button.
   - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
@@ -121,7 +238,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     via `sqlite_master` (the old and new v1 migrations both set `user_version=1`, so the pragma
     cannot be trusted). `rebuild_schema` is the shared drop-all-tables (preserving
     `journal_index`) + reset `user_version=0` + re-run migrations helper used by both
-    `commands::export_cmd::reset_project` and the legacy upgrade path.
+    `commands::export_cmd::reset_project` and the legacy upgrade path. `DROP_TABLES` includes
+    the lazily-created `wiki_pages_fts` FTS5 virtual table (it is not created by migrations);
+    it self-heals via `fts::ensure_index_populated` on the next wiki read. `reset_project`
+    additionally deletes the entire on-disk `wiki-root/` directory (resolved BEFORE the schema
+    rebuild, while `app_settings` still holds the path config); wiki deletion is non-fatal.
   - **`src-tauri/src/commands/startup.rs`** - exposes `get_startup_status` and
     `perform_legacy_upgrade` (one-shot: `export_legacy_project` -> write backup to
     `app_data_dir` -> `rebuild_schema` -> journal reload -> `import_project`; backup file
@@ -159,7 +280,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
     absent-key default). `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip
     (legacy article_references -> backup -> rebuild -> import) plus the
     `legacy_upgrade_needed(live, fallback)` pure decision function (live-probe-wins and
-    snapshot-fallback branches).
+    snapshot-fallback branches). `reset_project_test.rs` covers `reset_project_inner`
+    (Delete All Data): verifies the on-disk `wiki-root/` directory is deleted, `app_settings`
+    is cleared after rebuild, and the reset succeeds even when the wiki root is missing.
+    `wiki_consolidation_test.rs` covers the multi-batch consolidation pipeline
+    (cross-batch dup merge + link rewrite + single-batch skip + unrelated-page
+    preservation) using injectable `IngestLlmSender` fakes.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).
@@ -181,7 +307,44 @@ describe each durable boundary so agents can locate the right area. Create a chi
     detail panel + Google Scholar external lookup icons). `help-guide.vue` is the `/help` shell
     (tab bar + `?tab=`/`#hash` deep-link routing) that renders one `help-tab-*.vue` component
     per tab (guide, bibliometrics, troubleshooting, local-ai, reference); the Bibliometrics tab
-    documents all six completed modules.
+    documents all six completed modules. `help-tab-reference.vue` is the sidebar +
+    scroll-spy Reference tab; the Wiki section (`ref-wiki`, nav icon `local_library`) sits
+    under Chat Assistant and covers the wiki-root layout, getting-started workflow, supported
+    document file-type matrix, FTS5 token-optimized chat, and Obsidian integration.
+    `wiki-view.vue` is the `/wiki` route (flat, below
+    `chat-view.vue` is the `/chat` route. It renders the article-RAG chat (explicit
+    selected articles via `send_chat_message`) AND the wiki-RAG chat: a Wiki toggle button
+    (icon `local_library`) sits right of the `(+)` icon, visible only when
+    `chatStore.wikiReady` (wiki initialized AND `pageCount > 0`, populated from
+    `wiki_get_status`). When active it gets an indigo halo/fill, hides the `(+)` button
+    + article context pills, shows a "Wiki mode" banner, and routes sends through
+    `wiki_chat` (BM25 FTS5 RAG) instead of `send_chat_message`. Each message records its
+    `source` (`'articles'|'wiki'`) so the bubble shows a `wiki` badge and the assistant
+    body is rendered via `src/utils/wiki-markdown.ts` with `articlePriority: true` plus a
+    reactively-derived `wikiSources` map (article id -> WikiSourceInfo, built from the
+    loaded `articles` list) and the `wikiPageTitles` map, so bare article UUIDs in wiki
+    prose render as green `.art-ref` chips (article detail) while wiki-page UUIDs render
+    as pink `.wikilink--synthesis` chips (wiki reader). `[^art-id]` becomes `.art-ref`. Clicking a
+    wikilink opens a right-side **Wiki reader slide-over** (`WikiPageViewer` with a
+    `wikiNavStack` back-stack so inner navigation chains and a Back/Close chrome returns
+    to the chat); opening it closes the article detail slide-over and vice-versa (mutually
+    exclusive). `wiki-view.vue` is the `/wiki` route (flat, below
+    `/chat` in `nav-sidebar.vue` with the `local_library` icon). Ships the empty-state gates
+    (LLM configured, included articles > 0, wiki initialized), the sidebar (page list
+    grouped by type + client-side search filter), the page viewer (`wiki-page-viewer.vue`
+    with `[[wikilink]]` + `[^art-id]` source ref resolution + article detail slide-over),
+    the split-pane editor (`wiki-page-editor.vue`), the sigma graph view
+    (`wiki-graph-panel.vue` with ForceAtlas2 layout, color-coded by page type), and the
+    toolbar (`wiki-toolbar.vue`: Re-scaffold one-click pipeline, Add Documents, Lint, Delete
+    Wiki, progress bar). Composable: `use-wiki.ts`; types: `types/wiki.ts`. The
+    page action bar carries **Back/Forward** navigation icons (left of Edit) backed
+    by the generic `useNavHistory<string>` composable (see `src/composables/`), plus
+    platform-aware keyboard shortcuts registered via `window.addEventListener('keydown', ...)`
+    in `onMounted` / removed in `onUnmounted`: macOS `Cmd+[` / `Cmd+]` (and `Cmd+Left` /
+    `Cmd+Right`); Windows/Linux `Alt+Left` / `Alt+Right`. Shortcuts are disabled while focus
+    is in an input/textarea/contenteditable, in edit mode, on the Graph tab, or at the
+    history bounds. `selectedSlug` is a read-only computed alias over the history's current
+    entry; all mutations go through `navigate()` / `goBack()` / `goForward()` / `clear()`.
   - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
@@ -189,7 +352,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
     connection details + parameters + Revert/Get Models/Test Connection + test-result/error
     feedback in one bordered `<section>`), `settings-project-management.vue` (import/export/delete
-    + dialogs), `settings-screening-preferences.vue` (2 localStorage-backed toggles),
+    + dialogs; Delete All Data also wipes the on-disk Wiki and resets
+    `useWiki`/`useChatStore.wikiReady`; Export dialog warns that the Bango Documents
+    directory - full-text PDFs + Wiki - is NOT backed up), `settings-screening-preferences.vue` (2 localStorage-backed toggles),
     `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
     Shared card chrome for these lives in `settings-card-shared.css`.
   - **`src/composables/`** - Vue composables. `use-startup-upgrade.ts`
@@ -215,13 +380,60 @@ describe each durable boundary so agents can locate the right area. Create a chi
     layout-mode switch, PNG/GEXF export via `exportPrefix`, and subgraph
     recalculate that respects `graphType: 'directed'|'undirected'` and
     `yearAttribute: 'year'|'avgYear'`). Tested by `src/__tests__/use-network-view.test.ts`.
+    `use-nav-history.ts` (generic `<T>` browser-like navigation history: `navigate`
+    pushes + truncates forward history + skips duplicates; `goBack`/`goForward` no-op at
+    bounds; `clear` wipes the stack. Consumed by `wiki-view.vue` for Back/Forward page
+    navigation. Pure logic, no DOM/Tauri deps; tested by
+    `src/__tests__/composables/use-nav-history.test.ts`.
   - **`src/utils/`** - pure utilities: `network-export.ts` (graph PNG/GEXF export via the
     `save()` + `write_text_to_file` pattern), `formatters.ts`, `color.ts`, `debounce.ts`,
     `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `llm-error.ts`,
-    `google-trends.ts` (Trends embed URL builder + date-range validators).
+    `google-trends.ts` (Trends embed URL builder + date-range validators),
+    `wiki-markdown.ts` (shared wiki Markdown renderer: `renderWikiMarkdown(text, opts?)`
+    converts `[[slug]]` / `[[slug|alias]]` to `.wikilink` anchors and `[^art-id]`
+    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs).
+    On author pages the viewer passes `linkArtRefsToSynthesis: true` so each
+    publication's `[^art-{uuid}]` opens the wiki synthesis page (slug = uuid,
+    pink `.wikilink--synthesis` chip) instead of the article detail; the flag
+    falls back to a green `.art-ref` when no synthesis page exists for the uuid.
+    The renderer HTML-escapes slug/alias text, strips `/raw/*.md` artifact lines
+    (including title-based paths with spaces), collapses dangling non-UUID
+    footnote refs (so `[^title]` / `[^1]` markers don't leak as literal text
+    but `[^uuid]` is resolved, not stripped), then runs
+    `marked.parse`. Bare UUIDs in prose are auto-linked: `articlePriority: true`
+    (chat view) resolves `sources` first -> green `.art-ref` (article detail);
+    otherwise `pageTitles` wins -> pink `.wikilink--synthesis` (wiki reader).
+    Article-matched UUIDs always emit `.art-ref` (green, article detail) instead of
+    the former `[[uuid|alias]]` (which became an indigo wiki link). Consumed by both
+    `wiki-page-viewer.vue` (sources + pageTitles, default priority) and `chat-view.vue`
+    assistant bubbles (sources + pageTitles + `articlePriority: true`). Pure function,
+    unit-tested in `src/__tests__/utils/wiki-markdown.test.ts`).
+    **External-document citation routing** (regression fix for
+    `[^art-user-youcantbuild]` mangled-HTML bug): the footnote regexes accept any
+    kebab/snake slug (`[a-z0-9_-]+`), not just hex UUID chars, so refs to uploaded
+    documents resolve. Smart click routing: non-UUID ids with a `pageTitles` entry
+    (the Layer-1 source page) route to a pink `.wikilink--synthesis` chip opening the
+    wiki source page; UUID ids with `sources` stay green `.art-ref` (article detail).
+    `raw_export.rs::resolve_user_file_title` enriches PDF titles via `lopdf` (reads
+    the `/Title` entry from the Info dictionary) so the pre-seeded source page + the
+    LLM prompt use the document's real title instead of the filename stem.
+    `platform.ts` (`isMacPlatform()` reads
+    `navigator.platform`; `SHORTCUT_MODIFIER` constant resolves to `'Cmd'` or `'Alt'`.
+    Dependency-free, resilient to `navigator` absence. Used by `wiki-view.vue` to pick the
+    correct back/forward keyboard shortcut modifier. Tested by
+    `src/__tests__/utils/platform.test.ts`).
+  - **`src/stores/chat.ts`** - Pinia chat store. Holds `selectedArticleIds`, `messages`,
+    `loading`, `error`, plus the retrieval-source state `source: 'articles'|'wiki'`
+    (default `'articles'`; mutually exclusive) and `wikiReady` (drives the chat-view wiki
+    toggle visibility). `sendMessage(text)` branches: `source==='wiki'` calls
+    `wiki_chat` (history-only payload, no articleIds); otherwise calls `send_chat_message`
+    with `selectedArticleIds`. Each pushed message records its `source` for bubble
+    rendering. `toggleWikiMode()` flips the source; `clearChat()` resets it to
+    `'articles'`. Tested by `src/__tests__/chat.test.ts`.
   - **`src/styles/forms.css`** - global form/button/dialog primitives (`.field__*`, `.btn--*`,
-    `.dialog`, `.spinner`) promoted from the former scoped `llm-config.vue`. Loaded via
-    `base.css`; low specificity so scoped rules in other views still win.
+    `.dialog`, `.dialog__danger-box`, `.dialog__info-box`, `.spinner`) promoted from the
+    former scoped `llm-config.vue`. Loaded via `base.css`; low specificity so scoped rules
+    in other views still win.
   - **`src/router/index.ts`** - route table; lazy views are prefetched after `router.isReady()`.
     `/settings` renders `settings-view.vue`.
 - **`tests/test-citations/`** - RIS fixture data for citation/reference system tests.

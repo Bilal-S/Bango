@@ -410,3 +410,35 @@
   font-size: 13px;
   color: #991b1b;
 }
+
+/* Informational callout (neutral blue) for notes that are not warnings. */
+.dialog__info-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-lg, 0.5rem);
+}
+
+.dialog__info-box .material-symbols-outlined {
+  color: #2563eb;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.dialog__info-box p {
+  font-size: 13px;
+  color: #1e40af;
+  line-height: 18px;
+  margin: 0;
+  word-break: break-word;
+}
+
+.dialog__info-box code {
+  background-color: #dbeafe;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  font-size: 12px;
+}

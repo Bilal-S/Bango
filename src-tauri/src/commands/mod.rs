@@ -17,6 +17,7 @@ pub mod startup;
 pub mod summary;
 pub mod tags;
 pub mod trends;
+pub mod wiki_cmd;
 
 use crate::db::connection::DbState;
 use crate::error::AppError;

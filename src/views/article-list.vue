@@ -339,7 +339,10 @@ async function handleAttachFullText(articleId: string): Promise<void> {
     if (localStorage.getItem('bango-full-text-summaries') === 'true') {
       const article = articles.value.find((a) => a.id === articleId);
       if (article) {
-        requestArticleAiSummary(articleId, article.title);
+        // Pass a completion callback so the detail panel refreshes when the
+        // summary finishes (even across navigation). Guarded so we don't
+        // yank the user back if they navigated away during the LLM call.
+        requestArticleAiSummary(articleId, article.title, handleAiSummaryComplete);
       }
     }
   } catch (e: unknown) {
@@ -361,6 +364,18 @@ async function handleDeleteFullText(articleId: string): Promise<void> {
 
 async function handleReadFullText(articleId: string): Promise<string | null> {
   return await readFullTextContent(articleId);
+}
+
+/**
+ * Completion callback for the auto-submitted AI summary (after a document
+ * upload). Refreshes the detail panel only if the user is still viewing the
+ * same article, so we don't yank them back if they navigated away during the
+ * (long-running) LLM call.
+ */
+async function handleAiSummaryComplete(articleId: string): Promise<void> {
+  if (selectedArticle.value?.id === articleId) {
+    await selectArticle(articleId);
+  }
 }
 
 function handleOpenReader(articleId: string): void {

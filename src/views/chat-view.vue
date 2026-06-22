@@ -6,9 +6,14 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 import { useChatStore } from '@/stores/chat';
 import { useToast } from '@/composables/use-toast';
 import type { Article } from '@/types';
+import type { WikiStatus } from '@/types/wiki';
 import { marked } from 'marked';
+import { renderWikiMarkdown } from '@/utils/wiki-markdown';
 import { useArticleSearch } from '@/composables/use-article-search';
+import { useWiki } from '@/composables/use-wiki';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
+import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
+import type { WikiSourceInfo } from '@/types/wiki';
 
 const router = useRouter();
 const toast = useToast();
@@ -23,6 +28,41 @@ const inputMessage = ref('');
 const chatScrollContainer = ref<HTMLElement | null>(null);
 
 const isDetailFullScreen = ref(false);
+
+// Wiki-mode UI state.
+const checkingWiki = ref(true);
+/** Wiki reader slide-over navigation stack. The last entry is the visible page;
+ *  popping back to empty closes the panel. Keeping a stack lets inner
+ *  [[wikilink]] clicks chain while preserving the chat thread underneath. */
+const wikiNavStack = ref<string[]>([]);
+const wikiPanelOpen = computed(() => wikiNavStack.value.length > 0);
+const wikiSlug = computed(() => wikiNavStack.value[wikiNavStack.value.length - 1] ?? null);
+
+/** Wiki page slug-to-title map. Loaded once when the wiki is ready so that
+ *  bare UUIDs in wiki-sourced chat bubbles can render as synthesis-styled
+ *  chips with human-readable titles instead of raw UUIDs. */
+const wikiPageTitles = ref<Map<string, string>>(new Map());
+const { listPages: wikiListPages } = useWiki();
+
+/**
+ * Derived source-metadata map (article id -> WikiSourceInfo) built reactively
+ * from the loaded `articles` list. Passed to `renderWikiMarkdown` so bare
+ * article UUIDs in wiki-sourced chat prose render as green `.art-ref` chips
+ * that open the article detail panel, instead of pink wiki chips.
+ */
+const wikiSources = computed(() => {
+  const map = new Map<string, WikiSourceInfo>();
+  for (const a of articles.value) {
+    map.set(a.id, {
+      id: a.id,
+      title: a.title,
+      authors: a.authors ?? [],
+      year: a.publicationYear ?? null,
+      doi: a.doi ?? null,
+    });
+  }
+  return map;
+});
 
 const {
   selectedArticle: detailArticle,
@@ -52,7 +92,7 @@ watch(detailArticle, (newVal) => {
 onMounted(async () => {
   await checkLlmConfig();
   if (isLlmConfigured.value) {
-    await loadArticles();
+    await Promise.all([loadArticles(), checkWikiStatus()]);
     scrollToBottom();
   }
 });
@@ -60,10 +100,42 @@ onMounted(async () => {
 async function checkLlmConfig() {
   try {
     isLlmConfigured.value = await tauriCommand<boolean>('has_llm_config');
-  } catch (e) {
+  } catch {
     isLlmConfigured.value = false;
   } finally {
     checkingLlm.value = false;
+  }
+}
+
+/** Fetch wiki status and flip the store's `wikiReady` flag (drives toggle
+ *  visibility). The wiki toggle only appears when the wiki is initialized AND
+ *  has at least one page. */
+async function checkWikiStatus() {
+  try {
+    const status = await tauriCommand<WikiStatus>('wiki_get_status');
+    chatStore.setWikiReady(!!status.initialized && status.pageCount > 0);
+    // If the wiki became unavailable while wiki mode was on, drop back to articles.
+    if (!chatStore.wikiReady && chatStore.source === 'wiki') {
+      chatStore.setSource('articles');
+    }
+    // Load page titles so wiki chat bubbles can render bare UUIDs as
+    // synthesis-styled chips with human-readable titles.
+    if (chatStore.wikiReady && wikiPageTitles.value.size === 0) {
+      try {
+        const pages = await wikiListPages();
+        const map = new Map<string, string>();
+        for (const p of pages) {
+          map.set(p.slug, p.title);
+        }
+        wikiPageTitles.value = map;
+      } catch {
+        // Non-fatal: bare UUIDs fall back to raw text.
+      }
+    }
+  } catch {
+    chatStore.setWikiReady(false);
+  } finally {
+    checkingWiki.value = false;
   }
 }
 
@@ -72,7 +144,7 @@ async function loadArticles() {
     const all = await tauriCommand<Article[]>('get_articles');
     // Filter out duplicates (duplicate_of is not null or status is duplicate)
     articles.value = all.filter((a) => a.status !== 'duplicate' && !a.duplicateOf);
-  } catch (e) {
+  } catch {
     toast.show('Failed to load articles list', 'error');
   }
 }
@@ -118,6 +190,15 @@ function toggleArticleSelection(id: string) {
   }
 }
 
+/** Flip the wiki / article retrieval mode. */
+function onToggleWiki() {
+  const next = chatStore.toggleWikiMode();
+  if (next === 'wiki') {
+    // Entering wiki mode: article context is irrelevant, hide it to reduce clutter.
+    toast.show('Wiki mode: answers are grounded by FTS5 search over your wiki pages.', 'info');
+  }
+}
+
 async function handleSend() {
   if (!inputMessage.value.trim() || chatStore.loading) return;
   const msg = inputMessage.value;
@@ -140,6 +221,62 @@ function formatAuthorsList(authors: string[]): string {
   return `${authors[0]}; ${authors[1]} et al.`;
 }
 
+/**
+ * Render an assistant message body. Wiki-sourced messages go through the shared
+ * wiki renderer so `[[slug]]` citations become clickable `.wikilink` spans;
+ * article-sourced messages use plain `marked` (no wikilink interpretation, so
+ * bracketed text in article content is never misinterpreted).
+ */
+function renderMessage(msg: { role: string; content: string; source?: string }): string {
+  if (msg.source === 'wiki') {
+    return renderWikiMarkdown(msg.content, {
+      sources: wikiSources.value,
+      pageTitles: wikiPageTitles.value,
+      // Chat view: articles win over wiki pages for bare UUID resolution, so
+      // an article UUID renders as a green art-ref (article detail) even when
+      // a synthesis wiki page exists for the same UUID.
+      articlePriority: true,
+    });
+  }
+  return marked.parse(msg.content) as string;
+}
+
+/** Delegated click handler for assistant bubbles: detect wiki links and
+ *  article references and route them to the right slide-over. */
+function handleBubbleClick(event: MouseEvent) {
+  const target = event.target as HTMLElement;
+  if (target.classList.contains('wikilink')) {
+    const slug = target.getAttribute('data-slug');
+    if (slug) openWikiPage(slug);
+  } else if (target.classList.contains('art-ref')) {
+    const artId = target.getAttribute('data-art-id');
+    if (artId) void openArticleDetail(artId);
+  }
+}
+
+/** Open the wiki reader slide-over on a given slug. Closes the article panel so
+ *  only one slide-over is visible at a time. */
+function openWikiPage(slug: string) {
+  // Mutually exclusive with the article detail panel.
+  detailArticle.value = null;
+  wikiNavStack.value = [slug];
+}
+
+/** Inner [[wikilink]] navigation: push onto the stack so the back button works. */
+function navigateWiki(slug: string) {
+  wikiNavStack.value = [...wikiNavStack.value, slug];
+}
+
+/** Pop the wiki reader back-stack; close the panel when the stack is empty. */
+function goBackWiki() {
+  wikiNavStack.value = wikiNavStack.value.slice(0, -1);
+}
+
+/** Close the wiki reader entirely (clears history). */
+function closeWikiPanel() {
+  wikiNavStack.value = [];
+}
+
 // Tooltip state for hovered articles in context pills
 const hoveredArticle = ref<Article | null>(null);
 const tooltipX = ref(0);
@@ -157,9 +294,11 @@ function handleMouseLeave() {
 }
 
 async function openArticleDetail(articleId: string) {
+  // Mutually exclusive with the wiki reader panel.
+  closeWikiPanel();
   try {
     await selectArticle(articleId);
-  } catch (e) {
+  } catch {
     toast.show('Failed to load article details', 'error');
   }
 }
@@ -179,7 +318,7 @@ async function handleAttachFullText(articleId: string): Promise<void> {
     toast.show('Importing full text…', 'info');
     await attachFullText(articleId, selected);
     toast.show('Full text attached successfully.', 'success');
-  } catch (e) {
+  } catch {
     toast.show('Failed to attach full text', 'error');
   }
 }
@@ -261,6 +400,10 @@ async function handleAttachFullText(articleId: string): Promise<void> {
             <p class="text-sm text-slate-500 leading-relaxed mb-6">
               Ask questions about the articles in your library. Add articles to the context using
               the `+` button to ground the responses in specific research text.
+              <span v-if="chatStore.wikiReady">
+                Toggle the <strong>Wiki</strong> button to answer from your synthesized knowledge
+                base instead.
+              </span>
             </p>
           </div>
 
@@ -276,8 +419,16 @@ async function handleAttachFullText(articleId: string): Promise<void> {
               "
             >
               <!-- Sender details -->
-              <span class="text-[11px] text-slate-400 mb-1 font-medium px-1">
+              <span
+                class="text-[11px] text-slate-400 mb-1 font-medium px-1 flex items-center gap-1"
+              >
                 {{ msg.role === 'user' ? 'You' : 'Assistant' }} &bull; {{ msg.timestamp }}
+                <span
+                  v-if="msg.source === 'wiki'"
+                  class="wiki-badge"
+                  title="Answer grounded by FTS5 search over your wiki pages"
+                  >wiki</span
+                >
               </span>
               <!-- Bubble -->
               <div
@@ -292,8 +443,10 @@ async function handleAttachFullText(articleId: string): Promise<void> {
                   <div style="white-space: pre-wrap">{{ msg.content }}</div>
                 </template>
                 <template v-else>
-                  <!-- eslint-disable-next-line vue/no-v-html -- trusted LLM output rendered via marked -->
-                  <div class="markdown-content" v-html="marked.parse(msg.content)" />
+                  <div @click="handleBubbleClick">
+                    <!-- eslint-disable-next-line vue/no-v-html -- trusted LLM output; wiki links sanitized to data attributes -->
+                    <div class="markdown-content" v-html="renderMessage(msg)" />
+                  </div>
                 </template>
               </div>
             </div>
@@ -304,8 +457,9 @@ async function handleAttachFullText(articleId: string): Promise<void> {
             v-if="chatStore.loading"
             class="flex flex-col items-start max-w-[80%] self-start animate-pulse"
           >
-            <span class="text-[11px] text-slate-400 mb-1 font-medium px-1">
+            <span class="text-[11px] text-slate-400 mb-1 font-medium px-1 flex items-center gap-1">
               Assistant &bull; Thinking
+              <span v-if="chatStore.source === 'wiki'" class="wiki-badge">wiki</span>
             </span>
             <div
               class="px-4 py-3 rounded-2xl bg-white text-slate-500 border border-slate-200 rounded-tl-none shadow-sm flex items-center gap-2"
@@ -315,15 +469,35 @@ async function handleAttachFullText(articleId: string): Promise<void> {
                 <span class="dot-2 w-1.5 h-1.5 bg-indigo-600 rounded-full"></span>
                 <span class="dot-3 w-1.5 h-1.5 bg-indigo-600 rounded-full"></span>
               </div>
-              <span class="text-xs">Analyzing article context...</span>
+              <span class="text-xs">{{
+                chatStore.source === 'wiki'
+                  ? 'Searching wiki pages...'
+                  : 'Analyzing article context...'
+              }}</span>
             </div>
           </div>
         </div>
 
         <!-- Context pills and Input area -->
         <div class="border-t border-slate-200 bg-white p-4">
-          <!-- Selected articles panel -->
-          <div class="mb-3">
+          <!-- Wiki-mode banner (replaces the article context picker) -->
+          <div v-if="chatStore.source === 'wiki'" class="mb-3">
+            <div class="wiki-banner flex items-center gap-2">
+              <span class="material-symbols-outlined text-[16px]">local_library</span>
+              <span class="text-xs font-semibold text-indigo-700"
+                >Wiki mode: answers are grounded by FTS5 search over your wiki pages.</span
+              >
+              <button
+                class="ml-auto text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold"
+                @click="router.push('/wiki')"
+              >
+                Open Wiki
+              </button>
+            </div>
+          </div>
+
+          <!-- Selected articles panel (article mode only) -->
+          <div v-else class="mb-3">
             <div class="flex items-center justify-between mb-2">
               <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Selected Context ({{ selectedArticles.length }})
@@ -392,8 +566,9 @@ async function handleAttachFullText(articleId: string): Promise<void> {
 
           <!-- Chat bar input container -->
           <div class="flex items-center gap-3">
-            <!-- Plus button -->
+            <!-- Plus button (article mode only; hidden in wiki mode) -->
             <button
+              v-if="chatStore.source === 'articles'"
               class="flex items-center justify-center w-10 h-10 rounded-full border border-slate-200 hover:bg-slate-50 text-indigo-600 transition-all active:scale-95 flex-shrink-0"
               title="Add article context"
               @click="showSelector = true"
@@ -401,12 +576,32 @@ async function handleAttachFullText(articleId: string): Promise<void> {
               <span class="material-symbols-outlined text-[24px]">add</span>
             </button>
 
+            <!-- Wiki toggle button. Always adjacent to (+) when visible. Halo + indigo fill when active. -->
+            <button
+              v-if="chatStore.wikiReady"
+              class="wiki-toggle"
+              :class="{ 'wiki-toggle--active': chatStore.source === 'wiki' }"
+              :title="
+                chatStore.source === 'wiki'
+                  ? 'Wiki mode active. Click to return to article context.'
+                  : 'Answer from your wiki knowledge base (FTS5 search)'
+              "
+              :aria-pressed="chatStore.source === 'wiki'"
+              @click="onToggleWiki"
+            >
+              <span class="material-symbols-outlined text-[24px]">local_library</span>
+            </button>
+
             <!-- Input field -->
             <div class="flex-1 relative">
               <input
                 v-model="inputMessage"
                 type="text"
-                placeholder="Ask a question about the selected articles..."
+                :placeholder="
+                  chatStore.source === 'wiki'
+                    ? 'Ask a question about your wiki...'
+                    : 'Ask a question about the selected articles...'
+                "
                 class="w-full pl-4 pr-12 py-2.5 rounded-full border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm transition-all"
                 @keydown.enter="handleSend"
               />
@@ -449,6 +644,34 @@ async function handleAttachFullText(articleId: string): Promise<void> {
         @delete-full-text="deleteFullTextAttachment"
         @refresh-article="selectArticle"
       />
+    </Transition>
+
+    <!-- Wiki reader slide-over. Floats on the right; opening it closes the article panel. -->
+    <Transition name="slide">
+      <div v-if="wikiPanelOpen" class="wiki-reader">
+        <div class="wiki-reader__chrome">
+          <button
+            v-if="wikiNavStack.length > 1"
+            class="wiki-reader__back"
+            title="Back"
+            @click="goBackWiki"
+          >
+            <span class="material-symbols-outlined text-[18px]">arrow_back</span>
+          </button>
+          <span class="wiki-reader__title">Wiki</span>
+          <button class="wiki-reader__close" title="Close" @click="closeWikiPanel">
+            <span class="material-symbols-outlined text-[18px]">close</span>
+          </button>
+        </div>
+        <div class="wiki-reader__body">
+          <WikiPageViewer
+            :slug="wikiSlug"
+            @navigate="navigateWiki"
+            @view-article="openArticleDetail"
+            @close="closeWikiPanel"
+          />
+        </div>
+      </div>
     </Transition>
 
     <!-- Article Selection Modal -->
@@ -677,6 +900,131 @@ async function handleAttachFullText(articleId: string): Promise<void> {
   }
 }
 
+/* Wiki mode toggle button (right of the (+) icon). Halo + indigo fill when active. */
+.wiki-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(203 213 225); /* slate-300 */
+  background-color: #fff;
+  color: rgb(99 102 241); /* indigo-600 */
+  flex-shrink: 0;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+
+.wiki-toggle:hover:not(.wiki-toggle--active) {
+  background-color: rgb(238 242 255); /* indigo-50 */
+  border-color: rgb(165 180 252); /* indigo-300 */
+}
+
+.wiki-toggle--active {
+  background-color: rgb(99 102 241); /* indigo-600 */
+  border-color: rgb(79 70 229); /* indigo-700 */
+  color: #fff;
+  /* Halo */
+  box-shadow:
+    0 0 0 3px rgb(199 210 254 / 0.9),
+    /* indigo-200 ring */ 0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+/* Small "wiki" badge on message timestamps. */
+.wiki-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 9999px;
+  background-color: rgb(224 231 255); /* indigo-100 */
+  color: rgb(67 56 202); /* indigo-800 */
+  font-size: 0.55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Wiki-mode banner (replaces the article context picker). */
+.wiki-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background-color: rgb(238 242 255); /* indigo-50 */
+  border: 1px solid rgb(199 210 254); /* indigo-200 */
+  color: rgb(55 48 163); /* indigo-900 */
+}
+
+/* Wiki reader slide-over panel. */
+.wiki-reader {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 100%;
+  max-width: 640px;
+  background: #fff;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid rgb(226 232 240);
+  box-shadow: -4px 0 24px rgb(0 0 0 / 12%);
+}
+
+.wiki-reader__chrome {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgb(226 232 240);
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.wiki-reader__title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgb(71 85 105);
+  flex: 1;
+}
+
+.wiki-reader__back,
+.wiki-reader__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.375rem;
+  border: none;
+  background: transparent;
+  color: rgb(100 116 139);
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.wiki-reader__back:hover,
+.wiki-reader__close:hover {
+  background-color: rgb(241 245 249);
+  color: rgb(15 23 42);
+}
+
+.wiki-reader__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* Markdown styling in chat bubble */
 .markdown-content :deep(p) {
   margin-bottom: 0.5rem;
@@ -750,6 +1098,56 @@ async function handleAttachFullText(articleId: string): Promise<void> {
 .markdown-content :deep(th) {
   background-color: #f8fafc;
   font-weight: 600;
+}
+
+/* Wiki link + article reference styling inside assistant bubbles.
+   Mirrors wiki-page-viewer.vue so clicks feel consistent. */
+.markdown-content :deep(.wikilink) {
+  color: rgb(79 70 229);
+  text-decoration: underline;
+  cursor: pointer;
+  text-decoration-style: dotted;
+}
+.markdown-content :deep(.wikilink:hover) {
+  text-decoration-style: solid;
+}
+
+/* Synthesis-styled wikilink chip (from [^art-uuid]: definition lines). */
+.markdown-content :deep(.wikilink--synthesis) {
+  display: inline-block;
+  background: rgb(168 85 247 / 0.12); /* purple-500 @ 12% */
+  color: rgb(126 34 206); /* purple-800 */
+  border: 1px solid rgb(168 85 247 / 0.3);
+  padding: 0.0625rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.8em;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.markdown-content :deep(.wikilink--synthesis:hover) {
+  background: rgb(168 85 247 / 0.2);
+}
+.markdown-content :deep(.art-ref) {
+  display: inline;
+  color: rgb(21 128 61);
+  background: rgb(240 253 244);
+  border: 1px solid rgb(220 252 231);
+  padding: 0 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 500;
+}
+.markdown-content :deep(.art-ref:hover) {
+  background: rgb(220 252 231);
+}
+.markdown-content :deep(.art-ref--missing) {
+  color: rgb(148 163 184);
+  background: rgb(241 245 249);
+  border-color: rgb(226 232 240);
 }
 
 /* Tooltip animation */
