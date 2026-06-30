@@ -52,3 +52,37 @@ fn test_database_stores_all_article_fields() {
         .expect("Query failed");
     assert_eq!(doi, Some("10.1234/test".to_string()));
 }
+
+/// Test E: migration v003 must create the `article_chunks` table and set
+/// `user_version = 3`. This catches the migration not being registered in
+/// `migrations/mod.rs::get_migrations()`.
+#[test]
+fn test_migration_v003_creates_article_chunks_table_and_sets_user_version() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    // user_version must be 3 (v001 + v002 + v003).
+    let version: i64 =
+        conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("PRAGMA failed");
+    assert_eq!(version, 3, "user_version must be 3 after migrations v001-v003");
+
+    // article_chunks table must exist.
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='article_chunks'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("Query failed");
+    assert_eq!(exists, 1, "article_chunks table must exist after migration v003");
+
+    // Its schema must include the expected columns.
+    let has_chunk_index: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('article_chunks') WHERE name='chunk_index'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("pragma_table_info failed");
+    assert_eq!(has_chunk_index, 1, "article_chunks.chunk_index column must exist");
+}

@@ -25,7 +25,19 @@ pub const FTS_TABLE: &str = "wiki_pages_fts";
 /// populates it.
 pub const WIKI_DIR_HASH_KEY: &str = "wiki_dir_hash";
 
-/// Ensure the FTS5 table exists. Idempotent.
+/// Ensure the FTS5 table exists with the chunk-aware schema. Idempotent.
+///
+/// The schema includes three `UNINDEXED` metadata columns added in migration
+/// v003 (T1.2) so BM25 retrieval can return passage-level chunks with section
+/// provenance:
+/// - `chunk_index` - 0-based chunk ordinal within the page (NULL = legacy
+///   whole-page row).
+/// - `section` - `"Methods"` / `"Results"` / NULL.
+/// - `parent_slug` - slug of the page this chunk belongs to (== slug for
+///   whole-page rows).
+///
+/// Migration v003 `DROP`s the old `wiki_pages_fts` so this `CREATE` runs on the
+/// first read after upgrade. On a fresh DB it creates the new shape directly.
 pub fn ensure_table(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(&format!(
         "CREATE VIRTUAL TABLE IF NOT EXISTS {FTS_TABLE} USING fts5(
@@ -36,6 +48,9 @@ pub fn ensure_table(conn: &Connection) -> Result<(), AppError> {
             page_type,
             source_articles UNINDEXED,
             file_path UNINDEXED,
+            chunk_index UNINDEXED,
+            section UNINDEXED,
+            parent_slug UNINDEXED,
             tokenize = 'porter unicode61'
         );"
     ))?;
@@ -76,11 +91,19 @@ pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, Ap
         return Ok(false);
     }
 
-    // Case 2: index non-empty but row count differs from disk count. Rebuild
-    // to pick up added/removed pages. (When counts match we assume in-sync;
-    // in-place edits of existing pages are handled by the rebuild-on-mutation
-    // hooks in `wiki_update_page` / `wiki_delete_page`.)
-    if row_count != disk_count {
+    // Case 2: index non-empty but the number of distinct pages differs from
+    // disk count. After T1.2 the index is row-per-chunk (N rows per long page),
+    // so a raw row-count comparison would false-positive on every call. We
+    // compare `COUNT(DISTINCT COALESCE(parent_slug, slug))` against the disk
+    // page count instead, so chunk rows do not desync the self-heal.
+    let distinct_pages: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(DISTINCT COALESCE(parent_slug, slug)) FROM {FTS_TABLE}"),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if distinct_pages != disk_count {
         rebuild_index(conn, root)?;
         return Ok(true);
     }
@@ -106,9 +129,13 @@ pub fn rebuild_index(conn: &Connection, root: &Path) -> Result<usize, AppError> 
     ensure_table(conn)?;
 
     let wiki_dir = root.join("wiki");
+    // Collect whole-page rows, then expand to chunk rows for insertion only.
+    // The manifest helpers (in `rebuild_index_with_manifest`) need the
+    // whole-page set; here we only insert into FTS so chunking is safe.
     let rows = collect_page_rows(root)?;
-    insert_page_rows(conn, &rows, &wiki_dir)?;
-    Ok(rows.len())
+    let chunked_rows = chunk_page_rows(rows);
+    insert_page_rows(conn, &chunked_rows, &wiki_dir)?;
+    Ok(chunked_rows.len())
 }
 
 /// One wiki page parsed from disk, ready to insert into FTS5. Built by
@@ -127,13 +154,29 @@ pub struct PageRow {
     pub body: String,
     pub page_type: String,
     pub source_articles: String,
+    // ── Chunk metadata (T1.2). `None` for legacy whole-page rows. ──
+    /// 0-based chunk ordinal within the page. `None` = whole-page row (short
+    /// pages, concept/author hubs).
+    pub chunk_index: Option<i32>,
+    /// Section label, e.g. `"Methods"`. `None` for unstructured text.
+    pub section: Option<String>,
+    /// Slug of the page this chunk belongs to (== slug for whole-page rows).
+    pub parent_slug: Option<String>,
 }
 
-/// Read every wiki page from disk into a `Vec<PageRow>`.
+/// Read every wiki page from disk into a `Vec<PageRow>` (one row per file).
 ///
 /// **Filesystem-only — does not touch the DB.** This lets the on-demand drift
 /// check (`wiki_check_for_updates`) do all file I/O lock-free, then take the
 /// DB lock only for the fast SQLite writes (`insert_page_rows` + manifest).
+///
+/// Returns **whole-page rows** (`chunk_index = None`). This is intentional: the
+/// manifest helpers (`compute_file_hashes`, `compute_directory_fingerprint`)
+/// require one row per file so the `wiki_index_manifest` PRIMARY KEY
+/// (`file_path`) is not violated by duplicate chunk rows. Call
+/// `chunk_page_rows` to expand whole-page rows into chunk rows immediately
+/// before FTS insertion only (see `rebuild_index` /
+/// `rebuild_index_with_manifest`).
 pub fn collect_page_rows(root: &Path) -> Result<Vec<PageRow>, AppError> {
     let pages = collect_wiki_pages(root)?;
     let mut rows = Vec::with_capacity(pages.len());
@@ -149,9 +192,57 @@ pub fn collect_page_rows(root: &Path) -> Result<Vec<PageRow>, AppError> {
             body,
             page_type: fm.get("type").unwrap_or("").to_string(),
             source_articles: fm.get("source_articles").unwrap_or("").to_string(),
+            chunk_index: None,
+            section: None,
+            parent_slug: None,
         });
     }
     Ok(rows)
+}
+
+/// Expand whole-page rows into chunk rows for FTS5 insertion (T1.2).
+///
+/// Each whole-page `PageRow` is classified into sections and chunked; long
+/// pages produce multiple chunk rows (all sharing `parent_slug`), short pages
+/// produce a single row with `chunk_index = None`. This keeps the manifest at
+/// one-row-per-file (correct for the `wiki_index_manifest` PRIMARY KEY) while
+/// the FTS index gets passage-level granularity for BM25 retrieval + chat
+/// section labels.
+///
+/// **Apply this ONLY before `insert_page_rows`**, never before
+/// `compute_file_hashes` / `compute_directory_fingerprint` (those need the
+/// original one-row-per-file set to avoid PRIMARY KEY violations and
+/// redundant drift checks).
+#[must_use]
+pub fn chunk_page_rows(rows: Vec<PageRow>) -> Vec<PageRow> {
+    let mut out = Vec::new();
+    for row in rows {
+        let sections = crate::utils::sections::classify_sections(&row.body);
+        let chunks = crate::utils::chunking::chunk_sections(
+            &sections,
+            crate::utils::chunking::DEFAULT_CHUNK_WORDS,
+        );
+
+        if chunks.len() <= 1 {
+            // Short page (or no headings): keep as a whole-page row.
+            out.push(row);
+        } else {
+            // Long page: emit one chunk row per chunk, sharing parent_slug so
+            // `build_context` can dedupe and the self-heal distinct-count
+            // stays correct.
+            let parent_slug = row.slug.clone();
+            for chunk in &chunks {
+                out.push(PageRow {
+                    body: chunk.text.clone(),
+                    chunk_index: Some(chunk.chunk_index as i32),
+                    section: chunk.section.clone(),
+                    parent_slug: Some(parent_slug.clone()),
+                    ..row.clone()
+                });
+            }
+        }
+    }
+    out
 }
 
 /// Insert a batch of pre-collected page rows into the FTS5 table.
@@ -173,8 +264,8 @@ pub fn insert_page_rows(conn: &Connection, rows: &[PageRow], root: &Path) -> Res
             .to_string();
         conn.execute(
             &format!(
-                "INSERT INTO {FTS_TABLE} (slug, title, summary, body, page_type, source_articles, file_path)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);"
+                "INSERT INTO {FTS_TABLE} (slug, title, summary, body, page_type, source_articles, file_path, chunk_index, section, parent_slug)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10);"
             ),
             rusqlite::params![
                 row.slug,
@@ -184,6 +275,9 @@ pub fn insert_page_rows(conn: &Connection, rows: &[PageRow], root: &Path) -> Res
                 row.page_type,
                 row.source_articles,
                 file_path,
+                row.chunk_index,
+                row.section,
+                row.parent_slug,
             ],
         )?;
     }
@@ -342,19 +436,25 @@ pub fn set_dir_hash(conn: &Connection, hash: Option<&str>) {
 /// Does both the file reads and the DB writes; safe to call from synchronous
 /// command handlers (the existing mutation paths already do this).
 pub fn rebuild_index_with_manifest(conn: &Connection, root: &Path) -> Result<usize, AppError> {
-    // Filesystem: collect pages + compute per-file hashes.
+    // Filesystem: collect whole-page rows + compute per-file hashes + dir hash.
+    // Manifest helpers MUST run on the whole-page set (one row per file) so the
+    // `wiki_index_manifest` PRIMARY KEY (`file_path`) is not violated by
+    // duplicate chunk rows sharing the same file_path.
     let rows = collect_page_rows(root)?;
     let file_hashes = compute_file_hashes(&rows)?;
     let dir_hash = compute_directory_fingerprint(&rows);
+
+    // Expand to chunk rows for FTS insertion ONLY (not for the manifest).
+    let chunked_rows = chunk_page_rows(rows);
 
     // DB: wipe + rebuild FTS5, rewrite manifest, update dir hash.
     conn.execute_batch(&format!("DELETE FROM {FTS_TABLE};"))?;
     ensure_table(conn)?;
     let wiki_dir = root.join("wiki");
-    insert_page_rows(conn, &rows, &wiki_dir)?;
+    insert_page_rows(conn, &chunked_rows, &wiki_dir)?;
     write_manifest(conn, &file_hashes)?;
     set_dir_hash(conn, dir_hash.as_deref());
-    Ok(rows.len())
+    Ok(chunked_rows.len())
 }
 
 /// Lowercase hex encoding (no external dep). Mirrors `raw_export::hex_encode`.
@@ -378,6 +478,12 @@ pub struct WikiPageHit {
     pub source_articles: String,
     pub file_path: String,
     pub rank: f64,
+    /// Chunk ordinal (0-based) within the page. `None` for whole-page rows.
+    pub chunk_index: Option<i32>,
+    /// Section label, e.g. `"Methods"`. `None` for unstructured text.
+    pub section: Option<String>,
+    /// Slug of the page this chunk belongs to (== slug for whole-page rows).
+    pub parent_slug: Option<String>,
 }
 
 /// BM25-ranked search over the FTS5 index. Returns up to `limit` hits.
@@ -401,7 +507,8 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<WikiPa
 
     let mut stmt = conn.prepare(
         &format!(
-            "SELECT slug, title, summary, body, page_type, source_articles, file_path, bm25({FTS_TABLE}) AS rank
+            "SELECT slug, title, summary, body, page_type, source_articles, file_path, bm25({FTS_TABLE}) AS rank,
+                    chunk_index, section, parent_slug
              FROM {FTS_TABLE}
              WHERE {FTS_TABLE} MATCH ?1
              ORDER BY rank
@@ -419,6 +526,9 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<WikiPa
             source_articles: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
             file_path: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
             rank: row.get::<_, Option<f64>>(7)?.unwrap_or(0.0),
+            chunk_index: row.get::<_, Option<i32>>(8)?,
+            section: row.get::<_, Option<String>>(9)?,
+            parent_slug: row.get::<_, Option<String>>(10)?,
         })
     })?;
 
@@ -1092,5 +1202,176 @@ mod tests {
         assert_eq!(count2, 2);
         let manifest2 = read_manifest(&conn).unwrap();
         assert_eq!(manifest2.len(), 2);
+    }
+
+    // ── T1.2 vertical-slice tests (would have caught the chunk-emission gap) ──
+
+    /// Helper: write a wiki page with a long, section-structured body so
+    /// `collect_page_rows` -> `chunk_sections` produces multiple chunk rows.
+    fn write_long_sectioned_page(root: &Path, slug: &str, title: &str) {
+        // Build a body with a Methods heading + ~1400 words of Methods text
+        // (enough to split into >= 3 chunks at target=512).
+        let methods_sentence = "This study employed a randomised controlled trial design \
+            across multiple sites to evaluate the primary outcome measure with covariate \
+            adjustment for baseline characteristics and sensitivity analyses."; // ~28 words
+        let methods_body = methods_sentence.repeat(50); // ~1400 words
+        let body = format!(
+            "# {title}\n\n## Introduction\nIntro text here about the study context.\n\n\
+             ## Methods\n{methods_body}\n\n## Results\nThe results showed a significant effect.\n\n\
+             ## Discussion\nThese findings have important policy implications."
+        );
+        write_wiki_page(root, "sources", slug, title, &body);
+    }
+
+    /// Test A: a long, section-structured page must produce chunk rows in FTS5
+    /// with `chunk_index IS NOT NULL` and `section = 'Methods'`.
+    ///
+    /// This is the vertical-slice test that would have caught the
+    /// chunk-emission gap (`collect_page_rows` not calling `chunk_sections`).
+    #[test]
+    fn rebuild_index_emits_chunk_rows_for_long_sectioned_pages() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_long_sectioned_page(root, "smith-2023", "Smith 2023");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // Query the raw FTS rows for chunk metadata.
+        let mut stmt = conn
+            .prepare(
+                "SELECT chunk_index, section, parent_slug FROM wiki_pages_fts \
+                 WHERE chunk_index IS NOT NULL",
+            )
+            .unwrap();
+        let chunk_rows: Vec<(Option<i32>, Option<String>, Option<String>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+
+        assert!(
+            !chunk_rows.is_empty(),
+            "long sectioned page must emit at least one chunk row with chunk_index IS NOT NULL"
+        );
+        // At least one chunk carries the Methods section label.
+        assert!(
+            chunk_rows.iter().any(|(_, section, _)| section.as_deref() == Some("Methods")),
+            "at least one chunk must have section='Methods': {chunk_rows:?}"
+        );
+        // All chunk rows share the same parent_slug.
+        assert!(
+            chunk_rows.iter().all(|(_, _, ps)| ps.as_deref() == Some("smith-2023")),
+            "all chunk rows must share parent_slug='smith-2023': {chunk_rows:?}"
+        );
+    }
+
+    /// Test B: `ensure_index_populated` must NOT rebuild when the FTS has more
+    /// rows than disk pages, as long as the *distinct* parent-slug count
+    /// matches the disk page count. This catches the self-heal regression
+    /// where a raw row-count comparison would false-positive after chunking.
+    #[test]
+    fn ensure_index_populated_no_rebuild_when_chunk_rows_match_distinct_pages() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        // One long page on disk that splits into multiple chunks.
+        write_long_sectioned_page(root, "smith-2023", "Smith 2023");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // The index now has multiple chunk rows for one disk page.
+        let fts_row_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM wiki_pages_fts", [], |r| r.get(0)).unwrap();
+        assert!(fts_row_count > 1, "expected multiple chunk rows, got {fts_row_count}");
+
+        // Self-heal should return false (no rebuild): distinct parent-slug
+        // count (1) == disk page count (1), even though raw row count > 1.
+        let rebuilt = ensure_index_populated(&conn, root).unwrap();
+        assert!(!rebuilt, "must not rebuild when chunk rows are consistent with disk pages");
+    }
+
+    /// Test C: `search` must return hits with `section == Some("Methods")` for
+    /// a long page that was chunked. This catches the gap between the schema
+    /// existing and the schema being populated (the new columns exist but
+    /// `collect_page_rows` didn't fill them).
+    #[test]
+    fn search_returns_section_label_for_chunk_rows() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_long_sectioned_page(root, "smith-2023", "Smith 2023");
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // Search for a term that appears in the Methods body.
+        let hits = search(&conn, "randomised", 10).unwrap();
+        assert!(!hits.is_empty(), "should find the Methods chunk");
+
+        // At least one hit must carry the Methods section label and a chunk_index.
+        let has_methods_chunk =
+            hits.iter().any(|h| h.section.as_deref() == Some("Methods") && h.chunk_index.is_some());
+        assert!(
+            has_methods_chunk,
+            "at least one hit must have section=Some(\"Methods\") + chunk_index set: \
+             {:?}",
+            hits.iter().map(|h| (&h.slug, &h.section, h.chunk_index)).collect::<Vec<_>>()
+        );
+    }
+
+    /// Regression: `rebuild_index_with_manifest` must not crash on long pages
+    /// that split into multiple chunks. Before the `chunk_page_rows` separation,
+    /// `collect_page_rows` inlined chunking and the manifest helpers received
+    /// multiple rows with the same `rel_path`, hitting the
+    /// `wiki_index_manifest` PRIMARY KEY constraint.
+    ///
+    /// This test writes a long sectioned page, rebuilds with manifest, and
+    /// asserts: (1) no error, (2) the manifest has exactly one row per file
+    /// (not per chunk), (3) the FTS index has multiple chunk rows.
+    #[test]
+    fn rebuild_index_with_manifest_does_not_crash_on_long_chunked_pages() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        write_long_sectioned_page(root, "smith-2023", "Smith 2023");
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE wiki_index_manifest (
+                 file_path TEXT PRIMARY KEY,
+                 content_hash TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        ensure_table(&conn).unwrap();
+
+        // Must not return an error (the bug manifested as a UNIQUE constraint
+        // violation on wiki_index_manifest.file_path).
+        let count = rebuild_index_with_manifest(&conn, root).unwrap();
+        assert!(count > 1, "chunked page should produce multiple FTS rows: {count}");
+
+        // Manifest has exactly ONE row (one file on disk), not one-per-chunk.
+        let manifest = read_manifest(&conn).unwrap();
+        assert_eq!(manifest.len(), 1, "manifest must have one row per file, not per chunk");
+        assert!(
+            manifest.keys().all(|k| k.contains("smith-2023")),
+            "manifest key must be the file path: {manifest:?}"
+        );
+
+        // FTS has multiple chunk rows sharing the parent_slug.
+        let fts_rows: i64 =
+            conn.query_row("SELECT COUNT(*) FROM wiki_pages_fts", [], |r| r.get(0)).unwrap();
+        assert!(fts_rows > 1, "FTS should have multiple chunk rows: {fts_rows}");
+        let distinct_parents: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT COALESCE(parent_slug, slug)) FROM wiki_pages_fts",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(distinct_parents, 1, "all chunk rows share one parent slug");
     }
 }

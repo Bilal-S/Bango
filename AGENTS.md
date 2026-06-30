@@ -87,7 +87,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
 - **`src-tauri/src/`** - Rust backend (Tauri 2.x). Owned modules: `db/` (repos +
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
-  (LLM knowledge base; see `wiki/` entry below). App entry
+  (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:
+  `pdf_extract.rs`, `sections.rs`, `chunking.rs`). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
   - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
@@ -319,6 +320,55 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `touch` -> dir-hash update only, page add/delete -> path-set drift, internal edit
     via `rebuild_index_with_manifest` -> no false-positive, empty-wiki baseline clear,
     order-independent fingerprint, manifest round-trip).
+    `sections_test.rs` covers `utils::sections::classify_sections` (markdown /
+    numbered / bare-keyword heading detection, references exclusion, Text fallback,
+    word-count, Materials-and-Methods classification) + 3 `#[ignore]`d real-PDF
+    end-to-end tests against committed OA fixtures: `plos-med-1004371.pdf`
+    (Cobiac 2024, CC-BY, 7 sections / 21 chunks), `pone-0285956.pdf` (Oakland SSB
+    tax, CC-BY, 5 sections / 17 chunks), and `demo-vfs-2022-pid-69753.pdf`
+    (lopdf-fallback space-degenerate regression). `chunking_test.rs` is inline
+    in `utils/chunking.rs` (9 tests: empty input, short section, references skip,
+    long-section sentence split, tiny-tail merge, Text label, Heading label,
+    contiguous chunk_index, empty-body skip).
+  - **`src-tauri/src/utils/sections.rs`** - section-aware text classification (T1.1).
+    `classify_sections(text)` splits flat extracted text into `Vec<Section>` by detecting
+    heading lines (markdown `##`, numbered `2.1 Study Design`, bare keyword `METHODS`).
+    `SectionKind` enum: `Heading, Abstract, Introduction, Methods, Results, Discussion,
+    Conclusion, References, Text` (Table/Figure deferred to T2). `extract_sections(path)`
+    is the I/O wrapper that runs `extract_pdf_text`/`extract_txt_text` then classifies.
+    Pure functions (`#[must_use]`); the proven `strip_abstract`/`strip_references` in
+    `pdf_extract.rs` are kept unchanged (new consumers call `classify_sections` directly).
+    Consumed by T1.2 `chunking.rs` and T1.3 `commands::summary::generate_section_summaries`.
+  - **`src-tauri/src/utils/chunking.rs`** - semantic chunking (T1.2). `chunk_sections(
+    sections, target_words)` walks `Section`s and emits `Vec<Chunk>` bounded by
+    `DEFAULT_CHUNK_WORDS=512` / `MIN_CHUNK_WORDS=100` / `MAX_CHUNK_WORDS=1200`. Splits
+    long sections at sentence boundaries; merges tiny tails; skips `References` entirely;
+    carries section provenance (`Some("Methods")`) so FTS5 chunk rows + chat citations
+    can render `(§Methods)`. Pure functions (`#[must_use]`). Consumed by `wiki::fts`
+    (planned: `collect_page_rows` chunk-emission) and T3.1 `attach_full_text` chunk storage.
+  - **`src-tauri/src/db/migrations/v003_fts_sections.rs`** - Tier 1-4 schema (VERSION 3).
+    Two changes: (1) `DROP TABLE IF EXISTS wiki_pages_fts;` so `fts::ensure_table`
+    recreates it with chunk-aware columns (`chunk_index`, `section`, `parent_slug` UNINDEXED)
+    on the next read (FTS5 virtual tables cannot be `ALTER`ed; the explicit DROP is the
+    supported schema-change path, and the table self-heals via `ensure_index_populated`);
+    (2) `CREATE TABLE article_chunks` (per-article chunk storage populated at attach time
+    by T3.1, consumed by screening T3.2+). No `ALTER TABLE articles` - section summaries
+    (T1.3) live inside the existing `full_text_ai_summary` column as a `schema_version: 2`
+    superset blob.
+  - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
+    `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
+    UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:
+    Option<String>`, `parent_slug: Option<String>`. `WikiPageHit` surfaces the same three
+    fields. `ensure_index_populated` self-heal compares `COUNT(DISTINCT COALESCE(
+    parent_slug, slug))` against disk page count (not raw row count) so chunk rows do
+    not false-positive a rebuild on every chat call. `search` SELECT + row mapping
+    updated for the 3 new columns.
+  - **`src-tauri/src/wiki/chat.rs`** (T1.2 update) - chunk-aware context builder:
+    `MAX_HITS` raised from 8 to 16. `build_context` dedupes by `parent_slug` (keeps
+    top-ranked chunk per page, appends "(+N more passages from this page)"). `format_entry`
+    includes `(§Methods)` in the header when `hit.section` is present so the model can cite
+    the passage. 3 new tests: section-label-in-header, dedupe-chunks-of-same-page,
+    distinct-pages-not-deduped.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).

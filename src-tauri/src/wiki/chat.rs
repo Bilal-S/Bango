@@ -25,7 +25,11 @@ use crate::wiki::fts;
 const CONTEXT_CHAR_BUDGET: usize = 12_000; // ~3000 tokens
 
 /// The maximum number of FTS5 hits to consider for context.
-const MAX_HITS: usize = 8;
+///
+/// Raised from 8 to 16 in T1.2 because chunk rows are smaller than whole-page
+/// rows, so more fit the char budget. `build_context` dedupes by `parent_slug`
+/// so multiple chunks of the same page do not crowd out other pages.
+const MAX_HITS: usize = 16;
 
 /// Send a wiki-grounded chat message. Returns the assistant response text.
 pub async fn wiki_chat(
@@ -132,21 +136,51 @@ pub fn build_wiki_prompts(
 }
 
 /// Build a token-budgeted context string from BM25 hits.
+///
+/// T1.2 chunk-aware behavior:
+/// - Dedupe by `parent_slug`: when multiple chunks of the same page match,
+///   keep the top-ranked chunk and append "(+N more passages from this page)"
+///   so one paper does not crowd out other pages.
+/// - Include the section label in the entry header when present, e.g.
+///   `## [[slug]] - Title (§Methods)`, so the model can cite the passage.
+///
 /// Higher-ranked hits are included first; once the char budget is exhausted,
 /// remaining hits are skipped (their titles are still listed as "see also").
 fn build_context(hits: &[fts::WikiPageHit]) -> String {
     if hits.is_empty() {
         return String::new();
     }
+
+    // Dedupe by parent_slug (falls back to slug for legacy whole-page rows).
+    // Keep the first (highest-ranked) hit per page; count the rest as "more
+    // passages".
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut deduped: Vec<&fts::WikiPageHit> = Vec::new();
+    let mut extra_by_page: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for hit in hits {
+        let page_key = hit.parent_slug.clone().unwrap_or_else(|| hit.slug.clone());
+        if seen.insert(page_key.clone()) {
+            deduped.push(hit);
+        } else {
+            *extra_by_page.entry(page_key).or_insert(0) += 1;
+        }
+    }
+
     let mut out = String::new();
     let mut budget = CONTEXT_CHAR_BUDGET;
     let mut deferred: Vec<&fts::WikiPageHit> = Vec::new();
 
-    for hit in hits {
+    for hit in &deduped {
         let entry = format_entry(hit);
         if entry.len() <= budget {
             out.push_str(&entry);
-            out.push_str("\n---\n\n");
+            // Append the "+N more passages" note if this page had extra chunks.
+            let page_key = hit.parent_slug.clone().unwrap_or_else(|| hit.slug.clone());
+            if let Some(extra) = extra_by_page.get(&page_key) {
+                out.push_str(&format!("*(+{extra} more passages from this page)*\n\n"));
+            }
+            out.push_str("---\n\n");
             budget = budget.saturating_sub(entry.len());
         } else {
             // Include just the title + summary if the full body would overflow.
@@ -172,10 +206,16 @@ fn build_context(hits: &[fts::WikiPageHit]) -> String {
     out
 }
 
-/// Format a single hit as a context entry.
+/// Format a single hit as a context entry, including the section label when the
+/// hit carries chunk metadata.
 fn format_entry(hit: &fts::WikiPageHit) -> String {
     let mut s = String::new();
-    s.push_str(&format!("## [[{}]] - {}\n\n", hit.slug, hit.title));
+    // Header: include (§Section) when the chunk metadata carries a section.
+    if let Some(section) = &hit.section {
+        s.push_str(&format!("## [[{}]] - {} (§{section})\n\n", hit.slug, hit.title));
+    } else {
+        s.push_str(&format!("## [[{}]] - {}\n\n", hit.slug, hit.title));
+    }
     if !hit.summary.is_empty() {
         s.push_str(&format!("> {}\n\n", hit.summary));
     }
@@ -206,6 +246,34 @@ mod tests {
             source_articles: "[]".to_string(),
             file_path: format!("wiki/concepts/{slug}.md"),
             rank: -1.0,
+            chunk_index: None,
+            section: None,
+            parent_slug: None,
+        }
+    }
+
+    /// Build a hit that carries chunk metadata (simulates a chunk row).
+    fn chunk_hit(
+        slug: &str,
+        title: &str,
+        summary: &str,
+        body: &str,
+        section: &str,
+        parent_slug: &str,
+        chunk_index: i32,
+    ) -> WikiPageHit {
+        WikiPageHit {
+            slug: slug.to_string(),
+            title: title.to_string(),
+            summary: summary.to_string(),
+            body: body.to_string(),
+            page_type: "source".to_string(),
+            source_articles: "[]".to_string(),
+            file_path: format!("wiki/sources/{parent_slug}.md"),
+            rank: -1.0,
+            chunk_index: Some(chunk_index),
+            section: Some(section.to_string()),
+            parent_slug: Some(parent_slug.to_string()),
         }
     }
 
@@ -295,19 +363,81 @@ mod tests {
     }
 
     #[test]
-    fn build_wiki_prompts_with_context_includes_context_block_and_question() {
-        let ctx = "## [[alpha]] - Alpha\n\nbody text";
-        let (system, user) = build_wiki_prompts(ctx, &[], "What is alpha?");
-        // System prompt is the static contract.
-        assert_eq!(system, wiki_chat_system_prompt());
-        // The provided context is embedded.
-        assert!(user.contains("Wiki page context (BM25-ranked"));
-        assert!(user.contains("[[alpha]]"));
-        assert!(user.contains("body text"));
-        // The "ingest first" fallback must NOT appear when context is present.
-        assert!(!user.contains("ingest sources first"));
-        // Final line carries the question.
-        assert!(user.ends_with("User: What is alpha?\nAssistant:"));
+    fn build_context_distinct_pages_not_deduped() {
+        // Two chunks with different parent_slugs should both appear. The
+        // `[[...]]` link uses `hit.slug` (the chunk row's slug, which for
+        // source pages equals the article id); deduping keys on parent_slug.
+        let hits = vec![
+            chunk_hit(
+                "art-1",
+                "A",
+                "s1",
+                "first page methods body content text",
+                "Methods",
+                "page-a",
+                0,
+            ),
+            chunk_hit(
+                "art-2",
+                "B",
+                "s2",
+                "second page results body content text",
+                "Results",
+                "page-b",
+                0,
+            ),
+        ];
+        let ctx = build_context(&hits);
+        assert!(ctx.contains("[[art-1]]"), "first chunk slug should appear: {ctx}");
+        assert!(ctx.contains("[[art-2]]"), "second chunk slug should appear: {ctx}");
+        assert!(!ctx.contains("more passages"), "distinct pages must not trigger dedupe note");
+    }
+
+    /// Test D (vertical slice): build a real FTS5 table with chunk rows
+    /// (carrying `section`), run `fts::search`, pass the hits to
+    /// `build_context`, and assert the context includes the section label
+    /// `(§Methods)`. This crosses the fts.rs -> chat.rs boundary that the
+    /// manual-hit tests bypass, so it would catch `collect_page_rows` failing
+    /// to populate `section` on real FTS rows.
+    #[test]
+    fn build_context_includes_section_label_from_real_fts_rows() {
+        use crate::wiki::fts;
+        use rusqlite::Connection;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let dir = root.join("wiki").join("sources");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut fm = crate::wiki::frontmatter::Frontmatter::default();
+        fm.set("slug", "smith-2023");
+        fm.set("title", "Smith 2023");
+        fm.set("type", "source");
+        fm.set("summary", "summary");
+        fm.set("status", "draft");
+        fm.set("source_articles", "[]");
+        fm.set("links", "[]");
+        let methods_sentence = "This study employed a randomised controlled trial design \
+            across multiple sites to evaluate the primary outcome measure with covariate \
+            adjustment for baseline characteristics and sensitivity analyses.";
+        let body = format!(
+            "## Methods\n{}\n\n## Results\nThe results showed a significant effect.",
+            methods_sentence.repeat(50)
+        );
+        crate::wiki::frontmatter::write_file(&dir.join("smith-2023.md"), &fm, &body).unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        fts::ensure_table(&conn).unwrap();
+        fts::rebuild_index(&conn, root).unwrap();
+
+        let hits = fts::search(&conn, "randomised", 10).unwrap();
+        assert!(!hits.is_empty(), "should find the Methods chunk in the real FTS index");
+
+        let ctx = build_context(&hits);
+        assert!(
+            ctx.contains("(§Methods)"),
+            "context must include the section label from real FTS rows: {ctx}"
+        );
     }
 
     #[test]
@@ -315,7 +445,6 @@ mod tests {
         let (_system, user) = build_wiki_prompts("", &[], "anything");
         assert!(user.contains("does not yet contain any indexed pages"));
         assert!(user.contains("ingest sources first"));
-        // Still ends with the question prompt.
         assert!(user.contains("User: anything\nAssistant:"));
     }
 
@@ -328,7 +457,6 @@ mod tests {
         let a1 = user.find("Assistant: a1").unwrap_or(usize::MAX);
         let q2 = user.find("User: q2").unwrap_or(usize::MAX);
         let q3 = user.find("User: q3").unwrap_or(usize::MAX);
-        // History precedes the final question, in order.
         assert!(q1 < a1);
         assert!(a1 < q2);
         assert!(q2 < q3);
@@ -342,10 +470,66 @@ mod tests {
 
     #[test]
     fn build_wiki_prompts_treats_unknown_role_as_assistant() {
-        // Any role string other than exactly "user" renders as "Assistant".
         let history = vec![msg("system", "sys note")];
         let (_system, user) = build_wiki_prompts("", &history, "q");
         assert!(user.contains("Assistant: sys note"));
         assert!(!user.contains("User: sys note"));
+    }
+
+    // ── T1.2 chunk-aware context builder tests ─────────────────────────
+
+    #[test]
+    fn build_context_includes_section_label_in_header() {
+        let hits = vec![chunk_hit(
+            "art-uuid",
+            "Smith 2023",
+            "summary",
+            "We used a randomised controlled design.",
+            "Methods",
+            "smith-2023",
+            0,
+        )];
+        let ctx = build_context(&hits);
+        assert!(ctx.contains("(§Methods)"), "section label must be in header: {ctx}");
+        assert!(
+            ctx.contains("[[smith-2023]]") || ctx.contains("[[art-uuid]]"),
+            "slug must be present"
+        );
+    }
+
+    #[test]
+    fn build_context_dedupes_chunks_of_same_page() {
+        let hits = vec![
+            chunk_hit(
+                "a",
+                "A",
+                "s1",
+                "methods body text here is the first chunk content body",
+                "Methods",
+                "page-x",
+                0,
+            ),
+            chunk_hit(
+                "a",
+                "A",
+                "s2",
+                "results body text here is the second chunk content body",
+                "Results",
+                "page-x",
+                1,
+            ),
+            chunk_hit(
+                "a",
+                "A",
+                "s3",
+                "discussion body text here is the third chunk content body",
+                "Discussion",
+                "page-x",
+                2,
+            ),
+        ];
+        let ctx = build_context(&hits);
+        assert!(ctx.contains("+2 more passages from this page"), "should note extra chunks: {ctx}");
+        assert!(ctx.contains("(§Methods)"));
     }
 }

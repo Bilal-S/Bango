@@ -31,6 +31,8 @@ const DROP_TABLES: &[&str] = &[
     "llm_config",
     "summary",
     "app_settings",
+    // Article chunk storage (T1.2/T3.1)
+    "article_chunks",
     // Bibliometrics tables
     "biblio_network_edges",
     "biblio_network_nodes",
@@ -84,6 +86,8 @@ const DROP_INDEXES: &[&str] = &[
     "idx_bat_term",
     "idx_bnn_network",
     "idx_bne_network",
+    // Article chunk storage (T1.2/T3.1)
+    "idx_article_chunks_article",
     // Legacy v1 indexes
     "idx_article_references_parent_type",
     "idx_article_references_doi",

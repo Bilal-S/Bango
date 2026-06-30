@@ -339,6 +339,11 @@ pub fn remove_header_footer_lines(text: &str, header_footer_lines: &[String]) ->
 
 /// Strip the abstract section from the beginning of the text.
 /// Looks for "Abstract" heading and removes everything up to the next section heading.
+///
+/// Note: `classify_sections` (in `utils::sections`) provides a more structured
+/// view of the same document. This substring-based stripper is kept because it
+/// is proven and covered by existing tests; new consumers (T1.2 chunking,
+/// T1.3 section summaries) use `classify_sections` directly.
 #[must_use]
 pub fn strip_abstract(text: &str) -> String {
     let abstract_patterns = [
@@ -403,6 +408,11 @@ pub fn strip_abstract(text: &str) -> String {
 }
 
 /// Strip the references section from the end of the text.
+///
+/// Note: `classify_sections` (in `utils::sections`) provides a more structured
+/// view of the same document. This substring-based stripper is kept because it
+/// is proven and covered by existing tests; new consumers (T1.2 chunking,
+/// T1.3 section summaries) use `classify_sections` directly.
 #[must_use]
 pub fn strip_references(text: &str) -> String {
     let ref_patterns = [
