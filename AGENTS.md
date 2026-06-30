@@ -470,6 +470,23 @@ describe each durable boundary so agents can locate the right area. Create a chi
     in other views still win.
   - **`src/router/index.ts`** - route table; lazy views are prefetched after `router.isReady()`.
     `/settings` renders `settings-view.vue`.
+- **`landingpage/`** - standalone marketing microsite (NOT part of the shipped Tauri
+  app). Static HTML5 + Tailwind v4 (browser CDN build, no compile step). Two pages:
+  `index.html` (hero, privacy callout, feature grid, how-it-works, final CTA, footer)
+  and `help.html` (static reference copy of the in-app 5-tab Help system: User Guide,
+  Bibliometrics, Troubleshooting, Local AI, Reference). Shared `assets/` (logo.png +
+  screenshots). Cross-linked: `index.html` nav carries a `Help` link to `help.html`;
+  `help.html` nav links back to `index.html` sections. Both pages ship the same
+  vanilla-JS primitives: LinkedIn Insight Tag + conversion tracking
+  (`window.lintrk('track', ...)`, conversion_id 28476826), scroll-reveal via
+  IntersectionObserver, and an image lightbox (click-to-enlarge + Esc/backdrop/(X)
+  close). `help.html` additionally loads the Material Symbols font for icons and a
+  tab-switching IIFE that mirrors the app's 5-tab shell. Destination for all CTAs:
+  Microsoft Store (`apps.microsoft.com/detail/9np2bhgxt8h3`). Live home:
+  https://bango.boncode.net. When porting app Help content to `help.html`, remove
+  app-only interactivity (Vue router navigation buttons, demo-project loader,
+  scroll-spy sidebar) and replace CSS variables / Tailwind-scoped styles with plain
+  CSS or self-contained utility classes.
 - **`tests/test-citations/`** - RIS fixture data for citation/reference system tests.
   `main_articles.ris` (10 articles, DOIs `10.1001/art1`–`10.1010/art10`) with per-article
   `_references.ris` and `_citations.ris` files (filename = DOI with `/`→`_`). A dedicated
