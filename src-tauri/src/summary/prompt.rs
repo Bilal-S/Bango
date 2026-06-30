@@ -36,6 +36,67 @@ pub const SYSTEM_PROMPT: &str = "You are an expert academic literature review wr
 /// schema consumed by the frontend (`src/composables/use-ai-summary.ts`).
 pub const ARTICLE_SUMMARY_SYSTEM_PROMPT: &str = include_str!("ai_article_summary_prompt.md");
 
+/// System prompt variant that also requests per-section summaries.
+///
+/// Used by `generate_article_ai_summary` when `include_section_summaries` is
+/// true AND `classify_sections` detected at least one high-value section
+/// (Methods/Results/Discussion). The model returns the standard
+/// `AiSummaryData` fields PLUS a `section_summaries` array. The frontend
+/// `parseAiSummary` treats `section_summaries` as optional, so v1 callers
+/// keep working unchanged.
+pub const ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT: &str =
+    include_str!("ai_article_summary_with_sections_prompt.md");
+
+/// High-value section kinds that the section-aware summary extracts.
+///
+/// `Introduction` / `Conclusion` / `Abstract` are deliberately excluded:
+/// they are either already covered by the whole-paper summary or are low
+/// value as standalone section summaries for systematic-review work.
+const HIGH_VALUE_SECTION_KINDS: &[crate::utils::sections::SectionKind] = &[
+    crate::utils::sections::SectionKind::Methods,
+    crate::utils::sections::SectionKind::Results,
+    crate::utils::sections::SectionKind::Discussion,
+];
+
+/// Filter `classify_sections` output to the high-value subset (Methods /
+/// Results / Discussion).
+///
+/// Returns the input unchanged if it is empty or contains only `Text` /
+/// `References` (the degenerate "no real sections detected" case). The
+/// caller uses an empty result to skip the section-aware prompt branch.
+#[must_use]
+pub fn filter_high_value_sections(
+    sections: &[crate::utils::sections::Section],
+) -> Vec<crate::utils::sections::Section> {
+    sections.iter().filter(|s| HIGH_VALUE_SECTION_KINDS.contains(&s.kind)).cloned().collect()
+}
+
+/// Render detected high-value sections into a structured block for the LLM
+/// user prompt.
+///
+/// Each section is rendered as:
+///
+/// ```text
+/// === SECTION: Methods ===
+/// <section body>
+/// ```
+///
+/// Sections with empty bodies are skipped. Returns an empty string when no
+/// sections are provided (the caller falls back to the standard prompt).
+#[must_use]
+pub fn build_section_context(sections: &[crate::utils::sections::Section]) -> String {
+    let mut blocks = Vec::with_capacity(sections.len());
+    for s in sections {
+        let body = s.body.trim();
+        if body.is_empty() {
+            continue;
+        }
+        let label = s.kind.label();
+        blocks.push(format!("=== SECTION: {label} ===\n{body}"));
+    }
+    blocks.join("\n\n")
+}
+
 /// Format screening statistics into a human-readable summary for the prompt.
 #[must_use]
 pub fn format_screening_summary(data: &ScreeningData) -> String {

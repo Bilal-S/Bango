@@ -39,6 +39,26 @@ pub enum SectionKind {
     Text,
 }
 
+impl SectionKind {
+    /// Stable display label for the variant, used by prompt builders and
+    /// section-aware summary rendering. Guaranteed to be a single capitalized
+    /// word matching the enum variant name (e.g. `"Methods"`, `"Results"`).
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            SectionKind::Heading => "Heading",
+            SectionKind::Abstract => "Abstract",
+            SectionKind::Introduction => "Introduction",
+            SectionKind::Methods => "Methods",
+            SectionKind::Results => "Results",
+            SectionKind::Discussion => "Discussion",
+            SectionKind::Conclusion => "Conclusion",
+            SectionKind::References => "References",
+            SectionKind::Text => "Text",
+        }
+    }
+}
+
 /// A classified block of text bounded by headings (or the whole document when
 /// no headings are detected).
 #[derive(Debug, Clone)]

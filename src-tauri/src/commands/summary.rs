@@ -13,7 +13,11 @@ use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::prisma::data;
 use crate::screening::engine as screening_engine;
 use crate::summary::engine::{self, SummaryInput};
-use crate::summary::prompt::{ArticleSummary, ScreeningData, ARTICLE_SUMMARY_SYSTEM_PROMPT};
+use crate::summary::prompt::{
+    build_section_context, filter_high_value_sections, ArticleSummary, ScreeningData,
+    ARTICLE_SUMMARY_SYSTEM_PROMPT, ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
+};
+use crate::utils::sections::classify_sections;
 
 #[tauri::command]
 pub async fn generate_summary(
@@ -129,6 +133,7 @@ pub async fn generate_article_ai_summary(
     db_state: State<'_, DbState>,
     app_handle: tauri::AppHandle,
     article_id: String,
+    include_section_summaries: Option<bool>,
 ) -> Result<String, AppError> {
     // 1. Fetch article full text and LLM config while holding the DB lock
     let (title, full_text, config) = {
@@ -141,16 +146,47 @@ pub async fn generate_article_ai_summary(
         (t, ft, cfg)
     }; // conn lock released
 
-    // 2. Build user prompt with article title and full text
-    // Truncate full text to stay within reasonable token limits
-    let max_chars = ((config.context_window_tokens as usize).saturating_sub(2000)) * 4;
-    let truncated = if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
-    let user_prompt = format!("## Article Title\n{}\n\n## Full Text\n{}", title, truncated);
+    // 2. Build user prompt with article title and full text.
+    // When `include_section_summaries` is true AND the full text has detectable
+    // high-value sections (Methods/Results/Discussion), we swap to the
+    // section-aware system prompt and append a delimited section block so the
+    // model returns `section_summaries` alongside the standard fields. When the
+    // flag is false OR no sections are detected, behavior is identical to the
+    // pre-T1.3 path (backward compatible).
+    let want_sections = include_section_summaries.unwrap_or(false);
+    let high_value = if want_sections {
+        filter_high_value_sections(&classify_sections(&full_text))
+    } else {
+        Vec::new()
+    };
+    let (system_prompt, user_prompt) = if high_value.is_empty() {
+        // Standard path (whole-paper only).
+        let max_chars = ((config.context_window_tokens as usize).saturating_sub(2000)) * 4;
+        let truncated =
+            if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
+        let prompt = format!("## Article Title\n{title}\n\n## Full Text\n{truncated}");
+        (ARTICLE_SUMMARY_SYSTEM_PROMPT, prompt)
+    } else {
+        // Section-aware path. Reserve space for the section-context block, then
+        // append it after the full text so the model can ground each per-section
+        // summary in the corresponding delimited region.
+        let section_context = build_section_context(&high_value);
+        let section_overhead = section_context.len() + 200;
+        let max_chars = ((config.context_window_tokens as usize)
+            .saturating_sub(section_overhead / 4 + 2000))
+            * 4;
+        let truncated =
+            if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
+        let prompt = format!(
+            "## Article Title\n{title}\n\n## Full Text\n{truncated}\n\n## Detected Sections\n\n{section_context}"
+        );
+        (ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT, prompt)
+    };
 
     // 3. Call LLM via orchestrator - catch errors to log them to audit trail
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
     let llm_result = orchestrator
-        .send(&config, ARTICLE_SUMMARY_SYSTEM_PROMPT, &user_prompt, LlmRequestType::ArticleSummary)
+        .send(&config, system_prompt, &user_prompt, LlmRequestType::ArticleSummary)
         .await;
 
     let (response_text, _tokens) = match llm_result {

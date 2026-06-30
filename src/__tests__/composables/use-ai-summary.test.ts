@@ -29,9 +29,17 @@ import {
   pendingSummaries,
 } from '@/composables/use-ai-summary';
 import { useToast } from '@/composables/use-toast';
+import { shimLocalStorage } from '../helpers/fixtures';
 
 describe('use-ai-summary', () => {
   beforeEach(async () => {
+    // happy-dom's localStorage lacks removeItem/clear; install a full shim so
+    // the section-summaries toggle read/write/clear works.
+    Object.defineProperty(window, 'localStorage', {
+      value: shimLocalStorage(),
+      configurable: true,
+    });
+
     // Wait for the module-level `ensureGlobalListeners()` (fire-and-forget
     // on import) to finish registering both event listeners.
     await vi.waitFor(() => {
@@ -46,6 +54,7 @@ describe('use-ai-summary', () => {
     pendingSummaries.value.clear();
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue('ok');
+    localStorage.removeItem('bango-section-summaries');
 
     // Clear any lingering toasts from prior tests.
     const { toasts, dismiss } = useToast();
@@ -62,10 +71,48 @@ describe('use-ai-summary', () => {
     await requestArticleAiSummary('a1', 'Test Title');
 
     expect(pendingSummaries.value.has('a1')).toBe(true);
-    expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', { articleId: 'a1' });
+    expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', {
+      articleId: 'a1',
+      includeSectionSummaries: false,
+    });
     expect(toasts.value).toHaveLength(1);
     expect(toasts.value[0]!.message).toBe('Submitted for AI summary');
     expect(toasts.value[0]!.type).toBe('info');
+  });
+
+  it('forwards includeSectionSummaries=false by default (toggle absent)', async () => {
+    await requestArticleAiSummary('a1', 'Test Title');
+    expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', {
+      articleId: 'a1',
+      includeSectionSummaries: false,
+    });
+  });
+
+  it('forwards includeSectionSummaries=true when localStorage toggle is on', async () => {
+    localStorage.setItem('bango-section-summaries', 'true');
+    await requestArticleAiSummary('a1', 'Test Title');
+    expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', {
+      articleId: 'a1',
+      includeSectionSummaries: true,
+    });
+  });
+
+  it('explicit includeSections param overrides the localStorage toggle', async () => {
+    localStorage.setItem('bango-section-summaries', 'true');
+    await requestArticleAiSummary('a1', 'Test Title', undefined, false);
+    expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', {
+      articleId: 'a1',
+      includeSectionSummaries: false,
+    });
+  });
+
+  it('explicit includeSections=true forwards true even when toggle is off', async () => {
+    // Toggle absent (default off).
+    await requestArticleAiSummary('a1', 'Test Title', undefined, true);
+    expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', {
+      articleId: 'a1',
+      includeSectionSummaries: true,
+    });
   });
 
   it('invokes onComplete callback and clears pending on complete event', async () => {
@@ -170,6 +217,72 @@ describe('use-ai-summary', () => {
       expect(result!.summary_150_250_words).toBe('This is a summary.');
       expect(result!.key_insights).toEqual(['insight 1', 'insight 2']);
       expect(result!.keywords).toEqual(['kw1', 'kw2']);
+      // Backward-compat: v1 blob has no section_summaries.
+      expect(result!.section_summaries).toBeUndefined();
+    });
+
+    it('parses a v2 blob with section_summaries', () => {
+      const v2 = {
+        schema_version: 2,
+        field: 'medicine',
+        subfield: 'public_health',
+        structured_extraction: {},
+        summary_150_250_words: 'Whole-paper summary.',
+        key_insights: [],
+        keywords: [],
+        section_summaries: [
+          {
+            section: 'Methods',
+            summary: 'We did an RCT.',
+            key_points: ['N=1000'],
+            study_design: 'Randomized Controlled Trial',
+          },
+          {
+            section: 'Results',
+            summary: 'BMI fell.',
+            key_points: ['d=0.2'],
+            effect_size: 'd=0.2',
+            confidence_interval: '95% CI [0.1, 0.3]',
+          },
+          {
+            section: 'Discussion',
+            summary: 'Policy relevant.',
+            key_points: [],
+          },
+        ],
+      };
+
+      const result = parseAiSummary(JSON.stringify(v2));
+
+      expect(result).not.toBeNull();
+      expect(result!.schema_version).toBe(2);
+      expect(result!.section_summaries).toBeDefined();
+      expect(result!.section_summaries).toHaveLength(3);
+      expect(result!.section_summaries![0]!.section).toBe('Methods');
+      expect(result!.section_summaries![0]!.study_design).toBe('Randomized Controlled Trial');
+      expect(result!.section_summaries![1]!.section).toBe('Results');
+      expect(result!.section_summaries![1]!.effect_size).toBe('d=0.2');
+      expect(result!.section_summaries![1]!.confidence_interval).toBe('95% CI [0.1, 0.3]');
+      expect(result!.section_summaries![2]!.section).toBe('Discussion');
+    });
+
+    it('parses a v2 blob with empty section_summaries array', () => {
+      const v2Empty = {
+        schema_version: 2,
+        field: 'medicine',
+        subfield: 'public_health',
+        structured_extraction: {},
+        summary_150_250_words: 'Whole-paper summary.',
+        key_insights: [],
+        keywords: [],
+        section_summaries: [],
+      };
+
+      const result = parseAiSummary(JSON.stringify(v2Empty));
+
+      expect(result).not.toBeNull();
+      expect(result!.section_summaries).toBeDefined();
+      expect(result!.section_summaries).toHaveLength(0);
     });
   });
 });

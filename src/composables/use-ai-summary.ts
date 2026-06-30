@@ -3,13 +3,24 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useToast } from './use-toast';
 
+export interface SectionSummary {
+  section: string;
+  summary: string;
+  key_points?: string[];
+  study_design?: string;
+  effect_size?: string;
+  confidence_interval?: string;
+}
+
 export interface AiSummaryData {
+  schema_version?: number;
   field: string;
   subfield: string;
   structured_extraction: Record<string, string>;
   summary_150_250_words: string;
   key_insights: string[];
   keywords: string[];
+  section_summaries?: SectionSummary[];
 }
 
 export const pendingSummaries = ref<Set<string>>(new Set());
@@ -78,11 +89,15 @@ void ensureGlobalListeners();
  * Shows a toast immediately and processes asynchronously.
  * @param onComplete - Optional callback invoked when summary completes (even
  *   across navigation). Automatically cleaned up after firing.
+ * @param includeSections - When true, also generate per-section summaries
+ *   (Methods/Results/Discussion) in the same LLM call. Reads the
+ *   `bango-section-summaries` localStorage toggle when omitted.
  */
 export async function requestArticleAiSummary(
   articleId: string,
   articleTitle: string,
-  onComplete?: (articleId: string) => Promise<void>
+  onComplete?: (articleId: string) => Promise<void>,
+  includeSections?: boolean
 ) {
   const { show } = useToast();
   try {
@@ -94,8 +109,16 @@ export async function requestArticleAiSummary(
       summaryCallbacks.set(articleId, onComplete);
     }
 
+    // Resolve the section-summaries flag: explicit param wins, otherwise read
+    // the persisted user preference (default off / absent = false).
+    const wantSections =
+      includeSections ?? localStorage.getItem('bango-section-summaries') === 'true';
+
     // Fire-and-forget: the command is async and emits an event on success.
-    invoke<string>('generate_article_ai_summary', { articleId }).catch((e: unknown) => {
+    invoke<string>('generate_article_ai_summary', {
+      articleId,
+      includeSectionSummaries: wantSections,
+    }).catch((e: unknown) => {
       pendingSummaries.value.delete(articleId);
       summaryCallbacks.delete(articleId);
       const msg = e instanceof Error ? e.message : String(e);

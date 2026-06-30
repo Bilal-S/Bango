@@ -19,12 +19,29 @@ const defaultTab = (): 'abstract' | 'aiSummary' => (aiSummaryData.value ? 'aiSum
 // Active tab for Abstract/AI Summary
 const abstractTab = ref<'abstract' | 'aiSummary'>(defaultTab());
 
+// Per-section expand/collapse state for the Section Summaries block.
+const expandedSections = ref<Set<string>>(new Set());
+const sectionsExpanded = ref(false);
+
+function toggleSection(name: string): void {
+  // Mutate the Set reactively by creating a new instance.
+  const next = new Set(expandedSections.value);
+  if (next.has(name)) {
+    next.delete(name);
+  } else {
+    next.add(name);
+  }
+  expandedSections.value = next;
+}
+
 // Reset to the default tab whenever the selected article changes so that
 // articles with an AI summary land on the AI Summary tab automatically.
 watch(
   () => props.article.id,
   () => {
     abstractTab.value = defaultTab();
+    expandedSections.value = new Set();
+    sectionsExpanded.value = false;
   }
 );
 </script>
@@ -121,6 +138,79 @@ watch(
           >
             {{ kw }}
           </span>
+        </div>
+      </div>
+      <!-- Section Summaries (schema v2; optional) -->
+      <div v-if="(aiSummaryData.section_summaries ?? []).length > 0">
+        <div class="flex items-center justify-between mb-1">
+          <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider">
+            Section Summaries
+          </h4>
+          <button
+            class="text-xs text-slate-500 hover:text-violet-700 cursor-pointer select-none"
+            @click="sectionsExpanded = !sectionsExpanded"
+          >
+            {{ sectionsExpanded ? 'Collapse all' : 'Expand all' }}
+          </button>
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="sec in aiSummaryData.section_summaries ?? []"
+            :key="sec.section"
+            class="border border-slate-200 rounded-md overflow-hidden"
+          >
+            <button
+              class="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+              @click="toggleSection(sec.section)"
+            >
+              <span class="flex items-center gap-2">
+                <span
+                  class="text-xs font-label-caps text-violet-700 uppercase tracking-wider font-semibold"
+                  >{{ sec.section }}</span
+                >
+                <span
+                  v-if="sec.study_design"
+                  class="text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded"
+                  >{{ sec.study_design }}</span
+                >
+                <span
+                  v-if="sec.effect_size"
+                  class="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded"
+                  >{{ sec.effect_size }}</span
+                >
+              </span>
+              <span class="material-symbols-outlined text-[16px] text-slate-400">{{
+                expandedSections.has(sec.section) || sectionsExpanded
+                  ? 'expand_less'
+                  : 'expand_more'
+              }}</span>
+            </button>
+            <div
+              v-if="expandedSections.has(sec.section) || sectionsExpanded"
+              class="px-3 py-2 space-y-2"
+            >
+              <p class="text-sm text-slate-600 leading-relaxed">{{ sec.summary }}</p>
+              <ul v-if="(sec.key_points ?? []).length > 0" class="space-y-1">
+                <li
+                  v-for="(point, idx) in sec.key_points ?? []"
+                  :key="idx"
+                  class="flex gap-2 text-xs text-slate-500"
+                >
+                  <span class="text-violet-400 mt-0.5 shrink-0">•</span>
+                  <span>{{ point }}</span>
+                </li>
+              </ul>
+              <div
+                v-if="sec.confidence_interval"
+                class="text-xs text-slate-500 flex gap-1 items-center"
+              >
+                <span class="material-symbols-outlined text-[14px] text-slate-400"
+                  >confidence_interval</span
+                >
+                <span>{{ sec.confidence_interval }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -326,19 +326,29 @@ describe each durable boundary so agents can locate the right area. Create a chi
     end-to-end tests against committed OA fixtures: `plos-med-1004371.pdf`
     (Cobiac 2024, CC-BY, 7 sections / 21 chunks), `pone-0285956.pdf` (Oakland SSB
     tax, CC-BY, 5 sections / 17 chunks), and `demo-vfs-2022-pid-69753.pdf`
-    (lopdf-fallback space-degenerate regression). `chunking_test.rs` is inline
-    in `utils/chunking.rs` (9 tests: empty input, short section, references skip,
-    long-section sentence split, tiny-tail merge, Text label, Heading label,
-    contiguous chunk_index, empty-body skip).
+    (lopdf-fallback space-degenerate regression). `section_summary_prompt_test.rs`
+    (T1.3, 14 tests) covers the section-aware AI summary prompt helpers
+    (`filter_high_value_sections`, `build_section_context`), the
+    `SectionKind::label()` display strings, the
+    `ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT` content guard (schema keys +
+    delimiter format), and JSON backward-compat (v1 blobs without
+    `section_summaries` + v2 blobs with `section_summaries` both parse through
+    `serde_json::Value` as the command stores `parsed.to_string()`).
+    `chunking_test.rs` is inline in `utils/chunking.rs` (9 tests: empty input,
+    short section, references skip, long-section sentence split, tiny-tail
+    merge, Text label, Heading label, contiguous chunk_index, empty-body skip).
   - **`src-tauri/src/utils/sections.rs`** - section-aware text classification (T1.1).
     `classify_sections(text)` splits flat extracted text into `Vec<Section>` by detecting
     heading lines (markdown `##`, numbered `2.1 Study Design`, bare keyword `METHODS`).
     `SectionKind` enum: `Heading, Abstract, Introduction, Methods, Results, Discussion,
-    Conclusion, References, Text` (Table/Figure deferred to T2). `extract_sections(path)`
-    is the I/O wrapper that runs `extract_pdf_text`/`extract_txt_text` then classifies.
-    Pure functions (`#[must_use]`); the proven `strip_abstract`/`strip_references` in
-    `pdf_extract.rs` are kept unchanged (new consumers call `classify_sections` directly).
-    Consumed by T1.2 `chunking.rs` and T1.3 `commands::summary::generate_section_summaries`.
+    Conclusion, References, Text` (Table/Figure deferred to T2). `SectionKind::label()`
+    returns the stable display string for each variant (used by T1.3 prompt builders +
+    UI rendering). `extract_sections(path)` is the I/O wrapper that runs
+    `extract_pdf_text`/`extract_txt_text` then classifies. Pure functions (`#[must_use]`);
+    the proven `strip_abstract`/`strip_references` in `pdf_extract.rs` are kept unchanged
+    (new consumers call `classify_sections` directly). Consumed by T1.2 `chunking.rs`
+    and T1.3 `commands::summary::generate_article_ai_summary` (section-aware branch via
+    `summary::prompt::{filter_high_value_sections, build_section_context}`).
   - **`src-tauri/src/utils/chunking.rs`** - semantic chunking (T1.2). `chunk_sections(
     sections, target_words)` walks `Section`s and emits `Vec<Chunk>` bounded by
     `DEFAULT_CHUNK_WORDS=512` / `MIN_CHUNK_WORDS=100` / `MAX_CHUNK_WORDS=1200`. Splits
@@ -438,7 +448,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     feedback in one bordered `<section>`), `settings-project-management.vue` (import/export/delete
     + dialogs; Delete All Data also wipes the on-disk Wiki and resets
     `useWiki`/`useChatStore.wikiReady`; Export dialog warns that the Bango Documents
-    directory - full-text PDFs + Wiki - is NOT backed up), `settings-screening-preferences.vue` (2 localStorage-backed toggles),
+    directory - full-text PDFs + Wiki - is NOT backed up), `settings-screening-preferences.vue` (3 localStorage-backed toggles:
+    auto-navigate-after-decision, full-text-summaries [auto-fire whole-paper summary on attach],
+    section-summaries [T1.3: auto-fire per-section summaries on attach; independent of
+    full-text-summaries; manual `auto_awesome` button always works regardless]),
     `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
     Shared card chrome for these lives in `settings-card-shared.css`.
   - **`src/composables/`** - Vue composables. `use-startup-upgrade.ts`

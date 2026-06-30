@@ -21,6 +21,14 @@ function toggleFullTextSummaries(): void {
   fullTextSummaries.value = !fullTextSummaries.value;
   localStorage.setItem('bango-full-text-summaries', String(fullTextSummaries.value));
 }
+
+// Section Summaries preference (off by default; independent of Full Text Summaries)
+const sectionSummaries = ref(localStorage.getItem('bango-section-summaries') === 'true');
+
+function toggleSectionSummaries(): void {
+  sectionSummaries.value = !sectionSummaries.value;
+  localStorage.setItem('bango-section-summaries', String(sectionSummaries.value));
+}
 </script>
 
 <template>
@@ -62,6 +70,24 @@ function toggleFullTextSummaries(): void {
         role="switch"
         :aria-checked="fullTextSummaries"
         @click="toggleFullTextSummaries"
+      >
+        <span class="settings-card__switch-thumb" />
+      </button>
+    </div>
+    <div class="settings-card__toggle-row" style="margin-top: 1rem">
+      <label class="settings-card__toggle-label">
+        <span>Section Summaries</span>
+        <span class="settings-card__toggle-hint"
+          >When enabled, AI summaries also include per-section breakdowns (Methods, Results,
+          Discussion). Generates more detailed output per article in the same LLM call.</span
+        >
+      </label>
+      <button
+        class="settings-card__switch"
+        :class="{ 'settings-card__switch--on': sectionSummaries }"
+        role="switch"
+        :aria-checked="sectionSummaries"
+        @click="toggleSectionSummaries"
       >
         <span class="settings-card__switch-thumb" />
       </button>
