@@ -217,23 +217,32 @@ pub fn collect_page_rows(root: &Path) -> Result<Vec<PageRow>, AppError> {
 pub fn chunk_page_rows(rows: Vec<PageRow>) -> Vec<PageRow> {
     let mut out = Vec::new();
     for row in rows {
-        let sections = crate::utils::sections::classify_sections(&row.body);
+        // Use the table-aware composer so GFM tables are detected as
+        // `SectionKind::Table` (emitted atomically by `chunk_sections`)
+        // rather than being line-split as generic `Text`. The previous call
+        // to `classify_sections` missed tables entirely, defeating the
+        // atomic Table/Figure arm and chopping tables across chunks.
+        let sections = crate::utils::sections::extract_sections_with_tables(&row.body);
         let chunks = crate::utils::chunking::chunk_sections(
             &sections,
             crate::utils::chunking::DEFAULT_CHUNK_WORDS,
         );
 
         if chunks.len() <= 1 {
-            // Short page (or no headings): keep as a whole-page row.
-            out.push(row);
+            // Short page (or no headings): keep as a whole-page row. Strip
+            // any `<!-- TABLE:N -->` placeholder comments left by
+            // `detect_markdown_tables` so they don't pollute the FTS index.
+            let mut short = row;
+            short.body = strip_table_placeholders(&short.body);
+            out.push(short);
         } else {
             // Long page: emit one chunk row per chunk, sharing parent_slug so
             // `build_context` can dedupe and the self-heal distinct-count
-            // stays correct.
+            // stays correct. Strip placeholder comments from each chunk body.
             let parent_slug = row.slug.clone();
             for chunk in &chunks {
                 out.push(PageRow {
-                    body: chunk.text.clone(),
+                    body: strip_table_placeholders(&chunk.text),
                     chunk_index: Some(chunk.chunk_index as i32),
                     section: chunk.section.clone(),
                     parent_slug: Some(parent_slug.clone()),
@@ -464,6 +473,27 @@ fn hex_encode(bytes: &[u8]) -> String {
         out.push_str(&format!("{b:02x}"));
     }
     out
+}
+
+/// Strip `<!-- TABLE:N -->` placeholder comments from text before it enters
+/// the FTS index.
+///
+/// `detect_markdown_tables` replaces GFM table blocks with these placeholders
+/// in the linear text, then appends the actual table sections at the end. The
+/// placeholders are structural markers, not content; leaving them in the FTS
+/// body pollutes BM25 rows + chat context with markup that's useless for
+/// retrieval. This strips them (and the surrounding blank line) so only real
+/// prose + the appended table body are indexed.
+#[must_use]
+fn strip_table_placeholders(text: &str) -> String {
+    use crate::utils::sections::compile_static_regex;
+    use std::sync::OnceLock;
+    static PLACEHOLDER_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = PLACEHOLDER_RE.get_or_init(|| {
+        // Match `<!-- TABLE:N -->` on its own, optionally followed by a newline.
+        compile_static_regex(r"(?m)^<!-- TABLE:\d+ -->\s*$\n?")
+    });
+    re.replace_all(text, "").to_string()
 }
 
 /// A search hit returned by `search`.
@@ -1320,6 +1350,85 @@ mod tests {
              {:?}",
             hits.iter().map(|h| (&h.slug, &h.section, h.chunk_index)).collect::<Vec<_>>()
         );
+    }
+
+    /// Test F (Tier 2 Phase 1 regression): a wiki source page containing a
+    /// large GFM table must produce exactly ONE atomic FTS row with
+    /// `section = 'Table'`, not multiple line-split rows.
+    ///
+    /// This is the vertical-slice test that catches Gap 1 from the critique:
+    /// `chunk_page_rows` previously called `classify_sections` (which missed
+    /// tables entirely), so GFM tables flowed through as `SectionKind::Text`
+    /// and got hard-sliced line-by-line at newline boundaries. The fix
+    /// switched `chunk_page_rows` to `extract_sections_with_tables`, which
+    /// detects the table and routes it through `chunk_sections`'s atomic
+    /// `SectionKind::Table` arm (one chunk regardless of `MAX_CHUNK_WORDS`).
+    #[test]
+    fn chunk_page_rows_emits_atomic_table_row_for_gfm_table_page() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        // A page whose body is a large GFM table (>1200 words so it would
+        // exceed MAX_CHUNK_WORDS if hard-sliced).
+        let header = "| Metric | Value | Description |\n| --- | --- | --- |\n";
+        let rows = (0..600)
+            .map(|i| format!("| metric{i} | {i} | description of metric {i} number {i} |\n"))
+            .collect::<String>();
+        let table_body = format!("{header}{rows}");
+        let body = format!("# Data Table\n\n{table_body}");
+        write_wiki_page(root, "sources", "big-table", "Big Table", &body);
+
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_table(&conn).unwrap();
+        rebuild_index(&conn, root).unwrap();
+
+        // Query FTS for rows tagged as Table sections.
+        let mut stmt = conn
+            .prepare(
+                "SELECT chunk_index, section, parent_slug, body FROM wiki_pages_fts \
+                 WHERE section = 'Table'",
+            )
+            .unwrap();
+        let table_rows: Vec<(Option<i32>, Option<String>, Option<String>, String)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, String>(3)?))
+            })
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+
+        // Exactly ONE atomic Table row (the table was NOT line-split).
+        assert_eq!(
+            table_rows.len(),
+            1,
+            "GFM table must be ONE atomic FTS row, got {}: this is the Gap 1 regression",
+            table_rows.len()
+        );
+        // The atomic row carries the full table content (metric599 is the last row).
+        assert!(
+            table_rows[0].3.contains("metric599"),
+            "atomic table row must contain the full table body, got: {}...",
+            &table_rows[0].3[..200.min(table_rows[0].3.len())]
+        );
+        // Sanity: no FTS row is a fragment containing only the header.
+        let fragment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM wiki_pages_fts WHERE body LIKE '%| --- |%' AND body NOT LIKE '%metric599%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(fragment_count, 0, "no line-split table fragments should exist");
+    }
+
+    /// Test: `strip_table_placeholders` removes the `<!-- TABLE:N -->` markers
+    /// so they don't pollute the FTS index (Problem 2 from the critique).
+    #[test]
+    fn strip_table_placeholders_removes_markers() {
+        let text = "Some intro prose.\n\n<!-- TABLE:1 -->\n\nMore prose.\n\n<!-- TABLE:2 -->\n";
+        let stripped = strip_table_placeholders(text);
+        assert!(!stripped.contains("<!-- TABLE:"), "placeholders must be stripped: {stripped}");
+        assert!(stripped.contains("Some intro prose."), "prose must survive: {stripped}");
+        assert!(stripped.contains("More prose."), "prose must survive: {stripped}");
     }
 
     /// Regression: `rebuild_index_with_manifest` must not crash on long pages

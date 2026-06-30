@@ -10,7 +10,10 @@ use std::path::Path;
 use bango_lib::utils::{
     chunking::{chunk_sections, DEFAULT_CHUNK_WORDS, MIN_CHUNK_WORDS},
     pdf_extract::extract_pdf_text,
-    sections::{classify_sections, SectionKind},
+    sections::{
+        classify_sections, detect_markdown_tables, extract_captions, extract_sections_with_tables,
+        CaptionKind, SectionKind,
+    },
 };
 
 /// Helper: classify and return the (kind, heading) pairs for concise assertions.
@@ -345,5 +348,199 @@ fn lopdf_fallback_pdf_degrades_to_single_text_section() {
     for c in &chunks {
         assert!(c.word_count <= 1200, "chunk exceeds MAX_CHUNK_WORDS");
         assert!(c.section.is_none(), "no section label on Text chunks");
+    }
+}
+
+// ── Tier 2 Phase 1: extract_captions tests ──────────────────────────────────
+
+#[test]
+fn extract_captions_single_line_figure() {
+    let text = "Some intro.\n\nFigure 1. Bar chart of BMI.\n\nMore text.";
+    let caps = extract_captions(text);
+    assert_eq!(caps.len(), 1, "one figure caption: {:?}", caps);
+    assert_eq!(caps[0].kind, CaptionKind::Figure);
+    assert_eq!(caps[0].number, "1");
+    assert!(caps[0].caption.contains("Bar chart of BMI"));
+}
+
+#[test]
+fn extract_captions_abbreviation_fig() {
+    let text = "Fig. 2a: Forest plot of effect sizes.";
+    let caps = extract_captions(text);
+    assert_eq!(caps.len(), 1);
+    assert_eq!(caps[0].kind, CaptionKind::Figure);
+    assert_eq!(caps[0].number, "2a");
+    assert!(caps[0].caption.contains("Forest plot"));
+}
+
+#[test]
+fn extract_captions_table_variant() {
+    let text = "Table 3. Characteristics of study participants.";
+    let caps = extract_captions(text);
+    assert_eq!(caps.len(), 1);
+    assert_eq!(caps[0].kind, CaptionKind::Table);
+    assert_eq!(caps[0].number, "3");
+    assert!(caps[0].caption.contains("Characteristics"));
+}
+
+#[test]
+fn extract_captions_multiline_continuation() {
+    let text = "Figure 1. Study flow diagram.\nParticipants were recruited\nfrom 12 schools between\n2018 and 2020.\n\nNext paragraph.";
+    let caps = extract_captions(text);
+    assert_eq!(caps.len(), 1, "one caption (merged): {:?}", caps);
+    assert!(caps[0].caption.contains("Study flow diagram"));
+    assert!(caps[0].caption.contains("Participants were recruited"));
+    assert!(caps[0].caption.contains("from 12 schools"));
+    assert!(caps[0].caption.contains("2018 and 2020"));
+}
+
+#[test]
+fn extract_captions_stops_at_next_caption() {
+    let text = "Figure 1. First figure caption.\n\nFigure 2. Second figure caption.\n\nBody text.";
+    let caps = extract_captions(text);
+    assert_eq!(caps.len(), 2, "two distinct captions: {:?}", caps);
+    assert_eq!(caps[0].number, "1");
+    assert_eq!(caps[1].number, "2");
+    assert!(caps[0].caption.contains("First figure"));
+    assert!(caps[1].caption.contains("Second figure"));
+}
+
+#[test]
+fn extract_captions_stops_at_heading() {
+    let text = "Figure 1. A figure caption.\n## Methods\nmethods body";
+    let caps = extract_captions(text);
+    assert_eq!(caps.len(), 1);
+    assert!(!caps[0].caption.contains("## Methods"));
+    assert!(!caps[0].caption.contains("methods body"));
+}
+
+#[test]
+fn extract_captions_following_sentence_best_effort() {
+    let text = "Figure 1. A figure caption.\n\nThe results shown here confirm the hypothesis.";
+    let caps = extract_captions(text);
+    assert_eq!(caps.len(), 1);
+    assert!(caps[0].following_sentence.is_some(), "following sentence captured");
+    assert!(caps[0].following_sentence.as_ref().is_some_and(|s| s.contains("results shown here")));
+}
+
+#[test]
+fn extract_captions_no_captions_returns_empty() {
+    let text = "Just some prose.\nNo captions here.\nNone at all.";
+    let caps = extract_captions(text);
+    assert!(caps.is_empty(), "no captions: {:?}", caps);
+}
+
+// ── Tier 2 Phase 1: detect_markdown_tables tests ────────────────────────────
+
+#[test]
+fn detect_tables_pipe_delimited() {
+    let text = "| Col1 | Col2 | Col3 |\n| a | b | c |\n| d | e | f |";
+    let (text_out, tables) = detect_markdown_tables(text);
+    assert_eq!(tables.len(), 1, "one table detected: {:?}", tables);
+    assert_eq!(tables[0].kind, SectionKind::Table);
+    assert!(tables[0].body.contains("Col1"));
+    assert!(tables[0].body.contains("---"));
+    assert!(text_out.contains("<!-- TABLE:1 -->"), "placeholder emitted: {text_out}");
+}
+
+#[test]
+fn detect_tables_whitespace_aligned() {
+    let text = "Name      Age    City\nAlice     30     Paris\nBob       25     Lyon";
+    let (_text_out, tables) = detect_markdown_tables(text);
+    assert_eq!(tables.len(), 1, "one whitespace table: {:?}", tables);
+    assert_eq!(tables[0].kind, SectionKind::Table);
+    assert!(tables[0].body.contains("Name"));
+    assert!(tables[0].body.contains("Alice"));
+}
+
+#[test]
+fn detect_tables_single_pipe_line_is_table() {
+    let text = "| header | only |";
+    let (_text_out, tables) = detect_markdown_tables(text);
+    assert_eq!(tables.len(), 1, "single pipe line is a table: {:?}", tables);
+}
+
+#[test]
+fn detect_tables_rejects_prose() {
+    let text = "This is a normal paragraph of prose text.\nIt has single spaces between words.\nNo aligned columns here at all.";
+    let (_text_out, tables) = detect_markdown_tables(text);
+    assert!(tables.is_empty(), "prose should not be a table: {:?}", tables);
+}
+
+#[test]
+fn detect_tables_replaces_with_placeholder() {
+    let text = "Intro text.\n\n| H1 | H2 |\n| r1 | r2 |\n\nOutro text.";
+    let (text_out, tables) = detect_markdown_tables(text);
+    assert_eq!(tables.len(), 1);
+    assert!(text_out.contains("<!-- TABLE:1 -->"), "placeholder in output: {text_out}");
+    assert!(!text_out.contains("| H1 | H2 |"), "table removed from text: {text_out}");
+    assert!(text_out.contains("Intro text."));
+    assert!(text_out.contains("Outro text."));
+}
+
+#[test]
+fn detect_tables_emits_section_kind_table() {
+    let text = "| a | b |\n| c | d |";
+    let (_text_out, tables) = detect_markdown_tables(text);
+    assert!(
+        tables.iter().all(|t| t.kind == SectionKind::Table),
+        "all table sections: {:?}",
+        tables
+    );
+}
+
+// ── Tier 2 Phase 1: extract_sections_with_tables composer tests ─────────────
+
+#[test]
+fn extract_with_tables_keeps_heading_sections() {
+    let text = "## Methods\nSome methods body text here.\n\n| Col1 | Col2 |\n| a | b |";
+    let sections = extract_sections_with_tables(text);
+    assert!(
+        sections.iter().any(|s| s.kind == SectionKind::Methods),
+        "Methods section kept: {:?}",
+        sections.iter().map(|s| s.kind).collect::<Vec<_>>()
+    );
+    assert!(
+        sections.iter().any(|s| s.kind == SectionKind::Table),
+        "Table section appended: {:?}",
+        sections.iter().map(|s| s.kind).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn extract_with_tables_classify_untouched() {
+    let text = "## Methods\nm body\n\n## Results\nr body";
+    let with_tables = extract_sections_with_tables(text);
+    let plain = classify_sections(text);
+    let with_tables_kinds: Vec<_> = with_tables.iter().map(|s| s.kind).collect();
+    let plain_kinds: Vec<_> = plain.iter().map(|s| s.kind).collect();
+    assert_eq!(with_tables_kinds, plain_kinds, "no tables -> identical heading sections");
+}
+
+// ── Tier 2 Phase 1: page-spanning table break (v1 limitation) ────────────────
+
+#[test]
+fn detect_tables_page_spanning_break() {
+    // PDF page concatenation often splits a table with a header remnant or
+    // "...continued" line. The heuristic naturally breaks this into two
+    // `Table` sections, which is the accepted v1 behavior (stitching is out
+    // of scope). Two aligned blocks separated by a prose remnant -> 2 tables.
+    let text = "\
+Name      Age    City
+Alice     30     Paris
+Bob       25     Lyon
+... Table 1 continued ...
+Carol     40     Nice
+Dave      35     Nice
+";
+    let (_text_out, tables) = detect_markdown_tables(text);
+    assert!(
+        tables.len() >= 2,
+        "page-spanning table should break into >=2 tables, got {}: {:?}",
+        tables.len(),
+        tables
+    );
+    for t in &tables {
+        assert_eq!(t.kind, SectionKind::Table);
     }
 }

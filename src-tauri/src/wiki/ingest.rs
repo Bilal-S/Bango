@@ -688,6 +688,27 @@ struct ParsedAiSummary {
     keywords: Vec<String>,
     field: Option<String>,
     subfield: Option<String>,
+    /// T1.3: per-section summaries (Methods/Results/Discussion). Present only
+    /// on `schema_version >= 2` blobs produced by the section-aware path. Old
+    /// blobs (no `section_summaries`) keep this empty and render via the
+    /// legacy synthesis shape.
+    section_summaries: Vec<ParsedSectionSummary>,
+}
+
+/// One element of the `section_summaries` array in a v2 AI-summary blob.
+///
+/// Typed facts (`study_design`, `sample_size`, `effect_size`,
+/// `confidence_interval`) are optional and only meaningful for specific section
+/// kinds; `summary` + `key_points` are always present when the section exists.
+#[derive(Debug, Default, Clone)]
+struct ParsedSectionSummary {
+    section: String,
+    summary: String,
+    key_points: Vec<String>,
+    study_design: Option<String>,
+    sample_size: Option<String>,
+    effect_size: Option<String>,
+    confidence_interval: Option<String>,
 }
 
 /// Parse an article's `full_text_ai_summary` JSON blob into a `ParsedAiSummary`.
@@ -728,13 +749,61 @@ fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
             })
             .unwrap_or_default()
     };
+    let section_summaries = parse_section_summaries(&value);
     Some(ParsedAiSummary {
         summary: get_str("summary_150_250_words"),
         key_insights: get_str_array("key_insights"),
         keywords: get_str_array("keywords"),
         field: get_str("field"),
         subfield: get_str("subfield"),
+        section_summaries,
     })
+}
+
+/// Parse the `section_summaries` array out of a v2 AI-summary blob.
+///
+/// Each element is an object with `section`, `summary`, `key_points`, and
+/// optional typed facts. Malformed elements are skipped (no panic). Returns an
+/// empty `Vec` when the blob has no `section_summaries` array (v1 blobs).
+fn parse_section_summaries(value: &serde_json::Value) -> Vec<ParsedSectionSummary> {
+    let Some(arr) = value.get("section_summaries").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(arr.len());
+    for elem in arr {
+        let Some(obj) = elem.as_object() else { continue };
+        let get_str = |key: &str| {
+            obj.get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
+        let section = match get_str("section") {
+            Some(s) => s,
+            None => continue, // a section summary without a section name is useless
+        };
+        let summary = get_str("summary").unwrap_or_default();
+        let key_points = obj
+            .get("key_points")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(ParsedSectionSummary {
+            section,
+            summary,
+            key_points,
+            study_design: get_str("study_design"),
+            sample_size: get_str("sample_size"),
+            effect_size: get_str("effect_size"),
+            confidence_interval: get_str("confidence_interval"),
+        });
+    }
+    out
 }
 
 /// An included article row with its AI summary, for synthesis pre-seeding.
@@ -866,6 +935,51 @@ fn render_synthesis_page(
             parsed.keywords.iter().map(|k| format!("[[{}]]", concept_slug(k))).collect();
         body.push_str(&links.join(", "));
         body.push('\n');
+    }
+    // T1.3: render per-section subsections (Methods/Results/Discussion) when
+    // the v2 blob carries `section_summaries`. Old (v1) blobs have an empty
+    // list and skip this branch entirely (graceful backward compat).
+    for ss in &parsed.section_summaries {
+        let heading = match ss.section.to_lowercase().as_str() {
+            "methods" | "methodology" | "materials and methods" => "Methods",
+            "results" | "findings" => "Results",
+            "discussion" => "Discussion",
+            _ => &ss.section,
+        };
+        if ss.summary.is_empty() && ss.key_points.is_empty() {
+            continue;
+        }
+        body.push_str(&format!("\n## {heading}\n\n"));
+        if !ss.summary.is_empty() {
+            body.push_str(&ss.summary);
+            body.push_str("\n\n");
+        }
+        // Typed facts as labeled bullets (only when present).
+        let mut facts: Vec<String> = Vec::new();
+        if let Some(ref sd) = ss.study_design {
+            facts.push(format!("**Study design:** {sd}"));
+        }
+        if let Some(ref n) = ss.sample_size {
+            facts.push(format!("**Sample size:** {n}"));
+        }
+        if let Some(ref es) = ss.effect_size {
+            facts.push(format!("**Effect size:** {es}"));
+        }
+        if let Some(ref ci) = ss.confidence_interval {
+            facts.push(format!("**Confidence interval:** {ci}"));
+        }
+        if !facts.is_empty() {
+            for f in &facts {
+                body.push_str(&format!("- {f}\n"));
+            }
+            body.push('\n');
+        }
+        if !ss.key_points.is_empty() {
+            body.push_str("**Key points:**\n");
+            for kp in &ss.key_points {
+                body.push_str(&format!("- {kp}\n"));
+            }
+        }
     }
     (fm, body)
 }

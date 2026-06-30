@@ -1164,6 +1164,22 @@ async function handleAttachFullText(articleId: string): Promise<void> {
   border-color: rgb(226 232 240);
 }
 
+/* T2.3 Phase 3: muted section-provenance badge rendered after a wikilink
+ * when the citation carries a `(§Section)` suffix (e.g. `[[slug]] (§Methods)`).
+ * Mirrors the wiki-page-viewer badge styling so chat + wiki stay consistent. */
+.markdown-content :deep(.section-badge) {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0.0625rem 0.3125rem;
+  font-size: 0.7em;
+  font-weight: 500;
+  color: rgb(100 116 139);
+  background: rgb(241 245 249);
+  border: 1px solid rgb(226 232 240);
+  border-radius: 0.25rem;
+  vertical-align: baseline;
+}
+
 /* Tooltip animation */
 .tooltip-fade-enter-active,
 .tooltip-fade-leave-active {

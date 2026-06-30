@@ -65,6 +65,26 @@ pub fn chunk_sections(sections: &[Section], target_words: usize) -> Vec<Chunk> {
         }
 
         let section_label = section_label_for(section);
+
+        // Atomic Table/Figure arm (T2.2 Phase 1): a GFM table or a figure
+        // caption block must NEVER be split across chunks (it would break the
+        // Markdown table structure). Emit the whole section as a single chunk
+        // regardless of `MAX_CHUNK_WORDS`.
+        if section.kind == SectionKind::Table || section.kind == SectionKind::Figure {
+            let piece = section.body.trim();
+            let word_count = piece.split_whitespace().count();
+            if word_count > 0 {
+                chunks.push(Chunk {
+                    section: section_label.clone(),
+                    chunk_index,
+                    text: piece.to_string(),
+                    word_count,
+                });
+                chunk_index += 1;
+            }
+            continue;
+        }
+
         let pieces = split_section_body(&section.body, target);
 
         for piece in pieces {
@@ -104,6 +124,8 @@ fn section_label_for(section: &Section) -> Option<String> {
         SectionKind::Introduction => Some("Introduction".to_string()),
         SectionKind::Abstract => Some("Abstract".to_string()),
         SectionKind::Heading => section.heading.clone(),
+        SectionKind::Table => Some("Table".to_string()),
+        SectionKind::Figure => Some("Figure".to_string()),
         SectionKind::Text => None,
         SectionKind::References => None,
     }
@@ -214,15 +236,27 @@ fn hard_slice_words(text: &str, target: usize) -> Vec<String> {
 /// Merge a trailing chunk shorter than `MIN_CHUNK_WORDS` into the previous one.
 /// Only merges the very last chunk (not every short chunk) to keep the logic
 /// predictable.
+///
+/// Guards the `MAX_CHUNK_WORDS` bound: if merging would push the previous chunk
+/// over the cap, the tiny tail is left as its own chunk instead. Without this
+/// guard, a near-MAX chunk + a tiny tail (e.g. 1182 + 19 = 1201) would exceed
+/// the hard cap by a few words.
 fn merge_tiny_tail(chunks: &mut Vec<Chunk>) {
     if chunks.len() < 2 {
         return;
     }
     let last_idx = chunks.len() - 1;
     if chunks[last_idx].word_count < MIN_CHUNK_WORDS {
+        let prev_idx = last_idx - 1;
+        // Respect MAX: skip the merge if it would push the previous chunk over
+        // the hard cap. The tiny tail stays as its own chunk in that case.
+        let combined = chunks[prev_idx].word_count + chunks[last_idx].word_count;
+        if combined > MAX_CHUNK_WORDS {
+            return;
+        }
         // `pop` is `Some` because `chunks.len() >= 2` (guard at top).
         if let Some(last) = chunks.pop() {
-            let prev = &mut chunks[last_idx - 1];
+            let prev = &mut chunks[prev_idx];
             prev.text.push(' ');
             prev.text.push_str(&last.text);
             prev.word_count += last.word_count;
@@ -342,5 +376,50 @@ mod tests {
         let chunks = chunk_sections(&[empty, real], DEFAULT_CHUNK_WORDS);
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].section.as_deref(), Some("Results"));
+    }
+
+    // ── Tier 2 Phase 1: atomic Table/Figure arm ────────────────────────────
+
+    #[test]
+    fn chunk_sections_table_is_atomic() {
+        // A Table section larger than MAX_CHUNK_WORDS must emit exactly 1 chunk
+        // (never split, so the GFM table survives intact).
+        let body = format!(
+            "| col | val |\n| --- | --- |\n{}",
+            (0..2000).map(|i| format!("| r{i} | v{i} |")).collect::<Vec<_>>().join("\n")
+        );
+        let s = section(SectionKind::Table, Some("Table 1"), &body);
+        let chunks = chunk_sections(&[s], DEFAULT_CHUNK_WORDS);
+        assert_eq!(chunks.len(), 1, "table must be one chunk: {} chunks", chunks.len());
+        // The chunk can exceed MAX_CHUNK_WORDS (atomic exception).
+        assert!(chunks[0].word_count > MAX_CHUNK_WORDS, "table chunk should be > MAX");
+    }
+
+    #[test]
+    fn chunk_sections_figure_is_atomic() {
+        // A Figure section larger than MAX_CHUNK_WORDS must emit exactly 1 chunk.
+        let body = (0..2000).map(|i| format!("caption word{i}")).collect::<Vec<_>>().join(" ");
+        let s = section(SectionKind::Figure, Some("Figure 1"), &body);
+        let chunks = chunk_sections(&[s], DEFAULT_CHUNK_WORDS);
+        assert_eq!(chunks.len(), 1, "figure must be one chunk: {} chunks", chunks.len());
+        assert!(chunks[0].word_count > MAX_CHUNK_WORDS, "figure chunk should be > MAX");
+    }
+
+    #[test]
+    fn chunk_sections_table_carries_section_label() {
+        let body = "| a | b |\n| --- | --- |\n| c | d |";
+        let s = section(SectionKind::Table, Some("Table 1"), body);
+        let chunks = chunk_sections(&[s], DEFAULT_CHUNK_WORDS);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].section.as_deref(), Some("Table"), "table chunk label");
+    }
+
+    #[test]
+    fn chunk_sections_figure_carries_section_label() {
+        let body = "A figure caption body.";
+        let s = section(SectionKind::Figure, Some("Figure 1"), body);
+        let chunks = chunk_sections(&[s], DEFAULT_CHUNK_WORDS);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].section.as_deref(), Some("Figure"), "figure chunk label");
     }
 }

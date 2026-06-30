@@ -1,12 +1,30 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import type { Article } from '@/types';
-import { parseAiSummary } from '@/composables/use-ai-summary';
+import {
+  parseAiSummary,
+  requestFigureDescriptions,
+  pendingFigureDescriptions,
+} from '@/composables/use-ai-summary';
 import type { AiSummaryData } from '@/composables/use-ai-summary';
 
 const props = defineProps<{
   article: Article;
 }>();
+
+const emit = defineEmits<{ refreshArticle: [articleId: string] }>();
+
+/** True when a figure-description LLM call is in flight for this article. */
+const isGeneratingFigures = computed(() => pendingFigureDescriptions.value.has(props.article.id));
+
+/** Trigger the batched figure/table description LLM call (Tier 2 Phase 4).
+ *  On completion, emits `refreshArticle` so the parent re-fetches the article
+ *  and the new `figures`/`tables` keys render. */
+async function onGenerateFigureDescriptions(): Promise<void> {
+  await requestFigureDescriptions(props.article.id, props.article.title, async (id) => {
+    emit('refreshArticle', id);
+  });
+}
 
 // Parsed AI summary data
 const aiSummaryData = computed<AiSummaryData | null>(() =>
@@ -210,6 +228,77 @@ watch(
                 <span>{{ sec.confidence_interval }}</span>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+      <!-- ── Tier 2 Phase 4: Figures & Tables ───────────────────────── -->
+      <!-- Trigger button (gated on full text attached). Shown when no
+           descriptions exist yet OR when regenerating. -->
+      <div v-if="article.hasFullText" class="flex items-center gap-2">
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="isGeneratingFigures"
+          @click="onGenerateFigureDescriptions"
+        >
+          <span
+            v-if="isGeneratingFigures"
+            class="material-symbols-outlined text-[14px] animate-spin"
+            >progress_activity</span
+          >
+          <span v-else class="material-symbols-outlined text-[14px]">image_search</span>
+          {{
+            aiSummaryData?.figures?.length || aiSummaryData?.tables?.length
+              ? 'Regenerate'
+              : 'Describe Figures & Tables'
+          }}
+        </button>
+        <span v-if="isGeneratingFigures" class="text-xs text-slate-400">Analyzing captions...</span>
+      </div>
+      <!-- Figures grid (T2 Phase 4). Only renders when descriptions exist. -->
+      <div v-if="(aiSummaryData?.figures ?? []).length > 0">
+        <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-2">
+          Figures
+        </h4>
+        <div class="grid grid-cols-1 gap-2">
+          <div
+            v-for="fig in aiSummaryData?.figures ?? []"
+            :key="`fig-${fig.number}`"
+            class="border border-slate-200 rounded-md p-3 bg-slate-50/50"
+          >
+            <div class="flex items-center gap-2 mb-1">
+              <span
+                class="text-xs font-label-caps text-violet-700 uppercase tracking-wider font-semibold"
+                >Figure {{ fig.number }}</span
+              >
+            </div>
+            <p v-if="fig.caption" class="text-xs text-slate-500 italic mb-1">{{ fig.caption }}</p>
+            <p v-if="fig.description" class="text-sm text-slate-600 leading-relaxed">
+              {{ fig.description }}
+            </p>
+          </div>
+        </div>
+      </div>
+      <!-- Tables (T2 Phase 4). Only renders when descriptions exist. -->
+      <div v-if="(aiSummaryData?.tables ?? []).length > 0">
+        <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-2">
+          Tables
+        </h4>
+        <div class="grid grid-cols-1 gap-2">
+          <div
+            v-for="tbl in aiSummaryData?.tables ?? []"
+            :key="`tbl-${tbl.number}`"
+            class="border border-slate-200 rounded-md p-3 bg-slate-50/50"
+          >
+            <div class="flex items-center gap-2 mb-1">
+              <span
+                class="text-xs font-label-caps text-violet-700 uppercase tracking-wider font-semibold"
+                >Table {{ tbl.number }}</span
+              >
+            </div>
+            <p v-if="tbl.caption" class="text-xs text-slate-500 italic mb-1">{{ tbl.caption }}</p>
+            <p v-if="tbl.description" class="text-sm text-slate-600 leading-relaxed">
+              {{ tbl.description }}
+            </p>
           </div>
         </div>
       </div>

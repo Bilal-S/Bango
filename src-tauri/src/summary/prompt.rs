@@ -47,6 +47,116 @@ pub const ARTICLE_SUMMARY_SYSTEM_PROMPT: &str = include_str!("ai_article_summary
 pub const ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT: &str =
     include_str!("ai_article_summary_with_sections_prompt.md");
 
+/// System prompt for the batched figure/table caption description (Tier 2
+/// Phase 4). Grounded "caption parser": the model summarizes what each caption
+/// *states* and reproduces quantitative values mentioned in the caption text;
+/// it must not invent visual details not present in the caption.
+pub const FIGURE_DESCRIPTION_SYSTEM_PROMPT: &str = include_str!("figure_description_prompt.md");
+
+use crate::error::AppError;
+
+/// One LLM-described figure/table caption (Tier 2 Phase 4).
+///
+/// Stored in the `full_text_ai_summary` JSON blob under `figures`/`tables`.
+/// `caption` is the verbatim extracted caption text; `description` is the
+/// grounded LLM summary of what the caption states.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FigureDescription {
+    /// The figure or table number as a string: "1", "2a".
+    pub number: String,
+    /// The verbatim caption text extracted by `extract_captions`.
+    #[serde(default)]
+    pub caption: String,
+    /// The grounded LLM summary of what the caption states.
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Render the user prompt for the batched figure/table description call.
+///
+/// The prompt includes the paper title and one numbered block per caption
+/// (`[N] <caption text>`). Pure function: no I/O.
+#[must_use]
+pub fn build_figure_description_prompt(
+    title: &str,
+    captions: &[crate::utils::sections::Caption],
+) -> String {
+    let mut blocks = Vec::with_capacity(captions.len());
+    for c in captions {
+        let kind = c.kind.label();
+        blocks.push(format!(
+            "[{} {}] {}",
+            kind,
+            c.number,
+            if c.caption.trim().is_empty() { "(no caption text)" } else { c.caption.trim() }
+        ));
+    }
+    let captions_block = blocks.join("\n");
+    format!(
+        "## Paper Title\n{title}\n\n## Captions\n\n{captions_block}\n\n\
+         For each caption above, return a JSON array of objects with `number` and `description` keys."
+    )
+}
+
+/// Parse the batched figure/table description LLM response into a list.
+///
+/// Tolerates markdown code fences and trailing/leading whitespace. Returns
+/// an error (no panic) on malformed JSON. Each element must have a `number`;
+/// `description` defaults to an empty string when absent.
+pub fn parse_figure_descriptions_response(
+    response: &str,
+) -> Result<Vec<FigureDescription>, AppError> {
+    let cleaned = crate::screening::engine::extract_json(response);
+    let value: serde_json::Value = serde_json::from_str(&cleaned)
+        .map_err(|e| AppError::Import(format!("Invalid JSON for figure descriptions: {e}")))?;
+    let arr = value.as_array().ok_or_else(|| {
+        AppError::Import("Figure descriptions response is not a JSON array".to_string())
+    })?;
+    let mut out = Vec::with_capacity(arr.len());
+    for elem in arr {
+        let obj = elem.as_object().ok_or_else(|| {
+            AppError::Import("Figure description element is not a JSON object".to_string())
+        })?;
+        let number = obj
+            .get("number")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AppError::Import("Figure description missing `number`".to_string()))?
+            .to_string();
+        let description =
+            obj.get("description").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        out.push(FigureDescription { number, caption: String::new(), description });
+    }
+    Ok(out)
+}
+
+/// Merge figure/table descriptions into the `full_text_ai_summary` blob.
+///
+/// - `existing_blob`: the current JSON string (may be empty or malformed;
+///   malformed blobs are treated as empty so the merge never panics).
+/// - `figures` / `tables`: the descriptions keyed by number. Only entries whose
+///   `number` matches an extracted caption get the `caption` text attached.
+/// - Preserves all existing top-level fields (including `section_summaries`),
+///   adds/replaces `figures` + `tables`, and stamps `schema_version: 2`.
+///
+/// Returns the serialized JSON string ready for `article_repo::set_ai_summary`.
+#[must_use]
+pub fn merge_figure_descriptions_into_blob(
+    existing_blob: Option<&str>,
+    figures: Vec<FigureDescription>,
+    tables: Vec<FigureDescription>,
+) -> String {
+    let mut value: serde_json::Value = existing_blob
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("figures".to_string(), serde_json::to_value(&figures).unwrap_or_default());
+        obj.insert("tables".to_string(), serde_json::to_value(&tables).unwrap_or_default());
+        obj.insert("schema_version".to_string(), serde_json::Value::from(2));
+    }
+    value.to_string()
+}
+
 /// High-value section kinds that the section-aware summary extracts.
 ///
 /// `Introduction` / `Conclusion` / `Abstract` are deliberately excluded:
@@ -69,6 +179,34 @@ pub fn filter_high_value_sections(
     sections: &[crate::utils::sections::Section],
 ) -> Vec<crate::utils::sections::Section> {
     sections.iter().filter(|s| HIGH_VALUE_SECTION_KINDS.contains(&s.kind)).cloned().collect()
+}
+
+/// Ensure the parsed AI-summary JSON blob carries `schema_version: 2`.
+///
+/// Per the T1.3 contract (`chunkingplan.md` §T1.3), the backend MUST guarantee
+/// `schema_version: 2` when the section-aware summary path runs, regardless of
+/// whether the model emitted the field. This keeps frontend `parseAiSummary`
+/// gating reliable: a blob with `schema_version >= 2` is rendered via the
+/// enriched view, a blob without it (or `1`) renders via the legacy view.
+///
+/// - If `value` is an object and `schema_version` is missing or < 2, it is set
+///   to `2`.
+/// - If `value` is not an object, the function is a no-op (defensive: a
+///   malformed top-level array/string is left untouched; the caller's validation
+///   already confirmed it is a JSON object in practice).
+///
+/// Pure function: no I/O. Tested directly.
+pub fn ensure_schema_version_v2(value: &mut serde_json::Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let needs_bump = match obj.get("schema_version").and_then(|v| v.as_i64()) {
+        Some(existing) => existing < 2,
+        None => true,
+    };
+    if needs_bump {
+        obj.insert("schema_version".to_string(), serde_json::Value::from(2));
+    }
 }
 
 /// Render detected high-value sections into a structured block for the LLM

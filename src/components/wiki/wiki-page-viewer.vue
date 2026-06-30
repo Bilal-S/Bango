@@ -403,6 +403,22 @@ watch(() => props.slug, loadPage, { immediate: true });
   border-color: rgb(226 232 240);
 }
 
+/* T2.3 Phase 3: muted section-provenance badge rendered after a wikilink
+ * when the citation carries a `(§Section)` suffix (e.g. `[[slug]] (§Methods)`).
+ * Keeps the passage locator visible without crowding the chip itself. */
+.wiki-page-viewer :deep(.section-badge) {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0.0625rem 0.3125rem;
+  font-size: 0.7em;
+  font-weight: 500;
+  color: rgb(100 116 139); /* slate-500 */
+  background: rgb(241 245 249); /* slate-100 */
+  border: 1px solid rgb(226 232 240); /* slate-200 */
+  border-radius: 0.25rem;
+  vertical-align: baseline;
+}
+
 /* Search-term highlight (active sidebar search query). */
 .wiki-page-viewer :deep(.wiki-search-highlight) {
   background: rgb(253 224 71); /* yellow-300 */

@@ -32,6 +32,11 @@ pub enum LlmRequestType {
     Chat,
     WikiIngest,
     WikiChat,
+    /// T1.3: per-section AI summary (Methods/Results/Discussion) generated
+    /// alongside the whole-paper summary.
+    SectionSummary,
+    /// Tier 2 Phase 4: batched LLM description of figure/table captions.
+    FigureDescription,
 }
 
 /// Centralized LLM request coordinator.

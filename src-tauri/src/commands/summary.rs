@@ -14,10 +14,13 @@ use crate::prisma::data;
 use crate::screening::engine as screening_engine;
 use crate::summary::engine::{self, SummaryInput};
 use crate::summary::prompt::{
-    build_section_context, filter_high_value_sections, ArticleSummary, ScreeningData,
+    build_figure_description_prompt, build_section_context, ensure_schema_version_v2,
+    filter_high_value_sections, merge_figure_descriptions_into_blob,
+    parse_figure_descriptions_response, ArticleSummary, FigureDescription, ScreeningData,
     ARTICLE_SUMMARY_SYSTEM_PROMPT, ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
+    FIGURE_DESCRIPTION_SYSTEM_PROMPT,
 };
-use crate::utils::sections::classify_sections;
+use crate::utils::sections::{classify_sections, extract_captions};
 
 #[tauri::command]
 pub async fn generate_summary(
@@ -159,13 +162,13 @@ pub async fn generate_article_ai_summary(
     } else {
         Vec::new()
     };
-    let (system_prompt, user_prompt) = if high_value.is_empty() {
+    let (system_prompt, user_prompt, used_section_path) = if high_value.is_empty() {
         // Standard path (whole-paper only).
         let max_chars = ((config.context_window_tokens as usize).saturating_sub(2000)) * 4;
         let truncated =
             if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
         let prompt = format!("## Article Title\n{title}\n\n## Full Text\n{truncated}");
-        (ARTICLE_SUMMARY_SYSTEM_PROMPT, prompt)
+        (ARTICLE_SUMMARY_SYSTEM_PROMPT, prompt, false)
     } else {
         // Section-aware path. Reserve space for the section-context block, then
         // append it after the full text so the model can ground each per-section
@@ -180,14 +183,19 @@ pub async fn generate_article_ai_summary(
         let prompt = format!(
             "## Article Title\n{title}\n\n## Full Text\n{truncated}\n\n## Detected Sections\n\n{section_context}"
         );
-        (ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT, prompt)
+        (ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT, prompt, true)
     };
 
-    // 3. Call LLM via orchestrator - catch errors to log them to audit trail
+    // 3. Call LLM via orchestrator - catch errors to log them to audit trail.
+    // The section-aware path is categorized as `SectionSummary` for diagnostics
+    // so per-section requests are distinguishable from monolithic ones.
+    let request_type = if used_section_path {
+        LlmRequestType::SectionSummary
+    } else {
+        LlmRequestType::ArticleSummary
+    };
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
-    let llm_result = orchestrator
-        .send(&config, system_prompt, &user_prompt, LlmRequestType::ArticleSummary)
-        .await;
+    let llm_result = orchestrator.send(&config, system_prompt, &user_prompt, request_type).await;
 
     let (response_text, _tokens) = match llm_result {
         Ok(v) => v,
@@ -211,7 +219,7 @@ pub async fn generate_article_ai_summary(
 
     // 4. Validate the response is valid JSON - strip markdown code fences if present
     let cleaned = screening_engine::extract_json(&response_text);
-    let parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
+    let mut parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
         Ok(v) => v,
         Err(e) => {
             let err_msg = format!("Invalid JSON response from LLM: {e}");
@@ -228,6 +236,14 @@ pub async fn generate_article_ai_summary(
             return Err(AppError::Import(err_msg));
         }
     };
+
+    // Per the T1.3 contract, the backend MUST guarantee `schema_version: 2`
+    // when the section-aware path runs, regardless of whether the model
+    // emitted the field. This keeps frontend `parseAiSummary` gating reliable
+    // (schema_version >= 2 -> enriched view; absent/1 -> legacy view).
+    if used_section_path {
+        ensure_schema_version_v2(&mut parsed);
+    }
 
     // Store the raw JSON string
     let summary_json = parsed.to_string();
@@ -261,4 +277,159 @@ pub async fn generate_article_ai_summary(
     );
 
     Ok(summary_json)
+}
+
+/// Generate LLM descriptions for figure/table captions extracted from an
+/// article's full text (Tier 2 Phase 4). One batched orchestrator call per
+/// article, grounded in the caption text (no visual hallucination). The
+/// descriptions are merged into the existing `full_text_ai_summary` blob
+/// under `figures`/`tables` keys and stamped `schema_version: 2`.
+///
+/// Emits `article-figure-descriptions-complete` on success and
+/// `article-figure-descriptions-error` on failure.
+#[tauri::command]
+pub async fn generate_figure_descriptions(
+    db_state: State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+    article_id: String,
+) -> Result<String, AppError> {
+    // 1. Fetch the article's full text + existing AI-summary blob + config.
+    let (title, full_text, existing_blob, config) = {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let (t, ft) = article_repo::get_full_text_for_summary(&conn, &article_id)?;
+        // Fetch the existing AI-summary blob directly (no dedicated repo helper
+        // exists for this read; the column is `full_text_ai_summary`).
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+                rusqlite::params![&article_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        let cfg = llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+        (t, ft, existing, cfg)
+    }; // conn lock released
+
+    // 2. Extract figure/table captions from the full text.
+    let captions = extract_captions(&full_text);
+    if captions.is_empty() {
+        let err_msg = "No figure/table captions detected in the full text.";
+        let _ = app_handle.emit(
+            "article-figure-descriptions-error",
+            serde_json::json!({ "articleId": article_id, "error": err_msg }),
+        );
+        return Err(AppError::Validation(err_msg.to_string()));
+    }
+
+    // 3. Build the batched prompt (one call for all captions).
+    let user_prompt = build_figure_description_prompt(&title, &captions);
+
+    // 4. Call the orchestrator with the grounded caption-parser prompt.
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
+    let llm_result = orchestrator
+        .send(
+            &config,
+            FIGURE_DESCRIPTION_SYSTEM_PROMPT,
+            &user_prompt,
+            LlmRequestType::FigureDescription,
+        )
+        .await;
+
+    let (response_text, _tokens) = match llm_result {
+        Ok(v) => v,
+        Err(e) => {
+            let err_msg = e.to_string();
+            if let Ok(conn) = db_state.conn.lock() {
+                let _ = crate::db::audit_repo::log_error(
+                    &conn,
+                    &format!(
+                        "Figure descriptions failed for article {article_id} ({title}): {err_msg}"
+                    ),
+                );
+            }
+            let _ = app_handle.emit(
+                "article-figure-descriptions-error",
+                serde_json::json!({ "articleId": article_id, "error": err_msg }),
+            );
+            return Err(e);
+        }
+    };
+
+    // 5. Parse the LLM response into FigureDescription entries.
+    let descriptions = match parse_figure_descriptions_response(&response_text) {
+        Ok(d) => d,
+        Err(e) => {
+            let err_msg = e.to_string();
+            if let Ok(conn) = db_state.conn.lock() {
+                let _ = crate::db::audit_repo::log_error(
+                    &conn,
+                    &format!(
+                        "Figure descriptions parse failed for article {article_id}: {err_msg}"
+                    ),
+                );
+            }
+            let _ = app_handle.emit(
+                "article-figure-descriptions-error",
+                serde_json::json!({ "articleId": article_id, "error": err_msg }),
+            );
+            return Err(e);
+        }
+    };
+
+    // 6. Attach the verbatim caption text to each description (the LLM only
+    //    returns `number` + `description`; we pair them back to the extracted
+    //    caption text so the UI can show both). Split by CaptionKind.
+    let mut figures: Vec<FigureDescription> = Vec::new();
+    let mut tables: Vec<FigureDescription> = Vec::new();
+    for desc in descriptions {
+        // Find the matching extracted caption by number.
+        let matching_caption = captions.iter().find(|c| c.number == desc.number);
+        let caption_text = matching_caption.map(|c| c.caption.clone()).unwrap_or_default();
+        let is_table = matching_caption.map(|c| c.kind.label() == "Table").unwrap_or(false);
+        let enriched = FigureDescription {
+            number: desc.number,
+            caption: caption_text,
+            description: desc.description,
+        };
+        if is_table {
+            tables.push(enriched);
+        } else {
+            figures.push(enriched);
+        }
+    }
+
+    // 7. Merge into the existing blob (preserves section_summaries, stamps v2).
+    let merged_json =
+        merge_figure_descriptions_into_blob(existing_blob.as_deref(), figures, tables);
+
+    // 8. Store + audit + refresh flag.
+    {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        article_repo::set_ai_summary(&conn, &article_id, &merged_json)?;
+        crate::db::audit_repo::create_entry(
+            &conn,
+            &article_id,
+            "figure_descriptions",
+            None,
+            None,
+            Some("Figure/table descriptions generated from captions"),
+            "ai",
+        )?;
+        // Figures/tables feed the wiki synthesis pre-seed; flag a refresh.
+        app_settings_repo::mark_wiki_needs_refresh(&conn);
+    }
+
+    // 9. Emit success.
+    let _ = app_handle.emit(
+        "article-figure-descriptions-complete",
+        serde_json::json!({ "articleId": article_id, "title": title }),
+    );
+
+    Ok(merged_json)
 }

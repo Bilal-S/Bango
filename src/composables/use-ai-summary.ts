@@ -8,8 +8,19 @@ export interface SectionSummary {
   summary: string;
   key_points?: string[];
   study_design?: string;
+  sample_size?: string;
   effect_size?: string;
   confidence_interval?: string;
+}
+
+/** Tier 2 Phase 4: one LLM-described figure or table caption. */
+export interface FigureDescription {
+  /** The figure/table number as a string ("1", "2a"). */
+  number: string;
+  /** The verbatim extracted caption text. */
+  caption?: string;
+  /** The grounded LLM summary of what the caption states. */
+  description?: string;
 }
 
 export interface AiSummaryData {
@@ -21,6 +32,12 @@ export interface AiSummaryData {
   key_insights: string[];
   keywords: string[];
   section_summaries?: SectionSummary[];
+  /** Tier 2 Phase 4: LLM-described figure captions. Present only on v2 blobs
+   * after `generate_figure_descriptions` has run. */
+  figures?: FigureDescription[];
+  /** Tier 2 Phase 4: LLM-described table captions. Present only on v2 blobs
+   * after `generate_figure_descriptions` has run. */
+  tables?: FigureDescription[];
 }
 
 export const pendingSummaries = ref<Set<string>>(new Set());
@@ -148,4 +165,91 @@ export function parseAiSummary(raw: string | null | undefined): AiSummaryData | 
   } catch {
     return null;
   }
+}
+
+/** Module-level pending set for figure-description requests (T2 Phase 4). */
+export const pendingFigureDescriptions = ref<Set<string>>(new Set());
+
+type FigureCallback = (articleId: string) => Promise<void>;
+const figureCallbacks = new Map<string, FigureCallback>();
+const figureErrorCallbacks = new Map<string, FigureCallback>();
+let figureListenersInitialized = false;
+
+/** Lazily register the global Tauri event listeners for figure descriptions. */
+async function ensureFigureListeners(): Promise<void> {
+  if (figureListenersInitialized) return;
+  figureListenersInitialized = true;
+
+  await listen<{ articleId: string; title: string }>(
+    'article-figure-descriptions-complete',
+    async (event) => {
+      pendingFigureDescriptions.value.delete(event.payload.articleId);
+      const { show } = useToast();
+      show(`Figure/table descriptions complete for: ${event.payload.title}`, 'success');
+      const cb = figureCallbacks.get(event.payload.articleId);
+      if (cb) {
+        try {
+          await cb(event.payload.articleId);
+        } catch (e) {
+          console.error('Figure description callback error:', e);
+        } finally {
+          figureCallbacks.delete(event.payload.articleId);
+        }
+      }
+    }
+  );
+
+  await listen<{ articleId: string; error: string }>(
+    'article-figure-descriptions-error',
+    async (event) => {
+      pendingFigureDescriptions.value.delete(event.payload.articleId);
+      const { show } = useToast();
+      show(`Figure/table descriptions failed: ${event.payload.error}`, 'error');
+      const cb = figureErrorCallbacks.get(event.payload.articleId);
+      if (cb) {
+        try {
+          await cb(event.payload.articleId);
+        } catch (e) {
+          console.error('Figure description error callback error:', e);
+        } finally {
+          figureErrorCallbacks.delete(event.payload.articleId);
+        }
+      }
+    }
+  );
+}
+
+void ensureFigureListeners();
+
+/**
+ * Request LLM descriptions for an article's figure/table captions (T2 Phase 4).
+ * One batched orchestrator call per article, grounded in the extracted caption
+ * text. Shows a toast immediately and processes asynchronously. The result is
+ * merged into the existing `full_text_ai_summary` blob under `figures`/`tables`.
+ */
+export async function requestFigureDescriptions(
+  articleId: string,
+  articleTitle: string,
+  onComplete?: (articleId: string) => Promise<void>
+) {
+  const { show } = useToast();
+  try {
+    show('Submitted for figure/table descriptions', 'info');
+    pendingFigureDescriptions.value.add(articleId);
+    if (onComplete) {
+      figureCallbacks.set(articleId, onComplete);
+    }
+    invoke<string>('generate_figure_descriptions', { articleId }).catch((e: unknown) => {
+      pendingFigureDescriptions.value.delete(articleId);
+      figureCallbacks.delete(articleId);
+      const msg = e instanceof Error ? e.message : String(e);
+      show(`Figure/table descriptions failed: ${msg}`, 'error');
+    });
+  } catch (e) {
+    pendingFigureDescriptions.value.delete(articleId);
+    figureCallbacks.delete(articleId);
+    const msg = e instanceof Error ? e.message : String(e);
+    show(`Figure/table descriptions failed: ${msg}`, 'error');
+  }
+  void articleTitle;
 }

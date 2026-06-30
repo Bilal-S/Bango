@@ -334,28 +334,42 @@ describe each durable boundary so agents can locate the right area. Create a chi
     delimiter format), and JSON backward-compat (v1 blobs without
     `section_summaries` + v2 blobs with `section_summaries` both parse through
     `serde_json::Value` as the command stores `parsed.to_string()`).
-    `chunking_test.rs` is inline in `utils/chunking.rs` (9 tests: empty input,
-    short section, references skip, long-section sentence split, tiny-tail
-    merge, Text label, Heading label, contiguous chunk_index, empty-body skip).
-  - **`src-tauri/src/utils/sections.rs`** - section-aware text classification (T1.1).
-    `classify_sections(text)` splits flat extracted text into `Vec<Section>` by detecting
-    heading lines (markdown `##`, numbered `2.1 Study Design`, bare keyword `METHODS`).
-    `SectionKind` enum: `Heading, Abstract, Introduction, Methods, Results, Discussion,
-    Conclusion, References, Text` (Table/Figure deferred to T2). `SectionKind::label()`
-    returns the stable display string for each variant (used by T1.3 prompt builders +
-    UI rendering). `extract_sections(path)` is the I/O wrapper that runs
-    `extract_pdf_text`/`extract_txt_text` then classifies. Pure functions (`#[must_use]`);
-    the proven `strip_abstract`/`strip_references` in `pdf_extract.rs` are kept unchanged
-    (new consumers call `classify_sections` directly). Consumed by T1.2 `chunking.rs`
-    and T1.3 `commands::summary::generate_article_ai_summary` (section-aware branch via
-    `summary::prompt::{filter_high_value_sections, build_section_context}`).
-  - **`src-tauri/src/utils/chunking.rs`** - semantic chunking (T1.2). `chunk_sections(
-    sections, target_words)` walks `Section`s and emits `Vec<Chunk>` bounded by
-    `DEFAULT_CHUNK_WORDS=512` / `MIN_CHUNK_WORDS=100` / `MAX_CHUNK_WORDS=1200`. Splits
-    long sections at sentence boundaries; merges tiny tails; skips `References` entirely;
+    `chunking_test.rs` has inline tests in `utils/chunking.rs` (9 tests: empty input,
+    short section, references skip, long-section sentence split, tiny-tail merge,
+    Text label, Heading label, contiguous chunk_index, empty-body skip) + a standalone
+    `src-tauri/tests/chunking_test.rs` (Tier 2 Phase 1 atomic Table/Figure tests +
+    `proptest` invariants: word-count bounds excluding atomic Table/Figure, contiguous
+    `chunk_index`).
+  - **`src-tauri/src/utils/sections.rs`** - section-aware text classification (T1.1 +
+    Tier 2 Phase 1). `classify_sections(text)` splits flat extracted text into
+    `Vec<Section>` by detecting heading lines (markdown `##`, numbered `2.1 Study
+    Design`, bare keyword `METHODS`). `SectionKind` enum: `Heading, Abstract,
+    Introduction, Methods, Results, Discussion, Conclusion, References, Table, Figure,
+    Text` (Table/Figure added in T2 Phase 1 for caption/table extraction).
+    `SectionKind::label()` returns the stable display string. Tier 2 Phase 1 added:
+    `extract_captions(text)` (multi-line Figure/Table caption extraction via
+    `CAPTION_START_RE` with greedy continuation), `detect_markdown_tables(text)` (pipe +
+    whitespace-aligned table detection returning GFM tables + `<!-- TABLE:N -->`
+    placeholders), `extract_sections_with_tables(text)` (composer that keeps
+    `classify_sections` untouched). Constants: `COLUMN_ALIGN_TOLERANCE=2`,
+    `MIN_TABLE_LINES=2`. `extract_sections(path)` is the I/O wrapper. Pure functions
+    (`#[must_use]`); consumed by T1.2 `chunking.rs`, T1.3 `summary::prompt`, T2.4
+    `raw_export::structure_full_text`, and T3.1 `attach_full_text` chunk storage.
+    Tier 2 proptest invariants live in `src-tauri/tests/sections_test.rs` (page-spanning
+    break) + `src-tauri/tests/chunking_test.rs` (word-count bounds + contiguous index).
+  - **`src-tauri/src/utils/chunking.rs`** - semantic chunking (T1.2 + Tier 2 Phase 1).
+    `chunk_sections(sections, target_words)` walks `Section`s and emits `Vec<Chunk>`
+    bounded by `DEFAULT_CHUNK_WORDS=512` / `MIN_CHUNK_WORDS=100` / `MAX_CHUNK_WORDS=1200`.
+    Splits long sections at sentence boundaries; merges tiny tails (now MAX-guarded so a
+    near-MAX chunk + tiny tail cannot exceed the hard cap); skips `References` entirely;
     carries section provenance (`Some("Methods")`) so FTS5 chunk rows + chat citations
-    can render `(§Methods)`. Pure functions (`#[must_use]`). Consumed by `wiki::fts`
-    (planned: `collect_page_rows` chunk-emission) and T3.1 `attach_full_text` chunk storage.
+    can render `(§Methods)`. **Atomic Table/Figure arm** (T2 Phase 1): `SectionKind::Table`
+    / `Figure` sections are emitted as a single chunk regardless of `MAX_CHUNK_WORDS` so
+    GFM tables survive intact into the FTS index. Pure functions (`#[must_use]`).
+    Consumed by `wiki::fts` (chunk-emission) and T3.1 `attach_full_text` chunk storage.
+    Property-based tests (`proptest`) in `src-tauri/tests/chunking_test.rs` verify the
+    word-count bound (excluding atomic Table/Figure) + contiguous `chunk_index` for any
+    input.
   - **`src-tauri/src/db/migrations/v003_fts_sections.rs`** - Tier 1-4 schema (VERSION 3).
     Two changes: (1) `DROP TABLE IF EXISTS wiki_pages_fts;` so `fts::ensure_table`
     recreates it with chunk-aware columns (`chunk_index`, `section`, `parent_slug` UNINDEXED)
@@ -488,7 +502,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `google-trends.ts` (Trends embed URL builder + date-range validators),
     `wiki-markdown.ts` (shared wiki Markdown renderer: `renderWikiMarkdown(text, opts?)`
     converts `[[slug]]` / `[[slug|alias]]` to `.wikilink` anchors and `[^art-id]`
-    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs).
+    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs). T2.3
+    Phase 3 added `(§Section)` suffix parsing: a citation like `[[slug]] (§Methods)`
+    renders the chip plus a muted `<span class="section-badge">§Methods</span>` badge
+    so the reader can locate the passage. The badge styling lives in
+    `wiki-page-viewer.vue` and `chat-view.vue` (scoped `:deep(.section-badge)`).
     On author pages the viewer passes `linkArtRefsToSynthesis: true` so each
     publication's `[^art-{uuid}]` opens the wiki synthesis page (slug = uuid,
     pink `.wikilink--synthesis` chip) instead of the article detail; the flag

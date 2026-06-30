@@ -220,7 +220,12 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
     return `<a class="art-ref art-ref--missing" data-art-id="${artId}">[${shortId}]</a>`;
   });
 
-  // 2. [[slug]] and [[slug|alias]] -> wikilinks.
+  // 2. [[slug]] and [[slug|alias]] -> wikilinks, with an optional trailing
+  //    `(§Section)` suffix (T2.3 Phase 3) rendered as a `.section-badge` span.
+  //    The suffix comes from the wiki-chat system prompt instructing the model
+  //    to cite passages as `[[slug]] (§Methods)`; it is consumed here so the
+  //    badge is attached to the chip rather than left as stray prose.
+  //
   //    The `data-slug` is normalized to lowercase so that Title-Cased links
   //    like `[[Sugar-Reduction]]` resolve to the real page (slug
   //    `sugar-reduction`) when the consumer looks it up by exact slug. The
@@ -233,31 +238,43 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //    human-readable label — mirroring the bare-UUID resolution in step 0.
   //    If the UUID matches neither map, it falls through to the default
   //    wikilink (indigo, visible UUID) so the user can still click it.
-  out = out.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_match, slug: string, alias?: string) => {
-    const trimmedSlug = slug.trim();
-    // UUID-shaped slug: resolve to a synthesis chip or art-ref with a label.
-    if (UUID_RE.test(trimmedSlug) && !alias) {
-      const uuid = trimmedSlug;
-      const pageTitle = pageTitles?.get(uuid);
-      const source = sources?.get(uuid);
-      // Default / wiki viewer: pageTitles wins (pink synthesis chip).
-      if (!articlePriority && pageTitle) {
-        return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
+  //
+  //    The optional `(§Section)` suffix (matched group `section`) follows the
+  //    closing `]]`. When present, a muted `<span class="section-badge">` is
+  //    appended after the anchor so the reader sees e.g.
+  //    `[Sugar Tax] §Methods`. Absent suffix -> no badge (backward compat).
+  out = out.replace(
+    /\[\[([^\]|]+)(?:\|([^\]]+))?\]\](?:\s*\(§([A-Za-z][A-Za-z\s]{0,40})\))?/g,
+    (_match, slug: string, alias?: string, section?: string) => {
+      const trimmedSlug = slug.trim();
+      // UUID-shaped slug: resolve to a synthesis chip or art-ref with a label.
+      if (UUID_RE.test(trimmedSlug) && !alias) {
+        const uuid = trimmedSlug;
+        const pageTitle = pageTitles?.get(uuid);
+        const source = sources?.get(uuid);
+        // Default / wiki viewer: pageTitles wins (pink synthesis chip).
+        if (!articlePriority && pageTitle) {
+          return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
+        }
+        // Chat view with articlePriority: sources win (green art-ref).
+        if (source) {
+          return makeArtRef(uuid, source);
+        }
+        // pageTitles fallback (when articlePriority is true but no source).
+        if (pageTitle) {
+          return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
+        }
+        // No metadata: default wikilink with the raw UUID as text (still clickable).
       }
-      // Chat view with articlePriority: sources win (green art-ref).
-      if (source) {
-        return makeArtRef(uuid, source);
-      }
-      // pageTitles fallback (when articlePriority is true but no source).
-      if (pageTitle) {
-        return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
-      }
-      // No metadata: default wikilink with the raw UUID as text (still clickable).
+      const linkText = alias?.trim() || trimmedSlug;
+      const safeSlug = escapeAttr(trimmedSlug.toLowerCase());
+      const badge =
+        section && section.trim()
+          ? `<span class="section-badge">§${escapeText(section.trim())}</span>`
+          : '';
+      return `<a class="wikilink" data-slug="${safeSlug}">${escapeText(linkText)}</a>${badge}`;
     }
-    const linkText = alias?.trim() || trimmedSlug;
-    const safeSlug = escapeAttr(trimmedSlug.toLowerCase());
-    return `<a class="wikilink" data-slug="${safeSlug}">${escapeText(linkText)}</a>`;
-  });
+  );
 
   // 3. Strip lines containing /raw/ file paths (artifact, not user-facing).
   //    The path may contain spaces when an older pre-seeder used the article

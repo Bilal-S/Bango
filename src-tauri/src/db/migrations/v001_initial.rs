@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
         'import', 'dedup_merge', 'dedup_flag', 'status_change',
         'tag_add', 'tag_remove', 'label_add', 'label_remove',
         'criteria_match', 'ai_screen', 'manual_override', 'ai_summary',
-        'error', 'dedup_auto', 'reference_import', 'reference_match'
+        'error', 'dedup_auto', 'reference_import', 'reference_match',
+        'figure_descriptions'
     )),
     article_id TEXT,
     details TEXT,

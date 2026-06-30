@@ -27,6 +27,9 @@ use crate::db::article_repo;
 use crate::error::AppError;
 use crate::models::article::Article;
 use crate::utils::pdf_extract;
+use crate::utils::sections::{
+    extract_captions, extract_sections_with_tables, CaptionKind, SectionKind,
+};
 use crate::wiki::frontmatter::{self, Frontmatter};
 
 /// Result of a raw preparation run.
@@ -125,7 +128,13 @@ fn fmt_list(items: &[String]) -> String {
 }
 
 /// Build the Markdown body for an article raw page.
-fn article_body(article: &Article, content: &str) -> String {
+///
+/// When `content_source == "full_text"`, the content is re-emitted as structured
+/// Markdown (T2.4 Phase 2): `## Methods` / `## Results` headings from
+/// `extract_sections_with_tables`, preserved GFM tables, and `**Figure N:**`
+/// caption lines from `extract_captions`. Other sources (`abstract`, `ai_summary`)
+/// pass through unchanged (no structured re-emit).
+fn article_body(article: &Article, content: &str, content_source: &str) -> String {
     let year =
         article.publication_year.map(|y| y.to_string()).unwrap_or_else(|| "Unknown".to_string());
     let authors =
@@ -136,7 +145,84 @@ fn article_body(article: &Article, content: &str) -> String {
     } else {
         format!("Authors: {}  |  Year: {}  |  Journal: {}", authors, year, journal)
     };
-    format!("# {}\n\n{}\n\n## Content\n\n{}", article.title, meta_line, content)
+
+    let body_content = if content_source == "full_text" {
+        structure_full_text(content)
+    } else {
+        content.to_string()
+    };
+
+    format!("# {}\n\n{}\n\n## Content\n\n{}", article.title, meta_line, body_content)
+}
+
+/// Re-emit flat full-text as structured Markdown (T2.4 Phase 2).
+///
+/// - Runs `extract_sections_with_tables` to detect GFM tables (preserved as
+///   `SectionKind::Table`) and split the prose into heading-bounded sections.
+/// - Emits `## {SectionLabel}` headings for high-value sections (Methods,
+///   Results, Discussion, Conclusion, Introduction, Abstract).
+/// - Appends preserved GFM tables under their own `## Table N` heading.
+/// - Appends `**Figure N:** caption` lines for detected captions.
+///
+/// Low-value section kinds (`Heading`, `Text`) are emitted as plain body
+/// paragraphs without a synthetic heading (graceful degrade).
+#[must_use]
+fn structure_full_text(text: &str) -> String {
+    let sections = extract_sections_with_tables(text);
+    let captions = extract_captions(text);
+
+    let mut out = String::new();
+
+    for s in &sections {
+        if s.body.trim().is_empty() {
+            continue;
+        }
+        match s.kind {
+            SectionKind::Methods
+            | SectionKind::Results
+            | SectionKind::Discussion
+            | SectionKind::Conclusion
+            | SectionKind::Introduction
+            | SectionKind::Abstract => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&format!("## {}\n\n{}", s.kind.label(), s.body));
+            }
+            SectionKind::Table => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                let heading = s.heading.as_deref().unwrap_or("Table");
+                out.push_str(&format!("## {heading}\n\n{}", s.body));
+            }
+            SectionKind::Figure => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&format!("## Figure\n\n{}", s.body));
+            }
+            SectionKind::Heading | SectionKind::Text | SectionKind::References => {
+                if !out.is_empty() {
+                    out.push_str("\n\n");
+                }
+                out.push_str(&s.body);
+            }
+        }
+    }
+
+    if !captions.is_empty() {
+        out.push_str("\n\n## Captions\n\n");
+        for c in &captions {
+            let label = match c.kind {
+                CaptionKind::Figure => "Figure",
+                CaptionKind::Table => "Table",
+            };
+            out.push_str(&format!("**{} {}:** {}\n", label, c.number, c.caption));
+        }
+    }
+
+    out
 }
 
 /// Hash a string for idempotency checks.
@@ -184,7 +270,7 @@ pub fn export_included_articles(
 
     for article in &articles {
         let (content, content_source) = article_content(article);
-        let body = article_body(article, &content);
+        let body = article_body(article, &content, content_source);
         let source_hash = hash_str(&body);
 
         let path = raw_dir.join(format!("{}.md", sanitize_filename(&article.id)));
@@ -886,6 +972,59 @@ mod tests {
         assert_eq!(slugify("My Report!"), "my-report");
         assert_eq!(slugify("foo___bar"), "foo-bar");
         assert_eq!(slugify("UPPER"), "upper");
+    }
+
+    // ---- T2.4: structure_full_text (Phase 2 structured re-emit) ----
+
+    #[test]
+    fn structure_full_text_emits_methods_heading_for_full_text() {
+        // When the source is full_text, the structured re-emit runs
+        // extract_sections_with_tables and emits `## Methods` headings for
+        // detected high-value sections.
+        let text = "## Abstract\nAn abstract.\n\n## Methods\nWe did the study.\n\n## Results\nWe found things.";
+        let structured = structure_full_text(text);
+        assert!(structured.contains("## Methods"), "Methods heading missing: {structured}");
+        assert!(structured.contains("## Results"), "Results heading missing: {structured}");
+        assert!(structured.contains("We did the study."), "Methods body missing: {structured}");
+    }
+
+    #[test]
+    fn structure_full_text_preserves_gfm_table() {
+        // A detected pipe-delimited table survives into the structured body as
+        // a GFM table (under a `## Table N` heading).
+        let text = "## Methods\nBody.\n\n| Col1 | Col2 |\n| a | b |\n| c | d |";
+        let structured = structure_full_text(text);
+        assert!(structured.contains("| Col1 | Col2 |"), "GFM table header missing: {structured}");
+        assert!(structured.contains("| a | b |"), "GFM table row missing: {structured}");
+        assert!(structured.contains("---"), "GFM delimiter row missing: {structured}");
+    }
+
+    #[test]
+    fn structure_full_text_emits_figure_caption_lines() {
+        // Detected captions are appended as `**Figure N:** caption` lines.
+        let text = "## Methods\nBody.\n\nFigure 1. A bar chart of BMI by age group.";
+        let structured = structure_full_text(text);
+        assert!(structured.contains("**Figure 1:**"), "figure caption line missing: {structured}");
+        assert!(structured.contains("A bar chart of BMI"), "caption text missing: {structured}");
+    }
+
+    #[test]
+    fn structure_full_text_abstract_source_unchanged() {
+        // When the source is NOT full_text (abstract/ai_summary), article_body
+        // passes the content through unchanged (no structured re-emit).
+        let mut a = sample_article();
+        a.full_text = None;
+        a.abstract_text = "## Methods\nWe did the study.\n\nPlain abstract text.".to_string();
+        let body = article_body(&a, &a.abstract_text.clone(), "abstract");
+        // The abstract text is present verbatim (no re-classification).
+        assert!(body.contains("Plain abstract text."), "abstract content missing: {body}");
+        // No synthetic `## Methods` heading was injected by the structure path
+        // (the abstract already contains one, but the point is the structure
+        // re-emit did not run).
+        assert!(
+            !body.contains("## Content\n\n## Methods\n\n"),
+            "abstract source should not run the structured re-emit: {body}"
+        );
     }
 
     // ---- helpers ----

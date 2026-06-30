@@ -553,3 +553,30 @@ describe('formatArtRefLabel', () => {
     expect(titlePart.length).toBe(57);
   });
 });
+
+// ── T2.3 Phase 3: section-provenance badge ───────────────────────────────────
+
+describe('section badge (T2.3)', () => {
+  it('renders a section badge for [[slug]] with a (§Methods) suffix', () => {
+    const out = renderWikiMarkdown('See [[sugar-tax]] (§Methods) for details.');
+    expect(out).toContain('class="wikilink"');
+    expect(out).toContain('data-slug="sugar-tax"');
+    expect(out).toContain('section-badge');
+    expect(out).toContain('§Methods');
+  });
+
+  it('renders no badge when the section suffix is absent (backward compat)', () => {
+    const out = renderWikiMarkdown('See [[sugar-tax]] for details.');
+    expect(out).toContain('class="wikilink"');
+    expect(out).not.toContain('section-badge');
+  });
+
+  it('renders the section badge after an alias ([[slug|Title]] (§Results))', () => {
+    const out = renderWikiMarkdown('See [[sugar-tax|the levy]] (§Results).');
+    expect(out).toContain('class="wikilink"');
+    expect(out).toContain('data-slug="sugar-tax"');
+    expect(out).toContain('>the levy<');
+    expect(out).toContain('section-badge');
+    expect(out).toContain('§Results');
+  });
+});
