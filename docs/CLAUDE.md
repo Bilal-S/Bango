@@ -168,6 +168,17 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
   components until last.
 - When adding or changing source code, add or update tests in the same change so
   coverage does not regress.
+- **Test-First Protocol for multi-tier plans.** When a feature is specified in a
+  planning doc (`.worktrees/*.md`) with a Test Inventory section (tables whose
+  rows are `file::function` identifiers), the inventory is binding: every listed
+  `file::function` test must exist (un-ignored, passing) before the tier's PR
+  merges. Tiers ship in two PRs - a prep PR that adds the inventory as
+  `#[ignore]` (Rust) / `it.skip` (TS) stubs, and an implementation PR that
+  un-ignores each test as it lands. Reviewers grep for tier-labeled leftovers
+  (`grep -rn "TODO: tier" src-tauri/tests/ src/__tests__/`) - any leftover blocks
+  the PR. `scripts/check-test-inventory.sh` enforces this mechanically by parsing
+  the plan doc's inventory tables and grepping the named test files; it is wired
+  into `npm run check:all` via the `check:test-inventory` script.
 
 ## Tauri App Diagnostics & Testing
 
