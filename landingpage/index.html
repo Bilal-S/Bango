@@ -1,678 +1,1184 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bango - AI-Accelerated Systematic Literature Review Screening</title>
-  <meta name="description" content="Bango automates the screening phase of systematic literature reviews. Import RIS or BibTeX, define your criteria, and let AI screen abstracts with full bibliometric analysis. Desktop app for Windows 10 & 11." />
-  <meta name="author" content="BonCode (Bilal Soylu)" />
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bango - AI-Accelerated Systematic Literature Review Screening</title>
+    <meta
+      name="description"
+      content="Bango automates the screening phase of systematic literature reviews. Import RIS or BibTeX, define your criteria, and let AI screen abstracts with full bibliometric analysis. Desktop app for Windows 10 & 11."
+    />
+    <meta name="author" content="BonCode (Bilal Soylu)" />
 
-  <!-- Open Graph / social preview -->
-  <meta property="og:type" content="website" />
-  <meta property="og:title" content="Bango - AI-Accelerated Systematic Literature Review Screening" />
-  <meta property="og:description" content="Automate screening, deduplication, and bibliometrics for your systematic review. Local, private, no cloud." />
-  <meta property="og:url" content="https://bango.boncode.net" />
-  <meta property="og:image" content="assets/dashboard.png" />
-  <link rel="icon" type="image/png" href="assets/logo.png" />
+    <!-- Open Graph / social preview -->
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="Bango - AI-Accelerated Systematic Literature Review Screening"
+    />
+    <meta
+      property="og:description"
+      content="Automate screening, deduplication, and bibliometrics for your systematic review. Local, private, no cloud."
+    />
+    <meta property="og:url" content="https://bango.boncode.net" />
+    <meta property="og:image" content="assets/dashboard.png" />
+    <link rel="icon" type="image/png" href="assets/logo.png" />
 
-  <!-- Tailwind CSS v4 (browser build) -->
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Tailwind CSS v4 (browser build) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 
-  <!-- Inter font -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <!-- Inter font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
 
-  <!-- Base styles (uses Tailwind's built-in indigo + slate palettes, no custom @theme needed) -->
-  <style type="text/tailwindcss">
-    html { scroll-behavior: smooth; }
-    body { font-family: "Inter", ui-sans-serif, system-ui, sans-serif; }
-    /* subtle soft shadow token */
-    .shadow-soft { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); }
-    .shadow-window { box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.25), 0 10px 30px -10px rgba(79, 70, 229, 0.18); }
-    /* fade-up on scroll */
-    .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s ease; }
-    .reveal.in { opacity: 1; transform: translateY(0); }
-    @media (prefers-reduced-motion: reduce) {
-      .reveal { opacity: 1; transform: none; transition: none; }
-      html { scroll-behavior: auto; }
-    }
-    /* gradient text helper */
-    .text-gradient { background: linear-gradient(90deg, #4f46e5, #6366f1); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  </style>
-
-  <!-- ===== Lightbox styles (plain CSS, not Tailwind-scanned) ===== -->
-  <style>
-    /* Click-to-enlarge triggers */
-    .zoomable { cursor: zoom-in; display: block; }
-    .zoomable:focus-visible { outline: 2px solid #6366f1; outline-offset: 3px; border-radius: 1rem; }
-    .zoomable__overlay {
-      position: absolute;
-      right: 0.75rem;
-      bottom: 0.75rem;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.35rem 0.7rem;
-      border-radius: 0.5rem;
-      background: rgba(15, 23, 42, 0.72);
-      color: #fff;
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: 0.01em;
-      opacity: 0;
-      transform: translateY(4px);
-      transition: opacity 0.2s ease, transform 0.2s ease;
-      pointer-events: none;
-      backdrop-filter: blur(2px);
-    }
-    .zoomable:hover .zoomable__overlay,
-    .zoomable:focus-visible .zoomable__overlay { opacity: 1; transform: translateY(0); }
-
-    /* Modal */
-    #lightbox {
-      position: fixed;
-      inset: 0;
-      z-index: 100;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem;
-      background: rgba(2, 6, 23, 0.8);
-      backdrop-filter: blur(6px);
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 0.25s ease, visibility 0s linear 0.25s;
-    }
-    #lightbox.is-open {
-      opacity: 1;
-      visibility: visible;
-      transition: opacity 0.25s ease, visibility 0s;
-    }
-    .lightbox__figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 0.75rem; }
-    #lightbox img {
-      max-width: 90vw;
-      max-height: 82vh;
-      object-fit: contain;
-      border-radius: 0.75rem;
-      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6);
-      transform: scale(0.97);
-      transition: transform 0.25s ease;
-    }
-    #lightbox.is-open img { transform: scale(1); }
-    .lightbox__caption { color: #e2e8f0; font-size: 0.875rem; text-align: center; max-width: 40rem; }
-    .lightbox__close {
-      position: absolute;
-      top: 1rem;
-      right: 1rem;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 2.75rem;
-      height: 2.75rem;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 9999px;
-      background: rgba(255, 255, 255, 0.1);
-      color: #fff;
-      cursor: pointer;
-      transition: background 0.2s ease, transform 0.2s ease;
-    }
-    .lightbox__close:hover { background: rgba(255, 255, 255, 0.22); transform: rotate(90deg); }
-    .lightbox__close:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-    @media (prefers-reduced-motion: reduce) {
-      #lightbox, #lightbox img, .lightbox__close, .zoomable__overlay { transition: none; }
-    }
-  </style>
-
-  <!-- ===== LinkedIn Insight Tag (partner 9290066) ===== -->
-  <script type="text/javascript">
-    _linkedin_partner_id = "9290066";
-    window._linkedin_data_partner_ids = window._linkedin_data_partner_ids || [];
-    window._linkedin_data_partner_ids.push(_linkedin_partner_id);
-  </script>
-  <script type="text/javascript">
-    (function (l) {
-      if (!l) { window.lintrk = function (a, b) { window.lintrk.q.push([a, b]) }; window.lintrk.q = []; }
-      var s = document.getElementsByTagName("script")[0];
-      var b = document.createElement("script");
-      b.type = "text/javascript"; b.async = true;
-      b.src = "https://snap.licdn.com/li.lms-analytics/insight.min.js";
-      s.parentNode.insertBefore(b, s);
-    })(window.lintrk);
-  </script>
-  <noscript>
-    <img height="1" width="1" style="display:none;" alt="" src="https://px.ads.linkedin.com/collect/?pid=9290066&fmt=gif" />
-  </noscript>
-</head>
-
-<body class="bg-white text-slate-700 antialiased">
-
-  <!-- ===================== STICKY NAV ===================== -->
-  <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 border-b border-slate-200/70">
-    <nav class="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
-      <a href="#top" class="flex items-center gap-2.5">
-        <img src="assets/logo.png" alt="Bango" class="h-8 w-8 rounded-lg" />
-        <span class="text-lg font-bold tracking-tight text-slate-900">Bango</span>
-      </a>
-
-      <div class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-        <a href="#features" class="hover:text-indigo-600 transition-colors">Features</a>
-        <a href="#how" class="hover:text-indigo-600 transition-colors">How it works</a>
-        <a href="#privacy" class="hover:text-indigo-600 transition-colors">Privacy</a>
-        <a href="help.html" class="hover:text-indigo-600 transition-colors">Help</a>
-      </div>
-
-      <a href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
-        data-cta="store"
-        class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition-all hover:bg-indigo-700 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"/></svg>
-        Download
-      </a>
-    </nav>
-  </header>
-
-  <!-- ===================== HERO ===================== -->
-  <section id="top" class="relative overflow-hidden">
-    <!-- soft background accents -->
-    <div class="pointer-events-none absolute inset-0 -z-10">
-      <div class="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-indigo-100/60 blur-3xl"></div>
-      <div class="absolute top-40 -left-24 h-80 w-80 rounded-full bg-slate-100 blur-3xl"></div>
-    </div>
-
-    <div class="mx-auto max-w-7xl px-6 pt-16 pb-12 lg:pt-24 lg:pb-20">
-      <div class="grid lg:grid-cols-2 gap-12 items-center">
-
-        <!-- copy column -->
-        <div class="max-w-xl">
-          <div class="flex flex-wrap items-center gap-2.5">
-            <span class="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3.5 py-1.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200">
-              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"/></svg>
-              Built for Windows 10 & 11
-            </span>
-            <span class="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
-              Free & open source
-            </span>
-          </div>
-
-          <h1 class="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl leading-[1.05]">
-            Screen thousands of papers
-            <span class="text-gradient">in an afternoon.</span>
-          </h1>
-
-          <p class="mt-6 text-lg leading-relaxed text-slate-600">
-            Bango automates the slowest part of any systematic review. Import your RIS or BibTeX file,
-            set your inclusion and exclusion criteria, and let AI evaluate every abstract against your rules.
-            You get a rigorously categorized set of articles with reasoning, tags, and confidence scores.
-          </p>
-
-          <p class="mt-4 text-base leading-relaxed text-slate-500">
-            Then go deeper. Built-in bibliometric analysis, citation networks, and PRISMA diagrams turn your
-            included set into publication-ready insight. Everything stays on your machine.
-          </p>
-
-          <!-- CTAs -->
-          <div class="mt-8 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <a href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
-              data-cta="store"
-              class="group inline-flex items-center gap-3 rounded-xl bg-indigo-600 px-7 py-4 text-base font-bold text-white shadow-lg shadow-indigo-600/25 transition-all hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"/></svg>
-              Download on the Microsoft Store
-              <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z" clip-rule="evenodd"/></svg>
-            </a>
-            <a href="#how" class="text-sm font-semibold text-slate-600 hover:text-indigo-600 transition-colors">
-              See how it works &rarr;
-            </a>
-          </div>
-
-          <p class="mt-5 text-sm text-slate-400">
-            Free for any researcher, forever. Open source under Apache 2.0, with no subscription, no paywall,
-            and no account required. Verified and signed by the Microsoft Store.
-          </p>
-        </div>
-
-        <!-- hero visual -->
-        <div class="relative reveal">
-          <div class="absolute -inset-4 rounded-3xl bg-gradient-to-tr from-indigo-100/50 to-slate-100/50 blur-2xl -z-10"></div>
-          <!-- faux window chrome (click to enlarge) -->
-          <div class="zoomable relative rounded-2xl border border-slate-200 bg-white p-2 shadow-window" role="button" tabindex="0" aria-label="Enlarge dashboard screenshot" data-zoom="assets/dashboard.png" data-caption="Bango dashboard showing review progress and article counts">
-            <div class="flex items-center gap-1.5 px-3 py-2">
-              <span class="h-3 w-3 rounded-full bg-red-400"></span>
-              <span class="h-3 w-3 rounded-full bg-amber-400"></span>
-              <span class="h-3 w-3 rounded-full bg-green-400"></span>
-              <span class="ml-3 text-xs font-medium text-slate-400">Bango - Dashboard</span>
-            </div>
-            <img src="assets/dashboard.png" alt="Bango dashboard showing review progress and article counts" class="rounded-lg w-full" />
-            <span class="zoomable__overlay" aria-hidden="true"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Click to enlarge</span>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== TRUST & PRIVACY CALLOUT ===================== -->
-  <section id="privacy" class="bg-slate-900 text-white">
-    <div class="mx-auto max-w-7xl px-6 py-16 lg:py-20">
-      <!-- free software banner -->
-      <div class="mb-10 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-5 py-4 flex items-start gap-3">
-        <svg class="h-5 w-5 mt-0.5 shrink-0 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
-        <p class="text-sm text-emerald-50 leading-relaxed">
-          <span class="font-semibold">100% free for any researcher.</span>
-          Open source under the Apache 2.0 license. No subscriptions, no feature paywalls, no limits.
-          Built for academics, PhD students, and professional analysts alike.
-        </p>
-      </div>
-
-      <div class="max-w-2xl">
-        <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Your research data never leaves your computer.</h2>
-        <p class="mt-3 text-slate-300 leading-relaxed">
-          Bango is built local-first. No cloud uploads. No logins. No accounts. Your library, your notes,
-          and your API keys stay exactly where you put them.
-        </p>
-      </div>
-
-      <div class="mt-10 grid gap-6 sm:grid-cols-3">
-        <!-- pillar 1 -->
-        <div class="rounded-xl border border-white/10 bg-white/5 p-6">
-          <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-300">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 2 4 5v6.5c0 4.5 3.2 8.6 8 9.5 4.8-.9 8-5 8-9.5V5l-8-3z"/></svg>
-          </div>
-          <h3 class="mt-4 text-base font-semibold">Secure verification</h3>
-          <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">
-            Downloaded and verified through the Microsoft Store. Every update is signed and delivered by Microsoft's pipeline.
-          </p>
-        </div>
-        <!-- pillar 2 -->
-        <div class="rounded-xl border border-white/10 bg-white/5 p-6">
-          <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-300">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12c0 1-2 5-9 5s-9-4-9-5 2-5 9-5 9 4 9 5z"/><path d="M3 12h18"/></svg>
-          </div>
-          <h3 class="mt-4 text-base font-semibold">Zero data retention</h3>
-          <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">
-            Local execution first. SQLite lives on your disk. API keys are encrypted with AES-256-GCM using a machine-derived key.
-          </p>
-        </div>
-        <!-- pillar 3 -->
-        <div class="rounded-xl border border-white/10 bg-white/5 p-6">
-          <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-300">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          </div>
-          <h3 class="mt-4 text-base font-semibold">Privacy-centric</h3>
-          <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">
-            Project backups omit credentials. Use a hosted model or run a local LLM. The choice, and the data, is yours.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== CORE FEATURES ===================== -->
-  <section id="features" class="bg-slate-50">
-    <div class="mx-auto max-w-7xl px-6 py-20 lg:py-28">
-      <div class="max-w-2xl">
-        <p class="text-sm font-semibold uppercase tracking-wider text-indigo-600">Core features</p>
-        <h2 class="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
-          Everything a manual spreadsheet can't do.
-        </h2>
-        <p class="mt-4 text-lg text-slate-600 leading-relaxed">
-          Stop fighting columns and pivot tables. Bango handles the repetitive, error-prone parts of a review
-          so you can spend your time on judgment calls and synthesis.
-        </p>
-      </div>
-
-      <!-- feature grid -->
-      <div class="mt-14 grid gap-6 lg:grid-cols-3">
-
-        <!-- card 1 -->
-        <div class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal">
-          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">AI abstract screening</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600">
-            Batches of abstracts go to your configured LLM with your aims and criteria attached. You get back a
-            decision, a reasoning paragraph, matched rules, suggested tags, and a confidence score. Thousands of
-            papers screened in the time it takes to read a handful.
-          </p>
-        </div>
-
-        <!-- card 2 -->
-        <div class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal">
-          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">Intelligent deduplication</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600">
-            Four matching strategies run automatically on import. DOI exact, title plus year, fuzzy similarity
-            scoring, and author plus title. Exact duplicates merge on their own. The fuzzy ones land in a side-by-side
-            review queue so nothing slips through.
-          </p>
-        </div>
-
-        <!-- card 3 -->
-        <div class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal">
-          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">Tags & labels</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600">
-            AI suggests content tags and workflow labels from your keywords and criteria before screening even begins.
-            Review them, rename them, override anything. Full manual control sits one click away, always.
-          </p>
-        </div>
-
-        <!-- card 4 -->
-        <div class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal">
-          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M12 3a14 14 0 0 0 0 18"/><path d="M12 3a14 14 0 0 1 0 18"/></svg>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">Bibliometric analysis</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600">
-            Six modules run on your included corpus. Co-authorship networks, citation graphs, keyword maps,
-            publication timelines, author productivity rankings, and co-citation analysis. Louvain clustering finds
-            communities automatically. Export to PNG or GEXF.
-          </p>
-        </div>
-
-        <!-- card 5 -->
-        <div class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal">
-          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">PRISMA 2020 diagrams</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600">
-            A standard four-phase flow diagram generates itself from your real record counts. Toggle an exclusion-reason
-            breakdown when a journal asks for it. Export to SVG or PNG for the manuscript.
-          </p>
-        </div>
-
-        <!-- card 6 -->
-        <div class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal">
-          <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-            <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">References & citations</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600">
-            Track backward references and forward citations for any article. Import detail via RIS or BibTeX, match
-            against your library, and promote interesting references to full articles when they deserve a closer look.
-          </p>
-        </div>
-
-      </div>
-
-      <!-- visual showcase row -->
-      <div class="mt-16 grid gap-6 lg:grid-cols-3 reveal">
-        <figure class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-          <div class="zoomable relative" role="button" tabindex="0" aria-label="Enlarge keyword network screenshot" data-zoom="assets/keywords.png" data-caption="Keyword co-occurrence network graph">
-            <img src="assets/keywords.png" alt="Keyword co-occurrence network graph" class="w-full object-cover aspect-video" />
-            <span class="zoomable__overlay" aria-hidden="true"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Click to enlarge</span>
-          </div>
-          <figcaption class="px-5 py-4 text-sm font-medium text-slate-600">Keyword co-occurrence network</figcaption>
-        </figure>
-        <figure class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-          <div class="zoomable relative" role="button" tabindex="0" aria-label="Enlarge article review screenshot" data-zoom="assets/manual-review.png" data-caption="Article manual review panel with AI screening card">
-            <img src="assets/manual-review.png" alt="Article manual review panel with AI screening card" class="w-full object-cover aspect-video" />
-            <span class="zoomable__overlay" aria-hidden="true"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Click to enlarge</span>
-          </div>
-          <figcaption class="px-5 py-4 text-sm font-medium text-slate-600">Article review with AI reasoning</figcaption>
-        </figure>
-        <figure class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-          <div class="zoomable relative" role="button" tabindex="0" aria-label="Enlarge tags screenshot" data-zoom="assets/tags.png" data-caption="Tags and labels management screen">
-            <img src="assets/tags.png" alt="Tags and labels management screen" class="w-full object-cover aspect-video" />
-            <span class="zoomable__overlay" aria-hidden="true"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Click to enlarge</span>
-          </div>
-          <figcaption class="px-5 py-4 text-sm font-medium text-slate-600">Tags and labels management</figcaption>
-        </figure>
-      </div>
-
-    </div>
-  </section>
-
-  <!-- ===================== HOW IT WORKS ===================== -->
-  <section id="how" class="bg-white">
-    <div class="mx-auto max-w-7xl px-6 py-20 lg:py-28">
-      <div class="max-w-2xl mx-auto text-center">
-        <p class="text-sm font-semibold uppercase tracking-wider text-indigo-600">How it works</p>
-        <h2 class="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Three steps from import to insight.</h2>
-      </div>
-
-      <div class="mt-16 grid gap-10 md:grid-cols-3">
-        <!-- step 1 -->
-        <div class="relative text-center md:text-left reveal">
-          <div class="flex items-center justify-center md:justify-start">
-            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white text-lg font-bold shadow-lg shadow-indigo-600/25">1</span>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">Import</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600 max-w-xs mx-auto md:mx-0">
-            Drop in an RIS or BibTeX file. Bango parses 30+ metadata fields, deduplicates against your library,
-            and flags anything that needs a second look. Up to 10,000 articles per project.
-          </p>
-        </div>
-        <!-- step 2 -->
-        <div class="relative text-center md:text-left reveal">
-          <div class="flex items-center justify-center md:justify-start">
-            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white text-lg font-bold shadow-lg shadow-indigo-600/25">2</span>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">Screen</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600 max-w-xs mx-auto md:mx-0">
-            Define your aims and criteria with priority levels. The AI runs in the background, in batches, with
-            retry and backoff built in. Every decision is logged with reasoning you can audit.
-          </p>
-        </div>
-        <!-- step 3 -->
-        <div class="relative text-center md:text-left reveal">
-          <div class="flex items-center justify-center md:justify-start">
-            <span class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white text-lg font-bold shadow-lg shadow-indigo-600/25">3</span>
-          </div>
-          <h3 class="mt-5 text-lg font-bold text-slate-900">Analyze</h3>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600 max-w-xs mx-auto md:mx-0">
-            Normalize once and unlock the six bibliometric modules. Export your included list to valid RIS with
-            AI annotations, or back up the whole project to a single file.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== FINAL CTA ===================== -->
-  <section class="relative overflow-hidden bg-indigo-600">
-    <div class="pointer-events-none absolute inset-0 opacity-20">
-      <div class="absolute -top-20 right-10 h-72 w-72 rounded-full bg-white/30 blur-3xl"></div>
-      <div class="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-slate-900/40 blur-3xl"></div>
-    </div>
-    <div class="relative mx-auto max-w-4xl px-6 py-20 text-center">
-      <h2 class="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
-        Start your review today.
-      </h2>
-      <p class="mx-auto mt-4 max-w-xl text-lg text-indigo-100 leading-relaxed">
-        Download Bango from the Microsoft Store. It is free for any researcher, open source, and set up takes
-        just a few minutes. Your data stays local the whole time.
-      </p>
-      <div class="mt-8 flex justify-center">
-        <a href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
-          data-cta="store"
-          class="group inline-flex items-center gap-3 rounded-xl bg-white px-7 py-4 text-base font-bold text-indigo-700 shadow-xl transition-all hover:-translate-y-0.5 hover:shadow-2xl focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-indigo-600">
-          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"/></svg>
-          Download on the Microsoft Store
-          <svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z" clip-rule="evenodd"/></svg>
-        </a>
-      </div>
-      <p class="mt-5 text-sm text-indigo-200">Verified and signed by the Microsoft Store.</p>
-      <!-- cross-platform secondary note -->
-      <p class="mt-3 text-xs text-indigo-200/80">
-        Not on Windows? Bango also runs on Linux and macOS (Apple Silicon). Grab <b>unsigned</b> builds from
-        <a href="https://github.com/Bilal-S/Bango/releases/latest" class="font-medium text-white underline decoration-indigo-200/50 underline-offset-2 hover:decoration-white transition-colors">GitHub Releases</a>.
-      </p>
-    </div>
-  </section>
-
-  <!-- ===================== FOOTER ===================== -->
-  <footer class="bg-slate-900 text-slate-400">
-    <div class="mx-auto max-w-7xl px-6 py-12">
-      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-        <div class="flex items-center gap-2.5">
-          <img src="assets/logo.png" alt="Bango" class="h-7 w-7 rounded-lg" />
-          <span class="text-base font-bold text-white">Bango</span>
-        </div>
-
-        <p class="text-sm text-slate-400 max-w-xl md:text-right">
-          Requires an active Windows 10 or Windows 11 installation.
-          Delivered and securely updated by the Microsoft Store.
-        </p>
-      </div>
-
-      <hr class="my-8 border-white/10" />
-
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-slate-500">
-        <p>&copy; 2025-2026 BonCode (Bilal Soylu). Free open-source software for researchers. Licensed under Apache 2.0.</p>
-        <div class="flex items-center gap-5">
-          <a href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge" data-cta="store" class="hover:text-white transition-colors">Microsoft Store</a>
-          <a href="https://github.com/Bilal-S/Bango/releases/latest" class="hover:text-white transition-colors">GitHub</a>
-        </div>
-      </div>
-    </div>
-  </footer>
-
-  <!-- ===================== LIGHTBOX ===================== -->
-  <div id="lightbox" role="dialog" aria-modal="true" aria-label="Enlarged image" aria-hidden="true">
-    <button class="lightbox__close" type="button" aria-label="Close enlarged image (Esc)">
-      <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></svg>
-    </button>
-    <figure class="lightbox__figure">
-      <img class="lightbox__img" src="" alt="" />
-      <figcaption class="lightbox__caption"></figcaption>
-    </figure>
-  </div>
-
-  <!-- ===================== TRACKING + SAFETY SCRIPT ===================== -->
-  <script>
-    (function () {
-      "use strict";
-
-      // Destination for all conversion actions.
-      var STORE_URL = "https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge";
-      var CONVERSION_ID = 28476826;
-
-      /**
-       * Fire the LinkedIn conversion event.
-       * Wrapped so a missing/blocked tag never throws.
-       */
-      function fireConversion() {
-        try {
-          if (typeof window.lintrk === "function") {
-            window.lintrk("track", { conversion_id: CONVERSION_ID });
-          }
-        } catch (err) {
-          // Tracking is best-effort. Do nothing; navigation continues.
+    <!-- Base styles (uses Tailwind's built-in indigo + slate palettes, no custom @theme needed) -->
+    <style type="text/tailwindcss">
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      }
+      /* subtle soft shadow token */
+      .shadow-soft {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      }
+      .shadow-window {
+        box-shadow:
+          0 25px 60px -15px rgba(15, 23, 42, 0.25),
+          0 10px 30px -10px rgba(79, 70, 229, 0.18);
+      }
+      /* fade-up on scroll */
+      .reveal {
+        opacity: 0;
+        transform: translateY(24px);
+        transition:
+          opacity 0.7s ease,
+          transform 0.7s ease;
+      }
+      .reveal.in {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .reveal {
+          opacity: 1;
+          transform: none;
+          transition: none;
+        }
+        html {
+          scroll-behavior: auto;
         }
       }
+      /* gradient text helper */
+      .text-gradient {
+        background: linear-gradient(90deg, #4f46e5, #6366f1);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+    </style>
 
-      // Capture clicks on any element marked as a store CTA.
-      document.addEventListener("click", function (e) {
-        var cta = e.target.closest('[data-cta="store"]');
-        if (!cta) return;
+    <!-- ===== Lightbox styles (plain CSS, not Tailwind-scanned) ===== -->
+    <style>
+      /* Click-to-enlarge triggers */
+      .zoomable {
+        cursor: zoom-in;
+        display: block;
+      }
+      .zoomable:focus-visible {
+        outline: 2px solid #6366f1;
+        outline-offset: 3px;
+        border-radius: 1rem;
+      }
+      .zoomable__overlay {
+        position: absolute;
+        right: 0.75rem;
+        bottom: 0.75rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.35rem 0.7rem;
+        border-radius: 0.5rem;
+        background: rgba(15, 23, 42, 0.72);
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        opacity: 0;
+        transform: translateY(4px);
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        pointer-events: none;
+        backdrop-filter: blur(2px);
+      }
+      .zoomable:hover .zoomable__overlay,
+      .zoomable:focus-visible .zoomable__overlay {
+        opacity: 1;
+        transform: translateY(0);
+      }
 
-        fireConversion();
-
-        // If the CTA is an anchor with the right href, let the browser navigate naturally.
-        // Otherwise (a <button> or mismatched href), redirect explicitly.
-        var href = cta.getAttribute("href");
-        var isCorrectAnchor = cta.tagName === "A" && href && href.indexOf("apps.microsoft.com") !== -1;
-
-        if (!isCorrectAnchor) {
-          e.preventDefault();
-          window.location.href = STORE_URL;
+      /* Modal */
+      #lightbox {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        background: rgba(2, 6, 23, 0.8);
+        backdrop-filter: blur(6px);
+        opacity: 0;
+        visibility: hidden;
+        transition:
+          opacity 0.25s ease,
+          visibility 0s linear 0.25s;
+      }
+      #lightbox.is-open {
+        opacity: 1;
+        visibility: visible;
+        transition:
+          opacity 0.25s ease,
+          visibility 0s;
+      }
+      .lightbox__figure {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      #lightbox img {
+        max-width: 90vw;
+        max-height: 82vh;
+        object-fit: contain;
+        border-radius: 0.75rem;
+        box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6);
+        transform: scale(0.97);
+        transition: transform 0.25s ease;
+      }
+      #lightbox.is-open img {
+        transform: scale(1);
+      }
+      .lightbox__caption {
+        color: #e2e8f0;
+        font-size: 0.875rem;
+        text-align: center;
+        max-width: 40rem;
+      }
+      .lightbox__close {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.75rem;
+        height: 2.75rem;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 9999px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        cursor: pointer;
+        transition:
+          background 0.2s ease,
+          transform 0.2s ease;
+      }
+      .lightbox__close:hover {
+        background: rgba(255, 255, 255, 0.22);
+        transform: rotate(90deg);
+      }
+      .lightbox__close:focus-visible {
+        outline: 2px solid #fff;
+        outline-offset: 2px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #lightbox,
+        #lightbox img,
+        .lightbox__close,
+        .zoomable__overlay {
+          transition: none;
         }
-      });
+      }
+    </style>
 
-      // ---- Subtle scroll reveal (respects reduced motion via CSS) ----
-      if ("IntersectionObserver" in window) {
-        var io = new IntersectionObserver(function (entries) {
-          entries.forEach(function (entry) {
-            if (entry.isIntersecting) {
-              entry.target.classList.add("in");
-              io.unobserve(entry.target);
+    <!-- ===== LinkedIn Insight Tag (partner 9290066) ===== -->
+    <script type="text/javascript">
+      _linkedin_partner_id = '9290066';
+      window._linkedin_data_partner_ids = window._linkedin_data_partner_ids || [];
+      window._linkedin_data_partner_ids.push(_linkedin_partner_id);
+    </script>
+    <script type="text/javascript">
+      (function (l) {
+        if (!l) {
+          window.lintrk = function (a, b) {
+            window.lintrk.q.push([a, b]);
+          };
+          window.lintrk.q = [];
+        }
+        var s = document.getElementsByTagName('script')[0];
+        var b = document.createElement('script');
+        b.type = 'text/javascript';
+        b.async = true;
+        b.src = 'https://snap.licdn.com/li.lms-analytics/insight.min.js';
+        s.parentNode.insertBefore(b, s);
+      })(window.lintrk);
+    </script>
+    <noscript>
+      <img
+        height="1"
+        width="1"
+        style="display: none"
+        alt=""
+        src="https://px.ads.linkedin.com/collect/?pid=9290066&fmt=gif"
+      />
+    </noscript>
+  </head>
+
+  <body class="bg-white text-slate-700 antialiased">
+    <!-- ===================== STICKY NAV ===================== -->
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 border-b border-slate-200/70">
+      <nav class="mx-auto max-w-7xl px-6 h-16 flex items-center justify-between">
+        <a href="#top" class="flex items-center gap-2.5">
+          <img src="assets/logo.png" alt="Bango" class="h-8 w-8 rounded-lg" />
+          <span class="text-lg font-bold tracking-tight text-slate-900">Bango</span>
+        </a>
+
+        <div class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
+          <a href="#features" class="hover:text-indigo-600 transition-colors">Features</a>
+          <a href="#how" class="hover:text-indigo-600 transition-colors">How it works</a>
+          <a href="#privacy" class="hover:text-indigo-600 transition-colors">Privacy</a>
+          <a href="help.html" class="hover:text-indigo-600 transition-colors">Help</a>
+        </div>
+
+        <a
+          href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
+          data-cta="store"
+          class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition-all hover:bg-indigo-700 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path
+              d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"
+            />
+          </svg>
+          Download
+        </a>
+      </nav>
+    </header>
+
+    <!-- ===================== HERO ===================== -->
+    <section id="top" class="relative overflow-hidden">
+      <!-- soft background accents -->
+      <div class="pointer-events-none absolute inset-0 -z-10">
+        <div
+          class="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-indigo-100/60 blur-3xl"
+        ></div>
+        <div class="absolute top-40 -left-24 h-80 w-80 rounded-full bg-slate-100 blur-3xl"></div>
+      </div>
+
+      <div class="mx-auto max-w-7xl px-6 pt-16 pb-12 lg:pt-24 lg:pb-20">
+        <div class="grid lg:grid-cols-2 gap-12 items-center">
+          <!-- copy column -->
+          <div class="max-w-xl">
+            <div class="flex flex-wrap items-center gap-2.5">
+              <span
+                class="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3.5 py-1.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path
+                    d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"
+                  />
+                </svg>
+                Built for Windows 10 & 11
+              </span>
+              <span
+                class="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
+              >
+                <svg
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M20 12v10H4V12" />
+                  <path d="M2 7h20v5H2z" />
+                  <path d="M12 22V7" />
+                  <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+                  <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+                </svg>
+                Free & open source
+              </span>
+            </div>
+
+            <h1
+              class="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl leading-[1.05]"
+            >
+              Screen thousands of papers
+              <span class="text-gradient">in an afternoon.</span>
+            </h1>
+
+            <p class="mt-6 text-lg leading-relaxed text-slate-600">
+              Bango automates the slowest part of any systematic review. Import your RIS or BibTeX
+              file, set your inclusion and exclusion criteria, and let AI evaluate every abstract
+              against your rules. You get a rigorously categorized set of articles with reasoning,
+              tags, and confidence scores.
+            </p>
+
+            <p class="mt-4 text-base leading-relaxed text-slate-500">
+              Then go deeper. Built-in bibliometric analysis, citation networks, and PRISMA diagrams
+              turn your included set into publication-ready insight. Everything stays on your
+              machine.
+            </p>
+
+            <!-- CTAs -->
+            <div class="mt-8 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+              <a
+                href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
+                data-cta="store"
+                class="group inline-flex items-center gap-3 rounded-xl bg-indigo-600 px-7 py-4 text-base font-bold text-white shadow-lg shadow-indigo-600/25 transition-all hover:bg-indigo-700 hover:shadow-xl hover:shadow-indigo-600/30 hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              >
+                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path
+                    d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"
+                  />
+                </svg>
+                Download on the Microsoft Store
+                <svg
+                  class="h-4 w-4 transition-transform group-hover:translate-x-1"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+              </a>
+              <a
+                href="#how"
+                class="text-sm font-semibold text-slate-600 hover:text-indigo-600 transition-colors"
+              >
+                See how it works &rarr;
+              </a>
+            </div>
+
+            <p class="mt-5 text-sm text-slate-400">
+              Free for any researcher, forever. Open source under Apache 2.0, with no subscription,
+              no paywall, and no account required. Verified and signed by the Microsoft Store.
+            </p>
+          </div>
+
+          <!-- hero visual -->
+          <div class="relative reveal">
+            <div
+              class="absolute -inset-4 rounded-3xl bg-gradient-to-tr from-indigo-100/50 to-slate-100/50 blur-2xl -z-10"
+            ></div>
+            <!-- faux window chrome (click to enlarge) -->
+            <div
+              class="zoomable relative rounded-2xl border border-slate-200 bg-white p-2 shadow-window"
+              role="button"
+              tabindex="0"
+              aria-label="Enlarge dashboard screenshot"
+              data-zoom="assets/dashboard.png"
+              data-caption="Bango dashboard showing review progress and article counts"
+            >
+              <div class="flex items-center gap-1.5 px-3 py-2">
+                <span class="h-3 w-3 rounded-full bg-red-400"></span>
+                <span class="h-3 w-3 rounded-full bg-amber-400"></span>
+                <span class="h-3 w-3 rounded-full bg-green-400"></span>
+                <span class="ml-3 text-xs font-medium text-slate-400">Bango - Dashboard</span>
+              </div>
+              <img
+                src="assets/dashboard.png"
+                alt="Bango dashboard showing review progress and article counts"
+                class="rounded-lg w-full"
+              />
+              <span class="zoomable__overlay" aria-hidden="true"
+                ><svg
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.3-4.3" /></svg
+                >Click to enlarge</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== TRUST & PRIVACY CALLOUT ===================== -->
+    <section id="privacy" class="bg-slate-900 text-white">
+      <div class="mx-auto max-w-7xl px-6 py-16 lg:py-20">
+        <!-- free software banner -->
+        <div
+          class="mb-10 rounded-xl border border-emerald-400/20 bg-emerald-400/10 px-5 py-4 flex items-start gap-3"
+        >
+          <svg
+            class="h-5 w-5 mt-0.5 shrink-0 text-emerald-300"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M20 12v10H4V12" />
+            <path d="M2 7h20v5H2z" />
+            <path d="M12 22V7" />
+            <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+            <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+          </svg>
+          <p class="text-sm text-emerald-50 leading-relaxed">
+            <span class="font-semibold">100% free for any researcher.</span>
+            Open source under the Apache 2.0 license. No subscriptions, no feature paywalls, no
+            limits. Built for academics, PhD students, and professional analysts alike.
+          </p>
+        </div>
+
+        <div class="max-w-2xl">
+          <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">
+            Your research data never leaves your computer.
+          </h2>
+          <p class="mt-3 text-slate-300 leading-relaxed">
+            Bango is built local-first. No cloud uploads. No logins. No accounts. Your library, your
+            notes, and your API keys stay exactly where you put them.
+          </p>
+        </div>
+
+        <div class="mt-10 grid gap-6 sm:grid-cols-3">
+          <!-- pillar 1 -->
+          <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+            <div
+              class="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-300"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M9 12l2 2 4-4" />
+                <path d="M12 2 4 5v6.5c0 4.5 3.2 8.6 8 9.5 4.8-.9 8-5 8-9.5V5l-8-3z" />
+              </svg>
+            </div>
+            <h3 class="mt-4 text-base font-semibold">Secure verification</h3>
+            <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">
+              Downloaded and verified through the Microsoft Store. Every update is signed and
+              delivered by Microsoft's pipeline.
+            </p>
+          </div>
+          <!-- pillar 2 -->
+          <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+            <div
+              class="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-300"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M21 12c0 1-2 5-9 5s-9-4-9-5 2-5 9-5 9 4 9 5z" />
+                <path d="M3 12h18" />
+              </svg>
+            </div>
+            <h3 class="mt-4 text-base font-semibold">Zero data retention</h3>
+            <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">
+              Local execution first. SQLite lives on your disk. API keys are encrypted with
+              AES-256-GCM using a machine-derived key.
+            </p>
+          </div>
+          <!-- pillar 3 -->
+          <div class="rounded-xl border border-white/10 bg-white/5 p-6">
+            <div
+              class="flex h-11 w-11 items-center justify-center rounded-lg bg-indigo-600/20 text-indigo-300"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="11" width="18" height="11" rx="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            <h3 class="mt-4 text-base font-semibold">Privacy-centric</h3>
+            <p class="mt-1.5 text-sm text-slate-400 leading-relaxed">
+              Project backups omit credentials. Use a hosted model or run a local LLM. The choice,
+              and the data, is yours.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== CORE FEATURES ===================== -->
+    <section id="features" class="bg-slate-50">
+      <div class="mx-auto max-w-7xl px-6 py-20 lg:py-28">
+        <div class="max-w-2xl">
+          <p class="text-sm font-semibold uppercase tracking-wider text-indigo-600">
+            Core features
+          </p>
+          <h2 class="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+            Everything a manual spreadsheet can't do.
+          </h2>
+          <p class="mt-4 text-lg text-slate-600 leading-relaxed">
+            Stop fighting columns and pivot tables. Bango handles the repetitive, error-prone parts
+            of a review so you can spend your time on judgment calls and synthesis.
+          </p>
+        </div>
+
+        <!-- feature grid -->
+        <div class="mt-14 grid gap-6 lg:grid-cols-3">
+          <!-- card 1 -->
+          <div
+            class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal"
+          >
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 2v4" />
+                <path d="m16.2 7.8 2.9-2.9" />
+                <path d="M18 12h4" />
+                <path d="m16.2 16.2 2.9 2.9" />
+                <path d="M12 18v4" />
+                <path d="m4.9 19.1 2.9-2.9" />
+                <path d="M2 12h4" />
+                <path d="m4.9 4.9 2.9 2.9" />
+              </svg>
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">AI abstract screening</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600">
+              Batches of abstracts go to your configured LLM with your aims and criteria attached.
+              You get back a decision, a reasoning paragraph, matched rules, suggested tags, and a
+              confidence score. Thousands of papers screened in the time it takes to read a handful.
+            </p>
+          </div>
+
+          <!-- card 2 -->
+          <div
+            class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal"
+          >
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">Intelligent deduplication</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600">
+              Four matching strategies run automatically on import. DOI exact, title plus year,
+              fuzzy similarity scoring, and author plus title. Exact duplicates merge on their own.
+              The fuzzy ones land in a side-by-side review queue so nothing slips through.
+            </p>
+          </div>
+
+          <!-- card 3 -->
+          <div
+            class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal"
+          >
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"
+                />
+                <line x1="7" y1="7" x2="7.01" y2="7" />
+              </svg>
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">Tags & labels</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600">
+              AI suggests content tags and workflow labels from your keywords and criteria before
+              screening even begins. Review them, rename them, override anything. Full manual
+              control sits one click away, always.
+            </p>
+          </div>
+
+          <!-- card 4 -->
+          <div
+            class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal"
+          >
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3.6 9h16.8" />
+                <path d="M3.6 15h16.8" />
+                <path d="M12 3a14 14 0 0 0 0 18" />
+                <path d="M12 3a14 14 0 0 1 0 18" />
+              </svg>
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">Bibliometric analysis</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600">
+              Six modules run on your included corpus. Co-authorship networks, citation graphs,
+              keyword maps, publication timelines, author productivity rankings, and co-citation
+              analysis. Louvain clustering finds communities automatically. Export to PNG or GEXF.
+            </p>
+          </div>
+
+          <!-- card 5 -->
+          <div
+            class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal"
+          >
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+                <path d="M8 13h8" />
+                <path d="M8 17h8" />
+                <path d="M8 9h2" />
+              </svg>
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">PRISMA 2020 diagrams</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600">
+              A standard four-phase flow diagram generates itself from your real record counts.
+              Toggle an exclusion-reason breakdown when a journal asks for it. Export to SVG or PNG
+              for the manuscript.
+            </p>
+          </div>
+
+          <!-- card 6 -->
+          <div
+            class="group rounded-2xl border border-slate-200 bg-white p-7 shadow-soft transition-all hover:shadow-lg hover:-translate-y-1 reveal"
+          >
+            <div
+              class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600"
+            >
+              <svg
+                class="h-6 w-6"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+                <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+              </svg>
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">References & citations</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600">
+              Track backward references and forward citations for any article. Import detail via RIS
+              or BibTeX, match against your library, and promote interesting references to full
+              articles when they deserve a closer look.
+            </p>
+          </div>
+        </div>
+
+        <!-- visual showcase row -->
+        <div class="mt-16 grid gap-6 lg:grid-cols-3 reveal">
+          <figure class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+            <div
+              class="zoomable relative"
+              role="button"
+              tabindex="0"
+              aria-label="Enlarge keyword network screenshot"
+              data-zoom="assets/keywords.png"
+              data-caption="Keyword co-occurrence network graph"
+            >
+              <img
+                src="assets/keywords.png"
+                alt="Keyword co-occurrence network graph"
+                class="w-full object-cover aspect-video"
+              />
+              <span class="zoomable__overlay" aria-hidden="true"
+                ><svg
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.3-4.3" /></svg
+                >Click to enlarge</span
+              >
+            </div>
+            <figcaption class="px-5 py-4 text-sm font-medium text-slate-600">
+              Keyword co-occurrence network
+            </figcaption>
+          </figure>
+          <figure class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+            <div
+              class="zoomable relative"
+              role="button"
+              tabindex="0"
+              aria-label="Enlarge article review screenshot"
+              data-zoom="assets/manual-review.png"
+              data-caption="Article manual review panel with AI screening card"
+            >
+              <img
+                src="assets/manual-review.png"
+                alt="Article manual review panel with AI screening card"
+                class="w-full object-cover aspect-video"
+              />
+              <span class="zoomable__overlay" aria-hidden="true"
+                ><svg
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.3-4.3" /></svg
+                >Click to enlarge</span
+              >
+            </div>
+            <figcaption class="px-5 py-4 text-sm font-medium text-slate-600">
+              Article review with AI reasoning
+            </figcaption>
+          </figure>
+          <figure class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
+            <div
+              class="zoomable relative"
+              role="button"
+              tabindex="0"
+              aria-label="Enlarge tags screenshot"
+              data-zoom="assets/tags.png"
+              data-caption="Tags and labels management screen"
+            >
+              <img
+                src="assets/tags.png"
+                alt="Tags and labels management screen"
+                class="w-full object-cover aspect-video"
+              />
+              <span class="zoomable__overlay" aria-hidden="true"
+                ><svg
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m21 21-4.3-4.3" /></svg
+                >Click to enlarge</span
+              >
+            </div>
+            <figcaption class="px-5 py-4 text-sm font-medium text-slate-600">
+              Tags and labels management
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== HOW IT WORKS ===================== -->
+    <section id="how" class="bg-white">
+      <div class="mx-auto max-w-7xl px-6 py-20 lg:py-28">
+        <div class="max-w-2xl mx-auto text-center">
+          <p class="text-sm font-semibold uppercase tracking-wider text-indigo-600">How it works</p>
+          <h2 class="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
+            Three steps from import to insight.
+          </h2>
+        </div>
+
+        <div class="mt-16 grid gap-10 md:grid-cols-3">
+          <!-- step 1 -->
+          <div class="relative text-center md:text-left reveal">
+            <div class="flex items-center justify-center md:justify-start">
+              <span
+                class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white text-lg font-bold shadow-lg shadow-indigo-600/25"
+                >1</span
+              >
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">Import</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600 max-w-xs mx-auto md:mx-0">
+              Drop in an RIS or BibTeX file. Bango parses 30+ metadata fields, deduplicates against
+              your library, and flags anything that needs a second look. Up to 10,000 articles per
+              project.
+            </p>
+          </div>
+          <!-- step 2 -->
+          <div class="relative text-center md:text-left reveal">
+            <div class="flex items-center justify-center md:justify-start">
+              <span
+                class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white text-lg font-bold shadow-lg shadow-indigo-600/25"
+                >2</span
+              >
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">Screen</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600 max-w-xs mx-auto md:mx-0">
+              Define your aims and criteria with priority levels. The AI runs in the background, in
+              batches, with retry and backoff built in. Every decision is logged with reasoning you
+              can audit.
+            </p>
+          </div>
+          <!-- step 3 -->
+          <div class="relative text-center md:text-left reveal">
+            <div class="flex items-center justify-center md:justify-start">
+              <span
+                class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-600 text-white text-lg font-bold shadow-lg shadow-indigo-600/25"
+                >3</span
+              >
+            </div>
+            <h3 class="mt-5 text-lg font-bold text-slate-900">Analyze</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-600 max-w-xs mx-auto md:mx-0">
+              Normalize once and unlock the six bibliometric modules. Export your included list to
+              valid RIS with AI annotations, or back up the whole project to a single file.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FINAL CTA ===================== -->
+    <section class="relative overflow-hidden bg-indigo-600">
+      <div class="pointer-events-none absolute inset-0 opacity-20">
+        <div class="absolute -top-20 right-10 h-72 w-72 rounded-full bg-white/30 blur-3xl"></div>
+        <div class="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-slate-900/40 blur-3xl"></div>
+      </div>
+      <div class="relative mx-auto max-w-4xl px-6 py-20 text-center">
+        <h2 class="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+          Start your review today.
+        </h2>
+        <p class="mx-auto mt-4 max-w-xl text-lg text-indigo-100 leading-relaxed">
+          Download Bango from the Microsoft Store. It is free for any researcher, open source, and
+          set up takes just a few minutes. Your data stays local the whole time.
+        </p>
+        <div class="mt-8 flex justify-center">
+          <a
+            href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
+            data-cta="store"
+            class="group inline-flex items-center gap-3 rounded-xl bg-white px-7 py-4 text-base font-bold text-indigo-700 shadow-xl transition-all hover:-translate-y-0.5 hover:shadow-2xl focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-indigo-600"
+          >
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path
+                d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"
+              />
+            </svg>
+            Download on the Microsoft Store
+            <svg
+              class="h-4 w-4 transition-transform group-hover:translate-x-1"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M3 10a.75.75 0 0 1 .75-.75h10.638L10.23 5.29a.75.75 0 1 1 1.04-1.08l5.5 5.25a.75.75 0 0 1 0 1.08l-5.5 5.25a.75.75 0 1 1-1.04-1.08l4.158-3.96H3.75A.75.75 0 0 1 3 10Z"
+                clip-rule="evenodd"
+              />
+            </svg>
+          </a>
+        </div>
+        <p class="mt-5 text-sm text-indigo-200">Verified and signed by the Microsoft Store.</p>
+        <!-- cross-platform secondary note -->
+        <p class="mt-3 text-xs text-indigo-200/80">
+          Not on Windows? Bango also runs on Linux and macOS (Apple Silicon). Grab
+          <b>unsigned</b> builds from
+          <a
+            href="https://github.com/Bilal-S/Bango/releases/latest"
+            class="font-medium text-white underline decoration-indigo-200/50 underline-offset-2 hover:decoration-white transition-colors"
+            >GitHub Releases</a
+          >.
+        </p>
+      </div>
+    </section>
+
+    <!-- ===================== FOOTER ===================== -->
+    <footer class="bg-slate-900 text-slate-400">
+      <div class="mx-auto max-w-7xl px-6 py-12">
+        <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div class="flex items-center gap-2.5">
+            <img src="assets/logo.png" alt="Bango" class="h-7 w-7 rounded-lg" />
+            <span class="text-base font-bold text-white">Bango</span>
+          </div>
+
+          <p class="text-sm text-slate-400 max-w-xl md:text-right">
+            Requires an active Windows 10 or Windows 11 installation. Delivered and securely updated
+            by the Microsoft Store.
+          </p>
+        </div>
+
+        <hr class="my-8 border-white/10" />
+
+        <div
+          class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-slate-500"
+        >
+          <p>
+            &copy; 2025-2026 BonCode (Bilal Soylu). Free open-source software for researchers.
+            Licensed under Apache 2.0.
+          </p>
+          <div class="flex items-center gap-5">
+            <a
+              href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
+              data-cta="store"
+              class="hover:text-white transition-colors"
+              >Microsoft Store</a
+            >
+            <a
+              href="https://github.com/Bilal-S/Bango/releases/latest"
+              class="hover:text-white transition-colors"
+              >GitHub</a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- ===================== LIGHTBOX ===================== -->
+    <div
+      id="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Enlarged image"
+      aria-hidden="true"
+    >
+      <button class="lightbox__close" type="button" aria-label="Close enlarged image (Esc)">
+        <svg
+          class="h-5 w-5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M18 6 6 18" />
+          <path d="M6 6l12 12" />
+        </svg>
+      </button>
+      <figure class="lightbox__figure">
+        <img class="lightbox__img" src="" alt="" />
+        <figcaption class="lightbox__caption"></figcaption>
+      </figure>
+    </div>
+
+    <!-- ===================== TRACKING + SAFETY SCRIPT ===================== -->
+    <script>
+      (function () {
+        'use strict';
+
+        // Destination for all conversion actions.
+        var STORE_URL =
+          'https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge';
+        var CONVERSION_ID = 28476826;
+
+        /**
+         * Fire the LinkedIn conversion event.
+         * Wrapped so a missing/blocked tag never throws.
+         */
+        function fireConversion() {
+          try {
+            if (typeof window.lintrk === 'function') {
+              window.lintrk('track', { conversion_id: CONVERSION_ID });
+            }
+          } catch (err) {
+            // Tracking is best-effort. Do nothing; navigation continues.
+          }
+        }
+
+        // Capture clicks on any element marked as a store CTA.
+        document.addEventListener('click', function (e) {
+          var cta = e.target.closest('[data-cta="store"]');
+          if (!cta) return;
+
+          fireConversion();
+
+          // If the CTA is an anchor with the right href, let the browser navigate naturally.
+          // Otherwise (a <button> or mismatched href), redirect explicitly.
+          var href = cta.getAttribute('href');
+          var isCorrectAnchor =
+            cta.tagName === 'A' && href && href.indexOf('apps.microsoft.com') !== -1;
+
+          if (!isCorrectAnchor) {
+            e.preventDefault();
+            window.location.href = STORE_URL;
+          }
+        });
+
+        // ---- Subtle scroll reveal (respects reduced motion via CSS) ----
+        if ('IntersectionObserver' in window) {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add('in');
+                  io.unobserve(entry.target);
+                }
+              });
+            },
+            { threshold: 0.12 }
+          );
+          document.querySelectorAll('.reveal').forEach(function (el) {
+            io.observe(el);
+          });
+        } else {
+          document.querySelectorAll('.reveal').forEach(function (el) {
+            el.classList.add('in');
+          });
+        }
+
+        // ============ Image lightbox (click to enlarge) ============
+        var lb = document.getElementById('lightbox');
+        if (lb) {
+          var lbImg = lb.querySelector('.lightbox__img');
+          var lbCaption = lb.querySelector('.lightbox__caption');
+          var lbClose = lb.querySelector('.lightbox__close');
+          var lastFocused = null;
+          var scrollLocked = false;
+
+          function lockScroll(lock) {
+            if (lock && !scrollLocked) {
+              document.body.style.overflow = 'hidden';
+              scrollLocked = true;
+            } else if (!lock && scrollLocked) {
+              document.body.style.overflow = '';
+              scrollLocked = false;
+            }
+          }
+
+          function openLightbox(src, caption) {
+            lastFocused = document.activeElement;
+            lbImg.src = src;
+            lbImg.alt = caption || '';
+            lbCaption.textContent = caption || '';
+            lbCaption.style.display = caption ? '' : 'none';
+            lb.classList.add('is-open');
+            lb.setAttribute('aria-hidden', 'false');
+            lockScroll(true);
+            if (lbClose) {
+              setTimeout(function () {
+                lbClose.focus();
+              }, 60);
+            }
+          }
+
+          function closeLightbox() {
+            lb.classList.remove('is-open');
+            lb.setAttribute('aria-hidden', 'true');
+            lockScroll(false);
+            // Clear src after fade so the previous image doesn't linger
+            setTimeout(function () {
+              lbImg.src = '';
+            }, 280);
+            if (lastFocused && typeof lastFocused.focus === 'function') {
+              lastFocused.focus();
+            }
+          }
+
+          // Delegated click: open on any [data-zoom] trigger
+          document.addEventListener('click', function (e) {
+            var trigger = e.target.closest('[data-zoom]');
+            if (trigger) {
+              openLightbox(trigger.getAttribute('data-zoom'), trigger.getAttribute('data-caption'));
+              return;
+            }
+            if (!lb.classList.contains('is-open')) return;
+            // Backdrop click (directly on #lightbox, not on image/figure) closes
+            if (e.target === lb) {
+              closeLightbox();
+            }
+            // (X) button closes
+            if (e.target.closest('.lightbox__close')) {
+              closeLightbox();
             }
           });
-        }, { threshold: 0.12 });
-        document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
-      } else {
-        document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("in"); });
-      }
 
-      // ============ Image lightbox (click to enlarge) ============
-      var lb = document.getElementById("lightbox");
-      if (lb) {
-        var lbImg = lb.querySelector(".lightbox__img");
-        var lbCaption = lb.querySelector(".lightbox__caption");
-        var lbClose = lb.querySelector(".lightbox__close");
-        var lastFocused = null;
-        var scrollLocked = false;
-
-        function lockScroll(lock) {
-          if (lock && !scrollLocked) {
-            document.body.style.overflow = "hidden";
-            scrollLocked = true;
-          } else if (!lock && scrollLocked) {
-            document.body.style.overflow = "";
-            scrollLocked = false;
-          }
+          // Keyboard: Enter/Space opens from a trigger; Esc closes
+          document.addEventListener('keydown', function (e) {
+            var trigger = e.target.closest ? e.target.closest('[data-zoom]') : null;
+            if (trigger && (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar')) {
+              e.preventDefault();
+              openLightbox(trigger.getAttribute('data-zoom'), trigger.getAttribute('data-caption'));
+              return;
+            }
+            if (lb.classList.contains('is-open') && e.key === 'Escape') {
+              e.preventDefault();
+              closeLightbox();
+            }
+          });
         }
-
-        function openLightbox(src, caption) {
-          lastFocused = document.activeElement;
-          lbImg.src = src;
-          lbImg.alt = caption || "";
-          lbCaption.textContent = caption || "";
-          lbCaption.style.display = caption ? "" : "none";
-          lb.classList.add("is-open");
-          lb.setAttribute("aria-hidden", "false");
-          lockScroll(true);
-          if (lbClose) { setTimeout(function () { lbClose.focus(); }, 60); }
-        }
-
-        function closeLightbox() {
-          lb.classList.remove("is-open");
-          lb.setAttribute("aria-hidden", "true");
-          lockScroll(false);
-          // Clear src after fade so the previous image doesn't linger
-          setTimeout(function () { lbImg.src = ""; }, 280);
-          if (lastFocused && typeof lastFocused.focus === "function") {
-            lastFocused.focus();
-          }
-        }
-
-        // Delegated click: open on any [data-zoom] trigger
-        document.addEventListener("click", function (e) {
-          var trigger = e.target.closest("[data-zoom]");
-          if (trigger) {
-            openLightbox(trigger.getAttribute("data-zoom"), trigger.getAttribute("data-caption"));
-            return;
-          }
-          if (!lb.classList.contains("is-open")) return;
-          // Backdrop click (directly on #lightbox, not on image/figure) closes
-          if (e.target === lb) { closeLightbox(); }
-          // (X) button closes
-          if (e.target.closest(".lightbox__close")) { closeLightbox(); }
-        });
-
-        // Keyboard: Enter/Space opens from a trigger; Esc closes
-        document.addEventListener("keydown", function (e) {
-          var trigger = e.target.closest ? e.target.closest("[data-zoom]") : null;
-          if (trigger && (e.key === "Enter" || e.key === " " || e.key === "Spacebar")) {
-            e.preventDefault();
-            openLightbox(trigger.getAttribute("data-zoom"), trigger.getAttribute("data-caption"));
-            return;
-          }
-          if (lb.classList.contains("is-open") && e.key === "Escape") {
-            e.preventDefault();
-            closeLightbox();
-          }
-        });
-      }
-    })();
-  </script>
-
-</body>
+      })();
+    </script>
+  </body>
 </html>
