@@ -21,42 +21,120 @@ pub fn set_setting(conn: &Connection, key: &str, value: Option<&str>) -> Result<
     Ok(())
 }
 
-/// Get the fulltext storage directory. Returns the configured path or the platform default.
-/// Also ensures the directory exists.
-pub fn get_fulltext_storage_dir(conn: &Connection) -> Result<String, AppError> {
-    let configured = get_setting(conn, "fulltext_storage_dir")?;
+/// The `app_settings` key for the Bango documents root directory.
+///
+/// All on-disk project artifacts derive from this root as subdirectories:
+/// - `fulltext/` - article PDFs + text extracts
+/// - `ris/` - Citation Chaser output
+/// - `wiki-root/` - LLM Wiki (Markdown)
+///
+/// If unconfigured, defaults to `~/Documents/Bango/`.
+pub const STORAGE_ROOT_KEY: &str = "storage_root";
 
-    let path = if let Some(ref p) = configured {
-        if !p.is_empty() {
-            p.clone()
-        } else {
-            compute_default_storage_dir()
+/// The legacy `app_settings` key (pre-reorg) that stored the full *fulltext*
+/// path rather than the root. Read once during lazy migration
+/// (see [`get_storage_root`]) and then superseded by [`STORAGE_ROOT_KEY`].
+const LEGACY_FULLTEXT_STORAGE_DIR_KEY: &str = "fulltext_storage_dir";
+
+/// Subdirectory name under the storage root for full-text attachments.
+pub const FULLTEXT_DIR_NAME: &str = "fulltext";
+
+/// Resolve the Bango documents root, performing a one-time lazy migration
+/// from the legacy `fulltext_storage_dir` key to [`STORAGE_ROOT_KEY`].
+///
+/// Migration rules (only run when `storage_root` is absent):
+/// 1. Legacy value ending in `fulltext` (e.g. `~/Documents/Bango/fulltext`)
+///    -> root = parent (`~/Documents/Bango`).
+/// 2. Legacy custom value *not* ending in `fulltext` -> root = the value as-is
+///    (preserves the prior non-fulltext custom-dir behavior).
+/// 3. Legacy absent/empty -> default `~/Documents/Bango/`.
+///
+/// After computing, the normalized root is persisted to `storage_root` so
+/// subsequent reads are O(1) and the legacy key is never consulted again.
+/// Ensures the directory exists.
+pub fn get_storage_root(conn: &Connection) -> Result<String, AppError> {
+    // Fast path: the new key is already set.
+    if let Some(root) = get_setting(conn, STORAGE_ROOT_KEY)? {
+        if !root.is_empty() {
+            ensure_storage_root_exists(&root)?;
+            return Ok(root);
         }
-    } else {
-        compute_default_storage_dir()
-    };
-
-    // Ensure directory exists
-    std::fs::create_dir_all(&path).map_err(|e| {
-        AppError::Import(format!("Failed to create fulltext storage directory '{}': {}", path, e))
-    })?;
-
-    Ok(path)
-}
-
-/// Set the fulltext storage directory. Pass None to reset to default.
-pub fn set_fulltext_storage_dir(conn: &Connection, path: Option<&str>) -> Result<(), AppError> {
-    let value = path.and_then(|p| if p.is_empty() { None } else { Some(p) });
-    set_setting(conn, "fulltext_storage_dir", value)?;
-
-    // Ensure the new directory exists
-    if let Some(p) = value {
-        std::fs::create_dir_all(p).map_err(|e| {
-            AppError::Import(format!("Failed to create fulltext storage directory '{}': {}", p, e))
-        })?;
     }
 
+    // Lazy migration: derive the root from the legacy fulltext key.
+    let legacy = get_setting(conn, LEGACY_FULLTEXT_STORAGE_DIR_KEY)?;
+    let default = compute_default_storage_root();
+    let root = normalize_legacy_to_root(legacy.as_deref(), &default);
+
+    // Persist so we never consult the legacy key again.
+    set_setting(conn, STORAGE_ROOT_KEY, Some(&root))?;
+    ensure_storage_root_exists(&root)?;
+    Ok(root)
+}
+
+/// Set the Bango documents root. Pass `None` to reset to the platform default.
+pub fn set_storage_root(conn: &Connection, path: Option<&str>) -> Result<(), AppError> {
+    let value = path.and_then(|p| if p.is_empty() { None } else { Some(p) });
+    let root = value.map(String::from).unwrap_or_else(compute_default_storage_root);
+    set_setting(conn, STORAGE_ROOT_KEY, Some(&root))?;
+    ensure_storage_root_exists(&root)?;
     Ok(())
+}
+
+/// The full-text subdirectory under the storage root.
+pub fn get_fulltext_dir(conn: &Connection) -> Result<String, AppError> {
+    let root = get_storage_root(conn)?;
+    let fulltext = std::path::Path::new(&root).join(FULLTEXT_DIR_NAME);
+    std::fs::create_dir_all(&fulltext).map_err(|e| {
+        AppError::Import(format!(
+            "Failed to create fulltext storage directory '{}': {}",
+            fulltext.display(),
+            e
+        ))
+    })?;
+    Ok(fulltext.to_string_lossy().to_string())
+}
+
+/// Derive the storage root from a legacy `fulltext_storage_dir` value.
+///
+/// - Trailing `fulltext` segment stripped (parent becomes root).
+/// - Non-fulltext custom path kept as-is.
+/// - Empty/absent falls back to `default`.
+#[must_use]
+pub fn normalize_legacy_to_root(legacy: Option<&str>, default: &str) -> String {
+    let Some(p) = legacy.filter(|s| !s.is_empty()) else {
+        return default.to_string();
+    };
+    let path = std::path::Path::new(p);
+    if path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case(FULLTEXT_DIR_NAME))
+        .unwrap_or(false)
+    {
+        path.parent()
+            .map(|parent| parent.to_string_lossy().to_string())
+            .filter(|parent| !parent.is_empty())
+            .unwrap_or_else(|| default.to_string())
+    } else {
+        p.to_string()
+    }
+}
+
+/// Ensure the storage root directory exists.
+fn ensure_storage_root_exists(root: &str) -> Result<(), AppError> {
+    std::fs::create_dir_all(root).map_err(|e| {
+        AppError::Import(format!("Failed to create storage root directory '{root}': {e}"))
+    })?;
+    Ok(())
+}
+
+/// Compute the platform-specific default storage root: `~/Documents/Bango/`.
+fn compute_default_storage_root() -> String {
+    let docs = dirs::document_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    docs.join("Bango").to_string_lossy().to_string()
 }
 
 /// The `app_settings` key that records whether bibliometric normalized data
@@ -115,15 +193,6 @@ pub fn clear_wiki_needs_refresh(conn: &Connection) {
 /// included articles, no wiki) does not trigger an unnecessary ingest.
 pub fn get_wiki_needs_refresh(conn: &Connection) -> Result<bool, AppError> {
     Ok(get_setting(conn, WIKI_NEEDS_REFRESH_KEY)?.map(|v| v == "true").unwrap_or(false))
-}
-
-/// Compute the platform-specific default storage directory:
-/// ~/Documents/Bango/fulltext/
-fn compute_default_storage_dir() -> String {
-    let docs = dirs::document_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    docs.join("Bango").join("fulltext").to_string_lossy().to_string()
 }
 
 // ── Tier 3 screening-mode settings ──────────────────────────────────────────
@@ -283,4 +352,45 @@ pub fn set_two_stage_expected_borderline_fraction(
     value: f64,
 ) -> Result<(), AppError> {
     set_setting(conn, TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY, Some(&value.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DEFAULT: &str = "/home/user/Documents/Bango";
+
+    #[test]
+    fn normalize_legacy_none_returns_default() {
+        assert_eq!(normalize_legacy_to_root(None, DEFAULT), DEFAULT);
+    }
+
+    #[test]
+    fn normalize_legacy_empty_returns_default() {
+        assert_eq!(normalize_legacy_to_root(Some(""), DEFAULT), DEFAULT);
+    }
+
+    #[test]
+    fn normalize_legacy_fulltext_suffix_strips_to_parent() {
+        let legacy = "/home/user/Documents/Bango/fulltext";
+        assert_eq!(normalize_legacy_to_root(Some(legacy), DEFAULT), DEFAULT);
+    }
+
+    #[test]
+    fn normalize_legacy_fulltext_case_insensitive() {
+        let legacy = "/home/user/Documents/Bango/FullText";
+        assert_eq!(normalize_legacy_to_root(Some(legacy), DEFAULT), DEFAULT);
+    }
+
+    #[test]
+    fn normalize_legacy_custom_non_fulltext_kept_as_is() {
+        let legacy = "/data/my-bango-store";
+        assert_eq!(normalize_legacy_to_root(Some(legacy), DEFAULT), "/data/my-bango-store");
+    }
+
+    #[test]
+    fn normalize_legacy_bare_fulltext_falls_back_to_default() {
+        // Edge case: path is exactly `fulltext` -> parent is empty -> default.
+        assert_eq!(normalize_legacy_to_root(Some("fulltext"), DEFAULT), DEFAULT);
+    }
 }

@@ -3,48 +3,21 @@ import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 
-// Full text storage directory
-interface StorageInfo {
+// Storage root directory (Bango documents root; fulltext/, ris/, wiki-root/ derive from it).
+interface StorageRootInfo {
   effectivePath: string;
   isCustom: boolean;
   defaultPath: string;
 }
-const storageInfo = ref<StorageInfo | null>(null);
+const storageInfo = ref<StorageRootInfo | null>(null);
 const storageLoading = ref(false);
 const storageError = ref<string | null>(null);
 
-// Tier 3: one-shot chunk rebuild for already-attached PDFs.
-interface RebuildChunksResult {
-  success: boolean;
-  chunked: number;
-  failed: number;
-  skipped: number;
-  message: string;
-}
-const fullTextArticleCount = ref(0);
-const rebuildLoading = ref(false);
-const rebuildResult = ref<RebuildChunksResult | null>(null);
-const rebuildError = ref<string | null>(null);
-
 async function loadStorageInfo(): Promise<void> {
   try {
-    storageInfo.value = await invoke<StorageInfo>('get_fulltext_storage_dir');
-    fullTextArticleCount.value = await invoke<number>('count_articles_with_full_text');
+    storageInfo.value = await invoke<StorageRootInfo>('get_storage_root');
   } catch (e) {
     storageError.value = String(e);
-  }
-}
-
-async function rebuildChunks(): Promise<void> {
-  rebuildLoading.value = true;
-  rebuildError.value = null;
-  rebuildResult.value = null;
-  try {
-    rebuildResult.value = await invoke<RebuildChunksResult>('rebuild_article_chunks');
-  } catch (e: unknown) {
-    rebuildError.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    rebuildLoading.value = false;
   }
 }
 
@@ -53,7 +26,7 @@ async function browseStorageDir(): Promise<void> {
     const selected = await open({ directory: true, multiple: false });
     if (selected) {
       storageLoading.value = true;
-      storageInfo.value = await invoke<StorageInfo>('set_fulltext_storage_dir', {
+      storageInfo.value = await invoke<StorageRootInfo>('set_storage_root', {
         path: selected,
       });
     }
@@ -67,7 +40,7 @@ async function browseStorageDir(): Promise<void> {
 async function resetStorageDir(): Promise<void> {
   storageLoading.value = true;
   try {
-    storageInfo.value = await invoke<StorageInfo>('set_fulltext_storage_dir', { path: null });
+    storageInfo.value = await invoke<StorageRootInfo>('set_storage_root', { path: null });
   } catch (e) {
     storageError.value = String(e);
   } finally {
@@ -75,7 +48,7 @@ async function resetStorageDir(): Promise<void> {
   }
 }
 
-// Load storage info on mount
+// Load storage info on mount.
 loadStorageInfo();
 </script>
 
@@ -83,10 +56,11 @@ loadStorageInfo();
   <section class="settings-card">
     <h2 class="settings-card__title">
       <span class="material-symbols-outlined text-primary">folder_open</span>
-      Full Text Storage
+      Storage
     </h2>
     <p class="settings-card__desc">
-      Directory for storing extracted full-text articles (PDFs and text files).
+      Directory where Bango stores articles, full-text attachments, Citation Chaser output, and the
+      LLM Wiki.
     </p>
 
     <div v-if="storageError" class="settings-card__status storage-error">
@@ -99,7 +73,30 @@ loadStorageInfo();
         <span v-if="storageInfo.isCustom" class="storage-dir__badge">Custom</span>
         <span v-else class="storage-dir__badge storage-dir__badge--default">Default</span>
       </div>
-      <div class="settings-card__actions" style="margin-top: 0.75rem">
+
+      <!-- Directory tree visual -->
+      <div class="storage-tree">
+        <div class="storage-tree__line storage-tree__line--root">
+          <span class="material-symbols-outlined storage-tree__icon">folder</span>
+          <code>Bango/</code>
+        </div>
+        <div class="storage-tree__line">
+          <span class="material-symbols-outlined storage-tree__icon">description</span>
+          <span class="storage-tree__label"
+            ><code>fulltext/</code> article PDFs + text extracts</span
+          >
+        </div>
+        <div class="storage-tree__line">
+          <span class="material-symbols-outlined storage-tree__icon">article</span>
+          <span class="storage-tree__label"><code>ris/</code> Citation Chaser output</span>
+        </div>
+        <div class="storage-tree__line">
+          <span class="material-symbols-outlined storage-tree__icon">menu_book</span>
+          <span class="storage-tree__label"><code>wiki-root/</code> LLM Wiki (Markdown)</span>
+        </div>
+      </div>
+
+      <div class="settings-card__actions">
         <button class="btn btn--secondary" :disabled="storageLoading" @click="browseStorageDir">
           <span class="material-symbols-outlined btn__icon">folder</span>
           Browse...
@@ -117,28 +114,6 @@ loadStorageInfo();
       <p class="storage-dir__hint">
         Default: <code>{{ storageInfo.defaultPath }}</code>
       </p>
-
-      <!-- Tier 3: one-shot chunk rebuild for already-attached PDFs -->
-      <div v-if="fullTextArticleCount > 0" class="rebuild-chunks">
-        <div class="rebuild-chunks__row">
-          <span class="rebuild-chunks__title">Text chunks for screening</span>
-          <button class="btn btn--secondary" :disabled="rebuildLoading" @click="rebuildChunks">
-            <span class="material-symbols-outlined btn__icon">cached</span>
-            Rebuild text chunks
-          </button>
-        </div>
-        <p class="rebuild-chunks__desc">
-          Enhanced / Two-stage screening retrieves criteria-matched chunks from attached full text.
-          Rebuild if chunks are missing (e.g. PDFs attached before this feature shipped).
-        </p>
-        <p v-if="rebuildLoading" class="rebuild-chunks__status">Rebuilding chunks...</p>
-        <p v-if="rebuildResult" class="rebuild-chunks__status rebuild-chunks__status--ok">
-          {{ rebuildResult.message }}
-        </p>
-        <p v-if="rebuildError" class="rebuild-chunks__status rebuild-chunks__status--err">
-          {{ rebuildError }}
-        </p>
-      </div>
     </div>
   </section>
 </template>
@@ -206,43 +181,46 @@ loadStorageInfo();
   border-radius: 0.25rem;
 }
 
-/* ── Tier 3: chunk rebuild ── */
-.rebuild-chunks {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-surface-variant, #e4e1ee);
+/* ── Directory tree visual ── */
+.storage-tree {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--color-surface-container-low, #f5f2ff);
+  border: 1px solid var(--color-surface-variant, #e4e1ee);
+  border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
 }
 
-.rebuild-chunks__row {
+.storage-tree__line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.rebuild-chunks__title {
-  font-size: var(--font-size-body, 14px);
-  font-weight: var(--font-weight-semibold, 600);
+  gap: 0.5rem;
+  font-size: 13px;
   color: var(--color-on-surface, #1b1b24);
+  padding-left: 0.25rem;
 }
 
-.rebuild-chunks__desc {
-  font-size: var(--font-size-caption, 12px);
+.storage-tree__line--root {
+  font-weight: 600;
+  padding-left: 0;
+}
+
+.storage-tree__line .storage-tree__icon {
+  font-size: 18px;
+  color: var(--color-primary, #3525cd);
+  flex-shrink: 0;
+}
+
+.storage-tree__label {
   color: var(--color-on-surface-variant, #464555);
-  line-height: 1.4;
-  margin-top: 0.5rem;
 }
 
-.rebuild-chunks__status {
-  font-size: var(--font-size-caption, 12px);
-  margin-top: 0.5rem;
-}
-
-.rebuild-chunks__status--ok {
-  color: #15803d;
-}
-
-.rebuild-chunks__status--err {
-  color: #991b1b;
+.storage-tree__label code,
+.storage-tree__line code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  color: var(--color-on-surface, #1b1b24);
 }
 </style>

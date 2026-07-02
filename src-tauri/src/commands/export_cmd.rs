@@ -166,7 +166,7 @@ pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> 
 /// Reset the project: rebuild the DB schema (dropping all user tables) and
 /// delete the on-disk wiki-root directory. `journal_index` is preserved by
 /// `rebuild_schema`. The wiki root must be resolved BEFORE the schema rebuild
-/// because `app_settings` (which holds `fulltext_storage_dir` and the optional
+/// because `app_settings` (which holds `storage_root` and the optional
 /// `wiki_root_dir` override) is dropped by `rebuild_schema`.
 ///
 /// Wiki deletion is **non-fatal**: if resolving or deleting the wiki root

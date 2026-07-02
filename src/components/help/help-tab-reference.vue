@@ -1000,9 +1000,9 @@ ER  - </pre
     templates/       # page skeletons the LLM follows</pre
             >
             <p>
-              If you set a custom <strong>Full-Text Storage Directory</strong> in Settings, the
-              wiki-root is placed alongside it. Every file is plain <code>.md</code> - you own it
-              and can edit it in any text editor.
+              If you set a custom <strong>Storage</strong> directory in Settings, the wiki-root is
+              placed under it. Every file is plain <code>.md</code> - you own it and can edit it in
+              any text editor.
             </p>
 
             <h3>Getting Started (General Workflow)</h3>
@@ -1195,8 +1195,10 @@ ER  - </pre
             <h3>Configurable Options</h3>
             <ul>
               <li>
-                <strong>Full-Text Storage Directory:</strong> Defines where attached files are
-                cached. Defaults to <code>~/Documents/Bango/fulltext/</code> if unconfigured.
+                <strong>Storage:</strong> Defines the Bango documents root where attached files,
+                Citation Chaser output, and the Wiki are cached. Defaults to
+                <code>~/Documents/Bango/</code> if unconfigured (with <code>fulltext/</code>,
+                <code>ris/</code>, and <code>wiki-root/</code> as subdirectories).
               </li>
             </ul>
           </div>

@@ -1,20 +1,20 @@
 //! Wiki storage resolution.
 //!
-//! Resolves the `wiki-root/` directory as a **sibling** of the project's
-//! `fulltext_storage_dir` under the Bango documents root (or an optional
-//! explicit override in `app_settings` under key `wiki_root_dir`).
+//! Resolves the `wiki-root/` directory as a subdirectory of the project's
+//! Bango documents root (`storage_root` in `app_settings`, with a one-time
+//! lazy migration from the legacy `fulltext_storage_dir` key - see
+//! [`crate::db::app_settings_repo::get_storage_root`]).
 //!
 //! Default layout:
 //! ```text
 //! ~/Documents/Bango/
-//! ├── fulltext/      <- article PDFs + text extracts (existing)
+//! ├── fulltext/      <- article PDFs + text extracts
+//! ├── ris/           <- Citation Chaser output
 //! └── wiki-root/     <- LLM wiki (this module)
 //! ```
 //!
-//! When the user sets a custom `fulltext_storage_dir` whose last path
-//! component is `fulltext`, the wiki-root is placed in that dir's parent
-//! (e.g. `/x/y/fulltext/` -> `/x/y/wiki-root/`). If the custom dir does not
-//! end in `fulltext`, the wiki-root is placed inside it.
+//! An optional explicit override (`wiki_root_dir` in `app_settings`) lets
+//! power users place the wiki outside the storage root.
 
 use std::path::{Path, PathBuf};
 
@@ -22,49 +22,27 @@ use crate::db::app_settings_repo;
 use crate::error::AppError;
 
 /// The `app_settings` key for an optional explicit wiki-root override.
-/// When unset (or empty), the wiki root is derived from the Bango documents
-/// root (see [`derive_bango_root`]).
+/// When unset (or empty), the wiki root is `{storage_root}/wiki-root`.
 pub const WIKI_ROOT_DIR_KEY: &str = "wiki_root_dir";
 
-/// Subdirectory name placed under the Bango documents root.
+/// Subdirectory name placed under the storage root.
 pub const WIKI_ROOT_DIR_NAME: &str = "wiki-root";
-
-/// The conventional last component of the fulltext storage dir.
-const FULLTEXT_DIR_NAME: &str = "fulltext";
 
 /// Subdirectories created inside `wiki-root/`.
 pub const SUBDIRS: &[&str] =
     &["raw", "wiki/concepts", "wiki/authors", "wiki/methods", "wiki/synthesis", "templates"];
 
-/// Derive the Bango documents root from the fulltext storage dir.
-///
-/// If the storage dir's last component is `fulltext`, the root is its parent
-/// (so the wiki becomes a sibling of `fulltext/`). Otherwise the storage dir
-/// itself is treated as the root.
-#[must_use]
-pub fn derive_bango_root(fulltext_storage_dir: &Path) -> PathBuf {
-    if fulltext_storage_dir.file_name().and_then(|n| n.to_str()) == Some(FULLTEXT_DIR_NAME) {
-        fulltext_storage_dir
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| fulltext_storage_dir.to_path_buf())
-    } else {
-        fulltext_storage_dir.to_path_buf()
-    }
-}
-
 /// Resolve the effective wiki-root directory.
 ///
-/// Order: explicit `wiki_root_dir` setting -> `{bango_documents_root}/wiki-root`
-/// (where the Bango root is derived from `fulltext_storage_dir`).
+/// Order: explicit `wiki_root_dir` setting -> `{storage_root}/wiki-root`.
 /// Ensures the directory exists.
 pub fn resolve_root(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
     let explicit = app_settings_repo::get_setting(conn, WIKI_ROOT_DIR_KEY)?;
     let root = if let Some(p) = explicit.filter(|p| !p.is_empty()) {
         PathBuf::from(p)
     } else {
-        let storage_str = app_settings_repo::get_fulltext_storage_dir(conn)?;
-        derive_bango_root(Path::new(&storage_str)).join(WIKI_ROOT_DIR_NAME)
+        let storage_str = app_settings_repo::get_storage_root(conn)?;
+        PathBuf::from(storage_str).join(WIKI_ROOT_DIR_NAME)
     };
     ensure_root_exists(&root)?;
     Ok(root)
@@ -102,13 +80,13 @@ pub fn scaffold_tree(root: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Compute the default wiki-root path from the fulltext storage dir.
+/// Compute the default wiki-root path from the storage root.
 ///
-/// `compute_default_root("~/Documents/Bango/fulltext")` ->
+/// `compute_default_root("~/Documents/Bango")` ->
 /// `"~/Documents/Bango/wiki-root"`.
 #[must_use]
-pub fn compute_default_root(fulltext_storage_dir: &Path) -> PathBuf {
-    derive_bango_root(fulltext_storage_dir).join(WIKI_ROOT_DIR_NAME)
+pub fn compute_default_root(storage_root: &Path) -> PathBuf {
+    storage_root.join(WIKI_ROOT_DIR_NAME)
 }
 
 /// Delete the entire wiki-root directory tree (including `AGENTS.md`,
@@ -262,39 +240,19 @@ mod tests {
     }
 
     #[test]
-    fn derive_bango_root_strips_fulltext_suffix() {
-        // ~/Documents/Bango/fulltext -> ~/Documents/Bango
-        let root = derive_bango_root(Path::new("/home/user/Documents/Bango/fulltext"));
-        assert_eq!(root, Path::new("/home/user/Documents/Bango"));
-    }
-
-    #[test]
-    fn derive_bango_root_keeps_non_fulltext_dir() {
-        // Custom dir without `fulltext` suffix: treated as the root itself.
-        let root = derive_bango_root(Path::new("/my/custom/storage"));
-        assert_eq!(root, Path::new("/my/custom/storage"));
-    }
-
-    #[test]
-    fn derive_bango_root_handles_bare_fulltext() {
-        // Edge case: the path is exactly `fulltext` -> parent is empty (current dir).
-        let root = derive_bango_root(Path::new("fulltext"));
-        // parent of "fulltext" is "" which normalizes to "."
-        assert_eq!(root, Path::new(""));
-    }
-
-    #[test]
-    fn compute_default_root_places_wiki_as_sibling_of_fulltext() {
-        // The key contract: wiki-root is a SIBLING of fulltext, not nested inside it.
-        let storage = Path::new("/home/user/Documents/Bango/fulltext");
+    fn compute_default_root_places_wiki_under_storage_root() {
+        // The key contract: wiki-root is a child of the storage root, as a
+        // sibling of `fulltext/` and `ris/`, never nested inside either.
+        let storage = Path::new("/home/user/Documents/Bango");
         let root = compute_default_root(storage);
         assert_eq!(root, Path::new("/home/user/Documents/Bango/wiki-root"));
-        // Explicitly NOT inside fulltext:
+        assert!(root.starts_with("/home/user/Documents/Bango"));
         assert!(!root.starts_with("/home/user/Documents/Bango/fulltext"));
+        assert!(!root.starts_with("/home/user/Documents/Bango/ris"));
     }
 
     #[test]
-    fn compute_default_root_custom_non_fulltext_storage() {
+    fn compute_default_root_custom_storage() {
         let storage = Path::new("/data/bango-store");
         let root = compute_default_root(storage);
         assert_eq!(root, Path::new("/data/bango-store/wiki-root"));

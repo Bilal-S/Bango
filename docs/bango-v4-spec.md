@@ -33,7 +33,7 @@ The SQLite schema consists of the following primary tables. All IDs are UUID str
 *   **`criteria`**: `id` (PK), `text`, `type` (`'inclusion'`, `'exclusion'`), `priority` (`'critical'`, `'high'`, `'standard'`, `'low'`, `'optional'`), `created_at`
 *   **`tags`**: `id` (PK), `name` (unique), `color`, `source` (`'ai_suggested'`, `'user_created'`, `'ris_keyword'`)
 *   **`labels`**: `id` (PK), `name` (unique), `color`, `source` (`'ai_generated'`, `'user_created'`)
-*   **`app_settings`**: `key` (PK), `value` (e.g., `'fulltext_storage_dir'`, `'flag_premium'`)
+*   **`app_settings`**: `key` (PK), `value` (e.g., `'storage_root'`, `'flag_premium'`)
 
 #### Articles & Audit Tables
 *   **`articles`**:
@@ -184,7 +184,7 @@ The `journal_index` table hosts system-distributed reference metadata used to ma
 
 ### 8.1 Configuration Settings
 Application configurations are managed in the `app_settings` key-value table:
-*   `fulltext_storage_dir`: Custom directory for storing PDFs and text extracts. If unconfigured, defaults to `~/Documents/Bango/fulltext/` (with scraper RIS output written to `~/Documents/Bango/ris/`).
+*   `storage_root`: Bango documents root directory. All on-disk project artifacts derive from it as subdirectories (`fulltext/`, `ris/`, `wiki-root/`). If unconfigured, defaults to `~/Documents/Bango/`. Legacy installs that stored the fulltext path under `fulltext_storage_dir` are migrated lazily: a trailing `fulltext` segment is stripped to derive the root. Scraper RIS output is written to `{storage_root}/ris/`.
 *   `flag_premium`: Indicates whether premium features are unlocked.
 *   `screening_mode`: Tier 3 screening mode (`abstract` | `enhanced` | `two_stage`, default `abstract`). See §4.3.1.
 *   `enhanced_top_k`: Number of criteria-matched chunks to send per article in Enhanced mode (default `2`).
@@ -250,6 +250,7 @@ The following features remain explicitly **out of scope**:
 
 | Version | Date | Key Improvements |
 |---------|------|------------------|
+| **v6.0** | 2026-07-02 | Settings reorganization: split AI Summaries and Re-processing into dedicated cards, renamed Full-Text Storage to Storage with an explicit `storage_root` model (lazy-migrated from the legacy `fulltext_storage_dir` key; `fulltext/`, `ris/`, and `wiki-root/` now derive from it as subdirectories). Fixed the `full_text.rs` default-path `documents` vs `fulltext` bug. |
 | **v5.0** | 2026-06-30 | Tier 3 Enhanced & Two-stage screening modes (§4.3.1): abstract + criteria-matched full-text chunks with a per-article word budget. Added 6 screening-mode settings keys (§8.1). Lifted the §11 full-text screening exclusion for the bounded Tier 3 modes. |
 | **v4.0** | 2026-06-11 | Integrated References & Citations system, BibTeX parsing, Custom Full-Text storage, Premium feature flag, and Startup Journal Index synchronization. Removed outdated Google Stitch MCP sections. |
 | **v3.5** | 2026-06-09 | Added Bibliometrics data layer (co-authorship networks, Louvain clustering, term analyses, and network nodes/edges tables). |

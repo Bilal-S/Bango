@@ -202,7 +202,7 @@ All modules operate on your **included articles** and imported citation/referenc
 
 - Attach `.pdf` or `.txt` files to any article
 - Text extraction: PDF text parsed and cached in the `full_text` field; TXT read as plain text
-- Original file copied to a configurable storage directory (defaults to `~/Documents/Bango/fulltext/`)
+- Original file copied to a configurable storage root (defaults to `~/Documents/Bango/fulltext/`)
 - **Inline PDF reader**: render attached PDFs directly inside the article detail panel
 
 </details>

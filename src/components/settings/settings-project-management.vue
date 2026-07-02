@@ -13,12 +13,12 @@ const showDeleteDialog = ref(false);
 const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
 
-/** The effective Bango Documents directory path (parent of the fulltext dir).
+/** The effective Bango Documents directory path (storage root).
  * Shown in the Export dialog so the user knows what is NOT backed up. Fetched
- * from `get_fulltext_storage_dir`; `null` while loading or if the call fails. */
+ * from `get_storage_root`; `null` while loading or if the call fails. */
 const bangoDocsDir = ref<string | null>(null);
 
-interface StorageInfo {
+interface StorageRootInfo {
   effectivePath: string;
   isCustom: boolean;
   defaultPath: string;
@@ -26,14 +26,10 @@ interface StorageInfo {
 
 onMounted(async () => {
   try {
-    const info = await invoke<StorageInfo>('get_fulltext_storage_dir');
-    // The fulltext dir is `~/Documents/Bango/fulltext`; the Bango Documents
-    // root (which also holds `wiki-root/`) is its parent. If the user set a
-    // custom dir that does not end in `fulltext`, it is its own root.
-    const path = info.effectivePath;
-    bangoDocsDir.value = path.endsWith('fulltext')
-      ? path.slice(0, Math.max(0, path.length - 'fulltext'.length)).replace(/[\\/]+$/, '')
-      : path;
+    const info = await invoke<StorageRootInfo>('get_storage_root');
+    // The storage root is the Bango Documents directory directly (no
+    // `fulltext` suffix to strip after the storage-root refactor).
+    bangoDocsDir.value = info.effectivePath;
   } catch {
     // Non-fatal: the warning shows without the concrete path.
     bangoDocsDir.value = null;

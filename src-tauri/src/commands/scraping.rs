@@ -21,46 +21,35 @@ pub struct ScrapeResultDto {
     pub citations_ris: Option<PathBuf>,
 }
 
-/// Compute the RIS output directory: `~/Documents/Bango/ris/`.
-///
-/// Follows the same convention as `fulltext_storage_dir` (see `commands/app_settings.rs`).
+/// The RIS subdirectory name under the storage root.
+const RIS_DIR_NAME: &str = "ris";
+
+/// Compute the default RIS output directory: `~/Documents/Bango/ris/`.
 fn compute_ris_output_dir() -> PathBuf {
     let docs = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from("."));
-    docs.join("Bango").join("ris")
+    docs.join("Bango").join(RIS_DIR_NAME)
 }
 
-/// Resolve the effective RIS output directory.
+/// Resolve the effective RIS output directory (`{storage_root}/ris/`).
 ///
-/// If the user has configured a custom `fulltext_storage_dir`, place the `ris/`
-/// subfolder next to it (sibling of `fulltext/`). Otherwise use the default
-/// `~/Documents/Bango/ris/`.
+/// Delegates to [`app_settings_repo::get_storage_root`] (which performs the
+/// one-time lazy migration from the legacy `fulltext_storage_dir` key) and
+/// appends the `ris/` subdirectory, ensuring it exists.
 fn resolve_ris_dir(conn: &rusqlite::Connection) -> PathBuf {
-    let base = app_settings_repo::get_setting(conn, "fulltext_storage_dir")
-        .ok()
-        .flatten()
-        .filter(|p| !p.is_empty())
+    let root = app_settings_repo::get_storage_root(conn)
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let docs =
-                dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from("."));
-            docs.join("Bango")
-        });
-
-    // If the configured path ends with `/fulltext`, go one level up so `ris/`
-    // is a sibling. Otherwise use the base directly.
-    let base = if base.file_name().is_some_and(|n| n == "fulltext") {
-        base.parent().unwrap_or(&base).to_path_buf()
-    } else {
-        base
-    };
-
-    base.join("ris")
+        .unwrap_or_else(|_| compute_ris_output_dir());
+    let ris = root.join(RIS_DIR_NAME);
+    // Best-effort creation; scraping will surface its own error if the dir
+    // remains unwritable.
+    let _ = std::fs::create_dir_all(&ris);
+    ris
 }
 
 /// Scrape Citation Chaser for references and/or citations of a given DOI.
 ///
-/// RIS files are saved to `~/Documents/Bango/ris/` (or the configured Bango
-/// directory). Logs errors to the audit table so they appear in the Audit Timeline.
+/// RIS files are saved to `{storage_root}/ris/` (default `~/Documents/Bango/ris/`).
+/// Logs errors to the audit table so they appear in the Audit Timeline.
 ///
 /// **Shortcut**: If the expected RIS files already exist in the output directory,
 /// they are returned immediately without launching the headless browser.

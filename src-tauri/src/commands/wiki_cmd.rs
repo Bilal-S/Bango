@@ -147,7 +147,7 @@ pub struct WikiStatus {
     pub root_dir: String,
     /// Whether an explicit override is configured (vs derived default).
     pub is_custom: bool,
-    /// Platform default path (derived from `fulltext_storage_dir`).
+    /// Platform default path (derived from `storage_root`).
     pub default_path: String,
     /// Count of `.md` files in `/raw` (top-level).
     pub raw_count: usize,
@@ -188,9 +188,9 @@ pub fn wiki_get_status(db_state: tauri::State<'_, DbState>) -> Result<WikiStatus
     let root = storage::resolve_root(&conn)?;
     let is_custom = storage::has_explicit_override(&conn)?;
 
-    // Default path for display: derived from fulltext storage dir.
+    // Default path for display: derived from the storage root.
     let default_path = {
-        let storage_str = app_settings_repo::get_fulltext_storage_dir(&conn)?;
+        let storage_str = app_settings_repo::get_storage_root(&conn)?;
         storage::compute_default_root(std::path::Path::new(&storage_str))
             .to_string_lossy()
             .to_string()
@@ -228,7 +228,7 @@ pub fn wiki_get_root_dir(db_state: tauri::State<'_, DbState>) -> Result<WikiRoot
     let root = storage::resolve_root(&conn)?;
     let is_custom = storage::has_explicit_override(&conn)?;
     let default_path = {
-        let storage_str = app_settings_repo::get_fulltext_storage_dir(&conn)?;
+        let storage_str = app_settings_repo::get_storage_root(&conn)?;
         storage::compute_default_root(std::path::Path::new(&storage_str))
             .to_string_lossy()
             .to_string()
@@ -237,7 +237,7 @@ pub fn wiki_get_root_dir(db_state: tauri::State<'_, DbState>) -> Result<WikiRoot
 }
 
 /// Set an explicit wiki-root override. Pass empty/None to reset to the derived
-/// default (`{fulltext_storage_dir}/wiki-root`).
+/// default (`{storage_root}/wiki-root`).
 #[tauri::command]
 pub fn wiki_set_root_dir(
     db_state: tauri::State<'_, DbState>,
@@ -251,7 +251,7 @@ pub fn wiki_set_root_dir(
     let root = storage::resolve_root(&conn)?;
     let is_custom = storage::has_explicit_override(&conn)?;
     let default_path = {
-        let storage_str = app_settings_repo::get_fulltext_storage_dir(&conn)?;
+        let storage_str = app_settings_repo::get_storage_root(&conn)?;
         storage::compute_default_root(std::path::Path::new(&storage_str))
             .to_string_lossy()
             .to_string()

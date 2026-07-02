@@ -160,7 +160,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     audit-label) + 1 budget-guard integration test + `tests/token_estimation_test.rs`
     (4 pure-helper cases).
   - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
-    `fulltext_storage_dir`, `flag_premium`, `biblio_needs_refresh` (the bibliometric
+    `storage_root` (Bango documents root; `fulltext/`, `ris/`, `wiki-root/` derive from it
+    as subdirectories; lazy-migrated from the legacy `fulltext_storage_dir` key by
+    `get_storage_root`, which strips a trailing `fulltext` segment to derive the root),
+    `flag_premium`, `biblio_needs_refresh` (the bibliometric
     staleness flag), `wiki_needs_refresh` (the LLM Wiki staleness flag), and
     `summary_evidence_mode` (project-wide literature-review evidence enrichment;
     `abstract_only` default | `with_summary_facts` - see `commands/summary.rs::generate_summary`
@@ -531,17 +534,20 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
-    `src/styles/help-shared.css`. `settings/` holds the six settings sub-components consumed by
+    `src/styles/help-shared.css`. `settings/` holds the settings sub-components consumed by
     `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
     connection details + parameters + Revert/Get Models/Test Connection + test-result/error
-    feedback in one bordered `<section>`), `settings-project-management.vue` (import/export/delete
+    feedback in one bordered `<section>`), `settings-ai-summaries.vue` (2
+    localStorage-backed toggles: auto-generate-summaries [key `bango-full-text-summaries`:
+    auto-fire whole-paper summary on attach], section-summaries [key
+    `bango-section-summaries`; manual `auto_awesome` button always works regardless]),
+    `settings-screening-preferences.vue` (screening-mode dropdown + auto-navigate toggle),
+    `settings-storage.vue` (storage root picker + directory-tree visual),
+    `settings-reprocessing.vue` (text-chunks rebuild + Batch Import placeholder),
+    `settings-project-management.vue` (import/export/delete
     + dialogs; Delete All Data also wipes the on-disk Wiki and resets
     `useWiki`/`useChatStore.wikiReady`; Export dialog warns that the Bango Documents
-    directory - full-text PDFs + Wiki - is NOT backed up), `settings-screening-preferences.vue` (3 localStorage-backed toggles:
-    auto-navigate-after-decision, full-text-summaries [auto-fire whole-paper summary on attach],
-    section-summaries [T1.3: auto-fire per-section summaries on attach; independent of
-    full-text-summaries; manual `auto_awesome` button always works regardless]),
-    `settings-full-text-storage.vue` (storage dir picker),
+    directory - full-text PDFs + Wiki - is NOT backed up),
     `settings-notification-history.vue` (in-memory toast history viewer; newest-first list with
     type-colored dots, timestamps, and a Clear History button; reads the `history` ref from
     `use-toast`; sits immediately before Diagnostics in the card stack), and

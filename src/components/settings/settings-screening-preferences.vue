@@ -17,22 +17,6 @@ function toggleAutoNavigate(): void {
   );
 }
 
-// Full Text Summaries preference (off by default)
-const fullTextSummaries = ref(localStorage.getItem('bango-full-text-summaries') === 'true');
-
-function toggleFullTextSummaries(): void {
-  fullTextSummaries.value = !fullTextSummaries.value;
-  localStorage.setItem('bango-full-text-summaries', String(fullTextSummaries.value));
-}
-
-// Section Summaries preference (off by default; independent of Full Text Summaries)
-const sectionSummaries = ref(localStorage.getItem('bango-section-summaries') === 'true');
-
-function toggleSectionSummaries(): void {
-  sectionSummaries.value = !sectionSummaries.value;
-  localStorage.setItem('bango-section-summaries', String(sectionSummaries.value));
-}
-
 // ── Tier 3: Screening Mode (abstract | enhanced | two_stage) ────────────────
 // Persisted in app_settings (not localStorage) so it survives across devices
 // via project backup. Enhanced / Two-stage are disabled until at least one
@@ -161,42 +145,6 @@ onMounted(() => {
         role="switch"
         :aria-checked="autoNavigateAfterDecision"
         @click="toggleAutoNavigate"
-      >
-        <span class="settings-card__switch-thumb" />
-      </button>
-    </div>
-    <div class="settings-card__toggle-row" style="margin-top: 1rem">
-      <label class="settings-card__toggle-label">
-        <span>Full Text Summaries</span>
-        <span class="settings-card__toggle-hint"
-          >Auto-summarize full text when possible. When enabled, articles with uploaded full text
-          will be automatically summarized using the configured LLM.</span
-        >
-      </label>
-      <button
-        class="settings-card__switch"
-        :class="{ 'settings-card__switch--on': fullTextSummaries }"
-        role="switch"
-        :aria-checked="fullTextSummaries"
-        @click="toggleFullTextSummaries"
-      >
-        <span class="settings-card__switch-thumb" />
-      </button>
-    </div>
-    <div class="settings-card__toggle-row" style="margin-top: 1rem">
-      <label class="settings-card__toggle-label">
-        <span>Section Summaries</span>
-        <span class="settings-card__toggle-hint"
-          >When enabled, AI summaries also include per-section breakdowns (Methods, Results,
-          Discussion). Generates more detailed output per article in the same LLM call.</span
-        >
-      </label>
-      <button
-        class="settings-card__switch"
-        :class="{ 'settings-card__switch--on': sectionSummaries }"
-        role="switch"
-        :aria-checked="sectionSummaries"
-        @click="toggleSectionSummaries"
       >
         <span class="settings-card__switch-thumb" />
       </button>

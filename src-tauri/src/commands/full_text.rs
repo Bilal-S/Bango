@@ -34,27 +34,14 @@ pub struct FullTextAttachResult {
     pub word_count: usize,
 }
 
-/// Compute the fulltext storage directory using the same logic as app_settings.
+/// Resolve the fulltext storage directory (`{storage_root}/fulltext/`).
+///
+/// Delegates to [`app_settings_repo::get_fulltext_dir`], which derives the
+/// root via [`app_settings_repo::get_storage_root`] and ensures both the root
+/// and the `fulltext/` subdir exist.
 fn compute_storage_dir(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
-    let configured = app_settings_repo::get_setting(conn, "fulltext_storage_dir")?;
-    let default_path = dirs::document_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("Bango")
-        .join("documents");
-
-    let effective = if let Some(ref p) = configured {
-        if !p.is_empty() {
-            PathBuf::from(p)
-        } else {
-            default_path
-        }
-    } else {
-        default_path
-    };
-
-    std::fs::create_dir_all(&effective)
-        .map_err(|e| AppError::Import(format!("Failed to create storage dir: {e}")))?;
-    Ok(effective)
+    let fulltext = app_settings_repo::get_fulltext_dir(conn)?;
+    Ok(PathBuf::from(fulltext))
 }
 
 /// Attach a full-text file (PDF or TXT) to an article.
