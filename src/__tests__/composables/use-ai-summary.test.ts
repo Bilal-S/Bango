@@ -27,7 +27,9 @@ import {
   requestArticleAiSummary,
   parseAiSummary,
   pendingSummaries,
+  isUnifiedSummary,
 } from '@/composables/use-ai-summary';
+import type { AiSummaryData } from '@/composables/use-ai-summary';
 import { useToast } from '@/composables/use-toast';
 import { shimLocalStorage } from '../helpers/fixtures';
 
@@ -283,6 +285,94 @@ describe('use-ai-summary', () => {
       expect(result).not.toBeNull();
       expect(result!.section_summaries).toBeDefined();
       expect(result!.section_summaries).toHaveLength(0);
+    });
+
+    // ── Tier 4.3: parseAiSummary preserves table markdown column ────────
+
+    it('parseAiSummary_preserves_table_markdown_field', () => {
+      const v2WithTableMarkdown = {
+        schema_version: 2,
+        field: 'medicine',
+        subfield: 'public_health',
+        structured_extraction: {},
+        summary_150_250_words: 'Whole-paper summary.',
+        key_insights: [],
+        keywords: [],
+        tables: [
+          {
+            number: '1',
+            caption: 'Study characteristics.',
+            markdown: '| Col1 | Col2 |\n| --- | --- |\n| a | b |',
+            description: 'Describes the sample.',
+          },
+        ],
+      };
+
+      const result = parseAiSummary(JSON.stringify(v2WithTableMarkdown));
+
+      expect(result).not.toBeNull();
+      expect(result!.tables).toBeDefined();
+      expect(result!.tables).toHaveLength(1);
+      expect(result!.tables![0]!.markdown).toBe('| Col1 | Col2 |\n| --- | --- |\n| a | b |');
+    });
+  });
+
+  // ── Tier 4.3: isUnifiedSummary ──────────────────────────────────────────
+
+  describe('isUnifiedSummary', () => {
+    it('isUnifiedSummary_true_for_v2_blob', () => {
+      const data: AiSummaryData = {
+        schema_version: 2,
+        field: 'medicine',
+        subfield: 'public_health',
+        structured_extraction: {},
+        summary_150_250_words: 'A summary.',
+        key_insights: [],
+        keywords: [],
+      };
+      expect(isUnifiedSummary(data)).toBe(true);
+    });
+
+    it('isUnifiedSummary_true_for_v3_blob (forward-compatible)', () => {
+      const data: AiSummaryData = {
+        schema_version: 3,
+        field: 'medicine',
+        subfield: 'public_health',
+        structured_extraction: {},
+        summary_150_250_words: 'A summary.',
+        key_insights: [],
+        keywords: [],
+      };
+      expect(isUnifiedSummary(data)).toBe(true);
+    });
+
+    it('isUnifiedSummary_false_for_v1_blob', () => {
+      const data: AiSummaryData = {
+        schema_version: 1,
+        field: 'medicine',
+        subfield: 'public_health',
+        structured_extraction: {},
+        summary_150_250_words: 'A summary.',
+        key_insights: [],
+        keywords: [],
+      };
+      expect(isUnifiedSummary(data)).toBe(false);
+    });
+
+    it('isUnifiedSummary_false_for_absent_schema_version', () => {
+      const data: AiSummaryData = {
+        field: 'medicine',
+        subfield: 'public_health',
+        structured_extraction: {},
+        summary_150_250_words: 'A summary.',
+        key_insights: [],
+        keywords: [],
+      };
+      expect(isUnifiedSummary(data)).toBe(false);
+    });
+
+    it('isUnifiedSummary_false_for_null', () => {
+      expect(isUnifiedSummary(null)).toBe(false);
     });
   });
 });

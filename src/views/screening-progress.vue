@@ -159,6 +159,7 @@ async function handleResetWorkingList(): Promise<void> {
           :completed="progress.completed"
           :total="progress.total"
           :percentage="percentage"
+          :stage="progress.stage"
         />
       </section>
 

@@ -176,7 +176,7 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
       />
 
       <!-- Abstract / AI Summary Tabbed View -->
-      <AbstractSummaryView :article="article" />
+      <AbstractSummaryView :article="article" @refresh-article="emit('refreshArticle', $event)" />
 
       <!-- Tags -->
       <TagsSection :article="article" @update-tags="(id, tags) => emit('updateTags', id, tags)" />

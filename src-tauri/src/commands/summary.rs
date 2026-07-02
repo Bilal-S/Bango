@@ -11,16 +11,17 @@ use crate::db::summary_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::prisma::data;
-use crate::screening::engine as screening_engine;
 use crate::summary::engine::{self, SummaryInput};
 use crate::summary::prompt::{
-    build_figure_description_prompt, build_section_context, ensure_schema_version_v2,
-    filter_high_value_sections, merge_figure_descriptions_into_blob,
-    parse_figure_descriptions_response, ArticleSummary, FigureDescription, ScreeningData,
+    build_figure_description_prompt, build_section_context, build_synthesis_prompt,
+    ensure_schema_version_v2, filter_high_value_sections, merge_figure_descriptions_into_blob,
+    merge_summary_into_blob, merge_unified_blob, parse_figure_descriptions_response,
+    strip_code_fences, ArticleSummary, FigureDescription, ScreeningData, TableDescription,
     ARTICLE_SUMMARY_SYSTEM_PROMPT, ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
     FIGURE_DESCRIPTION_SYSTEM_PROMPT,
 };
-use crate::utils::sections::{classify_sections, extract_captions};
+use crate::summary::prompt::{parse_markdown_summary, ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT};
+use crate::utils::sections::{classify_sections, detect_markdown_tables, extract_captions};
 
 #[tauri::command]
 pub async fn generate_summary(
@@ -217,8 +218,13 @@ pub async fn generate_article_ai_summary(
         }
     };
 
-    // 4. Validate the response is valid JSON - strip markdown code fences if present
-    let cleaned = screening_engine::extract_json(&response_text);
+    // 4. Validate the response is valid JSON - strip markdown code fences if
+    //    present. NOTE: use `strip_code_fences`, NOT `screening_engine::extract_json`.
+    //    The screening helper assumes a top-level JSON array and unwraps the
+    //    first nested array-of-objects out of a JSON object — which corrupts a
+    //    valid summary object (whose `section_summaries` is an array-of-objects)
+    //    into just that array, breaking all top-level field access downstream.
+    let cleaned = strip_code_fences(&response_text);
     let mut parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
         Ok(v) => v,
         Err(e) => {
@@ -245,15 +251,86 @@ pub async fn generate_article_ai_summary(
         ensure_schema_version_v2(&mut parsed);
     }
 
-    // Store the raw JSON string
+    // Tier 1 fallback (T4 E2E 2026-07-01): if the model returned an empty or
+    // near-empty JSON object (a known failure mode for reasoning models that
+    // consume their output budget on thinking tokens), retry once with the
+    // simpler markdown fallback prompt. The markdown response is parsed by
+    // `parse_markdown_summary` into the same JSON blob shape. This guarantees
+    // the user gets *some* summary content instead of an empty blob.
+    let has_substantive_content = parsed
+        .get("summary_150_250_words")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        || parsed.get("field").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false);
+    if !has_substantive_content {
+        // Retry with the markdown fallback prompt.
+        let max_chars = ((config.context_window_tokens as usize).saturating_sub(2000)) * 4;
+        let truncated =
+            if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
+        let fallback_user_prompt =
+            format!("## Article Title\n{title}\n\n## Full Text\n{truncated}");
+        let fallback_result = orchestrator
+            .send(
+                &config,
+                ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT,
+                &fallback_user_prompt,
+                LlmRequestType::ArticleSummary,
+            )
+            .await;
+        if let Ok((fallback_text, _)) = fallback_result {
+            // Parse the markdown response into a JSON blob.
+            let markdown_blob = parse_markdown_summary(&fallback_text);
+            if let Ok(md_value) = serde_json::from_str::<serde_json::Value>(&markdown_blob) {
+                // Only use the fallback if it produced substantive content.
+                let md_has_content = md_value
+                    .get("summary_150_250_words")
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false)
+                    || md_value
+                        .get("field")
+                        .and_then(|v| v.as_str())
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false);
+                if md_has_content {
+                    parsed = md_value;
+                    if used_section_path {
+                        ensure_schema_version_v2(&mut parsed);
+                    }
+                }
+            }
+        }
+        // If the fallback also failed, `parsed` stays as the original empty blob.
+        // The user sees "No AI summary" but the command doesn't crash.
+    }
+
+    // Phase 0 footgun fix: merge the freshly-generated summary into the existing
+    // blob so `figures`/`tables` (from `generate_figure_descriptions`) survive a
+    // summary regen. The previous direct `set_ai_summary(&summary_json)` overwrote
+    // the entire column, wiping any figures/tables that existed. The merge helper
+    // preserves all existing keys the summary path does not produce.
     let summary_json = parsed.to_string();
 
-    // 5. Store in database
-    {
+    // 5. Store in database. The block returns `preserved_json` (the merged
+    //    blob) so the command can return it to the frontend with figures/tables
+    //    intact. NOTE: no trailing `;` on the block - it is an expression.
+    let preserved_json = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
-        article_repo::set_ai_summary(&conn, &article_id, &summary_json)?;
+        // Read the existing blob so the merge can preserve `figures`/`tables`.
+        let existing_blob: Option<String> = conn
+            .query_row(
+                "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+                rusqlite::params![&article_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        let merged =
+            merge_summary_into_blob(existing_blob.as_deref(), &summary_json, used_section_path);
+        article_repo::set_ai_summary(&conn, &article_id, &merged)?;
         crate::db::audit_repo::create_entry(
             &conn,
             &article_id,
@@ -268,7 +345,8 @@ pub async fn generate_article_ai_summary(
         // synthesis page the next ingest produces.
         app_settings_repo::mark_wiki_needs_refresh(&conn);
         app_settings_repo::mark_biblio_needs_refresh(&conn);
-    }
+        merged
+    };
 
     // 6. Emit success event
     let _ = app_handle.emit(
@@ -276,7 +354,8 @@ pub async fn generate_article_ai_summary(
         serde_json::json!({ "articleId": article_id, "title": title }),
     );
 
-    Ok(summary_json)
+    // Return the merged blob so the frontend gets the preserved figures/tables.
+    Ok(preserved_json)
 }
 
 /// Generate LLM descriptions for figure/table captions extracted from an
@@ -432,4 +511,348 @@ pub async fn generate_figure_descriptions(
     );
 
     Ok(merged_json)
+}
+
+/// Tier 4.2: Generate a unified AI summary for an article in a single merge
+/// write. Pipeline:
+/// 1. `extract_sections` (T1.1) from full text.
+/// 2. For each high-value section (Methods/Results/Discussion): focused LLM call
+///    via the section-aware summary prompt (T1.3).
+/// 3. `extract_captions` (T2.1) -> one batched orchestrator call for figure/table
+///    descriptions (T2.1 Phase 4).
+/// 4. **Synthesis call:** send the per-section summaries back to the LLM to
+///    synthesize an upgraded `summary_150_250_words` digest consistent with the
+///    section data.
+/// 5. **Single merge write:** `merge_unified_blob` composes the per-section
+///    summaries, figure/table descriptions, and synthesis digest into one
+///    `set_ai_summary` write so there is no intermediate state where keys are
+///    missing.
+///
+/// **Fallback (no detectable sections):** the command falls back to the
+/// monolithic `ARTICLE_SUMMARY_SYSTEM_PROMPT` path (T4.4 generation-path
+/// selection folded into the command itself). This is T4.4's contract: the
+/// button label stays "Generate AI Summary" and the user does not need to know
+/// which path ran.
+///
+/// Emits `article-ai-summary-complete` on success and
+/// `article-ai-summary-error` on failure (same events as the legacy command so
+/// the frontend `useAiSummary` composable works unchanged).
+#[tauri::command]
+pub async fn generate_unified_summary(
+    db_state: State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+    article_id: String,
+) -> Result<String, AppError> {
+    // 1. Fetch article full text + existing blob + config.
+    let (title, full_text, existing_blob, config) = {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let (t, ft) = article_repo::get_full_text_for_summary(&conn, &article_id)?;
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+                rusqlite::params![&article_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        let cfg = llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+        (t, ft, existing, cfg)
+    }; // conn lock released
+
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
+
+    // 2. Path selection: sections detectable -> unified; else monolithic fallback.
+    let high_value = filter_high_value_sections(&classify_sections(&full_text));
+    if high_value.is_empty() {
+        // Monolithic fallback (T4.4): single call, no section/figure/synthesis
+        // steps. Delegates to the legacy prompt path.
+        let max_chars = ((config.context_window_tokens as usize).saturating_sub(2000)) * 4;
+        let truncated =
+            if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
+        let user_prompt = format!("## Article Title\n{title}\n\n## Full Text\n{truncated}");
+        let llm_result = orchestrator
+            .send(
+                &config,
+                ARTICLE_SUMMARY_SYSTEM_PROMPT,
+                &user_prompt,
+                LlmRequestType::ArticleSummary,
+            )
+            .await;
+        let (response_text, _tokens) = match llm_result {
+            Ok(v) => v,
+            Err(e) => {
+                let err_msg = e.to_string();
+                if let Ok(conn) = db_state.conn.lock() {
+                    let _ = crate::db::audit_repo::log_error(
+                        &conn,
+                        &format!(
+                            "Unified summary (monolithic fallback) failed for article {article_id} ({title}): {err_msg}"
+                        ),
+                    );
+                }
+                let _ = app_handle.emit(
+                    "article-ai-summary-error",
+                    serde_json::json!({ "articleId": article_id, "error": err_msg }),
+                );
+                return Err(e);
+            }
+        };
+        // Parse + store via the Phase 0 preserve-on-write guard so existing
+        // figures/tables survive the monolithic regen. Use `strip_code_fences`
+        // (NOT `screening_engine::extract_json`) — see the legacy command for
+        // why the screening helper corrupts object-shaped summary responses.
+        let cleaned = strip_code_fences(&response_text);
+        let parsed: serde_json::Value = serde_json::from_str(&cleaned)
+            .map_err(|e| AppError::Import(format!("Invalid JSON response from LLM: {e}")))?;
+        let fresh_json = parsed.to_string();
+        let merged = merge_summary_into_blob(existing_blob.as_deref(), &fresh_json, false);
+        {
+            let conn = db_state.conn.lock().map_err(|e| {
+                AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+            })?;
+            article_repo::set_ai_summary(&conn, &article_id, &merged)?;
+            crate::db::audit_repo::create_entry(
+                &conn,
+                &article_id,
+                "ai_summary",
+                None,
+                None,
+                Some("Unified AI summary (monolithic fallback - no sections detected)"),
+                "ai",
+            )?;
+            app_settings_repo::mark_wiki_needs_refresh(&conn);
+            app_settings_repo::mark_biblio_needs_refresh(&conn);
+        }
+        let _ = app_handle.emit(
+            "article-ai-summary-complete",
+            serde_json::json!({ "articleId": article_id, "title": title }),
+        );
+        return Ok(merged);
+    }
+
+    // 3. Unified path: section calls (T1.3 reuse) + figure call (T2.1 reuse)
+    //    + synthesis call (T4.2 new). Each is a separate orchestrator round-trip.
+    //
+    // The section-aware path uses the same system prompt + delimited-section
+    // block as `generate_article_ai_summary(include_section_summaries=true)`.
+    let section_context = build_section_context(&high_value);
+    let section_overhead = section_context.len() + 200;
+    let max_chars =
+        ((config.context_window_tokens as usize).saturating_sub(section_overhead / 4 + 2000)) * 4;
+    let truncated = if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
+    let section_user_prompt = format!(
+        "## Article Title\n{title}\n\n## Full Text\n{truncated}\n\n## Detected Sections\n\n{section_context}"
+    );
+    let section_response = orchestrator
+        .send(
+            &config,
+            ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
+            &section_user_prompt,
+            LlmRequestType::SectionSummary,
+        )
+        .await;
+    let (section_text, _section_tokens) = match section_response {
+        Ok(v) => v,
+        Err(e) => {
+            let err_msg = e.to_string();
+            if let Ok(conn) = db_state.conn.lock() {
+                let _ = crate::db::audit_repo::log_error(
+                    &conn,
+                    &format!(
+                        "Unified summary section call failed for article {article_id}: {err_msg}"
+                    ),
+                );
+            }
+            let _ = app_handle.emit(
+                "article-ai-summary-error",
+                serde_json::json!({ "articleId": article_id, "error": err_msg }),
+            );
+            return Err(e);
+        }
+    };
+    // Parse the section-aware response; extract the `section_summaries` array
+    // and the top-level `field` for the synthesis prompt input. Use
+    // `strip_code_fences` (NOT `screening_engine::extract_json`) — see the
+    // legacy command for why the screening helper corrupts object-shaped
+    // summary responses (it would discard everything except `section_summaries`).
+    let cleaned_section = strip_code_fences(&section_text);
+    let mut section_value: serde_json::Value = serde_json::from_str(&cleaned_section)
+        .map_err(|e| AppError::Import(format!("Invalid section response JSON: {e}")))?;
+    ensure_schema_version_v2(&mut section_value);
+    let field =
+        section_value.get("field").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let section_summaries =
+        section_value.get("section_summaries").cloned().unwrap_or(serde_json::Value::Array(vec![]));
+    let section_summaries_json = section_summaries.to_string();
+
+    // 4. Figure/table descriptions (T2.1 Phase 4 reuse) + GFM table markdown
+    //    (T2.2 reuse via `detect_markdown_tables`). Skipped when no captions.
+    //
+    //    The GFM rows extracted by `detect_markdown_tables` are correlated to
+    //    their corresponding table captions by table number, so the frontend
+    //    can render the table natively (`TableDescription.markdown`) instead of
+    //    showing only the caption + description text. Tables without a matching
+    //    caption are still emitted (numbered by detection order as a fallback).
+    let captions = extract_captions(&full_text);
+    // Detect GFM tables once; the (text_without_tables, table_sections) pair is
+    // used below to populate `TableDescription.markdown` by detection order.
+    let (_text_without_tables, table_sections) = detect_markdown_tables(&full_text);
+    let (figures, tables): (Vec<FigureDescription>, Vec<TableDescription>) = if captions.is_empty()
+    {
+        (Vec::new(), Vec::new())
+    } else {
+        let fig_prompt = build_figure_description_prompt(&title, &captions);
+        let fig_response = orchestrator
+            .send(
+                &config,
+                FIGURE_DESCRIPTION_SYSTEM_PROMPT,
+                &fig_prompt,
+                LlmRequestType::FigureDescription,
+            )
+            .await;
+        match fig_response {
+            Ok((fig_text, _fig_tokens)) => match parse_figure_descriptions_response(&fig_text) {
+                Ok(descriptions) => {
+                    let mut figs: Vec<FigureDescription> = Vec::new();
+                    let mut tabs: Vec<TableDescription> = Vec::new();
+                    // Counter for unmatched GFM table sections (fallback
+                    // numbering when a table has no caption).
+                    let mut unmatched_table_idx = 0usize;
+                    for desc in descriptions {
+                        let matching = captions.iter().find(|c| c.number == desc.number);
+                        let caption_text = matching.map(|c| c.caption.clone()).unwrap_or_default();
+                        let is_table = matching.map(|c| c.kind.label() == "Table").unwrap_or(false);
+                        if is_table {
+                            // Correlate the GFM table markdown by table number
+                            // (1-based detection order in `table_sections`).
+                            // Try the numeric portion of the caption number first
+                            // (e.g. "2a" -> 2), then fall back to the unmatched
+                            // counter so every detected table gets a chance.
+                            let table_index_from_number = desc
+                                .number
+                                .chars()
+                                .take_while(|c| c.is_ascii_digit())
+                                .collect::<String>()
+                                .parse::<usize>()
+                                .ok()
+                                .filter(|&n| n >= 1 && n <= table_sections.len())
+                                .unwrap_or_else(|| {
+                                    unmatched_table_idx += 1;
+                                    unmatched_table_idx.min(table_sections.len())
+                                });
+                            let markdown = table_sections
+                                .get(table_index_from_number.saturating_sub(1))
+                                .map(|s| s.body.clone())
+                                .unwrap_or_default();
+                            tabs.push(TableDescription {
+                                number: desc.number,
+                                caption: caption_text,
+                                markdown,
+                                description: desc.description,
+                            });
+                        } else {
+                            figs.push(FigureDescription {
+                                number: desc.number,
+                                caption: caption_text,
+                                description: desc.description,
+                            });
+                        }
+                    }
+                    (figs, tabs)
+                }
+                Err(_) => (Vec::new(), Vec::new()),
+            },
+            Err(_) => (Vec::new(), Vec::new()),
+        }
+    };
+
+    // 5. Synthesis call: produce the upgraded digest from the section summaries.
+    let synthesis_prompt = build_synthesis_prompt(&title, &field, &section_summaries_json);
+    let synthesis_response = orchestrator
+        .send(
+            &config,
+            ARTICLE_SUMMARY_SYSTEM_PROMPT,
+            &synthesis_prompt,
+            LlmRequestType::UnifiedSummary,
+        )
+        .await;
+    let synthesis_digest_json = match synthesis_response {
+        Ok((syn_text, _syn_tokens)) => {
+            let cleaned_syn = strip_code_fences(&syn_text);
+            serde_json::from_str::<serde_json::Value>(&cleaned_syn)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|_| {
+                    // Malformed synthesis: fall back to the section call's digest.
+                    serde_json::json!({
+                        "summary_150_250_words": section_value
+                            .get("summary_150_250_words")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::String(String::new())),
+                        "key_insights": section_value
+                            .get("key_insights")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Array(vec![])),
+                        "keywords": section_value
+                            .get("keywords")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Array(vec![])),
+                    })
+                    .to_string()
+                })
+        }
+        Err(_) => {
+            // Synthesis call failed: fall back to the section call's digest.
+            serde_json::json!({
+                "summary_150_250_words": section_value
+                    .get("summary_150_250_words")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::String(String::new())),
+                "key_insights": section_value
+                    .get("key_insights")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Array(vec![])),
+                "keywords": section_value
+                    .get("keywords")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Array(vec![])),
+            })
+            .to_string()
+        }
+    };
+
+    // 6. Single merge write: compose all parts into one blob.
+    let unified_json = merge_unified_blob(
+        existing_blob.as_deref(),
+        &section_summaries_json,
+        figures,
+        tables,
+        &synthesis_digest_json,
+    );
+    {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        article_repo::set_ai_summary(&conn, &article_id, &unified_json)?;
+        crate::db::audit_repo::create_entry(
+            &conn,
+            &article_id,
+            "ai_summary",
+            None,
+            None,
+            Some("Unified AI summary generated (section + figure + synthesis pipeline)"),
+            "ai",
+        )?;
+        app_settings_repo::mark_wiki_needs_refresh(&conn);
+        app_settings_repo::mark_biblio_needs_refresh(&conn);
+    }
+
+    let _ = app_handle.emit(
+        "article-ai-summary-complete",
+        serde_json::json!({ "articleId": article_id, "title": title }),
+    );
+
+    Ok(unified_json)
 }

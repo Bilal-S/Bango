@@ -34,6 +34,12 @@ struct ChatResponse {
 #[derive(Debug, Deserialize)]
 struct Choice {
     message: ChatMessage,
+    /// "stop" = normal completion; "length" = truncated by output token limit.
+    /// The client logs a warning when this is "length" so reasoning-model
+    /// truncation is visible in diagnostics.
+    #[serde(default)]
+    #[allow(dead_code)]
+    finish_reason: Option<String>,
 }
 
 // ── Google Generative Language API types ─────────────────────────────
@@ -388,6 +394,13 @@ async fn send_openai_compatible(
 ) -> Result<(String, usize), AppError> {
     let client = Client::new();
     let temp = if config.skip_temperature { None } else { Some(config.temperature) };
+    // Note: `max_tokens` is intentionally NOT sent. Some newer OpenAI-compatible
+    // models (e.g. o-series reasoning models) reject `max_tokens` with a 400
+    // "Unsupported parameter" error and require `max_completion_tokens` instead.
+    // Sending neither is the provider-portable default: the server applies its
+    // own model-specific output budget. The summary command's markdown-fallback
+    // retry handles the empty-content failure mode that reasoning models can
+    // produce when their thinking phase exhausts a server-side budget.
     let request = ChatRequest {
         model: config.model_name.clone(),
         messages: vec![

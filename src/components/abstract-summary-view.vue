@@ -7,6 +7,8 @@ import {
   pendingFigureDescriptions,
 } from '@/composables/use-ai-summary';
 import type { AiSummaryData } from '@/composables/use-ai-summary';
+import { groupExtractionFields, sortSectionSummaries } from '@/utils/ai-summary-groups';
+import type { ExtractionGroup } from '@/utils/ai-summary-groups';
 
 const props = defineProps<{
   article: Article;
@@ -41,6 +43,18 @@ const abstractTab = ref<'abstract' | 'aiSummary'>(defaultTab());
 const expandedSections = ref<Set<string>>(new Set());
 const sectionsExpanded = ref(false);
 
+// Per-group expand/collapse state for the Detailed Extraction block.
+// Groups are collapsed by default; the user expands them individually, or via
+// the "Expand all" toggle.
+const expandedGroups = ref<Set<string>>(new Set());
+const groupsExpanded = ref(false);
+
+// Figures/Tables blocks are collapsed by default (same UX as section cards and
+// extraction groups). The user expands them to see the per-figure/per-table
+// description cards.
+const figuresExpanded = ref(false);
+const tablesExpanded = ref(false);
+
 function toggleSection(name: string): void {
   // Mutate the Set reactively by creating a new instance.
   const next = new Set(expandedSections.value);
@@ -52,6 +66,41 @@ function toggleSection(name: string): void {
   expandedSections.value = next;
 }
 
+function toggleGroup(name: string): void {
+  const next = new Set(expandedGroups.value);
+  if (next.has(name)) {
+    next.delete(name);
+  } else {
+    next.add(name);
+  }
+  expandedGroups.value = next;
+}
+
+function isGroupOpen(name: string): boolean {
+  return groupsExpanded.value || expandedGroups.value.has(name);
+}
+
+function toggleFigures(): void {
+  figuresExpanded.value = !figuresExpanded.value;
+}
+
+function toggleTables(): void {
+  tablesExpanded.value = !tablesExpanded.value;
+}
+
+// Grouped + sorted derived data. Recomputed when the underlying summary changes.
+const extractionGroups = computed<ExtractionGroup[]>(() =>
+  aiSummaryData.value?.structured_extraction
+    ? groupExtractionFields(aiSummaryData.value.structured_extraction)
+    : []
+);
+
+const sortedSectionSummaries = computed(() =>
+  aiSummaryData.value?.section_summaries
+    ? sortSectionSummaries(aiSummaryData.value.section_summaries)
+    : []
+);
+
 // Reset to the default tab whenever the selected article changes so that
 // articles with an AI summary land on the AI Summary tab automatically.
 watch(
@@ -60,6 +109,10 @@ watch(
     abstractTab.value = defaultTab();
     expandedSections.value = new Set();
     sectionsExpanded.value = false;
+    expandedGroups.value = new Set();
+    groupsExpanded.value = false;
+    figuresExpanded.value = false;
+    tablesExpanded.value = false;
   }
 );
 </script>
@@ -111,14 +164,7 @@ watch(
         <span class="text-slate-400">·</span>
         <span class="italic">{{ aiSummaryData.subfield }}</span>
       </div>
-      <!-- Structured extraction -->
-      <div v-if="aiSummaryData.structured_extraction" class="space-y-2">
-        <div v-for="(value, key) in aiSummaryData.structured_extraction" :key="key" class="text-sm">
-          <span class="font-semibold text-slate-700 capitalize">{{ key.replace(/_/g, ' ') }}</span>
-          <p class="text-slate-600 leading-relaxed">{{ value }}</p>
-        </div>
-      </div>
-      <!-- Summary -->
+      <!-- Summary (150-250 words) -->
       <div v-if="aiSummaryData.summary_150_250_words">
         <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-1">
           Summary
@@ -143,23 +189,8 @@ watch(
           </li>
         </ul>
       </div>
-      <!-- Keywords -->
-      <div v-if="aiSummaryData.keywords.length > 0">
-        <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-1">
-          Keywords
-        </h4>
-        <div class="flex flex-wrap gap-1.5">
-          <span
-            v-for="kw in aiSummaryData.keywords"
-            :key="kw"
-            class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded"
-          >
-            {{ kw }}
-          </span>
-        </div>
-      </div>
-      <!-- Section Summaries (schema v2; optional) -->
-      <div v-if="(aiSummaryData.section_summaries ?? []).length > 0">
+      <!-- Section Summaries (schema v2; optional). Sorted by Methods/Results/Discussion/etc. -->
+      <div v-if="sortedSectionSummaries.length > 0">
         <div class="flex items-center justify-between mb-1">
           <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider">
             Section Summaries
@@ -173,7 +204,7 @@ watch(
         </div>
         <div class="space-y-2">
           <div
-            v-for="sec in aiSummaryData.section_summaries ?? []"
+            v-for="sec in sortedSectionSummaries"
             :key="sec.section"
             class="border border-slate-200 rounded-md overflow-hidden"
           >
@@ -231,6 +262,59 @@ watch(
           </div>
         </div>
       </div>
+      <!-- Detailed Extraction (grouped, collapsed by default). -->
+      <div v-if="extractionGroups.length > 0">
+        <div class="flex items-center justify-between mb-1">
+          <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider">
+            Detailed Extraction
+          </h4>
+          <button
+            class="text-xs text-slate-500 hover:text-violet-700 cursor-pointer select-none"
+            @click="groupsExpanded = !groupsExpanded"
+          >
+            {{ groupsExpanded ? 'Collapse all' : 'Expand all' }}
+          </button>
+        </div>
+        <div class="space-y-2">
+          <div
+            v-for="group in extractionGroups"
+            :key="group.name"
+            class="border border-slate-200 rounded-md overflow-hidden"
+          >
+            <button
+              class="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+              @click="toggleGroup(group.name)"
+            >
+              <span
+                class="text-xs font-label-caps text-violet-700 uppercase tracking-wider font-semibold"
+              >
+                {{ group.name }}
+              </span>
+              <span class="material-symbols-outlined text-[16px] text-slate-400">{{
+                isGroupOpen(group.name) ? 'expand_less' : 'expand_more'
+              }}</span>
+            </button>
+            <div v-if="isGroupOpen(group.name)" class="px-3 py-2 space-y-3">
+              <div v-for="[key, value] in group.entries" :key="key">
+                <div class="text-xs font-semibold text-slate-700 capitalize mb-0.5">
+                  {{ key.replace(/_/g, ' ') }}
+                </div>
+                <!-- Scalar value: render as a paragraph. -->
+                <p v-if="!Array.isArray(value)" class="text-sm text-slate-600 leading-relaxed">
+                  {{ value }}
+                </p>
+                <!-- Array value: render as a bullet list (no `[ "x", "y" ]` array notation). -->
+                <ul v-else class="space-y-1">
+                  <li v-for="(item, i) in value" :key="i" class="flex gap-2 text-sm text-slate-600">
+                    <span class="text-violet-400 mt-0.5 shrink-0">•</span>
+                    <span>{{ item }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <!-- ── Tier 2 Phase 4: Figures & Tables ───────────────────────── -->
       <!-- Trigger button (gated on full text attached). Shown when no
            descriptions exist yet OR when regenerating. -->
@@ -254,12 +338,25 @@ watch(
         </button>
         <span v-if="isGeneratingFigures" class="text-xs text-slate-400">Analyzing captions...</span>
       </div>
-      <!-- Figures grid (T2 Phase 4). Only renders when descriptions exist. -->
-      <div v-if="(aiSummaryData?.figures ?? []).length > 0">
-        <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-2">
-          Figures
-        </h4>
-        <div class="grid grid-cols-1 gap-2">
+      <!-- Figures (T2 Phase 4). Collapsible section; collapsed by default. -->
+      <div
+        v-if="(aiSummaryData?.figures ?? []).length > 0"
+        class="border border-slate-200 rounded-md overflow-hidden"
+      >
+        <button
+          class="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+          @click="toggleFigures"
+        >
+          <span
+            class="text-xs font-label-caps text-violet-700 uppercase tracking-wider font-semibold"
+          >
+            Figures ({{ aiSummaryData?.figures?.length ?? 0 }})
+          </span>
+          <span class="material-symbols-outlined text-[16px] text-slate-400">{{
+            figuresExpanded ? 'expand_less' : 'expand_more'
+          }}</span>
+        </button>
+        <div v-if="figuresExpanded" class="px-3 py-2 space-y-2">
           <div
             v-for="fig in aiSummaryData?.figures ?? []"
             :key="`fig-${fig.number}`"
@@ -278,12 +375,25 @@ watch(
           </div>
         </div>
       </div>
-      <!-- Tables (T2 Phase 4). Only renders when descriptions exist. -->
-      <div v-if="(aiSummaryData?.tables ?? []).length > 0">
-        <h4 class="text-xs font-label-caps text-violet-600 uppercase tracking-wider mb-2">
-          Tables
-        </h4>
-        <div class="grid grid-cols-1 gap-2">
+      <!-- Tables (T2 Phase 4). Collapsible section; collapsed by default. -->
+      <div
+        v-if="(aiSummaryData?.tables ?? []).length > 0"
+        class="border border-slate-200 rounded-md overflow-hidden"
+      >
+        <button
+          class="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+          @click="toggleTables"
+        >
+          <span
+            class="text-xs font-label-caps text-violet-700 uppercase tracking-wider font-semibold"
+          >
+            Tables ({{ aiSummaryData?.tables?.length ?? 0 }})
+          </span>
+          <span class="material-symbols-outlined text-[16px] text-slate-400">{{
+            tablesExpanded ? 'expand_less' : 'expand_more'
+          }}</span>
+        </button>
+        <div v-if="tablesExpanded" class="px-3 py-2 space-y-2">
           <div
             v-for="tbl in aiSummaryData?.tables ?? []"
             :key="`tbl-${tbl.number}`"

@@ -3,6 +3,7 @@ import SettingsProviderCard from '@/components/settings/settings-provider-card.v
 import SettingsProjectManagement from '@/components/settings/settings-project-management.vue';
 import SettingsScreeningPreferences from '@/components/settings/settings-screening-preferences.vue';
 import SettingsFullTextStorage from '@/components/settings/settings-full-text-storage.vue';
+import SettingsNotificationHistory from '@/components/settings/settings-notification-history.vue';
 import SettingsDiagnostics from '@/components/settings/settings-diagnostics.vue';
 </script>
 
@@ -25,6 +26,7 @@ import SettingsDiagnostics from '@/components/settings/settings-diagnostics.vue'
       <SettingsProjectManagement />
       <SettingsScreeningPreferences />
       <SettingsFullTextStorage />
+      <SettingsNotificationHistory />
       <SettingsDiagnostics />
     </div>
   </div>

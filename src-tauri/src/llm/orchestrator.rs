@@ -37,6 +37,15 @@ pub enum LlmRequestType {
     SectionSummary,
     /// Tier 2 Phase 4: batched LLM description of figure/table captions.
     FigureDescription,
+    /// Tier 3: enhanced / two-stage screening stage 2 (abstract + retrieved
+    /// full-text chunks). Stage 1 stays `Screening`. Categorized separately so
+    /// diagnostics can distinguish abstract-only from full-text-aware calls.
+    EnhancedScreening,
+    /// Tier 4.2: unified AI summary - the synthesis call that combines
+    /// per-section summaries + figure/table descriptions into one upgraded
+    /// `summary_150_250_words` digest. Distinguishes the unified path from the
+    /// legacy monolithic `ArticleSummary` and the section-only `SectionSummary`.
+    UnifiedSummary,
 }
 
 /// Centralized LLM request coordinator.

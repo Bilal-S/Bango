@@ -19,15 +19,48 @@ macro_rules! debug_log {
     };
 }
 
-use crate::db::{article_repo, audit_repo, biblio_repo, label_repo, tag_repo};
+use crate::db::{
+    app_settings_repo::ScreeningMode, article_repo, audit_repo, biblio_repo, chunk_repo,
+    label_repo, tag_repo,
+};
 use crate::error::AppError;
+use crate::llm::orchestrator::LlmRequestType;
 use crate::models::biblio::{TermSource, TermType};
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
+use crate::screening::chunk_retrieval::{
+    rank_chunks_by_criteria, ScoredChunk, DEFAULT_MAX_CHUNK_WORDS,
+};
 use crate::screening::llm_client::LlmClient;
 use crate::screening::prompt::{
     self, AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput,
 };
 use crate::screening::resolution::{self, CriterionMatch};
+
+/// Tier 3 screening configuration. Built by the command layer from `app_settings`
+/// and passed into `run_sync`. Pure value type — no I/O.
+#[derive(Debug, Clone)]
+pub struct ScreeningConfig {
+    pub mode: ScreeningMode,
+    pub enhanced_top_k: usize,
+    pub enhanced_sections: Vec<String>,
+    pub two_stage_low: f64,
+    pub two_stage_high: f64,
+    pub chunk_budget_per_article: usize,
+}
+
+impl Default for ScreeningConfig {
+    fn default() -> Self {
+        Self {
+            mode: ScreeningMode::Abstract,
+            enhanced_top_k: crate::screening::chunk_retrieval::DEFAULT_TOP_K,
+            enhanced_sections: vec!["Methods".to_string(), "Results".to_string()],
+            two_stage_low: 0.4,
+            two_stage_high: 0.7,
+            chunk_budget_per_article:
+                crate::screening::chunk_retrieval::DEFAULT_CHUNK_BUDGET_PER_ARTICLE,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +74,15 @@ pub struct ScreeningProgress {
     pub current_article_titles: Vec<String>,
     pub elapsed_ms: u64,
     pub estimated_remaining_ms: Option<u64>,
+    /// Tier 3 two-stage: human-readable stage label for a single sub-line under
+    /// the main count (e.g. `"Stage 2: 3/12 borderline (full text)"`). `None`
+    /// for abstract + enhanced modes (single-stage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    /// Tier 3 two-stage: the per-stage total (e.g. the borderline article count
+    /// for stage 2). `None` for single-stage modes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_total: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +164,10 @@ impl ScreeningEngine {
     /// Run the screening engine using the std::sync::Mutex<Connection> from DbState.
     /// If `app_handle` is provided, emits `screening:progress` events after each article.
     /// Accepts an `LlmClient` trait object so tests can inject mocks.
+    ///
+    /// `config` (Tier 3) selects abstract / enhanced / two-stage behavior. Pass
+    /// `ScreeningConfig::default()` for the legacy abstract-only path.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_sync(
         &self,
         conn_mutex: &std::sync::Mutex<Connection>,
@@ -129,6 +175,7 @@ impl ScreeningEngine {
         request_delay_ms: u64,
         criteria: Vec<Criterion>,
         aims: Vec<ResearchAim>,
+        config: ScreeningConfig,
         app_handle: Option<tauri::AppHandle>,
     ) -> Result<(), AppError> {
         // Reset state
@@ -193,6 +240,23 @@ impl ScreeningEngine {
             })
             .collect();
 
+        // Tier 3: pre-build criterion text vectors for evidence retrieval
+        // (rank_chunks_by_criteria scores chunks against these tokens). Built once;
+        // reused per article inside the loop.
+        let inclusion_texts: Vec<String> =
+            inclusion_criteria.iter().map(|c| c.text.clone()).collect();
+        let exclusion_texts: Vec<String> =
+            exclusion_criteria.iter().map(|c| c.text.clone()).collect();
+        let enhanced_mode = config.mode == ScreeningMode::Enhanced;
+        let two_stage_mode = config.mode == ScreeningMode::TwoStage;
+
+        // Tier 3: two-stage emits a stage label on the progress sub-line.
+        if two_stage_mode {
+            let mut progress = self.progress.lock().await;
+            progress.stage = Some("Stage 1: abstract".to_string());
+            progress.stage_total = None;
+        }
+
         // Initialize progress
         {
             let mut progress = self.progress.lock().await;
@@ -244,16 +308,56 @@ impl ScreeningEngine {
                 self.emit_progress(&app_handle, &progress);
             }
 
-            // Build prompt with batch of articles
-            let article_entries: Vec<ArticleEntry> = batch
-                .iter()
-                .map(|a| ArticleEntry {
-                    title: a.title.clone(),
-                    authors: a.authors.join("; "),
-                    year: a.publication_year,
-                    abstract_text: a.abstract_text.clone(),
-                })
-                .collect();
+            // Build prompt with batch of articles.
+            //
+            // Tier 3 enhanced mode: for articles with `has_full_text`, retrieve
+            // the top-K criteria-targeted chunks and attach as evidence so the
+            // single batched LLM call sees Methods/Results context. Articles
+            // without full text (or with no surviving chunks) keep
+            // `full_text_evidence = None` and screen abstract-only.
+            //
+            // Two-stage mode: stage 1 is always abstract-only (no evidence);
+            // borderline articles get a second evidence-bearing call below.
+            // Tier 3 Gap 7: collect the precise evidence-sections label per
+            // article so the audit trail names the sections that *actually*
+            // matched (e.g. `"§Methods"` when only a Methods chunk survived
+            // ranking), not the configured allow-list (e.g. `"§Methods,
+            // §Results"`) regardless of what was retrieved.
+            let mut enhanced_evidence_labels: HashMap<String, String> = HashMap::new();
+
+            let article_entries: Vec<ArticleEntry> = {
+                let mut entries: Vec<ArticleEntry> = batch
+                    .iter()
+                    .map(|a| ArticleEntry {
+                        title: a.title.clone(),
+                        authors: a.authors.join("; "),
+                        year: a.publication_year,
+                        abstract_text: a.abstract_text.clone(),
+                        full_text_evidence: None,
+                    })
+                    .collect();
+                if enhanced_mode {
+                    let c = conn_mutex.lock().map_err(|e| {
+                        AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+                    })?;
+                    for (entry, article) in entries.iter_mut().zip(batch.iter()) {
+                        if !article.has_full_text {
+                            continue;
+                        }
+                        if let Some(ev) = retrieve_evidence_for_article(
+                            &c,
+                            &article.id,
+                            &inclusion_texts,
+                            &exclusion_texts,
+                            &config,
+                        ) {
+                            entry.full_text_evidence = Some(ev.text);
+                            enhanced_evidence_labels.insert(article.id.clone(), ev.sections_label);
+                        }
+                    }
+                }
+                entries
+            };
 
             let prompt_input = ScreeningPromptInput {
                 aims: aim_entries.clone(),
@@ -267,12 +371,20 @@ impl ScreeningEngine {
             let user_prompt = prompt::build_screening_prompt(&prompt_input);
             let system_prompt = prompt::SYSTEM_PROMPT;
 
+            // Stage-1 / abstract / enhanced: categorize as Screening. Two-stage
+            // stage-2 calls (below) use EnhancedScreening.
+            let request_type = if enhanced_mode {
+                LlmRequestType::EnhancedScreening
+            } else {
+                LlmRequestType::Screening
+            };
+
             // Send to LLM with retry on 429
             let mut response_data = None;
             let mut retry_count: u32 = 0;
 
             while retry_count <= max_retries {
-                match llm.send(system_prompt, &user_prompt).await {
+                match llm.send_with_type(system_prompt, &user_prompt, request_type.clone()).await {
                     Ok((text, tokens)) => {
                         response_data = Some((text, tokens));
                         break;
@@ -443,6 +555,13 @@ impl ScreeningEngine {
                             ));
                         }
 
+                        // Tier 3 Gap 7: use the precise evidence-sections label
+                        // captured during retrieval (the sections that *actually*
+                        // matched), not the configured allow-list. Two-stage
+                        // stage-1 stays `ai_screen` (stage 2 writes the
+                        // `ai_screen_enhanced` entry below).
+                        let evidence_sections = enhanced_evidence_labels.get(&article.id).cloned();
+
                         // Update article in DB
                         {
                             let c = conn_mutex.lock().map_err(|e2| {
@@ -460,6 +579,7 @@ impl ScreeningEngine {
                                     matched_inc: &augmented_inc,
                                     matched_exc: &augmented_exc,
                                     actual_tokens: Some(tokens_per_article),
+                                    evidence_sections: evidence_sections.as_deref(),
                                 },
                             )?;
 
@@ -494,6 +614,349 @@ impl ScreeningEngine {
                             progress.included += 1;
                         } else {
                             progress.rejected += 1;
+                        }
+                    }
+
+                    // Tier 3 two-stage: stage 2. After stage 1 has written
+                    // decisions for the whole batch, re-screen borderline
+                    // articles (confidence in `[low, high)` AND has full text)
+                    // with full-text evidence. The stage-2 decision overrides
+                    // stage 1 and passes through `resolve_decision` again.
+                    // Both passes are recorded: stage 1 already wrote
+                    // `ai_screen`; stage 2 writes `ai_screen_enhanced`.
+                    if two_stage_mode {
+                        // Collect borderline articles from the batch (needs the
+                        // stage-1 screening responses, which we still hold).
+                        let borderline: Vec<(
+                            &crate::models::article::Article,
+                            &LlmScreeningResponse,
+                        )> = batch
+                            .iter()
+                            .zip(screenings.iter())
+                            .filter(|(a, s)| {
+                                a.has_full_text
+                                    && s.decision != "error"
+                                    && s.confidence >= config.two_stage_low
+                                    && s.confidence < config.two_stage_high
+                            })
+                            .collect();
+
+                        if !borderline.is_empty() {
+                            // Update progress sub-line for stage 2.
+                            {
+                                let mut progress = self.progress.lock().await;
+                                progress.stage_total = Some(borderline.len());
+                                progress.stage = Some(format!(
+                                    "Stage 2: 0/{} borderline (full text)",
+                                    borderline.len()
+                                ));
+                                self.emit_progress(&app_handle, &progress);
+                            }
+
+                            for (stage2_done, (article, _stage1)) in borderline.iter().enumerate() {
+                                // Cancel/pause checks between stage-2 articles.
+                                if *self.cancel_token.lock().await {
+                                    break;
+                                }
+                                while *self.pause_token.lock().await {
+                                    sleep(Duration::from_millis(200)).await;
+                                    if *self.cancel_token.lock().await {
+                                        break;
+                                    }
+                                }
+
+                                // Retrieve evidence for this borderline article.
+                                let evidence = {
+                                    let c = conn_mutex.lock().map_err(|e| {
+                                        AppError::Database(rusqlite::Error::InvalidParameterName(
+                                            e.to_string(),
+                                        ))
+                                    })?;
+                                    retrieve_evidence_for_article(
+                                        &c,
+                                        &article.id,
+                                        &inclusion_texts,
+                                        &exclusion_texts,
+                                        &config,
+                                    )
+                                };
+
+                                // If no evidence survived ranking, skip stage 2
+                                // for this article (stage-1 decision stands).
+                                // Update the progress sub-line first so the UI
+                                // does not stall at the previous count.
+                                let evidence = match evidence {
+                                    Some(ev) => ev,
+                                    None => {
+                                        let mut progress = self.progress.lock().await;
+                                        progress.stage = Some(format!(
+                                            "Stage 2: {}/{} borderline (full text)",
+                                            stage2_done + 1,
+                                            borderline.len()
+                                        ));
+                                        self.emit_progress(&app_handle, &progress);
+                                        continue;
+                                    }
+                                };
+
+                                // Build a single-article stage-2 prompt.
+                                let entry = ArticleEntry {
+                                    title: article.title.clone(),
+                                    authors: article.authors.join("; "),
+                                    year: article.publication_year,
+                                    abstract_text: article.abstract_text.clone(),
+                                    full_text_evidence: Some(evidence.text),
+                                };
+                                let prompt_input = ScreeningPromptInput {
+                                    aims: aim_entries.clone(),
+                                    inclusion_criteria: inc_entries.clone(),
+                                    exclusion_criteria: exc_entries.clone(),
+                                    articles: vec![entry],
+                                    existing_tags: existing_tag_names.clone(),
+                                    existing_labels: existing_label_names.clone(),
+                                };
+                                let user_prompt = prompt::build_screening_prompt(&prompt_input);
+                                let system_prompt = prompt::SYSTEM_PROMPT;
+
+                                // Stage-2 call: categorize as EnhancedScreening.
+                                let stage2_response = llm
+                                    .send_with_type(
+                                        system_prompt,
+                                        &user_prompt,
+                                        LlmRequestType::EnhancedScreening,
+                                    )
+                                    .await;
+                                sleep(Duration::from_millis(request_delay_ms)).await;
+
+                                let (response_text, total_tokens) = match stage2_response {
+                                    Ok(data) => data,
+                                    Err(e) => {
+                                        // Non-fatal: log + keep stage-1 decision.
+                                        // Scope the connection guard so it drops
+                                        // before the progress `.await` below.
+                                        {
+                                            let c = conn_mutex.lock().map_err(|e2| {
+                                                AppError::Database(
+                                                    rusqlite::Error::InvalidParameterName(
+                                                        e2.to_string(),
+                                                    ),
+                                                )
+                                            })?;
+                                            let _ = audit_repo::log_error(
+                                                &c,
+                                                &format!(
+                                                    "Stage-2 screening failed for {}: {}",
+                                                    article.id, e
+                                                ),
+                                            );
+                                        }
+                                        // Update progress sub-line and continue.
+                                        let mut progress = self.progress.lock().await;
+                                        progress.stage = Some(format!(
+                                            "Stage 2: {}/{} borderline (full text)",
+                                            stage2_done + 1,
+                                            borderline.len()
+                                        ));
+                                        self.emit_progress(&app_handle, &progress);
+                                        continue;
+                                    }
+                                };
+
+                                // Parse the single-article stage-2 response.
+                                match process_screening_responses(&response_text) {
+                                    Ok(mut stage2_screenings) if stage2_screenings.len() == 1 => {
+                                        let stage2 = stage2_screenings.swap_remove(0);
+                                        if stage2.decision == "error" {
+                                            // Keep stage-1 decision; don't override with error.
+                                            let mut progress = self.progress.lock().await;
+                                            progress.stage = Some(format!(
+                                                "Stage 2: {}/{} borderline (full text)",
+                                                stage2_done + 1,
+                                                borderline.len()
+                                            ));
+                                            self.emit_progress(&app_handle, &progress);
+                                            continue;
+                                        }
+
+                                        // Resolve stage-2 matches through the
+                                        // priority layer (per Appendix decision).
+                                        let inc_matches: Vec<CriterionMatch> = stage2
+                                            .matched_inclusion_criteria
+                                            .iter()
+                                            .filter_map(|key| {
+                                                criteria
+                                                    .iter()
+                                                    .find(|c| c.id == *key || c.text == *key)
+                                            })
+                                            .map(|c| CriterionMatch {
+                                                id: c.id.clone(),
+                                                criterion_type: c.criterion_type.clone(),
+                                                priority: c.priority,
+                                            })
+                                            .collect();
+                                        let exc_matches: Vec<CriterionMatch> = stage2
+                                            .matched_exclusion_criteria
+                                            .iter()
+                                            .filter_map(|key| {
+                                                criteria
+                                                    .iter()
+                                                    .find(|c| c.id == *key || c.text == *key)
+                                            })
+                                            .map(|c| CriterionMatch {
+                                                id: c.id.clone(),
+                                                criterion_type: c.criterion_type.clone(),
+                                                priority: c.priority,
+                                            })
+                                            .collect();
+                                        let resolution_input = resolution::ScreeningInput {
+                                            inclusion_matches: inc_matches.clone(),
+                                            exclusion_matches: exc_matches.clone(),
+                                        };
+                                        let final_decision =
+                                            resolution::resolve_decision(&resolution_input);
+
+                                        // Auto-label from stage-2 matches.
+                                        let auto_label_criteria: Vec<(String, String)> =
+                                            inc_matches
+                                                .iter()
+                                                .chain(exc_matches.iter())
+                                                .filter_map(|m| {
+                                                    criteria.iter().find(|cr| cr.id == m.id).map(
+                                                        |cr| {
+                                                            (
+                                                                if matches!(
+                                                                    cr.criterion_type,
+                                                                    CriterionType::Inclusion
+                                                                ) {
+                                                                    "Inclusion"
+                                                                } else {
+                                                                    "Exclusion"
+                                                                }
+                                                                .to_string(),
+                                                                cr.text.clone(),
+                                                            )
+                                                        },
+                                                    )
+                                                })
+                                                .collect();
+
+                                        let (augmented_inc, augmented_exc) =
+                                            augment_matched_from_reasoning(
+                                                &stage2.reasoning,
+                                                &stage2.matched_inclusion_criteria,
+                                                &stage2.matched_exclusion_criteria,
+                                                &global_numbering,
+                                                inclusion_criteria.len(),
+                                            );
+
+                                        let mut reasoning = stage2.reasoning.clone();
+                                        if stage2.decision.as_str() != final_decision {
+                                            reasoning.push_str(&format!(
+                                                "\n\n[App override: {} favored due to priority resolution]",
+                                                if final_decision == "include" {
+                                                    "inclusion"
+                                                } else {
+                                                    "exclusion"
+                                                }
+                                            ));
+                                        }
+
+                                        // Adjust progress counters: the stage-1
+                                        // include/exclude tallies already counted
+                                        // this article; correct them to the
+                                        // stage-2 (final) decision.
+                                        //
+                                        // The connection guard is scoped tightly
+                                        // so it drops before the `progress`
+                                        // `.await` below (the `std::sync`
+                                        // MutexGuard is not `Send`).
+                                        let stage1_was_include = {
+                                            let c = conn_mutex.lock().map_err(|e2| {
+                                                AppError::Database(
+                                                    rusqlite::Error::InvalidParameterName(
+                                                        e2.to_string(),
+                                                    ),
+                                                )
+                                            })?;
+                                            // Read the stage-1 decision so we can
+                                            // fix up the progress tallies.
+                                            let stage1_status: Option<String> = c
+                                                .query_row(
+                                                    "SELECT status FROM articles WHERE id = ?1",
+                                                    rusqlite::params![&article.id],
+                                                    |row| row.get(0),
+                                                )
+                                                .ok();
+                                            let stage1_was_include =
+                                                stage1_status.as_deref() == Some("included");
+
+                                            update_article_after_screening(
+                                                &c,
+                                                ScreeningUpdate {
+                                                    article_id: &article.id,
+                                                    decision: final_decision,
+                                                    reasoning: &reasoning,
+                                                    confidence: stage2.confidence,
+                                                    matched_inc: &augmented_inc,
+                                                    matched_exc: &augmented_exc,
+                                                    actual_tokens: Some(total_tokens),
+                                                    evidence_sections: Some(
+                                                        &evidence.sections_label,
+                                                    ),
+                                                },
+                                            )?;
+
+                                            for tag_name in &stage2.suggested_tags {
+                                                let _ =
+                                                    create_or_match_tag(&c, tag_name, &article.id);
+                                            }
+                                            for (prefix, text) in &auto_label_criteria {
+                                                let label_name = format!("{}: {}", prefix, text);
+                                                let _ = create_or_match_label(
+                                                    &c,
+                                                    &label_name,
+                                                    &article.id,
+                                                );
+                                            }
+                                            stage1_was_include
+                                        };
+
+                                        // Fix up progress include/exclude tallies
+                                        // if the decision flipped.
+                                        {
+                                            let mut progress = self.progress.lock().await;
+                                            let now_include = final_decision == "include";
+                                            if now_include != stage1_was_include {
+                                                if now_include {
+                                                    progress.included += 1;
+                                                    progress.rejected =
+                                                        progress.rejected.saturating_sub(1);
+                                                } else {
+                                                    progress.rejected += 1;
+                                                    progress.included =
+                                                        progress.included.saturating_sub(1);
+                                                }
+                                            }
+                                            progress.stage = Some(format!(
+                                                "Stage 2: {}/{} borderline (full text)",
+                                                stage2_done + 1,
+                                                borderline.len()
+                                            ));
+                                            self.emit_progress(&app_handle, &progress);
+                                        }
+                                    }
+                                    _ => {
+                                        // Mismatched count / parse error: keep stage-1 decision.
+                                        let mut progress = self.progress.lock().await;
+                                        progress.stage = Some(format!(
+                                            "Stage 2: {}/{} borderline (full text)",
+                                            stage2_done + 1,
+                                            borderline.len()
+                                        ));
+                                        self.emit_progress(&app_handle, &progress);
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -842,6 +1305,10 @@ struct ScreeningUpdate<'a> {
     matched_inc: &'a [String],
     matched_exc: &'a [String],
     actual_tokens: Option<usize>,
+    /// Tier 3: when `Some`, the audit detail line names the evidence sections
+    /// used (e.g. `"§Methods, §Results"`), producing an `ai_screen_enhanced`
+    /// audit action. When `None`, the audit action is the legacy `ai_screen`.
+    evidence_sections: Option<&'a str>,
 }
 
 fn update_article_after_screening(
@@ -852,10 +1319,15 @@ fn update_article_after_screening(
     let matched_inc_json = serde_json::to_string(update.matched_inc)?;
     let matched_exc_json = serde_json::to_string(update.matched_exc)?;
 
+    // Tier 3 Gap 6: two-stage screening calls this twice for borderline
+    // articles (stage 1 then stage 2). The flat `actual_tokens = ?7` write
+    // previously discarded the stage-1 token count. Accumulate atomically via
+    // `COALESCE(actual_tokens, 0) + ?7` so the column reflects the full cost
+    // (stage 1 starts from NULL → `COALESCE(NULL,0)+t == t`, unchanged).
     conn.execute(
         "UPDATE articles SET status = ?1, ai_decision = ?2, ai_reasoning = ?3, ai_confidence = ?4, \
          matched_inclusion_criteria = ?5, matched_exclusion_criteria = ?6, screened_at = datetime('now'), changed_at = datetime('now'), \
-         actual_tokens = ?7 \
+         actual_tokens = COALESCE(actual_tokens, 0) + ?7 \
          WHERE id = ?8",
         rusqlite::params![
             new_status,
@@ -870,18 +1342,137 @@ fn update_article_after_screening(
     )?;
 
     let audit_id = uuid::Uuid::new_v4().to_string();
+    // Tier 3: enhanced / two-stage stage-2 entries use the `ai_screen_enhanced`
+    // action and name the evidence sections in the details so decision flips
+    // are visible in the audit trail. Abstract / stage-1 entries stay `ai_screen`.
+    let (action, details) = match update.evidence_sections {
+        Some(sections) => (
+            "ai_screen_enhanced",
+            format!(
+                "AI screened (enhanced) with {} evidence: {} (confidence: {:.2})",
+                sections, update.decision, update.confidence
+            ),
+        ),
+        None => (
+            "ai_screen",
+            format!("AI screened: {} (confidence: {:.2})", update.decision, update.confidence),
+        ),
+    };
     conn.execute(
         "INSERT INTO audit_entries (id, article_id, action, from_status, to_status, details, source) \
-         VALUES (?1, ?2, 'ai_screen', 'working', ?3, ?4, 'ai')",
-        rusqlite::params![
-            audit_id,
-            update.article_id,
-            new_status,
-            format!("AI screened: {} (confidence: {:.2})", update.decision, update.confidence)
-        ],
+         VALUES (?1, ?2, ?3, 'working', ?4, ?5, 'ai')",
+        rusqlite::params![audit_id, update.article_id, action, new_status, details],
     )?;
 
     Ok(())
+}
+
+/// Format scored chunks as the `## Supporting Evidence from Full Text` body for
+/// one article. Each chunk is prefixed with its section label
+/// (`[§Methods]`, `[§Results]`, or `[§Text]` when the section is unknown).
+///
+/// Returns `None` when the slice is empty so callers can leave
+/// `ArticleEntry.full_text_evidence = None` (keeping the prompt byte-identical
+/// to abstract-only mode). Pure: no I/O, no DB. Tested directly.
+#[must_use]
+pub fn format_chunks_as_evidence(chunks: &[ScoredChunk]) -> Option<String> {
+    if chunks.is_empty() {
+        return None;
+    }
+    let lines: Vec<String> = chunks
+        .iter()
+        .map(|c| {
+            let label = c.section.as_deref().unwrap_or("Text");
+            format!("[§{label}] {}", c.content)
+        })
+        .collect();
+    Some(lines.join("\n"))
+}
+
+/// The evidence body string plus the deduped section labels that survived
+/// ranking (e.g. `"§Methods, §Results"`), for the audit trail.
+#[derive(Debug, Clone)]
+struct ArticleEvidence {
+    /// The formatted `[§Methods] ...` block (the `full_text_evidence` value).
+    text: String,
+    /// Section labels actually present in the retrieved chunks, joined for the
+    /// audit detail (e.g. `"§Methods, §Results"`). Stable order: deduped,
+    /// preserved in retrieval (highest-ranked-first) order.
+    sections_label: String,
+}
+
+/// Rank the given chunks against the criteria text, returning the top-K
+/// scored chunks (no DB, no formatting). Pure helper extracted from
+/// `retrieve_evidence_for_article` so it can be tested without a DB.
+///
+/// Tier 4.1: this is now the rank-only half; the formatting lives in
+/// `evidence::resolve_evidence` (which picks between summary+chunk, summary
+/// alone, or chunks-only formatting).
+fn rank_evidence_chunks(
+    chunks: Vec<crate::utils::chunking::Chunk>,
+    inclusion_texts: &[String],
+    exclusion_texts: &[String],
+    config: &ScreeningConfig,
+) -> Vec<ScoredChunk> {
+    // Filter to the section allow-list (default Methods/Results). Chunks whose
+    // section is NULL/unknown are kept (they may carry signal; the allow-list
+    // only restricts named sections that are out of scope like Discussion).
+    let allow = &config.enhanced_sections;
+    let filtered: Vec<_> = chunks
+        .into_iter()
+        .filter(|c| match c.section.as_deref() {
+            Some(s) => allow.iter().any(|a| a.eq_ignore_ascii_case(s)),
+            None => true,
+        })
+        .collect();
+    if filtered.is_empty() {
+        return Vec::new();
+    }
+    rank_chunks_by_criteria(
+        &filtered,
+        inclusion_texts,
+        exclusion_texts,
+        config.enhanced_top_k,
+        DEFAULT_MAX_CHUNK_WORDS,
+        config.chunk_budget_per_article,
+    )
+}
+
+/// Tier 3 + Tier 4.1: retrieve + rank + resolve the supporting evidence for one
+/// article. Reads the AI-summary blob AND chunks from `article_chunks` (populated
+/// at attach time), ranks the chunks, then delegates to
+/// `evidence::resolve_evidence` (Q1=B complementarity: summary facts + top-1
+/// verbatim chunk when both exist). Returns `None` when neither candidate
+/// yields evidence (caller leaves evidence as `None`).
+///
+/// Tier 3 chunks-only behavior is preserved byte-for-byte when no AI summary
+/// exists (covered by `resolve_evidence_chunks_path_unchanged_from_tier3`).
+fn retrieve_evidence_for_article(
+    conn: &Connection,
+    article_id: &str,
+    inclusion_texts: &[String],
+    exclusion_texts: &[String],
+    config: &ScreeningConfig,
+) -> Option<ArticleEvidence> {
+    // Tier 4.1: fetch the AI-summary blob (Option<String>).
+    let ai_summary_json: Option<String> = conn
+        .query_row(
+            "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+            rusqlite::params![article_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten();
+    // Rank the chunks (may be empty).
+    let chunks = chunk_repo::list_chunks_for_article(conn, article_id).ok()?;
+    let scored = rank_evidence_chunks(chunks, inclusion_texts, exclusion_texts, config);
+    // Pure resolution (Q1 = B complementarity).
+    let evidence =
+        crate::screening::evidence::resolve_evidence(ai_summary_json.as_deref(), &scored);
+    if evidence.source_type == crate::screening::evidence::EvidenceSource::None {
+        return None;
+    }
+    Some(ArticleEvidence { text: evidence.text, sections_label: evidence.sections_label })
 }
 
 /// Maximum character length for newly created tags or labels that don't match existing ones.

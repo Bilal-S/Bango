@@ -5,7 +5,18 @@
 - No unwrapped `unwrap()`, `expect()`, or panics in library/application code. Use `?` and proper error types.
 - No `any` types in TypeScript. Use `unknown` and narrow with type guards if type is truly unknown.
 - All code must pass `npm run check:all` before committing. Pre-commit hooks enforce this.
-- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`
+- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`.
+  Never auto-add your agent name as a co-author (`Co-Authored-By:` trailer) to commit messages.
+- Never manually modify `CHANGELOG.md` or any file marked as auto-generated.
+- Never use the em dash character (`—`).
+  Use a plain dash (`-`) instead in all generated text and comments.
+
+## Engineering Principles
+
+- When making technical decisions, do not over-weight development cost.
+  Prefer quality, simplicity, robustness, scalability, and long-term maintainability.
+- When writing or substantially editing long Markdown files, put each full sentence on its own physical line.
+  Preserve normal Markdown structure, but avoid wrapping multiple sentences onto one physical line.
 
 ## Rust (src-tauri/)
 
@@ -14,6 +25,7 @@
 - Use `thiserror` for library-level errors (RIS parsing, deduplication, LLM client).
 - Never use `unwrap()` or `expect()` outside of tests. Clippy warns on both.
 - Return `Result<T, E>` from all fallible functions.
+- Use tauri-pilot mcp for E2E testing. Check whether dev server is running before attempting to start another instance.
 - **System/Generic Error Logging**: For system-wide operational events or errors not tied to a specific article (e.g., scraping outcomes, global LLM client failures, database initialization errors), use `audit_repo::log_error(conn, details)`. This creates an audit entry with `article_id = NULL` and `action = 'error'`. Do not use this for article-specific events.
 
 ### Code Style
@@ -22,7 +34,6 @@
 - No `clone()` unless the borrow checker truly requires it. Prefer references.
 - Use `impl Trait` for return types in function signatures when appropriate.
 - Prefer iterators over `for` loops with mutable accumulators.
-- Do not use EmDash (—) in any generated user text or comments
 
 ### LLM Calls (Orchestrator Pattern)
 - All LLM calls MUST go through `LlmOrchestrator` (registered as Tauri managed state).
@@ -179,6 +190,27 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
   the PR. `scripts/check-test-inventory.sh` enforces this mechanically by parsing
   the plan doc's inventory tables and grepping the named test files; it is wired
   into `npm run check:all` via the `check:test-inventory` script.
+- **Tier 3 screening modes test coverage.** The three `screening_mode` values
+  (`abstract`, `enhanced`, `two_stage`) must each have at least one integration
+  test exercising the end-to-end engine path (`run_sync` with a `ScreeningConfig`
+  carrying that mode + a mock `LlmClient`). The pure retrieval layer
+  (`screening::chunk_retrieval::rank_chunks_by_criteria`) MUST be unit-tested
+  independently of the engine (it has no I/O). The pure prompt helper
+  (`screening::prompt::build_screening_prompt`) must have tests asserting the
+  `## Supporting Evidence from Full Text` block is present when
+  `ArticleEntry.full_text_evidence = Some(...)` and absent when `None` (backward
+  compat for abstract-mode prompts). Two-stage tests must verify that clear-cut
+  confidence values skip stage 2 and borderline values trigger it, plus that
+  borderline articles carry both `ai_screen` and `ai_screen_enhanced` audit
+  entries.
+
+### Bug Fixes & Engineering Hygiene
+
+- When doing bug fixes, always start with reproducing the bug in an E2E setting
+  as closely aligned with how an end user would experience it as possible.
+  This makes sure you find the real problem so your fix will actually solve it.
+- Apply the same high standard to engineering excellence: lint, test failures, and test flakiness.
+  If you encounter one - even if it is not caused by what you are working on right now - still get it fixed.
 
 ## Tauri App Diagnostics & Testing
 
@@ -187,3 +219,5 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
   - Perform clicks and element queries (`mcp_tauri-pilot_click`, `mcp_tauri-pilot_wait`, `mcp_tauri-pilot_text`).
   - Retrieve current state, console logs, and network logs (`mcp_tauri-pilot_logs`, `mcp_tauri-pilot_network`).
   - Capture screenshots to visually inspect layout issues (`mcp_tauri-pilot_screenshot`).
+- When end-to-end testing a product, be picky about the UI you see and be obsessed with pixel perfection.
+  If something clearly looks off, even if it is not directly related to what you are doing, inform user to approve the fix along with the current task.

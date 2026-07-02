@@ -88,9 +88,74 @@ describe each durable boundary so agents can locate the right area. Create a chi
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
   (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:
-  `pdf_extract.rs`, `sections.rs`, `chunking.rs`). App entry
+  `pdf_extract.rs`, `sections.rs`, `chunking.rs`, `text_tokens.rs` [Tier 3 shared
+  tokenizer for FTS5 BM25 + screening chunk scoring]). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
+  - **`src-tauri/src/db/chunk_repo.rs`** - Tier 3 article chunk storage (`article_chunks`
+    table, created by migration v003). Populated at attach time by
+    `commands::full_text::populate_chunks_for_attached_text` (extract_sections +
+    chunk_sections) and cleared on detach. Consumed by `screening::chunk_retrieval` for
+    enhanced/two_stage screening evidence. Exposes `replace_chunks_for_article`,
+    `list_chunks_for_article`, `delete_chunks_for_article`, `count_chunks_for_article`,
+    `get_articles_with_full_text_missing_chunks` (screening-start guard,
+    `has_full_text=1` AND zero chunks), `get_articles_with_full_text` (Settings
+    "Rebuild text chunks" button, `has_full_text=1` regardless of chunks, so a
+    corrupted/partial/outdated set is repaired), `count_articles_with_full_text`.
+    Tested in `tests/chunk_retrieval_test.rs`.
+  - **`src-tauri/src/screening/chunk_retrieval.rs`** - Tier 3 criteria-targeted chunk
+    retrieval (pure, `#[must_use]`). `rank_chunks_by_criteria(chunks, inc, exc, top_k,
+    max_chunk_words, budget)` scores chunks by criteria-token TF density (shared
+    `utils::text_tokens` tokenizer), boosts Methods-section matches, filters oversized
+    chunks, and enforces a per-article word budget. Constants: `DEFAULT_TOP_K=2`,
+    `DEFAULT_MAX_CHUNK_WORDS=600`, `METHODS_BOOST=0.25`, `DEFAULT_CHUNK_BUDGET_PER_ARTICLE=2400`.
+    11 inline tests + the §T3.7 inventory.
+  - **`src-tauri/src/screening/` Tier 3 Phases C/D/E (enhanced + two_stage modes)** -
+    `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
+    (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,
+    `chunk_budget_per_article`); `run_sync` gains a `config` param. **Enhanced**: per
+    article with `has_full_text=1`, retrieves top-K chunks → `rank_chunks_by_criteria` →
+    `format_chunks_as_evidence` (pure `#[must_use]`) → attaches as
+    `ArticleEntry.full_text_evidence`; one batched LLM call categorized as
+    `LlmRequestType::EnhancedScreening`. **Two-stage**: stage 1 abstract-only; borderline
+    articles (`two_stage_low <= conf < two_stage_high`, default `[0.4,0.7)`) with full text
+    get a second per-article evidence call that overrides stage 1; both passes flow through
+    `resolve_decision` and write audit entries (`ai_screen` stage 1, `ai_screen_enhanced`
+    stage 2). `ScreeningProgress` gains `stage`/`stage_total` for the progress sub-line.
+    `prompt.rs` `ArticleEntry` gains `full_text_evidence: Option<String>`; the prompt emits
+    a `## Supporting Evidence from Full Text` block (chunks prefixed `[§Methods]`/`[§Results]`)
+    only when `Some` (abstract-mode prompts stay byte-identical). `llm_client.rs` gains a
+    non-breaking `send_with_type(system, user, LlmRequestType)` default method (delegates to
+    `send`); only `HttpLlmClient` overrides it to route the type through the orchestrator.
+    `commands/screening.rs` reads mode + params from `app_settings` and runs
+    `ensure_chunks_for_full_text_articles(conn, force=false)` inside the spawned
+    background task before `run_sync` (NOT in the synchronous IPC handler, so the
+    PDF-parse + chunk-write pass does not freeze the UI by holding the DbState
+    mutex); the Settings "Rebuild text chunks" button calls the same fn with
+    `force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
+    `get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` commands.
+    Migration `v004_ai_screen_enhanced.rs` adds `ai_screen_enhanced` to the
+    `audit_entries.action` CHECK constraint (SQLite CHECK constraints can't be ALTERed;
+    uses the rename-create-copy-drop pattern). **Stage-2 progress**: every early-exit
+    arm in the two-stage loop (evidence filtered out, LLM error, parse mismatch,
+    `"error"` decision) updates `ScreeningProgress.stage` so the `X/Y borderline`
+    sub-line never stalls. **Token accumulation**: `update_article_after_screening`
+    writes `actual_tokens = COALESCE(actual_tokens, 0) + ?` so the stage-2 cost
+    adds to (not overwrites) stage-1 for borderline articles. **Accurate enhanced
+    audit label**: the evidence-sections label written to the `ai_screen_enhanced`
+    audit detail is captured during retrieval (`ArticleEvidence.sections_label`,
+    the sections that *actually* matched), not derived from the configured
+    allow-list. **Mode-aware token estimation** (Gap 5): `token_estimation::
+    worst_case_per_article_tokens` (pure, `#[must_use]`) computes the §4.3
+    worst-case footprint per active mode (Abstract = abstract+template;
+    Enhanced adds `chunk_budget/4`; Two-stage adds `chunk_budget/4 *
+    two_stage_expected_borderline_fraction`); both `get_screening_readiness` and
+    `estimate_screening_tokens` route through it so their estimates stay in sync.
+    Tested in `tests/screening_prompt_test.rs` (3 evidence-block tests) +
+    `tests/screening_two_stage_test.rs` (8 two-stage/enhanced tests: 5 original
+    + Gap 3 progress-on-filtered + Gap 6 token-accumulation + Gap 7 accurate
+    audit-label) + 1 budget-guard integration test + `tests/token_estimation_test.rs`
+    (4 pure-helper cases).
   - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
     `fulltext_storage_dir`, `flag_premium`, `biblio_needs_refresh` (the bibliometric
     staleness flag), and `wiki_needs_refresh` (the LLM Wiki staleness flag). `mark_biblio_needs_refresh(conn)` is called by every mutation that
@@ -286,11 +351,14 @@ describe each durable boundary so agents can locate the right area. Create a chi
     source tables (aims, criteria, articles, tags, labels, article_tags/labels, audit,
     reference_papers, article_reference_links, llm_config). The 9 `biblio_*` tables are NOT
     exported - they are dynamically generated by `biblio_normalize` and would bloat backups
-    and trigger UNIQUE constraint violations on import. After import,
-    `mark_biblio_needs_refresh` ensures the frontend auto-regenerates them. The import code
-    uses `INSERT OR IGNORE` + ID-remap maps for `reference_papers`, `biblio_authors`,
-    `biblio_institutions`, and `biblio_terms` (all have UNIQUE constraints) to handle older
-    backups that may still contain biblio data.
+    and trigger UNIQUE constraint violations on import. `article_chunks` is also NOT exported
+    - it is regenerated at attach time; the import purge sequence explicitly `DELETE FROM
+    article_chunks` before wiping `articles` because `PRAGMA foreign_keys=OFF` during import
+    prevents the `ON DELETE CASCADE` from firing. After import,
+    `mark_biblio_needs_refresh` ensures the frontend auto-regenerates the biblio tables. The
+    import code uses `INSERT OR IGNORE` + ID-remap maps for `reference_papers`,
+    `biblio_authors`, `biblio_institutions`, and `biblio_terms` (all have UNIQUE constraints)
+    to handle older backups that may still contain biblio data.
   - **`src-tauri/src/export/legacy_project.rs`** - reads the old single-table
     `article_references` schema and emits a current-format `ProjectBackup` JSON, deduplicating
     rows into `reference_papers` (by DOI -> title+authors+year) + `article_reference_links`.
@@ -456,7 +524,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
-    `src/styles/help-shared.css`. `settings/` holds the five settings sub-components consumed by
+    `src/styles/help-shared.css`. `settings/` holds the six settings sub-components consumed by
     `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
     connection details + parameters + Revert/Get Models/Test Connection + test-result/error
     feedback in one bordered `<section>`), `settings-project-management.vue` (import/export/delete
@@ -466,8 +534,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
     auto-navigate-after-decision, full-text-summaries [auto-fire whole-paper summary on attach],
     section-summaries [T1.3: auto-fire per-section summaries on attach; independent of
     full-text-summaries; manual `auto_awesome` button always works regardless]),
-    `settings-full-text-storage.vue` (storage dir picker), `settings-diagnostics.vue` (error log).
-    Shared card chrome for these lives in `settings-card-shared.css`.
+    `settings-full-text-storage.vue` (storage dir picker),
+    `settings-notification-history.vue` (in-memory toast history viewer; newest-first list with
+    type-colored dots, timestamps, and a Clear History button; reads the `history` ref from
+    `use-toast`; sits immediately before Diagnostics in the card stack), and
+    `settings-diagnostics.vue` (error log). Shared card chrome for these lives in
+    `settings-card-shared.css`.
   - **`src/composables/`** - Vue composables. `use-startup-upgrade.ts`
     (silent legacy DB upgrade orchestration: `getStartupStatus` calls the backend
     `get_startup_status`, `performLegacyUpgrade` calls `perform_legacy_upgrade`;

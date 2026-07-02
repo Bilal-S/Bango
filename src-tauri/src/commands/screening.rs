@@ -3,13 +3,15 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
 
+use crate::db::app_settings_repo::{self, ScreeningMode};
 use crate::db::article_repo;
+use crate::db::chunk_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::LlmOrchestrator;
-use crate::screening::engine::{ScreeningEngine, ScreeningProgress};
+use crate::screening::engine::{ScreeningConfig, ScreeningEngine, ScreeningProgress};
 use crate::screening::llm_client::HttpLlmClient;
 use crate::screening::token_estimation;
 
@@ -77,23 +79,33 @@ pub async fn get_screening_readiness(
         let total_unscreened = article_repo::count_unscreened_working(&conn)?;
 
         let token_warning = if total_unscreened > 0 {
-            let config = llm_config_repo::get_config_no_decrypt(&conn)?
+            let llm_config = llm_config_repo::get_config_no_decrypt(&conn)?
                 .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
-            let max_chars = article_repo::max_article_char_len(&conn)?;
-            let worst_case_tokens = max_chars / 4; // chars/4 heuristic
+            // Tier 3 Gap 5: mode-aware worst-case footprint per §4.3.
+            let mode = app_settings_repo::get_screening_mode(&conn)?;
+            let chunk_budget = app_settings_repo::get_chunk_budget_per_article(&conn)?;
+            let borderline_fraction =
+                app_settings_repo::get_two_stage_expected_borderline_fraction(&conn)?;
 
+            let max_chars = article_repo::max_article_char_len(&conn)?;
+            let abstract_tokens = max_chars / 4; // chars/4 heuristic
             let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
             let template_tokens = token_estimation::estimate_tokens(&template_text);
+            let worst_case = token_estimation::worst_case_per_article_tokens(
+                mode,
+                abstract_tokens,
+                template_tokens,
+                chunk_budget,
+                borderline_fraction,
+            );
 
-            let threshold = (config.context_window_tokens as f64 * 0.8) as usize;
-            let total = worst_case_tokens + template_tokens;
-
-            if total > threshold {
+            let threshold = (llm_config.context_window_tokens as f64 * 0.8) as usize;
+            if worst_case > threshold {
                 Some(format!(
                     "Estimated worst-case per-article tokens ({}) exceed 80% of context window ({}). \
                          Articles with large abstracts may produce truncated responses.",
-                    total, threshold,
+                    worst_case, threshold,
                 ))
             } else {
                 None
@@ -197,6 +209,31 @@ pub async fn start_screening(
         ));
     }
 
+    // Tier 3: read the screening mode + params from `app_settings` and build
+    // the ScreeningConfig the engine consumes. Defaults preserve abstract-only
+    // behavior exactly when no mode key is set.
+    //
+    // NOTE: the chunk-backfill guard (`ensure_chunks_for_full_text_articles`)
+    // previously ran inside this synchronous block, holding the DbState mutex
+    // for the full PDF-parse + chunk-write pass and freezing the Tauri UI. It
+    // now runs inside the spawned background task below, before `run_sync`,
+    // so the IPC handler returns immediately and the lock is held only for the
+    // millisecond-scale SQLite writes the engine itself performs.
+    let screening_config = {
+        let conn = db_state.conn.lock().map_err(|e| {
+            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mode = app_settings_repo::get_screening_mode(&conn)?;
+        ScreeningConfig {
+            mode,
+            enhanced_top_k: app_settings_repo::get_enhanced_top_k(&conn)?,
+            enhanced_sections: app_settings_repo::get_enhanced_screening_sections(&conn)?,
+            two_stage_low: app_settings_repo::get_two_stage_low(&conn)?,
+            two_stage_high: app_settings_repo::get_two_stage_high(&conn)?,
+            chunk_budget_per_article: app_settings_repo::get_chunk_budget_per_article(&conn)?,
+        }
+    };
+
     // Create and store engine in state (clamp batch_size to 1–15)
     let effective_batch_size = batch_size.unwrap_or(1).clamp(1, 15) as usize;
     let engine = Arc::new(ScreeningEngine::with_batch_size(effective_batch_size));
@@ -213,8 +250,30 @@ pub async fn start_screening(
     tokio::spawn(async move {
         let db = app_handle.state::<DbState>();
         let screening = app_handle.state::<ScreeningState>();
+
+        // Tier 3: for enhanced / two-stage, backfill chunks for any article
+        // with full text but no chunks (pure CPU, no LLM). Runs here in the
+        // background task - not in the IPC handler - so the DbState mutex is
+        // held only per-article during chunk write, not for the whole pass,
+        // and the UI stays responsive. `force=false` so already-chunked
+        // articles are skipped (the Settings "Rebuild" button uses `force=true`).
+        if screening_config.mode != ScreeningMode::Abstract {
+            if let Ok(conn) = db.conn.lock() {
+                let _ =
+                    crate::commands::full_text::ensure_chunks_for_full_text_articles(&conn, false);
+            }
+        }
+
         let _ = engine
-            .run_sync(&db.conn, &llm, delay_ms, criteria, aims, Some(app_handle.clone()))
+            .run_sync(
+                &db.conn,
+                &llm,
+                delay_ms,
+                criteria,
+                aims,
+                screening_config,
+                Some(app_handle.clone()),
+            )
             .await;
 
         // Screening decisions change article statuses (included/rejected), which
@@ -311,21 +370,75 @@ pub fn estimate_screening_tokens(db_state: State<'_, DbState>) -> Result<Option<
         .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
 
     let max_len = article_repo::max_article_char_len(&conn)?;
-
     if max_len == 0 {
         return Ok(None);
     }
 
+    // Tier 3 Gap 5: mode-aware worst-case footprint per §4.3. Previously this
+    // always computed `abstract_tokens + template_tokens`, ignoring the
+    // Enhanced chunk budget and the Two-stage borderline overhead. Now both
+    // command entry points (`get_screening_readiness`, `estimate_screening_tokens`)
+    // route through the same pure helper so their estimates stay in sync.
+    let mode = app_settings_repo::get_screening_mode(&conn)?;
+    let chunk_budget = app_settings_repo::get_chunk_budget_per_article(&conn)?;
+    let borderline_fraction = app_settings_repo::get_two_stage_expected_borderline_fraction(&conn)?;
+
     let template_text = crate::screening::prompt::SYSTEM_PROMPT.to_string();
     let template_tokens = token_estimation::estimate_tokens(&template_text);
-
-    let worst_case_article_tokens = max_len / 4;
-
-    let result = token_estimation::check_context_window(
+    let abstract_tokens = max_len / 4;
+    let worst_case = token_estimation::worst_case_per_article_tokens(
+        mode,
+        abstract_tokens,
         template_tokens,
-        &[worst_case_article_tokens],
-        config.context_window_tokens as usize,
+        chunk_budget,
+        borderline_fraction,
     );
 
-    Ok(result)
+    let threshold = (config.context_window_tokens as f64 * 0.8) as usize;
+    if worst_case > threshold {
+        Ok(Some(format!(
+            "Estimated worst-case per-article tokens ({}) exceed 80% of context window ({}). \
+             Articles with large abstracts may produce truncated responses.",
+            worst_case, threshold,
+        )))
+    } else {
+        Ok(None)
+    }
+}
+
+// ── Tier 3 screening-mode commands ──────────────────────────────────────────
+
+/// Read the active screening mode (`abstract` | `enhanced` | `two_stage`).
+/// Powers the Settings -> Screening Preferences radio-card selector.
+#[tauri::command]
+pub fn get_screening_mode(db_state: State<'_, DbState>) -> Result<ScreeningMode, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    app_settings_repo::get_screening_mode(&conn)
+}
+
+/// Persist the active screening mode.
+#[tauri::command]
+pub fn set_screening_mode(
+    db_state: State<'_, DbState>,
+    mode: ScreeningMode,
+) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    app_settings_repo::set_screening_mode(&conn, mode)
+}
+
+/// Count articles with full text attached. Drives the Settings gate that
+/// disables Enhanced/Two-stage mode until at least one full-text article exists.
+#[tauri::command]
+pub fn get_full_text_article_count(db_state: State<'_, DbState>) -> Result<i64, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    chunk_repo::count_articles_with_full_text(&conn)
 }

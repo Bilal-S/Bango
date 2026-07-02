@@ -225,7 +225,17 @@ export interface ScreeningProgress {
   currentArticleTitles: string[];
   elapsedMs: number;
   estimatedRemainingMs: number | null;
+  /** Tier 3 two-stage: stage label sub-line (e.g. "Stage 2: 3/12 borderline"). */
+  stage?: string | null;
+  /** Tier 3 two-stage: per-stage total (borderline article count). */
+  stageTotal?: number | null;
 }
+
+/**
+ * Tier 3 screening mode (`abstract` | `enhanced` | `two_stage`). Mirrors the
+ * Rust `ScreeningMode` enum (`serde(rename_all = "snake_case")`).
+ */
+export type ScreeningMode = 'abstract' | 'enhanced' | 'two_stage';
 
 export interface ScreeningReadiness {
   totalWorking: number;

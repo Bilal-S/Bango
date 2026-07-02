@@ -53,7 +53,53 @@ pub const ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT: &str =
 /// it must not invent visual details not present in the caption.
 pub const FIGURE_DESCRIPTION_SYSTEM_PROMPT: &str = include_str!("figure_description_prompt.md");
 
+/// Tier 1 fallback: simple markdown-structured prompt for models that struggle
+/// with complex JSON schemas (e.g., reasoning models that consume their output
+/// budget on thinking tokens). Parsed by `parse_markdown_summary`.
+pub const ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT: &str =
+    include_str!("ai_article_summary_markdown_fallback_prompt.md");
+
 use crate::error::AppError;
+
+/// Strip markdown code fences (```` ```json ```` / ```` ``` ````) from an LLM
+/// response and trim whitespace.
+///
+/// **Why this exists (not `screening_engine::extract_json`):** `extract_json`
+/// was written for the screening prompt, whose schema is a top-level JSON
+/// **array**. Its Strategy 3 (`extract_array_from_object`) actively unwraps the
+/// first nested array-of-objects it finds inside a JSON object. The article
+/// summary schema is a top-level JSON **object** that legitimately contains
+/// arrays-of-objects (e.g. `section_summaries`, figure descriptions). Feeding a
+/// valid summary object through `extract_json` silently corrupts it into just
+/// the `section_summaries` array, which then fails the substantive-content
+/// check and triggers a spurious markdown-fallback retry.
+///
+/// This helper does ONE thing: strip code fences. It does not attempt any
+/// array/object shape normalization. The caller's `serde_json::from_str` is the
+/// single source of truth for JSON validity.
+///
+/// Pure function: no I/O.
+#[must_use]
+pub fn strip_code_fences(raw: &str) -> String {
+    let trimmed = raw.trim();
+    // Strip ```json or ``` prefix.
+    let after_open = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .map(|rest| rest.trim_start());
+    let Some(rest) = after_open else {
+        // No code fence — return as-is (already trimmed).
+        return trimmed.to_string();
+    };
+    // Strip the trailing ``` if present.
+    if let Some(body) = rest.strip_suffix("```") {
+        body.trim().to_string()
+    } else {
+        // Opening fence with no closing fence (truncated response). Return the
+        // remainder so the caller's JSON parser can report a clean error.
+        rest.to_string()
+    }
+}
 
 /// One LLM-described figure/table caption (Tier 2 Phase 4).
 ///
@@ -67,6 +113,31 @@ pub struct FigureDescription {
     /// The verbatim caption text extracted by `extract_captions`.
     #[serde(default)]
     pub caption: String,
+    /// The grounded LLM summary of what the caption states.
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Tier 4.2/4.3: one LLM-described table caption with the optional `markdown`
+/// GFM column for tables-as-GFM rendering. Mirrors the TS `TableDescription`
+/// interface in `src/composables/use-ai-summary.ts`.
+///
+/// Stored in the `full_text_ai_summary` JSON blob under `tables`. The
+/// `markdown` field carries the preserved GFM rows extracted by
+/// `detect_markdown_tables` (T2.2), so the frontend can render the table
+/// natively instead of showing the caption + description text only. Old blobs
+/// without `markdown` render text-only (the field is optional / `#[serde(default)]`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TableDescription {
+    /// The table number as a string: "1", "2a".
+    pub number: String,
+    /// The verbatim extracted caption text.
+    #[serde(default)]
+    pub caption: String,
+    /// GFM markdown rows extracted from the full text (T2.2). Empty when no
+    /// `detect_markdown_tables` match was found for this table's number.
+    #[serde(default)]
+    pub markdown: String,
     /// The grounded LLM summary of what the caption states.
     #[serde(default)]
     pub description: String,
@@ -106,7 +177,11 @@ pub fn build_figure_description_prompt(
 pub fn parse_figure_descriptions_response(
     response: &str,
 ) -> Result<Vec<FigureDescription>, AppError> {
-    let cleaned = crate::screening::engine::extract_json(response);
+    // The figure-description prompt returns a bare JSON array. We only need
+    // code-fence stripping here, not the screening `extract_json` array-unwrap
+    // heuristic (which corrupts object-shaped responses — see
+    // `strip_code_fences` docs).
+    let cleaned = strip_code_fences(response);
     let value: serde_json::Value = serde_json::from_str(&cleaned)
         .map_err(|e| AppError::Import(format!("Invalid JSON for figure descriptions: {e}")))?;
     let arr = value.as_array().ok_or_else(|| {
@@ -155,6 +230,322 @@ pub fn merge_figure_descriptions_into_blob(
         obj.insert("schema_version".to_string(), serde_json::Value::from(2));
     }
     value.to_string()
+}
+
+/// Merge a freshly-generated summary blob into the existing blob, preserving
+/// `figures`/`tables` (and any other keys the summary path does not produce).
+///
+/// This closes the `set_ai_summary` overwrite footgun (Tier 4 Phase 0): without
+/// it, `generate_article_ai_summary` wipes `figures`/`tables` on regen because
+/// the freshly-generated summary blob does not include them. With this helper,
+/// the summary path mirrors `merge_figure_descriptions_into_blob`'s
+/// preserve-on-write contract, so the two commands compose safely regardless
+/// of ordering.
+///
+/// - `existing_blob`: the current JSON string (may be empty or malformed;
+///   malformed blobs are treated as empty so the merge never panics).
+/// - `fresh_summary_json`: the freshly-generated summary blob (must be a JSON
+///   object; if it is malformed, the existing blob is returned unchanged with
+///   `schema_version` bumped per `force_v2`).
+/// - `force_v2`: when true, stamps `schema_version: 2` on the merged blob
+///   (passed as `used_section_path` from the caller so the section-aware path
+///   guarantees v2 per the T1.3 contract). When false, preserves the existing
+///   `schema_version` if present (no downgrade).
+///
+/// Mirrors `merge_figure_descriptions_into_blob`'s pure, no-panic contract.
+/// Returns the serialized JSON string ready for `article_repo::set_ai_summary`.
+#[must_use]
+pub fn merge_summary_into_blob(
+    existing_blob: Option<&str>,
+    fresh_summary_json: &str,
+    force_v2: bool,
+) -> String {
+    let mut merged: serde_json::Value = existing_blob
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    let fresh: serde_json::Value = serde_json::from_str(fresh_summary_json).unwrap_or_else(|_| {
+        // Malformed fresh summary: return the existing blob (with v2 stamp per
+        // force_v2). Never panic; the caller's own validation should have caught
+        // this, but the helper stays defensive.
+        if force_v2 {
+            ensure_schema_version_v2(&mut merged);
+        }
+        merged.clone()
+    });
+    // Overlay the fresh summary's keys onto the existing object. Keys the
+    // summary produces (summary_150_250_words, section_summaries, etc.) are
+    // overwritten; keys it does NOT produce (figures, tables) are preserved.
+    if let (Some(existing_obj), Some(fresh_obj)) = (merged.as_object_mut(), fresh.as_object()) {
+        for (k, v) in fresh_obj {
+            existing_obj.insert(k.clone(), v.clone());
+        }
+    } else if fresh.is_object() {
+        // Existing was malformed/non-object; the fresh summary wins outright.
+        merged = fresh;
+    }
+    if force_v2 {
+        ensure_schema_version_v2(&mut merged);
+    }
+    merged.to_string()
+}
+
+/// Tier 4.2: Build the synthesis user prompt that asks the LLM to synthesize a
+/// unified 150-250 word digest FROM the per-section summaries (so the digest is
+/// consistent with, not contradictory to, the section data).
+///
+/// The prompt receives the paper title + field + the per-section summaries as
+/// input context, and asks for a single `summary_150_250_words` digest plus
+/// `key_insights` + `keywords` that incorporate the specific facts from the
+/// sections. Pure function: no I/O.
+#[must_use]
+pub fn build_synthesis_prompt(title: &str, field: &str, section_summaries_json: &str) -> String {
+    format!(
+        "## Paper Title\n{title}\n\n## Field\n{field}\n\n\
+         ## Per-Section Summaries (synthesize the digest FROM these)\n\
+         {section_summaries_json}\n\n\
+         Synthesize a unified 150-250 word digest (`summary_150_250_words`) that \
+         incorporates the specific facts from the sections above. Also return \
+         `key_insights` (3-5 bullets) and `keywords` (5-10 terms) consistent with \
+         the section data. Return ONLY a JSON object with keys: \
+         `summary_150_250_words`, `key_insights`, `keywords`."
+    )
+}
+
+/// Tier 4.2: Merge the per-section summaries, figure/table descriptions, and
+/// synthesis digest into one unified blob. Single-write composition: the caller
+/// produces all parts, then this helper merges them into one `set_ai_summary`
+/// write so there is no intermediate state where some keys are missing.
+///
+/// - `existing_blob`: the current JSON string (preserves unknown keys; malformed
+///   blobs are treated as empty so the merge never panics).
+/// - `section_summaries_json`: the `section_summaries` array as a JSON string
+///   (from T1.3's per-section calls).
+/// - `figures` / `tables`: the LLM-described figure/table captions (T2.1).
+/// - `synthesis_digest_json`: the synthesis call's `{summary_150_250_words,
+///   key_insights, keywords}` blob (T4.2 step 4).
+///
+/// Stamps `schema_version: 2`. Returns the serialized JSON string ready for
+/// `article_repo::set_ai_summary`.
+#[must_use]
+pub fn merge_unified_blob(
+    existing_blob: Option<&str>,
+    section_summaries_json: &str,
+    figures: Vec<FigureDescription>,
+    tables: Vec<TableDescription>,
+    synthesis_digest_json: &str,
+) -> String {
+    // Start from the existing blob (preserves unknown keys like `structured_extraction`).
+    let mut value: serde_json::Value = existing_blob
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    // Overlay the section_summaries array (parse the JSON string; on malformed
+    // input, skip the key rather than panicking).
+    if let Ok(arr) = serde_json::from_str::<serde_json::Value>(section_summaries_json) {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("section_summaries".to_string(), arr);
+        }
+    }
+
+    // Overlay figures + tables.
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("figures".to_string(), serde_json::to_value(&figures).unwrap_or_default());
+        obj.insert("tables".to_string(), serde_json::to_value(&tables).unwrap_or_default());
+    }
+
+    // Overlay the synthesis digest keys (summary_150_250_words, key_insights, keywords).
+    if let Ok(digest) = serde_json::from_str::<serde_json::Value>(synthesis_digest_json) {
+        if let (Some(obj), Some(digest_obj)) = (value.as_object_mut(), digest.as_object()) {
+            for (k, v) in digest_obj {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+    }
+
+    // Stamp schema_version: 2.
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("schema_version".to_string(), serde_json::Value::from(2));
+    }
+
+    value.to_string()
+}
+
+/// Tier 1 fallback: Parse a markdown-structured summary response into the same
+/// JSON blob shape the primary JSON path produces. This is the robust fallback
+/// for models that struggle with complex JSON schemas (e.g., reasoning models
+/// that consume their output budget on thinking tokens).
+///
+/// Expected markdown format (headings + body):
+/// ```text
+/// ## Field
+/// medicine / public_health
+///
+/// ## Summary
+/// <150-250 word digest>
+///
+/// ## Key Insights
+/// - Insight 1
+/// - Insight 2
+///
+/// ## Keywords
+/// sugar, tax, SSB, obesity
+///
+/// ## Structured Extraction
+/// study_type: RCT
+/// population: N=1000 children
+/// ```
+///
+/// Unknown headings are ignored. Missing headings produce empty defaults.
+/// `schema_version` is stamped to `2` so the frontend renders the enriched view.
+///
+/// Pure function: no I/O. Returns a JSON string ready for `set_ai_summary`.
+#[must_use]
+pub fn parse_markdown_summary(markdown: &str) -> String {
+    let mut field = String::new();
+    let mut subfield = String::new();
+    let mut summary = String::new();
+    let mut key_insights: Vec<String> = Vec::new();
+    let mut keywords: Vec<String> = Vec::new();
+    let mut structured_extraction: serde_json::Map<String, serde_json::Value> =
+        serde_json::Map::new();
+
+    // Split into heading-delimited sections.
+    let mut current_heading: Option<&str> = None;
+    let mut current_body = String::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") {
+            // Flush the previous section.
+            flush_section(
+                current_heading,
+                &current_body,
+                &mut field,
+                &mut subfield,
+                &mut summary,
+                &mut key_insights,
+                &mut keywords,
+                &mut structured_extraction,
+            );
+            current_heading = Some(trimmed.trim_start_matches("## ").trim());
+            current_body.clear();
+        } else {
+            current_body.push_str(line);
+            current_body.push('\n');
+        }
+    }
+    // Flush the last section.
+    flush_section(
+        current_heading,
+        &current_body,
+        &mut field,
+        &mut subfield,
+        &mut summary,
+        &mut key_insights,
+        &mut keywords,
+        &mut structured_extraction,
+    );
+
+    // Build the blob with safe defaults.
+    let blob = serde_json::json!({
+        "schema_version": 2,
+        "field": field,
+        "subfield": subfield,
+        "structured_extraction": structured_extraction,
+        "summary_150_250_words": summary,
+        "key_insights": key_insights,
+        "keywords": keywords,
+    });
+    blob.to_string()
+}
+
+/// Helper: parse a heading section's body into the appropriate fields.
+///
+/// `flush_section` has 6 distinct mutable output targets (field, subfield,
+/// summary, key_insights, keywords, structured_extraction) plus 2 inputs
+/// (heading, body). Each is a separate semantic destination, so the signature
+/// is clearer than introducing a builder/accumulator struct for an internal
+/// helper.
+#[allow(clippy::too_many_arguments)]
+fn flush_section(
+    heading: Option<&str>,
+    body: &str,
+    field: &mut String,
+    subfield: &mut String,
+    summary: &mut String,
+    key_insights: &mut Vec<String>,
+    keywords: &mut Vec<String>,
+    structured_extraction: &mut serde_json::Map<String, serde_json::Value>,
+) {
+    let Some(h) = heading else { return };
+    let trimmed_body = body.trim();
+    if trimmed_body.is_empty() {
+        return;
+    }
+    match h.to_lowercase().as_str() {
+        "field" => {
+            // "medicine / public_health" -> field="medicine", subfield="public_health"
+            let parts: Vec<&str> = trimmed_body.split('/').map(|s| s.trim()).collect();
+            if !parts.is_empty() {
+                *field = parts[0].to_string();
+                if parts.len() > 1 {
+                    *subfield = parts[1..].join(" / ");
+                }
+            }
+        }
+        "summary" => {
+            *summary = trimmed_body.to_string();
+        }
+        "key insights" | "insights" => {
+            // Bullet lines starting with `-` or `*`.
+            *key_insights = trimmed_body
+                .lines()
+                .filter_map(|l| {
+                    let l = l.trim();
+                    l.strip_prefix('-')
+                        .or_else(|| l.strip_prefix('*'))
+                        .map(|s| s.trim().to_string())
+                })
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        "keywords" => {
+            // Comma-separated or bullet-separated.
+            if trimmed_body.contains(',') {
+                *keywords = trimmed_body
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            } else {
+                *keywords = trimmed_body
+                    .lines()
+                    .filter_map(|l| {
+                        let l = l.trim();
+                        l.strip_prefix('-')
+                            .or_else(|| l.strip_prefix('*'))
+                            .map(|s| s.trim().to_string())
+                    })
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+        "structured extraction" | "extraction" => {
+            // `key: value` lines.
+            for line in trimmed_body.lines() {
+                let line = line.trim();
+                if let Some((k, v)) = line.split_once(':') {
+                    let k = k.trim().to_string();
+                    let v = v.trim().to_string();
+                    if !k.is_empty() && !v.is_empty() {
+                        structured_extraction.insert(k, serde_json::Value::String(v));
+                    }
+                }
+            }
+        }
+        _ => {} // Ignore unknown headings.
+    }
 }
 
 /// High-value section kinds that the section-aware summary extracts.

@@ -3,6 +3,8 @@ defineProps<{
   completed: number;
   total: number;
   percentage: number;
+  /** Tier 3 two-stage: optional stage sub-line (e.g. "Stage 2: 3/12 borderline"). */
+  stage?: string | null;
 }>();
 </script>
 
@@ -14,6 +16,7 @@ defineProps<{
     <div class="progress-bar__label">
       {{ completed }} / {{ total }} articles screened ({{ percentage }}%)
     </div>
+    <div v-if="stage" class="progress-bar__stage">{{ stage }}</div>
   </div>
 </template>
 
@@ -43,5 +46,12 @@ defineProps<{
 .progress-bar__label {
   font-size: var(--font-size-caption);
   color: var(--color-on-surface-variant);
+}
+
+.progress-bar__stage {
+  font-size: 11px;
+  color: var(--color-primary);
+  font-weight: 500;
+  margin-top: -0.125rem;
 }
 </style>

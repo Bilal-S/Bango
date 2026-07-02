@@ -569,16 +569,12 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<WikiPa
     Ok(hits)
 }
 
-/// A small set of English stop words dropped from the MATCH query to avoid
-/// surfacing only pages that happen to contain common particles. Tokens here
-/// are matched case-insensitively against lowercased input.
-const STOP_WORDS: &[&str] = &[
-    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it",
-    "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these",
-    "they", "this", "to", "was", "will", "with", "who", "what", "when", "where", "why", "how", "i",
-    "you", "we", "he", "she", "they", "me", "him", "her", "us", "do", "does", "did", "can",
-    "could", "would", "should", "my", "your", "our",
-];
+/// English stop words dropped from the MATCH query and from screening chunk
+/// scoring. The canonical list lives in `utils::text_tokens` so the Wiki FTS5
+/// BM25 index and the Tier 3 screening TF scorer share one source of truth.
+/// Re-exported here so existing references (`STOP_WORDS.contains(...)`) keep
+/// working without touching each call site.
+pub use crate::utils::text_tokens::STOP_WORDS;
 
 /// Build a safe, effective FTS5 MATCH expression from a natural-language query.
 ///

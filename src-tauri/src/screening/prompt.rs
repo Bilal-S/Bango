@@ -5,7 +5,13 @@ Act as a systematic literature review screening assistant. \
 Critically evaluate JSON array or article abstracts against research aims and criteria. \
 Cite specific sentences from the text to justify your decision. \
 Follow priority rules when criteria overlap or conflict. \
-Return matching inclusion or exclusion criteria ids. Format response only as ordered JSON object that matches the required schema.
+Return matching inclusion or exclusion criteria ids. Format response only as ordered JSON object that matches the required schema. \
+Where supporting full-text evidence is provided, use it to verify criteria matches. The primary decision rests on the abstract. \
+Evidence marked `[Source: AI Summary]` is a structured distillation - reliable for factual lookups \
+(study design, sample size) but may contain hallucinations; cross-check any summary fact against \
+the `[Source: Full Text - verbatim]` chunk when both are present. If the abstract, summary, and \
+verbatim chunk conflict, note the discrepancy in your reasoning and prefer the verbatim chunk \
+for specific sentences.
 
 Return a JSON array matching this schema, one object per article, in the same order as submitted:
 [
@@ -38,6 +44,18 @@ pub struct ArticleEntry {
     pub authors: String,
     pub year: Option<i32>,
     pub abstract_text: String,
+    /// Tier 3: retrieved full-text chunks (enhanced / two-stage mode), formatted as
+    /// `[§Methods] ...` / `[§Results] ...` lines. `None` in abstract mode (the
+    /// evidence block is omitted entirely so abstract-mode prompts are unchanged).
+    pub full_text_evidence: Option<String>,
+}
+
+impl ArticleEntry {
+    /// Build an `ArticleEntry` without full-text evidence (the abstract-mode shape).
+    /// Convenience constructor keeping existing call sites concise.
+    pub fn new(title: String, authors: String, year: Option<i32>, abstract_text: String) -> Self {
+        Self { title, authors, year, abstract_text, full_text_evidence: None }
+    }
 }
 
 pub struct ScreeningPromptInput {
@@ -157,6 +175,25 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         format!("[\n{}\n]", entries.join(",\n"))
     };
 
+    // Build the supporting-evidence section. Only articles carrying
+    // `full_text_evidence = Some(...)` contribute; in abstract mode every entry
+    // is `None`, the section is empty, and the prompt is byte-identical to the
+    // pre-Tier-3 shape (backward compat for existing prompt tests + cost).
+    let evidence_blocks: Vec<String> = input
+        .articles
+        .iter()
+        .filter_map(|a| a.full_text_evidence.as_ref().map(|ev| format!("### {}\n{}", a.title, ev)))
+        .collect();
+    let evidence_section = if evidence_blocks.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n## Supporting Evidence from Full Text \
+             (use ONLY to verify criteria; primary decision from abstract)\n{}\n",
+            evidence_blocks.join("\n")
+        )
+    };
+
     // Build existing tags/labels section
     let existing_tags_section = if input.existing_tags.is_empty() {
         String::new()
@@ -201,7 +238,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
 {existing_tags_section}
 {existing_labels_section}
 ## Articles
-{articles_json}"#,
+{articles_json}{evidence_section}"#,
         aims_list = aims_list,
         inclusion_header = inclusion_header,
         inclusion_list = inclusion_list,
@@ -211,6 +248,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         existing_tags_section = existing_tags_section,
         existing_labels_section = existing_labels_section,
         articles_json = articles_json,
+        evidence_section = evidence_section,
     )
 }
 

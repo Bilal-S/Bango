@@ -17,6 +17,7 @@
     "format:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo fmt --check",
     "check:all": "npm run type-check && npm run lint:check && npm run format:check && npm run format:rust && npm run lint:rust && npm run test",
     "test": "vitest run",
+    "check:test-inventory": "bash scripts/check-test-inventory.sh",
     "test:coverage": "vitest run --coverage",
     "coverage:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo llvm-cov --fail-under-lines 70",
     "test:watch": "vitest",

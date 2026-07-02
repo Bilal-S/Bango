@@ -20,6 +20,7 @@ fn make_single_article_input() -> ScreeningPromptInput {
             authors: "Author".to_string(),
             year: None,
             abstract_text: "Abstract".to_string(),
+            full_text_evidence: None,
         }],
         existing_tags: vec![],
         existing_labels: vec![],
@@ -174,6 +175,7 @@ fn test_build_prompt_contains_article_fields() {
             authors: "Doe, Jane; Smith, John".to_string(),
             year: Some(2024),
             abstract_text: "This paper reviews deep learning methods.".to_string(),
+            full_text_evidence: None,
         }],
         ..make_single_article_input()
     };
@@ -278,12 +280,14 @@ fn test_build_prompt_multiple_articles() {
                 authors: "Author A".to_string(),
                 year: Some(2023),
                 abstract_text: "Abstract one.".to_string(),
+                full_text_evidence: None,
             },
             ArticleEntry {
                 title: "Article Two".to_string(),
                 authors: "Author B".to_string(),
                 year: Some(2024),
                 abstract_text: "Abstract two.".to_string(),
+                full_text_evidence: None,
             },
         ],
         ..make_single_article_input()
@@ -323,6 +327,7 @@ fn test_prompt_token_estimation() {
             authors: "Author".to_string(),
             year: Some(2023),
             abstract_text: "a".repeat(200),
+            full_text_evidence: None,
         }],
         ..make_single_article_input()
     };

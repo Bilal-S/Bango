@@ -13,11 +13,38 @@ const storageInfo = ref<StorageInfo | null>(null);
 const storageLoading = ref(false);
 const storageError = ref<string | null>(null);
 
+// Tier 3: one-shot chunk rebuild for already-attached PDFs.
+interface RebuildChunksResult {
+  success: boolean;
+  chunked: number;
+  failed: number;
+  skipped: number;
+  message: string;
+}
+const fullTextArticleCount = ref(0);
+const rebuildLoading = ref(false);
+const rebuildResult = ref<RebuildChunksResult | null>(null);
+const rebuildError = ref<string | null>(null);
+
 async function loadStorageInfo(): Promise<void> {
   try {
     storageInfo.value = await invoke<StorageInfo>('get_fulltext_storage_dir');
+    fullTextArticleCount.value = await invoke<number>('count_articles_with_full_text');
   } catch (e) {
     storageError.value = String(e);
+  }
+}
+
+async function rebuildChunks(): Promise<void> {
+  rebuildLoading.value = true;
+  rebuildError.value = null;
+  rebuildResult.value = null;
+  try {
+    rebuildResult.value = await invoke<RebuildChunksResult>('rebuild_article_chunks');
+  } catch (e: unknown) {
+    rebuildError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    rebuildLoading.value = false;
   }
 }
 
@@ -90,6 +117,37 @@ loadStorageInfo();
       <p class="storage-dir__hint">
         Default: <code>{{ storageInfo.defaultPath }}</code>
       </p>
+
+      <!-- Tier 3: one-shot chunk rebuild for already-attached PDFs -->
+      <div class="rebuild-chunks">
+        <div class="rebuild-chunks__row">
+          <div class="rebuild-chunks__label">
+            <span class="rebuild-chunks__title">Text chunks for screening</span>
+            <span class="rebuild-chunks__desc">
+              Enhanced / Two-stage screening retrieves criteria-matched chunks from attached full
+              text. Rebuild if chunks are missing (e.g. PDFs attached before this feature shipped).
+            </span>
+          </div>
+          <button
+            class="btn btn--secondary"
+            :disabled="rebuildLoading || fullTextArticleCount < 1"
+            @click="rebuildChunks"
+          >
+            <span class="material-symbols-outlined btn__icon">cached</span>
+            Rebuild text chunks
+          </button>
+        </div>
+        <p v-if="rebuildLoading" class="rebuild-chunks__status">Rebuilding chunks...</p>
+        <p v-if="rebuildResult" class="rebuild-chunks__status rebuild-chunks__status--ok">
+          {{ rebuildResult.message }}
+        </p>
+        <p v-if="rebuildError" class="rebuild-chunks__status rebuild-chunks__status--err">
+          {{ rebuildError }}
+        </p>
+        <p v-if="fullTextArticleCount < 1" class="rebuild-chunks__hint">
+          No articles with full text attached yet.
+        </p>
+      </div>
     </div>
   </section>
 </template>
@@ -155,5 +213,57 @@ loadStorageInfo();
   background-color: var(--color-surface-container-low, #f5f2ff);
   padding: 0.0625rem 0.375rem;
   border-radius: 0.25rem;
+}
+
+/* ── Tier 3: chunk rebuild ── */
+.rebuild-chunks {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-surface-variant, #e4e1ee);
+}
+
+.rebuild-chunks__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.rebuild-chunks__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.rebuild-chunks__title {
+  font-size: var(--font-size-body, 14px);
+  font-weight: var(--font-weight-semibold, 600);
+  color: var(--color-on-surface, #1b1b24);
+}
+
+.rebuild-chunks__desc {
+  font-size: var(--font-size-caption, 12px);
+  color: var(--color-on-surface-variant, #464555);
+  line-height: 1.4;
+  max-width: 38ch;
+}
+
+.rebuild-chunks__status {
+  font-size: var(--font-size-caption, 12px);
+  margin-top: 0.5rem;
+}
+
+.rebuild-chunks__status--ok {
+  color: #15803d;
+}
+
+.rebuild-chunks__status--err {
+  color: #991b1b;
+}
+
+.rebuild-chunks__hint {
+  font-size: 11px;
+  color: var(--color-outline, #777587);
+  margin-top: 0.25rem;
 }
 </style>

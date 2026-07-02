@@ -52,7 +52,8 @@ pub fn get_next_unscreened_working_batch(
     limit: usize,
 ) -> Result<Vec<Article>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, sequence_id, title, abstract_text, authors, publication_year FROM articles \
+        "SELECT id, sequence_id, title, abstract_text, authors, publication_year, has_full_text \
+         FROM articles \
           WHERE status = 'working' AND screened_at IS NULL \
           ORDER BY sequence_id ASC LIMIT ?1",
     )?;
@@ -116,7 +117,9 @@ pub fn get_next_unscreened_working_batch(
             num_references: None,
             has_citation_details: false,
             has_reference_details: false,
-            has_full_text: false,
+            // Tier 3: read the real has_full_text flag so the screening engine
+            // knows which articles have retrievable full-text evidence chunks.
+            has_full_text: row.get::<_, i32>(6)? != 0,
             full_text_file_name: None,
         })
     })?;

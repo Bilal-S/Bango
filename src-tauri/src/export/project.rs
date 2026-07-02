@@ -211,6 +211,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     tx.execute("DELETE FROM audit_entries", [])?;
     tx.execute("DELETE FROM article_tags", [])?;
     tx.execute("DELETE FROM article_labels", [])?;
+    // Tier 3: article_chunks references articles(id) ON DELETE CASCADE, but
+    // foreign_keys are OFF during import so the cascade does not fire. Explicit
+    // purge prevents orphaned chunk rows surviving the article-table wipe.
+    tx.execute("DELETE FROM article_chunks", [])?;
     tx.execute("DELETE FROM articles", [])?;
     tx.execute("DELETE FROM criteria", [])?;
     tx.execute("DELETE FROM research_aims", [])?;

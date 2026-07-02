@@ -121,8 +121,19 @@ Upon import, new articles are run sequentially through a prioritized strategy pi
 
 ### 4.3 AI Screening Process
 *   **Execution**: Multi-threaded async worker running in the background with user-configured batch size, concurrency, and delay. Exponential backoff handles rate-limiting (429 errors).
-*   **Readiness Check**: Enforces presence of >= 1 aim, >= 1 inclusion, and >= 1 exclusion criterion, valid LLM config, and performs a worst-case per-article token estimation. Warns the user if any estimated footprint exceeds 80% of `contextWindowTokens` (minimum required: 50,000).
-*   **Advisory Prompts**: Batch prompt details aims, criteria, and articles, requesting JSON output containing the advisory `decision`, `reasoning` (citing specific sentences), `matched_inclusion_criteria`, `matched_exclusion_criteria`, `suggested_tags`, `extracted_terms`, and `confidence`. The app executes the deterministic resolution locally.
+*   **Readiness Check**: Enforces presence of >= 1 aim, >= 1 inclusion, and >= 1 exclusion criterion, valid LLM config, and performs a worst-case per-article token estimation. Warns the user if any estimated footprint exceeds 80% of `contextWindowTokens` (minimum required: 50,000). The worst-case footprint is recomputed by the active screening mode (see §4.3.1): Abstract uses today's abstract-only estimate; Enhanced adds the per-article chunk budget; Two-stage adds the budget times the expected borderline fraction.
+*   **Advisory Prompts**: Batch prompt details aims, criteria, and articles, requesting JSON output containing the advisory `decision`, `reasoning` (citing specific sentences), `matched_inclusion_criteria`, `matched_exclusion_criteria`, `suggested_tags`, `extracted_terms`, and `confidence`. The app executes the deterministic resolution locally. Where supporting full-text evidence is provided (Enhanced / Two-stage stage 2), the system prompt instructs the model to use it only to verify criteria matches; the primary decision rests on the abstract.
+
+### 4.3.1 Screening Modes
+The `screening_mode` setting (`abstract` | `enhanced` | `two_stage`, default `abstract`) selects how the screening engine treats the full text of articles that have one attached.
+
+| Mode | Behavior | Token cost per article (worst case) |
+|------|----------|--------------------------------------|
+| `abstract` (default) | Screens on the abstract alone. Preserves today's behavior and cost exactly. | ~63 tokens (1x) |
+| `enhanced` | Screens the abstract plus the top-K (`enhanced_top_k`, default 2) criteria-matched chunks from the Methods/Results sections (`enhanced_screening_sections`). The chunks are retrieved at attach time from `article_chunks` and ranked by `screening::chunk_retrieval::rank_chunks_by_criteria` (TF-density + Methods boost + per-article word budget). | ~320 tokens (~5x) |
+| `two_stage` | Stage 1 screens the abstract; only borderline articles (confidence in `[two_stage_low, two_stage_high)`, default `[0.4, 0.7)`) with full text attached get a second full-text-aware pass that overrides stage 1. Both passes flow through the deterministic `resolve_decision` priority layer; both are recorded in the audit trail (`ai_screen` for stage 1, `ai_screen_enhanced` for stage 2). | ~63 tokens clear-cut, ~320 borderline (~1.5x effective) |
+
+A per-article chunk budget (`chunk_budget_per_article`, default 2400 words) guarantees no single article can blow the screening context window. The two-stage borderline band and the section allow-list are advanced-only settings (no Settings UI; power users edit `app_settings` directly). Enhanced and Two-stage modes are disabled in the Settings UI until the project has at least one article with attached full text. At screening start, `ensure_chunks_for_full_text_articles` runs (pure CPU, no LLM) so previously-attached PDFs without chunks are backfilled transparently; the explicit `rebuild_article_chunks` command powers the Settings "Rebuild text chunks" button for manual rebuilds.
 
 ---
 
@@ -175,6 +186,11 @@ The `journal_index` table hosts system-distributed reference metadata used to ma
 Application configurations are managed in the `app_settings` key-value table:
 *   `fulltext_storage_dir`: Custom directory for storing PDFs and text extracts. If unconfigured, defaults to `~/Documents/Bango/fulltext/` (with scraper RIS output written to `~/Documents/Bango/ris/`).
 *   `flag_premium`: Indicates whether premium features are unlocked.
+*   `screening_mode`: Tier 3 screening mode (`abstract` | `enhanced` | `two_stage`, default `abstract`). See §4.3.1.
+*   `enhanced_top_k`: Number of criteria-matched chunks to send per article in Enhanced mode (default `2`).
+*   `enhanced_screening_sections`: Comma-separated section allow-list for Enhanced evidence (default `"Methods,Results"`).
+*   `two_stage_low` / `two_stage_high`: The borderline confidence band `[low, high)` that triggers the Two-stage second pass (defaults `0.4` / `0.7`).
+*   `chunk_budget_per_article`: Per-article word budget for retrieved evidence chunks (default `2400`, ~600 tokens).
 
 ### 8.2 Full-Text Attachments
 *   **Attachment**: Users can attach `.pdf` or `.txt` files to articles.
@@ -223,7 +239,7 @@ The following features remain explicitly **out of scope**:
 *   Mobile-native builds or mobile layouts.
 *   Multi-project workspaces or project file selectors.
 *   Multi-user real-time collaboration or blind review synchronization.
-*   Full-text screening (decisions are based on abstracts only).
+*   Full-text screening is no longer out of scope: see §4.3.1 for the bounded `enhanced` and `two_stage` modes. Naive whole-paper screening (sending the entire full text to the LLM) remains out of scope due to cost; Tier 3 sends only the abstract plus the top-K criteria-matched chunks.
 *   Automatic query builders or direct PubMed/external API integrations.
 *   Interactive PDF text highlighting or annotation.
 *   Global undo/redo action stacks or edit rollbacks.
@@ -234,6 +250,7 @@ The following features remain explicitly **out of scope**:
 
 | Version | Date | Key Improvements |
 |---------|------|------------------|
+| **v5.0** | 2026-06-30 | Tier 3 Enhanced & Two-stage screening modes (§4.3.1): abstract + criteria-matched full-text chunks with a per-article word budget. Added 6 screening-mode settings keys (§8.1). Lifted the §11 full-text screening exclusion for the bounded Tier 3 modes. |
 | **v4.0** | 2026-06-11 | Integrated References & Citations system, BibTeX parsing, Custom Full-Text storage, Premium feature flag, and Startup Journal Index synchronization. Removed outdated Google Stitch MCP sections. |
 | **v3.5** | 2026-06-09 | Added Bibliometrics data layer (co-authorship networks, Louvain clustering, term analyses, and network nodes/edges tables). |
 | **v3.4** | 2026-06-06 | Integrated `fullText` and `fullTextAiSummary` demand-populated fields into the Article model. |

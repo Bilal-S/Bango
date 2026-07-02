@@ -17,7 +17,7 @@ use bango_lib::db::migration::run_migrations;
 use bango_lib::error::AppError;
 use bango_lib::models::article::NewArticle;
 use bango_lib::models::criterion::{Criterion, ResearchAim};
-use bango_lib::screening::engine::ScreeningEngine;
+use bango_lib::screening::engine::{ScreeningConfig, ScreeningEngine};
 use bango_lib::screening::llm_client::LlmClient;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -173,7 +173,10 @@ async fn test_happy_path_bare_array_batch2() {
     let mock = MockLlmClient::new(responses);
     let engine = ScreeningEngine::with_batch_size(2);
 
-    engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run_sync");
+    engine
+        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+        .await
+        .expect("run_sync");
 
     let progress = engine.get_progress().await;
     assert_eq!(progress.total, 6);
@@ -198,7 +201,10 @@ async fn test_envelope_format() {
     let mock = MockLlmClient::new(responses);
     let engine = ScreeningEngine::with_batch_size(2);
 
-    engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run_sync");
+    engine
+        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+        .await
+        .expect("run_sync");
 
     let progress = engine.get_progress().await;
     assert_eq!(progress.completed, 4);
@@ -220,7 +226,10 @@ async fn test_partial_error_one_batch_malformed() {
     let mock = PartialErrorMock::new(vec![1]);
     let engine = ScreeningEngine::with_batch_size(2);
 
-    engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run_sync");
+    engine
+        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+        .await
+        .expect("run_sync");
 
     let progress = engine.get_progress().await;
     assert_eq!(progress.completed, 6, "All articles should be completed (success + error)");
@@ -249,7 +258,10 @@ async fn test_cancel_mid_run() {
     });
 
     let mock = CancelAwareMock::new(6, 2, 100);
-    engine_clone.run_sync(&db, &mock, 10, criteria, aims, None).await.expect("run_sync");
+    engine_clone
+        .run_sync(&db, &mock, 10, criteria, aims, ScreeningConfig::default(), None)
+        .await
+        .expect("run_sync");
 
     let progress = engine_clone.get_progress().await;
     assert!(!progress.is_running);
@@ -277,7 +289,15 @@ async fn test_resume_after_cancel() {
 
         let mock = CancelAwareMock::new(6, 2, 100);
         engine_arc
-            .run_sync(&db, &mock, 10, criteria.clone(), aims.clone(), None)
+            .run_sync(
+                &db,
+                &mock,
+                10,
+                criteria.clone(),
+                aims.clone(),
+                ScreeningConfig::default(),
+                None,
+            )
             .await
             .expect("run 1");
 
@@ -305,7 +325,10 @@ async fn test_resume_after_cancel() {
         let mock = MockLlmClient::new(responses);
         let engine = ScreeningEngine::with_batch_size(2);
 
-        engine.run_sync(&db, &mock, 0, criteria, aims, None).await.expect("run 2");
+        engine
+            .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+            .await
+            .expect("run 2");
 
         let progress = engine.get_progress().await;
         assert_eq!(progress.completed, remaining, "Remaining articles screened");

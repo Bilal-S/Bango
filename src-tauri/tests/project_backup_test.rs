@@ -296,6 +296,64 @@ fn test_import_old_backup_without_biblio_data() {
     assert_eq!(count_rows(&conn, "biblio_network_edges"), 0);
 }
 
+/// Tier 3 regression test: `import_project` must purge `article_chunks` rows.
+/// Without the explicit `DELETE FROM article_chunks` in the purge sequence,
+/// foreign_keys=OFF during import prevents the `ON DELETE CASCADE` on
+/// `article_chunks.article_id REFERENCES articles(id)` from firing, leaving
+/// orphaned chunk rows that survive the article-table wipe.
+#[test]
+fn import_project_clears_article_chunks() {
+    // 1. Seed a DB with one article + chunk rows.
+    let conn = setup_db();
+    seed_core_data(&conn);
+    let article_id: String = conn
+        .query_row("SELECT id FROM articles LIMIT 1", [], |row| row.get(0))
+        .expect("get article id");
+    conn.execute(
+        "INSERT INTO article_chunks (article_id, chunk_index, section, content, word_count)
+         VALUES (?1, 0, 'Methods', 'sugar tax study design rct children', 6)",
+        params![article_id],
+    )
+    .expect("seed chunk");
+    conn.execute(
+        "INSERT INTO article_chunks (article_id, chunk_index, section, content, word_count)
+         VALUES (?1, 1, 'Results', 'effect size 0.45 ci 0.21 0.69', 7)",
+        params![article_id],
+    )
+    .expect("seed chunk 2");
+    assert_eq!(count_rows(&conn, "article_chunks"), 2, "pre: chunks seeded");
+
+    // 2. Export (backup JSON deliberately excludes article_chunks - it is derived
+    //    at attach time). Then import into a fresh DB that already has stale chunks.
+    let json = export_project(&conn).expect("export");
+
+    let conn2 = setup_db();
+    // Seed conn2 with a *different* article + chunks so we verify the import
+    // wipes pre-existing chunks (not just that it starts empty).
+    let stale = article_repo::insert_article(&conn2, &new_article("Stale")).expect("insert stale");
+    article_repo::move_to_working(&conn2, &stale.id).expect("move stale");
+    conn2
+        .execute(
+            "INSERT INTO article_chunks (article_id, chunk_index, section, content, word_count)
+             VALUES (?1, 0, 'Methods', 'stale chunk text here', 4)",
+            params![stale.id],
+        )
+        .expect("seed stale chunk into conn2");
+    assert_eq!(count_rows(&conn2, "article_chunks"), 1, "pre: stale chunk present");
+
+    // 3. Import - should wipe article_chunks (orphaned chunks must not survive).
+    import_project(&conn2, &json).expect("import");
+
+    // 4. Assert no orphaned chunks remain.
+    assert_eq!(
+        count_rows(&conn2, "article_chunks"),
+        0,
+        "import_project must purge article_chunks (orphan-prevention)"
+    );
+    // And the imported article round-tripped.
+    assert_eq!(count_rows(&conn2, "articles"), 1, "imported article present");
+}
+
 #[test]
 fn test_export_import_preserves_article_data() {
     let conn = setup_db();
