@@ -119,33 +119,24 @@ loadStorageInfo();
       </p>
 
       <!-- Tier 3: one-shot chunk rebuild for already-attached PDFs -->
-      <div class="rebuild-chunks">
+      <div v-if="fullTextArticleCount > 0" class="rebuild-chunks">
         <div class="rebuild-chunks__row">
-          <div class="rebuild-chunks__label">
-            <span class="rebuild-chunks__title">Text chunks for screening</span>
-            <span class="rebuild-chunks__desc">
-              Enhanced / Two-stage screening retrieves criteria-matched chunks from attached full
-              text. Rebuild if chunks are missing (e.g. PDFs attached before this feature shipped).
-            </span>
-          </div>
-          <button
-            class="btn btn--secondary"
-            :disabled="rebuildLoading || fullTextArticleCount < 1"
-            @click="rebuildChunks"
-          >
+          <span class="rebuild-chunks__title">Text chunks for screening</span>
+          <button class="btn btn--secondary" :disabled="rebuildLoading" @click="rebuildChunks">
             <span class="material-symbols-outlined btn__icon">cached</span>
             Rebuild text chunks
           </button>
         </div>
+        <p class="rebuild-chunks__desc">
+          Enhanced / Two-stage screening retrieves criteria-matched chunks from attached full text.
+          Rebuild if chunks are missing (e.g. PDFs attached before this feature shipped).
+        </p>
         <p v-if="rebuildLoading" class="rebuild-chunks__status">Rebuilding chunks...</p>
         <p v-if="rebuildResult" class="rebuild-chunks__status rebuild-chunks__status--ok">
           {{ rebuildResult.message }}
         </p>
         <p v-if="rebuildError" class="rebuild-chunks__status rebuild-chunks__status--err">
           {{ rebuildError }}
-        </p>
-        <p v-if="fullTextArticleCount < 1" class="rebuild-chunks__hint">
-          No articles with full text attached yet.
         </p>
       </div>
     </div>
@@ -224,15 +215,9 @@ loadStorageInfo();
 
 .rebuild-chunks__row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-}
-
-.rebuild-chunks__label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
 }
 
 .rebuild-chunks__title {
@@ -245,7 +230,7 @@ loadStorageInfo();
   font-size: var(--font-size-caption, 12px);
   color: var(--color-on-surface-variant, #464555);
   line-height: 1.4;
-  max-width: 38ch;
+  margin-top: 0.5rem;
 }
 
 .rebuild-chunks__status {
@@ -259,11 +244,5 @@ loadStorageInfo();
 
 .rebuild-chunks__status--err {
   color: #991b1b;
-}
-
-.rebuild-chunks__hint {
-  font-size: 11px;
-  color: var(--color-outline, #777587);
-  margin-top: 0.25rem;
 }
 </style>
