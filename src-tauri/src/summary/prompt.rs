@@ -5,6 +5,13 @@ pub struct ArticleSummary {
     pub year: Option<i32>,
     pub abstract_text: String,
     pub keywords: Vec<String>,
+    /// Optional supporting evidence distilled from the article's
+    /// `full_text_ai_summary` blob (Shape A). When `Some`, the prompt assembler
+    /// appends an `Evidence:` block after the abstract so the literature-review
+    /// LLM gains access to structured study facts (study design, sample size,
+    /// effect sizes). `None` preserves the legacy abstract-only prompt
+    /// byte-for-byte (backward compat).
+    pub evidence: Option<String>,
 }
 
 #[derive(Clone)]
@@ -27,6 +34,13 @@ pub struct SummaryPromptInput {
     pub screening_data: ScreeningData,
     pub citation_style: String,
     pub articles: Vec<ArticleSummary>,
+    /// Full inclusion criterion definitions (Shape 0). Rendered into the
+    /// Methodology context so the LLM can name the actual eligibility rules
+    /// instead of inferring them from aggregate exclusion counts. Empty when
+    /// no inclusion criteria are defined.
+    pub inclusion_criteria: Vec<String>,
+    /// Full exclusion criterion definitions (Shape 0). Same role as above.
+    pub exclusion_criteria: Vec<String>,
 }
 
 pub const SYSTEM_PROMPT: &str = "You are an expert academic literature review writer. You produce well-structured, scholarly literature reviews with proper in-text citations and a complete references section. You only cite sources that are explicitly provided. You never fabricate references. You write in formal academic English with natural variation in sentence length. You never use em dashes.";
@@ -626,9 +640,103 @@ pub fn build_section_context(sections: &[crate::utils::sections::Section]) -> St
     blocks.join("\n\n")
 }
 
-/// Format screening statistics into a human-readable summary for the prompt.
+/// Distill a per-article `full_text_ai_summary` JSON blob into a compact
+/// evidence string for the project-wide literature-review prompt (Shape A).
+///
+/// Extracts the highest-signal fields the literature-review LLM can directly
+/// use to synthesize patterns across studies:
+/// - `field` / `subfield` (research domain)
+/// - `structured_extraction` facts (`study_type`, `population`,
+///   `intervention_exposure`, `outcomes`, `effect_size`, etc.) as `key: value`
+///   lines
+/// - `summary_150_250_words` digest (truncated to keep the prompt bounded)
+///
+/// Returns `None` when the blob is missing, malformed, or carries no usable
+/// facts (so the caller leaves `ArticleSummary.evidence = None` and the prompt
+/// stays byte-identical to the legacy abstract-only path). Never panics:
+/// malformed JSON falls back to `None` (per CLAUDE.md line 89 - validate before
+/// field access).
+///
+/// Pure function: no I/O. Tested directly.
 #[must_use]
-pub fn format_screening_summary(data: &ScreeningData) -> String {
+pub fn format_ai_summary_as_evidence(blob: Option<&str>) -> Option<String> {
+    let raw = blob?;
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let obj = value.as_object()?;
+    let mut lines: Vec<String> = Vec::new();
+
+    // Field / subfield (research domain).
+    if let Some(field) = obj.get("field").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        lines.push(format!("field: {field}"));
+    }
+    if let Some(sub) = obj.get("subfield").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        lines.push(format!("subfield: {sub}"));
+    }
+
+    // Structured extraction facts (the highest-value fields for pattern
+    // synthesis). Emit known keys in a stable order first, then any unknown
+    // string-valued keys (forward-compatible). Skip empty values.
+    if let Some(extraction) = obj.get("structured_extraction").and_then(|v| v.as_object()) {
+        let known_order = [
+            "study_type",
+            "study_design",
+            "population",
+            "sample_size",
+            "intervention_exposure",
+            "comparator",
+            "outcomes",
+            "effect_size",
+            "confidence_interval",
+            "statistical_results",
+            "clinical_area",
+        ];
+        let mut emitted: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for key in known_order {
+            if let Some(value) =
+                extraction.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+            {
+                lines.push(format!("{key}: {value}"));
+                emitted.insert(key);
+            }
+        }
+        for (key, value) in extraction {
+            if emitted.contains(key.as_str()) {
+                continue;
+            }
+            if let Some(s) = value.as_str().filter(|s| !s.is_empty()) {
+                lines.push(format!("{key}: {s}"));
+            }
+        }
+    }
+
+    // Digest (truncated to keep the prompt bounded; 600 chars ~ 150 tokens).
+    if let Some(digest) =
+        obj.get("summary_150_250_words").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+    {
+        let truncated = if digest.len() > 600 { &digest[..600] } else { digest };
+        lines.push(format!("digest: {truncated}"));
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("; "))
+    }
+}
+
+/// Format screening statistics into a human-readable summary for the prompt.
+///
+/// When `inclusion_criteria` / `exclusion_criteria` are non-empty (Shape 0),
+/// the full criterion definitions are rendered so the LLM can name the actual
+/// eligibility rules in the Methodology section instead of inferring them from
+/// aggregate exclusion counts alone. Empty lists produce no criteria lines
+/// (backward compatible with callers that pass `&[]`).
+#[must_use]
+pub fn format_screening_summary(
+    data: &ScreeningData,
+    inclusion_criteria: &[String],
+    exclusion_criteria: &[String],
+) -> String {
     let mut lines = Vec::new();
 
     lines.push(format!("Total records identified: {}", data.records_identified));
@@ -674,6 +782,21 @@ pub fn format_screening_summary(data: &ScreeningData) -> String {
         }
     }
 
+    // Shape 0: full criteria definitions so the Methodology narrative can name
+    // the actual eligibility rules (not just aggregate exclusion counts).
+    if !inclusion_criteria.is_empty() {
+        lines.push("Inclusion criteria:".to_string());
+        for c in inclusion_criteria {
+            lines.push(format!("  - {c}"));
+        }
+    }
+    if !exclusion_criteria.is_empty() {
+        lines.push("Exclusion criteria:".to_string());
+        for c in exclusion_criteria {
+            lines.push(format!("  - {c}"));
+        }
+    }
+
     lines.join("\n")
 }
 
@@ -691,7 +814,11 @@ pub fn build_summary_prompt(input: &SummaryPromptInput) -> String {
             .join("\n")
     };
 
-    let screening_summary = format_screening_summary(&input.screening_data);
+    let screening_summary = format_screening_summary(
+        &input.screening_data,
+        &input.inclusion_criteria,
+        &input.exclusion_criteria,
+    );
 
     let articles_text = input
         .articles
@@ -703,13 +830,23 @@ pub fn build_summary_prompt(input: &SummaryPromptInput) -> String {
             } else {
                 format!("\nKeywords: {}", a.keywords.join(", "))
             };
+            // Shape A: append the distilled evidence block when present so the
+            // LLM can cite structured facts (study design, sample size, effect
+            // sizes) in the Results/Discussion synthesis. Empty when `None`
+            // (abstract-only mode) - preserves the legacy prompt byte-for-byte.
+            let evidence = if let Some(ev) = &a.evidence {
+                format!("\nEvidence: {ev}")
+            } else {
+                String::new()
+            };
             format!(
-                "---\nTitle: {}\nAuthors: {}\nYear: {}\nAbstract: {}{}\n---",
+                "---\nTitle: {}\nAuthors: {}\nYear: {}\nAbstract: {}{}{}\n---",
                 a.title,
                 a.authors.join("; "),
                 year_str,
                 a.abstract_text,
-                keywords
+                keywords,
+                evidence
             )
         })
         .collect::<Vec<_>>()

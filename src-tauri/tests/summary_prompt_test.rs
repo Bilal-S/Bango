@@ -30,6 +30,7 @@ fn sample_articles() -> Vec<ArticleSummary> {
             year: Some(2024),
             abstract_text: "A survey of AI applications.".to_string(),
             keywords: vec!["ai".to_string(), "medicine".to_string()],
+            evidence: None,
         },
         ArticleSummary {
             title: "Deep Learning for Diagnostics".to_string(),
@@ -37,6 +38,7 @@ fn sample_articles() -> Vec<ArticleSummary> {
             year: Some(2023),
             abstract_text: "Novel DL approaches for medical imaging.".to_string(),
             keywords: vec![],
+            evidence: None,
         },
     ]
 }
@@ -46,7 +48,7 @@ fn sample_articles() -> Vec<ArticleSummary> {
 #[test]
 fn test_format_basic_statistics() {
     let data = sample_screening_data();
-    let summary = format_screening_summary(&data);
+    let summary = format_screening_summary(&data, &[], &[]);
     assert!(summary.contains("Total records identified: 150"));
     assert!(summary.contains("Duplicates removed: 30"));
     assert!(summary.contains("Records screened: 120"));
@@ -58,7 +60,7 @@ fn test_format_basic_statistics() {
 #[test]
 fn test_format_screening_method() {
     let data = sample_screening_data();
-    let summary = format_screening_summary(&data);
+    let summary = format_screening_summary(&data, &[], &[]);
     assert!(summary.contains("100 articles were screened using AI-assisted review"));
     assert!(summary.contains("20 underwent manual review"));
 }
@@ -66,7 +68,7 @@ fn test_format_screening_method() {
 #[test]
 fn test_format_exclusion_reasons() {
     let data = sample_screening_data();
-    let summary = format_screening_summary(&data);
+    let summary = format_screening_summary(&data, &[], &[]);
     assert!(summary.contains("Top exclusion reasons:"));
     assert!(summary.contains("Wrong population (25 articles)"));
     assert!(summary.contains("Not in English (15 articles)"));
@@ -75,14 +77,14 @@ fn test_format_exclusion_reasons() {
 #[test]
 fn test_format_excluded_with_specific_criteria() {
     let data = sample_screening_data();
-    let summary = format_screening_summary(&data);
+    let summary = format_screening_summary(&data, &[], &[]);
     assert!(summary.contains("Excluded with specific criteria: 60"));
 }
 
 #[test]
 fn test_format_in_progress() {
     let data = sample_screening_data();
-    let summary = format_screening_summary(&data);
+    let summary = format_screening_summary(&data, &[], &[]);
     assert!(summary.contains("Records still in progress: 5"));
 }
 
@@ -101,7 +103,7 @@ fn test_format_minimal_data() {
         manual_reviewed: 0,
         exclusion_reasons: vec![],
     };
-    let summary = format_screening_summary(&data);
+    let summary = format_screening_summary(&data, &[], &[]);
     assert!(summary.contains("Total records identified: 10"));
     assert!(summary.contains("Records screened: 10"));
     assert!(summary.contains("Studies included in final review: 10"));
@@ -128,7 +130,7 @@ fn test_format_no_duplicates_no_method() {
         manual_reviewed: 0,
         exclusion_reasons: vec![],
     };
-    let summary = format_screening_summary(&data);
+    let summary = format_screening_summary(&data, &[], &[]);
     assert!(!summary.contains("Duplicates removed"));
     assert!(!summary.contains("Screening method"));
 }
@@ -142,6 +144,8 @@ fn test_prompt_contains_research_aims() {
         screening_data: sample_screening_data(),
         citation_style: "APA".to_string(),
         articles: sample_articles(),
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("1. Understand AI in healthcare"));
@@ -155,6 +159,8 @@ fn test_prompt_with_empty_aims() {
         screening_data: sample_screening_data(),
         citation_style: "APA".to_string(),
         articles: sample_articles(),
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("None defined."));
@@ -167,6 +173,8 @@ fn test_prompt_contains_screening_summary() {
         screening_data: sample_screening_data(),
         citation_style: "APA".to_string(),
         articles: sample_articles(),
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("Total records identified: 150"));
@@ -179,6 +187,8 @@ fn test_prompt_contains_citation_style() {
         screening_data: sample_screening_data(),
         citation_style: "Vancouver".to_string(),
         articles: sample_articles(),
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("**Vancouver**"));
@@ -191,6 +201,8 @@ fn test_prompt_contains_article_details() {
         screening_data: sample_screening_data(),
         citation_style: "APA".to_string(),
         articles: sample_articles(),
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("AI in Medicine"));
@@ -215,7 +227,10 @@ fn test_prompt_article_unknown_year() {
             year: None,
             abstract_text: "Abstract text.".to_string(),
             keywords: vec![],
+            evidence: None,
         }],
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("Year: Unknown"));
@@ -233,7 +248,10 @@ fn test_prompt_article_no_keywords() {
             year: Some(2024),
             abstract_text: "Abstract.".to_string(),
             keywords: vec![],
+            evidence: None,
         }],
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(!prompt.contains("Keywords:"));
@@ -246,6 +264,8 @@ fn test_prompt_contains_section_instructions() {
         screening_data: sample_screening_data(),
         citation_style: "APA".to_string(),
         articles: vec![],
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("## Introduction"));
@@ -263,6 +283,8 @@ fn test_prompt_no_em_dashes_rule() {
         screening_data: sample_screening_data(),
         citation_style: "APA".to_string(),
         articles: vec![],
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("em dash"));
@@ -275,6 +297,8 @@ fn test_prompt_with_empty_articles() {
         screening_data: sample_screening_data(),
         citation_style: "APA".to_string(),
         articles: vec![],
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
     };
     let prompt = build_summary_prompt(&input);
     // Should still produce a valid prompt

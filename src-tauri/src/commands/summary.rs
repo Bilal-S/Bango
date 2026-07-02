@@ -43,6 +43,34 @@ pub async fn generate_summary(
         let aim_texts: Vec<String> = aim_list.iter().map(|a| a.text.clone()).collect();
         let included = article_repo::get_articles_by_status(&conn, "included")?;
 
+        // Shape 0: fetch full criteria definitions so the Methodology narrative
+        // can name the actual eligibility rules (not just aggregate exclusion
+        // counts). Split by type; each list is threaded into the prompt.
+        let all_criteria = criteria_repo::get_all_criteria(&conn)?;
+        let inclusion_criteria: Vec<String> = all_criteria
+            .iter()
+            .filter(|c| {
+                matches!(c.criterion_type, crate::models::criterion::CriterionType::Inclusion)
+            })
+            .map(|c| c.text.clone())
+            .collect();
+        let exclusion_criteria: Vec<String> = all_criteria
+            .iter()
+            .filter(|c| {
+                matches!(c.criterion_type, crate::models::criterion::CriterionType::Exclusion)
+            })
+            .map(|c| c.text.clone())
+            .collect();
+
+        // Shape A: opt-in evidence enrichment. When `summary_evidence_mode` is
+        // `with_summary_facts`, distill each included article's
+        // `full_text_ai_summary` blob into a compact evidence string carrying
+        // structured study facts (study design, sample size, effect sizes).
+        // Default `abstract_only` preserves today's behavior and cost exactly.
+        let evidence_mode = app_settings_repo::get_setting(&conn, "summary_evidence_mode")?
+            .unwrap_or_else(|| "abstract_only".to_string());
+        let use_evidence = evidence_mode == "with_summary_facts";
+
         let articles: Vec<ArticleSummary> = included
             .iter()
             .map(|a| {
@@ -53,12 +81,23 @@ pub async fn generate_summary(
                         combined.push(tag.clone());
                     }
                 }
+                // Shape A: distill the per-article AI-summary blob into evidence.
+                // `format_ai_summary_as_evidence` returns None for missing/malformed/
+                // empty blobs, so abstract-only articles stay unaffected.
+                let evidence = if use_evidence {
+                    crate::summary::prompt::format_ai_summary_as_evidence(
+                        a.full_text_ai_summary.as_deref(),
+                    )
+                } else {
+                    None
+                };
                 ArticleSummary {
                     title: a.title.clone(),
                     authors: a.authors.clone(),
                     year: a.publication_year,
                     abstract_text: a.abstract_text.clone(),
                     keywords: combined,
+                    evidence,
                 }
             })
             .collect();
@@ -98,7 +137,15 @@ pub async fn generate_summary(
                 .collect(),
         };
 
-        SummaryInput::new(config, aim_texts, articles, screening_data, style.clone())
+        SummaryInput::new(
+            config,
+            aim_texts,
+            articles,
+            screening_data,
+            style.clone(),
+            inclusion_criteria,
+            exclusion_criteria,
+        )
     }; // conn lock released here
 
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();

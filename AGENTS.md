@@ -161,7 +161,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     (4 pure-helper cases).
   - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
     `fulltext_storage_dir`, `flag_premium`, `biblio_needs_refresh` (the bibliometric
-    staleness flag), and `wiki_needs_refresh` (the LLM Wiki staleness flag). `mark_biblio_needs_refresh(conn)` is called by every mutation that
+    staleness flag), `wiki_needs_refresh` (the LLM Wiki staleness flag), and
+    `summary_evidence_mode` (project-wide literature-review evidence enrichment;
+    `abstract_only` default | `with_summary_facts` - see `commands/summary.rs::generate_summary`
+    + the `format_ai_summary_as_evidence` pure helper in `summary/prompt.rs`; design in
+    `.worktrees/summary-improvements.md` Shape 0 + Shape A). `mark_biblio_needs_refresh(conn)` is called by every mutation that
     changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
     project backup restore in `commands/export_cmd::import_project_backup`,
     reference/citation import + CR extraction + reference promotion in

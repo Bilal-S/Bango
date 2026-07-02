@@ -51,6 +51,7 @@ fn sample_article(title: &str, abstract_text: &str) -> ArticleSummary {
         year: Some(2021),
         abstract_text: abstract_text.to_string(),
         keywords: vec!["machine learning".to_string()],
+        evidence: None,
     }
 }
 
@@ -63,6 +64,8 @@ async fn generate_summary_errors_when_no_articles() {
         vec![],
         empty_screening(),
         "apa".to_string(),
+        vec![],
+        vec![],
     );
     let result = generate_summary(&orch, input).await;
     assert!(result.is_err());
@@ -91,6 +94,8 @@ async fn generate_summary_single_batch_under_context_limit() {
         vec![sample_article("Paper One", "Short abstract.")],
         empty_screening(),
         "apa".to_string(),
+        vec![],
+        vec![],
     );
 
     let summary = generate_summary(&orch, input).await.expect("summary ok");
@@ -121,6 +126,8 @@ async fn generate_summary_batches_when_over_context_limit() {
         vec![sample_article("Paper A", &big_abstract), sample_article("Paper B", &big_abstract)],
         empty_screening(),
         "vancouver".to_string(),
+        vec![],
+        vec![],
     );
 
     let summary = generate_summary(&orch, input).await.expect("summary ok");
@@ -147,6 +154,8 @@ async fn generate_summary_trims_response() {
         vec![sample_article("T", "a")],
         empty_screening(),
         "apa".to_string(),
+        vec![],
+        vec![],
     );
 
     let summary = generate_summary(&orch, input).await.expect("summary ok");
@@ -172,6 +181,8 @@ async fn generate_summary_propagates_llm_error() {
         vec![sample_article("T", "a")],
         empty_screening(),
         "apa".to_string(),
+        vec![],
+        vec![],
     );
 
     // Give the failing request a moment to settle

@@ -12,6 +12,12 @@ pub struct SummaryInput {
     pub articles: Vec<ArticleSummary>,
     pub screening_data: ScreeningData,
     pub citation_style: String,
+    /// Full inclusion criterion definitions (Shape 0). Threaded into each
+    /// batch's prompt so the Methodology narrative can name the actual
+    /// eligibility rules.
+    pub inclusion_criteria: Vec<String>,
+    /// Full exclusion criterion definitions (Shape 0).
+    pub exclusion_criteria: Vec<String>,
 }
 
 impl SummaryInput {
@@ -21,8 +27,18 @@ impl SummaryInput {
         articles: Vec<ArticleSummary>,
         screening_data: ScreeningData,
         citation_style: String,
+        inclusion_criteria: Vec<String>,
+        exclusion_criteria: Vec<String>,
     ) -> Self {
-        Self { config, aim_texts, articles, screening_data, citation_style }
+        Self {
+            config,
+            aim_texts,
+            articles,
+            screening_data,
+            citation_style,
+            inclusion_criteria,
+            exclusion_criteria,
+        }
     }
 }
 
@@ -37,7 +53,17 @@ pub async fn generate_summary(
     // Check if batching is needed (80% of context window)
     let context_limit = (input.config.context_window_tokens as f64 * 0.8) as usize;
 
-    // Simple heuristic: estimate tokens for all articles combined
+    // Simple heuristic: estimate tokens for all articles combined.
+    // Includes the Shape A `evidence` field length (per `summary-improvements.md`
+    // §5 - the estimator MUST see any new field or batching silently underflows
+    // the context window on large projects). Criteria text is added once per
+    // batch (not per article).
+    let criteria_chars: usize = input
+        .inclusion_criteria
+        .iter()
+        .chain(input.exclusion_criteria.iter())
+        .map(|c| c.len() + 4)
+        .sum();
     let total_chars: usize = input
         .articles
         .iter()
@@ -46,9 +72,10 @@ pub async fn generate_summary(
                 + a.abstract_text.len()
                 + a.authors.join("; ").len()
                 + a.keywords.join(", ").len()
+                + a.evidence.as_ref().map_or(0, |e| e.len() + 12)
         })
         .sum();
-    let estimated_tokens = total_chars / 4;
+    let estimated_tokens = (total_chars + criteria_chars) / 4;
 
     let response = if estimated_tokens > context_limit {
         // Batch: split articles into chunks, summarize each, then synthesize
@@ -62,6 +89,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            &input.inclusion_criteria,
+            &input.exclusion_criteria,
             batch_a,
         )
         .await?;
@@ -71,6 +100,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            &input.inclusion_criteria,
+            &input.exclusion_criteria,
             batch_b,
         )
         .await?;
@@ -82,6 +113,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            &input.inclusion_criteria,
+            &input.exclusion_criteria,
             &summary_a,
             &summary_b,
         )
@@ -93,6 +126,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            &input.inclusion_criteria,
+            &input.exclusion_criteria,
             &input.articles,
         )
         .await?
@@ -101,12 +136,15 @@ pub async fn generate_summary(
     Ok(response)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn summarize_batch(
     orchestrator: &LlmOrchestrator,
     config: &LlmConfig,
     aims: &[String],
     screening: &ScreeningData,
     citation_style: &str,
+    inclusion_criteria: &[String],
+    exclusion_criteria: &[String],
     articles: &[ArticleSummary],
 ) -> Result<String, AppError> {
     let input = SummaryPromptInput {
@@ -114,6 +152,8 @@ async fn summarize_batch(
         screening_data: screening.clone(),
         citation_style: citation_style.to_string(),
         articles: articles.to_vec(),
+        inclusion_criteria: inclusion_criteria.to_vec(),
+        exclusion_criteria: exclusion_criteria.to_vec(),
     };
     let user_prompt = prompt::build_summary_prompt(&input);
     let (response, _tokens) = orchestrator
@@ -122,12 +162,15 @@ async fn summarize_batch(
     Ok(response.trim().to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn synthesize_batches(
     orchestrator: &LlmOrchestrator,
     config: &LlmConfig,
     aims: &[String],
     screening: &ScreeningData,
     citation_style: &str,
+    inclusion_criteria: &[String],
+    exclusion_criteria: &[String],
     a: &str,
     b: &str,
 ) -> Result<String, AppError> {
@@ -138,7 +181,8 @@ async fn synthesize_batches(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let screening_summary = prompt::format_screening_summary(screening);
+    let screening_summary =
+        prompt::format_screening_summary(screening, inclusion_criteria, exclusion_criteria);
 
     let synthesis_prompt = format!(
         r#"## Task
