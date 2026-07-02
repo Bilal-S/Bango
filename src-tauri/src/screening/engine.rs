@@ -1368,25 +1368,17 @@ fn update_article_after_screening(
 }
 
 /// Format scored chunks as the `## Supporting Evidence from Full Text` body for
-/// one article. Each chunk is prefixed with its section label
-/// (`[§Methods]`, `[§Results]`, or `[§Text]` when the section is unknown).
+/// one article.
 ///
-/// Returns `None` when the slice is empty so callers can leave
-/// `ArticleEntry.full_text_evidence = None` (keeping the prompt byte-identical
-/// to abstract-only mode). Pure: no I/O, no DB. Tested directly.
+/// **Delegate.** The canonical implementation lives in
+/// `chunk_retrieval::format_chunks_as_evidence` (the lowest-level module both
+/// this engine and `evidence::resolve_evidence` depend on). This thin wrapper
+/// is kept `pub` for backward compatibility with external tests
+/// (`tests/evidence_test.rs` references `engine::format_chunks_as_evidence`)
+/// and routes straight through so behavior is byte-identical.
 #[must_use]
 pub fn format_chunks_as_evidence(chunks: &[ScoredChunk]) -> Option<String> {
-    if chunks.is_empty() {
-        return None;
-    }
-    let lines: Vec<String> = chunks
-        .iter()
-        .map(|c| {
-            let label = c.section.as_deref().unwrap_or("Text");
-            format!("[§{label}] {}", c.content)
-        })
-        .collect();
-    Some(lines.join("\n"))
+    crate::screening::chunk_retrieval::format_chunks_as_evidence(chunks)
 }
 
 /// The evidence body string plus the deduped section labels that survived

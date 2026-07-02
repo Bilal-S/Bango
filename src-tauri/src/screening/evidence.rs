@@ -218,18 +218,19 @@ fn format_ai_summary_alone(summary: &ParsedSummary) -> String {
 
 // ── Internal: chunks formatting (byte-identical to Tier 3) ──────────────────
 
-/// Format scored chunks as the `[§Methods] ...` body. Byte-identical to the
-/// Tier 3 `engine::format_chunks_as_evidence` so the chunks-only path produces
-/// stable prompts (covered by `resolve_evidence_chunks_path_unchanged_from_tier3`).
+/// Format scored chunks as the `[§Methods] ...` body for the chunks-only path.
+///
+/// **Delegate.** The canonical implementation lives in
+/// `chunk_retrieval::format_chunks_as_evidence` (the lowest-level module both
+/// `engine` and this module depend on). That function returns `Option<String>`
+/// (`None` on empty); the chunks-only path is only reached when at least one
+/// chunk survived ranking, so we unwrap to `String` here.
+///
+/// Byte-identical to the Tier 3 `engine::format_chunks_as_evidence` output so
+/// the chunks-only path produces stable prompts (covered by
+/// `resolve_evidence_chunks_path_unchanged_from_tier3`).
 fn format_chunks_as_evidence(chunks: &[ScoredChunk]) -> String {
-    let lines: Vec<String> = chunks
-        .iter()
-        .map(|c| {
-            let label = c.section.as_deref().unwrap_or("Text");
-            format!("[§{label}] {}", c.content)
-        })
-        .collect();
-    lines.join("\n")
+    crate::screening::chunk_retrieval::format_chunks_as_evidence(chunks).unwrap_or_default()
 }
 
 /// Build the deduped section-label string for the audit trail, in ranked order.

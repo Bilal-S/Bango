@@ -17,6 +17,8 @@ const {
   error,
   hasArticles,
   screeningPercentage,
+  // Dynamic primary CTA (Connect LLM / Start AI Screening / Build Wiki / Review Wiki)
+  cta,
   refresh,
   loadMoreActivities,
 } = useDashboard();
@@ -150,9 +152,9 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
         <h1 class="page-title">Project Dashboard</h1>
         <p class="dashboard__subtitle">AI-assisted systematic literature review</p>
       </div>
-      <button v-if="hasArticles" class="dashboard__cta" @click="navigateTo('/screening')">
-        <span class="material-symbols-outlined dashboard__cta-icon">play_arrow</span>
-        Start AI Screening
+      <button v-if="hasArticles" class="dashboard__cta" @click="navigateTo(cta.route)">
+        <span class="material-symbols-outlined dashboard__cta-icon">{{ cta.icon }}</span>
+        {{ cta.label }}
       </button>
     </section>
 

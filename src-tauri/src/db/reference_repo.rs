@@ -733,6 +733,11 @@ fn update_parent_flags_tx(
 /// Searches across title, authors, abstract_text, and journal using LIKE.
 /// Optionally filters by match_status.
 /// Returns (papers, total_count).
+///
+/// Both `search` and `match_status_filter` are bound via `?N` parameters (not interpolated),
+/// per CLAUDE.md ("Never interpolate user input into SQL"). The `match_status` value comes
+/// from a `MatchStatus::as_str()` (enum-controlled, trusted) but is still bound for rule
+/// compliance and defense-in-depth.
 pub fn query_reference_papers(
     conn: &Connection,
     search: Option<&str>,
@@ -740,7 +745,7 @@ pub fn query_reference_papers(
     limit: usize,
     offset: usize,
 ) -> Result<(Vec<ReferencePaper>, usize), AppError> {
-    // Build WHERE clause fragments
+    // Build WHERE clause fragments (placeholders only - no interpolation)
     let search_clause = match search {
         Some(term) if !term.is_empty() => Some(
             "(title LIKE ? OR authors LIKE ? OR abstract_text LIKE ? OR journal LIKE ?)"
@@ -748,7 +753,7 @@ pub fn query_reference_papers(
         ),
         _ => None,
     };
-    let status_clause = match_status_filter.map(|s| format!("match_status = '{}'", s.as_str()));
+    let status_clause = match_status_filter.map(|_| "match_status = ?".to_string());
 
     // Combine WHERE conditions
     let where_parts: Vec<&str> =
@@ -765,26 +770,43 @@ pub fn query_reference_papers(
         where_sql
     );
 
-    // Build params dynamically
+    // Build params dynamically. The match_status (if present) is a single value bound once
+    // (the COUNT and DATA queries each get their own binding index sequence).
     let search_pattern =
         search.and_then(|t| if t.is_empty() { None } else { Some(format!("%{}%", t)) });
+    let status_value = match_status_filter.map(|s| s.as_str().to_string());
 
-    // Count query
-    let total: usize = if let Some(ref pattern) = search_pattern {
-        conn.query_row(&count_sql, params![pattern, pattern, pattern, pattern], |row| row.get(0))?
-    } else {
-        conn.query_row(&count_sql, [], |row| row.get(0))?
-    };
+    // Helper: collect params for one query invocation (search x4, then status once).
+    let build_params =
+        |search_present: bool, status_present: bool| -> Vec<Box<dyn rusqlite::types::ToSql>> {
+            let mut v: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            if let (Some(p), true) = (search_pattern.as_ref(), search_present) {
+                for _ in 0..4 {
+                    v.push(Box::new(p.clone()));
+                }
+            }
+            if let (Some(s), true) = (status_value.as_ref(), status_present) {
+                v.push(Box::new(s.clone()));
+            }
+            v
+        };
 
-    // Data query
+    // Count query params
+    let count_boxed = build_params(search_pattern.is_some(), status_value.is_some());
+    let count_params: Vec<&dyn rusqlite::types::ToSql> =
+        count_boxed.iter().map(|p| p.as_ref()).collect();
+    let total: usize = conn.query_row(&count_sql, count_params.as_slice(), |row| row.get(0))?;
+
+    // Data query params (same filter params as count, plus LIMIT and OFFSET)
+    let mut data_boxed = build_params(search_pattern.is_some(), status_value.is_some());
+    data_boxed.push(Box::new(limit));
+    data_boxed.push(Box::new(offset));
+    let data_params: Vec<&dyn rusqlite::types::ToSql> =
+        data_boxed.iter().map(|p| p.as_ref()).collect();
+
     let mut stmt = conn.prepare(&data_sql)?;
-    let papers: Vec<ReferencePaper> = if let Some(ref pattern) = search_pattern {
-        stmt.query_map(params![pattern, pattern, pattern, pattern, limit, offset], row_to_paper)?
-            .filter_map(|r| r.ok())
-            .collect()
-    } else {
-        stmt.query_map(params![limit, offset], row_to_paper)?.filter_map(|r| r.ok()).collect()
-    };
+    let papers: Vec<ReferencePaper> =
+        stmt.query_map(data_params.as_slice(), row_to_paper)?.filter_map(|r| r.ok()).collect();
 
     Ok((papers, total))
 }

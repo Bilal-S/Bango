@@ -153,6 +153,33 @@ fn enforce_word_budget(chunks: &mut Vec<ScoredChunk>, budget: usize) {
     }
 }
 
+/// Format scored chunks as the `## Supporting Evidence from Full Text` body for
+/// one article. Each chunk is prefixed with its section label
+/// (`[§Methods]`, `[§Results]`, or `[§Text]` when the section is unknown).
+///
+/// Returns `None` when the slice is empty so callers can leave
+/// `ArticleEntry.full_text_evidence = None` (keeping the prompt byte-identical
+/// to abstract-only mode). Pure: no I/O, no DB.
+///
+/// This is the single canonical implementation. `engine::format_chunks_as_evidence`
+/// (kept `pub` for backward compat with external tests) and `evidence::resolve_evidence`
+/// (the Tier 4.1 complementarity path) both delegate here so the chunks-only body
+/// stays byte-identical across all screening modes.
+#[must_use]
+pub fn format_chunks_as_evidence(chunks: &[ScoredChunk]) -> Option<String> {
+    if chunks.is_empty() {
+        return None;
+    }
+    let lines: Vec<String> = chunks
+        .iter()
+        .map(|c| {
+            let label = c.section.as_deref().unwrap_or("Text");
+            format!("[§{label}] {}", c.content)
+        })
+        .collect();
+    Some(lines.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

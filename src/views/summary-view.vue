@@ -163,14 +163,14 @@ onMounted(async () => {
           :disabled="!canGenerate || loading"
           @click="handleGenerate"
         >
-          <span v-if="loading" class="btn__loading">
+          <template v-if="loading">
             <span class="material-symbols-outlined btn__spinner">progress_activity</span>
             Generating...
-          </span>
-          <span v-else>
+          </template>
+          <template v-else>
             <span class="material-symbols-outlined btn__icon">auto_awesome</span>
             Summarize Findings
-          </span>
+          </template>
         </button>
       </div>
     </header>

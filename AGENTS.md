@@ -107,9 +107,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
     retrieval (pure, `#[must_use]`). `rank_chunks_by_criteria(chunks, inc, exc, top_k,
     max_chunk_words, budget)` scores chunks by criteria-token TF density (shared
     `utils::text_tokens` tokenizer), boosts Methods-section matches, filters oversized
-    chunks, and enforces a per-article word budget. Constants: `DEFAULT_TOP_K=2`,
-    `DEFAULT_MAX_CHUNK_WORDS=600`, `METHODS_BOOST=0.25`, `DEFAULT_CHUNK_BUDGET_PER_ARTICLE=2400`.
-    11 inline tests + the §T3.7 inventory.
+    chunks, and enforces a per-article word budget. Also owns the canonical
+    `format_chunks_as_evidence(chunks) -> Option<String>` (the `## Supporting Evidence`
+    body formatter); `engine::format_chunks_as_evidence` and `evidence::resolve_evidence`
+    both delegate here so the chunks-only output stays byte-identical across modes.
+    Constants: `DEFAULT_TOP_K=2`, `DEFAULT_MAX_CHUNK_WORDS=600`, `METHODS_BOOST=0.25`,
+    `DEFAULT_CHUNK_BUDGET_PER_ARTICLE=2400`. 11 inline tests + the §T3.7 inventory.
   - **`src-tauri/src/screening/` Tier 3 Phases C/D/E (enhanced + two_stage modes)** -
     `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
     (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,

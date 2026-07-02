@@ -7,6 +7,23 @@ use crate::models::article::{AiDecision, Article, ArticleStatus, NewArticle};
 
 const MAX_ARTICLES: usize = 10_000;
 
+/// Shared SELECT base for the `articles` table.
+///
+/// Includes the `tags` and `labels` correlated subqueries as `tags_json` /
+/// `labels_json` so every article fetch returns the joined data in one shot.
+/// All article read functions (`get_article_by_id`, `get_all_articles`,
+/// `get_articles_by_status`, `get_articles_for_export`, `get_duplicate_articles`,
+/// `get_working_articles`, `query_articles`) compose their SQL by appending a
+/// WHERE / ORDER BY clause to this constant. Keeps the column list in one place
+/// so a schema change is a single edit, not ten.
+const ARTICLE_SELECT_BASE: &str = "\
+SELECT articles.*, \
+(SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id \
+ WHERE at.article_id = articles.id) AS tags_json, \
+(SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id \
+ WHERE al.article_id = articles.id) AS labels_json \
+FROM articles";
+
 pub fn count_articles(conn: &Connection) -> Result<usize, AppError> {
     let count: usize = conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0))?;
     Ok(count)
@@ -337,36 +354,35 @@ pub fn insert_articles_batch(
 }
 
 pub fn get_article_by_id(conn: &Connection, id: &str) -> Result<Article, AppError> {
-    conn.query_row("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE id = ?1", [id], row_to_article).map_err(
-        |e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                AppError::NotFound(format!("Article {} not found", id))
-            }
-            other => AppError::Database(other),
-        },
-    )
+    let sql = format!("{ARTICLE_SELECT_BASE} WHERE id = ?1");
+    conn.query_row(&sql, [id], row_to_article).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            AppError::NotFound(format!("Article {} not found", id))
+        }
+        other => AppError::Database(other),
+    })
 }
 
 fn get_article_by_id_tx(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<Article, AppError> {
-    tx.query_row("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE id = ?1", [id], row_to_article).map_err(
-        |e| match e {
-            rusqlite::Error::QueryReturnedNoRows => {
-                AppError::NotFound(format!("Article {} not found", id))
-            }
-            other => AppError::Database(other),
-        },
-    )
+    let sql = format!("{ARTICLE_SELECT_BASE} WHERE id = ?1");
+    tx.query_row(&sql, [id], row_to_article).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            AppError::NotFound(format!("Article {} not found", id))
+        }
+        other => AppError::Database(other),
+    })
 }
 
 pub fn get_all_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
-    let mut stmt = conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles ORDER BY imported_at DESC")?;
+    let sql = format!("{ARTICLE_SELECT_BASE} ORDER BY imported_at DESC");
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Article>, AppError> {
-    let mut stmt =
-        conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = ?1 ORDER BY imported_at DESC")?;
+    let sql = format!("{ARTICLE_SELECT_BASE} WHERE status = ?1 ORDER BY imported_at DESC");
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([status], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -374,34 +390,55 @@ pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Art
 /// Fetch articles for tab-aware export.
 /// - `status`: `"all"` for all articles, or a specific status like `"included"`, `"working"`, etc.
 /// - `screening_errors_only`: when true, only working articles with screening errors are returned.
+///
+/// `status` is bound via `?1` (parameterized) rather than interpolated, per CLAUDE.md
+/// ("Never interpolate user input into SQL"). The value flows from a `#[tauri::command]`
+/// parameter; enum-controlled, but parameterized for rule compliance and defense-in-depth.
 pub fn get_articles_for_export(
     conn: &Connection,
     status: &str,
     screening_errors_only: bool,
 ) -> Result<Vec<Article>, AppError> {
-    let sql = if status == "all" && !screening_errors_only {
-        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles ORDER BY imported_at DESC".to_string()
+    // Three branches: all / screening-errors-only / specific-status.
+    // Each composes a parameterized SQL string from `ARTICLE_SELECT_BASE`.
+    let (sql, params_boxed): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if status == "all"
+        && !screening_errors_only
+    {
+        (format!("{ARTICLE_SELECT_BASE} ORDER BY imported_at DESC"), vec![])
     } else if screening_errors_only {
-        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'working' AND screened_at IS NOT NULL ORDER BY imported_at DESC".to_string()
+        (
+                format!(
+                    "{ARTICLE_SELECT_BASE} WHERE status = 'working' AND screened_at IS NOT NULL ORDER BY imported_at DESC"
+                ),
+                vec![],
+            )
     } else {
-        format!("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = '{status}' ORDER BY imported_at DESC")
+        (
+            format!("{ARTICLE_SELECT_BASE} WHERE status = ?1 ORDER BY imported_at DESC"),
+            vec![Box::new(status.to_string())],
+        )
     };
+    let params: Vec<&dyn rusqlite::types::ToSql> =
+        params_boxed.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), row_to_article)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn get_duplicate_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
+    let sql = format!(
+        "{ARTICLE_SELECT_BASE} WHERE status = 'duplicate' AND duplicate_of IS NULL ORDER BY imported_at DESC"
+    );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-pub fn get_duplicate_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'duplicate' AND duplicate_of IS NULL ORDER BY imported_at DESC"
-    )?;
-    let rows = stmt.query_map([], row_to_article)?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
-}
-
 pub fn get_working_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
-    let mut stmt =
-        conn.prepare("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles WHERE status = 'working' AND duplicate_of IS NULL ORDER BY imported_at DESC")?;
+    let sql = format!(
+        "{ARTICLE_SELECT_BASE} WHERE status = 'working' AND duplicate_of IS NULL ORDER BY imported_at DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], row_to_article)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -471,7 +508,7 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
     let is_all_view = query.status.is_none();
     let base_filter =
         if is_duplicate_view || is_all_view { " WHERE 1=1" } else { " WHERE duplicate_of IS NULL" };
-    let mut sql = format!("SELECT articles.*, (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id WHERE at.article_id = articles.id) AS tags_json, (SELECT json_group_array(l.name) FROM labels l JOIN article_labels al ON l.id = al.label_id WHERE al.article_id = articles.id) AS labels_json FROM articles{base_filter}");
+    let mut sql = format!("{ARTICLE_SELECT_BASE}{base_filter}");
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ref status) = query.status {
@@ -916,15 +953,13 @@ pub fn reset_screening_errors(conn: &Connection) -> Result<usize, AppError> {
     Ok(rows)
 }
 
-/// Reset the working list: clear `screened_at` and `screening_error` for all working articles
-/// that have been previously screened, so they can be re-screened.
+/// Reset the working list: semantically identical to `reset_screening_errors` (both clear
+/// `screened_at` and `screening_error` for previously-screened working articles). Kept as a
+/// thin delegate so the two Tauri command endpoints (`reset_screening_errors` /
+/// `reset_working_list` in `commands::screening`) can keep their distinct frontend contracts
+/// while sharing one implementation.
 pub fn reset_working_list(conn: &Connection) -> Result<usize, AppError> {
-    let rows = conn.execute(
-        "UPDATE articles SET screened_at = NULL, screening_error = 0, changed_at = datetime('now') \
-         WHERE status = 'working' AND screened_at IS NOT NULL",
-        [],
-    )?;
-    Ok(rows)
+    reset_screening_errors(conn)
 }
 
 /// Bulk update status for multiple articles in a single transaction.
