@@ -1,0 +1,517 @@
+//! Batch Import Processor.
+//!
+//! A three-phase pipeline that scans the Bango Documents directory for files
+//! produced by external tools (Citation Chaser, manual PDF drops) and imports
+//! them into the article database:
+//!
+//! 1. **Full Text** (`fulltext/`): attach `{normalized_doi}.pdf` / `.txt` files
+//!    to articles matching by DOI. Skips articles that already have full text.
+//! 2. **Citations** (`ris/`): import `{normalized_doi}_references.ris` /
+//!    `_citations.ris` / `.bib` files. Skips articles that already have the
+//!    corresponding reference/citation details.
+//! 3. **AI Summaries**: for each article that got full text attached in Phase
+//!    1 (and has no existing summary), generate one via the same path as the
+//!    "Generate AI Summary" button in the article detail panel. Only runs when
+//!    `auto_summarize` is true (the frontend passes the
+//!    `bango-full-text-summaries` localStorage flag).
+//!
+//! All three phases run inside a single spawned background task so the UI stays
+//! responsive and the user can navigate to other sections. The runner emits
+//! `batch-import:progress` events after each item; the frontend listens and
+//! updates a progress bar. The user can cancel at any point via
+//! [`cancel_batch_import`]; the runner checks the cancel token between items
+//! (an in-flight LLM request completes naturally).
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+use tauri::{Emitter, Manager, State};
+use tokio::sync::RwLock;
+
+use crate::db::article_repo::ArticleDoiInfo;
+use crate::db::connection::DbState;
+use crate::error::AppError;
+
+pub mod citations_phase;
+pub mod full_text_phase;
+pub mod summary_phase;
+
+/// A wrapper around the DOI match map. Defined here so both phase modules can
+/// share one type without a circular dependency on each other.
+pub struct DoiMatchMap(pub HashMap<String, ArticleDoiInfo>);
+
+impl DoiMatchMap {
+    /// Look up an article by its cleaned-DOI key.
+    pub fn get(&self, key: &str) -> Option<&ArticleDoiInfo> {
+        self.0.get(key)
+    }
+
+    /// Whether the map is empty.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Number of entries.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Whether the map contains a key.
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.0.contains_key(key)
+    }
+}
+
+/// Result of a single phase's execution.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportPhaseResult {
+    /// Total items discovered for this phase (before cancellation/processing).
+    pub total: usize,
+    /// Items processed (attempted) so far. May be less than `total` if cancelled.
+    pub processed: usize,
+    /// Items that succeeded.
+    pub succeeded: usize,
+    /// Items that failed.
+    pub failed: usize,
+    /// Non-fatal error messages collected during the phase.
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+/// Which phase is currently running (1-indexed for display).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BatchImportPhase {
+    FullText = 1,
+    Citations = 2,
+    Summaries = 3,
+}
+
+impl BatchImportPhase {
+    /// Human-readable phase name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::FullText => "Full Text",
+            Self::Citations => "Citations",
+            Self::Summaries => "AI Summaries",
+        }
+    }
+}
+
+/// The progress payload emitted via the `batch-import:progress` event and
+/// returned by `get_batch_import_progress`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchImportProgress {
+    /// Current phase (1-based).
+    pub phase: usize,
+    /// Human-readable phase name.
+    pub phase_name: String,
+    /// Items completed in the current phase so far.
+    pub completed: usize,
+    /// Total items in the current phase.
+    pub total: usize,
+    /// Overall percentage across all 3 phases (0-100).
+    pub overall_percent: usize,
+    /// Human-readable status message (e.g. the filename being processed).
+    #[serde(default)]
+    pub message: String,
+    /// Whether the runner is currently active.
+    pub is_running: bool,
+    /// Whether the runner was cancelled by the user.
+    pub is_cancelled: bool,
+    /// Final per-phase results (populated as each phase completes).
+    #[serde(default)]
+    pub full_text: Option<BatchImportPhaseResult>,
+    #[serde(default)]
+    pub citations: Option<BatchImportPhaseResult>,
+    #[serde(default)]
+    pub summaries: Option<BatchImportPhaseResult>,
+}
+
+/// Managed state holding the cancel token. The runner is spawned as a background
+/// task; the cancel token is checked between items.
+pub struct BatchImportState {
+    cancel_token: Arc<RwLock<bool>>,
+    progress: Arc<RwLock<BatchImportProgress>>,
+}
+
+impl Default for BatchImportState {
+    fn default() -> Self {
+        Self {
+            cancel_token: Arc::new(RwLock::new(false)),
+            progress: Arc::new(RwLock::new(BatchImportProgress::default())),
+        }
+    }
+}
+
+/// Emit a progress update via both the event system and the shared progress
+/// struct (so `get_batch_import_progress` returns the latest snapshot).
+async fn emit_progress(
+    app_handle: &tauri::AppHandle,
+    progress: &Arc<RwLock<BatchImportProgress>>,
+    phase: BatchImportPhase,
+    completed: usize,
+    total: usize,
+    overall_percent: usize,
+    message: &str,
+    is_running: bool,
+    is_cancelled: bool,
+) {
+    let payload = BatchImportProgress {
+        phase: phase as usize,
+        phase_name: phase.name().to_string(),
+        completed,
+        total,
+        overall_percent,
+        message: message.to_string(),
+        is_running,
+        is_cancelled,
+        full_text: None,
+        citations: None,
+        summaries: None,
+    };
+    {
+        let mut guard = progress.write().await;
+        *guard = payload.clone();
+    }
+    let _ = app_handle.emit("batch-import:progress", payload);
+}
+
+/// Start the batch import pipeline. Returns immediately after spawning the
+/// background task; the frontend tracks progress via the `batch-import:progress`
+/// event and can cancel via [`cancel_batch_import`].
+///
+/// # Arguments
+/// * `auto_summarize` - When true, Phase 3 runs (generate AI summaries for
+///   newly-attached articles). When false, only Phases 1 and 2 run.
+/// * `include_section_summaries` - Forwarded to the summary generator. Should
+///   mirror the `bango-section-summaries` localStorage flag.
+#[tauri::command]
+pub async fn start_batch_import(
+    app_handle: tauri::AppHandle,
+    db_state: State<'_, DbState>,
+    batch_state: State<'_, BatchImportState>,
+    auto_summarize: Option<bool>,
+    include_section_summaries: Option<bool>,
+) -> Result<BatchImportProgress, AppError> {
+    // ── Concurrent-start guard ──
+    {
+        let guard = batch_state.progress.read().await;
+        if guard.is_running {
+            return Ok(guard.clone());
+        }
+    }
+
+    // Reset cancel token.
+    {
+        let mut token = batch_state.cancel_token.write().await;
+        *token = false;
+    }
+
+    let auto_sum = auto_summarize.unwrap_or(false);
+    let include_sections = include_section_summaries.unwrap_or(false);
+    let cancel_token = batch_state.cancel_token.inner().clone();
+    let progress = batch_state.progress.inner().clone();
+    let app_handle_clone = app_handle.clone();
+
+    // Emit initial state.
+    emit_progress(
+        &app_handle,
+        &progress,
+        BatchImportPhase::FullText,
+        0,
+        0,
+        0,
+        "Starting batch import...",
+        true,
+        false,
+    )
+    .await;
+
+    // Spawn the background task.
+    tokio::spawn(async move {
+        let db = app_handle_clone.state::<DbState>();
+        let state = app_handle_clone.state::<BatchImportState>();
+
+        // ── Phase 1: Full Text ──
+        let (ft_result, newly_attached) = {
+            // Cancel check closure (sync, for the full_text + citations phases
+            // which take a `&Connection`).
+            let cancel_snap = state.cancel_token.inner().clone();
+            let is_cancelled = || {
+                // Try a non-blocking read; if it would block, treat as not cancelled.
+                let guard = cancel_snap.try_read();
+                matches!(guard, Ok(g) if *g)
+            };
+
+            let conn = match db.conn.lock() {
+                Ok(c) => c,
+                Err(e) => {
+                    let msg = format!("DB lock error: {e}");
+                    emit_progress(
+                        &app_handle_clone,
+                        &progress,
+                        BatchImportPhase::FullText,
+                        0,
+                        0,
+                        0,
+                        &msg,
+                        false,
+                        false,
+                    )
+                    .await;
+                    return;
+                }
+            };
+            match full_text_phase::run_full_text_phase(&conn, &is_cancelled) {
+                Ok((result, ids)) => (result, ids),
+                Err(e) => (
+                    BatchImportPhaseResult {
+                        total: 0,
+                        processed: 0,
+                        succeeded: 0,
+                        failed: 0,
+                        errors: vec![format!("Phase 1 error: {e}")],
+                    },
+                    vec![],
+                ),
+            }
+        };
+
+        // Stash phase 1 result into the progress snapshot + emit.
+        {
+            let mut guard = progress.write().await;
+            guard.full_text = Some(ft_result.clone());
+        }
+        let ft_percent = if ft_result.total > 0 {
+            (ft_result.processed * 100) / ft_result.total
+        } else {
+            100
+        };
+        emit_progress(
+            &app_handle_clone,
+            &progress,
+            BatchImportPhase::FullText,
+            ft_result.processed,
+            ft_result.total,
+            ft_percent / 3,
+            &format!(
+                "Phase 1 complete: {} attached, {} failed",
+                ft_result.succeeded, ft_result.failed
+            ),
+            true,
+            false,
+        )
+        .await;
+
+        // Check cancel after phase 1.
+        if *state.cancel_token.read().await {
+            emit_progress(
+                &app_handle_clone,
+                &progress,
+                BatchImportPhase::FullText,
+                ft_result.processed,
+                ft_result.total,
+                ft_percent / 3,
+                "Cancelled by user",
+                false,
+                true,
+            )
+            .await;
+            return;
+        }
+
+        // ── Phase 2: Citations ──
+        let cit_result = {
+            let cancel_snap = state.cancel_token.inner().clone();
+            let is_cancelled = || {
+                let guard = cancel_snap.try_read();
+                matches!(guard, Ok(g) if *g)
+            };
+            let conn = match db.conn.lock() {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = eprintln!("batch_import phase 2 DB lock error: {e}");
+                    return BatchImportPhaseResult::default();
+                }
+            };
+            match citations_phase::run_citations_phase(&conn, &is_cancelled) {
+                Ok(result) => result,
+                Err(e) => BatchImportPhaseResult {
+                    total: 0,
+                    processed: 0,
+                    succeeded: 0,
+                    failed: 0,
+                    errors: vec![format!("Phase 2 error: {e}")],
+                },
+            }
+        };
+        {
+            let mut guard = progress.write().await;
+            guard.citations = Some(cit_result.clone());
+        }
+        let cit_percent = if cit_result.total > 0 {
+            (cit_result.processed * 100) / cit_result.total
+        } else {
+            100
+        };
+        emit_progress(
+            &app_handle_clone,
+            &progress,
+            BatchImportPhase::Citations,
+            cit_result.processed,
+            cit_result.total,
+            33 + cit_percent / 3,
+            &format!(
+                "Phase 2 complete: {} imported, {} failed",
+                cit_result.succeeded, cit_result.failed
+            ),
+            true,
+            false,
+        )
+        .await;
+
+        // Check cancel after phase 2.
+        if *state.cancel_token.read().await {
+            emit_progress(
+                &app_handle_clone,
+                &progress,
+                BatchImportPhase::Citations,
+                cit_result.processed,
+                cit_result.total,
+                33 + cit_percent / 3,
+                "Cancelled by user",
+                false,
+                true,
+            )
+            .await;
+            return;
+        }
+
+        // ── Phase 3: AI Summaries (optional) ──
+        if auto_sum {
+            // Filter the newly-attached articles to only those without an
+            // existing AI summary. Re-query to get the latest flags.
+            let to_summarize: Vec<String> = {
+                let conn = match db.conn.lock() {
+                    Ok(c) => c,
+                    Err(_) => vec![],
+                };
+                let Ok(articles) = article_repo_get_articles_by_ids(&db) else {
+                    vec![]
+                };
+                let id_set: std::collections::HashSet<&str> =
+                    newly_attached.iter().map(String::as_str).collect();
+                articles
+                    .into_iter()
+                    .filter(|a| id_set.contains(a.id.as_str()) && !a.has_ai_summary)
+                    .map(|a| a.id)
+                    .collect::<Vec<_>>()
+            };
+
+            let cancel_snap = state.cancel_token.inner().clone();
+            let sum_result = summary_phase::run_summary_phase(
+                &db,
+                &app_handle_clone,
+                to_summarize.clone(),
+                include_sections,
+                || async move { *cancel_snap.read().await },
+            )
+            .await;
+            {
+                let mut guard = progress.write().await;
+                guard.summaries = Some(sum_result.clone());
+            }
+            let sum_percent = if sum_result.total > 0 {
+                (sum_result.processed * 100) / sum_result.total
+            } else {
+                100
+            };
+            emit_progress(
+                &app_handle_clone,
+                &progress,
+                BatchImportPhase::Summaries,
+                sum_result.processed,
+                sum_result.total,
+                66 + sum_percent / 3,
+                &format!(
+                    "Phase 3 complete: {} summarized, {} failed",
+                    sum_result.succeeded, sum_result.failed
+                ),
+                true,
+                false,
+            )
+            .await;
+        } else {
+            // Phase 3 skipped; jump to 100%.
+            emit_progress(
+                &app_handle_clone,
+                &progress,
+                BatchImportPhase::Summaries,
+                0,
+                0,
+                100,
+                "Phase 3 skipped (auto-summarize disabled)",
+                true,
+                false,
+            )
+            .await;
+        }
+
+        // Final state.
+        emit_progress(
+            &app_handle_clone,
+            &progress,
+            BatchImportPhase::Summaries,
+            0,
+            0,
+            100,
+            "Batch import complete",
+            false,
+            false,
+        )
+        .await;
+    });
+
+    let guard = batch_state.progress.read().await;
+    Ok(guard.clone())
+}
+
+/// Cancel a running batch import. The runner checks the token between items; an
+/// in-flight LLM request completes naturally.
+#[tauri::command]
+pub async fn cancel_batch_import(
+    batch_state: State<'_, BatchImportState>,
+) -> Result<(), AppError> {
+    *batch_state.cancel_token.write().await = true;
+    Ok(())
+}
+
+/// Get the current batch-import progress snapshot (for polling or initial load).
+#[tauri::command]
+pub async fn get_batch_import_progress(
+    batch_state: State<'_, BatchImportState>,
+) -> Result<BatchImportProgress, AppError> {
+    let guard = batch_state.progress.read().await;
+    Ok(guard.clone())
+}
+
+/// Helper: load `ArticleDoiInfo` for articles matching a set of IDs. Kept here
+/// because the spawned task can't easily thread a `HashSet` through the closure
+/// and the DB helper signature takes `&State`.
+///
+/// This is a thin wrapper around `article_repo::get_articles_with_doi_info`
+/// that filters client-side by the IDs Phase 1 produced.
+fn article_repo_get_articles_by_ids(
+    db: &State<'_, DbState>,
+) -> Result<Vec<ArticleDoiInfo>, AppError> {
+    let conn = db
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    crate::db::article_repo::get_articles_with_doi_info(&conn)
+}

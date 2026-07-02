@@ -1119,6 +1119,44 @@ pub fn get_full_text_file_name(
     Ok(file_name)
 }
 
+/// Lightweight article info for batch import DOI matching.
+/// Used by the batch-import phases to match files on disk to articles by DOI
+/// and to skip articles that already have full text / references / citations.
+#[derive(Debug, Clone)]
+pub struct ArticleDoiInfo {
+    pub id: String,
+    pub doi: String,
+    pub has_full_text: bool,
+    pub has_reference_details: bool,
+    pub has_citation_details: bool,
+    /// `Some` if the article already has an AI summary blob, `None` otherwise.
+    /// Used by Phase 3 to skip articles that already have a summary.
+    pub has_ai_summary: bool,
+}
+
+/// Load all articles that have a non-null, non-empty DOI with their full-text /
+/// reference / citation / AI-summary flags. Used by the batch-import runner to
+/// build the DOI match map in a single query instead of one lookup per file.
+pub fn get_articles_with_doi_info(conn: &Connection) -> Result<Vec<ArticleDoiInfo>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, doi, has_full_text, has_reference_details, has_citation_details, \
+         (full_text_ai_summary IS NOT NULL AND full_text_ai_summary != '') AS has_ai_summary \
+         FROM articles \
+         WHERE doi IS NOT NULL AND TRIM(doi) != '' AND duplicate_of IS NULL",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ArticleDoiInfo {
+            id: row.get(0)?,
+            doi: row.get::<_, String>(1)?,
+            has_full_text: row.get::<_, i64>(2)? != 0,
+            has_reference_details: row.get::<_, i64>(3)? != 0,
+            has_citation_details: row.get::<_, i64>(4)? != 0,
+            has_ai_summary: row.get::<_, i64>(5)? != 0,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn get_article_counts(
     conn: &Connection,
 ) -> Result<crate::models::article::ArticleCounts, AppError> {

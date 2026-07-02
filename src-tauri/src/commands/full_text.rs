@@ -39,30 +39,31 @@ pub struct FullTextAttachResult {
 /// Delegates to [`app_settings_repo::get_fulltext_dir`], which derives the
 /// root via [`app_settings_repo::get_storage_root`] and ensures both the root
 /// and the `fulltext/` subdir exist.
-fn compute_storage_dir(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
+pub fn compute_storage_dir(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
     let fulltext = app_settings_repo::get_fulltext_dir(conn)?;
     Ok(PathBuf::from(fulltext))
 }
 
 /// Attach a full-text file (PDF or TXT) to an article.
 /// Extracts text content, stores in DB, and copies file to storage directory.
-#[tauri::command]
-pub fn attach_full_text(
-    db_state: tauri::State<'_, DbState>,
-    _app_handle: tauri::AppHandle,
-    article_id: String,
-    file_path: String,
+///
+/// This is the reusable core extracted from the Tauri command so the batch
+/// import runner can attach files per-article without re-acquiring the
+/// `DbState` mutex (the caller already holds a `&Connection`).
+///
+/// # Arguments
+/// * `conn` - A locked SQLite connection.
+/// * `article_id` - The article to attach the full text to.
+/// * `source_path` - Path to the source PDF/TXT file on disk.
+/// * `storage_dir` - The fulltext storage directory (from `compute_storage_dir`).
+pub fn attach_full_text_inner(
+    conn: &rusqlite::Connection,
+    article_id: &str,
+    source_path: &Path,
+    storage_dir: &Path,
 ) -> Result<FullTextAttachResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-
-    let storage_dir = compute_storage_dir(&conn)?;
-
-    let source_path = PathBuf::from(&file_path);
     if !source_path.exists() {
-        return Err(AppError::Import(format!("File not found: {file_path}")));
+        return Err(AppError::Import(format!("File not found: {}", source_path.display())));
     }
 
     let extension = source_path
@@ -73,9 +74,9 @@ pub fn attach_full_text(
 
     // Extract text based on file type
     let full_text = match extension.as_str() {
-        "pdf" => pdf_extract::extract_pdf_text(&source_path).map_err(AppError::Import),
+        "pdf" => pdf_extract::extract_pdf_text(source_path).map_err(AppError::Import),
         "txt" => {
-            let content = std::fs::read_to_string(&source_path)?;
+            let content = std::fs::read_to_string(source_path)?;
             Ok(pdf_extract::extract_txt_text(&content))
         }
         other => Err(AppError::Import(format!(
@@ -97,32 +98,27 @@ pub fn attach_full_text(
     let dest_path = storage_dir.join(&dest_filename);
 
     // Copy file to storage directory
-    std::fs::copy(&source_path, &dest_path)
+    std::fs::copy(source_path, &dest_path)
         .map_err(|e| AppError::Import(format!("Failed to copy file to storage: {e}")))?;
 
     // Update database
-    article_repo::update_full_text(&conn, &article_id, &full_text, &dest_filename)?;
+    article_repo::update_full_text(conn, article_id, &full_text, &dest_filename)?;
 
     // Tier 3: populate `article_chunks` so enhanced/two-stage screening can
     // retrieve "Supporting Evidence from Full Text" without re-parsing the PDF.
-    // Extraction/chunking failures are non-fatal: the full text still attaches
-    // and screening falls back to abstract-only for this article.
-    if let Err(e) = populate_chunks_for_attached_text(&conn, &article_id, &source_path) {
+    if let Err(e) = populate_chunks_for_attached_text(conn, article_id, source_path) {
         let _ = crate::db::audit_repo::log_error(
-            &conn,
+            conn,
             &format!("Chunk extraction failed for article {article_id}: {e}"),
         );
     }
 
-    // Full text is the top-priority content source for the wiki (full_text →
-    // ai_summary → abstract). Attaching it changes what the next ingest produces.
-    app_settings_repo::mark_wiki_needs_refresh(&conn);
-    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(conn);
+    app_settings_repo::mark_biblio_needs_refresh(conn);
 
-    // Create audit entry
     crate::db::audit_repo::create_entry(
-        &conn,
-        &article_id,
+        conn,
+        article_id,
         "import",
         None,
         None,
@@ -135,6 +131,25 @@ pub fn attach_full_text(
         message: format!("Full text extracted ({word_count} words)"),
         word_count,
     })
+}
+
+/// Attach a full-text file (PDF or TXT) to an article.
+/// Extracts text content, stores in DB, and copies file to storage directory.
+#[tauri::command]
+pub fn attach_full_text(
+    db_state: tauri::State<'_, DbState>,
+    _app_handle: tauri::AppHandle,
+    article_id: String,
+    file_path: String,
+) -> Result<FullTextAttachResult, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+
+    let storage_dir = compute_storage_dir(&conn)?;
+    let source_path = PathBuf::from(&file_path);
+    attach_full_text_inner(&conn, &article_id, &source_path, &storage_dir)
 }
 
 /// Delete the full-text attachment for an article.

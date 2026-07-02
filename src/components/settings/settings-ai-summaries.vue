@@ -34,7 +34,8 @@ function toggleSectionSummaries(): void {
         <span class="settings-card__toggle-hint">
           When enabled, articles with uploaded full text are automatically summarized using the
           configured LLM as soon as the attachment completes. The manual
-          <code>auto_awesome</code> button on each article works regardless of this setting.
+          <span class="inline-icon material-symbols-outlined">auto_awesome</span>
+          <strong>Generate Summary</strong> button on each article works regardless of this setting.
         </span>
       </label>
       <button
@@ -72,4 +73,15 @@ function toggleSectionSummaries(): void {
 
 <style scoped>
 @import './settings-card-shared.css';
+
+/* Inline Material Symbols icon within hint prose. Sized to sit on the text
+   baseline so the user can visually match it to the article detail button. */
+.inline-icon {
+  font-size: 15px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+  color: var(--color-primary, #3525cd);
+  user-select: none;
+}
 </style>

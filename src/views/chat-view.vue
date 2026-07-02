@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { open } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useChatStore } from '@/stores/chat';
 import { useToast } from '@/composables/use-toast';
@@ -11,6 +10,7 @@ import { marked } from 'marked';
 import { renderWikiMarkdown } from '@/utils/wiki-markdown';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useWiki } from '@/composables/use-wiki';
+import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
 import type { WikiSourceInfo } from '@/types/wiki';
@@ -317,25 +317,9 @@ async function openArticleDetail(articleId: string) {
   }
 }
 
-async function handleAttachFullText(articleId: string): Promise<void> {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: 'Documents',
-          extensions: ['pdf', 'txt'],
-        },
-      ],
-    });
-    if (!selected) return;
-    toast.show('Importing full text…', 'info');
-    await attachFullText(articleId, selected);
-    toast.show('Full text attached successfully.', 'success');
-  } catch {
-    toast.show('Failed to attach full text', 'error');
-  }
-}
+// Full-text attach UI orchestration is centralized in
+// `useFullTextAttachment` (shared with the other detail-panel host views).
+const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
 </script>
 
 <template>

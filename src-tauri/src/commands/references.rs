@@ -1,3 +1,4 @@
+use crate::bibtex::converter::convert_bibtex_entries;
 use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::audit_repo;
@@ -603,37 +604,58 @@ pub struct ImportReferencesPayload {
     pub ref_type: String,
 }
 
-/// Import references/citations from an RIS file and link them to an article.
-#[tauri::command]
-pub fn import_references_for_article(
-    db_state: tauri::State<'_, DbState>,
-    payload: ImportReferencesPayload,
+/// Import references/citations from an RIS or BibTeX file and link them to an
+/// article. Reusable core extracted from the Tauri command so the batch import
+/// runner can call it per-file without re-acquiring the `DbState` mutex.
+///
+/// Auto-detects the file format: BibTeX (`.bib`) is parsed via
+/// [`crate::bibtex::parser::parse_bibtex`] + [`convert_bibtex_entries`];
+/// everything else is parsed as RIS via [`read_content`] +
+/// [`parse_and_validate`].
+///
+/// # Arguments
+/// * `conn` - A locked SQLite connection.
+/// * `article_id` - The parent article to link the references/citations to.
+/// * `file_path` - Path to the RIS or BibTeX file on disk.
+/// * `ref_type_str` - `"reference"` (backward references) or `"citation"`
+///   (forward citations).
+pub fn import_references_inner(
+    conn: &rusqlite::Connection,
+    article_id: &str,
+    file_path: &str,
+    ref_type_str: &str,
 ) -> Result<ExtractResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
-
     // Determine reference type
-    let ref_type = match payload.ref_type.as_str() {
+    let ref_type = match ref_type_str {
         "citation" => ReferenceType::Citation,
         _ => ReferenceType::Reference,
     };
 
-    // Read and parse RIS file using shared pipeline
-    let content = read_content(None, Some(payload.file_path.clone()))?;
-    let output = parse_and_validate(&content, ValidationMode::None)?;
+    // Read content
+    let content = read_content(None, Some(file_path.to_string()))?;
 
-    if output.valid_records.is_empty() {
-        return Ok(ExtractResult { papers_created: 0, links_created: 0, errors: vec![] });
-    }
+    // Parse: detect BibTeX by extension; default RIS.
+    let valid_records = if file_path.to_lowercase().ends_with(".bib") {
+        let bibtex_result = crate::bibtex::parser::parse_bibtex(&content);
+        let records: Vec<RisRecord> = convert_bibtex_entries(&bibtex_result.entries);
+        if records.is_empty() {
+            return Ok(ExtractResult { papers_created: 0, links_created: 0, errors: vec![] });
+        }
+        records
+    } else {
+        let output = parse_and_validate(&content, ValidationMode::None)?;
+        if output.valid_records.is_empty() {
+            return Ok(ExtractResult { papers_created: 0, links_created: 0, errors: vec![] });
+        }
+        output.valid_records
+    };
 
     let mut papers_created = 0usize;
     let mut links_created = 0usize;
     let mut errors: Vec<String> = Vec::new();
     let mut created_papers: Vec<ReferencePaper> = Vec::new();
 
-    for record in &output.valid_records {
+    for record in &valid_records {
         let paper = ris_record_to_reference_paper(record);
 
         // If the record has CR entries, also parse those
@@ -645,16 +667,16 @@ pub fn import_references_for_article(
         };
 
         // Insert the main record as a paper
-        match reference_repo::insert_or_find_paper(&conn, &paper) {
+        match reference_repo::insert_or_find_paper(conn, &paper) {
             Ok((inserted, was_created)) => {
                 if was_created {
                     papers_created += 1;
                     created_papers.push(inserted.clone());
                     if let Ok(Some(matched_id)) =
-                        reference_repo::auto_match_paper_to_article(&conn, &inserted)
+                        reference_repo::auto_match_paper_to_article(conn, &inserted)
                     {
                         let _ = reference_repo::update_paper_match(
-                            &conn,
+                            conn,
                             &inserted.id,
                             &MatchStatus::Matched,
                             Some(&matched_id),
@@ -662,12 +684,7 @@ pub fn import_references_for_article(
                     }
                 }
 
-                match reference_repo::create_link(
-                    &conn,
-                    &payload.article_id,
-                    &inserted.id,
-                    &ref_type,
-                ) {
+                match reference_repo::create_link(conn, article_id, &inserted.id, &ref_type) {
                     Ok(_) => links_created += 1,
                     Err(e) => errors.push(format!(
                         "Failed to link paper '{}' to article: {}",
@@ -688,16 +705,16 @@ pub fn import_references_for_article(
             let mut cr_to_insert = cr_paper.clone();
             cr_to_insert.import_source = Some("cr_extraction".into());
 
-            match reference_repo::insert_or_find_paper(&conn, &cr_to_insert) {
+            match reference_repo::insert_or_find_paper(conn, &cr_to_insert) {
                 Ok((cr_inserted, cr_created)) => {
                     if cr_created {
                         papers_created += 1;
                         created_papers.push(cr_inserted.clone());
                         if let Ok(Some(matched_id)) =
-                            reference_repo::auto_match_paper_to_article(&conn, &cr_inserted)
+                            reference_repo::auto_match_paper_to_article(conn, &cr_inserted)
                         {
                             let _ = reference_repo::update_paper_match(
-                                &conn,
+                                conn,
                                 &cr_inserted.id,
                                 &MatchStatus::Matched,
                                 Some(&matched_id),
@@ -705,12 +722,8 @@ pub fn import_references_for_article(
                         }
                     }
                     // CR entries link to the imported paper, not the original article
-                    let _ = reference_repo::create_link(
-                        &conn,
-                        &payload.article_id,
-                        &cr_inserted.id,
-                        &ref_type,
-                    );
+                    let _ =
+                        reference_repo::create_link(conn, article_id, &cr_inserted.id, &ref_type);
                 }
                 Err(e) => errors.push(format!(
                     "Failed to insert CR paper '{}': {}",
@@ -723,7 +736,7 @@ pub fn import_references_for_article(
 
     // Post-import: resolve journal links for newly created papers
     if !created_papers.is_empty() {
-        reference_repo::resolve_journal_links(&conn, &created_papers);
+        reference_repo::resolve_journal_links(conn, &created_papers);
     }
 
     // Audit log
@@ -733,15 +746,15 @@ pub fn import_references_for_article(
     };
     let details = format!(
         "Imported {} {} from file for article {} ({} new papers, {} links)",
-        output.valid_records.len(),
+        valid_records.len(),
         type_label,
-        payload.article_id,
+        article_id,
         papers_created,
         links_created,
     );
     let _ = audit_repo::create_entry(
-        &conn,
-        &payload.article_id,
+        conn,
+        article_id,
         "reference_import",
         None,
         None,
@@ -751,20 +764,26 @@ pub fn import_references_for_article(
 
     // Log individual errors
     for err in &errors {
-        let _ = audit_repo::create_entry(
-            &conn,
-            &payload.article_id,
-            "error",
-            None,
-            None,
-            Some(err),
-            "system",
-        );
+        let _ =
+            audit_repo::create_entry(conn, article_id, "error", None, None, Some(err), "system");
     }
 
     // References/citations feed citation and co-citation networks.
-    app_settings_repo::mark_biblio_needs_refresh(&conn);
-    app_settings_repo::mark_wiki_needs_refresh(&conn);
+    app_settings_repo::mark_biblio_needs_refresh(conn);
+    app_settings_repo::mark_wiki_needs_refresh(conn);
 
     Ok(ExtractResult { papers_created, links_created, errors })
+}
+
+/// Import references/citations from an RIS file and link them to an article.
+#[tauri::command]
+pub fn import_references_for_article(
+    db_state: tauri::State<'_, DbState>,
+    payload: ImportReferencesPayload,
+) -> Result<ExtractResult, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    import_references_inner(&conn, &payload.article_id, &payload.file_path, &payload.ref_type)
 }

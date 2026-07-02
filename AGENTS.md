@@ -88,6 +88,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
   (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:
+  `batch_import/` (3-phase batch import processor; see `batch_import/` entry
+  below),
   `pdf_extract.rs`, `sections.rs`, `chunking.rs`, `text_tokens.rs` [Tier 3 shared
   tokenizer for FTS5 BM25 + screening chunk scoring]). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
@@ -471,6 +473,48 @@ describe each durable boundary so agents can locate the right area. Create a chi
     includes `(§Methods)` in the header when `hit.section` is present so the model can cite
     the passage. 3 new tests: section-label-in-header, dedupe-chunks-of-same-page,
     distinct-pages-not-deduped.
+  - **`src-tauri/src/batch_import/`** - 3-phase batch import processor. Scans the
+    Bango Documents directory for files produced by external tools and imports
+    them into the article database by DOI match. Files keyed on
+    `clean_doi_filename(normalized_doi)`, consistent with Citation Chaser RIS
+    naming (`{clean_doi}_references.ris`). Modules: `mod.rs`
+    (`BatchImportRunner`, `BatchImportProgress`, `BatchImportState` managed
+    state, `start_batch_import` / `cancel_batch_import` /
+    `get_batch_import_progress` Tauri commands; spawned `tokio::task` so the UI
+    stays responsive and the user can navigate away; cancel token checked
+    between items; emits `batch-import:progress` events), `full_text_phase.rs`
+    (Phase 1: scan `fulltext/` for `{cleaned_doi}.pdf` / `.txt`, attach via
+    extracted `commands::full_text::attach_full_text_inner`; skips articles
+    with `has_full_text=true`; returns newly-attached IDs for Phase 3),
+    `citations_phase.rs` (Phase 2: scan `ris/` for
+    `{cleaned_doi}_references.ris`, `_citations.ris`, `.ris`, `.bib`; skips
+    articles with `has_reference_details`/`has_citation_details`; auto-detects
+    RIS vs BibTeX by extension via extracted
+    `commands::references::import_references_inner`), `summary_phase.rs`
+    (Phase 3: generate AI summaries for newly-attached articles without an
+    existing summary; reuses extracted
+    `commands::summary::generate_article_ai_summary_inner` so behavior is
+    identical to the article detail "Generate AI Summary" button including the
+    `include_section_summaries` flag; pre-flight LLM-configured guard; emits
+    the standard `article-ai-summary-complete` / `-error` events).
+    `db::article_repo::get_articles_with_doi_info` loads all articles with a
+    non-null DOI + the `has_full_text` / `has_reference_details` /
+    `has_citation_details` / `has_ai_summary` flags in a single query to build
+    the DOI match map. Frontend: `settings-reprocessing.vue` (button "Import
+    full text files" right after "Rebuild text chunks"; dialog explaining the
+    3 phases + file naming convention + Start/Cancel; live progress bar with
+    phase label + per-phase completed/total + overall percent + cancel button;
+    listens to `batch-import:progress` events so it survives navigation). 8
+    inline tests in `full_text_phase.rs` (DOI match map normalization +
+    collision + empty skip) + `citations_phase.rs` (skip-when-has-details,
+    find-references, find-citations-independently, generic-ris-fallback,
+    generic-bib-fallback). End-to-end integration tests live in
+    `tests/batch_import_test.rs` (10 tests: Phase 1 attach + skip-already-attached +
+    no-matching-DOI + no-DOI-article; Phase 2 refs + citations + independent +
+    skip-already-has-details; full-pipeline idempotency; multiple articles with
+    mixed files). Phase 3 (AI summaries) requires a live LLM and is not covered
+    by integration tests; the `generate_article_ai_summary_inner` core is tested
+    via the existing `summary_engine_test.rs` mock-LLM path.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).
@@ -543,7 +587,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `bango-section-summaries`; manual `auto_awesome` button always works regardless]),
     `settings-screening-preferences.vue` (screening-mode dropdown + auto-navigate toggle),
     `settings-storage.vue` (storage root picker + directory-tree visual),
-    `settings-reprocessing.vue` (text-chunks rebuild + Batch Import placeholder),
+    `settings-reprocessing.vue` (text-chunks rebuild + Batch Import processor:
+    full-text attach + Citation Chaser RIS import + optional AI summary
+    generation, 3-phase pipeline with progress bar and cancel; see
+    `batch_import/` entry below),
     `settings-project-management.vue` (import/export/delete
     + dialogs; Delete All Data also wipes the on-disk Wiki and resets
     `useWiki`/`useChatStore.wikiReady`; Export dialog warns that the Bango Documents
@@ -581,6 +628,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
     bounds; `clear` wipes the stack. Consumed by `wiki-view.vue` for Back/Forward page
     navigation. Pure logic, no DOM/Tauri deps; tested by
     `src/__tests__/composables/use-nav-history.test.ts`.
+    `use-full-text-attachment.ts` (shared UI orchestration for attaching a full-text
+    PDF/TXT via the OS file dialog: open dialog -> "Importing..." toast -> caller's
+    `attachFullText` (sourced from `useArticleSearch`) -> "success" toast -> optional
+    `onAttached` hook. Centralizes the flow that was previously duplicated across the
+    four `ArticleDetailPanel` host views - `article-list.vue` (with auto-summarize hook),
+    `biblio-citations.vue`, `chat-view.vue`, `wiki-view.vue`. Error toasts include the
+    underlying message so all four views report failures with equal detail. The
+    low-level IPC + refresh logic stays in `useArticleFullText`/`useArticleSearch`; this
+    composable owns only the file-dialog + toast shell).
   - **`src/utils/`** - pure utilities: `network-export.ts` (graph PNG/GEXF export via the
     `save()` + `write_text_to_file` pattern), `formatters.ts`, `color.ts`, `debounce.ts`,
     `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `llm-error.ts`,

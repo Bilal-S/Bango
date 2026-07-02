@@ -14,7 +14,7 @@ import WikiGraphPanel from '@/components/wiki/wiki-graph-panel.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
-import { open } from '@tauri-apps/plugin-dialog';
+import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { openPath } from '@tauri-apps/plugin-opener';
 
 // Name the component so <keep-alive include="WikiView"> in app-shell.vue
@@ -397,20 +397,9 @@ function onCloseArticleDetail(): void {
   showArticleDetail.value = false;
 }
 
-async function handleAttachFullText(articleId: string): Promise<void> {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [{ name: 'Documents', extensions: ['pdf', 'txt'] }],
-    });
-    if (!selected) return;
-    toast.show('Importing full text…', 'info');
-    await attachFullText(articleId, selected);
-    toast.show('Full text attached successfully.', 'success');
-  } catch {
-    toast.show('Failed to attach full text', 'error');
-  }
-}
+// Full-text attach UI orchestration is centralized in
+// `useFullTextAttachment` (shared with the other detail-panel host views).
+const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
 
 async function onIngested(): Promise<void> {
   await refreshStatus();

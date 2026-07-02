@@ -186,12 +186,39 @@ pub async fn generate_article_ai_summary(
     article_id: String,
     include_section_summaries: Option<bool>,
 ) -> Result<String, AppError> {
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
+    let want_sections = include_section_summaries.unwrap_or(false);
+    generate_article_ai_summary_inner(
+        &db_state,
+        &app_handle,
+        &orchestrator,
+        &article_id,
+        want_sections,
+    )
+    .await
+}
+
+/// Reusable summary-generation core (no Tauri state). Extracted from the
+/// `generate_article_ai_summary` command so the batch-import Phase 3 runner
+/// can call it per-article without re-implementing the LLM call + parse + store
+/// pipeline. Emits the same `article-ai-summary-complete` / `-error` events so
+/// the article detail panel and `useAiSummary` composable work unchanged.
+///
+/// The caller MUST pass the LLM orchestrator (from Tauri managed state) and
+/// the `DbState` mutex (so this fn can lock it briefly for reads/writes).
+pub async fn generate_article_ai_summary_inner(
+    db_state: &State<'_, DbState>,
+    app_handle: &tauri::AppHandle,
+    orchestrator: &Arc<LlmOrchestrator>,
+    article_id: &str,
+    include_section_summaries: bool,
+) -> Result<String, AppError> {
     // 1. Fetch article full text and LLM config while holding the DB lock
     let (title, full_text, config) = {
         let conn = db_state.conn.lock().map_err(|e| {
             AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
-        let (t, ft) = article_repo::get_full_text_for_summary(&conn, &article_id)?;
+        let (t, ft) = article_repo::get_full_text_for_summary(&conn, article_id)?;
         let cfg = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         (t, ft, cfg)
@@ -204,7 +231,7 @@ pub async fn generate_article_ai_summary(
     // model returns `section_summaries` alongside the standard fields. When the
     // flag is false OR no sections are detected, behavior is identical to the
     // pre-T1.3 path (backward compatible).
-    let want_sections = include_section_summaries.unwrap_or(false);
+    let want_sections = include_section_summaries;
     let high_value = if want_sections {
         filter_high_value_sections(&classify_sections(&full_text))
     } else {
@@ -242,7 +269,6 @@ pub async fn generate_article_ai_summary(
     } else {
         LlmRequestType::ArticleSummary
     };
-    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
     let llm_result = orchestrator.send(&config, system_prompt, &user_prompt, request_type).await;
 
     let (response_text, _tokens) = match llm_result {
@@ -377,10 +403,10 @@ pub async fn generate_article_ai_summary(
             .flatten();
         let merged =
             merge_summary_into_blob(existing_blob.as_deref(), &summary_json, used_section_path);
-        article_repo::set_ai_summary(&conn, &article_id, &merged)?;
+        article_repo::set_ai_summary(&conn, article_id, &merged)?;
         crate::db::audit_repo::create_entry(
             &conn,
-            &article_id,
+            article_id,
             "ai_summary",
             None,
             None,

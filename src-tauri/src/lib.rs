@@ -1,3 +1,4 @@
+pub mod batch_import;
 pub mod biblio;
 pub mod bibtex;
 pub mod commands;
@@ -134,6 +135,7 @@ pub fn run() {
             Ok(())
         })
         .manage(ScreeningState { engine: tokio::sync::RwLock::new(None) })
+        .manage(batch_import::BatchImportState::default())
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::startup::get_startup_status,
@@ -247,6 +249,9 @@ pub fn run() {
             commands::references::get_reference_articles_of_interest,
             commands::references::get_linked_articles_for_paper,
             commands::references::get_reference_paper,
+            batch_import::start_batch_import,
+            batch_import::cancel_batch_import,
+            batch_import::get_batch_import_progress,
             commands::scraping::scrape_citation_chaser_cmd,
             commands::biblio_cmd::biblio_normalize,
             commands::biblio_cmd::biblio_get_needs_refresh,

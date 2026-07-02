@@ -20,7 +20,7 @@ pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
     // Step 1: Detect headers/footers from lopdf (also pre-loads pages for fallback)
     let header_footer_lines = detect_headers_footers(file_path)?;
 
-    // Step 2: Extract full text using pdf-extract, with panic safety
+    // Step 2: Extract full text using pdf-extract, with panic safety.
     // pdf-extract can panic on PDFs with broken Unicode maps (FromUtf16Error).
     // Wrap in catch_unwind so the app doesn't abort when called from a
     // non-unwinding WebKit callback.

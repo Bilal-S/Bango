@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { open } from '@tauri-apps/plugin-dialog';
 import CitationNetworkGraph from '../components/citation-network-graph.vue';
 import type { IsolationDirection } from '../components/citation-network-graph.vue';
 import CitationControls from '../components/citation-controls.vue';
@@ -12,6 +11,7 @@ import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { useMainPathWorker } from '../composables/use-main-path-worker';
 import { useArticleSearch } from '../composables/use-article-search';
 import { useToast } from '../composables/use-toast';
+import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { debounce } from '../utils/debounce';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CitationNode } from '../types/biblio-citation';
@@ -224,21 +224,9 @@ function onCloseArticleDetail() {
   detailAuditTrail.value = [];
 }
 
-/** Attach a full-text PDF/text file to the article in the detail panel. */
-async function handleAttachFullText(articleId: string): Promise<void> {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [{ name: 'Documents', extensions: ['pdf', 'txt'] }],
-    });
-    if (!selected) return;
-    toast.show('Importing full text…', 'info');
-    await attachFullText(articleId, selected);
-    toast.show('Full text attached successfully.', 'success');
-  } catch {
-    toast.show('Failed to attach full text', 'error');
-  }
-}
+// Full-text attach UI orchestration is centralized in
+// `useFullTextAttachment` (shared with the other detail-panel host views).
+const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
 
 function onFilterChange(filters: {
   minCitations: number;

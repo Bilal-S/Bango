@@ -34,3 +34,5 @@ scripts/**/target/
 # Logs
 *.log
 .worktrees/
+scratch/
+

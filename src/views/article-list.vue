@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { open } from '@tauri-apps/plugin-dialog';
 import { useArticleSearch } from '@/composables/use-article-search';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
@@ -9,6 +8,7 @@ import { requestArticleAiSummary } from '@/composables/use-ai-summary';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useBatchReferenceScraping } from '@/composables/use-references';
 import { useChatStore } from '@/stores/chat';
+import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -319,22 +319,13 @@ function handleBulkAddToChat(): void {
 }
 
 // ── Full text handlers ────────────────────────────────────────────
-async function handleAttachFullText(articleId: string): Promise<void> {
-  try {
-    const selected = await open({
-      multiple: false,
-      filters: [
-        {
-          name: 'Documents',
-          extensions: ['pdf', 'txt'],
-        },
-      ],
-    });
-    if (!selected) return;
-    toast.show('Importing full text…', 'info');
-    await attachFullText(articleId, selected);
-    toast.show('Full text attached successfully.', 'success');
-
+// UI orchestration (file dialog + toasts) is centralized in
+// `useFullTextAttachment`; the auto-summarize branch is preserved via the
+// `onAttached` hook so behavior is byte-identical to the previous inline
+// implementation.
+const { handleAttachFullText } = useFullTextAttachment({
+  attachFullText,
+  onAttached: (articleId) => {
     // Auto-summarize if Full Text Summaries preference is enabled
     if (localStorage.getItem('bango-full-text-summaries') === 'true') {
       const article = articles.value.find((a) => a.id === articleId);
@@ -345,10 +336,8 @@ async function handleAttachFullText(articleId: string): Promise<void> {
         requestArticleAiSummary(articleId, article.title, handleAiSummaryComplete);
       }
     }
-  } catch (e: unknown) {
-    toast.show(`Failed to attach file: ${e instanceof Error ? e.message : String(e)}`, 'error');
-  }
-}
+  },
+});
 
 async function handleDeleteFullText(articleId: string): Promise<void> {
   try {
