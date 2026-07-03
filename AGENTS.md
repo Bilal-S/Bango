@@ -118,7 +118,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src-tauri/src/screening/` Tier 3 Phases C/D/E (enhanced + two_stage modes)** -
     `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
     (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,
-    `chunk_budget_per_article`); `run_sync` gains a `config` param. **Enhanced**: per
+    `chunk_budget_per_article`, optional `max_articles` per-run cap from
+    `start_screening(max_articles)`); `run_sync` gains a `config` param. **Enhanced**: per
     article with `has_full_text=1`, retrieves top-K chunks → `rank_chunks_by_criteria` →
     `format_chunks_as_evidence` (pure `#[must_use]`) → attaches as
     `ArticleEntry.full_text_evidence`; one batched LLM call categorized as
@@ -167,7 +168,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     as subdirectories; lazy-migrated from the legacy `fulltext_storage_dir` key by
     `get_storage_root`, which strips a trailing `fulltext` segment to derive the root),
     `flag_premium`, `biblio_needs_refresh` (the bibliometric
-    staleness flag), `wiki_needs_refresh` (the LLM Wiki staleness flag), and
+    staleness flag), `wiki_needs_refresh` (the LLM Wiki staleness flag),
+    `auto_translate` (experimental toggle for translating non-English articles to
+    English during AI processing; DB-backed unlike the sibling localStorage AI
+    Summary toggles; default `true`; absent/garbage value falls back to the
+    default), and
     `summary_evidence_mode` (project-wide literature-review evidence enrichment;
     `abstract_only` default | `with_summary_facts` - see `commands/summary.rs::generate_summary`
     + the `format_ai_summary_as_evidence` pure helper in `summary/prompt.rs`; design in
@@ -386,7 +391,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `screening_engine_test.rs`, `pdf_extract_test.rs`, `browser_test.rs`. Co-citation
     integration tests against RIS fixtures live in `cocitation_data_test.rs`.
     `biblio_needs_refresh_test.rs` covers the staleness-flag round-trip (mark/clear/
-    absent-key default). `wiki_full_text_refresh_test.rs` covers the wiki staleness-flag
+    absent-key default). `auto_translate_test.rs` covers the experimental
+    auto-translate `app_settings` toggle round-trip (default-true absent key, set
+    false/true round-trips, garbage value falls back to default).
+    `wiki_full_text_refresh_test.rs` covers the wiki staleness-flag
     pairing with content-source mutations (`full_text` attach/delete, AI-summary regen)
     plus the wiki-flag round-trip. `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip
     (legacy article_references -> backup -> rebuild -> import) plus the
@@ -592,10 +600,13 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `src/styles/help-shared.css`. `settings/` holds the settings sub-components consumed by
     `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
     connection details + parameters + Revert/Get Models/Test Connection + test-result/error
-    feedback in one bordered `<section>`), `settings-ai-summaries.vue` (2
-    localStorage-backed toggles: auto-generate-summaries [key `bango-full-text-summaries`:
-    auto-fire whole-paper summary on attach], section-summaries [key
-    `bango-section-summaries`; manual `auto_awesome` button always works regardless]),
+    feedback in one bordered `<section>`), `settings-ai-summaries.vue` (3 toggles:
+    auto-generate-summaries [localStorage key `bango-full-text-summaries`:
+    auto-fire whole-paper summary on attach], section-summaries [localStorage key
+    `bango-section-summaries`; manual `auto_awesome` button always works regardless],
+    auto-translate [DB-backed `app_settings.auto_translate`; experimental; default
+    enabled; translates non-English articles to English during AI processing - see
+    `app_settings_repo.rs` entry above]),
     `settings-screening-preferences.vue` (screening-mode dropdown + auto-navigate toggle),
     `settings-storage.vue` (storage root picker + directory-tree visual),
     `settings-reprocessing.vue` (text-chunks rebuild + Batch Import processor:

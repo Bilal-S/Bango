@@ -19,13 +19,20 @@ export function useScreening() {
     await store.fetchReadiness();
   }
 
-  async function startScreening(batchSize?: number): Promise<void> {
+  async function startScreening(batchSize?: number, maxArticles?: number): Promise<void> {
     loading.value = true;
     error.value = null;
 
-    // Optimistically show progress bar immediately (before IPC returns)
+    // Optimistically show progress bar immediately (before IPC returns).
+    // If a max-articles cap is provided, reflect that cap in the optimistic total.
+    const totalUnscreened = store.readiness?.totalUnscreened ?? 0;
+    const optimisticTotal =
+      maxArticles !== undefined
+        ? Math.min(Math.max(maxArticles, 1), totalUnscreened)
+        : totalUnscreened;
+
     store.setProgress({
-      total: store.readiness?.totalUnscreened ?? 0,
+      total: optimisticTotal,
       completed: 0,
       included: 0,
       rejected: 0,
@@ -40,7 +47,9 @@ export function useScreening() {
     store.startListening();
 
     try {
-      const args = batchSize ? { batchSize } : undefined;
+      const args: Record<string, unknown> = {};
+      if (batchSize !== undefined) args.batchSize = batchSize;
+      if (maxArticles !== undefined) args.maxArticles = maxArticles;
       const result = await tauriCommand<ScreeningProgress>('start_screening', args);
       // Replace optimistic progress with real initial progress (may have total=0 if engine
       // hasn't counted yet - that's fine, the next event will correct it)

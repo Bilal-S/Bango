@@ -200,6 +200,8 @@ pub fn run() {
             commands::app_settings::get_app_flags,
             commands::app_settings::get_storage_root,
             commands::app_settings::set_storage_root,
+            commands::app_settings::get_auto_translate,
+            commands::app_settings::set_auto_translate,
             commands::full_text::attach_full_text,
             commands::full_text::count_articles_with_full_text,
             commands::full_text::delete_full_text,

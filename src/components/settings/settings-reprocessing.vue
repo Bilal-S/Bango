@@ -64,6 +64,9 @@ interface BatchImportProgress {
 const showBatchDialog = ref(false);
 const batchProgress = ref<BatchImportProgress | null>(null);
 const batchError = ref<string | null>(null);
+// Hide the progress bar until the user actually starts an import run. On mount
+// we only reveal it if a run is already in progress (user navigated away+back).
+const batchStarted = ref(false);
 let batchUnlisten: UnlistenFn | null = null;
 
 /** Read the auto-summarize + section-summaries localStorage flags. */
@@ -79,11 +82,17 @@ async function startBatchImport(): Promise<void> {
   showBatchDialog.value = false;
   batchError.value = null;
   batchProgress.value = null;
+  // Reveal the progress bar now that the user has explicitly started a run.
+  batchStarted.value = true;
   try {
-    await invoke<BatchImportProgress>('start_batch_import', {
+    // The command returns the initial progress snapshot; assign it so the bar
+    // appears immediately. Subsequent updates arrive via the
+    // `batch-import:progress` event listener registered on mount.
+    const initial = await invoke<BatchImportProgress>('start_batch_import', {
       autoSummarize: readAutoSummarize(),
       includeSectionSummaries: readSectionSummaries(),
     });
+    batchProgress.value = initial;
   } catch (e: unknown) {
     batchError.value = e instanceof Error ? e.message : String(e);
   }
@@ -110,6 +119,11 @@ async function refreshBatchProgress(): Promise<void> {
 onMounted(async () => {
   await loadFullTextCount();
   await refreshBatchProgress();
+  // Only reveal the bar on mount if a run is already in progress (e.g. the
+  // user navigated to Settings, started an import, left, and came back). A
+  // fresh mount with an idle/empty snapshot keeps the bar hidden until the
+  // user clicks Start.
+  batchStarted.value = batchProgress.value?.isRunning === true;
   // Listen for progress events so the bar updates live.
   batchUnlisten = await listen<BatchImportProgress>('batch-import:progress', (event) => {
     batchProgress.value = event.payload;
@@ -174,8 +188,9 @@ onUnmounted(() => {
         optionally generate AI summaries. Files are matched to articles by DOI.
       </p>
 
-      <!-- Progress bar (shown while running or after completion) -->
-      <div v-if="batchProgress" class="batch-progress">
+      <!-- Progress bar (hidden until the user starts a run via the dialog, or a
+           run is already in progress on mount) -->
+      <div v-if="batchProgress && batchStarted" class="batch-progress">
         <div class="batch-progress__header">
           <span class="batch-progress__phase">{{ batchProgress.phaseName }}</span>
           <span class="batch-progress__percent">{{ batchProgress.overallPercent }}%</span>

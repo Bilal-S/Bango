@@ -120,7 +120,7 @@ Upon import, new articles are run sequentially through a prioritized strategy pi
 *   **Screening Errors**: Malformed responses or explicit `"error"` decisions leave the article in `working` status with `screeningError` set to `true` and the raw error reason saved in the audit log.
 
 ### 4.3 AI Screening Process
-*   **Execution**: Multi-threaded async worker running in the background with user-configured batch size, concurrency, and delay. Exponential backoff handles rate-limiting (429 errors).
+*   **Execution**: Multi-threaded async worker running in the background with user-configured batch size, concurrency, and delay. `start_screening` also accepts an optional `max_articles` cap, limiting a run to `min(max_articles, unscreened_count)` articles so users can process a bounded subset. Exponential backoff handles rate-limiting (429 errors).
 *   **Readiness Check**: Enforces presence of >= 1 aim, >= 1 inclusion, and >= 1 exclusion criterion, valid LLM config, and performs a worst-case per-article token estimation. Warns the user if any estimated footprint exceeds 80% of `contextWindowTokens` (minimum required: 50,000). The worst-case footprint is recomputed by the active screening mode (see §4.3.1): Abstract uses today's abstract-only estimate; Enhanced adds the per-article chunk budget; Two-stage adds the budget times the expected borderline fraction.
 *   **Advisory Prompts**: Batch prompt details aims, criteria, and articles, requesting JSON output containing the advisory `decision`, `reasoning` (citing specific sentences), `matched_inclusion_criteria`, `matched_exclusion_criteria`, `suggested_tags`, `extracted_terms`, and `confidence`. The app executes the deterministic resolution locally. Where supporting full-text evidence is provided (Enhanced / Two-stage stage 2), the system prompt instructs the model to use it only to verify criteria matches; the primary decision rests on the abstract.
 
@@ -191,6 +191,7 @@ Application configurations are managed in the `app_settings` key-value table:
 *   `enhanced_screening_sections`: Comma-separated section allow-list for Enhanced evidence (default `"Methods,Results"`).
 *   `two_stage_low` / `two_stage_high`: The borderline confidence band `[low, high)` that triggers the Two-stage second pass (defaults `0.4` / `0.7`).
 *   `chunk_budget_per_article`: Per-article word budget for retrieved evidence chunks (default `2400`, ~600 tokens).
+*   `auto_translate`: Experimental toggle for translating non-English articles to English during AI processing (screening and summaries). Default `true` (enabled). Absent/garbage values fall back to the default. Persisted in the database (unlike the sibling AI Summary localStorage toggles) so backend processing stages can read it directly.
 
 ### 8.2 Full-Text Attachments
 *   **Attachment**: Users can attach `.pdf` or `.txt` files to articles.
@@ -250,6 +251,7 @@ The following features remain explicitly **out of scope**:
 
 | Version | Date | Key Improvements |
 |---------|------|------------------|
+| **v6.1** | 2026-07-03 | Settings screen refinements: Batch Import progress bar hidden until the user clicks Start (revealed on mount only if a run is already in progress); experimental Auto Translate toggle added under AI Summaries (DB-backed `app_settings.auto_translate`, default enabled); Max Context Tokens slider floor raised to 16K with a matching load-time clamp so legacy sub-16K configs are transparently bumped. |
 | **v6.0** | 2026-07-02 | Settings reorganization: split AI Summaries and Re-processing into dedicated cards, renamed Full-Text Storage to Storage with an explicit `storage_root` model (lazy-migrated from the legacy `fulltext_storage_dir` key; `fulltext/`, `ris/`, and `wiki-root/` now derive from it as subdirectories). Fixed the `full_text.rs` default-path `documents` vs `fulltext` bug. |
 | **v5.0** | 2026-06-30 | Tier 3 Enhanced & Two-stage screening modes (§4.3.1): abstract + criteria-matched full-text chunks with a per-article word budget. Added 6 screening-mode settings keys (§8.1). Lifted the §11 full-text screening exclusion for the bounded Tier 3 modes. |
 | **v4.0** | 2026-06-11 | Integrated References & Citations system, BibTeX parsing, Custom Full-Text storage, Premium feature flag, and Startup Journal Index synchronization. Removed outdated Google Stitch MCP sections. |

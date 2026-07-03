@@ -8,6 +8,14 @@ export interface TestResult {
   message: string;
 }
 
+/**
+ * The minimum selectable context window, in tokens. The Settings UI slider
+ * floor and the load-time clamp both use this so a legacy config below the
+ * floor is transparently bumped up on load (keeping the badge and slider
+ * consistent with the UI floor).
+ */
+export const MIN_CONTEXT_WINDOW_TOKENS = 16_000;
+
 const DEFAULT_CONFIG: LlmConfig = {
   provider: 'openai',
   endpointUrl: 'https://api.openai.com/v1',
@@ -36,6 +44,13 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
     try {
       const saved = await tauriCommand<LlmConfig | null>('get_llm_config');
       if (saved) {
+        // Clamp a legacy sub-floor context window up to the minimum so the
+        // badge and slider (whose min is now MIN_CONTEXT_WINDOW_TOKENS) stay
+        // consistent with the persisted value. A config at/above the floor
+        // is left untouched.
+        if (saved.contextWindowTokens < MIN_CONTEXT_WINDOW_TOKENS) {
+          saved.contextWindowTokens = MIN_CONTEXT_WINDOW_TOKENS;
+        }
         config.value = saved;
       }
       initialized.value = true;

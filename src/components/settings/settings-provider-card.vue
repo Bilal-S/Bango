@@ -34,12 +34,14 @@ function startEditingContextTokens(): void {
 }
 
 const CONTEXT_MAX_CEILING = 1_000_000;
+/** The minimum selectable context window, in tokens. */
+const CONTEXT_MIN_FLOOR = 16_000;
 
 function commitContextTokens(): void {
   const raw = contextTokensInput.value.replace(/[^0-9]/g, '');
   let parsed = parseInt(raw, 10);
-  if (isNaN(parsed) || parsed < 1000) {
-    parsed = 1000;
+  if (isNaN(parsed) || parsed < CONTEXT_MIN_FLOOR) {
+    parsed = CONTEXT_MIN_FLOOR;
   } else if (parsed > CONTEXT_MAX_CEILING) {
     parsed = CONTEXT_MAX_CEILING;
   }
@@ -426,12 +428,12 @@ watch(
               v-model.number="config.contextWindowTokens"
               type="range"
               class="field__range"
-              min="1000"
+              :min="CONTEXT_MIN_FLOOR"
               :max="contextSliderMax"
               step="1000"
             />
             <div class="field__range-labels">
-              <span>1k</span>
+              <span>{{ formatCompact(CONTEXT_MIN_FLOOR) }}</span>
               <span>{{ formatCompact(contextSliderMax) }}</span>
             </div>
           </div>

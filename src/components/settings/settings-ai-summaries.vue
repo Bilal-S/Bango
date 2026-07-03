@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from '@/composables/use-tauri-command';
 
 // AI summary preferences (persisted in localStorage; keys shared with the old
 // Screening Preferences card so existing user prefs carry over unchanged).
@@ -16,6 +18,47 @@ function toggleSectionSummaries(): void {
   sectionSummaries.value = !sectionSummaries.value;
   localStorage.setItem('bango-section-summaries', String(sectionSummaries.value));
 }
+
+// ── Auto Translate (experimental) ─────────────────────────────────────────
+// Unlike the two toggles above, this is persisted in the database
+// (`app_settings.auto_translate`) so backend processing stages can read it
+// directly. Defaults to enabled (true) when the key is absent.
+const autoTranslate = ref(true);
+const autoTranslateError = ref<string | null>(null);
+
+async function loadAutoTranslate(): Promise<void> {
+  if (!isTauri()) {
+    // Non-Tauri (unit test) mode: keep the default (enabled).
+    return;
+  }
+  try {
+    autoTranslate.value = await invoke<boolean>('get_auto_translate');
+  } catch (e: unknown) {
+    // Non-fatal: keep the default on read failure.
+    autoTranslate.value = true;
+  }
+}
+
+async function toggleAutoTranslate(): Promise<void> {
+  const next = !autoTranslate.value;
+  autoTranslate.value = next;
+  autoTranslateError.value = null;
+  if (!isTauri()) {
+    return;
+  }
+  try {
+    await invoke('set_auto_translate', { enabled: next });
+  } catch (e: unknown) {
+    autoTranslateError.value = e instanceof Error ? e.message : String(e);
+    // Revert on error.
+    autoTranslate.value = !next;
+    await loadAutoTranslate();
+  }
+}
+
+onMounted(() => {
+  void loadAutoTranslate();
+});
 </script>
 
 <template>
@@ -68,6 +111,32 @@ function toggleSectionSummaries(): void {
         <span class="settings-card__switch-thumb" />
       </button>
     </div>
+
+    <div class="settings-card__toggle-row" style="margin-top: 1rem">
+      <label class="settings-card__toggle-label">
+        <span>
+          Auto Translate
+          <span class="badge--experimental">Experimental</span>
+        </span>
+        <span class="settings-card__toggle-hint">
+          When enabled, articles written in other languages are translated to English during AI
+          processing (screening and summaries). This is an experimental feature and may be refined
+          in future releases.
+        </span>
+      </label>
+      <button
+        class="settings-card__switch"
+        :class="{ 'settings-card__switch--on': autoTranslate }"
+        role="switch"
+        :aria-checked="autoTranslate"
+        @click="toggleAutoTranslate"
+      >
+        <span class="settings-card__switch-thumb" />
+      </button>
+    </div>
+    <p v-if="autoTranslateError" class="settings-card__status settings-card__status--err">
+      {{ autoTranslateError }}
+    </p>
   </section>
 </template>
 
@@ -82,6 +151,23 @@ function toggleSectionSummaries(): void {
   position: relative;
   top: -1px;
   color: var(--color-primary, #3525cd);
+  user-select: none;
+}
+
+/* Experimental pill badge used inline next to the Auto Translate label. */
+.badge--experimental {
+  display: inline-block;
+  margin-left: 0.375rem;
+  padding: 0.0625rem 0.5rem;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-primary, #3525cd);
+  background-color: var(--color-surface-container-low, #f5f2ff);
+  border: 1px solid var(--color-surface-variant, #e4e1ee);
+  border-radius: var(--radius-pill, 9999px);
+  vertical-align: middle;
   user-select: none;
 }
 </style>

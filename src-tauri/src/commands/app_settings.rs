@@ -71,6 +71,33 @@ pub fn set_storage_root(
     Ok(StorageRootInfo { effective_path, is_custom, default_path })
 }
 
+/// Read the experimental auto-translate toggle. Defaults to `true` (enabled)
+/// when the `auto_translate` key is absent. Powers the Settings -> AI Summaries
+/// "Auto Translate" switch. Unlike the sibling localStorage-backed summary
+/// toggles, this lives in the database so backend processing stages can read
+/// it directly.
+#[tauri::command]
+pub fn get_auto_translate(db_state: tauri::State<'_, DbState>) -> Result<bool, AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    app_settings_repo::get_auto_translate(&conn)
+}
+
+/// Persist the experimental auto-translate toggle.
+#[tauri::command]
+pub fn set_auto_translate(
+    db_state: tauri::State<'_, DbState>,
+    enabled: bool,
+) -> Result<(), AppError> {
+    let conn = db_state
+        .conn
+        .lock()
+        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    app_settings_repo::set_auto_translate(&conn, enabled)
+}
+
 /// Compute the platform default root: `~/Documents/Bango/`.
 fn compute_default_storage_root() -> String {
     let docs = dirs::document_dir()

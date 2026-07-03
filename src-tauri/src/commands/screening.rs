@@ -135,6 +135,7 @@ pub async fn start_screening(
     db_state: State<'_, DbState>,
     screening_state: State<'_, ScreeningState>,
     batch_size: Option<u32>,
+    max_articles: Option<u32>,
 ) -> Result<ScreeningProgress, AppError> {
     // ── Concurrent-start guard ──
     {
@@ -231,6 +232,7 @@ pub async fn start_screening(
             two_stage_low: app_settings_repo::get_two_stage_low(&conn)?,
             two_stage_high: app_settings_repo::get_two_stage_high(&conn)?,
             chunk_budget_per_article: app_settings_repo::get_chunk_budget_per_article(&conn)?,
+            max_articles: max_articles.map(|n| n.max(1) as usize),
         }
     };
 

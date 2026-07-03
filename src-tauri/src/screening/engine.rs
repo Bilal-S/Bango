@@ -46,6 +46,12 @@ pub struct ScreeningConfig {
     pub two_stage_low: f64,
     pub two_stage_high: f64,
     pub chunk_budget_per_article: usize,
+    /// Optional cap on the total number of articles to screen in this run.
+    /// When `Some(n)`, the engine stops after `n` articles have been processed
+    /// (included + rejected + errors). The progress `total` is set to
+    /// `min(n, unscreened_count)` so the progress bar reaches 100% at the cap.
+    /// `None` (default) screens all unscreened articles (legacy behavior).
+    pub max_articles: Option<usize>,
 }
 
 impl Default for ScreeningConfig {
@@ -58,6 +64,7 @@ impl Default for ScreeningConfig {
             two_stage_high: 0.7,
             chunk_budget_per_article:
                 crate::screening::chunk_retrieval::DEFAULT_CHUNK_BUDGET_PER_ARTICLE,
+            max_articles: None,
         }
     }
 }
@@ -194,6 +201,10 @@ impl ScreeningEngine {
             return Ok(());
         }
 
+        // Apply the optional max_articles cap. The progress total reflects the
+        // effective cap so the progress bar reaches 100% at the limit.
+        let effective_total = config.max_articles.map_or(total, |n| n.min(total));
+
         let inclusion_criteria: Vec<&Criterion> = criteria
             .iter()
             .filter(|c| matches!(c.criterion_type, CriterionType::Inclusion))
@@ -260,7 +271,7 @@ impl ScreeningEngine {
         // Initialize progress
         {
             let mut progress = self.progress.lock().await;
-            progress.total = total;
+            progress.total = effective_total;
             progress.completed = 0;
             progress.included = 0;
             progress.rejected = 0;
@@ -289,7 +300,7 @@ impl ScreeningEngine {
             }
 
             // 1. Fetch next batch from DB
-            let batch = {
+            let mut batch = {
                 let c = conn_mutex.lock().map_err(|e| {
                     AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
                 })?;
@@ -298,6 +309,22 @@ impl ScreeningEngine {
 
             if batch.is_empty() {
                 break;
+            }
+
+            // max_articles cap: if we have already processed the limit, stop.
+            // Also truncate the current batch so we never process more than the
+            // remaining allowance (e.g. cap=2, batch_size=5 -> process only 2).
+            if let Some(cap) = config.max_articles {
+                let progress = self.progress.lock().await;
+                let processed = progress.completed;
+                drop(progress);
+                if processed >= cap {
+                    break;
+                }
+                let remaining = cap - processed;
+                if remaining < batch.len() {
+                    batch.truncate(remaining);
+                }
             }
 
             // Set all current article titles and emit immediately so the UI
@@ -966,7 +993,7 @@ impl ScreeningEngine {
                     progress.elapsed_ms = elapsed;
                     if progress.completed > 0 {
                         let avg_per_article = elapsed / progress.completed as u64;
-                        let remaining = (total - progress.completed) as u64;
+                        let remaining = (effective_total - progress.completed) as u64;
                         progress.estimated_remaining_ms = Some(avg_per_article * remaining);
                     }
                     self.emit_progress(&app_handle, &progress);

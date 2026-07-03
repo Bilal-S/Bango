@@ -95,7 +95,7 @@ describe('useScreening', () => {
       const { startScreening, loading, error } = useScreening();
       await startScreening();
 
-      expect(tauriCommand).toHaveBeenCalledWith('start_screening', undefined);
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', {});
       expect(loading.value).toBe(false);
       expect(error.value).toBeNull();
     });
@@ -108,6 +108,433 @@ describe('useScreening', () => {
       await startScreening(5);
 
       expect(tauriCommand).toHaveBeenCalledWith('start_screening', { batchSize: 5 });
+    });
+
+    it('passes maxArticles when provided', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(3, 12);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', {
+        batchSize: 3,
+        maxArticles: 12,
+      });
+    });
+
+    it('sets optimistic total to maxArticles cap when provided', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 7);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 7
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('clamps optimistic total by unscreened count', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 5 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 99);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 5
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('clamps optimistic total minimum to 1 when maxArticles is 0', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 0);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 1
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('sets optimistic total to 0 when no unscreened articles are available', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 0 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 5);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 0
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('sets optimistic total to unscreened when maxArticles is omitted', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 42 };
+
+      const { startScreening } = useScreening();
+      await startScreening(2);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 42
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('passes only maxArticles when batchSize is omitted', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(undefined, 9);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', { maxArticles: 9 });
+    });
+
+    it('passes empty args when both batchSize and maxArticles are omitted', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(undefined, undefined);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', {});
+    });
+
+    it('replaces optimistic progress with real result when total > 0 after maxArticles start', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ ...mockProgress, total: 12, completed: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(2, 12);
+
+      const realCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.total === 12 && c[0]?.completed === 0
+      );
+      expect(realCall).toBeDefined();
+    });
+
+    it('keeps existing optimistic progress test for baseline path', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening();
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 100
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('preserves loading and error behavior with maxArticles', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 20 };
+
+      const { startScreening, loading, error } = useScreening();
+      await startScreening(1, 10);
+
+      expect(loading.value).toBe(false);
+      expect(error.value).toBeNull();
+    });
+
+    it('clears optimistic progress on error when maxArticles is used', async () => {
+      vi.mocked(tauriCommand).mockRejectedValue(new Error('Screening failed'));
+      mockStore.readiness = { totalUnscreened: 50 };
+
+      const { startScreening, error } = useScreening();
+      await startScreening(2, 8);
+
+      expect(error.value).toBe('Screening failed');
+      expect(mockStore.setProgress).toHaveBeenCalledWith(null);
+    });
+
+    it('starts listening immediately when maxArticles is used', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 4);
+
+      expect(mockStore.startListening).toHaveBeenCalled();
+    });
+
+    it('accepts maxArticles without readiness and still sends command args', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = null;
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 6);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', {
+        batchSize: 1,
+        maxArticles: 6,
+      });
+    });
+
+    it('handles non-Error exceptions with maxArticles', async () => {
+      vi.mocked(tauriCommand).mockRejectedValue('unexpected');
+      mockStore.readiness = { totalUnscreened: 10 };
+
+      const { startScreening, error } = useScreening();
+      await startScreening(1, 3);
+
+      expect(error.value).toBe('unexpected');
+    });
+
+    it('keeps legacy batch-only command shape unchanged', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(5);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', { batchSize: 5 });
+    });
+
+    it('still supports no-args start command', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening();
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', {});
+    });
+
+    it('does not set real progress when backend returns total 0', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 5);
+
+      const realCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) =>
+          c[0]?.total === 0 && c[0]?.completed === 0 && c[0]?.isRunning === undefined
+      );
+      expect(realCall).toBeUndefined();
+    });
+
+    it('ensures optimistic isRunning true when maxArticles provided', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(2, 11);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('sets optimistic completed/included/rejected/errors to 0 with maxArticles', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 5);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) =>
+          c[0]?.isRunning === true &&
+          c[0]?.completed === 0 &&
+          c[0]?.included === 0 &&
+          c[0]?.rejected === 0 &&
+          c[0]?.errors === 0
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('keeps currentArticleTitles empty in optimistic state when maxArticles set', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 5);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) =>
+          c[0]?.isRunning === true && Array.isArray(c[0]?.currentArticleTitles)
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('ensures optimistic elapsed timing fields are initialized when maxArticles set', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 5);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) =>
+          c[0]?.isRunning === true && c[0]?.elapsedMs === 0 && c[0]?.estimatedRemainingMs === null
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('supports maxArticles equal to totalUnscreened exactly', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 12 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 12);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 12
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('supports tiny maxArticles value of 1', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 12 };
+
+      const { startScreening } = useScreening();
+      await startScreening(1, 1);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 1
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('handles undefined readiness with no args start', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = null;
+
+      const { startScreening } = useScreening();
+      await startScreening();
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 0
+      );
+      expect(optimisticCall).toBeDefined();
+    });
+
+    it('keeps tauri command payload deterministic for explicit undefined values', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(undefined, undefined);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', {});
+    });
+
+    it('keeps tauri command payload deterministic for only batchSize defined', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(6, undefined);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', { batchSize: 6 });
+    });
+
+    it('keeps tauri command payload deterministic for only maxArticles defined', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(undefined, 6);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', { maxArticles: 6 });
+    });
+
+    it('still sets optimistic state before awaiting IPC', async () => {
+      let resolveFn!: (v: Record<string, unknown>) => void;
+      const pending = new Promise<Record<string, unknown>>((resolve) => {
+        resolveFn = resolve;
+      });
+      vi.mocked(tauriCommand).mockReturnValue(
+        pending as unknown as ReturnType<typeof tauriCommand>
+      );
+      mockStore.readiness = { totalUnscreened: 10 };
+
+      const { startScreening } = useScreening();
+      const promise = startScreening(1, 3);
+
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 3
+      );
+      expect(optimisticCall).toBeDefined();
+
+      resolveFn({ total: 0 });
+      await promise;
+    });
+
+    it('keeps loading true during pending start and false after completion', async () => {
+      let resolveFn!: (v: Record<string, unknown>) => void;
+      const pending = new Promise<Record<string, unknown>>((resolve) => {
+        resolveFn = resolve;
+      });
+      vi.mocked(tauriCommand).mockReturnValue(
+        pending as unknown as ReturnType<typeof tauriCommand>
+      );
+      mockStore.readiness = { totalUnscreened: 10 };
+
+      const { startScreening, loading } = useScreening();
+      const promise = startScreening(1, 3);
+      expect(loading.value).toBe(true);
+
+      resolveFn({ total: 0 });
+      await promise;
+      expect(loading.value).toBe(false);
+    });
+
+    it('keeps error null on success path with maxArticles', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening, error } = useScreening();
+      await startScreening(1, 8);
+
+      expect(error.value).toBeNull();
+    });
+
+    it('retains backward compatibility for old callers passing only batch size', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening(4);
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', { batchSize: 4 });
+    });
+
+    it('uses empty payload for legacy no-arg callers', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(mockProgress);
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening();
+
+      expect(tauriCommand).toHaveBeenCalledWith('start_screening', {});
+    });
+
+    it('sets optimistic progress immediately', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue({ total: 0 });
+      mockStore.readiness = { totalUnscreened: 100 };
+
+      const { startScreening } = useScreening();
+      await startScreening();
+
+      // Should call setProgress with optimistic data
+      expect(mockStore.setProgress).toHaveBeenCalled();
+      const optimisticCall = mockStore.setProgress.mock.calls.find(
+        (c: Array<Record<string, unknown>>) => c[0]?.isRunning === true && c[0]?.total === 100
+      );
+      expect(optimisticCall).toBeDefined();
     });
 
     it('sets optimistic progress immediately', async () => {

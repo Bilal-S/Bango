@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-import { useLlmConfigStore } from '@/stores/llm-config';
+import { useLlmConfigStore, MIN_CONTEXT_WINDOW_TOKENS } from '@/stores/llm-config';
 import type { LlmConfig } from '@/types';
 
 vi.mock('@/composables/use-tauri-command', () => ({
@@ -88,5 +88,46 @@ describe('useLlmConfigStore', () => {
     store.testResult = { success: false, message: 'err' };
     store.clearTestResult();
     expect(store.testResult).toBeNull();
+  });
+
+  describe('context window floor clamp on fetch', () => {
+    it('clamps a legacy sub-floor contextWindowTokens up to the minimum', async () => {
+      const legacy: LlmConfig = {
+        ...savedConfig,
+        contextWindowTokens: 4_000,
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(legacy);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.config.contextWindowTokens).toBe(MIN_CONTEXT_WINDOW_TOKENS);
+    });
+
+    it('leaves an at-floor contextWindowTokens untouched', async () => {
+      const atFloor: LlmConfig = {
+        ...savedConfig,
+        contextWindowTokens: MIN_CONTEXT_WINDOW_TOKENS,
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(atFloor);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.config.contextWindowTokens).toBe(MIN_CONTEXT_WINDOW_TOKENS);
+    });
+
+    it('leaves an above-floor contextWindowTokens untouched', async () => {
+      const above: LlmConfig = {
+        ...savedConfig,
+        contextWindowTokens: 50_000,
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(above);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.config.contextWindowTokens).toBe(50_000);
+    });
   });
 });

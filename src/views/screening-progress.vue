@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useScreening } from '@/composables/use-screening';
 import { formatLlmError } from '@/utils/llm-error';
@@ -37,8 +37,143 @@ const screeningErrorInfo = computed(() => {
 });
 
 const isPaused = ref(false);
+const BATCH_MIN = 1;
+const BATCH_MAX = 15;
+const NUM_TO_PROCESS_MIN = 1;
 const batchSize = ref(1);
+const numToProcess = ref<number | null>(null);
+
+const totalUnscreened = computed(() => readiness.value?.totalUnscreened ?? 0);
+const hasAvailableArticles = computed(() => totalUnscreened.value > 0);
+
 const showBatchWarning = computed(() => batchSize.value > 1);
+const canDecrement = computed(() => batchSize.value > BATCH_MIN);
+const canIncrement = computed(() => batchSize.value < BATCH_MAX);
+const canDecrementNumToProcess = computed(
+  () => hasAvailableArticles.value && (numToProcess.value ?? 0) > NUM_TO_PROCESS_MIN
+);
+const canIncrementNumToProcess = computed(
+  () => hasAvailableArticles.value && (numToProcess.value ?? 0) < totalUnscreened.value
+);
+
+watch(
+  totalUnscreened,
+  (total) => {
+    if (total <= 0) {
+      numToProcess.value = 0;
+      return;
+    }
+
+    if (numToProcess.value === null || numToProcess.value <= 0) {
+      numToProcess.value = total;
+      return;
+    }
+
+    numToProcess.value = Math.min(total, Math.max(NUM_TO_PROCESS_MIN, numToProcess.value));
+  },
+  { immediate: true }
+);
+
+function decrementBatch(): void {
+  if (canDecrement.value) {
+    batchSize.value = Math.max(BATCH_MIN, batchSize.value - 1);
+  }
+}
+
+function incrementBatch(): void {
+  if (canIncrement.value) {
+    batchSize.value = Math.min(BATCH_MAX, batchSize.value + 1);
+  }
+}
+
+function decrementNumToProcess(): void {
+  if (canDecrementNumToProcess.value) {
+    numToProcess.value = Math.max(
+      NUM_TO_PROCESS_MIN,
+      (numToProcess.value ?? NUM_TO_PROCESS_MIN) - 1
+    );
+  }
+}
+
+function incrementNumToProcess(): void {
+  if (canIncrementNumToProcess.value) {
+    numToProcess.value = Math.min(
+      totalUnscreened.value,
+      (numToProcess.value ?? NUM_TO_PROCESS_MIN) + 1
+    );
+  }
+}
+
+/** Sanitize manual text-box entry to an integer in [BATCH_MIN, BATCH_MAX]. */
+function onBatchInput(event: Event): void {
+  const raw = (event.target as HTMLInputElement).value.replace(/[^0-9]/g, '');
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed)) {
+    batchSize.value = BATCH_MIN;
+    return;
+  }
+  batchSize.value = Math.min(BATCH_MAX, Math.max(BATCH_MIN, parsed));
+}
+
+/** Sanitize manual text-box entry to an integer in [NUM_TO_PROCESS_MIN, totalUnscreened]. */
+function onNumToProcessInput(event: Event): void {
+  if (!hasAvailableArticles.value) {
+    numToProcess.value = 0;
+    return;
+  }
+
+  const raw = (event.target as HTMLInputElement).value.replace(/[^0-9]/g, '');
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed)) {
+    numToProcess.value = NUM_TO_PROCESS_MIN;
+    return;
+  }
+
+  numToProcess.value = Math.min(totalUnscreened.value, Math.max(NUM_TO_PROCESS_MIN, parsed));
+}
+
+const displayNumToProcess = computed(
+  () => numToProcess.value ?? (hasAvailableArticles.value ? totalUnscreened.value : 0)
+);
+const isRunning = computed(() => progress.value?.isRunning ?? false);
+const displayAvailable = computed(() => readiness.value?.totalUnscreened ?? 0);
+const displayRunningTotal = computed(() => progress.value?.total ?? 0);
+const displayRunningCompleted = computed(() => progress.value?.completed ?? 0);
+const controlsDisabled = computed(() => !hasAvailableArticles.value);
+const effectiveNumToProcess = computed(() => {
+  if (!hasAvailableArticles.value) return undefined;
+  const requested = numToProcess.value ?? totalUnscreened.value;
+  return Math.min(totalUnscreened.value, Math.max(NUM_TO_PROCESS_MIN, requested));
+});
+
+function onNumToProcessFocus(event: FocusEvent): void {
+  const input = event.target as HTMLInputElement;
+  input.select();
+}
+
+function onBatchInputFocus(event: FocusEvent): void {
+  const input = event.target as HTMLInputElement;
+  input.select();
+}
+
+function handleStart(): void {
+  startScreening(batchSize.value, effectiveNumToProcess.value);
+}
+
+function navigateTo(route: string): void {
+  router.push(route);
+}
+
+async function handleResetWorkingList(): Promise<void> {
+  resettingWorkingList.value = true;
+  try {
+    await resetWorkingList();
+  } catch {
+    // Error is handled by the composable
+  } finally {
+    resettingWorkingList.value = false;
+  }
+}
 
 onMounted(async () => {
   // Silent background refresh
@@ -80,41 +215,12 @@ const blockingReasons = computed((): string[] => {
   return prereqReasons;
 });
 
-/** Display count for the hero subtitle. */
-const displayTotal = computed((): number => {
-  if (progress.value && progress.value.total > 0) return progress.value.total;
-  return readiness.value?.totalUnscreened ?? 0;
-});
-
-const displayCompleted = computed((): number => {
-  return progress.value?.completed ?? 0;
-});
-
 /** Computed: true when all prerequisites are met but no unscreened articles exist. */
 const isWorkingListScreened = computed((): boolean => {
   const r = readiness.value;
   if (!r) return false;
   return r.hasAims && r.hasInclusion && r.hasExclusion && r.hasLlmConfig && r.totalUnscreened === 0;
 });
-
-function handleStart(): void {
-  startScreening(batchSize.value);
-}
-
-function navigateTo(route: string): void {
-  router.push(route);
-}
-
-async function handleResetWorkingList(): Promise<void> {
-  resettingWorkingList.value = true;
-  try {
-    await resetWorkingList();
-  } catch {
-    // Error is handled by the composable
-  } finally {
-    resettingWorkingList.value = false;
-  }
-}
 </script>
 
 <template>
@@ -140,22 +246,24 @@ async function handleResetWorkingList(): Promise<void> {
         <div class="screening-view__hero-header">
           <div>
             <h1 class="page-title">AI Screening</h1>
-            <p v-if="displayTotal > 0" class="screening-view__subtitle">
-              Processing: <strong>{{ displayCompleted }}</strong> of
-              <strong>{{ displayTotal }}</strong> article(s)
-            </p>
-            <p v-else class="screening-view__subtitle">
-              Screen articles against your inclusion/exclusion criteria
+            <p class="screening-view__subtitle">
+              <template v-if="isRunning">
+                Processing: <strong>{{ displayRunningCompleted }}</strong> of
+                <strong>{{ displayRunningTotal }}</strong> article(s)
+              </template>
+              <template v-else>
+                Available: <strong>{{ displayAvailable }}</strong> article(s)
+              </template>
             </p>
           </div>
-          <div v-if="progress && progress.total > 0" class="screening-view__percent">
+          <div v-if="isRunning && progress && progress.total > 0" class="screening-view__percent">
             <span class="screening-view__percent-value">{{ percentage }}%</span>
             <span class="screening-view__percent-label">Completion</span>
           </div>
         </div>
 
         <ScreeningProgressBar
-          v-if="progress && progress.total > 0"
+          v-if="isRunning && progress && progress.total > 0"
           :completed="progress.completed"
           :total="progress.total"
           :percentage="percentage"
@@ -265,27 +373,97 @@ async function handleResetWorkingList(): Promise<void> {
         </div>
       </div>
 
-      <!-- Batch Size Control (only when not running) -->
-      <div v-if="!progress?.isRunning && !loading" class="screening-view__batch">
-        <div class="screening-view__batch-header">
-          <label class="screening-view__batch-label" for="batch-slider"> Batch Size </label>
-          <span class="screening-view__batch-value">{{ batchSize }}</span>
-        </div>
-        <input
-          id="batch-slider"
-          v-model.number="batchSize"
-          type="range"
-          min="1"
-          max="15"
-          step="1"
-          class="screening-view__batch-slider"
-        />
-        <div class="screening-view__batch-range">
-          <span>1</span>
-          <span>15</span>
-        </div>
-        <div v-if="showBatchWarning" class="screening-view__batch-warning">
-          ⚠ Batching may not be supported by your LLM and may lead to failures.
+      <!-- Start Configuration Controls (only when not running) -->
+      <div v-if="!isRunning && !loading" class="screening-view__start-config">
+        <div class="screening-view__start-config-row">
+          <div
+            class="screening-view__batch screening-view__batch--half"
+            data-testid="num-to-process-tile"
+          >
+            <div class="screening-view__batch-header">
+              <label class="screening-view__batch-label" for="num-to-process-input">
+                To Process
+              </label>
+              <span class="screening-view__batch-value">{{ displayNumToProcess }}</span>
+            </div>
+            <div class="screening-view__stepper">
+              <button
+                type="button"
+                class="screening-view__stepper-btn"
+                :disabled="controlsDisabled || !canDecrementNumToProcess"
+                aria-label="Decrease number to process"
+                @click="decrementNumToProcess"
+              >
+                <span class="material-symbols-outlined">remove</span>
+              </button>
+              <input
+                id="num-to-process-input"
+                class="screening-view__stepper-input"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                :value="displayNumToProcess"
+                :disabled="controlsDisabled"
+                aria-label="Number to process"
+                @focus="onNumToProcessFocus"
+                @input="onNumToProcessInput"
+              />
+              <button
+                type="button"
+                class="screening-view__stepper-btn"
+                :disabled="controlsDisabled || !canIncrementNumToProcess"
+                aria-label="Increase number to process"
+                @click="incrementNumToProcess"
+              >
+                <span class="material-symbols-outlined">add</span>
+              </button>
+            </div>
+          </div>
+
+          <div
+            class="screening-view__batch screening-view__batch--half"
+            data-testid="batch-size-tile"
+          >
+            <div class="screening-view__batch-header">
+              <label class="screening-view__batch-label" for="batch-input"> Batch Size </label>
+              <span class="screening-view__batch-value">{{ batchSize }}</span>
+            </div>
+            <div class="screening-view__stepper">
+              <button
+                type="button"
+                class="screening-view__stepper-btn"
+                :disabled="controlsDisabled || !canDecrement"
+                aria-label="Decrease batch size"
+                @click="decrementBatch"
+              >
+                <span class="material-symbols-outlined">remove</span>
+              </button>
+              <input
+                id="batch-input"
+                class="screening-view__stepper-input"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                :value="batchSize"
+                :disabled="controlsDisabled"
+                aria-label="Batch size"
+                @focus="onBatchInputFocus"
+                @input="onBatchInput"
+              />
+              <button
+                type="button"
+                class="screening-view__stepper-btn"
+                :disabled="controlsDisabled || !canIncrement"
+                aria-label="Increase batch size"
+                @click="incrementBatch"
+              >
+                <span class="material-symbols-outlined">add</span>
+              </button>
+            </div>
+            <div v-if="showBatchWarning && !controlsDisabled" class="screening-view__batch-warning">
+              ⚠ Batching may not be supported by your LLM and may lead to failures.
+            </div>
+          </div>
         </div>
       </div>
 
@@ -295,7 +473,7 @@ async function handleResetWorkingList(): Promise<void> {
           <button
             v-if="!progress?.isRunning && !loading"
             class="btn btn--primary"
-            :disabled="!canStart"
+            :disabled="!canStart || controlsDisabled"
             @click="handleStart"
           >
             Start Screening
@@ -403,6 +581,39 @@ async function handleResetWorkingList(): Promise<void> {
   .screening-view__actions {
     flex-wrap: wrap;
   }
+
+  .screening-view__start-config-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.screening-view__start-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.screening-view__start-config-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.screening-view__batch--half {
+  min-width: 0;
+}
+
+.screening-view__stepper-input:disabled,
+.screening-view__stepper-btn:disabled {
+  cursor: not-allowed;
+}
+
+.screening-view__stepper-input:disabled {
+  opacity: 0.6;
+}
+
+.screening-view__subtitle strong {
+  font-weight: var(--font-weight-semibold);
 }
 
 .screening-view__loading {
@@ -716,7 +927,7 @@ async function handleResetWorkingList(): Promise<void> {
   cursor: not-allowed;
 }
 
-/* ── Batch Size Slider ── */
+/* ── Batch Size ── */
 .screening-view__batch {
   padding: var(--space-4);
   background-color: var(--color-surface-container);
@@ -748,44 +959,70 @@ async function handleResetWorkingList(): Promise<void> {
   text-align: right;
 }
 
-.screening-view__batch-slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--color-surface-container-highest);
-  outline: none;
-  cursor: pointer;
-}
-
-.screening-view__batch-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  cursor: pointer;
-  border: 2px solid var(--color-on-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-.screening-view__batch-slider::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  cursor: pointer;
-  border: 2px solid var(--color-on-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-.screening-view__batch-range {
+/* ── Batch Size Stepper ── */
+.screening-view__stepper {
   display: flex;
-  justify-content: space-between;
-  font-size: var(--font-size-caption);
-  color: var(--color-on-surface-variant);
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.screening-view__stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-default);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.15s ease;
+  font-family: var(--font-family);
+}
+
+.screening-view__stepper-btn .material-symbols-outlined {
+  font-size: 20px;
+  line-height: 1;
+  user-select: none;
+}
+
+.screening-view__stepper-btn:hover:not(:disabled) {
+  background-color: var(--color-surface-container-highest);
+}
+
+.screening-view__stepper-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.screening-view__stepper-input {
+  width: 3.5ch;
+  text-align: center;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  color: var(--color-on-surface);
+  background-color: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-default);
+  padding: var(--space-1) var(--space-2);
+  outline: none;
+  transition: border-color 0.15s ease;
+  -moz-appearance: textfield;
+}
+
+.screening-view__stepper-input::-webkit-outer-spin-button,
+.screening-view__stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.screening-view__stepper-input:focus {
+  border-color: var(--color-primary);
 }
 
 .screening-view__batch-warning {
