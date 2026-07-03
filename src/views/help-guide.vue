@@ -59,6 +59,37 @@ watch(
     }
   }
 );
+
+// Reset scroll container to top when changing tabs (unless navigating to a hash/anchor)
+watch(activeTab, () => {
+  if (route.hash) return;
+  requestAnimationFrame(() => {
+    const scrollContainer = document.querySelector('.app-shell__content');
+    if (scrollContainer) {
+      scrollContainer.scrollTop = 0;
+    }
+  });
+});
+
+/**
+ * Switch to a help tab from a child component (e.g. the "Understanding Bibliometrics"
+ * link inside the Reference tab). Behaves identically to clicking the tab button:
+ * updates `activeTab` directly (no route navigation) so the existing watcher scrolls
+ * the container to the top of the new tab's content. This keeps the action idempotent
+ * across repeated clicks - unlike a `router-link`, it does not depend on the route
+ * URL differing from the current one.
+ */
+function handleSwitchTab(tab: string): void {
+  if (
+    tab === 'guide' ||
+    tab === 'biblio' ||
+    tab === 'troubleshoot' ||
+    tab === 'local-ai' ||
+    tab === 'reference'
+  ) {
+    activeTab.value = tab as HelpTab;
+  }
+}
 </script>
 
 <template>
@@ -131,7 +162,11 @@ watch(
     <HelpTabBibliometrics v-else-if="activeTab === 'biblio'" />
     <HelpTabTroubleshooting v-else-if="activeTab === 'troubleshoot'" />
     <HelpTabLocalAi v-else-if="activeTab === 'local-ai'" />
-    <HelpTabReference v-else-if="activeTab === 'reference'" :initial-hash="routeHash" />
+    <HelpTabReference
+      v-else-if="activeTab === 'reference'"
+      :initial-hash="routeHash"
+      @switch-tab="handleSwitchTab"
+    />
   </div>
 </template>
 
@@ -170,6 +205,10 @@ watch(
   gap: 0;
   border-bottom: 2px solid var(--color-outline-variant, #e0e0e0);
   margin-bottom: var(--space-6);
+  position: sticky;
+  top: 0;
+  background-color: var(--color-surface, #ffffff);
+  z-index: 10;
 }
 
 .help-tabs__btn {

@@ -7,7 +7,7 @@ use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::utils::chunking::{chunk_sections, DEFAULT_CHUNK_WORDS};
 use crate::utils::pdf_extract;
-use crate::utils::sections::extract_sections;
+use crate::utils::sections::{extract_captions, extract_sections};
 
 /// Extract sections from an attached full-text file and store them as chunks
 /// in `article_chunks` (Tier 3 screening evidence). Pure-CPU (no LLM).
@@ -86,6 +86,14 @@ pub fn attach_full_text_inner(
 
     let word_count = full_text.split_whitespace().count();
 
+    // Detect figure/table captions in the extracted text so the persisted
+    // `has_figures_or_tables` flag matches the generation path's own
+    // precondition (`generate_figure_descriptions` validates via the same
+    // `extract_captions` call and errors with "No figure/table captions
+    // detected" when the result is empty). Using the same detector here keeps
+    // the frontend button gate DRY with the backend generation precondition.
+    let has_figures_or_tables = !extract_captions(&full_text).is_empty();
+
     // Build destination filename: {original_stem}_{article_id}.{ext}
     let original_name = source_path.file_name().and_then(|n| n.to_str()).unwrap_or("document");
     let stem = source_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
@@ -102,7 +110,13 @@ pub fn attach_full_text_inner(
         .map_err(|e| AppError::Import(format!("Failed to copy file to storage: {e}")))?;
 
     // Update database
-    article_repo::update_full_text(conn, article_id, &full_text, &dest_filename)?;
+    article_repo::update_full_text(
+        conn,
+        article_id,
+        &full_text,
+        &dest_filename,
+        has_figures_or_tables,
+    )?;
 
     // Tier 3: populate `article_chunks` so enhanced/two-stage screening can
     // retrieve "Supporting Evidence from Full Text" without re-parsing the PDF.

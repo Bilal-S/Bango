@@ -71,6 +71,7 @@ function makeArticle(id: string, status: Article['status']): Article {
     hasReferenceDetails: false,
     hasFullText: false,
     fullTextFileName: null,
+    hasFiguresOrTables: false,
   } as Article;
 }
 

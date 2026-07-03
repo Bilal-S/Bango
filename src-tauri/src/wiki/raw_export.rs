@@ -1090,6 +1090,7 @@ mod tests {
             has_reference_details: false,
             has_full_text: false,
             full_text_file_name: None,
+            has_figures_or_tables: false,
         }
     }
 }

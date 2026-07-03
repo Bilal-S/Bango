@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS articles (
     full_text_ai_summary TEXT,
     full_text_file_name TEXT,
     has_citation_details INTEGER NOT NULL DEFAULT 0,
+    has_figures_or_tables INTEGER NOT NULL DEFAULT 0,
     has_full_text INTEGER NOT NULL DEFAULT 0,
     has_reference_details INTEGER NOT NULL DEFAULT 0,
     import_source TEXT,

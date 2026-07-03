@@ -115,6 +115,7 @@ function makeArticle(overrides: Partial<Article> & { id: string }): Article {
     hasReferenceDetails: false,
     hasFullText: false,
     fullTextFileName: null,
+    hasFiguresOrTables: false,
   };
 }
 

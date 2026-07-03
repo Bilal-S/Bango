@@ -66,6 +66,7 @@ const mockArticle: Article = {
   hasReferenceDetails: false,
   hasFullText: false,
   fullTextFileName: null,
+  hasFiguresOrTables: false,
 };
 
 const mockArticleWithFullText: Article = {
@@ -73,6 +74,7 @@ const mockArticleWithFullText: Article = {
   hasFullText: true,
   fullText: 'This is the extracted full text content.',
   fullTextFileName: 'test-article-1_paper.pdf',
+  hasFiguresOrTables: false,
 };
 
 describe('Full Text Operations', () => {
@@ -242,6 +244,7 @@ describe('Full Text Operations', () => {
       const txtArticle: Article = {
         ...mockArticleWithFullText,
         fullTextFileName: 'test-article-1_notes.txt',
+        hasFiguresOrTables: false,
       };
       expect(txtArticle.fullTextFileName?.toLowerCase().endsWith('.txt')).toBe(true);
     });

@@ -1,6 +1,6 @@
 //! Repository for the `article_chunks` table (Tier 3 chunk storage).
 //!
-//! The `article_chunks` table is created by migration `v003_fts_sections.rs`
+//! The `article_chunks` table is created by migration `v002_wiki_manifest.rs`
 //! alongside the FTS5 drop, but it is NOT populated by the wiki pipeline. It
 //! holds the per-article chunks that Tier 3 screening retrieves as
 //! "Supporting Evidence from Full Text". It is filled at attach time by

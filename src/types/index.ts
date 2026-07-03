@@ -61,6 +61,10 @@ export interface Article {
   hasFullText: boolean;
   /** Name of the attached full text file */
   fullTextFileName: string | null;
+  /** Whether the attached full text contains figure/table captions.
+   * Computed once at attach time (backend `extract_captions`) and persisted on
+   * the row so the "Describe Figures & Tables" button gate is cheap. */
+  hasFiguresOrTables: boolean;
 }
 
 /** Reference type for imported citations/references */

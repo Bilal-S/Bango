@@ -19,6 +19,17 @@ const emit = defineEmits<{ refreshArticle: [articleId: string] }>();
 /** True when a figure-description LLM call is in flight for this article. */
 const isGeneratingFigures = computed(() => pendingFigureDescriptions.value.has(props.article.id));
 
+/** True when the article already has figure/table descriptions in its AI
+ *  summary blob. The "Describe Figures & Tables" button must stay visible in
+ *  this state so the user can Regenerate, even when `hasFiguresOrTables` is
+ *  false (e.g. an older row where the flag wasn't computed at attach time
+ *  but the blob already carries descriptions). */
+const hasExistingFigureDescriptions = computed(
+  () =>
+    (aiSummaryData.value?.figures?.length ?? 0) > 0 ||
+    (aiSummaryData.value?.tables?.length ?? 0) > 0
+);
+
 /** Trigger the batched figure/table description LLM call (Tier 2 Phase 4).
  *  On completion, emits `refreshArticle` so the parent re-fetches the article
  *  and the new `figures`/`tables` keys render. */
@@ -316,9 +327,16 @@ watch(
         </div>
       </div>
       <!-- ── Tier 2 Phase 4: Figures & Tables ───────────────────────── -->
-      <!-- Trigger button (gated on full text attached). Shown when no
-           descriptions exist yet OR when regenerating. -->
-      <div v-if="article.hasFullText" class="flex items-center gap-2">
+      <!-- Trigger button. Gated on full text attached AND either the
+           persisted `hasFiguresOrTables` flag (computed at attach time via
+           extract_captions) OR the presence of existing descriptions so the
+           user can Regenerate. Hiding the button when there is nothing to
+           describe avoids a server-side "No figure/table captions detected"
+           error. -->
+      <div
+        v-if="article.hasFullText && (article.hasFiguresOrTables || hasExistingFigureDescriptions)"
+        class="flex items-center gap-2"
+      >
         <button
           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           :disabled="isGeneratingFigures"

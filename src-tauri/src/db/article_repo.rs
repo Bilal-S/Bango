@@ -138,6 +138,8 @@ pub fn get_next_unscreened_working_batch(
             // knows which articles have retrievable full-text evidence chunks.
             has_full_text: row.get::<_, i32>(6)? != 0,
             full_text_file_name: None,
+            // Screening does not need the figures/tables flag; default false.
+            has_figures_or_tables: false,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -939,6 +941,7 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         has_reference_details: row.get::<_, i32>("has_reference_details")? != 0,
         has_full_text: row.get::<_, i32>("has_full_text")? != 0,
         full_text_file_name: row.get("full_text_file_name")?,
+        has_figures_or_tables: row.get::<_, i32>("has_figures_or_tables")? != 0,
     })
 }
 
@@ -1084,15 +1087,22 @@ pub fn set_ai_summary(
 }
 
 /// Update the full text and file attachment info for an article.
+///
+/// `has_figures_or_tables` is computed at attach time by
+/// `commands::full_text::attach_full_text_inner` via
+/// `utils::sections::extract_captions` (the same detector
+/// `generate_figure_descriptions` validates against), so the persisted flag
+/// matches the generation path's own precondition.
 pub fn update_full_text(
     conn: &Connection,
     article_id: &str,
     full_text: &str,
     file_name: &str,
+    has_figures_or_tables: bool,
 ) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE articles SET full_text = ?1, has_full_text = 1, full_text_file_name = ?2, changed_at = datetime('now') WHERE id = ?3",
-        params![full_text, file_name, article_id],
+        "UPDATE articles SET full_text = ?1, has_full_text = 1, full_text_file_name = ?2, has_figures_or_tables = ?3, changed_at = datetime('now') WHERE id = ?4",
+        params![full_text, file_name, if has_figures_or_tables { 1 } else { 0 }, article_id],
     )?;
     Ok(())
 }
@@ -1100,7 +1110,7 @@ pub fn update_full_text(
 /// Clear the full text and file attachment info for an article.
 pub fn clear_full_text(conn: &Connection, article_id: &str) -> Result<(), AppError> {
     conn.execute(
-        "UPDATE articles SET full_text = NULL, has_full_text = 0, full_text_file_name = NULL, changed_at = datetime('now') WHERE id = ?1",
+        "UPDATE articles SET full_text = NULL, has_full_text = 0, full_text_file_name = NULL, has_figures_or_tables = 0, changed_at = datetime('now') WHERE id = ?1",
         params![article_id],
     )?;
     Ok(())

@@ -65,6 +65,7 @@ export function makeArticle(overrides: Partial<Article> = {}): Article {
     hasReferenceDetails: false,
     hasFullText: false,
     fullTextFileName: null,
+    hasFiguresOrTables: false,
     ...overrides,
   } as Article;
 }

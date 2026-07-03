@@ -28,7 +28,7 @@ pub const WIKI_DIR_HASH_KEY: &str = "wiki_dir_hash";
 /// Ensure the FTS5 table exists with the chunk-aware schema. Idempotent.
 ///
 /// The schema includes three `UNINDEXED` metadata columns added in migration
-/// v003 (T1.2) so BM25 retrieval can return passage-level chunks with section
+/// v002 (T1.2) so BM25 retrieval can return passage-level chunks with section
 /// provenance:
 /// - `chunk_index` - 0-based chunk ordinal within the page (NULL = legacy
 ///   whole-page row).
@@ -36,7 +36,7 @@ pub const WIKI_DIR_HASH_KEY: &str = "wiki_dir_hash";
 /// - `parent_slug` - slug of the page this chunk belongs to (== slug for
 ///   whole-page rows).
 ///
-/// Migration v003 `DROP`s the old `wiki_pages_fts` so this `CREATE` runs on the
+/// Migration v002 `DROP`s the old `wiki_pages_fts` so this `CREATE` runs on the
 /// first read after upgrade. On a fresh DB it creates the new shape directly.
 pub fn ensure_table(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(&format!(

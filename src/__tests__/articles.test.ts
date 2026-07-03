@@ -67,6 +67,7 @@ const mockArticles: Article[] = [
     hasReferenceDetails: false,
     hasFullText: false,
     fullTextFileName: null,
+    hasFiguresOrTables: false,
   },
   {
     id: '2',
@@ -123,6 +124,7 @@ const mockArticles: Article[] = [
     hasReferenceDetails: false,
     hasFullText: false,
     fullTextFileName: null,
+    hasFiguresOrTables: false,
   },
 ];
 

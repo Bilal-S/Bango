@@ -95,7 +95,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
   - **`src-tauri/src/db/chunk_repo.rs`** - Tier 3 article chunk storage (`article_chunks`
-    table, created by migration v003). Populated at attach time by
+    table, created by migration v002). Populated at attach time by
     `commands::full_text::populate_chunks_for_attached_text` (extract_sections +
     chunk_sections) and cleared on detach. Consumed by `screening::chunk_retrieval` for
     enhanced/two_stage screening evidence. Exposes `replace_chunks_for_article`,
@@ -139,7 +139,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     mutex); the Settings "Rebuild text chunks" button calls the same fn with
     `force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
     `get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` commands.
-    Migration `v003_fts_sections.rs` adds `ai_screen_enhanced` (along with
+    Migration `v002_wiki_manifest.rs` adds `ai_screen_enhanced` (along with
     `figure_descriptions`) to the `audit_entries.action` CHECK constraint in the
     single audit_entries rebuild (SQLite CHECK constraints can't be ALTERed; uses the
     rename-create-copy-drop pattern). **Stage-2 progress**: every early-exit
@@ -451,20 +451,25 @@ describe each durable boundary so agents can locate the right area. Create a chi
     Property-based tests (`proptest`) in `src-tauri/tests/chunking_test.rs` verify the
     word-count bound (excluding atomic Table/Figure) + contiguous `chunk_index` for any
     input.
-  - **`src-tauri/src/db/migrations/v003_fts_sections.rs`** - Tier 1-4 schema (VERSION 3).
-    Three changes in one migration: (1) `DROP TABLE IF EXISTS wiki_pages_fts;` so
-    `fts::ensure_table` recreates it with chunk-aware columns (`chunk_index`, `section`,
-    `parent_slug` UNINDEXED) on the next read (FTS5 virtual tables cannot be `ALTER`ed;
-    the explicit DROP is the supported schema-change path, and the table self-heals via
+  - **`src-tauri/src/db/migrations/v002_wiki_manifest.rs`** - Post-v001 schema
+    (VERSION 2). Consolidates all post-v001 changes so the migration sequence is
+    gap-free (v001 -> v002); v003 was merged in here pre-release. Four changes in one
+    migration: (1) `DROP TABLE IF EXISTS wiki_pages_fts;` so `fts::ensure_table`
+    recreates it with chunk-aware columns (`chunk_index`, `section`, `parent_slug`
+    UNINDEXED) on the next read (FTS5 virtual tables cannot be `ALTER`ed; the explicit
+    DROP is the supported schema-change path, and the table self-heals via
     `ensure_index_populated`); (2) `CREATE TABLE article_chunks` (per-article chunk
-    storage populated at attach time by T3.1, consumed by screening T3.2+); (3) a single
-    `audit_entries` rebuild that adds both `figure_descriptions` (Tier 2 Phase 4) and
-    `ai_screen_enhanced` (Tier 3 two-stage screening stage 2) to the `action` CHECK
-    constraint (SQLite CHECK constraints can't be `ALTER`ed; uses the
-    rename-create-copy-drop pattern). The v001 initial schema is also updated so fresh
-    DBs get the expanded constraint directly. No `ALTER TABLE articles` - section
-    summaries (T1.3) live inside the existing `full_text_ai_summary` column as a
-    `schema_version: 2` superset blob.
+    storage populated at attach time by T3.1, consumed by screening T3.2+); (3) `CREATE
+    TABLE wiki_index_manifest` (per-file content hashes for the Wiki external-edit drift
+    detection); (4) a single `audit_entries` rebuild that adds both
+    `figure_descriptions` (Tier 2 Phase 4) and `ai_screen_enhanced` (Tier 3 two-stage
+    screening stage 2) to the `action` CHECK constraint (SQLite CHECK constraints can't
+    be `ALTER`ed; uses the rename-create-copy-drop pattern). The v001 initial schema is
+    also updated so fresh DBs get the expanded constraint directly. The
+    `has_figures_or_tables` articles column is added in v001 directly (no ALTER here)
+    - see `commands::full_text::attach_full_text_inner` for the parse-time detection.
+    No `ALTER TABLE articles` - section summaries (T1.3) live inside the existing
+    `full_text_ai_summary` column as a `schema_version: 2` superset blob.
   - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
     `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
     UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:

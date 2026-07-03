@@ -14,7 +14,11 @@ const props = defineProps<{
   initialHash?: string;
 }>();
 
-const activeRefSection = ref<string>('ref-dashboard');
+const emit = defineEmits<{
+  (e: 'switch-tab', tab: string): void;
+}>();
+
+const activeRefSection = ref<string>('ref-ai-philosophy');
 
 let scrollContainer: HTMLElement | null = null;
 let isScrollingManual = false;
@@ -118,6 +122,14 @@ watch(
       <!-- Navigation Sidebar -->
       <aside class="ref-sidebar" aria-label="Reference Navigation">
         <nav class="ref-nav">
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-ai-philosophy' }"
+            @click="selectRefSection('ref-ai-philosophy')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">psychology</span>
+            AI Integration & Philosophy
+          </button>
           <button
             class="ref-nav__link"
             :class="{ 'ref-nav__link--active': activeRefSection === 'ref-dashboard' }"
@@ -227,6 +239,133 @@ watch(
 
       <!-- Main Content Area -->
       <div class="ref-content">
+        <!-- SECTION: AI INTEGRATION & PHILOSOPHY -->
+        <section id="ref-ai-philosophy" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">psychology</span>
+            <h2 class="ref-section__title">AI Integration & Philosophy</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Bango is designed with a specific philosophy: AI should serve as a high-accuracy,
+              transparent research assistant that helps you organize and analyze literature, not a
+              black-box decision-maker that replaces human oversight.
+            </p>
+
+            <h3>How Bango Works with AI</h3>
+            <p>
+              Traditional AI chat interfaces require you to copy-paste or upload entire PDFs into a
+              single context window. In contrast, Bango treats papers the way a human researcher
+              does: section by section, with the most relevant passages surfaced on demand.
+            </p>
+            <ul>
+              <li>
+                <strong>Section-Aware PDF Extraction:</strong> When you attach a PDF, Bango parses
+                the text and splits it into structured Method, Results, and Discussion passages.
+                This ensures important sections are not lost to context window limits.
+              </li>
+              <li>
+                <strong>Criteria-Targeted Chunking:</strong> Rather than feeding an entire paper to
+                the AI, Bango's retrieval engine ranks and pulls only the top-K passages matching
+                your criteria.
+              </li>
+              <li>
+                <strong>Grounded Citation Mapping:</strong> Every AI summary, screening advice, and
+                chat answer is directly mapped to the source passage (e.g.,
+                <code>Smith 2023 (§Methods)</code>). These labels are interactive links that open
+                the source text, so you can verify the AI's work.
+              </li>
+              <li>
+                <strong>Deterministic Logic Layer:</strong> Bango evaluates conflict resolution
+                rules locally in SQLite based on your criteria priorities, using the LLM solely to
+                advise on matches.
+              </li>
+            </ul>
+
+            <h3>Bango RAG vs. Dumping Documents into Chat Windows</h3>
+            <div class="ref-comparison-wrapper">
+              <table class="ref-comparison-table">
+                <thead>
+                  <tr>
+                    <th>Dimension</th>
+                    <th>Dumping in Chat Windows (ChatGPT/Claude UI)</th>
+                    <th>Bango Structured Retrieval (RAG)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Context Truncation</strong></td>
+                    <td>High. Long papers exceed limits and get silently cut off.</td>
+                    <td>
+                      None. Section-by-section parsing and word budgets prevent context overflow.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Hallucination Risk</strong></td>
+                    <td>
+                      High. The model generates summaries based on incomplete or recalled memory.
+                    </td>
+                    <td>
+                      Low. The model is constrained to analyze only target, extracted passages.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Verifiability</strong></td>
+                    <td>
+                      Low. Answers are plain text; you must search the PDF to locate the source.
+                    </td>
+                    <td>
+                      High. Interactive passage links (e.g., <code>§Methods</code>) open the exact
+                      source text.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Reproducibility</strong></td>
+                    <td>
+                      None. Repeated questions yield different outputs; there is no saved history.
+                    </td>
+                    <td>Full. Every decision is logged in an immutable database audit trail.</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Structured Comparison</strong></td>
+                    <td>
+                      Manual. You must copy/paste data to spreadsheets to compare papers
+                      side-by-side.
+                    </td>
+                    <td>
+                      Automatic. Standard variables (sample size, design, effect sizes) are parsed
+                      into cards.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Setup Complexity</strong></td>
+                    <td>Instant. Just upload or paste text and type.</td>
+                    <td>Structured. Requires importing bibliography files and attaching PDFs.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3>Benefits & Drawbacks of Bango's Approach</h3>
+            <p>
+              While Bango's structured approach provides the rigor needed for systematic reviews, it
+              represents a different set of trade-offs:
+            </p>
+            <ul>
+              <li>
+                <strong>Benefits:</strong> Perfect audit trails for PRISMA reporting, automatic
+                re-evaluation when criteria change, and lower API token costs by avoiding sending
+                unnecessary parts of the paper.
+              </li>
+              <li>
+                <strong>Drawbacks:</strong> Processing requires a multi-phase pipeline (import, text
+                extraction, chunking, and database mapping) that takes longer to run than a simple
+                chat prompt, and requires attaching original PDF files.
+              </li>
+            </ul>
+          </div>
+        </section>
+
         <!-- SECTION: DASHBOARD -->
         <section id="ref-dashboard" class="ref-section">
           <header class="ref-section__header">
@@ -651,8 +790,10 @@ ER  - </pre
               The Bibliometrics tab analyzes structural collaborations, citation density, and
               keywords across six modules: Co-Authorship, Citation Network, Keyword Co-Occurrence,
               Publication Timeline, Author Productivity, and Co-Citation Analysis. See the
-              <strong>Understanding Bibliometrics</strong> help tab for detailed explanations and
-              use cases for each module.
+              <button type="button" class="ref-link" @click="emit('switch-tab', 'biblio')">
+                Understanding Bibliometrics
+              </button>
+              help tab for detailed explanations and use cases for each module.
             </p>
             <h3>Modularity & Layout Algorithms</h3>
             <p>
@@ -1185,20 +1326,78 @@ ER  - </pre
             <h2 class="ref-section__title">Settings & API Security</h2>
           </header>
           <div class="ref-section__body">
-            <p>Configure AI connections, custom directories, and license flags.</p>
+            <p>
+              Configure AI connections, custom directories, reprocessing tasks, and project backups.
+              Bango's settings are arranged into modular cards to help you manage your workspace.
+            </p>
+
             <h3>API Key Encryption</h3>
             <p>
               To protect your credentials, LLM API keys are encrypted locally using **AES-256-GCM**.
               The decryption key is derived cryptographically from your local machine's hostname,
               username, and a secure app salt. API keys are never included in project backups.
             </p>
-            <h3>Configurable Options</h3>
+
+            <h3>Configurable Options & Cards</h3>
             <ul>
               <li>
-                <strong>Storage:</strong> Defines the Bango documents root where attached files,
-                Citation Chaser output, and the Wiki are cached. Defaults to
-                <code>~/Documents/Bango/</code> if unconfigured (with <code>fulltext/</code>,
-                <code>ris/</code>, and <code>wiki-root/</code> as subdirectories).
+                <strong>LLM Provider Settings:</strong> Select your AI provider (Google Gemini,
+                Anthropic Claude, OpenAI, Ollama, LM Studio, or custom endpoints) and enter your
+                credentials. Use the model picker to select active models.
+              </li>
+              <li>
+                <strong>AI Summary Settings:</strong> Toggle the "Include Section Summaries" option.
+                When enabled, the AI reads your PDFs section-by-section (Methods, Results,
+                Discussion) to build a structured breakdown of study design, sample size,
+                population, effect sizes, and limitations.
+              </li>
+              <li>
+                <strong>AI Screening Preferences:</strong> Configure the active screening mode:
+                <ul>
+                  <li>
+                    <em>Abstract Mode:</em> Evaluates articles using title and abstract text alone
+                    (default).
+                  </li>
+                  <li>
+                    <em>Enhanced Mode:</em> Evaluates abstract plus the top criteria-matched
+                    passages from full text.
+                  </li>
+                  <li>
+                    <em>Two-Stage Mode:</em> Screens abstracts first, then runs a full-text pass
+                    only for borderline papers (confidence in configurable range, e.g.,
+                    <code>[0.4, 0.7)</code>).
+                  </li>
+                </ul>
+                Allows setting the chunk budget per article (default 2400 words) and active sections
+                (default Methods, Results).
+              </li>
+              <li>
+                <strong>File Storage:</strong> Defines the Bango documents root folder. All cached
+                files, PDF attachments, scrapers, and the local Wiki files reside in subdirectories
+                here (<code>fulltext/</code>, <code>ris/</code>, <code>wiki-root/</code>).
+              </li>
+              <li>
+                <strong>Maintenance & Imports (Reprocessing):</strong>
+                <ul>
+                  <li>
+                    <em>Rebuild Text Chunks:</em> Forces Bango to re-parse and split attached
+                    full-text files into vector chunks.
+                  </li>
+                  <li>
+                    <em>Batch Import:</em> A three-phase automated pipeline that scans your Storage
+                    directory. It links PDFs to articles via DOI (Phase 1), imports Citation
+                    Chaser/RIS metadata (Phase 2), and pre-generates AI summaries (Phase 3).
+                  </li>
+                </ul>
+              </li>
+              <li>
+                <strong>Project Management:</strong> Contains core project options. Export backup as
+                a <code>.bango.json</code> file, import a backup to restore data, reset the current
+                project database, or delete all data.
+              </li>
+              <li>
+                <strong>Diagnostics & Notification History:</strong> View previous toast messages,
+                system logs, and error trails.
               </li>
             </ul>
           </div>
@@ -1468,5 +1667,23 @@ ER  - </pre
     position: static;
     max-height: none;
   }
+}
+
+.ref-link {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  color: #4f46e5;
+  text-decoration: none;
+  font-weight: var(--font-weight-semibold);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.ref-link:hover {
+  text-decoration: underline;
 }
 </style>

@@ -128,7 +128,7 @@ fn phase1_skips_articles_that_already_have_full_text() {
     let id = insert_article_with_doi(&conn, doi, "Skip Article");
 
     // Pre-attach full text so the article already has it.
-    article_repo::update_full_text(&conn, &id, "existing text", "existing.txt").unwrap();
+    article_repo::update_full_text(&conn, &id, "existing text", "existing.txt", false).unwrap();
 
     write_fulltext_txt(tmp.path(), doi, "This should NOT be attached.");
 

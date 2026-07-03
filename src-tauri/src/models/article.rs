@@ -72,6 +72,10 @@ pub struct Article {
     pub has_full_text: bool,
     /// Relative path with partial subpath (e.g., `fulltext/smith2023.pdf`)
     pub full_text_file_name: Option<String>,
+    /// True when the attached full text contains figure/table captions
+    /// (detected via `utils::sections::extract_captions` at attach time).
+    /// Gates the "Describe Figures & Tables" button in the frontend.
+    pub has_figures_or_tables: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

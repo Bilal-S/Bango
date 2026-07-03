@@ -64,6 +64,7 @@ function makeArticle(overrides: Partial<Article> = {}): Article {
     hasReferenceDetails: false,
     hasFullText: false,
     fullTextFileName: null,
+    hasFiguresOrTables: false,
     ...overrides,
   } as Article;
 }
@@ -121,6 +122,7 @@ describe('detail-header.vue', () => {
       props: {
         ...baseProps,
         article: makeArticle({ hasFullText: true, fullTextFileName: 'paper.pdf' }),
+        hasFiguresOrTables: false,
         fullTextFileIcon: 'picture_as_pdf',
       },
     });

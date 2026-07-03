@@ -46,7 +46,7 @@ The SQLite schema consists of the following primary tables. All IDs are UUID str
     *   `data_length` (character count), `token_estimate` (heuristic tokens), `actual_tokens`
     *   `full_text` (extracted text, nullable), `full_text_ai_summary` (nullable), `full_text_file_name` (nullable)
     *   `num_cited` (nullable), `num_references` (nullable)
-    *   `has_citation_details` (bool, default 0), `has_full_text` (bool, default 0), `has_reference_details` (bool, default 0)
+    *   `has_citation_details` (bool, default 0), `has_figures_or_tables` (bool, default 0; computed once at full-text attach time via `extract_captions`), `has_full_text` (bool, default 0), `has_reference_details` (bool, default 0)
     *   `import_source` (originating filename), `imported_at`
 *   **`article_tags`**: `article_id` (FK), `tag_id` (FK) [PK: composite]
 *   **`article_labels`**: `article_id` (FK), `label_id` (FK) [PK: composite]

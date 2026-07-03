@@ -64,7 +64,7 @@ fn test_full_text_attach_marks_wiki_stale() {
 
     // Repo-level mutation performed by `attach_full_text` (file copy + audit
     // entry are command-layer concerns; the DB write is what affects the wiki).
-    article_repo::update_full_text(&conn, &article_id, "full text body", "doc.pdf")
+    article_repo::update_full_text(&conn, &article_id, "full text body", "doc.pdf", false)
         .expect("update_full_text");
 
     // Command-layer flag-setting called after the repo write succeeds.
@@ -79,7 +79,7 @@ fn test_full_text_delete_marks_wiki_stale() {
     let article_id = seed_included_article(&conn);
 
     // Start from an article that already has full text and a fresh wiki.
-    article_repo::update_full_text(&conn, &article_id, "existing full text", "doc.pdf")
+    article_repo::update_full_text(&conn, &article_id, "existing full text", "doc.pdf", false)
         .expect("update_full_text");
     clear_wiki_needs_refresh(&conn);
     assert!(!get_wiki_needs_refresh(&conn).unwrap());
