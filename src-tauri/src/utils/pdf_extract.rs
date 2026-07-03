@@ -11,8 +11,9 @@ const MAX_WORDS: usize = 30_000;
 /// Pipeline:
 /// 1. Extract text page-by-page using lopdf for header/footer detection
 /// 2. Detect repeating header/footer lines across pages
-/// 3. Extract full text using pdf-extract (better layout handling)
-///    - Falls back to lopdf page-by-page extraction if pdf-extract panics or fails
+/// 3. Extract full text using `unpdf` (best quality, handles custom font encodings)
+///    - Falls back to `pdf-extract` if `unpdf` fails (legacy compat)
+///    - Falls back to `lopdf` page-by-page if both fail (degraded but always works)
 /// 4. Remove detected headers/footers from the extracted text
 /// 5. Strip abstract and references sections
 /// 6. Truncate to MAX_WORDS
@@ -20,20 +21,26 @@ pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
     // Step 1: Detect headers/footers from lopdf (also pre-loads pages for fallback)
     let header_footer_lines = detect_headers_footers(file_path)?;
 
-    // Step 2: Extract full text using pdf-extract, with panic safety.
-    // pdf-extract can panic on PDFs with broken Unicode maps (FromUtf16Error).
-    // Wrap in catch_unwind so the app doesn't abort when called from a
-    // non-unwinding WebKit callback.
-    let raw_text = match extract_text_safe(file_path) {
-        Ok(text) => text,
-        Err(e) => {
-            // Fallback: use lopdf page-by-page extraction (degraded but doesn't panic)
-            eprintln!(
-                "[pdf_extract] pdf-extract failed/panicked: {e} - falling back to lopdf extraction"
-            );
-            let doc = LopdfDocument::load(file_path)
-                .map_err(|e2| format!("Fallback PDF load also failed: {e2}"))?;
-            extract_all_pages_text(&doc)?
+    // Step 2: Extract full text.
+    // Tier 1: unpdf (best quality — handles Type1 custom fonts without panicking)
+    // Tier 2: pdf-extract (legacy fallback — may panic on broken Unicode maps)
+    // Tier 3: lopdf page-by-page (last resort — degraded but always works)
+    let raw_text = match extract_via_unpdf(file_path) {
+        Ok(text) if !text.trim().is_empty() => text,
+        _ => {
+            // unpdf failed or returned empty — try pdf-extract with panic safety.
+            match extract_text_safe(file_path) {
+                Ok(text) => text,
+                Err(e) => {
+                    // pdf-extract also failed — fall back to lopdf.
+                    eprintln!(
+                        "[pdf_extract] pdf-extract failed/panicked: {e} - falling back to lopdf extraction"
+                    );
+                    let doc = LopdfDocument::load(file_path)
+                        .map_err(|e2| format!("Fallback PDF load also failed: {e2}"))?;
+                    extract_all_pages_text(&doc)?
+                }
+            }
         }
     };
 
@@ -55,6 +62,17 @@ fn extract_text_safe(file_path: &Path) -> Result<String, String> {
     std::panic::catch_unwind(|| pdf_extract::extract_text(file_path))
         .map_err(|_| "PDF extraction panicked - the PDF may contain unsupported fonts".to_string())?
         .map_err(|e| format!("PDF extraction failed: {e}"))
+}
+
+/// Extract text via `unpdf` — the highest-quality PDF text extractor.
+///
+/// `unpdf` handles custom Type1 font encodings that cause `pdf-extract` to
+/// panic and `lopdf` to produce garbled output. Pure Rust, MIT-licensed,
+/// no external dependencies. Synchronous API (no async runtime needed).
+fn extract_via_unpdf(file_path: &Path) -> Result<String, String> {
+    let doc = unpdf::parse_file(file_path).map_err(|e| format!("unpdf parse failed: {e}"))?;
+    let options = unpdf::render::RenderOptions::default();
+    unpdf::render::to_text(&doc, &options).map_err(|e| format!("unpdf text extraction failed: {e}"))
 }
 
 /// Fallback: extract text from all pages using lopdf (used when pdf-extract fails).
