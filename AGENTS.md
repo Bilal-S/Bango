@@ -139,9 +139,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     mutex); the Settings "Rebuild text chunks" button calls the same fn with
     `force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
     `get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` commands.
-    Migration `v004_ai_screen_enhanced.rs` adds `ai_screen_enhanced` to the
-    `audit_entries.action` CHECK constraint (SQLite CHECK constraints can't be ALTERed;
-    uses the rename-create-copy-drop pattern). **Stage-2 progress**: every early-exit
+    Migration `v003_fts_sections.rs` adds `ai_screen_enhanced` (along with
+    `figure_descriptions`) to the `audit_entries.action` CHECK constraint in the
+    single audit_entries rebuild (SQLite CHECK constraints can't be ALTERed; uses the
+    rename-create-copy-drop pattern). **Stage-2 progress**: every early-exit
     arm in the two-stage loop (evidence filtered out, LLM error, parse mismatch,
     `"error"` decision) updates `ScreeningProgress.stage` so the `X/Y borderline`
     sub-line never stalls. **Token accumulation**: `update_article_after_screening`
@@ -451,14 +452,19 @@ describe each durable boundary so agents can locate the right area. Create a chi
     word-count bound (excluding atomic Table/Figure) + contiguous `chunk_index` for any
     input.
   - **`src-tauri/src/db/migrations/v003_fts_sections.rs`** - Tier 1-4 schema (VERSION 3).
-    Two changes: (1) `DROP TABLE IF EXISTS wiki_pages_fts;` so `fts::ensure_table`
-    recreates it with chunk-aware columns (`chunk_index`, `section`, `parent_slug` UNINDEXED)
-    on the next read (FTS5 virtual tables cannot be `ALTER`ed; the explicit DROP is the
-    supported schema-change path, and the table self-heals via `ensure_index_populated`);
-    (2) `CREATE TABLE article_chunks` (per-article chunk storage populated at attach time
-    by T3.1, consumed by screening T3.2+). No `ALTER TABLE articles` - section summaries
-    (T1.3) live inside the existing `full_text_ai_summary` column as a `schema_version: 2`
-    superset blob.
+    Three changes in one migration: (1) `DROP TABLE IF EXISTS wiki_pages_fts;` so
+    `fts::ensure_table` recreates it with chunk-aware columns (`chunk_index`, `section`,
+    `parent_slug` UNINDEXED) on the next read (FTS5 virtual tables cannot be `ALTER`ed;
+    the explicit DROP is the supported schema-change path, and the table self-heals via
+    `ensure_index_populated`); (2) `CREATE TABLE article_chunks` (per-article chunk
+    storage populated at attach time by T3.1, consumed by screening T3.2+); (3) a single
+    `audit_entries` rebuild that adds both `figure_descriptions` (Tier 2 Phase 4) and
+    `ai_screen_enhanced` (Tier 3 two-stage screening stage 2) to the `action` CHECK
+    constraint (SQLite CHECK constraints can't be `ALTER`ed; uses the
+    rename-create-copy-drop pattern). The v001 initial schema is also updated so fresh
+    DBs get the expanded constraint directly. No `ALTER TABLE articles` - section
+    summaries (T1.3) live inside the existing `full_text_ai_summary` column as a
+    `schema_version: 2` superset blob.
   - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
     `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
     UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:

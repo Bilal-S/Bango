@@ -1,6 +1,7 @@
-//! Tier 1-4 schema: chunk-aware FTS5 + article chunk storage.
+//! Tier 1-4 schema: chunk-aware FTS5 + article chunk storage + audit entries
+//! expansion.
 //!
-//! Two changes in one migration (Tiers 1-4 ship together):
+//! Three changes in one migration (Tiers 1-4 ship together):
 //! 1. `DROP TABLE IF EXISTS wiki_pages_fts;` - the FTS5 virtual table is a
 //!    derived cache rebuilt from disk by `rebuild_index_with_manifest`. Dropping
 //!    it is safe and lets `fts::ensure_table` recreate it with the chunk-aware
@@ -11,16 +12,16 @@
 //! 2. `CREATE TABLE article_chunks` - per-article chunk storage populated at
 //!    attach time by `extract_sections` (T1.1) + `chunk_sections` (T1.2).
 //!    Consumed by screening (T3.2+) and reusable by any per-article retrieval.
+//! 3. Rebuild `audit_entries` to add both `figure_descriptions` (Tier 2 Phase 4)
+//!    and `ai_screen_enhanced` (Tier 3 two-stage screening stage-2 entries) to
+//!    the `action` CHECK constraint. SQLite CHECK constraints cannot be ALTERed
+//!    in place, so the table is rebuilt via the rename-create-copy-drop pattern.
+//!    The v001 initial schema is also updated so fresh DBs get the expanded
+//!    constraint directly.
 //!
 //! No `ALTER TABLE articles`: section summaries (T1.3) live inside the existing
 //! `full_text_ai_summary` column as a `schema_version: 2` superset blob, so no
 //! new column is needed.
-//!
-//! 3. Rebuild `audit_entries` to add `figure_descriptions` to the `action`
-//!    CHECK constraint (Tier 2 Phase 4). SQLite CHECK constraints cannot be
-//!    ALTERed in place, so the table is rebuilt via the rename-create-copy-drop
-//!    pattern. The v001 initial schema is also updated so fresh DBs get the
-//!    expanded constraint directly.
 
 pub const VERSION: i32 = 3;
 
@@ -47,9 +48,10 @@ CREATE TABLE IF NOT EXISTS article_chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_article_chunks_article ON article_chunks(article_id);
 
--- Rebuild audit_entries to add 'figure_descriptions' to the action CHECK
--- constraint (Tier 2 Phase 4). SQLite CHECK constraints cannot be ALTERed;
--- use the rename-create-copy-drop pattern.
+-- Rebuild audit_entries to add 'figure_descriptions' (Tier 2 Phase 4) and
+-- 'ai_screen_enhanced' (Tier 3 two-stage screening stage 2) to the action CHECK
+-- constraint. SQLite CHECK constraints cannot be ALTERed; use the
+-- rename-create-copy-drop pattern.
 ALTER TABLE audit_entries RENAME TO audit_entries_v003_old;
 
 CREATE TABLE audit_entries (
@@ -57,9 +59,9 @@ CREATE TABLE audit_entries (
     action TEXT NOT NULL CHECK(action IN (
         'import', 'dedup_merge', 'dedup_flag', 'status_change',
         'tag_add', 'tag_remove', 'label_add', 'label_remove',
-        'criteria_match', 'ai_screen', 'manual_override', 'ai_summary',
-        'error', 'dedup_auto', 'reference_import', 'reference_match',
-        'figure_descriptions'
+        'criteria_match', 'ai_screen', 'ai_screen_enhanced', 'manual_override',
+        'ai_summary', 'error', 'dedup_auto', 'reference_import',
+        'reference_match', 'figure_descriptions'
     )),
     article_id TEXT,
     details TEXT,
