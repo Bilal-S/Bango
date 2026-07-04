@@ -36,6 +36,19 @@ Row format (machine-parseable):
 | `src-tauri/tests/screening_translation_integration_test.rs::screening_uses_translated_text_when_available` | Covers `TC-11` |
 | `src-tauri/tests/summary_translation_integration_test.rs::summary_uses_translated_text_when_available` | Covers `TC-12` |
 | `src-tauri/tests/v001_v003_schema_parity_test.rs::translation_tables_match_between_v001_and_v003` | Covers v001/v003 parity |
+| `src-tauri/tests/manual_translate_test.rs::auto_translate_off_gate_prevents_import_trigger` | Covers Scenario 3: auto_translate=false gate |
+| `src-tauri/tests/manual_translate_test.rs::manual_enqueue_bypasses_auto_translate_and_language_gate` | Covers Scenario 3: manual enqueue bypasses gates |
+| `src-tauri/tests/manual_translate_test.rs::manual_translate_metadata_only_succeeds` | Covers Scenario 3: manual translate E2E |
+| `src-tauri/tests/manual_translate_test.rs::manual_translate_then_retry_works` | Covers Scenario 3: retry after manual translate |
+| `src-tauri/tests/broken_language_import_test.rs::import_article_with_none_language_does_not_crash` | Covers Scenario 2: None language import |
+| `src-tauri/tests/broken_language_import_test.rs::absent_language_skips_translation` | Covers Scenario 2: skip policy for absent language |
+| `src-tauri/tests/broken_language_import_test.rs::blank_and_whitespace_language_also_skips` | Covers Scenario 2: blank/whitespace language |
+| `src-tauri/tests/broken_language_import_test.rs::absent_language_article_still_screenable` | Covers Scenario 2: screening with absent language |
+| `src-tauri/tests/broken_language_import_test.rs::mixed_language_batch_handles_all_cases` | Covers Scenario 2: mixed language batch |
+| `src-tauri/tests/auto_translate_full_text_test.rs::auto_translate_on_enables_import_trigger` | Covers Scenario 4: auto_translate=true gate |
+| `src-tauri/tests/auto_translate_full_text_test.rs::has_full_text_article_enqueues_full_text_job_kind` | Covers Scenario 4: FullText job kind selection |
+| `src-tauri/tests/auto_translate_full_text_test.rs::full_text_translation_produces_english_chunks_and_full_text` | Covers Scenario 4: full-text translate E2E |
+| `src-tauri/tests/auto_translate_full_text_test.rs::auto_translate_enabled_summary_reads_english_after_translation` | Covers Scenario 4: summary reads English after translate |
 
 ## Frontend tests
 

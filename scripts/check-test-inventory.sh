@@ -60,8 +60,8 @@ for row in "${ROWS[@]}"; do
   fn="${row##*::}"
   checked=$((checked + 1))
   if [[ ! -f "$file" ]]; then
-    # Test file doesn't exist yet (prep PR not landed). Skip; the two-PR
-    # convention adds the file in the prep PR.
+    echo "[check-test-inventory] MISSING FILE: ${row} (file does not exist on disk)" >&2
+    missing=$((missing + 1))
     continue
   fi
   # Rust: `fn <name>(` or `fn <name> ()` or `#[ignore]`-stub `fn <name>(`.
