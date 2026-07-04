@@ -102,7 +102,7 @@ async function loadRawFiles(): Promise<void> {
  * Documents) rather than a real DB article. Detection is data-driven: the raw
  * file's `source_kind` must start with `user_`. Real article sources have no
  * `source_kind` field (or a non-`user_` value) and fall through to the default
- * `viewArticle` path — preserving the existing ArticleDetailPanel behavior. */
+ * `viewArticle` path - preserving the existing ArticleDetailPanel behavior. */
 function isExternalSource(artId: string): boolean {
   const entry = rawFiles.value.get(artId);
   return !!entry && entry.sourceKind.startsWith('user_');
@@ -121,7 +121,7 @@ function onSourceClick(artId: string): void {
 
 /** Display name for a Sources-footer entry. For external documents, appends
  * the original file extension (from `source_file`) so the user can tell what
- * type of file will open — e.g. "notes.txt", "report.pdf". For real articles,
+ * type of file will open - e.g. "notes.txt", "report.pdf". For real articles,
  * the title is used unchanged. Avoids double-appending if the title already
  * ends with the extension. */
 function sourceDisplayName(artId: string): string {

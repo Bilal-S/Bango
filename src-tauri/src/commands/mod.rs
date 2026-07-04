@@ -16,6 +16,7 @@ pub mod screening;
 pub mod startup;
 pub mod summary;
 pub mod tags;
+pub mod translation;
 pub mod trends;
 pub mod wiki_cmd;
 

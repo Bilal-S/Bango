@@ -60,7 +60,7 @@ fn article_summary_prompt_requires_json_schema() {
 // a JSON object. The article-summary schema is a top-level object whose
 // `section_summaries` field is an array-of-objects, so feeding a valid summary
 // response through `extract_json` silently corrupted it into just the
-// `section_summaries` array — breaking all top-level field access and
+// `section_summaries` array - breaking all top-level field access and
 // triggering a spurious markdown-fallback retry. `strip_code_fences` is the
 // summary-path replacement.
 

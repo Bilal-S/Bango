@@ -6,7 +6,7 @@
 //! - Phase 3 `wiki_ingest` (the index is rebuilt after pages are generated).
 //!
 //! The index mirrors the frontmatter + body of every `.md` page under
-//! `wiki/` (not `raw/` — raw sources are ingested into wiki pages first).
+//! `wiki/` (not `raw/` - raw sources are ingested into wiki pages first).
 
 use std::path::{Path, PathBuf};
 
@@ -116,7 +116,7 @@ pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, Ap
 ///
 /// Uses `collect_wiki_pages` (which excludes top-level internal files like
 /// `log.md` / `index.md`) so the FTS search index matches the page list shown
-/// in the UI — internal infrastructure never surfaces in chat or search.
+/// in the UI - internal infrastructure never surfaces in chat or search.
 ///
 /// This is the thin wrapper that does both the file reads (filesystem) and the
 /// FTS5 inserts (DB) in one call. Callers that need to keep the DB lock window
@@ -166,7 +166,7 @@ pub struct PageRow {
 
 /// Read every wiki page from disk into a `Vec<PageRow>` (one row per file).
 ///
-/// **Filesystem-only — does not touch the DB.** This lets the on-demand drift
+/// **Filesystem-only - does not touch the DB.** This lets the on-demand drift
 /// check (`wiki_check_for_updates`) do all file I/O lock-free, then take the
 /// DB lock only for the fast SQLite writes (`insert_page_rows` + manifest).
 ///
@@ -256,7 +256,7 @@ pub fn chunk_page_rows(rows: Vec<PageRow>) -> Vec<PageRow> {
 
 /// Insert a batch of pre-collected page rows into the FTS5 table.
 ///
-/// **DB-only — does no file I/O.** Pairs with `collect_page_rows` so callers
+/// **DB-only - does no file I/O.** Pairs with `collect_page_rows` so callers
 /// can split the lock-free filesystem work from the DB work. The caller is
 /// responsible for `DELETE FROM {FTS_TABLE}` first (see `rebuild_index` /
 /// `rebuild_index_with_manifest`).
@@ -312,7 +312,7 @@ pub fn insert_page_rows(conn: &Connection, rows: &[PageRow], root: &Path) -> Res
 /// Compute the tier-1 directory fingerprint: SHA-256 over the sorted
 /// `(rel_path, mtime_sec, mtime_nsec, size)` tuples for every page.
 ///
-/// **Stat-only — does not read file contents.** This is the cheap fast path
+/// **Stat-only - does not read file contents.** This is the cheap fast path
 /// that lets `wiki_check_for_updates` skip tier-2 entirely when nothing
 /// changed on disk. The sort by `rel_path` makes the hash stable regardless
 /// of filesystem readdir order.
@@ -369,7 +369,7 @@ pub fn compute_file_hashes(pages: &[PageRow]) -> Result<Vec<(String, String)>, A
 }
 
 /// Read the entire `wiki_index_manifest` table into a `{ rel_path -> hash }`
-/// map. Empty (not error) if the table is missing — `ensure_table` handles
+/// map. Empty (not error) if the table is missing - `ensure_table` handles
 /// creation lazily.
 pub fn read_manifest(
     conn: &Connection,
@@ -377,7 +377,7 @@ pub fn read_manifest(
     let mut map = std::collections::HashMap::new();
     let mut stmt = match conn.prepare("SELECT file_path, content_hash FROM wiki_index_manifest") {
         Ok(s) => s,
-        Err(_) => return Ok(map), // table missing — treat as empty.
+        Err(_) => return Ok(map), // table missing - treat as empty.
     };
     let rows =
         stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
@@ -522,7 +522,7 @@ pub struct WikiPageHit {
 /// `build_match_query`: tokens are split on whitespace/punctuation, stop words
 /// are dropped, and each remaining token is phrase-quoted (so FTS5 treats it
 /// as a literal string, never as an operator) and OR-joined. This retrieves
-/// any page containing any meaningful term, ranked by BM25 — the standard
+/// any page containing any meaningful term, ranked by BM25 - the standard
 /// RAG-over-FTS5 pattern. (The previous implementation phrase-quoted the whole
 /// question, which only matched documents containing those exact words in that
 /// exact sequence, so natural-language questions like "Who is J Adams?"
@@ -627,7 +627,7 @@ pub fn build_match_query(query: &str) -> String {
 /// Top-level wiki `.md` files that are internal infrastructure (not wiki
 /// "pages"). These are excluded from the page list shown in the UI and from
 /// the FTS search index so they don't surface as navigable pages. A same-named
-/// file inside a subdirectory (e.g. `wiki/concepts/log.md`) is still listed —
+/// file inside a subdirectory (e.g. `wiki/concepts/log.md`) is still listed -
 /// only direct children of `wiki/` are filtered.
 const INTERNAL_WIKI_FILES: &[&str] = &["log", "index"];
 
@@ -642,7 +642,7 @@ pub fn collect_wiki_pages(root: &Path) -> Result<Vec<PathBuf>, AppError> {
     }
     let mut out = Vec::new();
     collect_md_recursive(&wiki_dir, &mut out)?;
-    // Exclude top-level internal infrastructure files (log.md, index.md) —
+    // Exclude top-level internal infrastructure files (log.md, index.md) -
     // they have no frontmatter slug/type and would surface as raw "log" /
     // "index" entries in the sidebar. Only direct children of wiki/ are
     // filtered; a wiki/concepts/log.md page is still listed.
@@ -1028,7 +1028,7 @@ mod tests {
         rebuild_index(&conn, root).unwrap();
 
         // A question with only stop words falls back to searching them; they
-        // aren't in the index, so 0 hits — but no error.
+        // aren't in the index, so 0 hits - but no error.
         let hits = search(&conn, "the and is", 5).unwrap();
         assert!(hits.is_empty());
 
@@ -1080,7 +1080,7 @@ mod tests {
     #[test]
     fn collect_wiki_pages_keeps_subdirectory_log_or_index() {
         // A same-named page inside a subdir is a legitimate wiki page and must
-        // still be listed — only direct children of wiki/ are filtered.
+        // still be listed - only direct children of wiki/ are filtered.
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
         write_wiki_page(root, "concepts", "alpha", "Alpha", "a");

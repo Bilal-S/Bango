@@ -75,10 +75,10 @@ export function highlightSearchTerms(html: string, query: string): string {
   let out = '';
   for (const seg of segments) {
     if (seg.startsWith('<')) {
-      // Tag segment — pass through unchanged.
+      // Tag segment - pass through unchanged.
       out += seg;
     } else {
-      // Text segment — highlight matches.
+      // Text segment - highlight matches.
       out += highlightText(seg, terms);
     }
   }

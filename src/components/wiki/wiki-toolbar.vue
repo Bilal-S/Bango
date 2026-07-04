@@ -122,7 +122,7 @@ async function handleAddRawFile(): Promise<void> {
     });
     if (!selected || (Array.isArray(selected) && selected.length === 0)) return;
 
-    // Normalize to array — multiple: true returns string[] | null.
+    // Normalize to array - multiple: true returns string[] | null.
     const files: string[] = Array.isArray(selected) ? selected : [selected];
 
     let added = 0;
@@ -132,7 +132,7 @@ async function handleAddRawFile(): Promise<void> {
         await addRawFile(filePath);
         added++;
       } catch {
-        // Unsupported file type or extraction error — skip.
+        // Unsupported file type or extraction error - skip.
         skipped++;
       }
     }
@@ -446,7 +446,7 @@ function handleChat(): void {
         <button
           class="wiki-toolbar__menu-item"
           :disabled="rebuilding"
-          title="Regenerate all wiki pages from raw sources — fixes broken links and stale content"
+          title="Regenerate all wiki pages from raw sources - fixes broken links and stale content"
           @click="
             () => {
               closeActionsMenu();

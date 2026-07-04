@@ -58,6 +58,7 @@ interface BatchImportProgress {
   isCancelled: boolean;
   fullText: BatchImportPhaseResult | null;
   citations: BatchImportPhaseResult | null;
+  translations: BatchImportPhaseResult | null;
   summaries: BatchImportPhaseResult | null;
 }
 
@@ -216,8 +217,12 @@ onUnmounted(() => {
           Phase 2 (Citations): {{ batchProgress.citations.succeeded }} imported,
           {{ batchProgress.citations.failed }} failed
         </div>
+        <div v-if="batchProgress.translations" class="batch-progress__summary">
+          Phase 3 (Translations): {{ batchProgress.translations.succeeded }} translated,
+          {{ batchProgress.translations.failed }} failed
+        </div>
         <div v-if="batchProgress.summaries" class="batch-progress__summary">
-          Phase 3 (AI Summaries): {{ batchProgress.summaries.succeeded }} summarized,
+          Phase 4 (AI Summaries): {{ batchProgress.summaries.succeeded }} summarized,
           {{ batchProgress.summaries.failed }} failed
         </div>
 
@@ -243,7 +248,7 @@ onUnmounted(() => {
         <h2>Batch Import</h2>
         <p class="dialog__desc">
           This will scan your Bango Documents directory and import files that match your articles by
-          DOI. The pipeline runs in three phases:
+          DOI. The pipeline runs in four phases:
         </p>
         <ol class="dialog__list">
           <li>
@@ -253,6 +258,10 @@ onUnmounted(() => {
           <li>
             <strong>Citations</strong> - imports Citation Chaser RIS/BibTeX files from
             <code>ris/</code>.
+          </li>
+          <li>
+            <strong>Translations</strong> - translates non-English newly-attached articles to
+            English (when auto-translate is enabled).
           </li>
           <li>
             <strong>AI Summaries</strong>

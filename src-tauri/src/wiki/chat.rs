@@ -1,4 +1,4 @@
-//! Wiki chat — token-budgeted RAG over the FTS5 index.
+//! Wiki chat - token-budgeted RAG over the FTS5 index.
 //!
 //! Given a user question:
 //! 1. BM25-search the `wiki_pages_fts` index for the top matches.

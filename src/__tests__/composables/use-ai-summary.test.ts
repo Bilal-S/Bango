@@ -50,7 +50,7 @@ describe('use-ai-summary', () => {
     });
 
     // Reset module-level mutable state.
-    // NOTE: do NOT clear `eventCallbacks` — listeners are registered once
+    // NOTE: do NOT clear `eventCallbacks` - listeners are registered once
     // (guarded by `listenersInitialized`) and clearing the map would make
     // them unreachable for the rest of the suite.
     pendingSummaries.value.clear();

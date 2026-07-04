@@ -14,6 +14,7 @@ pub mod ris;
 pub mod scraping;
 pub mod screening;
 pub mod summary;
+pub mod translation;
 pub mod utils;
 pub mod wiki;
 
@@ -132,6 +133,20 @@ pub fn run() {
             };
             app.manage(std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms)));
 
+            // ── Translation worker ──
+            // Spawn the in-memory translation queue after the orchestrator is
+            // managed so the worker can fetch it per-job. Then re-enqueue any
+            // articles stranded in `queued`/`running` at startup (crash
+            // recovery). The handle is managed so command wrappers can enqueue.
+            let translation_handle =
+                translation::worker::spawn_translation_worker(app.handle().clone());
+            {
+                let guard = app.state::<DbState>();
+                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                translation::worker::reenqueue_stranded_on_startup(&conn, translation_handle.sender());
+            }
+            app.manage(translation_handle);
+
             Ok(())
         })
         .manage(ScreeningState { engine: tokio::sync::RwLock::new(None) })
@@ -226,6 +241,9 @@ pub fn run() {
             commands::summary::generate_article_ai_summary,
             commands::summary::generate_figure_descriptions,
             commands::summary::generate_unified_summary,
+            commands::translation::enqueue_article_translation,
+            commands::translation::get_translation_status,
+            commands::translation::retry_translation_job,
             commands::prisma::get_prisma_data,
             commands::prisma::get_prisma_svg,
             commands::prisma::export_prisma_svg_to_file,

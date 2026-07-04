@@ -30,6 +30,10 @@ describe('abstract-summary-view.vue - "Describe Figures & Tables" button gate', 
     const article = makeArticle({
       hasFullText: true,
       hasFiguresOrTables: false,
+      isTranslated: false,
+      translationStatus: 'none',
+      translationError: null,
+      translatedAt: null,
       abstractText: 'Some abstract.',
     });
     const wrapper = mount(AbstractSummaryView, {

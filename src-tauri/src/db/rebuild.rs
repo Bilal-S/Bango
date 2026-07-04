@@ -33,6 +33,9 @@ const DROP_TABLES: &[&str] = &[
     "app_settings",
     // Article chunk storage (T1.2/T3.1)
     "article_chunks",
+    // Translation originals (Plan-A permanent rewrite)
+    "article_original_chunks",
+    "article_original_content",
     // Bibliometrics tables
     "biblio_network_edges",
     "biblio_network_nodes",
@@ -88,6 +91,8 @@ const DROP_INDEXES: &[&str] = &[
     "idx_bne_network",
     // Article chunk storage (T1.2/T3.1)
     "idx_article_chunks_article",
+    // Translation originals (Plan-A permanent rewrite)
+    "idx_article_original_chunks_article",
     // Legacy v1 indexes
     "idx_article_references_parent_type",
     "idx_article_references_doi",

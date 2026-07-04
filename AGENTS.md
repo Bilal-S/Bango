@@ -256,7 +256,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     pages from `biblio_authors` (metrics, publications, research areas,
     collaborators); (2) `preseed_synthesis_from_ai_summaries` writes one
     `wiki/synthesis/{article_id}.md` per included article that has a
-    `full_text_ai_summary` JSON blob — slug = article UUID (so `[[uuid]]` links
+    `full_text_ai_summary` JSON blob - slug = article UUID (so `[[uuid]]` links
     resolve), body = `summary_150_250_words` digest + `key_insights` bullets,
     `tags` = keyword-derived `[[concept-slug]]` candidates; (3)
     `preseed_concept_hubs` writes top-25 `wiki/concepts/{term-slug}.md` hub

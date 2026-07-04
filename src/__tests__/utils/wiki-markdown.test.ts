@@ -438,7 +438,7 @@ Low-income households purchase significantly more added sugar than high-income h
   });
 
   // ------------------------------------------------------------------
-  // External document (user-slug) references — regression for the
+  // External document (user-slug) references - regression for the
   // `[^art-user-youcantbuild]` mangled-HTML bug. The id capture must accept
   // non-hex slugs (`user-...`, `author-...`) so refs to uploaded documents
   // resolve to chips instead of leaking as literal text that Markdown mangles.

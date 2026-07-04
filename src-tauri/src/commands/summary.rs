@@ -294,7 +294,7 @@ pub async fn generate_article_ai_summary_inner(
     // 4. Validate the response is valid JSON - strip markdown code fences if
     //    present. NOTE: use `strip_code_fences`, NOT `screening_engine::extract_json`.
     //    The screening helper assumes a top-level JSON array and unwraps the
-    //    first nested array-of-objects out of a JSON object — which corrupts a
+    //    first nested array-of-objects out of a JSON object - which corrupts a
     //    valid summary object (whose `section_summaries` is an array-of-objects)
     //    into just that array, breaking all top-level field access downstream.
     let cleaned = strip_code_fences(&response_text);
@@ -675,7 +675,7 @@ pub async fn generate_unified_summary(
         };
         // Parse + store via the Phase 0 preserve-on-write guard so existing
         // figures/tables survive the monolithic regen. Use `strip_code_fences`
-        // (NOT `screening_engine::extract_json`) — see the legacy command for
+        // (NOT `screening_engine::extract_json`) - see the legacy command for
         // why the screening helper corrupts object-shaped summary responses.
         let cleaned = strip_code_fences(&response_text);
         let parsed: serde_json::Value = serde_json::from_str(&cleaned)
@@ -748,7 +748,7 @@ pub async fn generate_unified_summary(
     };
     // Parse the section-aware response; extract the `section_summaries` array
     // and the top-level `field` for the synthesis prompt input. Use
-    // `strip_code_fences` (NOT `screening_engine::extract_json`) — see the
+    // `strip_code_fences` (NOT `screening_engine::extract_json`) - see the
     // legacy command for why the screening helper corrupts object-shaped
     // summary responses (it would discard everything except `section_summaries`).
     let cleaned_section = strip_code_fences(&section_text);

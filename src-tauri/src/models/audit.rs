@@ -35,6 +35,12 @@ pub enum AuditAction {
     ReferenceImport,
     ReferenceMatch,
     WikiIngestError,
+    /// Plan-A translation rewrote the working article text to English
+    /// (`translation_status = 'succeeded'`).
+    Translation,
+    /// A translation job failed (`translation_status = 'failed'`); the error
+    /// message is stored in `details`.
+    TranslationError,
 }
 
 impl AuditAction {
@@ -58,6 +64,8 @@ impl AuditAction {
             Self::ReferenceImport => "reference_import",
             Self::ReferenceMatch => "reference_match",
             Self::WikiIngestError => "wiki_ingest_error",
+            Self::Translation => "translation",
+            Self::TranslationError => "translation_error",
         }
     }
 }

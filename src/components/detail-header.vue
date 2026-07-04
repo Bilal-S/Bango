@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
 import { getPublicationTypeLabel } from '@/utils/formatters';
 
-defineProps<{
+const props = defineProps<{
   article: Article;
   canRequestAiSummary: boolean;
   isAiSummaryPending: boolean;
@@ -18,7 +19,34 @@ const emit = defineEmits<{
   attachFullText: [id: string];
   requestAiSummary: [];
   readFullText: [];
+  requestTranslation: [id: string];
 }>();
+
+// Translation gate: show the translate button only when the article has a
+// non-English language, has not been translated, and is not currently queued
+// or running. Once translation completes (isTranslated = true) the button is
+// replaced by the translated status chip.
+const ENGLISH_LANGUAGE_VALUES = new Set(['english', 'en']);
+
+const isEnglishLanguage = (language: string | null | undefined): boolean => {
+  if (!language) return true; // absent/blank treated as English (no translation)
+  return ENGLISH_LANGUAGE_VALUES.has(language.trim().toLowerCase());
+};
+
+const canTranslate = computed(() => {
+  const a = props.article;
+  if (a.isTranslated) return false;
+  if (isEnglishLanguage(a.language)) return false;
+  // Hide the action button while a translation is queued/running; the status
+  // chip renders instead.
+  if (a.translationStatus === 'queued' || a.translationStatus === 'running') return false;
+  return true;
+});
+
+const isTranslationPending = computed(
+  () =>
+    props.article.translationStatus === 'queued' || props.article.translationStatus === 'running'
+);
 </script>
 
 <template>
@@ -68,6 +96,40 @@ const emit = defineEmits<{
           title="AI summary in progress..."
         >
           progress_activity
+        </span>
+        <!-- Translate icon (language-plan-v2 Phase 5) -->
+        <button
+          v-if="canTranslate"
+          class="material-symbols-outlined text-[18px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 cursor-pointer rounded px-1 transition-colors"
+          title="Translate to English"
+          @click="emit('requestTranslation', article.id)"
+        >
+          translate
+        </button>
+        <!-- Translation status chips (replace the button once translation starts/completes) -->
+        <span
+          v-else-if="isTranslationPending"
+          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded"
+          :title="article.translationStatus === 'queued' ? 'Translation queued' : 'Translating…'"
+        >
+          <span class="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+          {{ article.translationStatus === 'queued' ? 'Translation Queued' : 'Translating' }}
+        </span>
+        <span
+          v-else-if="article.isTranslated"
+          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
+          title="Article translated to English"
+        >
+          <span class="material-symbols-outlined text-[14px]">check_circle</span>
+          Translated
+        </span>
+        <span
+          v-else-if="article.translationStatus === 'failed'"
+          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-red-700 bg-red-50 px-1.5 py-0.5 rounded"
+          :title="article.translationError ?? 'Translation failed'"
+        >
+          <span class="material-symbols-outlined text-[14px]">error</span>
+          Translation Failed
         </span>
       </div>
       <div class="flex items-center gap-1">

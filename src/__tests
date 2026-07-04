@@ -1,0 +1,23 @@
+import { describe, it, expect } from 'vitest';
+
+/**
+ * Article detail panel translation UX tests (language-plan-v2).
+ *
+ * The full ArticleDetailPanel component requires heavy Tauri-state mocking
+ * (DbState, router, stores). These stubs are skipped until the Phase 5
+ * implementation adds the translate confirm modal + toast flow; they will be
+ * un-skipped alongside a shared mount helper that mocks the IPC layer.
+ */
+describe('article-detail-panel.vue - translation (language-plan-v2)', () => {
+  it.skip('click_translate_enqueues_job_and_shows_toast', () => {
+    // TC-09: clicking the translate button (after the confirmation modal) calls
+    // `enqueue_article_translation` and shows an immediate toast.
+    expect(true).toBe(true);
+  });
+
+  it.skip('refreshes_article_on_translation_complete_event', () => {
+    // TC-09: on the `translation:complete` Tauri event, the panel re-fetches the
+    // article and the translated text replaces the original.
+    expect(true).toBe(true);
+  });
+});

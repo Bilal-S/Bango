@@ -140,6 +140,12 @@ pub fn get_next_unscreened_working_batch(
             full_text_file_name: None,
             // Screening does not need the figures/tables flag; default false.
             has_figures_or_tables: false,
+            // Translation status is not needed by the screening batch fetch;
+            // the translation worker reads it via dedicated queries.
+            is_translated: false,
+            translation_status: "none".to_string(),
+            translation_error: None,
+            translated_at: None,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -942,6 +948,10 @@ fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
         has_full_text: row.get::<_, i32>("has_full_text")? != 0,
         full_text_file_name: row.get("full_text_file_name")?,
         has_figures_or_tables: row.get::<_, i32>("has_figures_or_tables")? != 0,
+        is_translated: row.get::<_, i32>("is_translated")? != 0,
+        translation_status: row.get("translation_status")?,
+        translation_error: row.get("translation_error")?,
+        translated_at: row.get("translated_at")?,
     })
 }
 
@@ -1127,6 +1137,117 @@ pub fn get_full_text_file_name(
         |row| row.get(0),
     )?;
     Ok(file_name)
+}
+
+// ── Translation status helpers ──────────────────────────────────────────────
+//
+// The DB-backed translation progress record lives on the `articles` row (there
+// is no `translation_jobs` table). These helpers are the single write-path for
+// `translation_status` / `is_translated` / `translation_error` / `translated_at`.
+
+/// Snapshot of the translation status fields for one article.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationStatusInfo {
+    pub article_id: String,
+    pub is_translated: bool,
+    pub translation_status: String,
+    pub translation_error: Option<String>,
+    pub translated_at: Option<String>,
+}
+
+/// Write `translation_status` (and clear `translation_error` when leaving a
+/// failed state). Used by the enqueue path (`queued`) and the worker (`running`
+/// / `succeeded`).
+pub fn update_translation_status(
+    conn: &Connection,
+    article_id: &str,
+    status: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET translation_status = ?1, \
+             translation_error = CASE WHEN ?1 = 'failed' THEN translation_error ELSE NULL END, \
+             changed_at = datetime('now') \
+         WHERE id = ?2",
+        params![status, article_id],
+    )?;
+    Ok(())
+}
+
+/// Mark a translation job as failed with the given error message.
+pub fn update_translation_status_failed(
+    conn: &Connection,
+    article_id: &str,
+    error_msg: &str,
+) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET translation_status = 'failed', translation_error = ?1, \
+             changed_at = datetime('now') WHERE id = ?2",
+        params![error_msg, article_id],
+    )?;
+    Ok(())
+}
+
+/// Reset an article for re-translation: `translation_status = 'none'`,
+/// `is_translated = 0`, clear error. Used by `retry_translation_job`.
+pub fn reset_translation_status(conn: &Connection, article_id: &str) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET translation_status = 'none', is_translated = 0, \
+             translation_error = NULL, translated_at = NULL, \
+             changed_at = datetime('now') WHERE id = ?1",
+        params![article_id],
+    )?;
+    Ok(())
+}
+
+/// Read the translation status snapshot for one article.
+pub fn get_translation_status(
+    conn: &Connection,
+    article_id: &str,
+) -> Result<TranslationStatusInfo, AppError> {
+    conn.query_row(
+        "SELECT id, is_translated, translation_status, translation_error, translated_at \
+         FROM articles WHERE id = ?1",
+        [article_id],
+        |row| {
+            Ok(TranslationStatusInfo {
+                article_id: row.get(0)?,
+                is_translated: row.get::<_, i32>(1)? != 0,
+                translation_status: row.get(2)?,
+                translation_error: row.get(3)?,
+                translated_at: row.get(4)?,
+            })
+        },
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            AppError::NotFound(format!("Article {} not found", article_id))
+        }
+        other => AppError::Database(other),
+    })
+}
+
+/// Articles stranded in `queued` or `running` (crash recovery on startup).
+///
+/// Returns `(id, has_full_text)` per stranded article so the caller can choose
+/// the correct `TranslationJobKind` (`FullText` when `has_full_text`, else
+/// `MetadataOnly`). Re-enqueuing a stranded full-text job as `MetadataOnly`
+/// would leave the full text + chunks in the original language while marking
+/// the article `is_translated = 1`.
+pub fn get_stranded_translation_articles(
+    conn: &Connection,
+) -> Result<Vec<(String, bool)>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, has_full_text FROM articles \
+         WHERE translation_status IN ('queued', 'running') AND is_translated = 0",
+    )?;
+    let rows =
+        stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
 }
 
 /// Lightweight article info for batch import DOI matching.

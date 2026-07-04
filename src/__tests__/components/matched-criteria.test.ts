@@ -72,6 +72,10 @@ function makeArticle(overrides: Partial<Article> = {}): Article {
     hasFullText: false,
     fullTextFileName: null,
     hasFiguresOrTables: false,
+    isTranslated: false,
+    translationStatus: 'none',
+    translationError: null,
+    translatedAt: null,
     ...overrides,
   } as Article;
 }

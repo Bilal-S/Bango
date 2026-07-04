@@ -152,7 +152,7 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //      The LLM emits footnote definitions at the bottom of each page like
   //      `[^art-id]: citation text` (sometimes `[^id]:` without the `art-`
   //      prefix). The inline ref (step 1) already produces the article link, so
-  //      the definition is redundant for article access — but the id also names
+  //      the definition is redundant for article access - but the id also names
   //      a synthesis wiki page, which is NOT redundant. Convert each definition
   //      line into a synthesis-styled wikilink chip that opens the wiki page,
   //      using the source title as the visible label when available.
@@ -161,7 +161,7 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //      is also caught.
   //
   //      The id capture accepts any kebab/snake slug (UUIDs, `user-...`,
-  //      `author-...`, concept slugs) — not just hex — so refs to uploaded
+  //      `author-...`, concept slugs) - not just hex - so refs to uploaded
   //      documents (`[^art-user-youcantbuild]:`) resolve instead of leaking as
   //      literal text that Markdown mangles into a broken `<a href=...>` tag.
   out = out.replace(/^\[\^(?:art-)?([a-z0-9_-]+)\]:[^\n]*$/gim, (_m, artId: string) => {
@@ -178,7 +178,7 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //    OR synthesis chips. Accepts both the `[^art-id]` (canonical) and
   //    `[^id]` (LLM variant, no prefix) forms, case-insensitively
   //    (`[^ART-id]` also matches). The id capture accepts any kebab/snake slug
-  //    (UUIDs, `user-...`, `author-...`, concept slugs) — not just hex — so
+  //    (UUIDs, `user-...`, `author-...`, concept slugs) - not just hex - so
   //    refs to uploaded documents (`[^art-user-youcantbuild]`) resolve instead
   //    of leaking as literal text that Markdown mangles into a broken
   //    `<a href=...>` tag.
@@ -235,7 +235,7 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //    emits article UUIDs inside wikilink brackets, and showing the raw UUID
   //    as link text is unreadable. When the slug is a UUID, resolve it against
   //    `pageTitles` (synthesis chip) or `sources` (green art-ref) to produce a
-  //    human-readable label — mirroring the bare-UUID resolution in step 0.
+  //    human-readable label - mirroring the bare-UUID resolution in step 0.
   //    If the UUID matches neither map, it falls through to the default
   //    wikilink (indigo, visible UUID) so the user can still click it.
   //

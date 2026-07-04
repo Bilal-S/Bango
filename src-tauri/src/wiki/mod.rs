@@ -1,7 +1,7 @@
 //! LLM Wiki module.
 //!
 //! Generates and maintains a local-first Markdown knowledge base from the
-//! project's `included` article corpus. 
+//! project's `included` article corpus.
 //! See `wiki-root/AGENTS.md` for the agent contract.
 //!
 

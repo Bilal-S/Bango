@@ -76,6 +76,20 @@ pub struct Article {
     /// (detected via `utils::sections::extract_captions` at attach time).
     /// Gates the "Describe Figures & Tables" button in the frontend.
     pub has_figures_or_tables: bool,
+
+    // --- Translation (Plan-A permanent rewrite) fields ---
+    /// True when the working text (`title`, `abstract_text`, `full_text`, and
+    /// the `article_chunks` rows) has been rewritten to English. Originals are
+    /// preserved in `article_original_content` / `article_original_chunks`.
+    pub is_translated: bool,
+    /// DB-backed queue progress: `'none'` | `'queued'` | `'running'` |
+    /// `'succeeded'` | `'failed'`. Sole source of truth for the in-memory
+    /// translation worker; there is no `translation_jobs` table.
+    pub translation_status: String,
+    /// Error message captured when `translation_status = 'failed'`.
+    pub translation_error: Option<String>,
+    /// RFC3339 timestamp of the last successful translation.
+    pub translated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

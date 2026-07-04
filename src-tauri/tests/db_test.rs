@@ -53,21 +53,22 @@ fn test_database_stores_all_article_fields() {
     assert_eq!(doi, Some("10.1234/test".to_string()));
 }
 
-/// Test E: migration v002 must create the `article_chunks` table and set
-/// `user_version = 2`. This catches the migration not being registered in
-/// `migrations/mod.rs::get_migrations()`. (v003 was merged into v002
-/// pre-release, so the sequence is v001 -> v002.)
+/// Test E: migration v003 must create the `article_chunks` table, the
+/// translation schema (4 article columns + 2 original-* tables), and set
+/// `user_version = 3`. This catches the migration not being registered in
+/// `migrations/mod.rs::get_migrations()` and v003 missing the reverted-v002
+/// content. The sequence is v001 -> v002 -> v003.
 #[test]
-fn test_migration_v002_creates_article_chunks_table_and_sets_user_version() {
+fn test_migration_v003_creates_article_chunks_table_and_sets_user_version() {
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("Failed to run migrations");
 
-    // user_version must be 2 (v001 + v002).
+    // user_version must be 3 (v001 + v002 + v003).
     let version: i64 =
         conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("PRAGMA failed");
-    assert_eq!(version, 2, "user_version must be 2 after migrations v001-v002");
+    assert_eq!(version, 3, "user_version must be 3 after migrations v001-v003");
 
-    // article_chunks table must exist (created by v002).
+    // article_chunks table must exist (created by v003).
     let exists: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='article_chunks'",
@@ -75,7 +76,7 @@ fn test_migration_v002_creates_article_chunks_table_and_sets_user_version() {
             |row| row.get(0),
         )
         .expect("Query failed");
-    assert_eq!(exists, 1, "article_chunks table must exist after migration v002");
+    assert_eq!(exists, 1, "article_chunks table must exist after migration v003");
 
     // Its schema must include the expected columns.
     let has_chunk_index: i64 = conn
@@ -99,4 +100,55 @@ fn test_migration_v002_creates_article_chunks_table_and_sets_user_version() {
         has_figures_col, 1,
         "articles.has_figures_or_tables column must exist (added in v001)"
     );
+}
+
+/// Test T1: v003 must add the translation schema: the 4 translation columns on
+/// `articles` and the 2 original-content tables. Verifies the column defaults
+/// and the two new tables exist.
+#[test]
+fn test_migration_v003_creates_translation_schema() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    // articles.is_translated (default 0).
+    let is_translated_default: i64 = conn
+        .query_row("SELECT is_translated FROM articles LIMIT 1", [], |row| row.get(0))
+        .ok()
+        .unwrap_or(0);
+    assert!(
+        is_translated_default == 0 || is_translated_default == 1,
+        "articles.is_translated must be a 0/1 INTEGER"
+    );
+
+    // Verify the four translation columns exist.
+    for col in ["is_translated", "translation_status", "translation_error", "translated_at"] {
+        let count: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = '{col}'"),
+                [],
+                |row| row.get(0),
+            )
+            .expect("pragma_table_info failed");
+        assert_eq!(count, 1, "articles.{col} column must exist (added by v003)");
+    }
+
+    // The default translation_status must be 'none'.
+    let status_default: String = conn
+        .query_row("SELECT translation_status FROM articles LIMIT 1", [], |row| row.get(0))
+        .unwrap_or_else(|_| "none".to_string());
+    assert_eq!(status_default, "none", "translation_status default must be 'none'");
+
+    // The two original-content tables must exist.
+    for table in ["article_original_content", "article_original_chunks"] {
+        let count: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='{table}'"
+                ),
+                [],
+                |row| row.get(0),
+            )
+            .expect("Query failed");
+        assert_eq!(count, 1, "{table} table must exist after v003");
+    }
 }

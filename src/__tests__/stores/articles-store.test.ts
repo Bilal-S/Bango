@@ -72,6 +72,10 @@ function makeArticle(id: string, status: Article['status']): Article {
     hasFullText: false,
     fullTextFileName: null,
     hasFiguresOrTables: false,
+    isTranslated: false,
+    translationStatus: 'none',
+    translationError: null,
+    translatedAt: null,
   } as Article;
 }
 

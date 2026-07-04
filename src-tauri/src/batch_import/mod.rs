@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 //! Batch Import Processor.
 //!
-//! A three-phase pipeline that scans the Bango Documents directory for files
+//! A four-phase pipeline that scans the Bango Documents directory for files
 //! produced by external tools (Citation Chaser, manual PDF drops) and imports
 //! them into the article database:
 //!
@@ -10,18 +10,24 @@
 //! 2. **Citations** (`ris/`): import `{normalized_doi}_references.ris` /
 //!    `_citations.ris` / `.bib` files. Skips articles that already have the
 //!    corresponding reference/citation details.
-//! 3. **AI Summaries**: for each article that got full text attached in Phase
+//! 3. **Translations** : for each article that got full
+//!    text attached in Phase 1 and has a non-English `language`, enqueue a
+//!    `FullText` translation job and wait for it. Runs when `auto_translate`
+//!    is true (the DB-backed `app_settings.auto_translate` flag).
+//! 4. **AI Summaries**: for each article that got full text attached in Phase
 //!    1 (and has no existing summary), generate one via the same path as the
 //!    "Generate AI Summary" button in the article detail panel. Only runs when
 //!    `auto_summarize` is true (the frontend passes the
-//!    `bango-full-text-summaries` localStorage flag).
+//!    `bango-full-text-summaries` localStorage flag). Runs after translations
+//!    so it reads English text.
 //!
-//! All three phases run inside a single spawned background task so the UI stays
+//! All four phases run inside a single spawned background task so the UI stays
 //! responsive and the user can navigate to other sections. The runner emits
 //! `batch-import:progress` events **per-item** within each phase; the frontend
 //! listens and updates a progress bar. The user can cancel at any point via
 //! [`cancel_batch_import`]; the runner checks the cancel token between items
 //! (an in-flight LLM request completes naturally).
+use crate::db::app_settings_repo;
 use crate::db::article_repo::{self, ArticleDoiInfo};
 use crate::db::connection::DbState;
 use crate::error::AppError;
@@ -33,6 +39,7 @@ use tauri::{Emitter, Manager, State};
 pub mod citations_phase;
 pub mod full_text_phase;
 pub mod summary_phase;
+pub mod translations_phase;
 
 /// A wrapper around the DOI match map. Defined here so both phase modules can
 /// share one type without a circular dependency on each other.
@@ -45,13 +52,11 @@ impl DoiMatchMap {
     }
 
     /// Number of entries.
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Whether the map is empty.
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -80,11 +85,16 @@ pub struct BatchImportPhaseResult {
 }
 
 /// Which phase is currently running (1-indexed for display).
+///
+/// The pipeline is 4 phases - Full Text →
+/// Citations → Translations → AI Summaries. Translations runs when
+/// `auto_translate` is enabled so summaries read English text.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BatchImportPhase {
     FullText = 1,
     Citations = 2,
-    Summaries = 3,
+    Translations = 3,
+    Summaries = 4,
 }
 
 impl BatchImportPhase {
@@ -94,6 +104,7 @@ impl BatchImportPhase {
         match self {
             Self::FullText => "Full Text",
             Self::Citations => "Citations",
+            Self::Translations => "Translations",
             Self::Summaries => "AI Summaries",
         }
     }
@@ -112,7 +123,7 @@ pub struct BatchImportProgress {
     pub completed: usize,
     /// Total items in the current phase.
     pub total: usize,
-    /// Overall percentage across all 3 phases (0-100).
+    /// Overall percentage across all 4 phases (0-100).
     pub overall_percent: usize,
     /// Human-readable status message (e.g. the filename being processed).
     #[serde(default)]
@@ -126,6 +137,9 @@ pub struct BatchImportProgress {
     pub full_text: Option<BatchImportPhaseResult>,
     #[serde(default)]
     pub citations: Option<BatchImportPhaseResult>,
+    /// Translation phase result.
+    #[serde(default)]
+    pub translations: Option<BatchImportPhaseResult>,
     #[serde(default)]
     pub summaries: Option<BatchImportPhaseResult>,
 }
@@ -189,6 +203,7 @@ fn emit_progress(
     is_cancelled: bool,
     full_text: Option<BatchImportPhaseResult>,
     citations: Option<BatchImportPhaseResult>,
+    translations: Option<BatchImportPhaseResult>,
     summaries: Option<BatchImportPhaseResult>,
 ) {
     let payload = BatchImportProgress {
@@ -202,6 +217,7 @@ fn emit_progress(
         is_cancelled,
         full_text: full_text.clone(),
         citations: citations.clone(),
+        translations: translations.clone(),
         summaries: summaries.clone(),
     };
     {
@@ -220,6 +236,9 @@ fn emit_progress(
         if citations.is_some() {
             guard.citations = citations;
         }
+        if translations.is_some() {
+            guard.translations = translations;
+        }
         if summaries.is_some() {
             guard.summaries = summaries;
         }
@@ -232,8 +251,8 @@ fn emit_progress(
 /// event and can cancel via [`cancel_batch_import`].
 ///
 /// # Arguments
-/// * `auto_summarize` - When true, Phase 3 runs (generate AI summaries for
-///   newly-attached articles). When false, only Phases 1 and 2 run.
+/// * `auto_summarize` - When true, Phase 4 runs (generate AI summaries for
+///   newly-attached articles). When false, only Phases 1-3 run.
 /// * `include_section_summaries` - Forwarded to the summary generator. Should
 ///   mirror the `bango-section-summaries` localStorage flag.
 #[tauri::command]
@@ -281,11 +300,38 @@ pub async fn start_batch_import(
         None,
         None,
         None,
+        None,
     );
 
     // Spawn the background task.
     tokio::spawn(async move {
         let db = app_handle_clone.state::<DbState>();
+
+        // Read the auto_translate setting once (Phase 3 gate). Default true.
+        let auto_translate = {
+            let conn = match db.conn.lock() {
+                Ok(c) => c,
+                Err(_) => {
+                    emit_progress(
+                        &app_handle_clone,
+                        &progress,
+                        BatchImportPhase::FullText,
+                        0,
+                        0,
+                        0,
+                        "DB lock error",
+                        false,
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                    return;
+                }
+            };
+            app_settings_repo::get_auto_translate(&conn).unwrap_or(true)
+        };
 
         // ═══════════════════════════════════════════════════════════════════
         //  Phase 1: Full Text (runs on spawn_blocking to avoid UI hang)
@@ -311,7 +357,7 @@ pub async fn start_batch_import(
                 matches!(guard, Ok(g) if *g)
             };
             let mut on_progress = |processed: usize, total: usize, msg: &str| {
-                let overall = percent(processed, total) / 3;
+                let overall = percent(processed, total) / 4;
                 emit_progress(
                     &p1_app,
                     &p1_progress,
@@ -322,6 +368,7 @@ pub async fn start_batch_import(
                     msg,
                     true,
                     false,
+                    None,
                     None,
                     None,
                     None,
@@ -370,6 +417,7 @@ pub async fn start_batch_import(
                 None,
                 None,
                 None,
+                None,
             );
             return;
         }
@@ -382,7 +430,7 @@ pub async fn start_batch_import(
             BatchImportPhase::FullText,
             ft_result.processed,
             ft_result.total,
-            ft_percent / 3,
+            ft_percent / 4,
             &format!(
                 "Phase 1 (Full Text): {} attached, {} failed",
                 ft_result.succeeded, ft_result.failed
@@ -390,6 +438,7 @@ pub async fn start_batch_import(
             true,
             false,
             Some(ft_result.clone()),
+            None,
             None,
             None,
         );
@@ -403,11 +452,12 @@ pub async fn start_batch_import(
                     BatchImportPhase::FullText,
                     ft_result.processed,
                     ft_result.total,
-                    ft_percent / 3,
+                    ft_percent / 4,
                     "Cancelled by user",
                     false,
                     true,
                     Some(ft_result),
+                    None,
                     None,
                     None,
                 );
@@ -439,7 +489,7 @@ pub async fn start_batch_import(
                 matches!(guard, Ok(g) if *g)
             };
             let mut on_progress = |processed: usize, total: usize, msg: &str| {
-                let overall = 33 + percent(processed, total) / 3;
+                let overall = 25 + percent(processed, total) / 4;
                 emit_progress(
                     &p2_app,
                     &p2_progress,
@@ -451,6 +501,7 @@ pub async fn start_batch_import(
                     true,
                     false,
                     Some(p2_ft.clone()),
+                    None,
                     None,
                     None,
                 );
@@ -480,7 +531,7 @@ pub async fn start_batch_import(
             BatchImportPhase::Citations,
             cit_result.processed,
             cit_result.total,
-            33 + cit_percent / 3,
+            25 + cit_percent / 4,
             &format!(
                 "Phase 2 (Citations): {} imported, {} failed",
                 cit_result.succeeded, cit_result.failed
@@ -489,6 +540,7 @@ pub async fn start_batch_import(
             false,
             Some(ft_result.clone()),
             Some(cit_result.clone()),
+            None,
             None,
         );
 
@@ -501,12 +553,13 @@ pub async fn start_batch_import(
                     BatchImportPhase::Citations,
                     cit_result.processed,
                     cit_result.total,
-                    33 + cit_percent / 3,
+                    25 + cit_percent / 4,
                     "Cancelled by user",
                     false,
                     true,
                     Some(ft_result),
                     Some(cit_result),
+                    None,
                     None,
                 );
                 return;
@@ -514,7 +567,99 @@ pub async fn start_batch_import(
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        //  Phase 3: AI Summaries (optional)
+        //  Phase 3: Translations
+        // ═══════════════════════════════════════════════════════════════════
+        let trn_result = if auto_translate && !newly_attached.is_empty() {
+            // Per-item progress callback for Phase 3.
+            let prog_snap = Arc::clone(&progress);
+            let app_snap = app_handle_clone.clone();
+            let ft_snap = ft_result.clone();
+            let cit_snap = cit_result.clone();
+            let mut on_progress = move |processed: usize, total: usize, msg: &str| {
+                let overall = 50 + percent(processed, total) / 4;
+                emit_progress(
+                    &app_snap,
+                    &prog_snap,
+                    BatchImportPhase::Translations,
+                    processed,
+                    total,
+                    overall,
+                    msg,
+                    true,
+                    false,
+                    Some(ft_snap.clone()),
+                    Some(cit_snap.clone()),
+                    None,
+                    None,
+                );
+            };
+
+            let cancel_snap = Arc::clone(&cancel_for_task);
+            translations_phase::run_translations_phase(
+                &app_handle_clone,
+                &db,
+                newly_attached.clone(),
+                &mut on_progress,
+                move || {
+                    let snap = Arc::clone(&cancel_snap);
+                    async move { *snap.lock().expect("batch import mutex") }
+                },
+            )
+            .await
+        } else {
+            BatchImportPhaseResult {
+                errors: vec![
+                    "Phase 3 skipped (auto-translate disabled or no new articles)".to_string()
+                ],
+                ..Default::default()
+            }
+        };
+
+        // Phase 3 complete summary.
+        let trn_percent = percent(trn_result.processed, trn_result.total);
+        emit_progress(
+            &app_handle_clone,
+            &progress,
+            BatchImportPhase::Translations,
+            trn_result.processed,
+            trn_result.total,
+            50 + trn_percent / 4,
+            &format!(
+                "Phase 3 (Translations): {} translated, {} failed",
+                trn_result.succeeded, trn_result.failed
+            ),
+            true,
+            false,
+            Some(ft_result.clone()),
+            Some(cit_result.clone()),
+            Some(trn_result.clone()),
+            None,
+        );
+
+        // Check cancel after phase 3.
+        if let Ok(g) = cancel_for_task.try_lock() {
+            if *g {
+                emit_progress(
+                    &app_handle_clone,
+                    &progress,
+                    BatchImportPhase::Translations,
+                    trn_result.processed,
+                    trn_result.total,
+                    50 + trn_percent / 4,
+                    "Cancelled by user",
+                    false,
+                    true,
+                    Some(ft_result),
+                    Some(cit_result),
+                    Some(trn_result),
+                    None,
+                );
+                return;
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  Phase 4: AI Summaries (optional)
         // ═══════════════════════════════════════════════════════════════════
         let sum_result = if auto_sum {
             let to_summarize: Vec<String> = {
@@ -538,13 +683,14 @@ pub async fn start_batch_import(
                 }
             };
 
-            // Per-item progress callback for Phase 3.
+            // Per-item progress callback for Phase 4.
             let prog_snap = Arc::clone(&progress);
             let app_snap = app_handle_clone.clone();
             let ft_snap = ft_result.clone();
             let cit_snap = cit_result.clone();
+            let trn_snap = trn_result.clone();
             let mut on_progress = move |processed: usize, total: usize, msg: &str| {
-                let overall = 66 + percent(processed, total) / 3;
+                let overall = 75 + percent(processed, total) / 4;
                 emit_progress(
                     &app_snap,
                     &prog_snap,
@@ -557,6 +703,7 @@ pub async fn start_batch_import(
                     false,
                     Some(ft_snap.clone()),
                     Some(cit_snap.clone()),
+                    Some(trn_snap.clone()),
                     None,
                 );
             };
@@ -576,12 +723,12 @@ pub async fn start_batch_import(
             .await
         } else {
             BatchImportPhaseResult {
-                errors: vec!["Phase 3 skipped (auto-summarize disabled)".to_string()],
+                errors: vec!["Phase 4 skipped (auto-summarize disabled)".to_string()],
                 ..Default::default()
             }
         };
 
-        // Phase 3 complete summary.
+        // Phase 4 complete summary.
         let sum_percent = percent(sum_result.processed, sum_result.total);
         emit_progress(
             &app_handle_clone,
@@ -589,15 +736,16 @@ pub async fn start_batch_import(
             BatchImportPhase::Summaries,
             sum_result.processed,
             sum_result.total,
-            66 + sum_percent / 3,
+            75 + sum_percent / 4,
             &format!(
-                "Phase 3 (AI Summaries): {} summarized, {} failed",
+                "Phase 4 (AI Summaries): {} summarized, {} failed",
                 sum_result.succeeded, sum_result.failed
             ),
             true,
             false,
             Some(ft_result.clone()),
             Some(cit_result.clone()),
+            Some(trn_result.clone()),
             Some(sum_result.clone()),
         );
 
@@ -614,6 +762,7 @@ pub async fn start_batch_import(
             false,
             Some(ft_result),
             Some(cit_result),
+            Some(trn_result),
             Some(sum_result),
         );
     });
@@ -624,6 +773,10 @@ pub async fn start_batch_import(
 
 /// Cancel a running batch import. The runner checks the token between items; an
 /// in-flight LLM request completes naturally.
+///
+/// `expect()` on the cancel-token mutex is a poisoned-mutex panic point (see
+/// `start_batch_import` doc).
+#[allow(clippy::expect_used)]
 #[tauri::command]
 pub async fn cancel_batch_import(batch_state: State<'_, BatchImportState>) -> Result<(), AppError> {
     let handle = batch_state.cancel_handle();
@@ -632,6 +785,10 @@ pub async fn cancel_batch_import(batch_state: State<'_, BatchImportState>) -> Re
 }
 
 /// Get the current batch-import progress snapshot (for polling or initial load).
+///
+/// `expect()` on the progress mutex is a poisoned-mutex panic point (see
+/// `start_batch_import` doc).
+#[allow(clippy::expect_used)]
 #[tauri::command]
 pub async fn get_batch_import_progress(
     batch_state: State<'_, BatchImportState>,

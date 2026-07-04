@@ -46,6 +46,13 @@ pub enum LlmRequestType {
     /// `summary_150_250_words` digest. Distinguishes the unified path from the
     /// legacy monolithic `ArticleSummary` and the section-only `SectionSummary`.
     UnifiedSummary,
+    /// Multilingual translation: per-chunk or per-metadata translation of a
+    /// non-English article to English. Categorized separately so diagnostics
+    /// can distinguish translation calls (Plan-A permanent rewrite) from
+    /// screening/summary calls. The translation engine owns a thin
+    /// `TranslationLlmClient` that logs `job_id`/`part_id` before delegating
+    /// to the orchestrator via `send_with_type(LlmRequestType::Translation)`.
+    Translation,
 }
 
 /// Centralized LLM request coordinator.

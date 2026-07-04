@@ -296,6 +296,66 @@ fn test_import_old_backup_without_biblio_data() {
     assert_eq!(count_rows(&conn, "biblio_network_edges"), 0);
 }
 
+/// Plan-A originals archive must survive a backup/restore cycle (plan §5).
+/// Regression for the data-loss gap where `export_project` did not serialize
+/// `article_original_content` / `article_original_chunks`.
+#[test]
+fn export_import_preserves_translation_originals() {
+    let conn = setup_db();
+    seed_core_data(&conn);
+    let article_id: String = conn
+        .query_row("SELECT id FROM articles LIMIT 1", [], |row| row.get(0))
+        .expect("get article id");
+
+    // Seed original content + original chunks (simulating a completed Plan-A
+    // translation that rewrote the working row to English).
+    conn.execute(
+        "INSERT INTO article_original_content \
+         (article_id, original_title, original_abstract_text, original_full_text, \
+         source_language, stored_at) \
+         VALUES (?1, 'Titre français', 'Résumé français détaillé.', \
+         'Corps de texte français complet.', 'French', '2026-01-01T00:00:00Z')",
+        params![article_id],
+    )
+    .expect("seed original content");
+    conn.execute(
+        "INSERT INTO article_original_chunks \
+         (id, article_id, chunk_index, section, content, word_count) \
+         VALUES (1, ?1, 0, 'Methods', 'méthodes françaises ici', 3)",
+        params![article_id],
+    )
+    .expect("seed original chunk");
+
+    // Export + import into a fresh DB.
+    let json = export_project(&conn).expect("export");
+    let conn2 = setup_db();
+    import_project(&conn2, &json).expect("import");
+
+    // The original content row must round-trip.
+    assert_eq!(count_rows(&conn2, "article_original_content"), 1, "original content must survive");
+    let (orig_title, orig_lang): (String, String) = conn2
+        .query_row(
+            "SELECT original_title, source_language FROM article_original_content \
+             WHERE article_id = ?1",
+            params![article_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("query original content");
+    assert_eq!(orig_title, "Titre français");
+    assert_eq!(orig_lang, "French");
+
+    // The original chunk must round-trip.
+    assert_eq!(count_rows(&conn2, "article_original_chunks"), 1, "original chunks must survive");
+    let chunk_content: String = conn2
+        .query_row(
+            "SELECT content FROM article_original_chunks WHERE article_id = ?1",
+            params![article_id],
+            |row| row.get(0),
+        )
+        .expect("query original chunk");
+    assert_eq!(chunk_content, "méthodes françaises ici");
+}
+
 /// Tier 3 regression test: `import_project` must purge `article_chunks` rows.
 /// Without the explicit `DELETE FROM article_chunks` in the purge sequence,
 /// foreign_keys=OFF during import prevents the `ON DELETE CASCADE` on

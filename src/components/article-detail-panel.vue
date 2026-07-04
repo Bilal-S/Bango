@@ -19,6 +19,7 @@ import {
   pendingSummaries,
 } from '@/composables/use-ai-summary';
 import type { AiSummaryData } from '@/composables/use-ai-summary';
+import { useTranslation } from '@/composables/use-translation';
 import { getFullTextFileIcon } from '@/utils/formatters';
 
 const props = defineProps<{
@@ -127,6 +128,22 @@ function startResize(e: MouseEvent): void {
 
 // Full-text reader ref for programmatic open
 const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
+
+// Translation UI orchestration (language-plan-v2 Phase 5): owns the
+// confirmation-dialog state, the enqueue invoke, the immediate toast, and the
+// global `translation:complete` listener that refreshes this article.
+const {
+  showTranslateDialog,
+  translateArticleTitle,
+  requestTranslation,
+  confirmTranslation,
+  cancelTranslation,
+} = useTranslation({
+  onTranslationComplete: (articleId) => {
+    // Refresh the article so the header chip flips to "Translated".
+    emit('refreshArticle', articleId);
+  },
+});
 </script>
 
 <template>
@@ -159,6 +176,7 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
       @read-full-text="fullTextReaderRef?.openFullTextView()"
       @attach-full-text="emit('attachFullText', article.id)"
       @request-ai-summary="handleRequestAiSummary"
+      @request-translate="requestTranslation(article.id, article.title)"
     />
 
     <!-- Scrollable Content -->
@@ -250,6 +268,31 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
       @refresh-article="emit('refreshArticle', $event)"
       @reader-opened="emit('readerOpened')"
     />
+
+    <!-- Translation Confirmation Dialog (language-plan-v2 Phase 5) -->
+    <div v-if="showTranslateDialog" class="dialog-overlay" @click.self="cancelTranslation">
+      <div class="dialog dialog--danger">
+        <h2>Translate Article</h2>
+        <div class="dialog__danger-box">
+          <span class="material-symbols-outlined">warning</span>
+          <p>
+            This will <strong>permanently rewrite</strong> the article text (title, abstract, and
+            full text) to English so AI screening and summaries can process it. The original
+            non-English text is preserved in the originals archive. This action has a
+            <strong>high token cost</strong> and cannot be undone without re-importing the article.
+          </p>
+        </div>
+        <div class="dialog__desc">
+          <p>
+            Article: <code>{{ translateArticleTitle }}</code>
+          </p>
+        </div>
+        <div class="dialog__actions">
+          <button class="btn btn--outline" @click="cancelTranslation">Cancel</button>
+          <button class="btn btn--danger" @click="confirmTranslation">Translate to English</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Footer Actions -->
     <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50 items-center">

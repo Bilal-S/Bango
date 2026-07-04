@@ -51,8 +51,8 @@ logic they delegate to is tested via the modules below).
 | `wiki/storage.rs` | 154 | 77.27% | ✅ |
 | `wiki/raw_export.rs` | 677 | 76.07% | ✅ |
 | `wiki/chat.rs` | 169 | ~85% (was 62%) | ✅ after `build_wiki_prompts` extraction |
-| `commands/chat.rs` | — | ~0% | deferred (thin shim; logic in `wiki/chat.rs`) |
-| `commands/wiki_cmd.rs` | — | ~0% | deferred (thin shims; logic in `wiki/*`) |
+| `commands/chat.rs` | - | ~0% | deferred (thin shim; logic in `wiki/chat.rs`) |
+| `commands/wiki_cmd.rs` | - | ~0% | deferred (thin shims; logic in `wiki/*`) |
 
 **Vue/TS** (`vitest --coverage`):
 

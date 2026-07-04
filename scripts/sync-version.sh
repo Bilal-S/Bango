@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sync-version.sh — surgically update the version marker in the three config
+# sync-version.sh - surgically update the version marker in the three config
 # files that track the release version:
 #
 #   - package.json                  →   "version": "X.Y.Z"

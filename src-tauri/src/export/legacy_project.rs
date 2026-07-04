@@ -81,6 +81,9 @@ pub fn export_legacy_project(conn: &Connection) -> Result<String, AppError> {
         biblio_network_meta: Vec::new(),
         biblio_network_nodes: Vec::new(),
         biblio_network_edges: Vec::new(),
+        // Legacy schema predates the translation originals archive; emit empty.
+        article_original_content: Vec::new(),
+        article_original_chunks: Vec::new(),
         llm_config: llm_backup,
     };
 

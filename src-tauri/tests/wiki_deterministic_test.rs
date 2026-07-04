@@ -127,7 +127,7 @@ fn preseed_concept_hubs_respects_reviewed_pages() {
 // ---------------------------------------------------------------------------
 
 /// Fake sender returning an empty response (no LLM pages). Used to verify the
-/// deterministic pre-seed runs even when the LLM produces nothing — proving
+/// deterministic pre-seed runs even when the LLM produces nothing - proving
 /// the single-batch gate is gone.
 struct EmptySender;
 
@@ -177,7 +177,7 @@ async fn build_batches_unconditionally_pre_seeds_authors_on_single_batch() {
     // Gap 2: synthesis + concept pre-seed must also run on single-batch. The
     // corpus has 1 article with no AI summary, so synthesis writes 0 pages.
     // But `run_full_normalization` extracted terms from the article's abstract
-    // into `biblio_terms`, so concept pre-seed DOES write pages — proving it
+    // into `biblio_terms`, so concept pre-seed DOES write pages - proving it
     // runs unconditionally on single-batch (not gated).
     let synth_written = ingest::preseed_synthesis_from_ai_summaries(&conn, &root).unwrap();
     let concept_written = ingest::preseed_concept_hubs(&conn, &root, 25).unwrap();
@@ -400,7 +400,7 @@ fn preseed_document_source_pages_writes_page_per_user_file() {
 #[test]
 fn preseed_document_source_pages_skips_article_exports() {
     let (_conn, root) = setup_empty_root();
-    // Article exports have `type: source` but NO `source_kind` — they must be
+    // Article exports have `type: source` but NO `source_kind` - they must be
     // skipped (the synthesis pre-seeder handles them).
     let raw_dir = root.join("raw");
     std::fs::create_dir_all(&raw_dir).unwrap();

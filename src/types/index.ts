@@ -65,7 +65,20 @@ export interface Article {
    * Computed once at attach time (backend `extract_captions`) and persisted on
    * the row so the "Describe Figures & Tables" button gate is cheap. */
   hasFiguresOrTables: boolean;
+  /** True when the working text (title/abstract/full_text/chunks) has been
+   * permanently rewritten to English (Plan-A translation). Originals are
+   * preserved in `article_original_content` / `article_original_chunks`. */
+  isTranslated: boolean;
+  /** DB-backed queue progress: 'none' | 'queued' | 'running' | 'succeeded' | 'failed'. */
+  translationStatus: TranslationStatus;
+  /** Error message captured when `translationStatus === 'failed'`. */
+  translationError: string | null;
+  /** RFC3339 timestamp of the last successful translation. */
+  translatedAt: string | null;
 }
+
+/** DB-backed translation-queue progress states (mirrors the Rust enum). */
+export type TranslationStatus = 'none' | 'queued' | 'running' | 'succeeded' | 'failed';
 
 /** Reference type for imported citations/references */
 export type ReferenceType = 'citation' | 'reference';
@@ -187,7 +200,9 @@ export type AuditAction =
   | 'ai_summary'
   | 'reference_import'
   | 'reference_match'
-  | 'error';
+  | 'error'
+  | 'translation'
+  | 'translation_error';
 
 export type AuditSource = 'ai' | 'user' | 'system';
 

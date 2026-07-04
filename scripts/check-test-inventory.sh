@@ -64,8 +64,10 @@ for row in "${ROWS[@]}"; do
     # convention adds the file in the prep PR.
     continue
   fi
-  # Rust: `fn <name>(` or `fn <name> ()`. TS: `it('<name>'` or `it("<name>"`.
-  if grep -qE "(fn ${fn}[ (]|(it|test)\(['\"]${fn}['\"])" "$file"; then
+  # Rust: `fn <name>(` or `fn <name> ()` or `#[ignore]`-stub `fn <name>(`.
+  # TS: `it('<name>'` / `it("<name>"` (also matches the `.skip` stub variant
+  # `it.skip('<name>'` used by the two-PR prep-PR protocol).
+  if grep -qE "(fn ${fn}[ (]|(it|test)(\.skip)?\(['\"]${fn}['\"])" "$file"; then
     continue
   fi
   echo "[check-test-inventory] MISSING: ${row} (file exists but test not found)" >&2

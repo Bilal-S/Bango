@@ -240,6 +240,16 @@ pub async fn import_ris_file(
         app_settings_repo::mark_biblio_needs_refresh(&conn);
         app_settings_repo::mark_wiki_needs_refresh(&conn);
 
+        // Auto-translate trigger: enqueue metadata-only translation jobs for
+        // non-English articles when `auto_translate = true`. Non-fatal -
+        // errors are logged by the helper and never fail the import.
+        let imported_ids: Vec<String> = updated_articles.iter().map(|a| a.id.clone()).collect();
+        crate::commands::translation::try_enqueue_translations_for_import(
+            &app,
+            &conn,
+            &imported_ids,
+        );
+
         Ok(ImportResult {
             imported_count: updated_articles.len(),
             skipped_count: skipped_validation,
@@ -392,6 +402,14 @@ pub async fn import_bibtex_file(
         // Imported articles affect bibliometrics - mark it stale.
         app_settings_repo::mark_biblio_needs_refresh(&conn);
         app_settings_repo::mark_wiki_needs_refresh(&conn);
+
+        // Auto-translate trigger (see `import_ris_file` for rationale).
+        let imported_ids: Vec<String> = updated_articles.iter().map(|a| a.id.clone()).collect();
+        crate::commands::translation::try_enqueue_translations_for_import(
+            &app,
+            &conn,
+            &imported_ids,
+        );
 
         Ok(ImportResult {
             imported_count: updated_articles.len(),

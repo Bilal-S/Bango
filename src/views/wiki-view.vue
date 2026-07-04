@@ -102,7 +102,7 @@ const forwardShortcutLabel = isMacPlatform() ? 'Cmd+]' : 'Alt+Right';
 const mode = ref<'view' | 'edit'>('view');
 const searchQuery = ref('');
 const viewTab = ref<'pages' | 'graph'>('pages');
-// Authors is collapsed by default — it's a long list (one page per corpus
+// Authors is collapsed by default - it's a long list (one page per corpus
 // author) that dominates the sidebar when expanded. Concepts / Sources /
 // Methods / Synthesis start expanded.
 const collapsedSections = ref<Set<string>>(new Set(['author']));
@@ -181,7 +181,7 @@ onMounted(async () => {
  *  view is keep-alive cached: `onMounted` only fires once for the component's
  *  lifetime, so without re-checking in `onActivated`, the empty-state gates
  *  (LLM configured, included articles > 0, wiki initialized) stay frozen at
- *  whatever value they had on first mount — e.g. the "LLM Provider Not
+ *  whatever value they had on first mount - e.g. the "LLM Provider Not
  *  Configured" card would persist even after the user configures an LLM in
  *  Settings and returns. All four calls are idempotent backend reads. */
 async function runReadinessChecks(): Promise<void> {

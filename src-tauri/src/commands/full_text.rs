@@ -149,10 +149,14 @@ pub fn attach_full_text_inner(
 
 /// Attach a full-text file (PDF or TXT) to an article.
 /// Extracts text content, stores in DB, and copies file to storage directory.
+///
+/// After a successful attach, if `auto_translate = true` and the article's
+/// `language` is non-English, enqueues a translation job. The attach response
+/// is never blocked on translation (fire-and-forget via the worker channel).
 #[tauri::command]
 pub fn attach_full_text(
     db_state: tauri::State<'_, DbState>,
-    _app_handle: tauri::AppHandle,
+    app_handle: tauri::AppHandle,
     article_id: String,
     file_path: String,
 ) -> Result<FullTextAttachResult, AppError> {
@@ -163,7 +167,23 @@ pub fn attach_full_text(
 
     let storage_dir = compute_storage_dir(&conn)?;
     let source_path = PathBuf::from(&file_path);
-    attach_full_text_inner(&conn, &article_id, &source_path, &storage_dir)
+    let result = attach_full_text_inner(&conn, &article_id, &source_path, &storage_dir);
+
+    // Fire-and-forget translation enqueue on successful attach. Phase 2
+    // enqueues `MetadataOnly`; Phase 3 will switch this to `FullText` once the
+    // full-text chunk translation engine exists. The enqueue gate inside the
+    // helper checks `auto_translate`, `is_english_language`, and the article's
+    // `translation_status` so existing already-translated / queued / English
+    // articles are skipped silently.
+    if result.is_ok() {
+        crate::commands::translation::try_enqueue_translations_for_import(
+            &app_handle,
+            &conn,
+            std::slice::from_ref(&article_id),
+        );
+    }
+
+    result
 }
 
 /// Delete the full-text attachment for an article.

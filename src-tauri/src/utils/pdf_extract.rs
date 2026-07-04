@@ -22,17 +22,17 @@ pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
     let header_footer_lines = detect_headers_footers(file_path)?;
 
     // Step 2: Extract full text.
-    // Tier 1: unpdf (best quality — handles Type1 custom fonts without panicking)
-    // Tier 2: pdf-extract (legacy fallback — may panic on broken Unicode maps)
-    // Tier 3: lopdf page-by-page (last resort — degraded but always works)
+    // Tier 1: unpdf (best quality - handles Type1 custom fonts without panicking)
+    // Tier 2: pdf-extract (legacy fallback - may panic on broken Unicode maps)
+    // Tier 3: lopdf page-by-page (last resort - degraded but always works)
     let raw_text = match extract_via_unpdf(file_path) {
         Ok(text) if !text.trim().is_empty() => text,
         _ => {
-            // unpdf failed or returned empty — try pdf-extract with panic safety.
+            // unpdf failed or returned empty - try pdf-extract with panic safety.
             match extract_text_safe(file_path) {
                 Ok(text) => text,
                 Err(e) => {
-                    // pdf-extract also failed — fall back to lopdf.
+                    // pdf-extract also failed - fall back to lopdf.
                     eprintln!(
                         "[pdf_extract] pdf-extract failed/panicked: {e} - falling back to lopdf extraction"
                     );
@@ -64,7 +64,7 @@ fn extract_text_safe(file_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("PDF extraction failed: {e}"))
 }
 
-/// Extract text via `unpdf` — the highest-quality PDF text extractor.
+/// Extract text via `unpdf` - the highest-quality PDF text extractor.
 ///
 /// `unpdf` handles custom Type1 font encodings that cause `pdf-extract` to
 /// panic and `lopdf` to produce garbled output. Pure Rust, MIT-licensed,

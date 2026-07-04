@@ -571,7 +571,7 @@ fn extract_pdf_title(path: &Path) -> Option<String> {
 /// Resolve the effective title + slug for a user file.
 ///
 /// For PDFs, prefers the embedded `/Title` from the Info dictionary when it is
-/// non-empty (gives a much cleaner title than the filename stem — e.g.
+/// non-empty (gives a much cleaner title than the filename stem - e.g.
 /// "You Can't Build an AI Workforce..." instead of "user-youcantbuild"). Falls
 /// back to the filename stem for PDFs without metadata and for all other file
 /// types.
@@ -1091,6 +1091,10 @@ mod tests {
             has_full_text: false,
             full_text_file_name: None,
             has_figures_or_tables: false,
+            is_translated: false,
+            translation_status: "none".to_string(),
+            translation_error: None,
+            translated_at: None,
         }
     }
 }

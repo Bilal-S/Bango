@@ -1,4 +1,5 @@
 pub mod app_settings_repo;
+pub mod article_original_repo;
 pub mod article_repo;
 pub mod audit_repo;
 pub mod biblio_repo;

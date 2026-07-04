@@ -116,6 +116,10 @@ function makeArticle(overrides: Partial<Article> & { id: string }): Article {
     hasFullText: false,
     fullTextFileName: null,
     hasFiguresOrTables: false,
+    isTranslated: false,
+    translationStatus: 'none',
+    translationError: null,
+    translatedAt: null,
   };
 }
 

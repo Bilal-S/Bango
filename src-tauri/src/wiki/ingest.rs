@@ -6,7 +6,7 @@
 //! entry, and rebuilds the FTS5 index.
 //!
 //! Workflow:
-//! 1. `process_user_files` — ensure `raw/` is uniform `.md`.
+//! 1. `process_user_files` - ensure `raw/` is uniform `.md`.
 //! 2. Read the `AGENTS.md` contract + concatenate raw sources.
 //! 3. Build a prompt instructing the LLM to output pages in a parseable format.
 //! 4. Parse the LLM response into pages (delimited by `<!-- PAGE:slug -->`).
@@ -47,7 +47,7 @@ pub struct IngestReport {
 /// Run the full ingest pipeline. Requires an LLM response string (the caller
 /// obtains it via the orchestrator; this function is split for testability).
 /// Write wiki pages from the LLM response (async, with per-page progress).
-/// Does NOT touch the DB connection — caller must call `finalize_ingest` afterwards.
+/// Does NOT touch the DB connection - caller must call `finalize_ingest` afterwards.
 pub async fn write_pages_from_response(
     root: &Path,
     llm_response: &str,
@@ -320,7 +320,7 @@ impl AuthorManifest {
     /// Render the manifest as a prompt section with a two-part directive:
     ///
     /// 1. **Known authors** (in the manifest) → "link to their pre-seeded page using the
-    ///    EXACT slug — do NOT create a duplicate page for them."
+    ///    EXACT slug - do NOT create a duplicate page for them."
     /// 2. **Unknown authors** (mentioned in uploaded documents but NOT in the manifest) →
     ///    "you SHOULD create a new author page" with slug `author-{lastname}-{initial}`,
     ///    linked to the uploaded document.
@@ -678,7 +678,7 @@ fn render_author_page(entry: &AuthorManifestEntry) -> (Frontmatter, String) {
 // Deterministic synthesis + concept pre-seed (Phases 2 & 3)
 // ---------------------------------------------------------------------------
 
-/// A parsed AI summary JSON blob — the deterministic source for synthesis pages.
+/// A parsed AI summary JSON blob - the deterministic source for synthesis pages.
 /// All fields are optional; the pre-seeder skips articles whose summary is
 /// missing or unparseable.
 #[derive(Debug, Default)]
@@ -843,7 +843,7 @@ fn fetch_articles_with_summaries(conn: &Connection) -> Result<Vec<ArticleWithSum
 /// `tags` frontmatter so the graph connects to the Phase-3 concept hubs.
 ///
 /// Reviewed (user-edited) synthesis pages are preserved. Articles without an AI
-/// summary (or with unparseable JSON) are skipped — the LLM can still produce a
+/// summary (or with unparseable JSON) are skipped - the LLM can still produce a
 /// synthesis page for them.
 ///
 /// Returns the count of pages written.
@@ -867,7 +867,7 @@ pub fn preseed_synthesis_from_ai_summaries(
             continue;
         };
         let Some(ref digest) = parsed.summary else {
-            // AI summary exists but has no digest field — skip (let the LLM handle).
+            // AI summary exists but has no digest field - skip (let the LLM handle).
             continue;
         };
         let (fm, body) = render_synthesis_page(&article, &parsed, digest);
@@ -1069,7 +1069,7 @@ fn fetch_top_terms(conn: &Connection, limit: usize) -> Result<Vec<TermRow>, AppE
 /// (`[[{article_id}]]` synthesis links) and to co-occurring concepts.
 ///
 /// Reviewed (user-edited) concept pages are preserved. Terms with no articles
-/// are skipped (defensive — the query already filters by included articles).
+/// are skipped (defensive - the query already filters by included articles).
 ///
 /// Returns the count of pages written.
 pub fn preseed_concept_hubs(
@@ -1183,7 +1183,7 @@ struct UserDocRow {
 
 /// Collect user-uploaded documents from `raw/*.md` (files with `source_kind`
 /// starting `user_`). Article exports (type `source` but no `source_kind`) are
-/// skipped — they are corpus articles, not external documents.
+/// skipped - they are corpus articles, not external documents.
 fn collect_user_documents(root: &Path) -> Result<Vec<UserDocRow>, AppError> {
     let raw_files = raw_export::list_raw_files(root)?;
     let mut out = Vec::new();
@@ -1209,11 +1209,11 @@ fn collect_user_documents(root: &Path) -> Result<Vec<UserDocRow>, AppError> {
 ///
 /// This mirrors how included articles get pre-seeded synthesis pages (slug =
 /// article UUID): uploaded documents get pre-seeded source pages (slug =
-/// `user-...`). The two on-ramps are symmetric — every raw source has a
+/// `user-...`). The two on-ramps are symmetric - every raw source has a
 /// corresponding wiki node.
 ///
 /// Reviewed (user-edited) source pages are preserved. Documents without a
-/// recognized `source_kind` (not starting `user_`) are skipped — they are
+/// recognized `source_kind` (not starting `user_`) are skipped - they are
 /// corpus articles handled by the synthesis pre-seeder.
 ///
 /// Returns the count of pages written.
@@ -1377,7 +1377,7 @@ fn build_external_docs_section(batch_sources: &[&RawSource]) -> String {
     out.push_str(
         "The following uploaded documents already have a pre-seeded wiki source page \
          (type: source) under /wiki/sources/{slug}.md. When you cite one of these, use the \
-         document's slug in a [[wikilink]] or [^art-slug] footnote ref — it resolves to the \
+         document's slug in a [[wikilink]] or [^art-slug] footnote ref - it resolves to the \
          source page automatically. Do NOT create a duplicate source page for them:\n\n",
     );
     for doc in user_docs {

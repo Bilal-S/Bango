@@ -226,7 +226,7 @@ async function loadAndRender(): Promise<void> {
  *
  * Reads the node's post-layout position via Sigma's `getNodeDisplayData`
  * (which reflects ForceAtlas2-assigned x/y) and animates the camera to it
- * with a gentle zoom-in (`ratio: 0.5` — Sigma's default viewport ratio is 1;
+ * with a gentle zoom-in (`ratio: 0.5` - Sigma's default viewport ratio is 1;
  * lower values zoom in). Mirrors the bibliometric co-authorship "focus after
  * selection" behavior.
  *
@@ -339,12 +339,12 @@ function renderInner(): void {
     });
   }
 
-  // Add edges (only between known nodes — broken links are skipped).
+  // Add edges (only between known nodes - broken links are skipped).
   // Dedupe: the wiki graph may contain duplicate edges (the LLM can emit the
   // same [[target]] link multiple times from a single page). graphology in
   // `multi: false` mode throws on the second addEdge with the same endpoints,
   // which would abort render() mid-construction (killing the old sigma before
-  // the new one is created — leaving the panel blank). Track seen endpoint
+  // the new one is created - leaving the panel blank). Track seen endpoint
   // pairs and skip duplicates.
   const knownSlugs = new Set(graph.value.nodes.map((n) => n.slug));
   const seenEdges = new Set<string>();

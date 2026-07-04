@@ -49,6 +49,12 @@ pub struct ProjectBackup {
     pub biblio_network_nodes: Vec<serde_json::Value>,
     #[serde(default)]
     pub biblio_network_edges: Vec<serde_json::Value>,
+    /// Translation originals archive (Plan-A permanent rewrite). Hold
+    /// genuine user-imported original-language data; survive backup/restore.
+    #[serde(default)]
+    pub article_original_content: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub article_original_chunks: Vec<serde_json::Value>,
     pub llm_config: Option<LlmConfigBackup>,
 }
 
@@ -81,6 +87,11 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
     let audit = serialize_table(conn, "SELECT * FROM audit_entries")?;
     let reference_papers = serialize_table(conn, "SELECT * FROM reference_papers")?;
     let article_reference_links = serialize_table(conn, "SELECT * FROM article_reference_links")?;
+    // Translation originals archive (Plan-A). Serialized so a backup/restore
+    // cycle preserves the original-language text + chunks for traceability and
+    // future reprocessing.
+    let article_original_content = serialize_table(conn, "SELECT * FROM article_original_content")?;
+    let article_original_chunks = serialize_table(conn, "SELECT * FROM article_original_chunks")?;
 
     let llm_backup = llm_config_repo::get_config(conn)?.map(|c| LlmConfigBackup {
         provider: c.provider.as_str().to_string(),
@@ -115,6 +126,8 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
         biblio_network_meta: Vec::new(),
         biblio_network_nodes: Vec::new(),
         biblio_network_edges: Vec::new(),
+        article_original_content,
+        article_original_chunks,
         llm_config: llm_backup,
     };
 
@@ -215,6 +228,11 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     // foreign_keys are OFF during import so the cascade does not fire. Explicit
     // purge prevents orphaned chunk rows surviving the article-table wipe.
     tx.execute("DELETE FROM article_chunks", [])?;
+    // Translation originals (Plan-A permanent rewrite). Same precedence rule as
+    // article_chunks: foreign_keys are OFF during import, so explicit purge is
+    // needed before the articles table is wiped.
+    tx.execute("DELETE FROM article_original_chunks", [])?;
+    tx.execute("DELETE FROM article_original_content", [])?;
     tx.execute("DELETE FROM articles", [])?;
     tx.execute("DELETE FROM criteria", [])?;
     tx.execute("DELETE FROM research_aims", [])?;
@@ -370,6 +388,21 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             a.get("hasReferenceDetails").and_then(|v| v.as_i64()).unwrap_or(0);
         let has_full_text = a.get("hasFullText").and_then(|v| v.as_i64()).unwrap_or(0);
         let full_text_file_name = get_str_field(a, "fullTextFileName", "full_text_file_name");
+        // Translation status columns travel with the article row. On backup
+        // restore, reset in-flight states to 'none' so the in-memory translation
+        // queue starts clean on the target machine.
+        let is_translated = a.get("isTranslated").and_then(|v| v.as_i64()).unwrap_or(0);
+        let translation_status_raw = a
+            .get("translationStatus")
+            .or_else(|| a.get("translation_status"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("none");
+        let translation_status = match translation_status_raw {
+            "queued" | "running" => "none".to_string(),
+            other => other.to_string(),
+        };
+        let translation_error = get_str_field(a, "translationError", "translation_error");
+        let translated_at = get_str_field(a, "translatedAt", "translated_at");
         tx.execute(
             "INSERT INTO articles (
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
@@ -380,11 +413,13 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
                 imported_at, changed_at, screened_at, full_text, full_text_ai_summary,
                 data_length, token_estimate, num_cited, num_references,
-                has_citation_details, has_reference_details, has_full_text, full_text_file_name
+                has_citation_details, has_reference_details, has_full_text, full_text_file_name,
+                is_translated, translation_status, translation_error, translated_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38,
-                ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54
+                ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55, ?56,
+                ?57, ?58
             )",
             rusqlite::params![
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
@@ -395,7 +430,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 matched_inclusion_criteria, matched_exclusion_criteria, manual_override, import_source,
                 imported_at, changed_at, screened_at, full_text, full_text_ai_summary,
                 data_length, token_estimate, num_cited, num_references,
-                has_citation_details, has_reference_details, has_full_text, full_text_file_name
+                has_citation_details, has_reference_details, has_full_text, full_text_file_name,
+                is_translated, translation_status, translation_error, translated_at
             ],
         )?;
     }
@@ -561,6 +597,60 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 id, parent_article_id, reference_paper_id, type, created_at
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![id, parent_article_id, reference_paper_id, ref_type, created_at],
+        )?;
+    }
+
+    // Restore translation originals (article_original_content).
+    // These hold the original-language text captured before Plan-A rewrite.
+    for aoc in &backup.article_original_content {
+        let article_id = get_str(aoc, "articleId");
+        let original_title = get_str_field(aoc, "originalTitle", "original_title");
+        let original_abstract_text =
+            get_str_field(aoc, "originalAbstractText", "original_abstract_text");
+        let original_full_text = get_str_field(aoc, "originalFullText", "original_full_text");
+        let source_language = get_str_field(aoc, "sourceLanguage", "source_language");
+        let stored_at = get_str_field(aoc, "storedAt", "stored_at")
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        tx.execute(
+            "INSERT INTO article_original_content \
+             (article_id, original_title, original_abstract_text, original_full_text, \
+             source_language, stored_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                article_id,
+                original_title,
+                original_abstract_text,
+                original_full_text,
+                source_language,
+                stored_at,
+            ],
+        )?;
+    }
+
+    // Restore translation original chunks (article_original_chunks).
+    // These hold the pre-translation chunk coordinate space.
+    for aoc_chunk in &backup.article_original_chunks {
+        let id: i64 = aoc_chunk
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or_else(|| chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+        let article_id = get_str_field(aoc_chunk, "articleId", "article_id").unwrap_or_default();
+        let chunk_index = aoc_chunk
+            .get("chunkIndex")
+            .or_else(|| aoc_chunk.get("chunk_index"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let section = get_str_field(aoc_chunk, "section", "section");
+        let content = get_str(aoc_chunk, "content");
+        let word_count = aoc_chunk
+            .get("wordCount")
+            .or_else(|| aoc_chunk.get("word_count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        tx.execute(
+            "INSERT INTO article_original_chunks \
+             (id, article_id, chunk_index, section, content, word_count) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, article_id, chunk_index, section, content, word_count],
         )?;
     }
 

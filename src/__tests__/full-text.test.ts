@@ -67,6 +67,10 @@ const mockArticle: Article = {
   hasFullText: false,
   fullTextFileName: null,
   hasFiguresOrTables: false,
+  isTranslated: false,
+  translationStatus: 'none',
+  translationError: null,
+  translatedAt: null,
 };
 
 const mockArticleWithFullText: Article = {

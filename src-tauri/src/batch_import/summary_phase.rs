@@ -1,4 +1,4 @@
-//! Phase 3: Generate AI summaries for articles that got full text attached
+//! Phase 4: Generate AI summaries for articles that got full text attached
 //! in Phase 1 (and don't already have a summary).
 //!
 //! Reuses [`crate::commands::summary::generate_article_ai_summary_inner`] so the
@@ -16,7 +16,7 @@ use crate::llm::orchestrator::LlmOrchestrator;
 
 use super::BatchImportPhaseResult;
 
-/// Run Phase 3: generate an AI summary for each article ID in `article_ids`
+/// Run Phase 4: generate an AI summary for each article ID in `article_ids`
 /// (the newly-attached articles from Phase 1).
 ///
 /// Each summary is generated via [`generate_article_ai_summary_inner`], which
@@ -86,7 +86,7 @@ where
             processed,
             total,
             &format!(
-                "Phase 3 - AI Summaries - found {total} articles - summarizing {} of {total}",
+                "Phase 4 - AI Summaries - found {total} articles - summarizing {} of {total}",
                 processed + 1
             ),
         );

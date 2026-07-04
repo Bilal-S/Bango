@@ -102,7 +102,7 @@ pub fn strip_code_fences(raw: &str) -> String {
         .or_else(|| trimmed.strip_prefix("```"))
         .map(|rest| rest.trim_start());
     let Some(rest) = after_open else {
-        // No code fence — return as-is (already trimmed).
+        // No code fence - return as-is (already trimmed).
         return trimmed.to_string();
     };
     // Strip the trailing ``` if present.
@@ -193,7 +193,7 @@ pub fn parse_figure_descriptions_response(
 ) -> Result<Vec<FigureDescription>, AppError> {
     // The figure-description prompt returns a bare JSON array. We only need
     // code-fence stripping here, not the screening `extract_json` array-unwrap
-    // heuristic (which corrupts object-shaped responses — see
+    // heuristic (which corrupts object-shaped responses - see
     // `strip_code_fences` docs).
     let cleaned = strip_code_fences(response);
     let value: serde_json::Value = serde_json::from_str(&cleaned)

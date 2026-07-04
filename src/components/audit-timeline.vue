@@ -26,6 +26,8 @@ const actionLabels: Record<AuditAction, string> = {
   reference_import: 'Reference Imported',
   reference_match: 'Reference Matched',
   error: 'Error',
+  translation: 'Article Translated',
+  translation_error: 'Translation Failed',
 };
 
 function formatTimestamp(ts: string): string {

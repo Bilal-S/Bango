@@ -48,7 +48,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # Surgical sed update — only the version line in each file changes.
+      # Surgical sed update - only the version line in each file changes.
       # Avoids JSON.stringify/jq which would expand tauri.conf.json's compact arrays.
       - name: Sync version across config files
         shell: bash
@@ -116,7 +116,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # Surgical sed update — only the version line in each file changes.
+      # Surgical sed update - only the version line in each file changes.
       - name: Sync version across config files
         shell: bash
         env:
@@ -202,7 +202,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # Surgical sed update — only the version line in each file changes.
+      # Surgical sed update - only the version line in each file changes.
       - name: Sync version across config files
         shell: bash
         env:
@@ -271,7 +271,7 @@ jobs:
 
   # ──────────────────────────────────────────────
   # Post-build: commit version-synced config files.
-  # SKIPPED ENTIRELY when check-version-sync reports no mismatch — no checkout,
+  # SKIPPED ENTIRELY when check-version-sync reports no mismatch - no checkout,
   # no file edits, no commit, no push, and never touches the GitHub Release.
   # ──────────────────────────────────────────────
   sync-version:
@@ -292,7 +292,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # Surgical sed update — only the version line in each file changes.
+      # Surgical sed update - only the version line in each file changes.
       # This job never creates or modifies a GitHub Release or its body.
       - name: Sync version across config files
         env:

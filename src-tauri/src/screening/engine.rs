@@ -37,7 +37,7 @@ use crate::screening::prompt::{
 use crate::screening::resolution::{self, CriterionMatch};
 
 /// Tier 3 screening configuration. Built by the command layer from `app_settings`
-/// and passed into `run_sync`. Pure value type — no I/O.
+/// and passed into `run_sync`. Pure value type - no I/O.
 #[derive(Debug, Clone)]
 pub struct ScreeningConfig {
     pub mode: ScreeningMode,

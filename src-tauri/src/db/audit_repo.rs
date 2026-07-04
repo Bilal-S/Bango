@@ -129,6 +129,8 @@ fn parse_action(s: &str) -> AuditAction {
         "reference_import" => AuditAction::ReferenceImport,
         "reference_match" => AuditAction::ReferenceMatch,
         "wiki_ingest_error" => AuditAction::WikiIngestError,
+        "translation" => AuditAction::Translation,
+        "translation_error" => AuditAction::TranslationError,
         _ => AuditAction::StatusChange,
     }
 }

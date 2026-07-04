@@ -243,7 +243,7 @@ export function useWiki() {
   async function checkForUpdates(force = false): Promise<CheckUpdatesResult | null> {
     const now = Date.now();
     if (!force && now - lastCheckAt < CHECK_DEBOUNCE_MS) {
-      return null; // debounced — too soon since the last auto-check
+      return null; // debounced - too soon since the last auto-check
     }
     lastCheckAt = now;
     return tauriCommand<CheckUpdatesResult>('wiki_check_for_updates');

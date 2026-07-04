@@ -102,13 +102,20 @@ pub(crate) fn compile_static_regex(pattern: &str) -> Regex {
 /// Markdown headings: `# Methods`, `## 2.1 Study Design`, etc.
 static MARKDOWN_HEADING_RE: Lazy<Regex> = Lazy::new(|| compile_static_regex(r"^#{1,6}\s+(.+)$"));
 
-/// Numbered headings like `2.1 Study Design`, `3 Methods`, `1.2.3 Results`.
+/// Numbered headings like `2.1 Study Design`, `3 Methods`, `1.2.3 Results`,
+/// `1 Введение` (Russian), `2 Обзор связанных работ`.
 ///
 /// Tightened to avoid false-positive sentence matches: requires a capitalised
 /// short phrase (<=60 chars) with no trailing sentence punctuation and no
 /// lowercase body words, so `3. The results showed` does not match.
+///
+/// Phase 3 (multilingual sectioning expansion): the pattern
+/// is Unicode-aware (`\p{Lu}` for any uppercase letter, `\p{L}`/`\p{N}` for any
+/// letter/digit) so Cyrillic, CJK, Arabic, etc. numbered headings are detected.
+/// ASCII letters are a subset of `\p{L}`, so existing English behavior is
+/// preserved (additive change).
 static NUMBERED_HEADING_RE: Lazy<Regex> =
-    Lazy::new(|| compile_static_regex(r"^\d+(?:\.\d+){0,2}\.?\s+[A-Z][A-Za-z\s\-:]{2,60}$"));
+    Lazy::new(|| compile_static_regex(r"^\d+(?:\.\d+){0,2}\.?\s+\p{Lu}[\p{L}\p{N}\s\-:']{2,60}$"));
 
 // ─── Keyword → SectionKind mapping ──────────────────────────────────────────
 //
@@ -119,15 +126,133 @@ static NUMBERED_HEADING_RE: Lazy<Regex> =
 /// Keyword groups, in priority order. Each group maps to one `SectionKind`.
 /// A heading matches a group if any keyword in the group equals the heading
 /// (case-insensitive, trimmed).
+///
+/// Phase 3 (multilingual sectioning expansion): localized
+/// keywords for French, Spanish, Japanese, Chinese, German, Russian,
+/// Portuguese, Italian, Arabic, and Turkish. Order within a group does not
+/// matter (exact-match); order across groups still matters only when a heading
+/// could match multiple groups (e.g. "Materials and Methods" must stay in the
+/// Methods group).
 const KEYWORD_GROUPS: &[(&[&str], SectionKind)] = &[
-    (&["abstract"], SectionKind::Abstract),
-    (&["introduction", "background"], SectionKind::Introduction),
-    (&["materials and methods", "methodology", "methods"], SectionKind::Methods),
-    (&["findings", "results"], SectionKind::Results),
-    (&["discussion"], SectionKind::Discussion),
-    (&["conclusion", "conclusions"], SectionKind::Conclusion),
     (
-        &["references", "bibliography", "acknowledgments", "acknowledgements"],
+        &[
+            "abstract",
+            "résumé",
+            "resumen",
+            "要約",
+            "摘要",
+            "zusammenfassung",
+            "resumo",
+            "riassunto",
+            "ملخص",
+            "özet",
+        ],
+        SectionKind::Abstract,
+    ),
+    (
+        &[
+            "introduction",
+            "background",
+            "introducción",
+            "introdução",
+            "introduzione",
+            "einleitung",
+            "введение",
+            "giriş",
+            "مقدمة",
+            "引言",
+            "はじめに",
+        ],
+        SectionKind::Introduction,
+    ),
+    (
+        &[
+            "materials and methods",
+            "methodology",
+            "methods",
+            "méthodes",
+            "méthode",
+            "método",
+            "métodos",
+            "methode",
+            "metodologia",
+            "методы",
+            "метода",
+            "yöntem",
+            "منهجية",
+            "方法",
+        ],
+        SectionKind::Methods,
+    ),
+    (
+        &[
+            "findings",
+            "results",
+            "résultats",
+            "resultados",
+            "ergebnisse",
+            "risultati",
+            "результаты",
+            "sonuçlar",
+            "النتائج",
+            "结果",
+            "結果",
+        ],
+        SectionKind::Results,
+    ),
+    (
+        &[
+            "discussion",
+            "discusión",
+            "discussão",
+            "discussione",
+            "diskussion",
+            "обсуждение",
+            "tartışma",
+            "مناقشة",
+            "讨论",
+            "考察",
+        ],
+        SectionKind::Discussion,
+    ),
+    (
+        &[
+            "conclusion",
+            "conclusions",
+            "conclusión",
+            "conclusiones",
+            "conclusão",
+            "conclusões",
+            "conclusioni",
+            "fazit",
+            "заключение",
+            "sonuç",
+            "الخلاصة",
+            "الخاتمة",
+            "结论",
+            "总结",
+            "おわりに",
+            "まとめ",
+        ],
+        SectionKind::Conclusion,
+    ),
+    (
+        &[
+            "references",
+            "bibliography",
+            "acknowledgments",
+            "acknowledgements",
+            "références",
+            "referencias",
+            "referências",
+            "bibliografia",
+            "literatur",
+            "список литературы",
+            "kaynakça",
+            "المراجع",
+            "参考文献",
+            "文献",
+        ],
         SectionKind::References,
     ),
 ];

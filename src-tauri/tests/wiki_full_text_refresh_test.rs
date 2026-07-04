@@ -14,7 +14,7 @@
 //! `src/views/wiki-view.vue` re-runs ingest with the new content.
 //!
 //! Because the flag-setting is a one-liner at the command layer (which requires
-//! `State<DbState>` that the project deliberately avoids mocking — see
+//! `State<DbState>` that the project deliberately avoids mocking - see
 //! `docs/CLAUDE.md` "Coverage Strategy"), these tests validate the contract at
 //! the repo layer: that calling `mark_wiki_needs_refresh` after the content
 //! mutation is the correct pairing.

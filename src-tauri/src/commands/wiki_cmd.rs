@@ -632,9 +632,9 @@ pub async fn wiki_ingest(
 ///    (with metrics), `biblio_terms`, and `biblio_article_terms` are populated.
 /// 2. **Pre-seed author pages** (`wiki/authors/`) from `biblio_authors`.
 /// 3. **Pre-seed synthesis pages** (`wiki/synthesis/`) from each included
-///    article's `full_text_ai_summary` JSON — no LLM call needed.
+///    article's `full_text_ai_summary` JSON - no LLM call needed.
 /// 4. **Pre-seed concept hubs** (`wiki/concepts/`) from the top-N terms in
-///    `biblio_terms` — no LLM call needed.
+///    `biblio_terms` - no LLM call needed.
 /// 5. Inject the author manifest into every batch prompt (so the LLM links to
 ///    canonical author slugs instead of inventing its own).
 ///
