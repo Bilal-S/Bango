@@ -6,7 +6,7 @@
 
 /// The full agent contract. Written to `wiki-root/AGENTS.md` on `wiki_init`.
 ///
-/// Rules kept aligned with `.worktrees/llmwiki-plan.md` §5 and `docs/CLAUDE.md`
+/// Rules kept aligned with `docs/CLAUDE.md`
 /// (no em dashes, kebab-case slugs, mandatory frontmatter).
 #[must_use]
 pub fn agents_md_content() -> &'static str {

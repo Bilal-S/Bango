@@ -23,8 +23,6 @@ import type {
  * Wiki composable.
  *
  * Wraps the Tauri wiki commands and exposes reactive state for the wiki view.
- * Phase 1 scope: status, root dir get/set, init. Ingest, lint, search, chat,
- * and page CRUD are added in later phases (see `.worktrees/llmwiki-plan.md`).
  */
 // ── Module-level singleton state (shared by all useWiki() callers) ──
 const status = ref<WikiStatus | null>(null);

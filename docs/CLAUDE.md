@@ -203,7 +203,7 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
   confidence values skip stage 2 and borderline values trigger it, plus that
   borderline articles carry both `ai_screen` and `ai_screen_enhanced` audit
   entries.
-
+  Do not inlcude references to files in `.worktrees/**` in production code these are only temporary. 
 ### Bug Fixes & Engineering Hygiene
 
 - When doing bug fixes, always start with reproducing the bug in an E2E setting

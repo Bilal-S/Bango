@@ -15,7 +15,7 @@
     "format:check": "prettier --check .",
     "lint:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo clippy -- -D warnings",
     "format:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo fmt --check",
-    "check:all": "npm run type-check && npm run lint:check && npm run format:check && npm run format:rust && npm run lint:rust && npm run test",
+    "check:all": "npm run type-check && npm run lint:check && npm run format:check && npm run format:rust && npm run lint:rust && npm run test && npm run check:test-inventory",
     "test": "vitest run",
     "check:test-inventory": "bash scripts/check-test-inventory.sh",
     "test:coverage": "vitest run --coverage",

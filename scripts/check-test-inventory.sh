@@ -18,12 +18,12 @@
 
 set -euo pipefail
 
-PLAN_DOCS=(.worktrees/chunkingplan.md .worktrees/tier4-plan.md)
+PLAN_DOCS=(docs/test-plans/language-plan-v2-tests.md)
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # Collect existing plan docs (non-fatal if any are absent, e.g. fresh checkout
-# without .worktrees). At least one must exist for the inventory to be checked.
+# without docs). At least one must exist for the inventory to be checked.
 EXISTING_PLAN_DOCS=()
 for doc in "${PLAN_DOCS[@]}"; do
   if [[ -f "$doc" ]]; then

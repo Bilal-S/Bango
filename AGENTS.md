@@ -95,7 +95,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
   - **`src-tauri/src/db/chunk_repo.rs`** - Tier 3 article chunk storage (`article_chunks`
-    table, created by migration v002). Populated at attach time by
+    table, created by migration v003; was in v002 pre-release but v002 was reverted to
+    `wiki_index_manifest`-only after deployment, so the FTS5 drop + article_chunks +
+    audit_entries rebuild moved to v003). Populated at attach time by
     `commands::full_text::populate_chunks_for_attached_text` (extract_sections +
     chunk_sections) and cleared on detach. Consumed by `screening::chunk_retrieval` for
     enhanced/two_stage screening evidence. Exposes `replace_chunks_for_article`,
@@ -175,8 +177,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     default), and
     `summary_evidence_mode` (project-wide literature-review evidence enrichment;
     `abstract_only` default | `with_summary_facts` - see `commands/summary.rs::generate_summary`
-    + the `format_ai_summary_as_evidence` pure helper in `summary/prompt.rs`; design in
-    `.worktrees/summary-improvements.md` Shape 0 + Shape A). `mark_biblio_needs_refresh(conn)` is called by every mutation that
+    + the `format_ai_summary_as_evidence` pure helper in `summary/prompt.rs`). `mark_biblio_needs_refresh(conn)` is called by every mutation that
     changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
     project backup restore in `commands/export_cmd::import_project_backup`,
     reference/citation import + CR extraction + reference promotion in
@@ -272,8 +273,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
     author/synthesis/concept/source pages regardless of which LLM model is used.
     Tested in `wiki_deterministic_test.rs`. Design + phases 4-5 (LLM prompt
     narrowing, `concepts` field in AI summary schema) in
-    `.worktrees/wiki-improvement-plan.md`; external-document ingestion +
-    linking design in `.worktrees/wiki-improvement-plan2.md`.
+    `.worktrees/DONOTUSE/wiki-improvement-plan.md`; external-document ingestion +
+    linking design in `.worktrees/DONOTUSE/wiki-improvement-plan2.md`.
     `commands/wiki_cmd.rs` exposes
     all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
@@ -316,7 +317,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     shows the full title + page `summary` + inbound/outbound counts via
     sigma's `moveBody` event. The `GraphNode.summary` field is populated from
     frontmatter by `engine::build_graph`. Composable: `use-wiki.ts`.
-    Design and phasing: `.worktrees/llmwiki-plan.md`.
+    Design and phasing: `.worktrees/DONOTUSE/llmwiki-plan.md`.
     **Chat-with-Wiki integration**: `useChatStore.source: 'articles'|'wiki'` (mutually
     exclusive) switches the `/chat` view between `send_chat_message` (article RAG) and
     `wiki_chat` (BM25 FTS5 RAG). A Wiki toggle button (icon `local_library`) in `chat-view.vue`
@@ -460,24 +461,18 @@ describe each durable boundary so agents can locate the right area. Create a chi
     word-count bound (excluding atomic Table/Figure) + contiguous `chunk_index` for any
     input.
   - **`src-tauri/src/db/migrations/v002_wiki_manifest.rs`** - Post-v001 schema
-    (VERSION 2). Consolidates all post-v001 changes so the migration sequence is
-    gap-free (v001 -> v002); v003 was merged in here pre-release. Four changes in one
-    migration: (1) `DROP TABLE IF EXISTS wiki_pages_fts;` so `fts::ensure_table`
-    recreates it with chunk-aware columns (`chunk_index`, `section`, `parent_slug`
-    UNINDEXED) on the next read (FTS5 virtual tables cannot be `ALTER`ed; the explicit
-    DROP is the supported schema-change path, and the table self-heals via
-    `ensure_index_populated`); (2) `CREATE TABLE article_chunks` (per-article chunk
-    storage populated at attach time by T3.1, consumed by screening T3.2+); (3) `CREATE
-    TABLE wiki_index_manifest` (per-file content hashes for the Wiki external-edit drift
-    detection); (4) a single `audit_entries` rebuild that adds both
-    `figure_descriptions` (Tier 2 Phase 4) and `ai_screen_enhanced` (Tier 3 two-stage
-    screening stage 2) to the `action` CHECK constraint (SQLite CHECK constraints can't
-    be `ALTER`ed; uses the rename-create-copy-drop pattern). The v001 initial schema is
-    also updated so fresh DBs get the expanded constraint directly. The
-    `has_figures_or_tables` articles column is added in v001 directly (no ALTER here)
-    - see `commands::full_text::attach_full_text_inner` for the parse-time detection.
-    No `ALTER TABLE articles` - section summaries (T1.3) live inside the existing
-    `full_text_ai_summary` column as a `schema_version: 2` superset blob.
+    (VERSION 2, deployed). Contains only `CREATE TABLE wiki_index_manifest` (per-file
+    content hashes for the Wiki external-edit drift detection). The FTS5 drop,
+    `article_chunks` creation, and `audit_entries` rebuild were in v002 pre-release but
+    moved to v003 after v002 was deployed with only `wiki_index_manifest`. v001 is
+    updated so fresh DBs get the expanded audit CHECK constraint directly.
+  - **`src-tauri/src/db/migrations/v003_articles_translations.rs`** - Post-v002 schema
+    (VERSION 3). Carries the reverted v002 content (FTS5 drop, `article_chunks`,
+    `audit_entries` rebuild with `figure_descriptions` + `ai_screen_enhanced`) plus
+    translation schema: `articles` columns (`is_translated`, `translation_status`,
+    `translation_error`, `translated_at`), `article_original_content` +
+    `article_original_chunks` tables, and `audit_entries` CHECK expansion for
+    `translation` + `translation_error`. Plan: `.worktrees/language-plan-v2.md`.
   - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
     `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
     UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:
@@ -744,13 +739,18 @@ describe each durable boundary so agents can locate the right area. Create a chi
   Rust (`cargo-llvm-cov`, ~52% lines) and Vue/TS (`@vitest/coverage-v8`, ~18% lines).
   Lists 0%-covered modules/components/composables/stores and ranks highest-value gaps.
 - **`docs/design-reference/00-design-patterns.md`** - design tokens (Material 3 inspired).
-- **`.worktrees/`** - planning documents (`biblio-publication-timeline-plan-v3.md` is the
-  implemented plan; `biblio-cocitation-requirmenents.md` is the Co-Citation Analysis
-  requirements spec; `biblio-plan.md` is the 8-screen bibliometric plan). Not part of the
-  shipped app.
+- **`docs/test-plans/`** - binding test inventory files consumed by
+  `scripts/check-test-inventory.sh` (wired into `npm run check:all`). Each plan that
+  specifies a Test Inventory section places its machine-checked `file::function` table
+  here as `<plan-name>-tests.md` so the script can grep-named test files at PR time.
+  Current: `language-plan-v2-tests.md` (26 rows across 11 files).
+- **`.worktrees/`** - planning documents (`language-plan-v2.md` is the active
+  translation plan; the superseded `language-plan.md` is archived in `DONOTUSE/`;
+  implemented/temporary docs are archived in `DONOTUSE/`, such as the timeline plan
+  `biblio-publication-timeline-plan-v3.md`). Not part of the shipped app.
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
-`-D warnings`) and `cargo test`.
+`-D warnings` + vitest + `check:test-inventory`) and `cargo test`.
 
 Coverage tooling: `npm run test:coverage` (Vue/TS via `@vitest/coverage-v8`, config in
 `vitest.config.ts`, report at `coverage/index.html`) and
