@@ -1,0 +1,21 @@
+{
+  "reference_type": "JOUR",
+  "title": "ROS (Robot Operating System)",
+  "abstract_text": "Robot Operating System (ROS) は、ロボットソフトウェア開発のためのオープンソースのメタオペレーティングシステムである。本稿では、ROSの基本概念、通信システム、ツール群、および開発コミュニティの現状について概説する。",
+  "authors": ["Okada, Kei"],
+  "publication_year": 2012,
+  "doi": "10.7210/jrsj.30.830",
+  "journal": "Journal of the Robotics Society of Japan",
+  "volume": "30",
+  "issue": "9",
+  "start_page": "830",
+  "end_page": "835",
+  "keywords": [],
+  "url": "https://www.jstage.jst.go.jp/article/jrsj/30/9/30_30_830/_pdf",
+  "language": "Japanese",
+  "publisher": null,
+  "issn": null,
+  "eissn": null,
+  "date": "2012-01-01",
+  "notes": "License: CC-BY"
+}

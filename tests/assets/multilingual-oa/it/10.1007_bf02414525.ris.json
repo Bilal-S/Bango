@@ -1,0 +1,21 @@
+{
+  "reference_type": "JOUR",
+  "title": "Elasticità asimmetrica",
+  "abstract_text": "Questo articolo propone uno studio matematico della deformazione dei solidi elastici caratterizzati da tensori degli sforzi non simmetrici, generalizzando la teoria classica di Cauchy per includere le interazioni tra coppie di contatto.",
+  "authors": ["Grioli, Giuseppe"],
+  "publication_year": 1940,
+  "doi": "10.1007/bf02414525",
+  "journal": "Annali di Matematica Pura ed Applicata",
+  "volume": "19",
+  "issue": "1",
+  "start_page": "145",
+  "end_page": "155",
+  "keywords": [],
+  "url": "https://link.springer.com/content/pdf/10.1007/BF02414525.pdf",
+  "language": "Italian",
+  "publisher": null,
+  "issn": null,
+  "eissn": null,
+  "date": "1940-01-01",
+  "notes": "License: All rights reserved (Fair Use / Educational OA)"
+}

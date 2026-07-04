@@ -1,0 +1,21 @@
+{
+  "reference_type": "JOUR",
+  "title": "Вероятностный подход к задачам о графах расстояний и графах диаметров",
+  "abstract_text": "Настоящая работа стоит на стыке двух дисциплин: вероятностной комбинаторики и дискретной геометрии. В работе исследуются вероятностные характеристики, связанные с классической проблемой Борсука, а также хроматические числа дистанционных графов и графов диаметров в евклидовых пространствах.",
+  "authors": ["Кокоткин, А. А."],
+  "publication_year": 2014,
+  "doi": "10.4213/rm358",
+  "journal": "Московский физико-технический институт (arXiv preprint)",
+  "volume": null,
+  "issue": null,
+  "start_page": null,
+  "end_page": null,
+  "keywords": [],
+  "url": "https://arxiv.org/abs/1501.03808",
+  "language": "Russian",
+  "publisher": null,
+  "issn": null,
+  "eissn": null,
+  "date": "2014-01-01",
+  "notes": "License: All rights reserved (arXiv pre-print)"
+}
