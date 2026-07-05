@@ -72,7 +72,16 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
     let (sender, mut receiver) = mpsc::channel::<TranslationJob>(64);
 
     let app_handle = app.clone();
-    tokio::spawn(async move {
+    // Use `tauri::async_runtime::spawn` (not raw `tokio::spawn`) because this
+    // function is called from the synchronous `.setup(|app| {...})` closure in
+    // `lib.rs`, which runs outside the Tokio runtime thread-local context.
+    // Raw `tokio::spawn` panics with "there is no reactor running" in that
+    // context; `tauri::async_runtime::spawn` routes through Tauri's global
+    // runtime handle so it works from sync and async call sites alike. (The
+    // other `tokio::spawn` sites in `commands/screening.rs` /
+    // `batch_import/mod.rs` are inside `#[tauri::command] async fn` handlers,
+    // which already run on the runtime.)
+    tauri::async_runtime::spawn(async move {
         while let Some(job) = receiver.recv().await {
             let article_id = job.article_id.clone();
             let app_for_job = app_handle.clone();

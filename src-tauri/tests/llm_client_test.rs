@@ -262,6 +262,66 @@ async fn test_openai_empty_choices_returns_error() {
     );
 }
 
+// ── send_chat_completion: Truncation (finish_reason=length) ──────────
+
+#[tokio::test]
+async fn test_openai_truncated_response_still_returns_content() {
+    // When finish_reason="length" the server hit the output-token budget and
+    // the content may be cut off mid-sentence. The client must NOT discard the
+    // partial content (callers rely on the markdown-fallback retry elsewhere to
+    // handle empty/garbage); it should return the truncated text and log a
+    // diagnostic. This test pins the "return content" half of that contract.
+    let mut server = mockito::Server::new_async().await;
+    let body = r#"{
+        "choices": [{
+            "message": {"role": "assistant", "content": "truncated mid sent"},
+            "finish_reason": "length"
+        }],
+        "usage": {"total_tokens": 128}
+    }"#;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(body)
+        .create_async()
+        .await;
+
+    let config = openai_config(&server.url());
+    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    mock.assert_async().await;
+    assert_eq!(content, "truncated mid sent", "truncated content must still be returned");
+    assert_eq!(tokens, 128);
+}
+
+#[tokio::test]
+async fn test_openai_normal_finish_reason_returns_content() {
+    // finish_reason="stop" is the normal-completion path; must return content
+    // unchanged. Guards against a regression where the length-warning branch
+    // accidentally interferes with the stop branch.
+    let mut server = mockito::Server::new_async().await;
+    let body = r#"{
+        "choices": [{
+            "message": {"role": "assistant", "content": "complete answer"},
+            "finish_reason": "stop"
+        }],
+        "usage": {"total_tokens": 10}
+    }"#;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(body)
+        .create_async()
+        .await;
+
+    let config = openai_config(&server.url());
+    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    mock.assert_async().await;
+    assert_eq!(content, "complete answer");
+    assert_eq!(tokens, 10);
+}
+
 // ── send_chat_completion: Non-standard response parsing ──────────────
 
 #[tokio::test]

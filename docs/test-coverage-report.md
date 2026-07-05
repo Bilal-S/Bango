@@ -26,8 +26,8 @@ Coverage artifacts are git-ignored (`coverage/`, `src-tauri/target/`). The `@vit
 
 | Stack | Baseline (initial) | Current | Target |
 |-------|--------------------|---------|--------|
-| **Rust** (`src-tauri/`) | 51.93% lines | **~56.5%** lines | 70% |
-| **Vue/TS** (`src/`) | 17.57% lines | **~28%** lines | 70% |
+| **Rust** (`src-tauri/`) | 51.93% lines | **65.47%** lines | 70% |
+| **Vue/TS** (`src/`) | 17.57% lines | **32.22%** lines | 70% |
 
 Rust coverage is dominated by well-tested pure-logic modules (parsing, dedup, biblio networks). The low function % comes from untested `#[tauri::command]` shims.
 
@@ -96,6 +96,16 @@ New test files:
 - Router: `router.test.ts`.
 - Composables: `use-feature-flags`, `use-viewport`, `use-tauri-command`, `use-toast`, `use-demo`, `use-llm-config`.
 - Components: `confidence-bar`, `screening-stats`, `detail-header`, `screening-progress-bar`, `audit-timeline`, `matched-criteria`, `article-metadata`, `ai-decision-card`, `article-notes`.
+
+### Vue/TS (30.71% → 32.22%) + Rust (56.5% → 65.47%) — 2026-07-04
+
+New test files:
+- Stores: `labels-store.test.ts` (9 tests), `tags-store.test.ts` (9 tests), `screening-store.test.ts` (16 tests).
+- Composables: `use-timeline-state.test.ts` (9 tests).
+- Components: `toast-container.test.ts` (8 tests), `tags-section.test.ts` (5 tests), `article-detail-panel-translation.test.ts` (2 tests).
+- Rust: `manual_translate_test.rs` (4 tests), `broken_language_import_test.rs` (5 tests), `auto_translate_full_text_test.rs` (4 tests).
+
+Test count: 969 → 1,025. Test files: 70 → 76.
 
 ---
 

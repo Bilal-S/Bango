@@ -1,10 +1,7 @@
 //! Translation queue + worker integration tests (language-plan-v2).
 //!
 //! Each test is listed in `docs/test-plans/language-plan-v2-tests.md` and
-//! enforced by `scripts/check-test-inventory.sh`. The two Phase 3 stubs
-//! (`enqueue_attach_non_english_creates_full_text_job`,
-//! `full_text_job_translates_chunks_and_rechunks_english`) remain `#[ignore]`
-//! until the full-text chunk translation engine lands.
+//! enforced by `scripts/check-test-inventory.sh`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;

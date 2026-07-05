@@ -35,10 +35,9 @@ struct ChatResponse {
 struct Choice {
     message: ChatMessage,
     /// "stop" = normal completion; "length" = truncated by output token limit.
-    /// The client logs a warning when this is "length" so reasoning-model
-    /// truncation is visible in diagnostics.
+    /// `send_openai_compatible` checks this against `"length"` to surface
+    /// reasoning-model truncation in diagnostics.
     #[serde(default)]
-    #[allow(dead_code)]
     finish_reason: Option<String>,
 }
 
@@ -464,13 +463,23 @@ async fn send_openai_compatible(
 
     // Strategy 1: Try standard ChatResponse (OpenAI format)
     if let Ok(chat_response) = serde_json::from_str::<ChatResponse>(&body_text) {
-        let content = chat_response
+        let choice = chat_response
             .choices
-            .first()
-            .map(|c| c.message.content.clone())
+            .into_iter()
+            .next()
             .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
+        // Surface reasoning-model truncation: "length" means the server hit its
+        // output-token budget before the model finished, so the content may be
+        // a cut-off mid-sentence. This is the diagnostic the `Choice` doc-comment
+        // promises; without it, truncation is silently swallowed.
+        if choice.finish_reason.as_deref() == Some("length") {
+            eprintln!(
+                "[LlmClient] response truncated by output-token limit (finish_reason=length); \
+                 content may be incomplete"
+            );
+        }
         let total_tokens = chat_response.usage.and_then(|u| u.total_tokens).unwrap_or(0);
-        return Ok((content, total_tokens));
+        return Ok((choice.message.content, total_tokens));
     }
 
     // Strategy 2: Fallback - extract content from arbitrary JSON envelope

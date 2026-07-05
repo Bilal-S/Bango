@@ -480,7 +480,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     fields. `ensure_index_populated` self-heal compares `COUNT(DISTINCT COALESCE(
     parent_slug, slug))` against disk page count (not raw row count) so chunk rows do
     not false-positive a rebuild on every chat call. `search` SELECT + row mapping
-    updated for the 3 new columns.
+    updated for the 3 new columns. All 36 unit tests for this module live in
+    `tests/wiki_fts_test.rs` (extracted from the inline `#[cfg(test)]` block per
+    `docs/CLAUDE.md` §Testing; the source file shrank from 1482 to 680 lines).
+    `strip_table_placeholders` is `pub` so the integration test can exercise it
+    directly.
   - **`src-tauri/src/wiki/chat.rs`** (T1.2 update) - chunk-aware context builder:
     `MAX_HITS` raised from 8 to 16. `build_context` dedupes by `parent_slug` (keeps
     top-ranked chunk per page, appends "(+N more passages from this page)"). `format_entry`

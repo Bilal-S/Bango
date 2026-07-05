@@ -318,8 +318,12 @@ fn read_legacy_llm_config(
         model_name,
     }))
 }
-#[allow(dead_code)]
 struct LegacyRefRow {
+    /// Legacy `article_references.id` PK. Intentionally unread: the dedup pass
+    /// mints fresh UUIDs for the normalized `reference_papers` rows, so the old
+    /// per-(parent,ref) id has no meaning in the new schema. Kept only so the
+    /// positional `row.get(0)` SELECT column lines up with the struct fields.
+    #[allow(dead_code)]
     id: String,
     parent_id: String,
     ref_type: i64,
