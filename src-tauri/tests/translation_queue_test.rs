@@ -250,13 +250,17 @@ fn full_text_job_translates_chunks_and_rechunks_english() {
         .expect("seed chunks");
 
     // Mock: first call is metadata (TITLE:/ABSTRACT:), subsequent calls are
-    // per-chunk translations.
+    // batched chunk translations. The batch path sends ALL chunks in ONE call
+    // (JSON-lines payload) and expects a single JSON object response keyed by
+    // chunk_id. The mock inspects the user prompt to find which chunk ids were
+    // sent and returns a JSON map translating each to a deterministic English
+    // string.
     struct FullTextMock {
         call_count: AtomicUsize,
     }
     #[async_trait::async_trait]
     impl LlmClient for FullTextMock {
-        async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+        async fn send(&self, _system: &str, user: &str) -> Result<(String, usize), AppError> {
             let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
             if idx == 0 {
                 // Metadata call: user prompt contains "TITLE:".
@@ -266,8 +270,27 @@ fn full_text_job_translates_chunks_and_rechunks_english() {
                     50,
                 ))
             } else {
-                // Per-chunk translation: echo a deterministic English string.
-                Ok((format!("English translated chunk {idx}."), 30))
+                // Batched chunk translation: parse the chunk ids out of the
+                // JSON-lines user prompt and respond with a JSON map. Each line
+                // looks like `{"0": "..."}`.
+                let mut map = serde_json::Map::new();
+                for line in user.lines() {
+                    let trimmed = line.trim();
+                    if !trimmed.starts_with('{') {
+                        continue;
+                    }
+                    if let Ok(obj) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        if let Some(id) = obj.as_object().and_then(|o| o.keys().next()) {
+                            map.insert(
+                                id.clone(),
+                                serde_json::Value::String(format!(
+                                    "English translated chunk {id}."
+                                )),
+                            );
+                        }
+                    }
+                }
+                Ok((serde_json::to_string(&map).unwrap_or_default(), 30))
             }
         }
     }
@@ -276,7 +299,7 @@ fn full_text_job_translates_chunks_and_rechunks_english() {
     let mutex = std::sync::Mutex::new(conn);
     let rt =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-    rt.block_on(translate_full_text(&mutex, &article_id, &mock))
+    rt.block_on(translate_full_text(&mutex, &article_id, &mock, 50_000))
         .expect("full-text translation succeeded");
     let conn = mutex.into_inner().expect("mutex not poisoned");
 
@@ -285,7 +308,7 @@ fn full_text_job_translates_chunks_and_rechunks_english() {
     assert_eq!(article.translation_status, "succeeded");
     assert_eq!(article.title, "English Title");
     assert_eq!(article.abstract_text, "English abstract about the study.");
-    // The full_text is the stitched per-chunk translations.
+    // The full_text is the stitched batched-chunk translations.
     assert!(article.full_text.as_deref().unwrap_or("").contains("English translated chunk"));
 
     // The re-chunked English chunks must be present and contain English text.

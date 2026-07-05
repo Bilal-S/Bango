@@ -606,6 +606,9 @@ fn search_returns_section_label_for_chunk_rows() {
 
 // ── Tier 2 Phase 1: atomic GFM table handling ────────────────────────
 
+/// Tuple type for FTS table rows: (chunk_index, section, parent_slug, body).
+type FtsTableRow = (Option<i32>, Option<String>, Option<String>, String);
+
 #[test]
 fn chunk_page_rows_emits_atomic_table_row_for_gfm_table_page() {
     let tmp = TempDir::new().unwrap();
@@ -625,7 +628,7 @@ fn chunk_page_rows_emits_atomic_table_row_for_gfm_table_page() {
     let mut stmt = conn
         .prepare("SELECT chunk_index, section, parent_slug, body FROM wiki_pages_fts WHERE section = 'Table'")
         .unwrap();
-    let table_rows: Vec<(Option<i32>, Option<String>, Option<String>, String)> = stmt
+    let table_rows: Vec<FtsTableRow> = stmt
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get::<_, String>(3)?)))
         .unwrap()
         .filter_map(Result::ok)

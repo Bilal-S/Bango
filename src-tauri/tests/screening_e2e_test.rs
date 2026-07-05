@@ -65,7 +65,7 @@ fn seed_criteria(conn: &rusqlite::Connection) -> (Vec<Criterion>, Vec<ResearchAi
 fn make_batch_response(n: usize, start_index: usize) -> String {
     let items: Vec<String> = (0..n)
         .map(|i| {
-            let decision = if (start_index + i) % 2 == 0 {
+            let decision = if (start_index + i).is_multiple_of(2) {
                 "include"
             } else {
                 "exclude"
@@ -163,10 +163,11 @@ impl LlmClient for CancelAwareMock {
 #[tokio::test]
 async fn test_happy_path_bare_array_batch2() {
     let db = setup_db();
-    let conn = db.lock().unwrap();
-    seed_articles(&conn, 6);
-    let (criteria, aims) = seed_criteria(&conn);
-    drop(conn);
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_articles(&conn, 6);
+        seed_criteria(&conn)
+    };
 
     let responses =
         vec![make_batch_response(2, 0), make_batch_response(2, 2), make_batch_response(2, 4)];
@@ -192,10 +193,11 @@ async fn test_happy_path_bare_array_batch2() {
 #[tokio::test]
 async fn test_envelope_format() {
     let db = setup_db();
-    let conn = db.lock().unwrap();
-    seed_articles(&conn, 4);
-    let (criteria, aims) = seed_criteria(&conn);
-    drop(conn);
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_articles(&conn, 4);
+        seed_criteria(&conn)
+    };
 
     let responses = vec![make_envelope_response(2, 0), make_envelope_response(2, 2)];
     let mock = MockLlmClient::new(responses);
@@ -218,10 +220,11 @@ async fn test_envelope_format() {
 #[tokio::test]
 async fn test_partial_error_one_batch_malformed() {
     let db = setup_db();
-    let conn = db.lock().unwrap();
-    seed_articles(&conn, 6);
-    let (criteria, aims) = seed_criteria(&conn);
-    drop(conn);
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_articles(&conn, 6);
+        seed_criteria(&conn)
+    };
 
     let mock = PartialErrorMock::new(vec![1]);
     let engine = ScreeningEngine::with_batch_size(2);
@@ -243,10 +246,11 @@ async fn test_partial_error_one_batch_malformed() {
 #[tokio::test]
 async fn test_cancel_mid_run() {
     let db = setup_db();
-    let conn = db.lock().unwrap();
-    seed_articles(&conn, 6);
-    let (criteria, aims) = seed_criteria(&conn);
-    drop(conn);
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_articles(&conn, 6);
+        seed_criteria(&conn)
+    };
 
     let engine = ScreeningEngine::with_batch_size(2);
     let engine_clone = Arc::new(engine);
@@ -272,10 +276,11 @@ async fn test_cancel_mid_run() {
 #[tokio::test]
 async fn test_resume_after_cancel() {
     let db = setup_db();
-    let conn = db.lock().unwrap();
-    seed_articles(&conn, 6);
-    let (criteria, aims) = seed_criteria(&conn);
-    drop(conn);
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_articles(&conn, 6);
+        seed_criteria(&conn)
+    };
 
     // Run 1: cancel after first batch
     {
@@ -319,7 +324,7 @@ async fn test_resume_after_cancel() {
             article_repo::count_unscreened_working(&conn).unwrap()
         };
 
-        let responses: Vec<String> = (0..((remaining + 1) / 2))
+        let responses: Vec<String> = (0..remaining.div_ceil(2))
             .map(|i| make_batch_response(2.min(remaining - i * 2), i * 2))
             .collect();
         let mock = MockLlmClient::new(responses);

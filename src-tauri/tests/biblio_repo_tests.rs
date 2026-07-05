@@ -705,7 +705,7 @@ fn test_compute_h_index() {
     }
     let aid = upsert_author(&conn, "a", "A.").unwrap();
     for i in 0..5 {
-        link_article_author(&conn, &format!("a{i}"), &aid, i as i32, None, None).unwrap();
+        link_article_author(&conn, &format!("a{i}"), &aid, i, None, None).unwrap();
     }
 
     let h = compute_h_index(&conn, &aid).unwrap();

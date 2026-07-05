@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-PLAN_DOCS=(docs/test-plans/language-plan-v2-tests.md)
+PLAN_DOCS=(docs/test-plans/language-plan-v2-tests.md docs/test-plans/translation-3-tests.md)
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 

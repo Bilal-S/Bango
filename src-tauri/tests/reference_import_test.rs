@@ -35,7 +35,7 @@ fn test_import_single_cr_reference() {
     let new_article = ris_record_to_new_article(&record);
     let article = article_repo::insert_article(&conn, &new_article).expect("insert article failed");
 
-    let errors = extract_cr_for_imported(&conn, &[article.clone()], &[&record]);
+    let errors = extract_cr_for_imported(&conn, std::slice::from_ref(&article), &[&record]);
     assert!(errors.is_empty(), "No errors expected");
 
     // Should have 1 reference paper
@@ -66,7 +66,7 @@ fn test_import_multiple_cr_references() {
     let new_article = ris_record_to_new_article(&record);
     let article = article_repo::insert_article(&conn, &new_article).expect("insert article failed");
 
-    let errors = extract_cr_for_imported(&conn, &[article.clone()], &[&record]);
+    let errors = extract_cr_for_imported(&conn, std::slice::from_ref(&article), &[&record]);
     assert!(errors.is_empty());
 
     let refs = reference_repo::get_references_for_article(&conn, &article.id, None)
@@ -86,7 +86,7 @@ fn test_import_overlapping_cr_same_doi() {
     let article1 =
         article_repo::insert_article(&conn, &new_article1).expect("insert article1 failed");
 
-    extract_cr_for_imported(&conn, &[article1.clone()], &[&record1]);
+    extract_cr_for_imported(&conn, std::slice::from_ref(&article1), &[&record1]);
 
     // Article 2 also references the same paper (same DOI)
     let record2 =
@@ -95,7 +95,7 @@ fn test_import_overlapping_cr_same_doi() {
     let article2 =
         article_repo::insert_article(&conn, &new_article2).expect("insert article2 failed");
 
-    extract_cr_for_imported(&conn, &[article2.clone()], &[&record2]);
+    extract_cr_for_imported(&conn, std::slice::from_ref(&article2), &[&record2]);
 
     // Both articles should link to the same paper
     let refs1 = reference_repo::get_references_for_article(&conn, &article1.id, None)
@@ -123,13 +123,13 @@ fn test_reimport_same_file_no_duplicate_papers() {
     let new_article1 = ris_record_to_new_article(&record);
     let article1 =
         article_repo::insert_article(&conn, &new_article1).expect("insert article1 failed");
-    extract_cr_for_imported(&conn, &[article1.clone()], &[&record]);
+    extract_cr_for_imported(&conn, std::slice::from_ref(&article1), &[&record]);
 
     // Re-import same file (different article record, same CR content)
     let new_article2 = ris_record_to_new_article(&record);
     let article2 =
         article_repo::insert_article(&conn, &new_article2).expect("insert article2 failed");
-    extract_cr_for_imported(&conn, &[article2.clone()], &[&record]);
+    extract_cr_for_imported(&conn, std::slice::from_ref(&article2), &[&record]);
 
     // Both should reference the same single paper
     let refs1 = reference_repo::get_references_for_article(&conn, &article1.id, None)
@@ -150,7 +150,7 @@ fn test_import_no_cr_field() {
     let new_article = ris_record_to_new_article(&record);
     let article = article_repo::insert_article(&conn, &new_article).expect("insert article failed");
 
-    let errors = extract_cr_for_imported(&conn, &[article.clone()], &[&record]);
+    let errors = extract_cr_for_imported(&conn, std::slice::from_ref(&article), &[&record]);
     assert!(errors.is_empty());
 
     let refs = reference_repo::get_references_for_article(&conn, &article.id, None)
@@ -167,7 +167,7 @@ fn test_import_malformed_cr_graceful() {
     let new_article = ris_record_to_new_article(&record);
     let article = article_repo::insert_article(&conn, &new_article).expect("insert article failed");
 
-    let _errors = extract_cr_for_imported(&conn, &[article.clone()], &[&record]);
+    let _errors = extract_cr_for_imported(&conn, std::slice::from_ref(&article), &[&record]);
     // Should not panic, may or may not produce errors
     // The paper should still be created with the raw text as title
     let refs = reference_repo::get_references_for_article(&conn, &article.id, None)

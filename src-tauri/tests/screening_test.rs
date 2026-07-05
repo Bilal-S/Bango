@@ -315,7 +315,7 @@ fn test_estimate_tokens_basic() {
 #[test]
 fn test_estimate_tokens_unicode() {
     let text = "\u{65e5}\u{672c}\u{8a9e}\u{30c6}\u{30b9}\u{30c8}"; // 6 chars
-    assert_eq!(estimate_tokens(&text), 1);
+    assert_eq!(estimate_tokens(text), 1);
 }
 
 #[test]

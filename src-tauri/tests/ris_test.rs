@@ -99,37 +99,45 @@ fn test_parse_empty_input() {
 
 #[test]
 fn test_validate_valid_record() {
-    let mut record = RisRecord::default();
-    record.title = Some("Title".to_string());
-    record.abstract_text = Some("Abstract".to_string());
-    record.authors = vec!["Author".to_string()];
+    let record = RisRecord {
+        title: Some("Title".to_string()),
+        abstract_text: Some("Abstract".to_string()),
+        authors: vec!["Author".to_string()],
+        ..Default::default()
+    };
     let errors = validate_record(&record, 1);
     assert!(errors.is_empty());
 }
 
 #[test]
 fn test_validate_missing_title() {
-    let mut record = RisRecord::default();
-    record.abstract_text = Some("Abstract".to_string());
-    record.authors = vec!["Author".to_string()];
+    let record = RisRecord {
+        abstract_text: Some("Abstract".to_string()),
+        authors: vec!["Author".to_string()],
+        ..Default::default()
+    };
     let errors = validate_record(&record, 1);
     assert!(errors.iter().any(|e| e.message.contains("Title")));
 }
 
 #[test]
 fn test_validate_missing_abstract() {
-    let mut record = RisRecord::default();
-    record.title = Some("Title".to_string());
-    record.authors = vec!["Author".to_string()];
+    let record = RisRecord {
+        title: Some("Title".to_string()),
+        authors: vec!["Author".to_string()],
+        ..Default::default()
+    };
     let errors = validate_record(&record, 1);
     assert!(errors.iter().any(|e| e.message.contains("Abstract")));
 }
 
 #[test]
 fn test_validate_missing_authors() {
-    let mut record = RisRecord::default();
-    record.title = Some("Title".to_string());
-    record.abstract_text = Some("Abstract".to_string());
+    let record = RisRecord {
+        title: Some("Title".to_string()),
+        abstract_text: Some("Abstract".to_string()),
+        ..Default::default()
+    };
     let errors = validate_record(&record, 1);
     assert!(errors.iter().any(|e| e.message.contains("Author")));
 }
@@ -139,10 +147,12 @@ fn test_validate_n2_abstract_fallback() {
     // N2 was already mapped to abstract_text by the parser.
     // This test verifies the parser correctly falls back.
     // Direct validation: if abstract_text is present, it's valid.
-    let mut record = RisRecord::default();
-    record.title = Some("Title".to_string());
-    record.abstract_text = Some("From N2".to_string());
-    record.authors = vec!["Author".to_string()];
+    let record = RisRecord {
+        title: Some("Title".to_string()),
+        abstract_text: Some("From N2".to_string()),
+        authors: vec!["Author".to_string()],
+        ..Default::default()
+    };
     let errors = validate_record(&record, 1);
     assert!(errors.is_empty());
 }
@@ -178,9 +188,9 @@ fn test_partial_import_blue_ris() {
     let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
 
     // Some records should be valid, some should have validation errors
-    assert!(valid.len() > 0, "Should have at least some valid records");
-    assert!(errors.len() > 0, "Should have some validation errors");
-    assert!(groups.len() > 0, "Should have error groups");
+    assert!(!valid.is_empty(), "Should have at least some valid records");
+    assert!(!errors.is_empty(), "Should have some validation errors");
+    assert!(!groups.is_empty(), "Should have error groups");
 
     // Verify that only valid records can be imported
     let conn = create_connection().expect("DB connection failed");
@@ -203,8 +213,8 @@ fn test_partial_import_green_ris() {
     let (valid, errors, groups) = validate_all_grouped(&parse_result.records);
 
     assert_eq!(parse_result.records.len(), 7, "Green.ris should have 7 records");
-    assert!(valid.len() > 0, "Should have at least some valid records");
-    assert!(errors.len() > 0, "Should have some validation errors (missing abstracts)");
+    assert!(!valid.is_empty(), "Should have at least some valid records");
+    assert!(!errors.is_empty(), "Should have some validation errors (missing abstracts)");
 
     // Check grouped errors mention Abstract
     let abstract_group = groups.iter().find(|g| g.message.contains("Abstract"));

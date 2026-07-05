@@ -145,7 +145,7 @@ fn test_validation_error_when_both_false() {
     let result = scrape_citation_chaser("10.1234/anything", &output_dir, &options);
 
     assert!(result.is_err(), "Should return an error");
-    let err = result.err().expect("Expected error");
+    let err = result.expect_err("Expected error");
     assert!(
         matches!(err, ScrapeError::Validation(_)),
         "Should be a Validation error, got: {err:?}"

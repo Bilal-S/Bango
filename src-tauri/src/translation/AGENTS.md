@@ -10,9 +10,13 @@ preserved in `article_original_content` and `article_original_chunks`.
 
 ## Ownership
 
-- Owned by the language-plan-v2 milestone (`.worktrees/language-plan-v2.md`).
-- Bound to the binding test inventory in
-  `docs/test-plans/language-plan-v2-tests.md` (21 Rust + 5 TS rows).
+- Owned by the language-plan-v2 milestone (`.worktrees/language-plan-v2.md`) +
+  the translation-3 batched-chunk optimization
+  (`.worktrees/translation-3-plan.md`).
+- Bound to the binding test inventories in
+  `docs/test-plans/language-plan-v2-tests.md` (21 Rust + 5 TS rows) and
+  `docs/test-plans/translation-3-tests.md` (16 Rust rows: 12 inline `engine.rs`
+  unit tests + 4 integration tests).
 
 ## Local Contracts
 
@@ -93,21 +97,52 @@ preserved in `article_original_content` and `article_original_chunks`.
 - Translation must complete before screening and summary generation consume
   the article. Batch import Phase 4 (summaries) gates per article on
   `translation_status` leaving `running`.
-- **Parallel per-chunk dispatch** (`engine.rs`): `translate_full_text`
-  dispatches all per-chunk LLM calls concurrently via
-  `futures::future::join_all`. Real parallelism is bounded by the
-  `LlmOrchestrator`'s semaphore (`max_concurrent_requests` from `LlmConfig`),
-  so a single-request config runs sequentially while a high-concurrency
-  config parallelizes automatically - the engine itself does NOT spawn or
-  bound work. `join_all` preserves input order, so the stitched
-  `english_full_text` is byte-identical to the previous sequential path.
-  The metadata LLM call (title + abstract) still runs sequentially before
-  chunk dispatch. Error handling mirrors the previous fail-on-first-error
-  semantics: the first error (in input order) aborts the job, other
-  in-flight chunks complete harmlessly (bounded by the orchestrator).
-  Tested in `auto_translate_full_text_test.rs`
-  (`parallel_chunk_dispatch_preserves_input_order`) with a variable-latency
-  mock.
+- **Batched chunk dispatch** (`engine.rs`): `translate_full_text`
+  packs chunks into context-window-sized batches (`build_chunk_batches`,
+  mirroring `wiki/ingest.rs::build_ingest_prompt_batches` with
+  `INPUT_BUDGET_FRACTION = 0.4`, floor `MIN_BATCH_INPUT_CHARS = 4_000`, cap
+  `MAX_BATCH_INPUT_CHARS = 80_000`) and sends each batch as ONE LLM call
+  carrying a JSON-lines payload (`{"<chunk_id>": "<text>"}` per line). The
+  model responds with a single JSON object mapping each chunk_id to its
+  English translation; `parse_batch_translation_response` (tolerant of
+  markdown fences + a regex `{...}` fallback) fills a pre-sized slot per
+  chunk_id. This reduces a 46-chunk article from 46 per-chunk calls to
+  ~2-3 batched calls.
+- **Resend loop with cap** (`engine.rs`): any chunk the model skipped or
+  returned empty is collected into a resend round, which repacks ONLY the
+  missing chunk_ids via `build_chunk_batches_for_indices` (preserving the
+  ORIGINAL chunk ids in both the prompt keys and the returned batch indices
+  so slots fill without remapping). After `MAX_RESEND_ITERATIONS = 2`
+  rounds, any still-missing chunk FAILS the job with a clear audit detail
+  naming the missing chunk ids. This is stricter than the previous
+  skip-empty lenience (an unfilled slot now fails rather than silently
+  dropping a chunk from the stitched `full_text`) - no silent gaps reach
+  the translated text.
+- **Concurrency**: batches are dispatched concurrently via
+  `futures::future::join_all`; real parallelism is bounded by the
+  `LlmOrchestrator`'s semaphore (`max_concurrent_requests` from
+  `LlmConfig`), so a single-request config serializes while a
+  high-concurrency config parallelizes automatically. The resend round is a
+  follow-up `join_all` after the prior round completes. The metadata LLM
+  call (title + abstract) still runs sequentially before chunk dispatch.
+- **`context_window_tokens` plumbing**: the worker extracts
+  `config.context_window_tokens` from the concrete `LlmConfig` BEFORE
+  constructing the `TranslationLlmClient` and passes it as a fourth
+  parameter to `translate_full_text`. It cannot be read inside the engine
+  from the `&dyn LlmClient` trait object (the trait has no config
+  accessor; widening it would pollute `screening::llm_client`).
+- **Error handling**: an LLM error on any batch fails the whole job
+  (mirrors the previous fail-on-first-error semantics); other in-flight
+  batches in the same round complete harmlessly (bounded by the
+  orchestrator). A parse failure on a batch response records every
+  expected id in that batch as missing, triggering a full-batch resend
+  (bounded by the cap above). Tested in `auto_translate_full_text_test.rs`
+  (`full_text_translation_produces_english_chunks_and_full_text`,
+  `parallel_chunk_dispatch_preserves_input_order`,
+  `batched_translation_resends_missing_chunks`,
+  `batched_translation_fails_after_resend_cap`) + 12 inline unit tests in
+  `engine.rs` covering the pure packer + parser helpers. Binding inventory:
+  `docs/test-plans/translation-3-tests.md`.
 - `#[must_use]` on pure helpers (`language.rs` detection functions).
 - `parse_metadata_translation` is strict: an empty title OR an empty abstract
   section is a parse failure (returns `None`), so a malformed LLM response
@@ -126,7 +161,10 @@ preserved in `article_original_content` and `article_original_chunks`.
   `summary_translation_integration_test.rs`, `batch_import_translation_test.rs`,
   `v001_v003_schema_parity_test.rs`.
 - `npm run check:all` includes `check:test-inventory`, which enforces the
-  binding inventory in `docs/test-plans/language-plan-v2-tests.md`.
+  binding inventories in `docs/test-plans/language-plan-v2-tests.md` AND
+  `docs/test-plans/translation-3-tests.md` (the batched-chunk-dispatch
+  inventory: 12 inline `engine.rs` unit tests + 4 integration tests in
+  `auto_translate_full_text_test.rs`).
 
 ## Child DOX Index
 

@@ -125,6 +125,12 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
                 (config, orchestrator)
             }; // DB lock released before the async LLM call.
 
+            // `context_window_tokens` is plumbed into `translate_full_text` for
+            // batch sizing (the engine packs chunks into context-window-sized
+            // batches; see translation-3-plan.md). It cannot be read from the
+            // `&dyn LlmClient` trait object inside the engine, so we extract it
+            // here from the concrete `LlmConfig` before constructing the client.
+            let context_window_tokens = config.context_window_tokens;
             let client = TranslationLlmClient { config, orchestrator, job_id: article_id.clone() };
 
             // Run the translation. The engine takes `&Mutex<Connection>` and
@@ -134,7 +140,7 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
             let db = app_for_job.state::<DbState>();
             let result = match job.kind {
                 TranslationJobKind::FullText => {
-                    translate_full_text(&db.conn, &article_id, &client).await
+                    translate_full_text(&db.conn, &article_id, &client, context_window_tokens).await
                 }
                 TranslationJobKind::MetadataOnly => {
                     translate_metadata_only(&db.conn, &article_id, &client).await

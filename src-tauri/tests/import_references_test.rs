@@ -484,8 +484,8 @@ fn cross_format_core_fields_match() {
         let ris_title = ris.title.as_deref().unwrap_or_default();
         let bib_title = bib.title.as_deref().unwrap_or_default();
         assert!(
-            ris_title.contains(&title.to_string().replace("  ", " ").trim())
-                || bib_title.contains(&title.to_string().replace("  ", " ").trim()),
+            ris_title.contains(title.to_string().replace("  ", " ").trim())
+                || bib_title.contains(title.to_string().replace("  ", " ").trim()),
             "Titles should match for record {}\n  RIS: {}\n  BIB: {}",
             i + 1,
             ris_title,

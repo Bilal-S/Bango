@@ -133,23 +133,48 @@ fn has_full_text_article_enqueues_full_text_job_kind() {
     assert!(matches!(ft_kind, TranslationJobKind::FullText));
 }
 
+/// Helper: build a JSON-map response for a batched chunk translation call.
+/// Parses the chunk ids out of the JSON-lines user prompt (one `{"<id>": "..."}`
+/// per line) and returns `{"<id>": "<english>", ...}`.
+fn build_batch_response(user: &str, translator: impl Fn(&str) -> String) -> String {
+    let mut map = serde_json::Map::new();
+    for line in user.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('{') {
+            continue;
+        }
+        if let Ok(serde_json::Value::Object(obj)) =
+            serde_json::from_str::<serde_json::Value>(trimmed)
+        {
+            if let Some((id, val)) = obj.into_iter().next() {
+                if let Some(src) = val.as_str() {
+                    map.insert(id, serde_json::Value::String(translator(src)));
+                }
+            }
+        }
+    }
+    serde_json::to_string(&map).unwrap_or_default()
+}
+
 #[test]
 fn full_text_translation_produces_english_chunks_and_full_text() {
-    // Full end-to-end full-text translation with mock LLM: metadata +
-    // per-chunk translation → English stitched full_text → re-chunked
+    // Full end-to-end BATCHED full-text translation with mock LLM: metadata +
+    // batched chunk translation → English stitched full_text → re-chunked
     // English chunks. This is what the worker dispatches when it receives
-    // a `FullText` job for an article with full text attached.
+    // a `FullText` job for an article with full text attached. The chunk path
+    // is now batched (one LLM call carrying a JSON-lines payload of all chunks),
+    // so the mock responds with a JSON map keyed by chunk_id.
     let conn = setup_db();
     let article_id = seed_non_english_with_full_text(&conn);
 
     // Mock LLM: first call is metadata (TITLE:/ABSTRACT:), subsequent calls
-    // are per-chunk translations.
+    // are BATCHED chunk translations (JSON-lines request → JSON-map response).
     struct FullTextMock {
         call_count: AtomicUsize,
     }
     #[async_trait::async_trait]
     impl LlmClient for FullTextMock {
-        async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+        async fn send(&self, _system: &str, user: &str) -> Result<(String, usize), AppError> {
             let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
             if idx == 0 {
                 Ok((
@@ -158,7 +183,11 @@ fn full_text_translation_produces_english_chunks_and_full_text() {
                     50,
                 ))
             } else {
-                Ok((format!("English translated section {idx}."), 30))
+                // Batched chunk call: parse ids from the JSON-lines prompt and
+                // respond with a JSON map translating each chunk to English.
+                let map =
+                    build_batch_response(user, |_src| "English translated section.".to_string());
+                Ok((map, 30))
             }
         }
     }
@@ -167,7 +196,7 @@ fn full_text_translation_produces_english_chunks_and_full_text() {
     let mutex = std::sync::Mutex::new(conn);
     let rt =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-    rt.block_on(translate_full_text(&mutex, &article_id, &mock))
+    rt.block_on(translate_full_text(&mutex, &article_id, &mock, 50_000))
         .expect("full-text translation must succeed");
     let conn = mutex.into_inner().expect("mutex not poisoned");
 
@@ -205,10 +234,10 @@ fn full_text_translation_produces_english_chunks_and_full_text() {
 
 #[test]
 fn parallel_chunk_dispatch_preserves_input_order() {
-    // Regression: per-chunk translation now uses `futures::future::join_all`
-    // (concurrent dispatch bounded by the orchestrator's semaphore). This test
-    // verifies that the stitched `full_text` preserves input-chunk order even
-    // though the LLM responses arrive non-deterministically.
+    // Regression: batched chunk translation dispatches batches concurrently via
+    // `futures::future::join_all` (bounded by the orchestrator's semaphore).
+    // This test verifies that the stitched `full_text` preserves input-chunk
+    // order even though the LLM responses arrive non-deterministically.
     //
     // The mock embeds the chunk's input index in its response so the test can
     // assert the stitched output is in ascending order regardless of which
@@ -229,8 +258,10 @@ fn parallel_chunk_dispatch_preserves_input_order() {
         .collect();
     chunk_repo::replace_chunks_for_article(&conn, &article_id, &chunks).expect("seed 5 chunks");
 
-    // Mock: metadata on the first call, per-chunk responses that echo the
-    // chunk's input text verbatim (so the stitched output is deterministic).
+    // Mock: metadata on the first call, batched responses that echo each
+    // chunk's input text (prefixed with "English ") so the stitched output is
+    // deterministic per chunk. A variable-latency sleep exercises the
+    // concurrent dispatch.
     struct OrderMock {
         call_count: AtomicUsize,
     }
@@ -242,8 +273,6 @@ fn parallel_chunk_dispatch_preserves_input_order() {
                 return Ok(("TITLE:\nTitle\n\nABSTRACT:\nAbstract.".to_string(), 10));
             }
             // Simulate variable latency so futures complete out of order.
-            // Reverse-scheduled sleep: later chunks return faster.
-            let chunk_input = user;
             let delay_ms: u64 = match idx {
                 1 => 40,
                 2 => 10,
@@ -252,7 +281,10 @@ fn parallel_chunk_dispatch_preserves_input_order() {
                 _ => 0,
             };
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-            Ok((format!("English {chunk_input}"), 10))
+            // Build a JSON map echoing each chunk's source text, prefixed
+            // "English " so the test can assert order on the stitched output.
+            let map = build_batch_response(user, |src| format!("English {src}"));
+            Ok((map, 10))
         }
     }
 
@@ -260,7 +292,8 @@ fn parallel_chunk_dispatch_preserves_input_order() {
     let mutex = std::sync::Mutex::new(conn);
     let rt =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-    rt.block_on(translate_full_text(&mutex, &article_id, &mock)).expect("translation must succeed");
+    rt.block_on(translate_full_text(&mutex, &article_id, &mock, 50_000))
+        .expect("translation must succeed");
     let conn = mutex.into_inner().expect("mutex not poisoned");
 
     let article = article_repo::get_article_by_id(&conn, &article_id).expect("article");
@@ -275,6 +308,164 @@ fn parallel_chunk_dispatch_preserves_input_order() {
         vec![0, 1, 2, 3, 4],
         "chunks must appear in input order; got: {full_text}"
     );
+}
+
+#[test]
+fn batched_translation_resends_missing_chunks() {
+    // Resend loop: the first batch call returns only HALF the chunk ids; the
+    // engine must detect the missing ids and resend them in a follow-up batch.
+    // The follow-up batch returns the rest. The final stitched full_text must
+    // contain ALL chunks, proving the resend recovered the missing ones.
+    let conn = setup_db();
+    let article_id = seed_non_english_with_full_text(&conn);
+
+    // Seed 4 chunks. The mock will translate ids 0+1 on the first batch call
+    // (skip 2+3), then translate the missing 2+3 on the resend batch call.
+    let chunks: Vec<Chunk> = (0..4)
+        .map(|i| Chunk {
+            chunk_index: i,
+            section: Some("Methods".to_string()),
+            text: format!("Chunk {i} source text."),
+            word_count: 4,
+        })
+        .collect();
+    chunk_repo::replace_chunks_for_article(&conn, &article_id, &chunks).expect("seed 4 chunks");
+
+    // Mock: first batch call returns ids 0+1 only (simulating truncation);
+    // subsequent batch calls return the remaining ids.
+    struct TruncatingMock {
+        call_count: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl LlmClient for TruncatingMock {
+        async fn send(&self, _system: &str, user: &str) -> Result<(String, usize), AppError> {
+            let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
+            if idx == 0 {
+                return Ok(("TITLE:\nTitle\n\nABSTRACT:\nAbstract.".to_string(), 10));
+            }
+            // Parse ALL chunk ids in this batch's prompt.
+            let requested_ids: Vec<String> = user
+                .lines()
+                .filter_map(|line| {
+                    let trimmed = line.trim();
+                    if !trimmed.starts_with('{') {
+                        return None;
+                    }
+                    serde_json::from_str::<serde_json::Value>(trimmed)
+                        .ok()
+                        .and_then(|v| v.as_object().and_then(|o| o.keys().next().cloned()))
+                })
+                .collect();
+
+            let mut map = serde_json::Map::new();
+            if idx == 1 {
+                // First batch round: return only the FIRST HALF of the requested
+                // ids (simulate truncation after chunk 1 of 3).
+                for id in requested_ids.iter().take(2) {
+                    map.insert(
+                        id.clone(),
+                        serde_json::Value::String(format!("English chunk {id}")),
+                    );
+                }
+            } else {
+                // Resend round(s): return every requested id (recovery).
+                for id in &requested_ids {
+                    map.insert(
+                        id.clone(),
+                        serde_json::Value::String(format!("English chunk {id}")),
+                    );
+                }
+            }
+            Ok((serde_json::to_string(&map).unwrap_or_default(), 10))
+        }
+    }
+
+    let mock = TruncatingMock { call_count: AtomicUsize::new(0) };
+    let mutex = std::sync::Mutex::new(conn);
+    let rt =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+    rt.block_on(translate_full_text(&mutex, &article_id, &mock, 50_000))
+        .expect("translation must succeed via resend");
+    let conn = mutex.into_inner().expect("mutex not poisoned");
+
+    let article = article_repo::get_article_by_id(&conn, &article_id).expect("article");
+    assert_eq!(article.translation_status, "succeeded");
+    let full_text = article.full_text.as_deref().unwrap_or("");
+    // All 4 chunks must be present in the stitched output - the resend loop
+    // recovered the two the first batch skipped.
+    for i in 0..4 {
+        assert!(
+            full_text.contains(&format!("English chunk {i}")),
+            "chunk {i} missing from stitched output (resend did not recover it): {full_text}"
+        );
+    }
+
+    // At least 3 LLM calls: 1 metadata + 1 initial batch + 1 resend batch.
+    let calls = mock.call_count.load(Ordering::SeqCst);
+    assert!(
+        calls >= 3,
+        "expected at least 3 LLM calls (metadata + initial batch + resend), got {calls}"
+    );
+}
+
+#[test]
+fn batched_translation_fails_after_resend_cap() {
+    // Resend cap: when the model persistently truncates (returns an empty map
+    // for every batch call), the engine must fail the job after
+    // `MAX_RESEND_ITERATIONS` rounds instead of looping forever. The article's
+    // `translation_status` must be `failed` with an error mentioning the
+    // missing chunks.
+    let conn = setup_db();
+    let article_id = seed_non_english_with_full_text(&conn);
+
+    // Seed 2 chunks so the batch has something to truncate.
+    let chunks: Vec<Chunk> = (0..2)
+        .map(|i| Chunk {
+            chunk_index: i,
+            section: Some("Methods".to_string()),
+            text: format!("Chunk {i} source text."),
+            word_count: 4,
+        })
+        .collect();
+    chunk_repo::replace_chunks_for_article(&conn, &article_id, &chunks).expect("seed 2 chunks");
+
+    // Mock: metadata succeeds, but EVERY batch call returns an empty map (the
+    // model never honors the JSON contract). The engine must exhaust its
+    // resend budget and fail.
+    struct AlwaysEmptyMock {
+        call_count: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl LlmClient for AlwaysEmptyMock {
+        async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+            let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
+            if idx == 0 {
+                return Ok(("TITLE:\nTitle\n\nABSTRACT:\nAbstract.".to_string(), 10));
+            }
+            // Always return an empty JSON object - no chunk translations.
+            Ok(("{}".to_string(), 5))
+        }
+    }
+
+    let mock = AlwaysEmptyMock { call_count: AtomicUsize::new(0) };
+    let mutex = std::sync::Mutex::new(conn);
+    let rt =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+    let result = rt.block_on(translate_full_text(&mutex, &article_id, &mock, 50_000));
+    assert!(result.is_err(), "persistently-truncating batch must fail the job");
+    let conn = mutex.into_inner().expect("mutex not poisoned");
+
+    let status = article_repo::get_translation_status(&conn, &article_id).expect("status");
+    assert_eq!(
+        status.translation_status, "failed",
+        "translation_status must be 'failed' after resend cap exhaustion"
+    );
+    let err = status.translation_error.expect("translation_error must be set");
+    assert!(err.contains("missing"), "error message should mention missing chunks: {err}");
+
+    // The article must NOT be marked translated.
+    let article = article_repo::get_article_by_id(&conn, &article_id).expect("article");
+    assert!(!article.is_translated, "article must not be marked translated on failure");
 }
 
 #[test]

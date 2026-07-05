@@ -34,7 +34,8 @@ fn seed_article_with_full_text(conn: &rusqlite::Connection, title: &str) -> Stri
     };
     let inserted = article_repo::insert_articles_batch(conn, &[article], "test").expect("insert");
     let id = inserted[0].id.clone();
-    article_repo::move_articles_to_working_batch(conn, &[id.clone()]).expect("move to working");
+    article_repo::move_articles_to_working_batch(conn, std::slice::from_ref(&id))
+        .expect("move to working");
     conn.execute("UPDATE articles SET has_full_text = 1 WHERE id = ?1", rusqlite::params![id])
         .expect("set has_full_text");
     id
