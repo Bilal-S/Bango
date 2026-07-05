@@ -90,7 +90,13 @@ describe each durable boundary so agents can locate the right area. Create a chi
   (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:
   `batch_import/` (4-phase batch import processor; see `batch_import/` entry
   below),
-  `pdf_extract.rs`, `sections.rs`, `chunking.rs`, `text_tokens.rs` [Tier 3 shared
+  `pdf_extract.rs` (incl. **legacy-CJK mojibake recovery** via `encoding_rs` +
+  `chardetng`: when `unpdf` returns raw Shift-JIS/EUC-JP/CP949/GB18030 bytes
+  as Latin-1 code points - the common failure mode for CJK PDFs whose fonts
+  lack a ToUnicode CMap - the `recover_mojibake` pass detects the C1
+  control-char signature and re-decodes the bytes to correct Unicode before
+  header/footer stripping; tested in `tests/pdf_mojibake_test.rs`),
+  `sections.rs`, `chunking.rs`, `text_tokens.rs` [Tier 3 shared
   tokenizer for FTS5 BM25 + screening chunk scoring]). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
