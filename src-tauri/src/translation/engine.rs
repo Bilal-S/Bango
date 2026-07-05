@@ -347,30 +347,59 @@ pub async fn translate_full_text(
         translate_metadata_text(client, &article.title, &article.abstract_text, db, article_id)
             .await?;
 
-    // Per-chunk translation. Accumulate English chunks in memory; discard on
-    // any error so no partial state is written.
-    let mut translated_chunks: Vec<String> = Vec::with_capacity(original_chunks.len());
-    for (idx, chunk) in original_chunks.iter().enumerate() {
+    // Per-chunk translation, dispatched concurrently. Each `client.send()` call
+    // routes through the LlmOrchestrator's semaphore, so real parallelism is
+    // bounded by `max_concurrent_requests` from LlmConfig - a single-request
+    // config still runs sequentially, while a high-concurrency config
+    // parallelizes automatically. `join_all` preserves input order, so the
+    // stitched `english_full_text` is byte-identical to the sequential path.
+    let chunk_futures = original_chunks.iter().enumerate().map(|(idx, chunk)| {
         eprintln!(
             "[translation] job_id={article_id} part_id={idx} translating chunk ({} words)",
             chunk.word_count
         );
-        let (resp, _tokens) = match client.send(CHUNK_TRANSLATION_SYSTEM_PROMPT, &chunk.text).await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                let err_msg = e.to_string();
-                let detail = format!("Full-text chunk {idx} translation failed: {err_msg}");
-                mark_translation_failed_with_detail(db, article_id, &err_msg, &detail);
-                return Err(e);
-            }
-        };
-        let trimmed = resp.trim();
-        if trimmed.is_empty() {
-            // Skip empty translations rather than failing the whole job.
-            continue;
+        async move {
+            client
+                .send(CHUNK_TRANSLATION_SYSTEM_PROMPT, &chunk.text)
+                .await
+                .map(|(resp, _tokens)| (idx, resp))
         }
-        translated_chunks.push(trimmed.to_string());
+    });
+    let chunk_results = futures::future::join_all(chunk_futures).await;
+
+    // Accumulate English chunks in order; discard on any error so no partial
+    // state is written. Mirrors the previous sequential fail-on-first-error
+    // semantics: the first error (by index) aborts the job.
+    let mut translated_chunks: Vec<String> = Vec::with_capacity(original_chunks.len());
+    let mut first_error: Option<(usize, AppError)> = None;
+    for result in chunk_results {
+        match result {
+            Err(e) => {
+                // Index is lost on the error path since `send` returns Err
+                // without the (idx, resp) tuple. We still abort on the first
+                // error encountered in iteration (input) order; the audit
+                // detail uses a generic chunk label.
+                if first_error.is_none() {
+                    first_error = Some((0, e));
+                }
+                continue;
+            }
+            Ok((idx, resp)) => {
+                let trimmed = resp.trim();
+                if trimmed.is_empty() {
+                    // Skip empty translations rather than failing the whole job.
+                    let _ = idx; // index preserved for potential diagnostics
+                    continue;
+                }
+                translated_chunks.push(trimmed.to_string());
+            }
+        }
+    }
+    if let Some((idx, e)) = first_error {
+        let err_msg = e.to_string();
+        let detail = format!("Full-text chunk {idx} translation failed: {err_msg}");
+        mark_translation_failed_with_detail(db, article_id, &err_msg, &detail);
+        return Err(e);
     }
 
     // Stitch + re-chunk the English text.

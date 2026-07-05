@@ -172,6 +172,12 @@ const {
   confirmTranslation,
   cancelTranslation,
 } = useTranslation({
+  onTranslationQueued: (articleId) => {
+    // Refresh immediately after enqueue so the badge flips to the
+    // "Translation Queued" spinner chip without waiting for
+    // `translation:complete` (which can take minutes for full-text jobs).
+    emit('refreshArticle', articleId);
+  },
   onTranslationComplete: (articleId) => {
     // Refresh the article so the header chip flips to "Translated".
     emit('refreshArticle', articleId);

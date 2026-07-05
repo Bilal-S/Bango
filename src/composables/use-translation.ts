@@ -56,6 +56,13 @@ export interface UseTranslationOptions {
   /** Called when a translation completes (success or failure) so the host
    * can refresh its article state. */
   onTranslationComplete?: (articleId: string, success: boolean, error?: string) => void;
+  /** Called immediately after a translation is successfully enqueued (the
+   * backend has written `translation_status = 'queued'`) so the host can
+   * refresh its article state and the status badge flips to the
+   * "Translation Queued" spinner chip right away. Without this the badge
+   * stays stale until the worker eventually emits `translation:complete`
+   * (which can take minutes for full-text translations). */
+  onTranslationQueued?: (articleId: string) => void;
 }
 
 export function useTranslation(options: UseTranslationOptions = {}) {
@@ -90,6 +97,12 @@ export function useTranslation(options: UseTranslationOptions = {}) {
         triggerSource: 'manual',
       });
       show(`Translation queued for: ${translateArticleTitle.value}`, 'info');
+      // Notify the host so it can refresh the article state immediately. The
+      // backend has just written `translation_status = 'queued'`, so a refresh
+      // flips the status badge to the "Translation Queued" spinner chip right
+      // away - without this the badge stays stale until `translation:complete`
+      // fires (which can take minutes for full-text translations).
+      options.onTranslationQueued?.(articleId);
     } catch (e) {
       pendingTranslations.value.delete(articleId);
       show(`Failed to queue translation: ${(e as Error).message ?? e}`, 'error');

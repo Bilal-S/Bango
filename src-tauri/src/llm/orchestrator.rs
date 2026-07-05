@@ -16,7 +16,7 @@ use crate::llm::client;
 use crate::models::llm_config::LlmConfig;
 
 /// Maximum time to wait for a single LLM response.
-const LLM_TIMEOUT_SECS: u64 = 120;
+const LLM_TIMEOUT_SECS: u64 = 300;
 
 /// Label for categorizing LLM request sources.
 #[derive(Debug, Clone)]
@@ -129,7 +129,7 @@ impl LlmOrchestrator {
         // 2. Rate limiting: ensure minimum delay between requests
         self.enforce_rate_limit().await;
 
-        // 3. Make the actual LLM call with a 2-minute timeout
+        // 3. Make the actual LLM call with a 5-minute timeout
         let result = tokio::time::timeout(
             Duration::from_secs(LLM_TIMEOUT_SECS),
             client::send_chat_completion(config, system_prompt, user_prompt),

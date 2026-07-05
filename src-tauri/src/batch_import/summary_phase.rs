@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 
 use crate::commands::summary::generate_article_ai_summary_inner;
+use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::db::llm_config_repo;
 use crate::llm::orchestrator::LlmOrchestrator;
@@ -45,23 +46,10 @@ where
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
 
     // Pre-flight: if LLM is not configured, skip the phase entirely with a
-    // clear message rather than failing per-article.
-    let llm_configured = {
-        let conn = match db_state.conn.lock() {
-            Ok(c) => c,
-            Err(_) => {
-                return BatchImportPhaseResult {
-                    total,
-                    processed: 0,
-                    succeeded: 0,
-                    failed: total,
-                    errors: vec!["Failed to acquire DB lock to check LLM config".to_string()],
-                };
-            }
-        };
-        llm_config_repo::has_config(&conn).unwrap_or_default()
-    };
-    if !llm_configured {
+    // clear message + system audit record rather than failing per-article.
+    // Mirrors the Phase 3 (Translations) pre-flight check so both LLM-gated
+    // phases surface the same actionable message in Diagnostics.
+    if !llm_configured_with_audit(db_state) {
         return BatchImportPhaseResult {
             total,
             processed: 0,
@@ -118,4 +106,32 @@ where
     );
 
     BatchImportPhaseResult { total, processed, succeeded, failed, errors }
+}
+
+/// Pre-flight LLM configuration check for Phase 4.
+///
+/// Returns `true` when an LLM is configured (the phase should proceed
+/// normally). Returns `false` when no LLM is configured, after writing a
+/// system-level audit record (`article_id = NULL`, `action = 'error'`) so the
+/// skip surfaces in Diagnostics with an actionable explanation.
+///
+/// Mirrors [`super::translations_phase::check_llm_configured_or_skip`] so both
+/// LLM-gated phases report consistently.
+fn llm_configured_with_audit(db_state: &State<'_, DbState>) -> bool {
+    let conn = match db_state.conn.lock() {
+        Ok(c) => c,
+        Err(_) => {
+            // Defer the error to the caller via the early-return path; here we
+            // just return false so the caller emits its skip result. The
+            // lock-error variant is reported by the caller's own skip message.
+            return false;
+        }
+    };
+    if llm_config_repo::has_config(&conn).unwrap_or(false) {
+        return true;
+    }
+    let audit_detail = "Batch import Phase 4 (AI Summaries) skipped: LLM not \
+         configured. Configure an LLM provider in Settings to generate summaries.";
+    let _ = audit_repo::log_error(&conn, audit_detail);
+    false
 }

@@ -7,10 +7,11 @@
 
 use std::io::Write;
 
-use bango_lib::batch_import::{citations_phase, full_text_phase};
+use bango_lib::batch_import::{citations_phase, full_text_phase, translations_phase};
 use bango_lib::db::app_settings_repo::{set_setting, STORAGE_ROOT_KEY};
 use bango_lib::db::article_repo;
 use bango_lib::db::article_repo::get_articles_with_doi_info;
+use bango_lib::db::audit_repo;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::db::reference_repo;
 use bango_lib::models::article::NewArticle;
@@ -375,4 +376,93 @@ fn pipeline_handles_multiple_articles_with_mixed_files() {
 
     assert!(by_doi[doi_c].has_full_text, "C should have full text");
     assert!(by_doi[doi_c].has_reference_details, "C should have refs");
+}
+
+// ── Phase 3: Translations pre-flight LLM check ──────────────────────────────
+
+/// Count the system-level audit entries (`article_id IS NULL`,
+/// `action = 'error'`) - the records written by `audit_repo::log_error`.
+fn count_system_error_audit(conn: &Connection) -> i64 {
+    conn.query_row(
+        "SELECT COUNT(*) FROM audit_entries WHERE article_id IS NULL AND action = 'error'",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+#[test]
+fn phase3_pre_flight_skips_when_llm_not_configured_and_writes_audit() {
+    // When `auto_translate = true` but no LLM is configured, Phase 3 must
+    // short-circuit with the "Skipped: LLM not configured" message and write a
+    // system-level audit record so the skip surfaces in Diagnostics with an
+    // actionable explanation (instead of silently churning every article
+    // through the worker's per-article failure path).
+    let conn = test_db();
+
+    // No LLM config inserted -> `has_config` returns false.
+    let skip = translations_phase::check_llm_configured_or_skip(&conn, 3);
+    let result = skip.expect("pre-flight should return a skip result when LLM is not configured");
+
+    assert_eq!(result.total, 3, "total echoes the input article count");
+    assert_eq!(result.processed, 0, "nothing was processed");
+    assert_eq!(result.succeeded, 0, "nothing succeeded");
+    assert_eq!(result.failed, 0, "the skip is NOT a failure");
+    assert!(
+        result.errors.iter().any(|e| e == "Skipped: LLM not configured"),
+        "errors must carry the canonical skip message; got {:?}",
+        result.errors
+    );
+
+    // A system-level audit record must have been written so the skip is
+    // visible in Diagnostics / Notification History.
+    assert_eq!(
+        count_system_error_audit(&conn),
+        1,
+        "exactly one system-level error audit row must be written on skip"
+    );
+
+    // The audit detail must mention Phase 3 and the actionable remedy so the
+    // user understands what to do.
+    let entries = audit_repo::get_generic_audit_entries(&conn, 10).expect("read audit entries");
+    assert_eq!(entries.len(), 1, "one generic audit entry expected");
+    let detail = entries[0].details.as_deref().unwrap_or("");
+    assert!(
+        detail.contains("Phase 3") && detail.contains("LLM not configured"),
+        "audit detail must explain the Phase 3 skip; got {detail:?}"
+    );
+    assert!(
+        detail.contains("Settings"),
+        "audit detail must point the user to Settings; got {detail:?}"
+    );
+}
+
+#[test]
+fn phase3_pre_flight_proceeds_when_llm_is_configured() {
+    // When an LLM IS configured, the pre-flight check returns `None` (the
+    // phase should proceed normally) and writes NO system audit record.
+    let conn = test_db();
+
+    // Insert a minimal LLM config row so `has_config` returns true. The schema
+    // is the singleton row `id = 1` with provider/endpoint_url/model_name +
+    // api_key_encrypted (required for non-local providers per `has_config`).
+    conn.execute(
+        "INSERT INTO llm_config (id, provider, endpoint_url, model_name, \
+         api_key_encrypted, temperature, skip_temperature, \
+         max_concurrent_requests, request_delay_ms, context_window_tokens) \
+         VALUES (1, 'openai', 'https://api.openai.com/v1', 'gpt-4o', \
+         'enc-blob', 0.2, 0, 3, 500, 50000)",
+        [],
+    )
+    .expect("insert llm config");
+
+    let skip = translations_phase::check_llm_configured_or_skip(&conn, 5);
+    assert!(skip.is_none(), "pre-flight must return None when LLM is configured");
+
+    // No system-level audit record should have been written.
+    assert_eq!(
+        count_system_error_audit(&conn),
+        0,
+        "no system-level error audit row when LLM is configured"
+    );
 }

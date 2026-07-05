@@ -16,7 +16,9 @@ use tauri::{Manager, State};
 
 use crate::commands::translation::enqueue_article_translation_inner;
 use crate::db::article_repo;
+use crate::db::audit_repo;
 use crate::db::connection::DbState;
+use crate::db::llm_config_repo;
 use crate::translation::language::should_skip_translation;
 use crate::translation::worker::TranslationJobKind;
 
@@ -28,6 +30,49 @@ const TRANSLATION_WAIT_TIMEOUT_SECS: u64 = 5 * 60;
 
 /// Poll interval for the translation-wait loop.
 const TRANSLATION_POLL_INTERVAL_MS: u64 = 2_000;
+
+/// The skip message used when the LLM is not configured. Mirrors the Phase 4
+/// (AI Summaries) pre-flight message so both LLM-gated phases report the same
+/// reason string.
+pub const LLM_NOT_CONFIGURED_SKIP_MSG: &str = "Skipped: LLM not configured";
+
+/// Pre-flight LLM configuration check for Phase 3.
+///
+/// Returns `None` when an LLM is configured (the phase should proceed
+/// normally). Returns `Some(skip_result)` when no LLM is configured: the
+/// result carries [`LLM_NOT_CONFIGURED_SKIP_MSG`] as its sole error, and a
+/// system-level audit record (`article_id = NULL`, `action = 'error'`) is
+/// written so the skip surfaces in Diagnostics with an actionable explanation
+/// instead of silently churning every article through the worker's per-article
+/// "LLM not configured" failure path.
+///
+/// This mirrors the Phase 4 (`summary_phase.rs`) pre-flight pattern, plus the
+/// system audit record so users who enabled `auto_translate` without an LLM
+/// see a single clear "configure an LLM" message rather than N scattered
+/// per-article `translation_error` audit rows.
+///
+/// Pure I/O over `&Connection` so it is unit-testable per CLAUDE.md
+/// ("Prefer testing extracted logic over `#[tauri::command]` shims").
+pub fn check_llm_configured_or_skip(
+    conn: &rusqlite::Connection,
+    total: usize,
+) -> Option<BatchImportPhaseResult> {
+    if llm_config_repo::has_config(conn).unwrap_or(false) {
+        return None;
+    }
+    // Write a system-level audit record so the skip is visible in Diagnostics
+    // and the Notification History, with an actionable explanation.
+    let audit_detail = "Batch import Phase 3 (Translations) skipped: LLM not \
+         configured. Configure an LLM provider in Settings to use auto-translate.";
+    let _ = audit_repo::log_error(conn, audit_detail);
+    Some(BatchImportPhaseResult {
+        total,
+        processed: 0,
+        succeeded: 0,
+        failed: 0,
+        errors: vec![LLM_NOT_CONFIGURED_SKIP_MSG.to_string()],
+    })
+}
 
 /// Run Phase 3: enqueue translations for non-English newly-attached articles
 /// and wait for each to complete.
@@ -52,6 +97,30 @@ where
     let mut succeeded = 0usize;
     let mut failed = 0usize;
     let mut errors: Vec<String> = Vec::new();
+
+    // Pre-flight: if the LLM is not configured, skip the phase entirely with a
+    // clear message + system audit record rather than churning every article
+    // through the worker's per-article "LLM not configured" failure path.
+    // Mirrors the Phase 4 (AI Summaries) pre-flight check. This must run BEFORE
+    // the worker-handle resolution so a no-LLM environment (e.g. a CI test
+    // harness without the worker registered) still short-circuits cleanly.
+    {
+        let conn = match db_state.conn.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                return BatchImportPhaseResult {
+                    total,
+                    processed: 0,
+                    succeeded: 0,
+                    failed: total,
+                    errors: vec![format!("Failed to acquire DB lock to check LLM config: {e}")],
+                };
+            }
+        };
+        if let Some(skip) = check_llm_configured_or_skip(&conn, total) {
+            return skip;
+        }
+    }
 
     // Resolve the translation worker handle (needed for enqueue). If it's not
     // registered (e.g. in a test harness), skip the phase gracefully.

@@ -117,6 +117,20 @@ async function refreshBatchProgress(): Promise<void> {
   }
 }
 
+/**
+ * Extract the phase skip message (e.g. "Skipped: LLM not configured") from a
+ * phase result's `errors` array. Returns the first error whose text starts
+ * with `"Skipped:"`, or `null` if there is no skip message. This distinguishes
+ * a phase-level skip from per-item failures.
+ */
+function phaseSkipMessage(phase: BatchImportPhaseResult | null): string | null {
+  if (!phase || !phase.errors || phase.errors.length === 0) {
+    return null;
+  }
+  const skip = phase.errors.find((e) => e.startsWith('Skipped:'));
+  return skip ?? null;
+}
+
 onMounted(async () => {
   await loadFullTextCount();
   await refreshBatchProgress();
@@ -208,22 +222,36 @@ onUnmounted(() => {
           {{ batchProgress.completed }} / {{ batchProgress.total }} items in current phase
         </p>
 
-        <!-- Phase summary (shown after each phase completes) -->
+        <!-- Phase summary (shown after each phase completes). Skip messages
+             (e.g. "Skipped: LLM not configured") are shown with a warning
+             style so the user understands why a phase did nothing. -->
         <div v-if="batchProgress.fullText" class="batch-progress__summary">
           Phase 1 (Full Text): {{ batchProgress.fullText.succeeded }} attached,
           {{ batchProgress.fullText.failed }} failed
+          <span v-if="phaseSkipMessage(batchProgress.fullText)" class="batch-progress__skip">
+            - {{ phaseSkipMessage(batchProgress.fullText) }}
+          </span>
         </div>
         <div v-if="batchProgress.citations" class="batch-progress__summary">
           Phase 2 (Citations): {{ batchProgress.citations.succeeded }} imported,
           {{ batchProgress.citations.failed }} failed
+          <span v-if="phaseSkipMessage(batchProgress.citations)" class="batch-progress__skip">
+            - {{ phaseSkipMessage(batchProgress.citations) }}
+          </span>
         </div>
         <div v-if="batchProgress.translations" class="batch-progress__summary">
           Phase 3 (Translations): {{ batchProgress.translations.succeeded }} translated,
           {{ batchProgress.translations.failed }} failed
+          <span v-if="phaseSkipMessage(batchProgress.translations)" class="batch-progress__skip">
+            - {{ phaseSkipMessage(batchProgress.translations) }}
+          </span>
         </div>
         <div v-if="batchProgress.summaries" class="batch-progress__summary">
           Phase 4 (AI Summaries): {{ batchProgress.summaries.succeeded }} summarized,
           {{ batchProgress.summaries.failed }} failed
+          <span v-if="phaseSkipMessage(batchProgress.summaries)" class="batch-progress__skip">
+            - {{ phaseSkipMessage(batchProgress.summaries) }}
+          </span>
         </div>
 
         <!-- Cancel button -->
@@ -438,6 +466,13 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--color-on-surface-variant, #464555);
   margin-top: 0.125rem;
+}
+
+/* Phase skip message (e.g. "Skipped: LLM not configured"). Styled as a
+   warning so the user understands the phase did nothing and why. */
+.batch-progress__skip {
+  color: #b45309;
+  font-style: italic;
 }
 
 .batch-progress__cancel {

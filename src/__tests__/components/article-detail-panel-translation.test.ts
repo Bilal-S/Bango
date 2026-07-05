@@ -207,6 +207,42 @@ describe('article-detail-panel.vue - translation (language-plan-v2)', () => {
     expect(document.body.querySelector('.dialog--danger')).toBeNull();
   });
 
+  it('refreshes_article_on_enqueue_before_completion', async () => {
+    // Regression: when the user confirms translation, the article must be
+    // refreshed immediately (so the header badge flips to the "Translation
+    // Queued" spinner chip) rather than waiting for the `translation:complete`
+    // event, which can take minutes for full-text jobs.
+    mockInvoke.mockResolvedValue(true);
+
+    const wrapper = mountPanel({
+      article: makeArticle({ language: 'French', isTranslated: false }),
+    });
+
+    // Open and confirm translation. The dialog is teleported to document.body.
+    const detailHeader = wrapper.findComponent({ name: 'DetailHeader' });
+    detailHeader.vm.$emit('request-translate');
+    await flushPromises();
+    const confirmBtn = document.body.querySelector('.btn--danger') as HTMLButtonElement;
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn.click();
+    await flushPromises();
+
+    // The enqueue invoke must have been called.
+    expect(mockInvoke).toHaveBeenCalledWith('enqueue_article_translation', {
+      articleId: 'a1',
+      triggerSource: 'manual',
+    });
+
+    // refreshArticle must fire immediately after the successful enqueue,
+    // BEFORE any `translation:complete` event. The parent uses this to
+    // re-fetch the article (now with `translation_status = 'queued'`) so the
+    // badge flips to "Translation Queued" right away.
+    const refreshEvents = wrapper.emitted('refreshArticle');
+    expect(refreshEvents).toBeTruthy();
+    expect(refreshEvents!.length).toBeGreaterThanOrEqual(1);
+    expect(refreshEvents![0]).toEqual(['a1']);
+  });
+
   it('refreshes_article_on_translation_complete_event', async () => {
     // TC-09: when the `translation:complete` event fires with success=true,
     // the article is refreshed so the header chip flips to "Translated".

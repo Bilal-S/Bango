@@ -28,6 +28,7 @@ sha2 = "0.10"
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
 async-trait = "0.1"
+futures = "0.3"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros", "rt-multi-thread"] }
 tauri-plugin-pilot = "0.7"
 tauri-plugin-dialog = "2"

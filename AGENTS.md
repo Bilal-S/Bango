@@ -88,7 +88,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
   (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:
-  `batch_import/` (3-phase batch import processor; see `batch_import/` entry
+  `batch_import/` (4-phase batch import processor; see `batch_import/` entry
   below),
   `pdf_extract.rs`, `sections.rs`, `chunking.rs`, `text_tokens.rs` [Tier 3 shared
   tokenizer for FTS5 BM25 + screening chunk scoring]). App entry
@@ -524,31 +524,46 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `{cleaned_doi}_references.ris`, `_citations.ris`, `.ris`, `.bib`; skips
     articles with `has_reference_details`/`has_citation_details`; auto-detects
     RIS vs BibTeX by extension via extracted
-    `commands::references::import_references_inner`), `summary_phase.rs`
-    (Phase 3: generate AI summaries for newly-attached articles without an
+    `commands::references::import_references_inner`), `translations_phase.rs`
+    (Phase 3: enqueue `FullText` translation jobs for non-English
+    newly-attached articles via `enqueue_article_translation_inner` + poll
+    until each completes; runs only when `auto_translate=true`; **pre-flight
+    LLM-configured guard** (`check_llm_configured_or_skip`, pure `&Connection`
+    helper) short-circuits the phase with the canonical
+    `"Skipped: LLM not configured"` message + a system-level audit record via
+    `audit_repo::log_error` so the skip surfaces in Diagnostics / Notification
+    History instead of churning every article through the worker's per-article
+    failure path - mirrors the Phase 4 pre-flight pattern), `summary_phase.rs`
+    (Phase 4: generate AI summaries for newly-attached articles without an
     existing summary; reuses extracted
     `commands::summary::generate_article_ai_summary_inner` so behavior is
     identical to the article detail "Generate AI Summary" button including the
-    `include_section_summaries` flag; pre-flight LLM-configured guard; emits
-    the standard `article-ai-summary-complete` / `-error` events).
+    `include_section_summaries` flag; **pre-flight LLM-configured guard**
+    (`llm_configured_with_audit`) short-circuits the phase with the same
+    `"Skipped: LLM not configured"` message + system-level audit record).
     `db::article_repo::get_articles_with_doi_info` loads all articles with a
     non-null DOI + the `has_full_text` / `has_reference_details` /
     `has_citation_details` / `has_ai_summary` flags in a single query to build
     the DOI match map. Frontend: `settings-reprocessing.vue` (button "Import
     full text files" right after "Rebuild text chunks"; dialog explaining the
-    3 phases + file naming convention + Start/Cancel; live progress bar with
+    4 phases + file naming convention + Start/Cancel; live progress bar with
     phase label + per-phase completed/total + overall percent + cancel button;
+    per-phase summary lines surface skip messages - e.g.
+    "Skipped: LLM not configured" - with a warning style via
+    `phaseSkipMessage(phase)` so the user understands why a phase did nothing;
     listens to `batch-import:progress` events so it survives navigation). 8
     inline tests in `full_text_phase.rs` (DOI match map normalization +
     collision + empty skip) + `citations_phase.rs` (skip-when-has-details,
     find-references, find-citations-independently, generic-ris-fallback,
     generic-bib-fallback). End-to-end integration tests live in
-    `tests/batch_import_test.rs` (10 tests: Phase 1 attach + skip-already-attached +
+    `tests/batch_import_test.rs` (12 tests: Phase 1 attach + skip-already-attached +
     no-matching-DOI + no-DOI-article; Phase 2 refs + citations + independent +
     skip-already-has-details; full-pipeline idempotency; multiple articles with
-    mixed files). Phase 3 (AI summaries) requires a live LLM and is not covered
-    by integration tests; the `generate_article_ai_summary_inner` core is tested
-    via the existing `summary_engine_test.rs` mock-LLM path.
+    mixed files; Phase 3 pre-flight skip + audit + proceed). Phase 3 (live
+    translation) + Phase 4 (AI summaries) require a live LLM and are not covered
+    end-to-end; the pre-flight LLM gate is unit-tested via the pure
+    `check_llm_configured_or_skip` helper, and the `generate_article_ai_summary_inner`
+    core is tested via the existing `summary_engine_test.rs` mock-LLM path.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).

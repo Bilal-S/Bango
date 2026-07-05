@@ -82,9 +82,32 @@ preserved in `article_original_content` and `article_original_chunks`.
   failure). `wait_for_article_translation` subscribes + falls back to a 60s
   sanity poll so a missed event never deadlocks the caller. Batch-import Phase
   3 and the screening pre-step both consume it.
+- **Frontend badge refresh** (the Rust worker emits `translation:complete`
+  only on completion, so the `use-translation.ts` composable exposes an
+  `onTranslationQueued` callback fired immediately after a successful
+  `enqueue_article_translation` invoke). `article-detail-panel.vue` wires both
+  `onTranslationQueued` and `onTranslationComplete` to `emit('refreshArticle')`
+  so the status badge flips to the "Translation Queued" spinner chip right
+  away - without the immediate refresh the badge stays stale through the whole
+  `queued`→`running` window (which can take minutes for full-text jobs).
 - Translation must complete before screening and summary generation consume
   the article. Batch import Phase 4 (summaries) gates per article on
   `translation_status` leaving `running`.
+- **Parallel per-chunk dispatch** (`engine.rs`): `translate_full_text`
+  dispatches all per-chunk LLM calls concurrently via
+  `futures::future::join_all`. Real parallelism is bounded by the
+  `LlmOrchestrator`'s semaphore (`max_concurrent_requests` from `LlmConfig`),
+  so a single-request config runs sequentially while a high-concurrency
+  config parallelizes automatically - the engine itself does NOT spawn or
+  bound work. `join_all` preserves input order, so the stitched
+  `english_full_text` is byte-identical to the previous sequential path.
+  The metadata LLM call (title + abstract) still runs sequentially before
+  chunk dispatch. Error handling mirrors the previous fail-on-first-error
+  semantics: the first error (in input order) aborts the job, other
+  in-flight chunks complete harmlessly (bounded by the orchestrator).
+  Tested in `auto_translate_full_text_test.rs`
+  (`parallel_chunk_dispatch_preserves_input_order`) with a variable-latency
+  mock.
 - `#[must_use]` on pure helpers (`language.rs` detection functions).
 - `parse_metadata_translation` is strict: an empty title OR an empty abstract
   section is a parse failure (returns `None`), so a malformed LLM response

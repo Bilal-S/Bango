@@ -691,13 +691,26 @@ ER  - </pre
               </li>
             </ul>
 
+            <h3>Implicit Translations</h3>
+            <p>
+              Please note: Even if you do not have <strong>Auto Translate</strong> enabled you may
+              be causing implicit translations via the LLM that you use. When you submit non-english
+              articles for AI screening or AI Summary the LLM you choose decides whether to
+              translate these and or respond in english or the original language. Thus explicit
+              translations via enabling the <strong>Auto Translate</strong>
+              setting may be preferable as they will be more reproducable.
+            </p>
+
             <h3>Translation State Machine</h3>
-            <p>Each article tracks its translation lifecycle through five states:</p>
+            <p>
+              Each article tracks its translation lifecycle through five states which you can also
+              review in the audit logs for articles:
+            </p>
             <ul>
               <li><strong>none</strong> : Never translated. Initial state.</li>
               <li><strong>queued</strong> : Job sent to the worker. Waiting to be processed.</li>
               <li>
-                <strong>running</strong> : Worker is actively translating (LLM call in flight).
+                <strong>running</strong> : Bango is actively translating (LLM call in flight).
               </li>
               <li><strong>succeeded</strong> : Translation complete - with a time stamp.</li>
               <li>
@@ -708,7 +721,7 @@ ER  - </pre
 
             <h3>Screening-Time Translation</h3>
             <p>
-              When <strong>Auto Translate</strong> is on, the screening engine runs a
+              When <strong>Auto Translate</strong> is on, the screening engine explicitly runs a
               pre-translation step before the AI reads any abstracts. It queries unscreened working
               articles with non-English language, enqueues Metadata (abstract and keywords)
               translation jobs, and waits for all to complete. The screening progress bar shows

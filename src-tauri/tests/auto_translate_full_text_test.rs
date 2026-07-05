@@ -204,6 +204,80 @@ fn full_text_translation_produces_english_chunks_and_full_text() {
 }
 
 #[test]
+fn parallel_chunk_dispatch_preserves_input_order() {
+    // Regression: per-chunk translation now uses `futures::future::join_all`
+    // (concurrent dispatch bounded by the orchestrator's semaphore). This test
+    // verifies that the stitched `full_text` preserves input-chunk order even
+    // though the LLM responses arrive non-deterministically.
+    //
+    // The mock embeds the chunk's input index in its response so the test can
+    // assert the stitched output is in ascending order regardless of which
+    // future completed first. A sleep inside the mock simulates variable LLM
+    // latency so the parallel dispatch is exercised realistically.
+    let conn = setup_db();
+    let article_id = seed_non_english_with_full_text(&conn);
+
+    // Seed 5 chunks so there is enough parallelism to reorder if the engine
+    // were buggy.
+    let chunks: Vec<Chunk> = (0..5)
+        .map(|i| Chunk {
+            chunk_index: i,
+            section: Some("Methods".to_string()),
+            text: format!("Chunk {i} text."),
+            word_count: 3,
+        })
+        .collect();
+    chunk_repo::replace_chunks_for_article(&conn, &article_id, &chunks).expect("seed 5 chunks");
+
+    // Mock: metadata on the first call, per-chunk responses that echo the
+    // chunk's input text verbatim (so the stitched output is deterministic).
+    struct OrderMock {
+        call_count: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl LlmClient for OrderMock {
+        async fn send(&self, _system: &str, user: &str) -> Result<(String, usize), AppError> {
+            let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
+            if idx == 0 {
+                return Ok(("TITLE:\nTitle\n\nABSTRACT:\nAbstract.".to_string(), 10));
+            }
+            // Simulate variable latency so futures complete out of order.
+            // Reverse-scheduled sleep: later chunks return faster.
+            let chunk_input = user;
+            let delay_ms: u64 = match idx {
+                1 => 40,
+                2 => 10,
+                3 => 50,
+                4 => 5,
+                _ => 0,
+            };
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            Ok((format!("English {chunk_input}"), 10))
+        }
+    }
+
+    let mock = OrderMock { call_count: AtomicUsize::new(0) };
+    let mutex = std::sync::Mutex::new(conn);
+    let rt =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
+    rt.block_on(translate_full_text(&mutex, &article_id, &mock)).expect("translation must succeed");
+    let conn = mutex.into_inner().expect("mutex not poisoned");
+
+    let article = article_repo::get_article_by_id(&conn, &article_id).expect("article");
+    let full_text = article.full_text.as_deref().unwrap_or("");
+    // The stitched output must list "Chunk 0" through "Chunk 4" in ascending
+    // order despite the out-of-order completion. Join the chunk-number
+    // subsequence and assert it is sorted.
+    let chunk_order: Vec<i32> =
+        (0..5).filter(|i| full_text.contains(&format!("Chunk {i}"))).collect();
+    assert_eq!(
+        chunk_order,
+        vec![0, 1, 2, 3, 4],
+        "chunks must appear in input order; got: {full_text}"
+    );
+}
+
+#[test]
 fn auto_translate_enabled_summary_reads_english_after_translation() {
     // After auto_translate=true + full-text translation completes, the
     // summary generation path reads the English `full_text` + chunks from
