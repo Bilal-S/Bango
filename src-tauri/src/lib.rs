@@ -146,6 +146,13 @@ pub fn run() {
             };
             app.manage(std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms)));
 
+            // Tier 1e: the in-process broadcast bus the worker emits on after
+            // each job. Managed BEFORE the worker spawns so the worker's first
+            // job can always find it. Batch-import Phase 3 and the screening
+            // translation pre-step subscribe to await completion without
+            // polling the DB.
+            app.manage(translation::TranslationDoneBus::new());
+
             // ── Translation worker ──
             // Spawn the in-memory translation queue after the orchestrator is
             // managed so the worker can fetch it per-job. Then re-enqueue any

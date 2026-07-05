@@ -180,6 +180,14 @@ watch(
           </button>
           <button
             class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-translation' }"
+            @click="selectRefSection('ref-translation')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">translate</span>
+            Translations
+          </button>
+          <button
+            class="ref-nav__link"
             :class="{ 'ref-nav__link--active': activeRefSection === 'ref-review' }"
             @click="selectRefSection('ref-review')"
           >
@@ -641,6 +649,115 @@ ER  - </pre
                 where it stopped.
               </li>
             </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: TRANSLATION PIPELINE -->
+        <section id="ref-translation" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">translate</span>
+            <h2 class="ref-section__title">Translations</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              Bango can translate non-English articles to English before AI workflows process them.
+              This is a <strong>permanent rewrite</strong>: after translation, the working article
+              fields hold English text, and the originals are preserved in archive tables but
+              currently not visible. Translation is <strong>experimental</strong> and
+              <strong>opt-in</strong>. To enable it use the <strong>Auto Translate</strong> setting
+              in the Settings page.
+            </p>
+
+            <h3>How It Works</h3>
+            <p>
+              When <strong>Auto Translate</strong> is enabled in Settings, Bango detects the
+              article's language from the RIS/BibTeX <code>language</code> field. English articles
+              and articles with blank language are skipped. Non-English articles are translated
+              using your configured LLM provider.
+            </p>
+            <p>
+              The scope of translation is chosen automatically from whether the article has full
+              text attached:
+            </p>
+            <ul>
+              <li>
+                <strong>MetadataOnly</strong>: Translates the title and abstract. Used during import
+                when no full text is attached, and during the screening pre-translation step.
+              </li>
+              <li>
+                <strong>FullText</strong>: Translates the title, abstract, all article chunks, then
+                re-chunks the stitched English result for screening. Used when full text is attached
+                and during batch import.
+              </li>
+            </ul>
+
+            <h3>Translation State Machine</h3>
+            <p>Each article tracks its translation lifecycle through five states:</p>
+            <ul>
+              <li><strong>none</strong> : Never translated. Initial state.</li>
+              <li><strong>queued</strong> : Job sent to the worker. Waiting to be processed.</li>
+              <li>
+                <strong>running</strong> : Worker is actively translating (LLM call in flight).
+              </li>
+              <li><strong>succeeded</strong> : Translation complete - with a time stamp.</li>
+              <li>
+                <strong>failed</strong> : Translation errored. This holds the error message. You can
+                retry via the translate button.
+              </li>
+            </ul>
+
+            <h3>Screening-Time Translation</h3>
+            <p>
+              When <strong>Auto Translate</strong> is on, the screening engine runs a
+              pre-translation step before the AI reads any abstracts. It queries unscreened working
+              articles with non-English language, enqueues Metadata (abstract and keywords)
+              translation jobs, and waits for all to complete. The screening progress bar shows
+              "Translating 3/12 articles..." during this stage. The readiness check also reports
+              <code>pending</code> so you know how many articles need translation before screening
+              can begin.
+            </p>
+
+            <h3>Manual Translation</h3>
+            <p>
+              A translate button appears on the article detail header for any non-English article.
+              Clicking it opens a confirmation dialog (warning about the permanent rewrite and token
+              cost), then enqueues the job. Popup messages provide feedback at each stage. A red
+              <strong>TRANSLATED</strong> badge appears on the header once translation succeeds.
+            </p>
+
+            <h3>Original Content Archive</h3>
+            <p>
+              Before the working <code>articles</code> row is rewritten, the original-language text
+              is saved to two dedicated tables. These are currently not visible in UI but can be
+              queried from database with other tools:
+            </p>
+            <ul>
+              <li>
+                <strong>article_original_content</strong> : Stores original title, abstract, full
+                text, and the source language at translation time.
+              </li>
+              <li>
+                <strong>article_original_chunks</strong> : Stores the pre-translation chunk
+                coordinate space (section, content, word count). After translation, English chunks
+                live in <code>article_chunks</code> with their own independent indices.
+              </li>
+            </ul>
+
+            <h3>Batch Import Integration</h3>
+            <p>
+              Translations are also integrated into batch imports and imported full text pdf will
+              also automatically translated if the setting is enabled.
+            </p>
+
+            <h3>Multilingual Section Classification</h3>
+            <p>
+              To correctly chunk non-English full text, Bango's section classifier supports 10
+              languages beyond English: French, Spanish, Japanese, Chinese, German, Russian,
+              Portuguese, Italian, Arabic, and Turkish. Each language maps academic section keywords
+              (Abstract, Introduction, Methods, Results, Discussion, Conclusion, References) to its
+              native terms. A Unicode-aware numbered-heading regex detects headings in non-Latin
+              scripts (Cyrillic, CJK, Arabic).
+            </p>
           </div>
         </section>
 

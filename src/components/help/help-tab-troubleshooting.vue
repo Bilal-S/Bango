@@ -128,6 +128,36 @@ const troubleshootItems: TroubleshootItem[] = [
     solution:
       'Use a smaller model or a more aggressive quantization (Q4_K_M instead of Q8). Close other applications. For GPU-based inference, ensure your GPU has enough dedicated VRAM.',
   },
+  {
+    anchorId: 'translation-failed',
+    icon: 'translate',
+    error: 'Translation failed',
+    providers: 'All providers',
+    cause:
+      'The LLM returned an error while translating an article to English. This can happen due to rate limits, the article text exceeding the token limit, or the model returning a malformed response.',
+    solution:
+      'Click the translate button on the article detail header to retry. If the problem persists, check your LLM configuration in Settings, reduce your batch size, or try a model with a larger context window. You can also disable Auto Translate in Settings and screen articles in their original language.',
+  },
+  {
+    anchorId: 'translation-stuck',
+    icon: 'pending_actions',
+    error: 'Translation queued but not completing',
+    providers: 'All providers',
+    cause:
+      'A translation job was enqueued but the worker appears stuck. This can happen if the app was closed while translations were running.',
+    solution:
+      'Restart the app. On startup, Bango automatically recovers stranded translation jobs (up to 20 articles). Any articles beyond the recovery cap are marked as failed so they are not lost, you can retry them manually via the translate button on each article.',
+  },
+  {
+    anchorId: 'database-locked',
+    icon: 'storage',
+    error: 'SQLITE_BUSY / database locked',
+    providers: 'Bango (local database)',
+    cause:
+      'Two operations are trying to write to the database at the same time. This can happen during heavy concurrent work like batch imports with translation enabled.',
+    solution:
+      'This is usually transient, Bango sets a 5-second busy timeout so writers wait their turn instead of failing immediately. If the error persists, close any other running operations, wait a moment, and try again. Restart the app if the problem continues.',
+  },
 ];
 </script>
 

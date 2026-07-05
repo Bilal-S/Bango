@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
-import type { LlmConfig } from '@/types';
+import type { LlmConfig, LlmProvider } from '@/types';
 
 export interface TestResult {
   success: boolean;
@@ -15,6 +15,19 @@ export interface TestResult {
  * consistent with the UI floor).
  */
 export const MIN_CONTEXT_WINDOW_TOKENS = 16_000;
+
+/**
+ * Local LLM providers that do not require an API key. Mirrors the backend
+ * `is_local` set in `llm_config_repo::has_config` (`ollama` | `lm_studio` |
+ * `llama_cpp`). Cloud providers require an API key; these do not. Kept as a
+ * shared constant so any frontend gate (e.g. `isConfigured`, future readiness
+ * checks) stays in sync.
+ */
+export const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
+  'ollama',
+  'lmStudio',
+  'llamaCpp',
+]);
 
 const DEFAULT_CONFIG: LlmConfig = {
   provider: 'openai',
@@ -33,6 +46,22 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
   const loading = ref(false);
   const initialized = ref(false);
   const testResult = ref<TestResult | null>(null);
+
+  /**
+   * Whether an LLM provider is fully configured and ready to serve requests.
+   * Mirrors the backend `llm_config_repo::has_config` contract: the store must
+   * be initialized, endpoint + model must be non-empty, and either the provider
+   * is local (no key required) or an API key is present. Use this getter
+   * everywhere a feature gates on "LLM configured" instead of re-deriving it
+   * from `apiKeyEncrypted` (which incorrectly disables local providers like
+   * LM Studio / Ollama / llama.cpp).
+   */
+  const isConfigured = computed(() => {
+    if (!initialized.value) return false;
+    const c = config.value;
+    if (!c.endpointUrl.trim() || !c.modelName.trim()) return false;
+    return LOCAL_PROVIDERS.has(c.provider) || !!c.apiKeyEncrypted;
+  });
 
   async function fetchIfNeeded(): Promise<void> {
     if (initialized.value || !isTauri()) return;
@@ -74,6 +103,7 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
     loading,
     initialized,
     testResult,
+    isConfigured,
     fetchIfNeeded,
     fetch,
     invalidate,

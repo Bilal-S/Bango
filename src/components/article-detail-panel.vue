@@ -61,10 +61,10 @@ const llmConfigStore = useLlmConfigStore();
 // Ensure store is loaded
 void llmConfigStore.fetchIfNeeded();
 
-// Whether LLM is configured (has API key)
-const isLlmConfigured = computed(
-  () => llmConfigStore.initialized && !!llmConfigStore.config.apiKeyEncrypted
-);
+// Whether an LLM provider is configured and ready. Delegates to the store
+// getter, which mirrors the backend `llm_config_repo::has_config` contract
+// (local providers like LM Studio / Ollama / llama.cpp do not need a key).
+const isLlmConfigured = computed(() => llmConfigStore.isConfigured);
 
 // Parsed AI summary data
 const aiSummaryData = computed<AiSummaryData | null>(() =>
@@ -83,6 +83,39 @@ const canRequestAiSummary = computed(
 
 // Whether an AI summary is pending for this article
 const isAiSummaryPending = computed(() => pendingSummaries.value.has(props.article.id));
+
+// ---- Translation eligibility (mirrors the canRequestAiSummary pattern) ----
+// Parent owns the full determination: article eligibility + LLM configured.
+// The child (DetailHeader) receives two props so it can render the enabled
+// button, the disabled-with-tooltip placeholder (eligible but no LLM), or
+// hide the action entirely (English / already translated / in-flight).
+const ENGLISH_LANGUAGE_VALUES = new Set(['english', 'en']);
+
+const isEnglishLanguage = (language: string | null | undefined): boolean => {
+  if (!language) return true; // absent/blank treated as English (no translation)
+  return ENGLISH_LANGUAGE_VALUES.has(language.trim().toLowerCase());
+};
+
+// Whether the manual translate action is actionable right now (eligible +
+// LLM configured). Structurally identical to `canRequestAiSummary`.
+const canRequestTranslation = computed(() => {
+  const a = props.article;
+  if (a.isTranslated) return false;
+  if (isEnglishLanguage(a.language)) return false;
+  if (a.translationStatus === 'queued' || a.translationStatus === 'running') return false;
+  return isLlmConfigured.value;
+});
+
+// Whether an article is eligible for translation ignoring the LLM gate. Used
+// by the child to decide between "hide entirely" (not eligible) and
+// "disabled with configure-LLM tooltip" (eligible but no LLM).
+const isTranslationEligible = computed(() => {
+  const a = props.article;
+  if (a.isTranslated) return false;
+  if (isEnglishLanguage(a.language)) return false;
+  if (a.translationStatus === 'queued' || a.translationStatus === 'running') return false;
+  return true;
+});
 
 // Determine the file type icon based on filename
 const fullTextFileIcon = computed(() => getFullTextFileIcon(props.article.fullTextFileName));
@@ -171,6 +204,9 @@ const {
       :can-request-ai-summary="canRequestAiSummary"
       :is-ai-summary-pending="isAiSummaryPending"
       :full-text-file-icon="fullTextFileIcon"
+      :is-llm-configured="isLlmConfigured"
+      :can-request-translation="canRequestTranslation"
+      :is-translation-eligible="isTranslationEligible"
       @toggle-full-screen="emit('toggleFullScreen')"
       @close="emit('close')"
       @read-full-text="fullTextReaderRef?.openFullTextView()"

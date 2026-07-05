@@ -307,7 +307,8 @@ pub async fn start_batch_import(
     tokio::spawn(async move {
         let db = app_handle_clone.state::<DbState>();
 
-        // Read the auto_translate setting once (Phase 3 gate). Default true.
+        // Read the auto_translate setting once (Phase 3 gate). Default false
+        // (opt-in); Phase 3 is skipped unless the user enabled it in Settings.
         let auto_translate = {
             let conn = match db.conn.lock() {
                 Ok(c) => c,
@@ -330,7 +331,7 @@ pub async fn start_batch_import(
                     return;
                 }
             };
-            app_settings_repo::get_auto_translate(&conn).unwrap_or(true)
+            app_settings_repo::get_auto_translate(&conn).unwrap_or(false)
         };
 
         // ═══════════════════════════════════════════════════════════════════

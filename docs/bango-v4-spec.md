@@ -47,10 +47,19 @@ The SQLite schema consists of the following primary tables. All IDs are UUID str
     *   `full_text` (extracted text, nullable), `full_text_ai_summary` (nullable), `full_text_file_name` (nullable)
     *   `num_cited` (nullable), `num_references` (nullable)
     *   `has_citation_details` (bool, default 0), `has_figures_or_tables` (bool, default 0; computed once at full-text attach time via `extract_captions`), `has_full_text` (bool, default 0), `has_reference_details` (bool, default 0)
+    *   `is_translated` (bool, default 0), `translation_status` (`'none'`, `'queued'`, `'running'`, `'succeeded'`, `'failed'`; default `'none'`), `translation_error` (text, nullable), `translated_at` (timestamp, nullable)
     *   `import_source` (originating filename), `imported_at`
 *   **`article_tags`**: `article_id` (FK), `tag_id` (FK) [PK: composite]
 *   **`article_labels`**: `article_id` (FK), `label_id` (FK) [PK: composite]
-*   **`audit_entries`**: `id` (PK), `article_id` (FK), `action` (e.g., `'import'`, `'status_change'`, `'ai_screen'`, `'reference_import'`, `'error'`), `from_status`, `to_status`, `details`, `source` (`'ai'`, `'user'`, `'system'`), `timestamp`
+*   **`audit_entries`**: `id` (PK), `article_id` (FK), `action` (e.g., `'import'`, `'status_change'`, `'ai_screen'`, `'translation'`, `'translation_error'`, `'reference_import'`, `'error'`), `from_status`, `to_status`, `details`, `source` (`'ai'`, `'user'`, `'system'`), `timestamp`
+
+#### Translation Archive Tables
+*   **`article_original_content`**:
+    *   `article_id` (PK, FK to `articles.id`), `original_title` (text), `original_abstract_text` (text), `original_full_text` (text), `source_language` (text), `stored_at` (timestamp)
+    *   Populated once at translation time before the working `articles` row is rewritten. Preserves the original-language title, abstract, and full text.
+*   **`article_original_chunks`**:
+    *   `id` (PK), `article_id` (FK to `articles.id`), `chunk_index` (int), `section` (text), `content` (text), `word_count` (int)
+    *   Holds the pre-translation chunk coordinate space. After translation the re-chunked English content lives in `article_chunks` with its own indices. The two spaces must not be compared or joined directly.
 
 #### References & Citations Tables
 *   **`reference_papers`**:
@@ -123,6 +132,7 @@ Upon import, new articles are run sequentially through a prioritized strategy pi
 *   **Execution**: Multi-threaded async worker running in the background with user-configured batch size, concurrency, and delay. `start_screening` also accepts an optional `max_articles` cap, limiting a run to `min(max_articles, unscreened_count)` articles so users can process a bounded subset. Exponential backoff handles rate-limiting (429 errors).
 *   **Readiness Check**: Enforces presence of >= 1 aim, >= 1 inclusion, and >= 1 exclusion criterion, valid LLM config, and performs a worst-case per-article token estimation. Warns the user if any estimated footprint exceeds 80% of `contextWindowTokens` (minimum required: 50,000). The worst-case footprint is recomputed by the active screening mode (see §4.3.1): Abstract uses today's abstract-only estimate; Enhanced adds the per-article chunk budget; Two-stage adds the budget times the expected borderline fraction.
 *   **Advisory Prompts**: Batch prompt details aims, criteria, and articles, requesting JSON output containing the advisory `decision`, `reasoning` (citing specific sentences), `matched_inclusion_criteria`, `matched_exclusion_criteria`, `suggested_tags`, `extracted_terms`, and `confidence`. The app executes the deterministic resolution locally. Where supporting full-text evidence is provided (Enhanced / Two-stage stage 2), the system prompt instructs the model to use it only to verify criteria matches; the primary decision rests on the abstract.
+*   **Screening-Time Abstract Translation**: When `auto_translate` is enabled (see §8.1), a pre-screening translation step runs before chunk-backfill and the main screening loop. The background task queries unscreened `working` articles with non-English `language` and `translation_status IN ('none','failed')`, enqueues `MetadataOnly` translation jobs (title + abstract only — full text is not touched), and waits for all to complete. The existing `screening:progress` channel emits a translation sub-stage (`stage = "translating"`, `stage_total = N`) so the progress bar shows "Translating 3/12 articles..." before flipping to the normal screening stage. `get_screening_readiness` returns `pendingTranslations: number` (0 when `auto_translate` is off) for a pre-start UI hint. This ensures the screening LLM always receives English abstracts.
 
 ### 4.3.1 Screening Modes
 The `screening_mode` setting (`abstract` | `enhanced` | `two_stage`, default `abstract`) selects how the screening engine treats the full text of articles that have one attached.
@@ -134,6 +144,77 @@ The `screening_mode` setting (`abstract` | `enhanced` | `two_stage`, default `ab
 | `two_stage` | Stage 1 screens the abstract; only borderline articles (confidence in `[two_stage_low, two_stage_high)`, default `[0.4, 0.7)`) with full text attached get a second full-text-aware pass that overrides stage 1. Both passes flow through the deterministic `resolve_decision` priority layer; both are recorded in the audit trail (`ai_screen` for stage 1, `ai_screen_enhanced` for stage 2). | ~63 tokens clear-cut, ~320 borderline (~1.5x effective) |
 
 A per-article chunk budget (`chunk_budget_per_article`, default 2400 words) guarantees no single article can blow the screening context window. The two-stage borderline band and the section allow-list are advanced-only settings (no Settings UI; power users edit `app_settings` directly). Enhanced and Two-stage modes are disabled in the Settings UI until the project has at least one article with attached full text. At screening start, `ensure_chunks_for_full_text_articles` runs (pure CPU, no LLM) so previously-attached PDFs without chunks are backfilled transparently; the explicit `rebuild_article_chunks` command powers the Settings "Rebuild text chunks" button for manual rebuilds.
+
+When `auto_translate` is enabled, a screening-time abstract translation pre-step runs before chunk-backfill and the main screening loop. See §4.4 for details.
+
+---
+
+### 4.4 Translation Pipeline
+
+Non-English articles are translated to English before AI workflows consume them. This is a **Plan-A permanent rewrite**: the working `articles` row and `article_chunks` rows hold English text after translation; originals are preserved in `article_original_content` and `article_original_chunks`. Translation is opt-in via the `auto_translate` setting (default `false`, see §8.1).
+
+#### 4.4.1 Translation State Machine
+
+Each article tracks its translation lifecycle via `translation_status` on the `articles` row:
+
+```
+none  ──(enqueue)──► queued  ──(worker picks up)──► running
+                                                         │
+                                    ┌────────────────────┼────────────────────┐
+                                    ▼                     ▼                    ▼
+                               succeeded              failed               (crash)
+                              (is_translated=1)   (translation_error set)     │
+                                                                              ▼
+                                                                     reenqueue_stranded
+                                                                     on next startup
+```
+
+- **`none`**: Initial state. Article has never been translated.
+- **`queued`**: Job sent to the in-memory worker channel. Waiting to be processed.
+- **`running`**: Worker is actively translating this article (LLM call in flight).
+- **`succeeded`**: Translation completed. `is_translated = 1`, `translated_at` set, `translation` audit entry written.
+- **`failed`**: Translation errored. `translation_error` set with the error message, `translation_error` audit entry written.
+
+#### 4.4.2 Job Kinds
+
+Two translation job kinds are selected automatically from the article's `has_full_text` flag:
+
+| Kind | Translates | Trigger |
+|------|-----------|---------|
+| `MetadataOnly` | Title + abstract | Import (no full text attached), screening pre-step |
+| `FullText` | Title + abstract + all `article_chunks` content, then re-chunks the stitched English result | Full-text attach, manual translate button on article with full text, batch import Phase 3 for articles with full text |
+
+The `language` column on `articles` records the original language and is immutable — it is never overwritten by translation. `is_translated = 1` with `language = 'French'` means "originally French, now translated to English; originals in `article_original_content`."
+
+#### 4.4.3 Queue Worker
+
+A single `tokio::spawn`-ed worker task with a `tokio::mpsc` channel (capacity 64) processes jobs sequentially:
+
+- **Enqueue gate** (`none`/`failed` → write `queued` + send to channel; `is_translated = 1` or status `queued`/`running`/`succeeded` → skip).
+- **Batch enqueue** uses a single filtered `SELECT` + `UPDATE` to mark all eligible articles `queued` in one transaction, then sends jobs to the channel.
+- **Execution** uses a 3-burst pattern: lock DB to read article + mark `running`, release lock for LLM call, lock DB to write-back translation + audit entry — so the worker never holds the database lock across an `.await` point.
+- **`LlmConfig` caching**: the worker caches the LLM config and invalidates it upon receiving a `translation:config-changed` event (emitted by `save_llm_config`).
+- On completion (success or failure), the worker emits a `translation:complete` event with `{ articleId, success, error? }` for frontend toast feedback.
+
+#### 4.4.4 Dedicated Worker Connection
+
+The translation worker holds its own SQLite connection via `WorkerDbState` (separate from the main `DbState`). This ensures translation work never blocks UI command handlers — the two connections operate independently under WAL mode. All connections set `PRAGMA busy_timeout=5000` so concurrent writers wait instead of returning `SQLITE_BUSY`.
+
+#### 4.4.5 Crash Recovery
+
+On app startup, `reenqueue_stranded_on_startup` queries `articles WHERE translation_status IN ('queued','running') AND is_translated = 0`. Stranded articles are re-enqueued. The recovery is **capped at 20 articles**; excess stranded articles are reset to `failed` with a `translation_error` audit note so they are not silently lost.
+
+#### 4.4.6 Batch Import Integration
+
+The batch import pipeline runs in four phases: Full Text (Phase 1) → Citations (Phase 2) → **Translations (Phase 3)** → AI Summaries (Phase 4). Phase 3 is gated on `auto_translate = true`. It enqueues `FullText` jobs for newly-attached non-English articles and waits per-article for completion (polling every 2s, 5-minute timeout per article). Phase 4 runs after Phase 3 so AI summaries read English text. Event-driven completion via `wait_for_article_translation` replaces busy-polling once the worker infrastructure supports it.
+
+#### 4.4.7 Manual Translation
+
+A translate button appears on the article detail header for non-English articles. Clicking it opens a confirmation dialog (warning about permanent rewrite and token cost), then enqueues the job. Toast messages provide feedback ("Translation queued...", "Article translated to English.", "Translation failed: ..."). The TRANSLATED badge appears on the detail header once `is_translated = 1`.
+
+#### 4.4.8 Multilingual Section Classification
+
+Section classification (`sections.rs`) supports 10 languages beyond English: French, Spanish, Japanese, Chinese, German, Russian, Portuguese, Italian, Arabic, and Turkish. Academic section keywords (Abstract, Introduction, Methods, Results, Discussion, Conclusion, References) are mapped per language. A Unicode-aware numbered-heading regex (`^\p{N}+(?:\.\p{N}+)*\s+.`) detects headings in non-Latin scripts.
 
 ---
 
@@ -191,7 +272,7 @@ Application configurations are managed in the `app_settings` key-value table:
 *   `enhanced_screening_sections`: Comma-separated section allow-list for Enhanced evidence (default `"Methods,Results"`).
 *   `two_stage_low` / `two_stage_high`: The borderline confidence band `[low, high)` that triggers the Two-stage second pass (defaults `0.4` / `0.7`).
 *   `chunk_budget_per_article`: Per-article word budget for retrieved evidence chunks (default `2400`, ~600 tokens).
-*   `auto_translate`: Toggle for translating non-English articles to English before AI processing (Plan-A permanent rewrite). Default `true` (enabled). When enabled, articles with a non-English `language` are permanently rewritten to English: title + abstract + full text + chunks are translated and the working `articles` row holds the English text so screening and summaries consume it directly. Originals are preserved in `article_original_content` + `article_original_chunks` (the originals archive). The batch import pipeline runs a dedicated Translations phase (Phase 3 of 4) before the AI Summaries phase so summaries read English text. Absent/garbage values fall back to the default. Persisted in the database (unlike the sibling AI Summary localStorage toggles) so backend processing stages can read it directly.
+*   `auto_translate`: Toggle for translating non-English articles to English before AI processing (Plan-A permanent rewrite). Default `false` (opt-in). When enabled, articles with a non-English `language` are permanently rewritten to English before AI workflows consume them. Two job kinds are chosen automatically from the article's `has_full_text` flag: `MetadataOnly` translates title + abstract; `FullText` translates title + abstract + full text + chunks, then re-chunks the English result. The working `articles` row holds the English text so screening and summaries consume it directly. Originals are preserved in `article_original_content` + `article_original_chunks` (the originals archive). The batch import pipeline runs a dedicated Translations phase (Phase 3 of 4) before the AI Summaries phase so summaries read English text. Absent/garbage values fall back to the default. Persisted in the database (unlike the sibling AI Summary localStorage toggles) so backend processing stages can read it directly. The manual translate button on the article detail header always works regardless of this setting.
 
 ### 8.2 Full-Text Attachments
 *   **Attachment**: Users can attach `.pdf` or `.txt` files to articles.
@@ -251,6 +332,7 @@ The following features remain explicitly **out of scope**:
 
 | Version | Date | Key Improvements |
 |---------|------|------------------|
+| **v6.3** | 2026-07-05 | Translation spec consolidation: added dedicated §4.4 Translation Pipeline section covering the state machine, job kinds (`MetadataOnly`/`FullText`), queue worker architecture, dedicated `WorkerDbState` connection, `busy_timeout` pragma, crash recovery cap (20 articles), batch import integration, and multilingual section classification. Added screening-time abstract translation pre-step to §4.3 (gated on `auto_translate`, emits "Translating N/M articles..." progress). Documented `article_original_content` + `article_original_chunks` archive tables and translation columns (`is_translated`/`translation_status`/`translation_error`/`translated_at`) in §2.2 schema. Flipped `auto_translate` default from `true` to `false` (opt-in) in §8.1. |
 | **v6.2** | 2026-07-04 | Multilingual translation pipeline (Plan-A permanent rewrite). Non-English articles are translated to English before AI workflows: title + abstract (metadata-only mode) or title + abstract + full text + chunks (full-text mode). Originals preserved in `article_original_content` + `article_original_chunks`. New schema columns `is_translated`/`translation_status`/`translation_error`/`translated_at` + `translation`/`translation_error` audit actions. In-memory queue worker with crash recovery (`reenqueue_stranded_on_startup`). 4-phase batch import (Full Text → Citations → Translations → AI Summaries) with per-article translation-wait gating. Manual translate button + confirmation dialog + status chips in the detail header. Multilingual section classification (FR/ES/JA/ZH/DE/RU/PT/IT/AR/TR) + Unicode numbered-heading detection. `auto_translate` now documents Plan-A semantics (§8.1). |
 | **v6.1** | 2026-07-03 | Settings screen refinements: Batch Import progress bar hidden until the user clicks Start (revealed on mount only if a run is already in progress); experimental Auto Translate toggle added under AI Summaries (DB-backed `app_settings.auto_translate`, default enabled); Max Context Tokens slider floor raised to 16K with a matching load-time clamp so legacy sub-16K configs are transparently bumped. |
 | **v6.0** | 2026-07-02 | Settings reorganization: split AI Summaries and Re-processing into dedicated cards, renamed Full-Text Storage to Storage with an explicit `storage_root` model (lazy-migrated from the legacy `fulltext_storage_dir` key; `fulltext/`, `ris/`, and `wiki-root/` now derive from it as subdirectories). Fixed the `full_text.rs` default-path `documents` vs `fulltext` bug. |

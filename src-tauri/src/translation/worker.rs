@@ -147,6 +147,14 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
                         "translation:complete",
                         serde_json::json!({ "articleId": article_id, "success": true }),
                     );
+                    // Tier 1e: notify the in-process bus so batch-import Phase
+                    // 3 + the screening translation pre-step can await
+                    // completion without polling the DB every 2s.
+                    if let Some(bus) =
+                        app_for_job.try_state::<crate::translation::TranslationDoneBus>()
+                    {
+                        bus.emit_done(&article_id);
+                    }
                 }
                 Err(e) => {
                     eprintln!("[translation] job {article_id} failed: {e}");
@@ -154,6 +162,14 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
                         "translation:complete",
                         serde_json::json!({ "articleId": article_id, "success": false, "error": e.to_string() }),
                     );
+                    // Emit on failure too so waiters don't stall waiting for a
+                    // success that will never come; the waiter re-checks the
+                    // live status and sees `translation_status = 'failed'`.
+                    if let Some(bus) =
+                        app_for_job.try_state::<crate::translation::TranslationDoneBus>()
+                    {
+                        bus.emit_done(&article_id);
+                    }
                 }
             }
         }
@@ -161,6 +177,14 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
 
     TranslationWorkerHandle { sender }
 }
+
+/// Maximum number of stranded jobs re-enqueued at startup. A large backlog
+/// (e.g. a crash during a 200-article batch import) would otherwise dump all
+/// of them into the channel at once, producing a startup burst that saturates
+/// the worker and contends with UI/LLM traffic. Capped excess is marked
+/// `failed` with a retryable audit note so it surfaces in the Audit Timeline
+/// instead of silently lingering in `queued`/`running`.
+pub const STARTUP_STRANDED_CAP: usize = 20;
 
 /// Crash recovery: re-enqueue articles stranded in `queued` or `running` at
 /// startup. Called once after the worker task is spawned so the jobs land in a
@@ -171,26 +195,52 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
 /// so a stranded full-text job does not silently degrade to metadata-only on
 /// restart (which would leave full text + chunks in the original language while
 /// marking the article `is_translated = 1`).
+///
+/// **Startup cap (Tier 1c)**: at most [`STARTUP_STRANDED_CAP`] jobs are
+/// re-enqueued. Excess rows are reset to `failed` via
+/// [`article_repo::mark_stranded_capped_failed`] with a retryable audit note,
+/// so they are not silently lost - the user can retry them individually from
+/// the article detail panel.
 pub fn reenqueue_stranded_on_startup(
     conn: &rusqlite::Connection,
     sender: &mpsc::Sender<TranslationJob>,
 ) {
     match article_repo::get_stranded_translation_articles(conn) {
         Ok(stranded) => {
-            let count = stranded.len();
-            for (id, has_full_text) in stranded {
+            let total = stranded.len();
+            let enqueued = stranded.iter().take(STARTUP_STRANDED_CAP);
+            let capped: Vec<String> =
+                stranded.iter().skip(STARTUP_STRANDED_CAP).map(|(id, _)| id.clone()).collect();
+
+            for (id, has_full_text) in enqueued {
                 // Reset to 'queued' so the worker picks it up; if it was
                 // 'running' the worker that owned it has died.
-                let _ = article_repo::update_translation_status(conn, &id, "queued");
-                let kind = if has_full_text {
+                let _ = article_repo::update_translation_status(conn, id, "queued");
+                let kind = if *has_full_text {
                     TranslationJobKind::FullText
                 } else {
                     TranslationJobKind::MetadataOnly
                 };
-                let _ = sender.try_send(TranslationJob { article_id: id, kind });
+                if let Err(e) = sender.try_send(TranslationJob { article_id: id.clone(), kind }) {
+                    eprintln!("[translation] failed to re-enqueue stranded job {id}: {e}");
+                }
             }
-            if count > 0 {
-                eprintln!("[translation] re-enqueued {count} stranded job(s) on startup");
+
+            if !capped.is_empty() {
+                let note = format!(
+                    "Startup translation-recovery capped at {STARTUP_STRANDED_CAP}; \
+                     this article was not re-enqueued automatically. Retry it manually."
+                );
+                if let Err(e) = article_repo::mark_stranded_capped_failed(conn, &capped, &note) {
+                    eprintln!("[translation] failed to mark capped stranded jobs as failed: {e}");
+                }
+                eprintln!(
+                    "[translation] re-enqueued {STARTUP_STRANDED_CAP} of {total} stranded job(s); \
+                     marked {} as failed (cap exceeded)",
+                    capped.len()
+                );
+            } else if total > 0 {
+                eprintln!("[translation] re-enqueued {total} stranded job(s) on startup");
             }
         }
         Err(e) => {

@@ -241,14 +241,13 @@ pub async fn import_ris_file(
         // Auto-translate trigger: enqueue metadata-only translation jobs for
         // non-English articles when `auto_translate = true`. Non-fatal -
         // errors are logged by the helper and never fail the import.
+        //
+        // Tier 1a: capture the imported IDs, then explicitly drop the
+        // connection guard BEFORE enqueuing so the import lock is not held
+        // across the (separately locking) batch-enqueue round-trip. The
+        // enqueue helper re-locks for a short filtered read + bulk write.
         let imported_ids: Vec<String> = updated_articles.iter().map(|a| a.id.clone()).collect();
-        crate::commands::translation::try_enqueue_translations_for_import(
-            &app,
-            &conn,
-            &imported_ids,
-        );
-
-        Ok(ImportResult {
+        let import_payload = ImportResult {
             imported_count: updated_articles.len(),
             skipped_count: skipped_validation,
             skipped_by_user,
@@ -260,7 +259,15 @@ pub async fn import_ris_file(
                 .map(|e| ImportError { record_index: e.record_index, message: e.message })
                 .collect(),
             error_groups: output.error_groups,
-        })
+        };
+        // Drop the guard before the (re-locking) enqueue call.
+        drop(conn);
+        crate::commands::translation::try_enqueue_translations_for_import(
+            &app,
+            &db_state.conn,
+            &imported_ids,
+        );
+        Ok(import_payload)
     })
     .await;
 
@@ -400,14 +407,9 @@ pub async fn import_bibtex_file(
         app_settings_repo::mark_wiki_needs_refresh(&conn);
 
         // Auto-translate trigger (see `import_ris_file` for rationale).
+        // Tier 1a: drop the guard before the (re-locking) enqueue call.
         let imported_ids: Vec<String> = updated_articles.iter().map(|a| a.id.clone()).collect();
-        crate::commands::translation::try_enqueue_translations_for_import(
-            &app,
-            &conn,
-            &imported_ids,
-        );
-
-        Ok(ImportResult {
+        let import_payload = ImportResult {
             imported_count: updated_articles.len(),
             skipped_count: skipped_validation,
             skipped_by_user,
@@ -419,7 +421,14 @@ pub async fn import_bibtex_file(
                 .map(|e| ImportError { record_index: e.record_index, message: e.message })
                 .collect(),
             error_groups: output.error_groups,
-        })
+        };
+        drop(conn);
+        crate::commands::translation::try_enqueue_translations_for_import(
+            &app,
+            &db_state.conn,
+            &imported_ids,
+        );
+        Ok(import_payload)
     })
     .await;
 

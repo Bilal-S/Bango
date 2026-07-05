@@ -94,6 +94,7 @@ const steps: HelpStep[] = [
     summary:
       "Let the AI read each article's abstract and decide whether it meets your inclusion criteria.",
     details: [
+      'If your project includes non-English articles, enable <strong>Auto Translate</strong> in Settings (off by default). Bango will translate non-English abstracts to English before the AI reads them, showing a "Translating..." progress stage.',
       'Once your criteria and tags are set, you start the AI screening. The AI reads the title and abstract of each article and evaluates it against your rules.',
       'For each article, the AI provides a decision (include or exclude), a written explanation, which criteria it matched, suggested tags, and a confidence score.',
       'You can watch the progress in real time. If the AI encounters a problem (like a rate limit from the server), it will retry automatically.',

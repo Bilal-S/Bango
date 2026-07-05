@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::RwLock;
 
 use crate::db::app_settings_repo::{self, ScreeningMode};
@@ -240,6 +240,15 @@ pub async fn start_screening(
         let db = app_handle.state::<DbState>();
         let screening = app_handle.state::<ScreeningState>();
 
+        // Tier 3: pre-screening translation step (decision b). When
+        // `auto_translate` is enabled, enqueue `MetadataOnly` translation
+        // jobs for unscreened working articles with a non-English `language`
+        // and wait for all to finish BEFORE screening runs, so the screening
+        // LLM reads English text. Emits `screening:progress` events with a
+        // translation sub-stage so the existing progress UI shows
+        // "Translating N/M articles..." before the normal screening stage.
+        run_pre_screening_translation(&app_handle, &db.conn).await;
+
         // Tier 3: for enhanced / two-stage, backfill chunks for any article
         // with full text but no chunks (pure CPU, no LLM). Runs here in the
         // background task - not in the IPC handler - so the DbState mutex is
@@ -412,4 +421,104 @@ pub fn set_screening_mode(
 pub fn get_full_text_article_count(db_state: State<'_, DbState>) -> Result<i64, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     chunk_repo::count_articles_with_full_text(&conn)
+}
+
+// ── Tier 3: pre-screening translation step (decision b) ─────────────────────
+
+/// `screening:progress` payload for the translation sub-stage. Emitted before
+/// the screening engine runs so the frontend progress UI shows
+/// "Translating N/M articles..." while the worker finishes metadata-only
+/// translations of unscreened working non-English articles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationSubStage {
+    pub completed: usize,
+    pub total: usize,
+    pub message: String,
+}
+
+/// Pre-screening translation step (decision b).
+///
+/// When `auto_translate` is enabled, enqueues `MetadataOnly` translation jobs
+/// for unscreened working articles with a non-English `language` and waits for
+/// all to finish BEFORE the screening engine runs, so the screening LLM reads
+/// English text. Emits `screening:translation-progress` events with a
+/// per-article counter so the existing progress UI can surface
+/// "Translating 3/12 articles...".
+///
+/// Skipped entirely when `auto_translate` is `false` (the new opt-in default),
+/// so screening starts immediately and reads whatever text is present
+/// (original or previously-translated).
+async fn run_pre_screening_translation(
+    app: &tauri::AppHandle,
+    db: &std::sync::Mutex<rusqlite::Connection>,
+) {
+    // Read the toggle + candidate set in one short lock scope.
+    let to_translate: Vec<String> = {
+        let Ok(conn) = crate::db::connection::lock_conn(db) else {
+            return;
+        };
+        let auto = app_settings_repo::get_auto_translate(&conn).unwrap_or(false);
+        if !auto {
+            return;
+        }
+        // Unscreened working non-English articles not already translated or
+        // queued. Reuses the import batch helper to filter by status.
+        let unscreened_ids: Vec<String> = match article_repo::get_unscreened_working_ids(&conn) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[screening] pre-translate: failed to read unscreened ids: {e}");
+                return;
+            }
+        };
+        let candidates = match article_repo::get_translatable_import_ids(&conn, &unscreened_ids) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[screening] pre-translate: get_translatable_import_ids failed: {e}");
+                return;
+            }
+        };
+        candidates
+            .into_iter()
+            .filter(|(_, language, _)| {
+                !crate::translation::should_skip_translation(language.as_deref())
+            })
+            .map(|(id, _, _)| id)
+            .collect()
+    };
+
+    if to_translate.is_empty() {
+        return;
+    }
+
+    // Enqueue via the batch helper (re-locks briefly). `MetadataOnly` because
+    // screening consumes only the title + abstract, not full-text chunks.
+    crate::commands::translation::try_enqueue_translations_for_import(app, db, &to_translate);
+
+    // Wait for each translation to finish, emitting progress per article.
+    let total = to_translate.len();
+    for (idx, article_id) in to_translate.iter().enumerate() {
+        let _ = app.emit(
+            "screening:translation-progress",
+            TranslationSubStage {
+                completed: idx,
+                total,
+                message: format!("Translating {}/{} articles...", idx + 1, total),
+            },
+        );
+        if let Err(e) = crate::translation::wait_for_article_translation(app, db, article_id).await
+        {
+            eprintln!("[screening] pre-translate: {e} - proceeding with current text");
+        }
+    }
+
+    // Final sub-stage event so the UI clears the "Translating..." line.
+    let _ = app.emit(
+        "screening:translation-progress",
+        TranslationSubStage {
+            completed: total,
+            total,
+            message: "Translations complete; starting screening.".to_string(),
+        },
+    );
 }

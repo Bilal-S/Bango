@@ -7,4 +7,10 @@
 
 pub mod engine;
 pub mod language;
+pub mod wait;
 pub mod worker;
+
+// Re-export the bus + waiter so callers don't need to reach into the submodule
+// for the two pieces of public API they actually use.
+pub use language::should_skip_translation;
+pub use wait::{wait_for_article_translation, TranslationDoneBus};

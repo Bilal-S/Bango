@@ -130,4 +130,111 @@ describe('useLlmConfigStore', () => {
       expect(store.config.contextWindowTokens).toBe(50_000);
     });
   });
+
+  describe('isConfigured getter (mirrors backend has_config)', () => {
+    it('is false before fetch (not initialized)', () => {
+      const store = useLlmConfigStore();
+      expect(store.isConfigured).toBe(false);
+    });
+
+    it('is true for a local provider (LM Studio) with no API key', async () => {
+      // Local providers (lmStudio, ollama, llamaCpp) do not require an API
+      // key. This is the LM Studio regression case: previously the gate
+      // checked only apiKeyEncrypted and incorrectly returned false.
+      const lmStudio: LlmConfig = {
+        ...savedConfig,
+        provider: 'lmStudio',
+        apiKeyEncrypted: null,
+        endpointUrl: 'http://localhost:1234/v1',
+        modelName: 'local-model',
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(lmStudio);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.isConfigured).toBe(true);
+    });
+
+    it('is true for Ollama with no API key', async () => {
+      const ollama: LlmConfig = {
+        ...savedConfig,
+        provider: 'ollama',
+        apiKeyEncrypted: null,
+        endpointUrl: 'http://localhost:11434/v1',
+        modelName: 'llama3',
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(ollama);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.isConfigured).toBe(true);
+    });
+
+    it('is false for a cloud provider without an API key', async () => {
+      const noKey: LlmConfig = {
+        ...savedConfig,
+        provider: 'openai',
+        apiKeyEncrypted: null,
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(noKey);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.isConfigured).toBe(false);
+    });
+
+    it('is true for a cloud provider with an API key', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(savedConfig);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.isConfigured).toBe(true);
+    });
+
+    it('is false when endpointUrl is empty even for a local provider', async () => {
+      const noEndpoint: LlmConfig = {
+        ...savedConfig,
+        provider: 'lmStudio',
+        apiKeyEncrypted: null,
+        endpointUrl: '   ',
+        modelName: 'local-model',
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(noEndpoint);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.isConfigured).toBe(false);
+    });
+
+    it('is false when modelName is empty even with an API key', async () => {
+      const noModel: LlmConfig = {
+        ...savedConfig,
+        provider: 'openai',
+        apiKeyEncrypted: 'secret',
+        modelName: '',
+      };
+      vi.mocked(tauriCommand).mockResolvedValue(noModel);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+
+      expect(store.isConfigured).toBe(false);
+    });
+
+    it('is false after invalidate()', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(savedConfig);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+      expect(store.isConfigured).toBe(true);
+
+      store.invalidate();
+      expect(store.isConfigured).toBe(false);
+    });
+  });
 });

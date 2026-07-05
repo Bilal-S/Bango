@@ -87,20 +87,19 @@ fn auto_translate_off_gate_prevents_import_trigger() {
     // When `auto_translate = false`, the import trigger
     // (`try_enqueue_translations_for_import`) reads `get_auto_translate`
     // and returns early. This test verifies the gate value itself -- the
-    // function in `commands/translation.rs:150` reads the setting first.
+    // function in `commands/translation.rs` reads the setting first.
+    //
+    // Decision (a): the default is now `false` (opt-in), so the import
+    // trigger is gated off until the user explicitly enables it.
     let conn = setup_db();
 
-    // Default is enabled (absent key → true).
-    assert!(get_auto_translate(&conn).expect("get auto_translate"));
-
-    // Disable the toggle.
-    set_auto_translate(&conn, false).expect("set auto_translate");
+    // Default is disabled (absent key → false, opt-in).
     assert!(!get_auto_translate(&conn).expect("get auto_translate"));
 
     // The import trigger checks `!auto` → returns early without enqueueing.
     // We verify the gate value, which is the condition the real function uses.
     let auto = app_settings_repo::get_auto_translate(&conn).expect("read auto");
-    assert!(!auto, "auto_translate must be false; import trigger returns early here");
+    assert!(!auto, "auto_translate must be false by default; import trigger returns early here");
 }
 
 #[test]

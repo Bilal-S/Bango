@@ -9,11 +9,13 @@
 //! trigger paths call directly (they already hold the DB lock and need the
 //! non-Tauri signature).
 
+use std::sync::Mutex;
+
 use tauri::{Manager, State};
 
 use crate::db::app_settings_repo;
 use crate::db::article_repo;
-use crate::db::connection::DbState;
+use crate::db::connection::{lock_conn, DbState};
 use crate::error::AppError;
 use crate::translation::language::should_skip_translation;
 use crate::translation::worker::{TranslationJob, TranslationJobKind, TranslationWorkerHandle};
@@ -133,30 +135,74 @@ pub fn retry_translation_job(
 ///
 /// Chooses `FullText` when the article has full text attached, else
 /// `MetadataOnly`.
+///
+/// **Lock-free variant (Tier 1a/1b)**: takes `&Mutex<Connection>` and acquires
+/// the lock only for the filtered read + the bulk status write, then drops the
+/// guard before sending jobs to the worker channel. Callers that have finished
+/// their own transactional work must drop their own `MutexGuard` before calling
+/// this so the import lock is not held across the enqueue round-trip.
+///
+/// Replaces the per-article `get_article_by_id` + `update_translation_status`
+/// sequence with one filtered `get_translatable_import_ids` query + one
+/// `mark_translation_queued_batch` UPDATE, preserving the non-English
+/// `should_skip_translation` gate and the `has_full_text` job-kind rule.
 pub fn try_enqueue_translations_for_import(
     app: &tauri::AppHandle,
-    conn: &rusqlite::Connection,
+    db: &Mutex<rusqlite::Connection>,
     article_ids: &[String],
 ) {
-    let auto = app_settings_repo::get_auto_translate(conn).unwrap_or(true);
-    if !auto {
-        return;
-    }
     let worker = match app.try_state::<TranslationWorkerHandle>() {
         Some(w) => w,
         None => return,
     };
-    for article_id in article_ids {
-        // Choose FullText when the article has full text attached, else
-        // MetadataOnly.
-        let kind = match article_repo::get_article_by_id(conn, article_id) {
-            Ok(a) if a.has_full_text => TranslationJobKind::FullText,
-            _ => TranslationJobKind::MetadataOnly,
+
+    // One filtered read + one bulk status write inside a single short lock
+    // scope. The guard is dropped before we send any jobs to the worker.
+    let to_send: Vec<(String, TranslationJobKind)> = {
+        let Ok(conn) = lock_conn(db) else {
+            return;
         };
-        if let Err(e) =
-            enqueue_article_translation_inner(conn, worker.inner(), article_id, kind, true)
-        {
-            eprintln!("[translation] failed to enqueue job for {article_id}: {e}");
+        let auto = app_settings_repo::get_auto_translate(&conn).unwrap_or(false);
+        if !auto {
+            return;
+        }
+        let candidates = match article_repo::get_translatable_import_ids(&conn, article_ids) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[translation] get_translatable_import_ids failed: {e}");
+                return;
+            }
+        };
+        // Apply the non-English skip gate in-memory (no extra DB read).
+        let mut enqueued_ids: Vec<String> = Vec::with_capacity(candidates.len());
+        let mut jobs: Vec<(String, TranslationJobKind)> = Vec::with_capacity(candidates.len());
+        for (id, language, has_full_text) in candidates {
+            if should_skip_translation(language.as_deref()) {
+                continue;
+            }
+            enqueued_ids.push(id.clone());
+            let kind = if has_full_text {
+                TranslationJobKind::FullText
+            } else {
+                TranslationJobKind::MetadataOnly
+            };
+            jobs.push((id, kind));
+        }
+        if enqueued_ids.is_empty() {
+            return;
+        }
+        if let Err(e) = article_repo::mark_translation_queued_batch(&conn, &enqueued_ids) {
+            eprintln!("[translation] mark_translation_queued_batch failed: {e}");
+            return;
+        }
+        jobs
+    }; // lock dropped here.
+
+    // Send to the worker channel outside the lock. `try_send` failures
+    // (worker exited) are non-fatal and logged per-article.
+    for (id, kind) in to_send {
+        if let Err(e) = worker.try_send(TranslationJob { article_id: id, kind }) {
+            eprintln!("[translation] failed to send job to worker: {e}");
         }
     }
 }

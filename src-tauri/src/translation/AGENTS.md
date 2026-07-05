@@ -57,10 +57,31 @@ preserved in `article_original_content` and `article_original_chunks`.
 - All LLM calls MUST go through `LlmOrchestrator` (per CLAUDE.md). The
   `TranslationLlmClient` wraps it; never call `llm::client` directly.
 - Translation runs as a background job (manual click, import trigger,
-  full-text attach trigger, or batch-import Phase 3). Never block the IPC
-  handler on a translation.
+  full-text attach trigger, batch-import Phase 3, or the screening pre-step).
+  Never block the IPC handler on a translation.
 - Auto-translate only runs when `app_settings.auto_translate` is `true`
-  (default enabled; absent/garbage falls back to default).
+  (default DISABLED / opt-in; absent/garbage falls back to disabled). Decision
+  (a): the default was flipped from `true` to `false` so imports do not
+  silently trigger background translation + LLM cost. The user must enable it
+  explicitly in Settings.
+- Import + full-text attach triggers call the lock-free
+  `try_enqueue_translations_for_import(app, &Mutex<Connection>, ids)` helper
+  (Tier 1a/1b). Callers MUST drop their own `MutexGuard` before calling it so
+  the import lock is not held across the enqueue round-trip; the helper
+  re-locks briefly for one filtered read (`get_translatable_import_ids`) + one
+  bulk write (`mark_translation_queued_batch`).
+- Screening pre-step (decision b): when `auto_translate` is enabled,
+  `commands::screening::run_pre_screening_translation` enqueues `MetadataOnly`
+  jobs for unscreened working non-English articles and awaits them via the
+  `TranslationDoneBus` BEFORE the screening engine runs, so the screening LLM
+  reads English text. Emits `screening:translation-progress` events with a
+  per-article counter so the UI shows "Translating N/M articles...". Skipped
+  entirely when `auto_translate` is off.
+- `TranslationDoneBus` (`translation/wait.rs`) is a `tokio::sync::broadcast`
+  managed-state channel the worker emits on after each job finishes (success or
+  failure). `wait_for_article_translation` subscribes + falls back to a 60s
+  sanity poll so a missed event never deadlocks the caller. Batch-import Phase
+  3 and the screening pre-step both consume it.
 - Translation must complete before screening and summary generation consume
   the article. Batch import Phase 4 (summaries) gates per article on
   `translation_status` leaving `running`.
@@ -86,5 +107,6 @@ preserved in `article_original_content` and `article_original_chunks`.
 
 ## Child DOX Index
 
-No child `AGENTS.md` files. This module owns three files (`mod.rs`,
-`engine.rs`, `language.rs`, `worker.rs`) with no further durable boundaries.
+No child `AGENTS.md` files. This module owns five files (`mod.rs`,
+`engine.rs`, `language.rs`, `wait.rs`, `worker.rs`) with no further durable
+boundaries.

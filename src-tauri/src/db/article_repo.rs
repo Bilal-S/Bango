@@ -1250,6 +1250,132 @@ pub fn get_stranded_translation_articles(
     Ok(out)
 }
 
+/// IDs of unscreened working articles (`status = 'working' AND screened_at IS NULL`).
+/// Used by the pre-screening translation step (Tier 3 decision b) to find the
+/// candidate set for `MetadataOnly` translation before the screening LLM runs.
+pub fn get_unscreened_working_ids(conn: &Connection) -> Result<Vec<String>, AppError> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM articles WHERE status = 'working' AND screened_at IS NULL")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Articles from `candidate_ids` that are eligible for translation enqueue:
+/// `is_translated = 0` AND `translation_status IN ('none','failed')`.
+///
+/// Returns `(id, language, has_full_text)` per article so the caller can apply
+/// the non-English `should_skip_translation` gate (Tier 1b) and choose the job
+/// kind (`FullText` vs `MetadataOnly`). One filtered query replaces the
+/// previous per-article `get_article_by_id` + `get_translation_status`
+/// round-trip that ran inside the import lock.
+///
+/// `language` is included so the caller applies the skip gate without a second
+/// DB read. Articles with NULL/blank language are returned; the caller filters
+/// them via `should_skip_translation`.
+pub fn get_translatable_import_ids(
+    conn: &Connection,
+    candidate_ids: &[String],
+) -> Result<Vec<(String, Option<String>, bool)>, AppError> {
+    if candidate_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // SQLite parameter limit is 999; chunk to stay well under it.
+    const CHUNK: usize = 500;
+    let mut out = Vec::new();
+    for chunk in candidate_ids.chunks(CHUNK) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, language, has_full_text FROM articles \
+             WHERE id IN ({placeholders}) \
+             AND is_translated = 0 \
+             AND translation_status IN ('none', 'failed')"
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, i64>(2)? != 0,
+            ))
+        })?;
+        for row in rows {
+            out.push(row?);
+        }
+    }
+    Ok(out)
+}
+
+/// Bulk-write `translation_status = 'queued'` for the given ids in one
+/// filtered UPDATE. Only rows still in `('none','failed')` AND
+/// `is_translated = 0` are touched, so a concurrent enqueue cannot re-queue a
+/// job that already started. Returns the number of rows actually updated.
+pub fn mark_translation_queued_batch(
+    conn: &Connection,
+    article_ids: &[String],
+) -> Result<usize, AppError> {
+    if article_ids.is_empty() {
+        return Ok(0);
+    }
+    const CHUNK: usize = 500;
+    let mut count = 0usize;
+    for chunk in article_ids.chunks(CHUNK) {
+        let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "UPDATE articles SET translation_status = 'queued', \
+             translation_error = NULL, changed_at = datetime('now') \
+             WHERE id IN ({placeholders}) \
+             AND is_translated = 0 \
+             AND translation_status IN ('none', 'failed')"
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        count += conn.execute(&sql, params.as_slice())?;
+    }
+    Ok(count)
+}
+
+/// Mark a set of stranded articles as `failed` with a cap-exceeded audit note.
+/// Used by `reenqueue_stranded_on_startup` when the stranded count exceeds the
+/// startup cap so capped rows are not silently lost; they surface in the Audit
+/// Timeline as a retryable failure instead of staying perpetually `queued`.
+pub fn mark_stranded_capped_failed(
+    conn: &Connection,
+    article_ids: &[String],
+    note: &str,
+) -> Result<usize, AppError> {
+    if article_ids.is_empty() {
+        return Ok(0);
+    }
+    let mut count = 0usize;
+    for id in article_ids {
+        let rows = conn.execute(
+            "UPDATE articles SET translation_status = 'failed', translation_error = ?1, \
+             changed_at = datetime('now') \
+             WHERE id = ?2 AND translation_status IN ('queued', 'running')",
+            params![note, id],
+        )?;
+        if rows > 0 {
+            let _ = crate::db::audit_repo::create_entry(
+                conn,
+                id,
+                "translation_error",
+                None,
+                None,
+                Some(note),
+                "system",
+            );
+            count += rows;
+        }
+    }
+    Ok(count)
+}
+
 /// Lightweight article info for batch import DOI matching.
 /// Used by the batch-import phases to match files on disk to articles by DOI
 /// and to skip articles that already have full text / references / citations.

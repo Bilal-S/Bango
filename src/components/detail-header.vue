@@ -11,6 +11,22 @@ const props = defineProps<{
   hasReturnTarget: boolean;
   fullScreen: boolean;
   fullTextFileIcon?: string | null;
+  /** Whether an LLM provider is configured. Used only to decide between the
+   *  disabled-with-tooltip placeholder and hiding the action entirely. The
+   *  real determination of "can the user translate right now" lives in the
+   *  parent via `canRequestTranslation`, mirroring the `canRequestAiSummary`
+   *  pattern: the parent owns `isLlmConfigured` centrally and each button
+   *  adds only its own eligibility details. */
+  isLlmConfigured?: boolean;
+  /** Whether the manual translate action is actionable right now (article
+   *  eligible AND LLM configured). Owned by the parent. */
+  canRequestTranslation?: boolean;
+  /** Whether the article is eligible for translation ignoring the LLM gate
+   *  (non-English, not translated, not queued/running). Owned by the parent.
+   *  When false the action is hidden entirely; when true but
+   *  `canRequestTranslation` is false, the disabled-with-tooltip placeholder
+   *  renders so the user gets the "configure LLM" hover hint. */
+  isTranslationEligible?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -22,27 +38,8 @@ const emit = defineEmits<{
   requestTranslation: [id: string];
 }>();
 
-// Translation gate: show the translate button only when the article has a
-// non-English language, has not been translated, and is not currently queued
-// or running. Once translation completes (isTranslated = true) the button is
-// replaced by the translated status chip.
-const ENGLISH_LANGUAGE_VALUES = new Set(['english', 'en']);
-
-const isEnglishLanguage = (language: string | null | undefined): boolean => {
-  if (!language) return true; // absent/blank treated as English (no translation)
-  return ENGLISH_LANGUAGE_VALUES.has(language.trim().toLowerCase());
-};
-
-const canTranslate = computed(() => {
-  const a = props.article;
-  if (a.isTranslated) return false;
-  if (isEnglishLanguage(a.language)) return false;
-  // Hide the action button while a translation is queued/running; the status
-  // chip renders instead.
-  if (a.translationStatus === 'queued' || a.translationStatus === 'running') return false;
-  return true;
-});
-
+// Translation is in-flight when the queue reports queued/running. The status
+// chip renders instead of the button in that case.
 const isTranslationPending = computed(
   () =>
     props.article.translationStatus === 'queued' || props.article.translationStatus === 'running'
@@ -99,10 +96,22 @@ const isTranslationPending = computed(
         </span>
         <!-- Translate icon (language-plan-v2 Phase 5) -->
         <button
-          v-if="canTranslate"
+          v-if="canRequestTranslation"
           class="material-symbols-outlined text-[18px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 cursor-pointer rounded px-1 transition-colors"
           title="Translate to English"
           @click="emit('requestTranslation', article.id)"
+        >
+          translate
+        </button>
+        <!-- Translate disabled: eligible (non-English, not translated, not
+             in-flight) but no LLM configured. Rendered as a disabled
+             placeholder with a tooltip guiding the user to Settings. -->
+        <button
+          v-else-if="isTranslationEligible && !isLlmConfigured"
+          type="button"
+          disabled
+          class="material-symbols-outlined text-[18px] text-slate-300 cursor-not-allowed rounded px-1"
+          title="Configure an LLM provider in Settings to enable translations"
         >
           translate
         </button>
@@ -117,7 +126,7 @@ const isTranslationPending = computed(
         </span>
         <span
           v-else-if="article.isTranslated"
-          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded"
+          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-red-700 bg-red-50 px-1.5 py-0.5 rounded ring-1 ring-red-200"
           title="Article translated to English"
         >
           <span class="material-symbols-outlined text-[14px]">check_circle</span>

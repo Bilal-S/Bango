@@ -54,7 +54,7 @@ Row format (machine-parseable):
 
 | Test (`file::function`) | Purpose |
 | --- | --- |
-| `src/__tests__/components/detail-header-translation.test.ts::shows_translate_button_for_non_english_not_translated` | Covers `TC-09` |
+| `src/__tests__/components/detail-header-translation.test.ts::shows_translate_button_for_non_english_not_translated_when_llm_configured` | Covers `TC-09` |
 | `src/__tests__/components/detail-header-translation.test.ts::hides_translate_button_when_translated` | Covers `TC-09` |
 | `src/__tests__/components/article-detail-panel-translation.test.ts::click_translate_enqueues_job_and_shows_toast` | Covers `TC-09` |
 | `src/__tests__/components/article-detail-panel-translation.test.ts::refreshes_article_on_translation_complete_event` | Covers `TC-09` |

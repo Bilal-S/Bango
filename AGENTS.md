@@ -175,8 +175,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     staleness flag), `wiki_needs_refresh` (the LLM Wiki staleness flag),
     `auto_translate` (experimental toggle for translating non-English articles to
     English during AI processing; DB-backed unlike the sibling localStorage AI
-    Summary toggles; default `true`; absent/garbage value falls back to the
-    default), and
+    Summary toggles; **default `false` (opt-in)** - decision (a) flipped it from
+    `true` so imports do not silently trigger background translation + LLM
+    cost; the user must enable it explicitly in Settings; absent/garbage value
+    falls back to the default), and
     `summary_evidence_mode` (project-wide literature-review evidence enrichment;
     `abstract_only` default | `with_summary_facts` - see `commands/summary.rs::generate_summary`
     + the `format_ai_summary_as_evidence` pure helper in `summary/prompt.rs`). `mark_biblio_needs_refresh(conn)` is called by every mutation that

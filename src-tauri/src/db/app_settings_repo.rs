@@ -359,20 +359,23 @@ pub fn set_two_stage_expected_borderline_fraction(
 /// The `app_settings` key for the experimental auto-translate toggle.
 ///
 /// When enabled, articles written in other languages are translated to English
-/// during AI processing. Default is `true` (enabled). Unlike the sibling AI
-/// Summary toggles (which live in `localStorage`), this is persisted in the
-/// database so it can be read by backend processing stages.
+/// during AI processing (import trigger, full-text attach trigger, batch-import
+/// Phase 3, and the screening pre-step). Default is `false` (opt-in): the user
+/// must enable it explicitly in Settings so imports do not silently trigger
+/// background translation + LLM cost. Unlike the sibling AI Summary toggles
+/// (which live in `localStorage`), this is persisted in the database so it can
+/// be read by backend processing stages.
 pub const AUTO_TRANSLATE_KEY: &str = "auto_translate";
 
-/// Whether auto-translate is enabled. Absent key = `true` (the default). Any
-/// value other than the exact strings `"true"` / `"false"` falls back to the
-/// default so a corrupted row never disables the feature silently.
+/// Whether auto-translate is enabled. Absent key = `false` (opt-in default).
+/// Any value other than the exact strings `"true"` / `"false"` falls back to
+/// the default so a corrupted row never silently enables the feature.
 pub fn get_auto_translate(conn: &Connection) -> Result<bool, AppError> {
     Ok(match get_setting(conn, AUTO_TRANSLATE_KEY)?.as_deref() {
-        Some("false") => false,
         Some("true") => true,
-        // Absent key or unrecognized value: default enabled.
-        _ => true,
+        Some("false") => false,
+        // Absent key or unrecognized value: default disabled (opt-in).
+        _ => false,
     })
 }
 

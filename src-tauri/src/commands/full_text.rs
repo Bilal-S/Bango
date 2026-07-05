@@ -211,29 +211,32 @@ pub fn attach_full_text(
     article_id: String,
     file_path: String,
 ) -> Result<FullTextAttachResult, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    // Compute the attach result while holding the DB lock, then drop the guard
+    // BEFORE enqueuing translations so the (re-locking) batch enqueue helper
+    // does not deadlock / serialize against the attach transaction
+    // (Tier 1a lock hygiene).
+    let result = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let storage_dir = compute_storage_dir(&conn)?;
+        let source_path = PathBuf::from(&file_path);
+        attach_full_text_inner(&conn, &article_id, &source_path, &storage_dir)
+    };
 
-    let storage_dir = compute_storage_dir(&conn)?;
-    let source_path = PathBuf::from(&file_path);
-    let result = attach_full_text_inner(&conn, &article_id, &source_path, &storage_dir);
-
-    // Fire-and-forget translation enqueue on successful attach. Phase 2
-    // enqueues `MetadataOnly`; Phase 3 will switch this to `FullText` once the
-    // full-text chunk translation engine exists. The enqueue gate inside the
-    // helper checks `auto_translate`, `is_english_language`, and the article's
+    // Fire-and-forget translation enqueue on successful attach. The enqueue
+    // gate inside the helper checks `auto_translate`, `should_skip_translation`
+    // (English OR absent/blank language), and the article's
     // `translation_status` so existing already-translated / queued / English
     // articles are skipped silently.
     //
     // Skipped when `extraction_failed` is true: a corrupt/empty PDF yields an
     // empty `full_text`, so a `FullText` translation job would translate
-    // nothing and waste worker effort (a `MetadataOnly` job is still pointless
-    // since the failure is already surfaced via the audit table). The user can
-    // retry translation manually once a valid source file is provided.
+    // nothing and waste worker effort. The user can retry translation
+    // manually once a valid source file is provided.
     if let Ok(ref attach) = result {
         if !attach.extraction_failed {
             crate::commands::translation::try_enqueue_translations_for_import(
                 &app_handle,
-                &conn,
+                &db_state.conn,
                 std::slice::from_ref(&article_id),
             );
         }

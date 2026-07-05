@@ -1,10 +1,10 @@
 //! Coverage for the experimental auto-translate `app_settings` toggle.
 //!
 //! Mirrors the `biblio_needs_refresh` round-trip test shape. The toggle
-//! defaults to `true` (enabled) when the key is absent, and round-trips both
+//! defaults to `false` (opt-in) when the key is absent, and round-trips both
 //! `true` and `false` through `set_auto_translate` / `get_auto_translate`.
-//! Garbage values fall back to the default so a corrupted row never silently
-//! disables the feature.
+//! Garbage values fall back to the default (disabled) so a corrupted row never
+//! silently enables translation + LLM cost.
 use bango_lib::db::app_settings_repo::{
     get_auto_translate, set_auto_translate, AUTO_TRANSLATE_KEY,
 };
@@ -18,10 +18,12 @@ fn test_db() -> Connection {
 }
 
 #[test]
-fn auto_translate_defaults_to_true_when_absent() {
+fn auto_translate_defaults_to_false_when_absent() {
     let conn = test_db();
-    // Fresh database has no app_settings row for the toggle; default is enabled.
-    assert!(get_auto_translate(&conn).unwrap());
+    // Fresh database has no app_settings row for the toggle; default is
+    // disabled (opt-in) so imports never silently trigger background
+    // translation + LLM cost.
+    assert!(!get_auto_translate(&conn).unwrap());
 }
 
 #[test]
@@ -60,14 +62,15 @@ fn auto_translate_round_trips_true() {
 }
 
 #[test]
-fn auto_translate_garbage_value_falls_back_to_default() {
+fn auto_translate_garbage_value_falls_back_to_default_false() {
     let conn = test_db();
     // Write a garbage value directly so we can confirm the read helper treats
-    // anything other than "true"/"false" as the default (enabled).
+    // anything other than "true"/"false" as the default (disabled / opt-in)
+    // so a corrupted row never silently enables translation + LLM cost.
     conn.execute(
         &format!("INSERT INTO app_settings (key, value) VALUES ('{AUTO_TRANSLATE_KEY}', 'yes')"),
         [],
     )
     .unwrap();
-    assert!(get_auto_translate(&conn).unwrap());
+    assert!(!get_auto_translate(&conn).unwrap());
 }

@@ -74,14 +74,18 @@ fn seed_non_english_with_full_text(conn: &rusqlite::Connection) -> String {
 fn auto_translate_on_enables_import_trigger() {
     // When `auto_translate = true`, `try_enqueue_translations_for_import`
     // does NOT return early (unlike the false case). The gate checks
-    // `get_auto_translate()` which defaults to `true`.
+    // `get_auto_translate()`.
+    //
+    // Decision (a): the default is now `false` (opt-in) so imports do not
+    // silently trigger background translation + LLM cost. The user must
+    // explicitly enable it in Settings; this test verifies the round-trip.
     let conn = setup_db();
 
-    // Default is enabled (absent key → true).
+    // Default is disabled (absent key → false, opt-in).
     let auto = app_settings_repo::get_auto_translate(&conn).expect("get auto_translate");
-    assert!(auto, "auto_translate defaults to true; import trigger proceeds past the gate");
+    assert!(!auto, "auto_translate defaults to false (opt-in); import trigger is gated off");
 
-    // Explicitly enable.
+    // Explicitly enable; the import trigger now proceeds past the gate.
     app_settings_repo::set_auto_translate(&conn, true).expect("set auto_translate");
     assert!(app_settings_repo::get_auto_translate(&conn).expect("get auto_translate"));
 }
