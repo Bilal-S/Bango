@@ -16,7 +16,7 @@ use crate::llm::client;
 use crate::models::llm_config::LlmConfig;
 
 /// Maximum time to wait for a single LLM response.
-const LLM_TIMEOUT_SECS: u64 = 300;
+const LLM_TIMEOUT_SECS: u64 = 600;
 
 /// Label for categorizing LLM request sources.
 #[derive(Debug, Clone)]
