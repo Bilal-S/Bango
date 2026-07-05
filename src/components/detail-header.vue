@@ -35,7 +35,7 @@ const emit = defineEmits<{
   attachFullText: [id: string];
   requestAiSummary: [];
   readFullText: [];
-  requestTranslation: [id: string];
+  requestTranslate: [id: string];
 }>();
 
 // Translation is in-flight when the queue reports queued/running. The status
@@ -53,9 +53,54 @@ const isTranslationPending = computed(
         <span
           class="text-xs font-label-caps text-primary uppercase bg-primary/5 px-2 py-0.5 rounded"
         >
-          Current {{ getPublicationTypeLabel(article.referenceType) }} Selection
+          {{ getPublicationTypeLabel(article.referenceType).toUpperCase() }}
         </span>
         <StatusBadge :status="article.status" />
+        <!-- Translation status chips (after status badge; pill-shaped to
+             match StatusBadge). Mutually exclusive by data state. -->
+        <span
+          v-if="isTranslationPending"
+          class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-tight text-amber-700 bg-amber-50"
+          :title="article.translationStatus === 'queued' ? 'Translation queued' : 'Translating…'"
+        >
+          <span class="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
+          {{ article.translationStatus === 'queued' ? 'Translation Queued' : 'Translating' }}
+        </span>
+        <span
+          v-else-if="article.isTranslated"
+          class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-tight text-red-700 bg-red-50 ring-1 ring-red-200"
+          title="Article translated to English"
+        >
+          <span class="material-symbols-outlined text-[14px]">check_circle</span>
+          Translated
+        </span>
+        <span
+          v-else-if="article.translationStatus === 'failed'"
+          class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-tight text-red-700 bg-red-50"
+          :title="article.translationError ?? 'Translation failed'"
+        >
+          <span class="material-symbols-outlined text-[14px]">error</span>
+          Translation Failed
+        </span>
+        <!-- Action icons (after status badge) -->
+        <!-- Translate icon (language-plan-v2 Phase 5) -->
+        <button
+          v-if="canRequestTranslation"
+          class="material-symbols-outlined text-[18px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 cursor-pointer rounded px-1 transition-colors"
+          title="Translate to English"
+          @click="emit('requestTranslate', article.id)"
+        >
+          translate
+        </button>
+        <button
+          v-else-if="isTranslationEligible && !isLlmConfigured"
+          type="button"
+          disabled
+          class="material-symbols-outlined text-[18px] text-slate-300 cursor-not-allowed rounded px-1"
+          title="Configure an LLM provider in Settings to enable translations"
+        >
+          translate
+        </button>
         <!-- Full-text attachment icon -->
         <button
           v-if="article.hasFullText && fullTextFileIcon"
@@ -93,52 +138,6 @@ const isTranslationPending = computed(
           title="AI summary in progress..."
         >
           progress_activity
-        </span>
-        <!-- Translate icon (language-plan-v2 Phase 5) -->
-        <button
-          v-if="canRequestTranslation"
-          class="material-symbols-outlined text-[18px] text-amber-600 hover:text-amber-700 hover:bg-amber-50 cursor-pointer rounded px-1 transition-colors"
-          title="Translate to English"
-          @click="emit('requestTranslation', article.id)"
-        >
-          translate
-        </button>
-        <!-- Translate disabled: eligible (non-English, not translated, not
-             in-flight) but no LLM configured. Rendered as a disabled
-             placeholder with a tooltip guiding the user to Settings. -->
-        <button
-          v-else-if="isTranslationEligible && !isLlmConfigured"
-          type="button"
-          disabled
-          class="material-symbols-outlined text-[18px] text-slate-300 cursor-not-allowed rounded px-1"
-          title="Configure an LLM provider in Settings to enable translations"
-        >
-          translate
-        </button>
-        <!-- Translation status chips (replace the button once translation starts/completes) -->
-        <span
-          v-else-if="isTranslationPending"
-          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded"
-          :title="article.translationStatus === 'queued' ? 'Translation queued' : 'Translating…'"
-        >
-          <span class="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>
-          {{ article.translationStatus === 'queued' ? 'Translation Queued' : 'Translating' }}
-        </span>
-        <span
-          v-else-if="article.isTranslated"
-          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-red-700 bg-red-50 px-1.5 py-0.5 rounded ring-1 ring-red-200"
-          title="Article translated to English"
-        >
-          <span class="material-symbols-outlined text-[14px]">check_circle</span>
-          Translated
-        </span>
-        <span
-          v-else-if="article.translationStatus === 'failed'"
-          class="inline-flex items-center gap-1 text-[11px] font-label-caps uppercase text-red-700 bg-red-50 px-1.5 py-0.5 rounded"
-          :title="article.translationError ?? 'Translation failed'"
-        >
-          <span class="material-symbols-outlined text-[14px]">error</span>
-          Translation Failed
         </span>
       </div>
       <div class="flex items-center gap-1">

@@ -26,12 +26,14 @@ vi.mock('@tauri-apps/api/event', () => ({
   },
 }));
 
-// Stub the LLM config store so the component doesn't try to fetch.
+// Stub the LLM config store so the component doesn't try to fetch. Includes
+// the `isConfigured` getter the panel delegates to (mirrors the real store).
 vi.mock('@/stores/llm-config', () => ({
   useLlmConfigStore: () => ({
     initialized: true,
     fetchIfNeeded: vi.fn(),
     config: { apiKeyEncrypted: 'fake-key' },
+    isConfigured: true,
   }),
 }));
 
@@ -181,15 +183,18 @@ describe('article-detail-panel.vue - translation (language-plan-v2)', () => {
 
     await flushPromises();
 
-    // The confirmation dialog should now be visible.
-    expect(wrapper.find('.dialog--danger').exists()).toBe(true);
-    expect(wrapper.html()).toContain('Translate Article');
-    expect(wrapper.html()).toContain('Titre français');
+    // The confirmation dialog is teleported to document.body (escapes the
+    // detail panel's transform), so query the document rather than the
+    // component wrapper.
+    const dialogInBody = document.body.querySelector('.dialog--danger');
+    expect(dialogInBody).not.toBeNull();
+    expect(dialogInBody!.textContent).toContain('Translate Article');
+    expect(dialogInBody!.textContent).toContain('Titre français');
 
     // Click the "Translate to English" button.
-    const confirmBtn = wrapper.find('.btn--danger');
-    expect(confirmBtn.exists()).toBe(true);
-    await confirmBtn.trigger('click');
+    const confirmBtn = document.body.querySelector('.btn--danger') as HTMLButtonElement;
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn.click();
     await flushPromises();
 
     // Must have invoked the Tauri enqueue command.
@@ -199,7 +204,7 @@ describe('article-detail-panel.vue - translation (language-plan-v2)', () => {
     });
 
     // The dialog must be closed after confirmation.
-    expect(wrapper.find('.dialog--danger').exists()).toBe(false);
+    expect(document.body.querySelector('.dialog--danger')).toBeNull();
   });
 
   it('refreshes_article_on_translation_complete_event', async () => {
@@ -211,12 +216,14 @@ describe('article-detail-panel.vue - translation (language-plan-v2)', () => {
       article: makeArticle({ language: 'French', isTranslated: false }),
     });
 
-    // Open and confirm translation so the global listener is registered.
+    // Open and confirm translation so the global listener is registered. The
+    // dialog is teleported to document.body, so query the confirm button there.
     const detailHeader = wrapper.findComponent({ name: 'DetailHeader' });
     detailHeader.vm.$emit('request-translate');
     await flushPromises();
-    const confirmBtn = wrapper.find('.btn--danger');
-    await confirmBtn.trigger('click');
+    const confirmBtn = document.body.querySelector('.btn--danger') as HTMLButtonElement;
+    expect(confirmBtn).not.toBeNull();
+    confirmBtn.click();
     await flushPromises();
 
     // The listener for `translation:complete` must be registered.

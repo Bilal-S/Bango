@@ -141,6 +141,51 @@ describe('article-metadata.vue', () => {
     expect(wrapper.text()).toContain('---');
   });
 
+  it('renders Lang label and language value when present', () => {
+    const wrapper = mount(ArticleMetadata, {
+      props: { article: makeArticle({ language: 'French' }) },
+    });
+    expect(wrapper.text()).toContain('Lang');
+    expect(wrapper.text()).toContain('French');
+  });
+
+  it('renders dashes for missing language', () => {
+    const wrapper = mount(ArticleMetadata, {
+      props: { article: makeArticle({ language: null }) },
+    });
+    expect(wrapper.text()).toContain('Lang');
+    // Language is null -> the `?? '---'` fallback renders dashes.
+    expect(wrapper.text()).toContain('---');
+  });
+
+  it('sets title attribute on Journal value span so the full name shows on hover', () => {
+    // When the journal name is truncated by the `truncate` class, the native
+    // tooltip (title attribute) carries the full name so the user can still
+    // read it on hover. The Journal label span is followed by the value span.
+    const wrapper = mount(ArticleMetadata, {
+      props: { article: makeArticle({ journal: 'Journal of Long Name Example' }) },
+    });
+    const labels = wrapper.findAll('span.text-slate-500');
+    const journalLabel = labels.find((s) => s.text() === 'Journal');
+    expect(journalLabel).toBeTruthy();
+    const valueSpan = journalLabel!.element.nextElementSibling as HTMLElement;
+    expect(valueSpan).toBeTruthy();
+    expect(valueSpan.getAttribute('title')).toBe('Journal of Long Name Example');
+  });
+
+  it('sets empty title on Journal value span when journal is null', () => {
+    // No stray tooltip should appear for the `---` placeholder.
+    const wrapper = mount(ArticleMetadata, {
+      props: { article: makeArticle({ journal: null }) },
+    });
+    const labels = wrapper.findAll('span.text-slate-500');
+    const journalLabel = labels.find((s) => s.text() === 'Journal');
+    expect(journalLabel).toBeTruthy();
+    const valueSpan = journalLabel!.element.nextElementSibling as HTMLElement;
+    expect(valueSpan).toBeTruthy();
+    expect(valueSpan.getAttribute('title')).toBe('');
+  });
+
   it('toggles metadata expanded state and persists to localStorage', async () => {
     const wrapper = mount(ArticleMetadata, { props: { article: makeArticle() } });
     const button = wrapper.find('button');

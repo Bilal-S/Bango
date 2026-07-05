@@ -89,7 +89,7 @@ describe('detail-header.vue', () => {
 
   it('renders publication-type label', () => {
     const wrapper = mount(DetailHeader, { props: baseProps });
-    expect(wrapper.text()).toContain('Journal');
+    expect(wrapper.text()).toContain('JOURNAL');
   });
 
   it('shows close icon when no return target', () => {

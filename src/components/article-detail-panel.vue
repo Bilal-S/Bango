@@ -305,30 +305,39 @@ const {
       @reader-opened="emit('readerOpened')"
     />
 
-    <!-- Translation Confirmation Dialog (language-plan-v2 Phase 5) -->
-    <div v-if="showTranslateDialog" class="dialog-overlay" @click.self="cancelTranslation">
-      <div class="dialog dialog--danger">
-        <h2>Translate Article</h2>
-        <div class="dialog__danger-box">
-          <span class="material-symbols-outlined">warning</span>
-          <p>
-            This will <strong>permanently rewrite</strong> the article text (title, abstract, and
-            full text) to English so AI screening and summaries can process it. The original
-            non-English text is preserved in the originals archive. This action has a
-            <strong>high token cost</strong> and cannot be undone without re-importing the article.
-          </p>
-        </div>
-        <div class="dialog__desc">
-          <p>
-            Article: <code>{{ translateArticleTitle }}</code>
-          </p>
-        </div>
-        <div class="dialog__actions">
-          <button class="btn btn--outline" @click="cancelTranslation">Cancel</button>
-          <button class="btn btn--danger" @click="confirmTranslation">Translate to English</button>
+    <!-- Translation Confirmation Dialog (language-plan-v2 Phase 5).
+         Teleported to <body> so it escapes the detail panel's transform
+         (mobile slide-in animation) + z-index stacking context, mirroring the
+         criteria-edit-dialog.vue precedent. Without Teleport the fixed-position
+         dialog is trapped inside the transformed <aside> and never appears. -->
+    <Teleport to="body">
+      <div v-if="showTranslateDialog" class="dialog-overlay" @click.self="cancelTranslation">
+        <div class="dialog dialog--danger">
+          <h2>Translate Article</h2>
+          <div class="dialog__danger-box">
+            <span class="material-symbols-outlined">warning</span>
+            <p>
+              This will <strong>permanently rewrite</strong> the article text (title, abstract, and
+              full text) to English so AI screening and summaries can process it. The original
+              non-English text is preserved in the originals archive. This action has a
+              <strong>high token cost</strong> and cannot be undone without re-importing the
+              article.
+            </p>
+          </div>
+          <div class="dialog__desc">
+            <p>
+              Article: <code>{{ translateArticleTitle }}</code>
+            </p>
+          </div>
+          <div class="dialog__actions">
+            <button class="btn btn--outline" @click="cancelTranslation">Cancel</button>
+            <button class="btn btn--danger" @click="confirmTranslation">
+              Translate to English
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
     <!-- Footer Actions -->
     <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50 items-center">

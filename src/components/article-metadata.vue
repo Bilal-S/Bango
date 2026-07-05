@@ -63,20 +63,33 @@ function copyDoi(): void {
           >
           <span class="text-on-surface">{{ article.affiliation }}</span>
         </div>
-        <div class="grid grid-cols-2 gap-4 text-body-sm font-body-sm">
-          <div class="flex flex-col gap-1">
+        <div
+          class="grid gap-4 text-body-sm font-body-sm"
+          style="grid-template-columns: 2.5fr 1fr 1fr"
+        >
+          <div class="flex flex-col gap-1 min-w-0">
             <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
               >Journal</span
             >
-            <span class="text-on-surface truncate">{{ article.journal ?? '---' }}</span>
+            <span class="text-on-surface truncate" :title="article.journal ?? ''">{{
+              article.journal ?? '---'
+            }}</span>
           </div>
-          <div class="flex flex-col gap-1">
+          <div class="flex flex-col gap-1 min-w-0">
             <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
               >Year</span
             >
             <span class="text-on-surface">{{ article.publicationYear ?? '---' }}</span>
           </div>
-          <div v-if="article.doi" class="flex flex-col gap-1 col-span-2">
+          <div class="flex flex-col gap-1 min-w-0">
+            <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
+              >Lang</span
+            >
+            <span class="text-on-surface truncate" :title="article.language ?? ''">{{
+              article.language ?? '---'
+            }}</span>
+          </div>
+          <div v-if="article.doi" class="flex flex-col gap-1 col-span-3">
             <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
               >DOI</span
             >
@@ -98,7 +111,7 @@ function copyDoi(): void {
               </button>
             </div>
           </div>
-          <div v-if="article.keywords.length > 0" class="flex flex-col gap-1 col-span-2">
+          <div v-if="article.keywords.length > 0" class="flex flex-col gap-1 col-span-3">
             <span class="text-slate-500 text-[11px] uppercase tracking-wider font-semibold"
               >Keywords</span
             >
