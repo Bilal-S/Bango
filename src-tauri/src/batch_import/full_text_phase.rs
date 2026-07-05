@@ -81,8 +81,11 @@ pub fn discover_importable_files(
 
 /// Run Phase 1: attach each importable full-text file to its matched article.
 ///
-/// Calls [`attach_full_text_inner`] per file inside a short-lived DB lock
-/// (extract the text first without the lock, then lock only for the DB write).
+/// Calls [`attach_full_text_inner`] per file under the caller's DB lock.
+/// Text-extraction failures are handled inside `attach_full_text_inner` (the
+/// file attaches with empty text and a general-error audit entry), so they are
+/// reported as succeeded here; this `Err` arm only catches hard attach
+/// failures (missing file, copy error, DB write error).
 /// The caller's `is_cancelled` closure is checked before each file so the
 /// runner can abort mid-phase.
 ///
@@ -114,25 +117,34 @@ where
             break;
         }
 
-        // Pre-extract the text outside the DB lock so the connection mutex is
-        // held only for the brief DB write. If extraction fails, count it and
-        // continue (the file is still removed from the backlog next run since
-        // attach only flips `has_full_text` on success).
+        // The connection mutex is held for the whole phase, so the attach call
+        // (text extraction + DB write) runs under the lock. Text-extraction
+        // failures are handled inside `attach_full_text_inner`: the file still
+        // attaches with empty text and a general-error audit entry, so the
+        // article is correctly reported as succeeded here and is not retried
+        // next run. This `Err` arm catches only hard attach failures (missing
+        // file, copy error, DB write error) and surfaces them via the Audit
+        // Timeline in addition to the transient progress UI.
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
         on_progress(processed, total, &format!("Phase 1 - Full Text - found {total} files - attempting to attach {} of {total}: {filename}", processed + 1));
 
         processed += 1;
         match attach_full_text_inner(conn, article_id, path, &storage_dir) {
-            Ok(_result) => {
+            Ok(_) => {
                 succeeded += 1;
                 newly_attached_ids.push(article_id.clone());
             }
             Err(e) => {
                 failed += 1;
-                errors.push(format!(
-                    "Failed to attach '{}': {e}",
-                    path.file_name().and_then(|n| n.to_str()).unwrap_or("?")
-                ));
+                let audit = format!(
+                    "Batch import Phase 1 (article {article_id}): Failed to attach '{filename}': {e}"
+                );
+                errors.push(format!("Failed to attach '{filename}': {e}"));
+                // Surface in the Audit Timeline (general error) so failures
+                // aren't only visible in the transient progress UI. Non-fatal:
+                // ignore audit-write errors so a logging failure can't break
+                // the import loop.
+                let _ = crate::db::audit_repo::log_error(conn, &audit);
             }
         }
     }

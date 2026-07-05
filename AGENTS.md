@@ -103,7 +103,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     enhanced/two_stage screening evidence. Exposes `replace_chunks_for_article`,
     `list_chunks_for_article`, `delete_chunks_for_article`, `count_chunks_for_article`,
     `get_articles_with_full_text_missing_chunks` (screening-start guard,
-    `has_full_text=1` AND zero chunks), `get_articles_with_full_text` (Settings
+    `has_full_text=1` AND non-empty `full_text` AND zero chunks; excludes
+    soft-fallback empty-text attaches so the guard does not retry-pam invalid
+    PDFs on every screening run), `get_articles_with_full_text` (Settings
     "Rebuild text chunks" button, `has_full_text=1` regardless of chunks, so a
     corrupted/partial/outdated set is repaired), `count_articles_with_full_text`.
     Tested in `tests/chunk_retrieval_test.rs`.
@@ -503,7 +505,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     between items; emits `batch-import:progress` events), `full_text_phase.rs`
     (Phase 1: scan `fulltext/` for `{cleaned_doi}.pdf` / `.txt`, attach via
     extracted `commands::full_text::attach_full_text_inner`; skips articles
-    with `has_full_text=true`; returns newly-attached IDs for Phase 3),
+    with `has_full_text=true`; returns newly-attached IDs for Phase 3;
+    text-extraction failures are handled inside `attach_full_text_inner` as
+    soft-fallback attaches with empty `full_text` + a `log_error` audit row,
+    and hard attach failures (missing file, copy error, DB write error) write
+    a `log_error` audit entry in addition to the in-memory progress errors),
     `citations_phase.rs` (Phase 2: scan `ris/` for
     `{cleaned_doi}_references.ris`, `_citations.ris`, `.ris`, `.bib`; skips
     articles with `has_reference_details`/`has_citation_details`; auto-detects
@@ -754,7 +760,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
   `biblio-publication-timeline-plan-v3.md`). Not part of the shipped app.
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
-`-D warnings` + vitest + `check:test-inventory`) and `cargo test`.
+`-D warnings` on the library crate + vitest + `check:test-inventory`) and
+`cargo test`. The clippy rule lives in `src-tauri/Cargo.toml`
+`[lints.clippy]` (escalated to deny by `-D warnings`); `unwrap_used`,
+`expect_used`, and `panic` are re-asserted test-aware in `src-tauri/src/lib.rs`
+via `#![cfg_attr(not(test), warn(...))]` so they fire on production code but
+not on test code (see `docs/CLAUDE.md` §Error Handling).
 
 Coverage tooling: `npm run test:coverage` (Vue/TS via `@vitest/coverage-v8`, config in
 `vitest.config.ts`, report at `coverage/index.html`) and

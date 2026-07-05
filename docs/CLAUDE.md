@@ -24,6 +24,16 @@
 - Use `anyhow::Result` for application-level errors (Tauri commands, CLI).
 - Use `thiserror` for library-level errors (RIS parsing, deduplication, LLM client).
 - Never use `unwrap()` or `expect()` outside of tests. Clippy warns on both.
+- `unwrap()` / `expect()` / `panic!()` are allowed in test code (both inline
+  `#[cfg(test)] mod tests` blocks and the separate integration test crates in
+  `src-tauri/tests/`). The configuration is split across two locations:
+  - `src-tauri/Cargo.toml` `[lints.clippy]` does NOT escalate `unwrap_used`,
+    `expect_used`, or `panic` (so integration test crates, which are separate
+    crates and not reached by `lib.rs` attributes, stay exempt).
+  - `src-tauri/src/lib.rs` re-asserts them via
+    `#![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used, clippy::panic))]`
+    so the `cargo clippy -- -D warnings` gate still denies them in production
+    library/application code while suspending them under `cfg(test)`.
 - Return `Result<T, E>` from all fallible functions.
 - Use tauri-pilot mcp for E2E testing. Check whether dev server is running before attempting to start another instance.
 - **System/Generic Error Logging**: For system-wide operational events or errors not tied to a specific article (e.g., scraping outcomes, global LLM client failures, database initialization errors), use `audit_repo::log_error(conn, details)`. This creates an audit entry with `article_id = NULL` and `action = 'error'`. Do not use this for article-specific events.

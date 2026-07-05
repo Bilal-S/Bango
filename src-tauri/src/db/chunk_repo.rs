@@ -91,12 +91,23 @@ pub fn count_chunks_for_article(conn: &Connection, article_id: &str) -> Result<i
 /// Used by the `ensure_chunks_for_full_text_articles` guard (runs at screening
 /// start with `force=false`) so previously-attached PDFs without chunks are
 /// backfilled transparently.
+///
+/// Excludes articles whose `full_text` is NULL or empty. Those rows result from
+/// `attach_full_text_inner`'s soft-fallback path (corrupt/empty PDF that
+/// attached but failed text extraction): re-parsing the same invalid source
+/// would never produce chunks, so including them would make the screening-start
+/// guard retry - and re-log the same `log_error` - on every screening run. The
+/// explicit Settings "Rebuild text chunks" button (`force=true`,
+/// `get_articles_with_full_text`) still attempts them so a user can retry after
+/// replacing the source file.
 pub fn get_articles_with_full_text_missing_chunks(
     conn: &Connection,
 ) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT a.id FROM articles a
          WHERE a.has_full_text = 1
+           AND a.full_text IS NOT NULL
+           AND a.full_text <> ''
            AND NOT EXISTS (SELECT 1 FROM article_chunks c WHERE c.article_id = a.id)",
     )?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;

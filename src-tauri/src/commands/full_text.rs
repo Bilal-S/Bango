@@ -32,6 +32,11 @@ pub struct FullTextAttachResult {
     pub success: bool,
     pub message: String,
     pub word_count: usize,
+    /// `true` when the file attached but text extraction failed (empty
+    /// `full_text` persisted). Callers use this to skip downstream
+    /// text-dependent work (e.g. translation enqueue) that would otherwise
+    /// operate on empty content.
+    pub extraction_failed: bool,
 }
 
 /// Resolve the fulltext storage directory (`{storage_root}/fulltext/`).
@@ -72,17 +77,28 @@ pub fn attach_full_text_inner(
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
 
-    // Extract text based on file type
-    let full_text = match extension.as_str() {
-        "pdf" => pdf_extract::extract_pdf_text(source_path).map_err(AppError::Import),
-        "txt" => {
-            let content = std::fs::read_to_string(source_path)?;
-            Ok(pdf_extract::extract_txt_text(&content))
+    // Extract text based on file type. On extraction failure, fall back to an
+    // empty string so the attachment still persists (the file is copied to
+    // storage, `has_full_text` flips, and the in-app reader can still open the
+    // raw file). The error is surfaced via the audit table below so the user
+    // knows text-based features (screening evidence, AI summary, wiki) will be
+    // unavailable until a valid source file is provided. Only an unsupported
+    // extension is a hard error (nothing to attach in that case).
+    let (full_text, extraction_error): (String, Option<String>) = match extension.as_str() {
+        "pdf" => match pdf_extract::extract_pdf_text(source_path) {
+            Ok(text) => (text, None),
+            Err(e) => (String::new(), Some(format!("PDF text extraction failed: {e}"))),
+        },
+        "txt" => match std::fs::read_to_string(source_path) {
+            Ok(content) => (pdf_extract::extract_txt_text(&content), None),
+            Err(e) => (String::new(), Some(format!("Failed to read .txt file: {e}"))),
+        },
+        other => {
+            return Err(AppError::Import(format!(
+                "Unsupported file type: .{other}. Only .pdf and .txt files are supported."
+            )));
         }
-        other => Err(AppError::Import(format!(
-            "Unsupported file type: .{other}. Only .pdf and .txt files are supported."
-        ))),
-    }?;
+    };
 
     let word_count = full_text.split_whitespace().count();
 
@@ -92,6 +108,7 @@ pub fn attach_full_text_inner(
     // `extract_captions` call and errors with "No figure/table captions
     // detected" when the result is empty). Using the same detector here keeps
     // the frontend button gate DRY with the backend generation precondition.
+    // On extraction failure `full_text` is empty, so this safely yields false.
     let has_figures_or_tables = !extract_captions(&full_text).is_empty();
 
     // Build destination filename: {original_stem}_{article_id}.{ext}
@@ -130,20 +147,54 @@ pub fn attach_full_text_inner(
     app_settings_repo::mark_wiki_needs_refresh(conn);
     app_settings_repo::mark_biblio_needs_refresh(conn);
 
-    crate::db::audit_repo::create_entry(
+    // When text extraction failed, surface a general-error audit entry so the
+    // degradation is visible in the Audit Timeline (not just the transient
+    // attach toast). The attachment itself still succeeded.
+    if let Some(ref msg) = extraction_error {
+        let _ = crate::db::audit_repo::log_error(
+            conn,
+            &format!(
+                "Full text attached to article {article_id} but {msg} (file: {original_name}). \
+                 The file is stored; text-based features (screening evidence, AI summary, wiki) \
+                 will be unavailable until a valid source file is provided."
+            ),
+        );
+    }
+
+    let attach_detail = format!(
+        "Full text attached: {original_name}{}",
+        extraction_error.as_ref().map(|_| " (text extraction failed)").unwrap_or("")
+    );
+
+    // Non-fatal: the attachment + file copy + DB update have already succeeded,
+    // so a failure to write the success audit row must not unwind the operation.
+    // The chunk-populate and extraction-error audit writes above already use the
+    // same `let _ = …` policy; this keeps the three audit paths consistent.
+    if let Err(audit_e) = crate::db::audit_repo::create_entry(
         conn,
         article_id,
         "import",
         None,
         None,
-        Some(&format!("Full text attached: {original_name}")),
+        Some(&attach_detail),
         "user",
-    )?;
+    ) {
+        let _ = crate::db::audit_repo::log_error(
+            conn,
+            &format!("Failed to write success audit for article {article_id}: {audit_e}"),
+        );
+    }
 
+    let extraction_failed = extraction_error.is_some();
     Ok(FullTextAttachResult {
         success: true,
-        message: format!("Full text extracted ({word_count} words)"),
+        message: if extraction_failed {
+            "Full text attached (text extraction failed)".to_string()
+        } else {
+            format!("Full text extracted ({word_count} words)")
+        },
         word_count,
+        extraction_failed,
     })
 }
 
@@ -175,12 +226,20 @@ pub fn attach_full_text(
     // helper checks `auto_translate`, `is_english_language`, and the article's
     // `translation_status` so existing already-translated / queued / English
     // articles are skipped silently.
-    if result.is_ok() {
-        crate::commands::translation::try_enqueue_translations_for_import(
-            &app_handle,
-            &conn,
-            std::slice::from_ref(&article_id),
-        );
+    //
+    // Skipped when `extraction_failed` is true: a corrupt/empty PDF yields an
+    // empty `full_text`, so a `FullText` translation job would translate
+    // nothing and waste worker effort (a `MetadataOnly` job is still pointless
+    // since the failure is already surfaced via the audit table). The user can
+    // retry translation manually once a valid source file is provided.
+    if let Ok(ref attach) = result {
+        if !attach.extraction_failed {
+            crate::commands::translation::try_enqueue_translations_for_import(
+                &app_handle,
+                &conn,
+                std::slice::from_ref(&article_id),
+            );
+        }
     }
 
     result

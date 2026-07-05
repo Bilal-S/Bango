@@ -1,3 +1,16 @@
+// Deny `unwrap()`/`expect()`/`panic!()` in production library/application
+// code. The `cfg_attr(not(test), ...)` form keeps the rules active for normal
+// builds (escalated to errors by `cargo clippy -- -D warnings`) while
+// suspending them under `cfg(test)` so:
+//   - inline `#[cfg(test)] mod tests` blocks inside `src/*.rs` (same crate),
+//     AND
+//   - integration test crates in `tests/*.rs` (separate crates that depend on
+//     `bango_lib` and are never reached by this attribute anyway)
+// both remain idiomatic. The crate-wide `[lints.clippy]` table in `Cargo.toml`
+// intentionally does NOT set these lints either, so nothing re-escalates them
+// in the test profile.
+#![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+
 pub mod batch_import;
 pub mod biblio;
 pub mod bibtex;

@@ -104,14 +104,55 @@ fn chunk_repo_missing_chunks_query_detects_un_chunked_articles() {
     let conn = setup_db();
     insert_article(&conn, "chunked");
     insert_article(&conn, "unchunked");
-    // Mark `chunked` as having full text + chunks.
-    conn.execute("UPDATE articles SET has_full_text = 1 WHERE id = 'chunked'", []).unwrap();
-    conn.execute("UPDATE articles SET has_full_text = 1 WHERE id = 'unchunked'", []).unwrap();
+    // Mark both as having non-empty full text; seed chunks for `chunked` only.
+    // (Non-empty `full_text` is required because the query excludes empty-text
+    // articles - the soft-fallback attach path that produces them would
+    // otherwise be retried on every screening run.)
+    conn.execute(
+        "UPDATE articles SET has_full_text = 1, full_text = 'body' WHERE id = 'chunked'",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE articles SET has_full_text = 1, full_text = 'body' WHERE id = 'unchunked'",
+        [],
+    )
+    .unwrap();
     chunk_repo::replace_chunks_for_article(&conn, "chunked", &sample_chunks()).unwrap();
 
     let missing = chunk_repo::get_articles_with_full_text_missing_chunks(&conn).unwrap();
     assert_eq!(missing.len(), 1, "only the unchunked article is missing chunks");
     assert_eq!(missing[0], "unchunked");
+}
+
+#[test]
+fn missing_chunks_query_excludes_empty_full_text_articles() {
+    // Regression guard for the chunk-retry-spam fix: an article with
+    // `has_full_text = 1` but NULL/empty `full_text` (the soft-fallback attach
+    // path for corrupt PDFs) must NOT be returned, since re-parsing the same
+    // invalid source would never produce chunks.
+    let conn = setup_db();
+    insert_article(&conn, "empty-ft");
+    insert_article(&conn, "real-ft");
+    // `empty-ft` mirrors the soft-fallback attach state: `has_full_text = 1`
+    // but empty `full_text`.
+    conn.execute("UPDATE articles SET has_full_text = 1, full_text = '' WHERE id = 'empty-ft'", [])
+        .unwrap();
+    conn.execute(
+        "UPDATE articles SET has_full_text = 1, full_text = 'real body text' WHERE id = 'real-ft'",
+        [],
+    )
+    .unwrap();
+
+    let missing = chunk_repo::get_articles_with_full_text_missing_chunks(&conn).unwrap();
+    assert!(
+        !missing.contains(&"empty-ft".to_string()),
+        "empty-full_text article must be excluded to prevent retry spam"
+    );
+    assert!(
+        missing.contains(&"real-ft".to_string()),
+        "non-empty article with no chunks is returned"
+    );
 }
 
 #[test]
@@ -138,8 +179,10 @@ fn get_articles_with_full_text_returns_all_regardless_of_chunks() {
     insert_article(&conn, "with-chunks");
     insert_article(&conn, "without-chunks");
     insert_article(&conn, "no-fulltext");
+    // Set non-empty `full_text` so the missing-chunks query considers them.
     conn.execute(
-        "UPDATE articles SET has_full_text = 1 WHERE id IN ('with-chunks', 'without-chunks')",
+        "UPDATE articles SET has_full_text = 1, full_text = 'body' \
+         WHERE id IN ('with-chunks', 'without-chunks')",
         [],
     )
     .unwrap();

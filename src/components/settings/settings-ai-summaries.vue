@@ -119,9 +119,10 @@ onMounted(() => {
           <span class="badge--experimental">Experimental</span>
         </span>
         <span class="settings-card__toggle-hint">
-          When enabled, articles written in other languages are translated to English during AI
-          processing (screening and summaries). This is an experimental feature and may be refined
-          in future releases.
+          When enabled, articles written in other languages are translated to English during upload
+          or batch import. Translations are depedendent on LLM model and
+          <b>should not be considered accurate</b> without further validation. This is experimental
+          and for convenience only so caution should be used.
         </span>
       </label>
       <button
