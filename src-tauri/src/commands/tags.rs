@@ -36,19 +36,13 @@ pub struct TagWithCount {
 
 #[tauri::command]
 pub fn get_tags(db_state: State<'_, DbState>) -> Result<Vec<Tag>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     tag_repo::get_all_tags(&conn)
 }
 
 #[tauri::command]
 pub fn get_tags_with_counts(db_state: State<'_, DbState>) -> Result<Vec<TagWithCount>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let tags = tag_repo::get_all_tags(&conn)?;
     let result: Vec<TagWithCount> = tags
         .into_iter()
@@ -81,10 +75,7 @@ pub fn create_tag(
     db_state: State<'_, DbState>,
     request: CreateTagRequest,
 ) -> Result<Tag, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     tag_repo::create_tag(&conn, &request.name, "user_created")
 }
 
@@ -100,19 +91,13 @@ pub fn rename_tag(
     db_state: State<'_, DbState>,
     request: RenameTagRequest,
 ) -> Result<Tag, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     tag_repo::rename_tag(&conn, &request.id, &request.new_name)
 }
 
 #[tauri::command]
 pub fn delete_tag(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     tag_repo::delete_tag(&conn, &id)
 }
 
@@ -128,10 +113,7 @@ pub fn update_tag_color(
     db_state: State<'_, DbState>,
     request: UpdateTagColorRequest,
 ) -> Result<Tag, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     tag_repo::update_tag_color(&conn, &request.id, request.color.as_deref())
 }
 
@@ -148,9 +130,7 @@ pub async fn suggest_tags(
 ) -> Result<SuggestTagsResult, AppError> {
     // ── Data gathering (under DB lock) ──────────────────────────────
     let (config, top_cited_full, next_cited_titles, keywords_str, criteria_text) = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
@@ -318,10 +298,7 @@ Rules:
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let tags = tag_repo::create_tags_batch(&conn, &tag_names, "ai_suggested")?;
 
     Ok(SuggestTagsResult { tags })

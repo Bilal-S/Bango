@@ -138,9 +138,7 @@ pub fn classify_imported_articles(
 pub async fn check_duplicates(app: AppHandle) -> Result<DedupResult, AppError> {
     tokio::task::spawn_blocking(move || {
         let db_state = app.state::<DbState>();
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         let duplicates = article_repo::get_duplicate_articles(&conn)?;
         let working = article_repo::get_working_articles(&conn)?;
@@ -195,10 +193,7 @@ pub async fn merge_exact_duplicates(
 ) -> Result<usize, AppError> {
     tokio::task::spawn_blocking(move || {
         let db_state = app.state::<DbState>();
-        let conn = db_state
-            .conn
-            .lock()
-            .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let tx = conn.unchecked_transaction()?;
 
@@ -290,10 +285,7 @@ pub async fn resolve_fuzzy_match(
 ) -> Result<Article, AppError> {
     tokio::task::spawn_blocking(move || {
         let db_state = app.state::<DbState>();
-        let conn = db_state
-            .conn
-            .lock()
-            .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         match request.resolution {
             DedupResolution::KeepA => {

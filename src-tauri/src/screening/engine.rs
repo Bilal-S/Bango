@@ -191,9 +191,7 @@ impl ScreeningEngine {
 
         // Get total count of unscreened working articles for progress tracking
         let total = {
-            let c = conn_mutex.lock().map_err(|e| {
-                AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-            })?;
+            let c = crate::db::connection::lock_conn(conn_mutex)?;
             article_repo::count_unscreened_working(&c)?
         };
 
@@ -220,9 +218,7 @@ impl ScreeningEngine {
 
         // Fetch existing tags and labels for the prompt so the LLM prefers matching them
         let (existing_tag_names, existing_label_names) = {
-            let c = conn_mutex.lock().map_err(|e| {
-                AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-            })?;
+            let c = crate::db::connection::lock_conn(conn_mutex)?;
             let tags = tag_repo::get_all_tags(&c)?;
             let labels = label_repo::get_all_labels(&c)?;
             (
@@ -301,9 +297,7 @@ impl ScreeningEngine {
 
             // 1. Fetch next batch from DB
             let mut batch = {
-                let c = conn_mutex.lock().map_err(|e| {
-                    AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-                })?;
+                let c = crate::db::connection::lock_conn(conn_mutex)?;
                 article_repo::get_next_unscreened_working_batch(&c, self.batch_size)?
             };
 
@@ -364,9 +358,7 @@ impl ScreeningEngine {
                     })
                     .collect();
                 if enhanced_mode {
-                    let c = conn_mutex.lock().map_err(|e| {
-                        AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-                    })?;
+                    let c = crate::db::connection::lock_conn(conn_mutex)?;
                     for (entry, article) in entries.iter_mut().zip(batch.iter()) {
                         if !article.has_full_text {
                             continue;
@@ -426,11 +418,7 @@ impl ScreeningEngine {
                     }
                     Err(e) => {
                         // Mark all articles in batch as errors
-                        let c = conn_mutex.lock().map_err(|e2| {
-                            AppError::Database(rusqlite::Error::InvalidParameterName(
-                                e2.to_string(),
-                            ))
-                        })?;
+                        let c = crate::db::connection::lock_conn(conn_mutex)?;
                         for article in &batch {
                             set_screening_error(&c, &article.id, &e.to_string(), None)?;
                         }
@@ -464,11 +452,7 @@ impl ScreeningEngine {
                     // Validate response count matches batch size
                     if screenings.len() != batch.len() {
                         {
-                            let c = conn_mutex.lock().map_err(|e2| {
-                                AppError::Database(rusqlite::Error::InvalidParameterName(
-                                    e2.to_string(),
-                                ))
-                            })?;
+                            let c = crate::db::connection::lock_conn(conn_mutex)?;
                             for article in &batch {
                                 set_screening_error(
                                     &c,
@@ -494,11 +478,7 @@ impl ScreeningEngine {
                         // Handle error decision from LLM
                         if screening.decision == "error" {
                             {
-                                let c = conn_mutex.lock().map_err(|e2| {
-                                    AppError::Database(rusqlite::Error::InvalidParameterName(
-                                        e2.to_string(),
-                                    ))
-                                })?;
+                                let c = crate::db::connection::lock_conn(conn_mutex)?;
                                 set_screening_error(&c, &article.id, &screening.reasoning, None)?;
                             }
                             let mut progress = self.progress.lock().await;
@@ -591,11 +571,7 @@ impl ScreeningEngine {
 
                         // Update article in DB
                         {
-                            let c = conn_mutex.lock().map_err(|e2| {
-                                AppError::Database(rusqlite::Error::InvalidParameterName(
-                                    e2.to_string(),
-                                ))
-                            })?;
+                            let c = crate::db::connection::lock_conn(conn_mutex)?;
                             update_article_after_screening(
                                 &c,
                                 ScreeningUpdate {
@@ -694,11 +670,7 @@ impl ScreeningEngine {
 
                                 // Retrieve evidence for this borderline article.
                                 let evidence = {
-                                    let c = conn_mutex.lock().map_err(|e| {
-                                        AppError::Database(rusqlite::Error::InvalidParameterName(
-                                            e.to_string(),
-                                        ))
-                                    })?;
+                                    let c = crate::db::connection::lock_conn(conn_mutex)?;
                                     retrieve_evidence_for_article(
                                         &c,
                                         &article.id,
@@ -762,13 +734,7 @@ impl ScreeningEngine {
                                         // Scope the connection guard so it drops
                                         // before the progress `.await` below.
                                         {
-                                            let c = conn_mutex.lock().map_err(|e2| {
-                                                AppError::Database(
-                                                    rusqlite::Error::InvalidParameterName(
-                                                        e2.to_string(),
-                                                    ),
-                                                )
-                                            })?;
+                                            let c = crate::db::connection::lock_conn(conn_mutex)?;
                                             let _ = audit_repo::log_error(
                                                 &c,
                                                 &format!(
@@ -898,13 +864,7 @@ impl ScreeningEngine {
                                         // `.await` below (the `std::sync`
                                         // MutexGuard is not `Send`).
                                         let stage1_was_include = {
-                                            let c = conn_mutex.lock().map_err(|e2| {
-                                                AppError::Database(
-                                                    rusqlite::Error::InvalidParameterName(
-                                                        e2.to_string(),
-                                                    ),
-                                                )
-                                            })?;
+                                            let c = crate::db::connection::lock_conn(conn_mutex)?;
                                             // Read the stage-1 decision so we can
                                             // fix up the progress tallies.
                                             let stage1_status: Option<String> = c
@@ -1000,11 +960,7 @@ impl ScreeningEngine {
                 }
                 Err(parse_err) => {
                     {
-                        let c = conn_mutex.lock().map_err(|e2| {
-                            AppError::Database(rusqlite::Error::InvalidParameterName(
-                                e2.to_string(),
-                            ))
-                        })?;
+                        let c = crate::db::connection::lock_conn(conn_mutex)?;
                         for article in &batch {
                             set_screening_error(
                                 &c,

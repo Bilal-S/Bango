@@ -33,9 +33,7 @@ pub async fn generate_summary(
 
     // Extract all DB data synchronously while holding the lock
     let summary_input = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
@@ -154,9 +152,7 @@ pub async fn generate_summary(
     // Save to DB after successful generation
     let generated_at = chrono::Utc::now().to_rfc3339();
     {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         summary_repo::save_summary(&conn, &result, &style, &generated_at)?;
     }
 
@@ -167,10 +163,7 @@ pub async fn generate_summary(
 pub fn get_saved_summary(
     db_state: State<'_, DbState>,
 ) -> Result<Option<summary_repo::SavedSummary>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     summary_repo::get_summary(&conn)
 }
 
@@ -215,9 +208,7 @@ pub async fn generate_article_ai_summary_inner(
 ) -> Result<String, AppError> {
     // 1. Fetch article full text and LLM config while holding the DB lock
     let (title, full_text, config) = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let (t, ft) = article_repo::get_full_text_for_summary(&conn, article_id)?;
         let cfg = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
@@ -389,9 +380,7 @@ pub async fn generate_article_ai_summary_inner(
     //    blob) so the command can return it to the frontend with figures/tables
     //    intact. NOTE: no trailing `;` on the block - it is an expression.
     let preserved_json = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         // Read the existing blob so the merge can preserve `figures`/`tables`.
         let existing_blob: Option<String> = conn
             .query_row(
@@ -447,9 +436,7 @@ pub async fn generate_figure_descriptions(
 ) -> Result<String, AppError> {
     // 1. Fetch the article's full text + existing AI-summary blob + config.
     let (title, full_text, existing_blob, config) = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let (t, ft) = article_repo::get_full_text_for_summary(&conn, &article_id)?;
         // Fetch the existing AI-summary blob directly (no dedicated repo helper
         // exists for this read; the column is `full_text_ai_summary`).
@@ -560,9 +547,7 @@ pub async fn generate_figure_descriptions(
 
     // 8. Store + audit + refresh flag.
     {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         article_repo::set_ai_summary(&conn, &article_id, &merged_json)?;
         crate::db::audit_repo::create_entry(
             &conn,
@@ -618,9 +603,7 @@ pub async fn generate_unified_summary(
 ) -> Result<String, AppError> {
     // 1. Fetch article full text + existing blob + config.
     let (title, full_text, existing_blob, config) = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let (t, ft) = article_repo::get_full_text_for_summary(&conn, &article_id)?;
         let existing: Option<String> = conn
             .query_row(
@@ -683,9 +666,7 @@ pub async fn generate_unified_summary(
         let fresh_json = parsed.to_string();
         let merged = merge_summary_into_blob(existing_blob.as_deref(), &fresh_json, false);
         {
-            let conn = db_state.conn.lock().map_err(|e| {
-                AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-            })?;
+            let conn = crate::db::connection::lock_conn(&db_state.conn)?;
             article_repo::set_ai_summary(&conn, &article_id, &merged)?;
             crate::db::audit_repo::create_entry(
                 &conn,
@@ -905,9 +886,7 @@ pub async fn generate_unified_summary(
         &synthesis_digest_json,
     );
     {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         article_repo::set_ai_summary(&conn, &article_id, &unified_json)?;
         crate::db::audit_repo::create_entry(
             &conn,

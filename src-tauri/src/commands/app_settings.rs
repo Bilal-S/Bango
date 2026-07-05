@@ -33,10 +33,7 @@ pub struct StorageRootInfo {
 /// from the legacy `fulltext_storage_dir` key.
 #[tauri::command]
 pub fn get_storage_root(db_state: tauri::State<'_, DbState>) -> Result<StorageRootInfo, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let effective_path = app_settings_repo::get_storage_root(&conn)?;
     let default_path = compute_default_storage_root();
@@ -56,10 +53,7 @@ pub fn set_storage_root(
     db_state: tauri::State<'_, DbState>,
     path: Option<String>,
 ) -> Result<StorageRootInfo, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     app_settings_repo::set_storage_root(&conn, path.as_deref())?;
 
@@ -78,10 +72,7 @@ pub fn set_storage_root(
 /// it directly.
 #[tauri::command]
 pub fn get_auto_translate(db_state: tauri::State<'_, DbState>) -> Result<bool, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     app_settings_repo::get_auto_translate(&conn)
 }
 
@@ -91,10 +82,7 @@ pub fn set_auto_translate(
     db_state: tauri::State<'_, DbState>,
     enabled: bool,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     app_settings_repo::set_auto_translate(&conn, enabled)
 }
 

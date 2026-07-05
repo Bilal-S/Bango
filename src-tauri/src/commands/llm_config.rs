@@ -11,10 +11,7 @@ use crate::models::llm_config::{LlmConfig, LlmProvider};
 
 #[tauri::command]
 pub fn get_llm_config(db_state: State<'_, DbState>) -> Result<Option<LlmConfig>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     llm_config_repo::get_config(&conn)
 }
 
@@ -25,9 +22,7 @@ pub async fn save_llm_config(
     config: LlmConfig,
 ) -> Result<(), AppError> {
     {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         llm_config_repo::save_config(&conn, &config)?;
     } // conn dropped here
 
@@ -51,9 +46,7 @@ pub async fn test_llm_connection(
     orchestrator: State<'_, Arc<LlmOrchestrator>>,
 ) -> Result<TestConnectionResult, AppError> {
     let config = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("No LLM config found".to_string()))?
     };
@@ -76,9 +69,7 @@ pub async fn test_llm_connection(
                 match orchestrator.test_connection(&retry_config).await {
                     Ok(_) => {
                         // Save the updated config so future calls skip temperature
-                        let conn = db_state.conn.lock().map_err(|e| {
-                            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-                        })?;
+                        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
                         llm_config_repo::save_config(&conn, &retry_config)?;
 
                         Ok(TestConnectionResult {
@@ -116,9 +107,6 @@ pub async fn list_llm_models(request: ListModelsRequest) -> Result<Vec<String>, 
 
 #[tauri::command]
 pub fn has_llm_config(db_state: State<'_, DbState>) -> Result<bool, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     llm_config_repo::has_config(&conn)
 }

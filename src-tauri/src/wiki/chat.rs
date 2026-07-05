@@ -40,9 +40,7 @@ pub async fn wiki_chat(
 ) -> Result<String, AppError> {
     // 1. Resolve the wiki root.
     let root = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         crate::wiki::storage::resolve_root(&conn)?
     };
 
@@ -51,9 +49,7 @@ pub async fn wiki_chat(
     //    empty (e.g. after a schema rebuild / DB reset that dropped the table
     //    but left the wiki/*.md files intact).
     let hits = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         fts::ensure_index_populated(&conn, &root)?;
         fts::search(&conn, question, MAX_HITS)?
     };
@@ -63,9 +59,7 @@ pub async fn wiki_chat(
 
     // 4. Load the LLM config.
     let config = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         llm_config_repo::get_config(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),

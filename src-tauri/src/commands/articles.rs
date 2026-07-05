@@ -14,10 +14,7 @@ pub fn query_articles(
     db_state: State<'_, DbState>,
     query: ArticleQuery,
 ) -> Result<Vec<Article>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::query_articles(&conn, &query)
 }
 
@@ -25,19 +22,13 @@ pub fn query_articles(
 pub fn get_article_counts(
     db_state: State<'_, DbState>,
 ) -> Result<crate::models::article::ArticleCounts, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::get_article_counts(&conn)
 }
 
 #[tauri::command]
 pub fn get_article(db_state: State<'_, DbState>, id: String) -> Result<Article, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::get_article_by_id(&conn, &id)
 }
 
@@ -47,10 +38,7 @@ pub fn update_article_status(
     id: String,
     new_status: String,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_article_status(&conn, &id, &new_status)?;
     // Status changes (e.g. to/from 'included') alter the bibliometric corpus.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
@@ -63,10 +51,7 @@ pub fn get_audit_trail(
     db_state: State<'_, DbState>,
     article_id: String,
 ) -> Result<Vec<AuditEntry>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     audit_repo::get_audit_trail(&conn, &article_id)
 }
 
@@ -78,10 +63,7 @@ pub fn get_recent_audit_entries(
 ) -> Result<Vec<AuditEntry>, AppError> {
     let limit = limit.unwrap_or(10);
     let offset = offset.unwrap_or(0);
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     audit_repo::get_recent_audit_entries(&conn, limit, offset)
 }
 
@@ -91,10 +73,7 @@ pub fn update_article_notes(
     id: String,
     notes: String,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_user_notes(&conn, &id, &notes)?;
     audit_repo::create_entry(
         &conn,
@@ -114,10 +93,7 @@ pub fn update_article_tags(
     id: String,
     tag_ids: Vec<String>,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_article_tags(&conn, &id, &tag_ids)?;
     audit_repo::create_entry(
         &conn,
@@ -140,10 +116,7 @@ pub fn update_article_labels(
     id: String,
     label_ids: Vec<String>,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_article_labels(&conn, &id, &label_ids)?;
     audit_repo::create_entry(
         &conn,
@@ -168,10 +141,7 @@ pub fn override_ai_decision(
     new_status: String,
     reasoning: Option<String>,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::override_ai_decision(
         &conn,
         &id,
@@ -192,10 +162,7 @@ pub fn update_article_criteria(
     inclusion_ids: Vec<String>,
     exclusion_ids: Vec<String>,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_article_criteria(&conn, &id, &inclusion_ids, &exclusion_ids)?;
     audit_repo::create_entry(
         &conn,
@@ -221,10 +188,7 @@ pub fn get_import_activities(
 ) -> Result<Vec<ImportActivity>, AppError> {
     let limit = limit.unwrap_or(10);
     let offset = offset.unwrap_or(0);
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     audit_repo::get_import_activities(&conn, limit, offset)
 }
 
@@ -234,10 +198,7 @@ pub fn get_generic_audit_entries(
     limit: Option<usize>,
 ) -> Result<Vec<AuditEntry>, AppError> {
     let limit = limit.unwrap_or(10);
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     audit_repo::get_generic_audit_entries(&conn, limit)
 }
 
@@ -247,10 +208,7 @@ pub fn bulk_update_article_status(
     ids: Vec<String>,
     new_status: String,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::bulk_update_article_status(&conn, &ids, &new_status)?;
     // Bulk status changes alter the bibliometric corpus.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
@@ -264,10 +222,7 @@ pub fn bulk_add_tag_to_articles(
     article_ids: Vec<String>,
     tag_name: String,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::bulk_add_tag_to_articles(&conn, &article_ids, &tag_name)?;
     // Bulk tag changes feed the keyword co-occurrence network.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
@@ -281,10 +236,7 @@ pub fn bulk_add_label_to_articles(
     article_ids: Vec<String>,
     label_name: String,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::bulk_add_label_to_articles(&conn, &article_ids, &label_name)?;
     // Bulk label changes affect article metadata.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
@@ -294,10 +246,7 @@ pub fn bulk_add_label_to_articles(
 
 #[tauri::command]
 pub fn clear_generic_audit(db_state: State<'_, DbState>) -> Result<usize, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     audit_repo::clear_generic_entries(&conn)
 }
 
@@ -306,10 +255,7 @@ pub fn clear_generic_audit(db_state: State<'_, DbState>) -> Result<usize, AppErr
 /// Returns `{ "articles": <n>, "references": <m> }`.
 #[tauri::command]
 pub fn rematch_journals(db_state: State<'_, DbState>) -> Result<serde_json::Value, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let articles_matched = article_repo::rematch_all_journals(&conn)?;
     let refs_matched = crate::db::reference_repo::rematch_all_journals(&conn)?;
@@ -327,9 +273,6 @@ pub fn biblio_get_journal_info(
     db_state: State<'_, DbState>,
     journal_index_id: String,
 ) -> Result<Option<JournalInfo>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     crate::db::journal_repo::get_journal_info(&conn, &journal_index_id)
 }

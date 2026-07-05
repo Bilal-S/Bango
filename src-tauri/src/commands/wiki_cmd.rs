@@ -14,17 +14,6 @@ use crate::commands::chat::ChatMessage;
 use serde::Serialize;
 use tauri::Emitter;
 
-/// Lock a mutex holding `rusqlite::Connection`, mapping poison errors to
-/// `AppError::Database`. Keeps command bodies free of the boilerplate.
-fn lock_conn<'a>(
-    db_state: &'a tauri::State<'a, DbState>,
-) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, AppError> {
-    db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))
-}
-
 /// Result of `wiki_check_for_updates`. Drives the frontend toast UX.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -67,7 +56,7 @@ pub async fn wiki_check_for_updates(
 ) -> Result<CheckUpdatesResult, AppError> {
     // Step 1: resolve the wiki root (microsecond lock).
     let root = {
-        let conn = lock_conn(&db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         storage::resolve_root(&conn)?
     };
 
@@ -89,14 +78,14 @@ pub async fn wiki_check_for_updates(
         Option<String>,
         std::collections::HashMap<String, String>,
     ) = {
-        let conn = lock_conn(&db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         (fts::get_dir_hash(&conn), fts::read_manifest(&conn)?)
     };
 
     // No pages on disk: clear any stale baseline and report nothing to do.
     if dir_hash.is_none() {
         if stored_dir_hash.is_some() || !stored_manifest.is_empty() {
-            let conn = lock_conn(&db_state)?;
+            let conn = crate::db::connection::lock_conn(&db_state.conn)?;
             fts::set_dir_hash(&conn, None);
             fts::write_manifest(&conn, &[])?;
         }
@@ -113,14 +102,14 @@ pub async fn wiki_check_for_updates(
     if !drifted {
         // mtime/size changed but content is identical (e.g. `touch`). Update
         // only the dir hash so the next check is a fast-path hit.
-        let conn = lock_conn(&db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         fts::set_dir_hash(&conn, dir_hash.as_deref());
         return Ok(CheckUpdatesResult { rebuilt: false, pages_reindexed: rows.len() });
     }
 
     // Step 4: drift confirmed -> rebuild FTS5 + manifest + dir hash (brief lock).
     let pages_count = {
-        let conn = lock_conn(&db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         fts::ensure_table(&conn)?;
         conn.execute_batch(&format!("DELETE FROM {};", fts::FTS_TABLE))?;
         let wiki_dir = root.join("wiki");
@@ -183,7 +172,7 @@ pub struct WikiRootInfo {
 /// existing `has_llm_config` command).
 #[tauri::command]
 pub fn wiki_get_status(db_state: tauri::State<'_, DbState>) -> Result<WikiStatus, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let root = storage::resolve_root(&conn)?;
     let is_custom = storage::has_explicit_override(&conn)?;
@@ -224,7 +213,7 @@ pub fn wiki_get_status(db_state: tauri::State<'_, DbState>) -> Result<WikiStatus
 /// Get the effective wiki-root directory info.
 #[tauri::command]
 pub fn wiki_get_root_dir(db_state: tauri::State<'_, DbState>) -> Result<WikiRootInfo, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let is_custom = storage::has_explicit_override(&conn)?;
     let default_path = {
@@ -243,7 +232,7 @@ pub fn wiki_set_root_dir(
     db_state: tauri::State<'_, DbState>,
     path: Option<String>,
 ) -> Result<WikiRootInfo, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let value = path.as_deref().and_then(|p| if p.is_empty() { None } else { Some(p) });
     app_settings_repo::set_setting(&conn, storage::WIKI_ROOT_DIR_KEY, value)?;
 
@@ -263,7 +252,7 @@ pub fn wiki_set_root_dir(
 /// seed `templates/`. Idempotent. Does NOT ingest (that is `wiki_ingest`).
 #[tauri::command]
 pub fn wiki_init(db_state: tauri::State<'_, DbState>) -> Result<WikiInitResult, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     storage::scaffold_tree(&root)?;
 
@@ -310,7 +299,7 @@ pub fn ensure_initialized(root: &std::path::Path) -> Result<bool, AppError> {
 pub fn wiki_export_raw(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<raw_export::RawExportReport, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let report = raw_export::prepare_all(&conn, &root)?;
     Ok(report)
@@ -323,7 +312,7 @@ pub fn wiki_add_raw_file(
     db_state: tauri::State<'_, DbState>,
     file_path: String,
 ) -> Result<String, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let companion = raw_export::add_user_file(&root, std::path::Path::new(&file_path))?;
     Ok(companion.to_string_lossy().to_string())
@@ -361,7 +350,7 @@ pub async fn wiki_add_raw_url(
         .map_err(|e| AppError::Import(format!("Failed to read response from '{url}': {e}")))?;
 
     // Resolve wiki root and add the content.
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let companion = raw_export::add_raw_content(&root, &title, &html, &url)?;
     Ok(companion.to_string_lossy().to_string())
@@ -384,7 +373,7 @@ pub struct RawFileEntry {
 pub fn wiki_list_raw_files(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<RawFileEntry>, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let files = raw_export::list_raw_files(&root)?;
     let entries = files
@@ -408,7 +397,7 @@ pub fn wiki_search(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<fts::WikiPageHit>, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     // Self-heal: rebuild the index if it is empty but pages exist on disk
     // (e.g. after a schema rebuild / DB reset that dropped the FTS table).
@@ -425,7 +414,7 @@ fn _ensure_frontmatter_linked() {
 /// Lint the wiki: detect broken links, orphans, duplicates, missing frontmatter.
 #[tauri::command]
 pub fn wiki_lint(db_state: tauri::State<'_, DbState>) -> Result<engine::LintReport, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let report = engine::lint(&root)?;
     Ok(report)
@@ -452,7 +441,7 @@ pub fn wiki_get_page(
     db_state: tauri::State<'_, DbState>,
     slug: String,
 ) -> Result<Option<WikiPage>, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let pages = fts::collect_wiki_pages(&root)?;
     for path in pages {
@@ -483,7 +472,7 @@ pub fn wiki_update_page(
     summary: String,
     body: String,
 ) -> Result<WikiPage, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let pages = fts::collect_wiki_pages(&root)?;
     for path in pages {
@@ -530,7 +519,7 @@ pub fn wiki_delete_page(
     db_state: tauri::State<'_, DbState>,
     slug: String,
 ) -> Result<bool, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let pages = fts::collect_wiki_pages(&root)?;
     for path in pages {
@@ -558,7 +547,7 @@ pub fn wiki_delete_page(
 /// what the user just deleted. The user can manually rebuild via the toolbar.
 #[tauri::command]
 pub fn wiki_delete_wiki(db_state: tauri::State<'_, DbState>) -> Result<(), AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let wiki_dir = root.join("wiki");
     if wiki_dir.exists() {
@@ -583,7 +572,7 @@ pub async fn wiki_chat(
 /// Get the wiki link graph (nodes + edges) for visualization.
 #[tauri::command]
 pub fn wiki_get_graph(db_state: tauri::State<'_, DbState>) -> Result<engine::WikiGraph, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let graph = engine::build_graph(&root)?;
     Ok(graph)
@@ -598,7 +587,7 @@ pub async fn wiki_ingest(
     orchestrator: tauri::State<'_, std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>,
 ) -> Result<ingest::IngestReport, AppError> {
     let (root, config) = {
-        let conn = lock_conn(&db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let root = storage::resolve_root(&conn)?;
         let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
             AppError::Validation(
@@ -614,14 +603,14 @@ pub async fn wiki_ingest(
 
     // Build batches (with author manifest if multi-batch) inside a DB scope.
     let batches = {
-        let mut conn = lock_conn(&db_state)?;
+        let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
         build_batches_with_manifest(&mut conn, &root, &config)?
     };
     let sender: Arc<dyn ingest::IngestLlmSender> =
         Arc::new(ingest::OrchestratorIngestSender::new(orchestrator.inner().clone(), config));
     let mut report = ingest::run_chunked_ingest(&root, batches, sender, None, (25, 95)).await?;
 
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
     Ok(report)
 }
@@ -709,7 +698,7 @@ pub struct WikiPageSummary {
 pub fn wiki_list_pages(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<WikiPageSummary>, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let pages = fts::collect_wiki_pages(&root)?;
     let mut summaries: Vec<WikiPageSummary> = pages
@@ -750,7 +739,7 @@ pub struct WikiSourceInfo {
 pub fn wiki_list_sources(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<WikiSourceInfo>, AppError> {
-    let conn = lock_conn(&db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let root = storage::resolve_root(&conn)?;
     let raw_files = raw_export::list_raw_files(&root)?;
     let sources: Vec<WikiSourceInfo> = raw_files
@@ -825,7 +814,7 @@ pub async fn wiki_rebuild(
 ) -> Result<ingest::IngestReport, AppError> {
     let result = wiki_rebuild_inner(&db_state, &orchestrator, &app_handle).await;
     if let Err(ref e) = result {
-        if let Ok(conn) = lock_conn(&db_state) {
+        if let Ok(conn) = crate::db::connection::lock_conn(&db_state.conn) {
             log_wiki_error(&conn, &e.to_string());
         }
         emit_wiki_progress(&app_handle, WIKI_PIPELINE_TOTAL_STEPS, &format!("Error: {}", e));
@@ -843,7 +832,7 @@ async fn wiki_rebuild_inner(
 
     // Step 0: Scaffold (ensure wiki-root exists) + self-heal AGENTS.md.
     {
-        let conn = lock_conn(db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let root = storage::resolve_root(&conn)?;
         storage::scaffold_tree(&root)?;
         let _ = ensure_initialized(&root);
@@ -852,7 +841,7 @@ async fn wiki_rebuild_inner(
 
     // Step 1: Export included articles + process user files.
     let (root, config) = {
-        let conn = lock_conn(db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let root = storage::resolve_root(&conn)?;
         raw_export::prepare_all(&conn, &root)?;
         let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
@@ -870,7 +859,7 @@ async fn wiki_rebuild_inner(
     // the corpus splits into multiple batches, the author manifest + pre-seed
     // optimization is applied to prevent cross-batch duplication.
     let batches = {
-        let mut conn = lock_conn(db_state)?;
+        let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
         build_batches_with_manifest(&mut conn, &root, &config)?
     };
     let sender: Arc<dyn ingest::IngestLlmSender> =
@@ -881,7 +870,7 @@ async fn wiki_rebuild_inner(
 
     // Step 3: Finalize (FTS5 rebuild + log + clear staleness).
     emit_wiki_progress(app_handle, 95, "Indexing pages...");
-    let conn = lock_conn(db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
 
     emit_wiki_progress(app_handle, 100, &format!("Done: {} pages written", report.pages_written));
@@ -898,7 +887,7 @@ pub async fn wiki_export_and_ingest(
 ) -> Result<ingest::IngestReport, AppError> {
     let result = wiki_export_and_ingest_inner(&db_state, &orchestrator, &app_handle).await;
     if let Err(ref e) = result {
-        if let Ok(conn) = lock_conn(&db_state) {
+        if let Ok(conn) = crate::db::connection::lock_conn(&db_state.conn) {
             log_wiki_error(&conn, &e.to_string());
         }
         emit_wiki_progress(&app_handle, WIKI_PIPELINE_TOTAL_STEPS, &format!("Error: {}", e));
@@ -915,7 +904,7 @@ async fn wiki_export_and_ingest_inner(
     emit_wiki_progress(app_handle, 0, "Preparing raw sources...");
 
     let (root, config) = {
-        let conn = lock_conn(db_state)?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let root = storage::resolve_root(&conn)?;
         raw_export::prepare_all(&conn, &root)?;
         let config = crate::db::llm_config_repo::get_config(&conn)?.ok_or_else(|| {
@@ -934,7 +923,7 @@ async fn wiki_export_and_ingest_inner(
     // corpus splits into multiple batches, the author manifest + pre-seed
     // optimization is applied to prevent cross-batch duplication.
     let batches = {
-        let mut conn = lock_conn(db_state)?;
+        let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
         build_batches_with_manifest(&mut conn, &root, &config)?
     };
     let sender: Arc<dyn ingest::IngestLlmSender> =
@@ -945,7 +934,7 @@ async fn wiki_export_and_ingest_inner(
 
     // Finalize (FTS5 rebuild + log + clear staleness).
     emit_wiki_progress(app_handle, 95, "Indexing pages...");
-    let conn = lock_conn(db_state)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
 
     emit_wiki_progress(app_handle, 100, &format!("Done: {} pages written", report.pages_written));

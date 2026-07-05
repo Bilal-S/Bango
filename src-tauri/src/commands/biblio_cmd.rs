@@ -72,10 +72,7 @@ pub async fn biblio_normalize(
     db_state: tauri::State<'_, DbState>,
     app_handle: tauri::AppHandle,
 ) -> Result<NormalizeResult, AppError> {
-    let mut conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     emit_progress(&app_handle, 0, "Starting normalization...");
     let (authors, terms) = biblio_repo::run_full_normalization(&mut conn)?;
@@ -95,10 +92,7 @@ pub async fn biblio_normalize(
 pub async fn biblio_get_needs_refresh(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<bool, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     app_settings_repo::get_biblio_needs_refresh(&conn)
 }
 
@@ -106,10 +100,7 @@ pub async fn biblio_get_needs_refresh(
 pub async fn biblio_get_status(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<BiblioStatus, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_biblio_status(&conn)
 }
 
@@ -117,10 +108,7 @@ pub async fn biblio_get_status(
 pub async fn biblio_get_authors(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<BiblioAuthor>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_all_authors(&conn)
 }
 
@@ -128,10 +116,7 @@ pub async fn biblio_get_authors(
 pub async fn biblio_get_terms(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<BiblioTerm>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_all_terms(&conn)
 }
 
@@ -139,19 +124,13 @@ pub async fn biblio_get_terms(
 pub async fn biblio_get_coauthor_network(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<serde_json::Value, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_coauthor_network_json(&conn)
 }
 
 #[tauri::command]
 pub async fn biblio_get_kpis(db_state: tauri::State<'_, DbState>) -> Result<BiblioKpis, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_biblio_kpis(&conn)
 }
 
@@ -160,10 +139,7 @@ pub async fn biblio_get_author_institutions(
     db_state: tauri::State<'_, DbState>,
     author_id: String,
 ) -> Result<Vec<BiblioInstitution>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_institutions_by_author(&conn, &author_id)
 }
 
@@ -171,10 +147,7 @@ pub async fn biblio_get_author_institutions(
 pub async fn biblio_get_unmatched_affiliation_count(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<i32, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::count_unmatched_affiliations(&conn)
 }
 
@@ -183,10 +156,7 @@ pub async fn biblio_get_author_pubs_by_year(
     db_state: tauri::State<'_, DbState>,
     author_id: String,
 ) -> Result<Vec<YearCount>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_author_pubs_by_year(&conn, &author_id)
 }
 
@@ -195,10 +165,7 @@ pub async fn biblio_get_citation_network(
     db_state: tauri::State<'_, DbState>,
     include_unmatched: Option<bool>,
 ) -> Result<serde_json::Value, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_citation_network_json(&conn, include_unmatched.unwrap_or(false))
 }
 
@@ -209,10 +176,7 @@ pub async fn biblio_get_keyword_network(
     min_occurrences: Option<i32>,
     min_cooccurrence: Option<i32>,
 ) -> Result<serde_json::Value, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_keyword_network_json(
         &conn,
         &sources,
@@ -225,10 +189,7 @@ pub async fn biblio_get_keyword_network(
 pub async fn biblio_get_author_rankings(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<AuthorRank>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_author_rankings(&conn)
 }
 
@@ -237,10 +198,7 @@ pub async fn biblio_get_author_detail(
     db_state: tauri::State<'_, DbState>,
     author_id: String,
 ) -> Result<AuthorDetail, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_author_detail(&conn, &author_id)
 }
 
@@ -248,10 +206,7 @@ pub async fn biblio_get_author_detail(
 pub async fn biblio_get_author_productivity_kpis(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<AuthorProductivityKpis, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     biblio_repo::get_author_productivity_kpis(&conn)
 }
 
@@ -265,10 +220,7 @@ pub async fn biblio_get_cocitation_network(
     db_state: tauri::State<'_, DbState>,
     params: Option<CocitationParams>,
 ) -> Result<serde_json::Value, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let p = params.unwrap_or_default();
     let scope = match p.scope.as_deref().unwrap_or("included") {

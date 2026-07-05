@@ -61,3 +61,22 @@ fn serialize_produces_string() {
     // The serialized form is a JSON string literal wrapping the message.
     assert!(json.contains("Validation error: oops"));
 }
+
+#[test]
+fn lock_poisoned_error_message() {
+    let err = AppError::LockPoisoned("thread panicked".to_string());
+    let s = err.to_string();
+    assert!(s.contains("Internal state error"), "got: {s}");
+    assert!(s.contains("lock poisoned"), "got: {s}");
+    assert!(s.contains("thread panicked"), "got: {s}");
+}
+
+#[test]
+fn lock_poisoned_serializes_to_display_string() {
+    // The user-visible string flows through Serialize -> InvokeError, so the
+    // serialized form must carry the "Internal state error" label (not a SQL
+    // label) so the user is not misled into thinking SQLite is broken.
+    let err = AppError::LockPoisoned("poison payload".to_string());
+    let json = serde_json::to_string(&err).expect("serialize");
+    assert!(json.contains("Internal state error (lock poisoned): poison payload"));
+}

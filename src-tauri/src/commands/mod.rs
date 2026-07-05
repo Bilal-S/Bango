@@ -33,10 +33,7 @@ pub struct HealthCheck {
 
 #[tauri::command]
 pub fn health_check(db_state: tauri::State<'_, DbState>) -> Result<HealthCheck, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let count: usize =
         conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0)).unwrap_or(0);
     Ok(HealthCheck { status: "ok".to_string(), article_count: count })

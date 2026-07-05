@@ -95,11 +95,8 @@ pub fn get_startup_status(
     status: State<'_, StartupStatus>,
 ) -> StartupStatusResponse {
     let snapshot = status.snapshot();
-    let live = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))
-        .and_then(|conn| check_schema(&conn));
+    let live =
+        crate::db::connection::lock_conn(&db_state.conn).and_then(|conn| check_schema(&conn));
     StartupStatusResponse { needs_legacy_upgrade: legacy_upgrade_needed(live, snapshot) }
 }
 
@@ -149,9 +146,7 @@ pub fn perform_legacy_upgrade(
     // 1. Export legacy DB to JSON, re-checking the schema under the same lock to
     //    confirm we're not double-upgrading.
     let backup_json = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let json = export_legacy_project(&conn).map_err(|e| {
             eprintln!("[legacy_upgrade] export_legacy_project failed: {e:?}");
             e
@@ -180,9 +175,7 @@ pub fn perform_legacy_upgrade(
 
     // 3. Rebuild schema (drops all tables incl. legacy, re-runs migrations).
     {
-        let mut conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
         rebuild::rebuild_schema(&mut conn).map_err(|e| {
             let msg = format!(
                 "Schema rebuild failed after backup was written to {}. Error: {e}",
@@ -199,9 +192,7 @@ pub fn perform_legacy_upgrade(
 
     // 5. Restore user data from the backup (also re-matches journals).
     let article_count = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         import_project(&conn, &backup_json).map_err(|e| {
             let msg = format!(
                 "Data reload failed after schema rebuild. Your backup is safe at {}. Error: {e}",
@@ -217,11 +208,8 @@ pub fn perform_legacy_upgrade(
     //    probe later fails for some reason (defense-in-depth against the reload
     //    loop). Re-probe under the lock to avoid races with concurrent callers.
     {
-        let post_status = db_state
-            .conn
-            .lock()
-            .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))
-            .and_then(|conn| check_schema(&conn));
+        let post_status =
+            crate::db::connection::lock_conn(&db_state.conn).and_then(|conn| check_schema(&conn));
         match post_status {
             Ok(s) => startup_status.set(s),
             Err(e) => eprintln!(

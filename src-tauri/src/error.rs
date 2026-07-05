@@ -25,6 +25,9 @@ pub enum AppError {
 
     #[error("Scraping error: {0}")]
     Scraping(String),
+
+    #[error("Internal state error (lock poisoned): {0}")]
+    LockPoisoned(String),
 }
 
 impl Serialize for AppError {

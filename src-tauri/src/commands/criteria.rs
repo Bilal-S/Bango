@@ -13,10 +13,7 @@ use crate::models::criterion::{Criterion, ResearchAim};
 
 #[tauri::command]
 pub fn get_research_aims(db_state: State<'_, DbState>) -> Result<Vec<ResearchAim>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     criteria_repo::get_all_aims(&conn)
 }
 
@@ -31,28 +28,19 @@ pub fn create_research_aim(
     db_state: State<'_, DbState>,
     request: CreateAimRequest,
 ) -> Result<ResearchAim, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     criteria_repo::create_aim(&conn, &request.text)
 }
 
 #[tauri::command]
 pub fn delete_research_aim(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     criteria_repo::delete_aim(&conn, &id)
 }
 
 #[tauri::command]
 pub fn get_criteria(db_state: State<'_, DbState>) -> Result<Vec<Criterion>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     criteria_repo::get_all_criteria(&conn)
 }
 
@@ -69,10 +57,7 @@ pub fn create_criterion(
     db_state: State<'_, DbState>,
     request: CreateCriterionRequest,
 ) -> Result<Criterion, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     criteria_repo::create_criterion(
         &conn,
         &request.criterion_type,
@@ -94,19 +79,13 @@ pub fn update_criterion(
     db_state: State<'_, DbState>,
     request: UpdateCriterionRequest,
 ) -> Result<Criterion, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     criteria_repo::update_criterion(&conn, &request.id, &request.text, &request.priority)
 }
 
 #[tauri::command]
 pub fn delete_criterion(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     criteria_repo::delete_criterion(&conn, &id)
 }
 
@@ -138,9 +117,7 @@ pub async fn generate_criteria(
     }
 
     let (config, aims) = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aims = criteria_repo::get_all_aims(&conn)?;
@@ -228,10 +205,7 @@ Rules:
         })
         .unwrap_or_default();
 
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let criteria: Vec<Criterion> = items
         .into_iter()
@@ -269,9 +243,7 @@ pub async fn critique_criteria(
     }
 
     let (config, aims, existing_criteria) = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aims = criteria_repo::get_all_aims(&conn)?;

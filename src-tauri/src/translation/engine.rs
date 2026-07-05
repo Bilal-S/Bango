@@ -136,7 +136,7 @@ pub fn parse_metadata_translation(response: &str) -> Option<TranslatedMetadata> 
 /// lives in one place. Non-fatal - errors are ignored (the caller already has
 /// an error to propagate and the DB write is best-effort bookkeeping).
 fn mark_translation_failed(db: &Mutex<rusqlite::Connection>, article_id: &str, err_msg: &str) {
-    let Ok(conn) = lock_db(db) else {
+    let Ok(conn) = crate::db::connection::lock_conn(db) else {
         return;
     };
     let _ = article_repo::update_translation_status_failed(&conn, article_id, err_msg);
@@ -171,7 +171,7 @@ pub async fn translate_metadata_only(
 ) -> Result<(), AppError> {
     // ── Burst 1: read + mark running + persist originals ──
     let (article, source_language, needs_llm_call) = {
-        let conn = lock_db(db)?;
+        let conn = crate::db::connection::lock_conn(db)?;
         // F.1: read article + language.
         let article = article_repo::get_article_by_id(&conn, article_id)?;
         if article.is_translated {
@@ -232,7 +232,7 @@ pub async fn translate_metadata_only(
     // ── Burst 3: single-transaction write-back ──
     let now = chrono::Utc::now().to_rfc3339();
     {
-        let conn = lock_db(db)?;
+        let conn = crate::db::connection::lock_conn(db)?;
         let tx = conn.unchecked_transaction()?;
         tx.execute(
             "UPDATE articles SET title = ?1, abstract_text = ?2, is_translated = 1, \
@@ -303,7 +303,7 @@ pub async fn translate_full_text(
 
     // ── Burst 1: read + mark running + persist originals ──
     let (article, source_language, original_chunks) = {
-        let conn = lock_db(db)?;
+        let conn = crate::db::connection::lock_conn(db)?;
         let article = article_repo::get_article_by_id(&conn, article_id)?;
         if article.is_translated {
             return Ok(());
@@ -381,7 +381,7 @@ pub async fn translate_full_text(
     // ── Burst 3: single-transaction write-back ──
     let now = chrono::Utc::now().to_rfc3339();
     {
-        let conn = lock_db(db)?;
+        let conn = crate::db::connection::lock_conn(db)?;
         let tx = conn.unchecked_transaction()?;
         // Delete + insert English chunks inside the transaction.
         tx.execute(
@@ -441,7 +441,7 @@ fn mark_translation_failed_with_detail(
     err_msg: &str,
     detail: &str,
 ) {
-    let Ok(conn) = lock_db(db) else {
+    let Ok(conn) = crate::db::connection::lock_conn(db) else {
         return;
     };
     let _ = article_repo::update_translation_status_failed(&conn, article_id, err_msg);
@@ -494,15 +494,6 @@ async fn translate_metadata_text(
             Err(AppError::Import(err_msg.to_string()))
         }
     }
-}
-
-/// Lock the DB mutex. Maps the poison error to an `AppError::Database` so the
-/// engine surfaces lock failures uniformly. The guard is released when it
-/// drops; the engine never holds it across an `.await`.
-fn lock_db(
-    db: &Mutex<rusqlite::Connection>,
-) -> Result<std::sync::MutexGuard<'_, rusqlite::Connection>, AppError> {
-    db.lock().map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))
 }
 
 #[cfg(test)]

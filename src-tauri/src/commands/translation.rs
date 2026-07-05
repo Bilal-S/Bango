@@ -93,10 +93,7 @@ pub fn enqueue_article_translation(
     article_id: String,
     trigger_source: String,
 ) -> Result<bool, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     eprintln!("[translation] enqueue triggered by '{trigger_source}' for article {article_id}");
     let kind = choose_job_kind(&conn, &article_id);
     enqueue_article_translation_inner(&conn, worker.inner(), &article_id, kind, false)
@@ -108,10 +105,7 @@ pub fn get_translation_status(
     db_state: State<'_, DbState>,
     article_id: String,
 ) -> Result<article_repo::TranslationStatusInfo, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::get_translation_status(&conn, &article_id)
 }
 
@@ -127,10 +121,7 @@ pub fn retry_translation_job(
     worker: State<'_, TranslationWorkerHandle>,
     article_id: String,
 ) -> Result<bool, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::reset_translation_status(&conn, &article_id)?;
     let kind = choose_job_kind(&conn, &article_id);
     enqueue_article_translation_inner(&conn, worker.inner(), &article_id, kind, false)

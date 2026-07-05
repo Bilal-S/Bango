@@ -54,9 +54,7 @@ pub async fn send_chat_message(
     new_message: String,
 ) -> Result<String, AppError> {
     let config = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         llm_config_repo::get_config(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
@@ -66,9 +64,7 @@ pub async fn send_chat_message(
 
     let mut articles_info = Vec::new();
     {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         for id in &article_ids {
             let article = article_repo::get_article_by_id(&conn, id)?;
             let summary_text = get_summary_text(&article);

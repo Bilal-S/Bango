@@ -347,6 +347,14 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.
+  - **`src-tauri/src/db/connection.rs`** - holds `DbState` (`conn: Mutex<Connection>`) and the
+    shared `lock_conn(conn_mutex) -> Result<MutexGuard<'_, Connection>, AppError>` helper that
+    maps `Mutex::lock()` poison failures to `AppError::LockPoisoned` (not `AppError::Database`).
+    Every command handler and engine that locks `DbState.conn` MUST route through `lock_conn`
+    instead of inlining `.lock().map_err(...)` so poison errors stay correctly categorized as
+    application-state errors and the error-mapping boilerplate is not duplicated. The private
+    `lock_conn` in `commands/wiki_cmd.rs` and `lock_db` in `translation/engine.rs` were removed
+    in favor of this shared helper. Tested in `tests/lock_poison_test.rs`.
   - **`src-tauri/src/db/schema_check.rs`** + **`rebuild.rs`** - startup legacy-DB detection
     and schema rebuild. `check_schema` classifies a live DB as `Current` / `Legacy` / `FreshDb`
     via `sqlite_master` (the old and new v1 migrations both set `user_version=1`, so the pragma

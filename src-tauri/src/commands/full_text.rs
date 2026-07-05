@@ -211,10 +211,7 @@ pub fn attach_full_text(
     article_id: String,
     file_path: String,
 ) -> Result<FullTextAttachResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let storage_dir = compute_storage_dir(&conn)?;
     let source_path = PathBuf::from(&file_path);
@@ -253,10 +250,7 @@ pub fn delete_full_text(
     _app_handle: tauri::AppHandle,
     article_id: String,
 ) -> Result<bool, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     // Get the file name before clearing
     let file_name = article_repo::get_full_text_file_name(&conn, &article_id)?;
@@ -311,10 +305,7 @@ pub fn read_full_text(
     db_state: tauri::State<'_, DbState>,
     article_id: String,
 ) -> Result<Option<String>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let article = article_repo::get_article_by_id(&conn, &article_id)?;
     Ok(article.full_text)
@@ -327,10 +318,7 @@ pub fn read_full_text_file_bytes(
     db_state: tauri::State<'_, DbState>,
     article_id: String,
 ) -> Result<Option<Vec<u8>>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let file_name = article_repo::get_full_text_file_name(&conn, &article_id)?;
 
@@ -355,10 +343,7 @@ pub fn get_full_text_file_path(
     db_state: tauri::State<'_, DbState>,
     article_id: String,
 ) -> Result<Option<String>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let file_name = article_repo::get_full_text_file_name(&conn, &article_id)?;
 
@@ -492,10 +477,7 @@ pub fn rebuild_article_chunks(
     db_state: tauri::State<'_, DbState>,
     _app_handle: tauri::AppHandle,
 ) -> Result<RebuildChunksResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     Ok(ensure_chunks_for_full_text_articles(&conn, true))
 }
 
@@ -503,9 +485,6 @@ pub fn rebuild_article_chunks(
 /// button label in Settings -> Full-Text Storage).
 #[tauri::command]
 pub fn count_articles_with_full_text(db_state: tauri::State<'_, DbState>) -> Result<i64, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     chunk_repo::count_articles_with_full_text(&conn)
 }

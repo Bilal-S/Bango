@@ -195,9 +195,7 @@ pub async fn import_ris_file(
 
         let new_articles: Vec<NewArticle> =
             to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         let imported =
             article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
@@ -360,9 +358,7 @@ pub async fn import_bibtex_file(
 
         let new_articles: Vec<NewArticle> =
             to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         let imported =
             article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
@@ -512,9 +508,6 @@ pub fn extract_cr_for_imported(
 
 #[tauri::command]
 pub fn get_articles(db_state: State<'_, DbState>) -> Result<Vec<Article>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::get_all_articles(&conn)
 }

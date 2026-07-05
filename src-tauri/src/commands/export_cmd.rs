@@ -62,10 +62,7 @@ fn build_criteria_map(conn: &rusqlite::Connection) -> Result<HashMap<String, Str
 
 #[tauri::command]
 pub fn export_ris(db_state: State<'_, DbState>) -> Result<String, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let articles = article_repo::get_articles_by_status(&conn, "included")?;
     let criteria_map = build_criteria_map(&conn)?;
     Ok(articles_to_ris_export(&articles, &criteria_map))
@@ -84,10 +81,7 @@ pub fn export_ris_for_tab_to_file(
     status: String,
     screening_errors_only: bool,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let articles = article_repo::get_articles_for_export(&conn, &status, screening_errors_only)?;
     let criteria_map = build_criteria_map(&conn)?;
     let content = articles_to_ris_export(&articles, &criteria_map);
@@ -100,10 +94,7 @@ pub struct ExportProjectRequest {}
 
 #[tauri::command]
 pub fn export_project_backup(db_state: State<'_, DbState>) -> Result<String, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     project::export_project(&conn)
 }
 
@@ -128,10 +119,7 @@ pub async fn import_project_backup(
         "[import_project_backup] Command received, content length: {}",
         request.json_content.len()
     );
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     eprintln!("[import_project_backup] DB lock acquired, calling import_project...");
     let result = project::import_project(&conn, &request.json_content);
     match &result {
@@ -200,10 +188,7 @@ pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppErr
 
 #[tauri::command]
 pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
-    let mut conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     reset_project_inner(&mut conn)
 }

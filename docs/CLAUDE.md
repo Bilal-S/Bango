@@ -37,6 +37,7 @@
 - Return `Result<T, E>` from all fallible functions.
 - Use tauri-pilot mcp for E2E testing. Check whether dev server is running before attempting to start another instance.
 - **System/Generic Error Logging**: For system-wide operational events or errors not tied to a specific article (e.g., scraping outcomes, global LLM client failures, database initialization errors), use `audit_repo::log_error(conn, details)`. This creates an audit entry with `article_id = NULL` and `action = 'error'`. Do not use this for article-specific events.
+- `Mutex::lock()` poison failures MUST be mapped to `AppError::LockPoisoned` via the shared `db::connection::lock_conn` helper. Never wrap a `PoisonError` as `AppError::Database` - a poisoned mutex is an application-state error, not a SQL error. Every command handler and engine that locks `DbState.conn` routes through `lock_conn(&db_state.conn)` (or `lock_conn(conn_mutex)` for engines taking `&Mutex<Connection>`) instead of inlining `.lock().map_err(...)`.
 
 ### Code Style
 - Module structure: one module per domain concern (e.g., `ris`, `dedup`, `screening`, `llm`, `db`, `prisma`, `biblio`).

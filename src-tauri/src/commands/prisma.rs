@@ -6,20 +6,14 @@ use crate::prisma::data::{self, PrismaData};
 use crate::prisma::svg;
 
 fn render_svg(db_state: &State<'_, DbState>) -> Result<String, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let prisma_data = data::compute_prisma_data(&conn)?;
     Ok(svg::render_prisma_svg(&prisma_data))
 }
 
 #[tauri::command]
 pub fn get_prisma_data(db_state: State<'_, DbState>) -> Result<PrismaData, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     data::compute_prisma_data(&conn)
 }
 

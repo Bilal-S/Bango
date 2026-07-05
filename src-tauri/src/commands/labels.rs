@@ -24,10 +24,7 @@ pub struct LabelWithCount {
 
 #[tauri::command]
 pub fn get_labels(db_state: State<'_, DbState>) -> Result<Vec<Label>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     label_repo::get_all_labels(&conn)
 }
 
@@ -35,10 +32,7 @@ pub fn get_labels(db_state: State<'_, DbState>) -> Result<Vec<Label>, AppError> 
 pub fn get_labels_with_counts(
     db_state: State<'_, DbState>,
 ) -> Result<Vec<LabelWithCount>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let labels = label_repo::get_all_labels(&conn)?;
     let result: Vec<LabelWithCount> = labels
         .into_iter()
@@ -70,10 +64,7 @@ pub fn create_label(
     db_state: State<'_, DbState>,
     request: CreateLabelRequest,
 ) -> Result<Label, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     label_repo::create_label(&conn, &request.name, "user_created")
 }
 
@@ -89,19 +80,13 @@ pub fn rename_label(
     db_state: State<'_, DbState>,
     request: RenameLabelRequest,
 ) -> Result<Label, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     label_repo::rename_label(&conn, &request.id, &request.new_name)
 }
 
 #[tauri::command]
 pub fn delete_label(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     label_repo::delete_label(&conn, &id)
 }
 
@@ -117,10 +102,7 @@ pub fn update_label_color(
     db_state: State<'_, DbState>,
     request: UpdateLabelColorRequest,
 ) -> Result<Label, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     label_repo::update_label_color(&conn, &request.id, request.color.as_deref())
 }
 
@@ -136,9 +118,7 @@ pub async fn suggest_labels(
     orchestrator: State<'_, Arc<LlmOrchestrator>>,
 ) -> Result<SuggestLabelsResult, AppError> {
     let (config, research_aims, inclusion_criteria, exclusion_criteria) = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
         let aims = criteria_repo::get_all_aims(&conn)?;
@@ -232,10 +212,7 @@ Rules:
         .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default();
 
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let labels = label_repo::create_labels_batch(&conn, &label_names, "ai_generated")?;
 
     Ok(SuggestLabelsResult { labels })

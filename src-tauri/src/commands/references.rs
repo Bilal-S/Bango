@@ -29,10 +29,7 @@ pub fn extract_cr_references(
     db_state: tauri::State<'_, DbState>,
     payload: ExtractCrPayload,
 ) -> Result<ExtractResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let Some(ref extras) = payload.ris_extras else {
         return Ok(ExtractResult { papers_created: 0, links_created: 0, errors: vec![] });
@@ -165,10 +162,7 @@ pub fn query_reference_papers(
     limit: Option<usize>,
     offset: Option<usize>,
 ) -> Result<QueryReferencePapersResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let limit = limit.unwrap_or(50);
     let offset = offset.unwrap_or(0);
@@ -197,10 +191,7 @@ pub fn query_reference_papers(
 pub fn get_reference_articles_of_interest(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<Vec<crate::models::reference::ReferencePaper>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     reference_repo::get_articles_of_interest(&conn)
 }
@@ -211,10 +202,7 @@ pub fn get_linked_articles_for_paper(
     db_state: tauri::State<'_, DbState>,
     paper_id: String,
 ) -> Result<Vec<LinkedArticleInfo>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     reference_repo::get_linked_articles_for_paper(&conn, &paper_id)
 }
@@ -225,10 +213,7 @@ pub fn get_reference_paper(
     db_state: tauri::State<'_, DbState>,
     paper_id: String,
 ) -> Result<crate::models::reference::ReferencePaper, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     reference_repo::get_paper_by_id(&conn, &paper_id)
 }
@@ -248,10 +233,7 @@ pub fn get_article_references(
     article_id: String,
     ref_type: Option<ReferenceType>,
 ) -> Result<Vec<ArticleReference>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     reference_repo::get_references_for_article(&conn, &article_id, ref_type.as_ref())
 }
@@ -264,10 +246,7 @@ pub fn link_reference_to_article(
     reference_paper_id: String,
     ref_type: ReferenceType,
 ) -> Result<ArticleReferenceLink, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let link = reference_repo::create_link(&conn, &article_id, &reference_paper_id, &ref_type)?;
 
@@ -294,10 +273,7 @@ pub fn promote_reference_to_article(
     db_state: tauri::State<'_, DbState>,
     reference_paper_id: String,
 ) -> Result<PromoteResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     // Fetch the reference paper
     let paper = reference_repo::get_paper_by_id(&conn, &reference_paper_id)?;
@@ -443,10 +419,7 @@ pub fn delete_article_references(
     db_state: tauri::State<'_, DbState>,
     article_id: String,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     reference_repo::delete_references_for_article(&conn, &article_id)?;
 
@@ -469,10 +442,7 @@ pub fn upsert_reference_paper(
     db_state: tauri::State<'_, DbState>,
     paper: NewReferencePaper,
 ) -> Result<ReferencePaperResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let (paper, was_created) = reference_repo::insert_or_find_paper(&conn, &paper)?;
 
@@ -781,9 +751,6 @@ pub fn import_references_for_article(
     db_state: tauri::State<'_, DbState>,
     payload: ImportReferencesPayload,
 ) -> Result<ExtractResult, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     import_references_inner(&conn, &payload.article_id, &payload.file_path, &payload.ref_type)
 }

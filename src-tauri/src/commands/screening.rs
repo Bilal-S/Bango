@@ -56,10 +56,7 @@ pub async fn get_screening_readiness(
         }
     };
 
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     // 1. Check cheap prerequisites first
     let has_aims = criteria_repo::has_any_aims(&conn)?;
@@ -149,9 +146,7 @@ pub async fn start_screening(
     }
 
     let config = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         llm_config_repo::get_config(&conn)?.ok_or_else(|| {
             AppError::Validation(
                 "LLM not configured. Please set up LLM configuration first.".to_string(),
@@ -160,16 +155,12 @@ pub async fn start_screening(
     };
 
     let criteria = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         criteria_repo::get_all_criteria(&conn)?
     };
 
     let aims = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         criteria_repo::get_all_aims(&conn)?
     };
 
@@ -198,9 +189,7 @@ pub async fn start_screening(
     }
 
     let unscreened = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         article_repo::count_unscreened_working(&conn)?
     };
     if unscreened == 0 {
@@ -221,9 +210,7 @@ pub async fn start_screening(
     // so the IPC handler returns immediately and the lock is held only for the
     // millisecond-scale SQLite writes the engine itself performs.
     let screening_config = {
-        let conn = db_state.conn.lock().map_err(|e| {
-            AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let mode = app_settings_repo::get_screening_mode(&conn)?;
         ScreeningConfig {
             mode,
@@ -343,30 +330,21 @@ pub async fn stop_screening(screening_state: State<'_, ScreeningState>) -> Resul
 
 #[tauri::command]
 pub fn reset_screening_errors(db_state: State<'_, DbState>) -> Result<usize, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let count = article_repo::reset_screening_errors(&conn)?;
     Ok(count)
 }
 
 #[tauri::command]
 pub fn reset_working_list(db_state: State<'_, DbState>) -> Result<usize, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     let count = article_repo::reset_working_list(&conn)?;
     Ok(count)
 }
 
 #[tauri::command]
 pub fn estimate_screening_tokens(db_state: State<'_, DbState>) -> Result<Option<String>, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     let config = llm_config_repo::get_config_no_decrypt(&conn)?
         .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
@@ -414,10 +392,7 @@ pub fn estimate_screening_tokens(db_state: State<'_, DbState>) -> Result<Option<
 /// Powers the Settings -> Screening Preferences radio-card selector.
 #[tauri::command]
 pub fn get_screening_mode(db_state: State<'_, DbState>) -> Result<ScreeningMode, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     app_settings_repo::get_screening_mode(&conn)
 }
 
@@ -427,10 +402,7 @@ pub fn set_screening_mode(
     db_state: State<'_, DbState>,
     mode: ScreeningMode,
 ) -> Result<(), AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     app_settings_repo::set_screening_mode(&conn, mode)
 }
 
@@ -438,9 +410,6 @@ pub fn set_screening_mode(
 /// disables Enhanced/Two-stage mode until at least one full-text article exists.
 #[tauri::command]
 pub fn get_full_text_article_count(db_state: State<'_, DbState>) -> Result<i64, AppError> {
-    let conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| AppError::Database(rusqlite::Error::InvalidParameterName(e.to_string())))?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     chunk_repo::count_articles_with_full_text(&conn)
 }
