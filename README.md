@@ -4,16 +4,19 @@
 
 # Bango
 
-**AI-accelerated systematic literature review screening with built-in bibliometric analysis and knowledge wiki**
+**Your Literature Reviview Assistant**
+<br>AI-accelerated systematic literature review screening with built-in bibliometric analysis and knowledge wiki
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/Bilal-S/Bango)](https://github.com/Bilal-S/Bango/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-orange.svg)](https://tauri.app/)
 [![Status](https://img.shields.io/badge/status-active%20development-yellow.svg)]()
 
-Bango is a cross-platform desktop application that automates and accelerates the screening phase of systematic literature reviews, scoping reviews, and meta-analyses. Researchers import RIS or BibTeX bibliography files, define inclusion/exclusion criteria, and let AI screen abstracts, producing a rigorously categorized set of articles ready for full-text review. Beyond screening, Bango includes a full bibliometric analysis suite: co-authorship networks, citation graphs, keyword maps, publication timelines, author productivity rankings, and co-citation analysis.
+Bango is a desktop application that automates and accelerates the screening phase of systematic literature reviews, scoping reviews, and meta-analyses. Researchers import RIS or BibTeX bibliography files, define inclusion/exclusion criteria, and let AI screen abstracts, producing a rigorously categorized set of articles ready for full-text review. Beyond screening, Bango includes a full bibliometric analysis suite: co-authorship networks, citation graphs, keyword maps, publication timelines, author productivity rankings, and co-citation analysis.
 
-Built with [Tauri 2.x](https://tauri.app/) · All data stays on your machine · No cloud dependency, no login, no accounts needed.
+All data stays on your machine · No cloud dependency, no login, no accounts needed.
+
+Download Info: [macOS](#macos), [Linux](#linux), [Windows](#windows)
 
 </div>
 
@@ -275,29 +278,27 @@ Pre-built installers for all major platforms are available on the [GitHub Releas
 
 | File | Best For |
 |------|----------|
-| `Bango_<version>_amd64.AppImage` | **Recommended.** Portable; no installation required. Works on any modern Linux distribution. |
-| `Bango_<version>_amd64.deb` | Debian, Ubuntu, and derivatives. Installs via the system package manager. |
-| `Bango-<version>.x86_64.rpm` | Fedora, RHEL, CentOS, openSUSE, and other RPM-based distributions. |
+| [`Bango_2.5.0_amd64.AppImage`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_amd64.AppImage) | **Recommended.** Portable; no installation required. Works on any modern Linux distribution. |
+| [`Bango_2.5.0_amd64.deb`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_amd64.deb) | Debian, Ubuntu, and derivatives. Installs via the system package manager. |
 
 #### Windows
 
 | File | Best For |
 |------|----------|
-| `Bango_<version>_x64-setup.exe` | **Recommended.** Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. |
-| `Bango_<version>_x64_en-US.msi` | Enterprise or automated deployments. Windows Installer package suitable for group policy distribution. |
+| [`Bango_2.5.0_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_x64-setup.exe) | **Recommended.** Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. |
+| [`Bango_2.5.0_x64_en-US.msi`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_x64_en-US.msi) | Enterprise or automated deployments. Windows Installer package suitable for group policy distribution. |
 
 #### macOS
 
 | File | Best For |
 |------|----------|
-| `Bango_<version>_aarch64.dmg` | **Recommended.** For Apple Silicon (M1/M2/M3/M4) Macs. Drag-and-drop install to Applications. |
-| `Bango_aarch64.app.tar.gz` | Portable or custom deployment. Extract and run from any location. |
+| [`Bango_2.5.0_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_aarch64.dmg) | **Recommended.** For Apple Silicon (M-CPU) Macs. Drag-and-drop install to Applications. |
 
 > **Note:** macOS builds are for **Apple Silicon (ARM64)** only. Intel (x86_64) Macs are not supported.
 
 ### Signed Builds
 
-- **Verified Builds**: Verified signed builds can be downloaded from the Microsoft Store for Windows users. Use the Microsoft Store app to do so.
+- **Verified Builds**: Verified signed builds are available from the [Microsoft Store](https://apps.microsoft.com/detail/9np2bhgxt8h3) for Windows users. Use the Microsoft Store app to install.
 
 ### ⚠️ Unsigned Build Notice
 
@@ -336,12 +337,6 @@ sudo dpkg -i Bango_*_amd64.deb
 sudo apt-get install -f   # resolve any missing dependencies
 ```
 
-**RPM package:**
-
-```bash
-sudo rpm -i Bango-*.x86_64.rpm
-```
-
 Linux does not enforce code signing, so no additional security bypass steps are needed.
 
 </details>
@@ -349,7 +344,7 @@ Linux does not enforce code signing, so no additional security bypass steps are 
 <details>
 <summary><strong>🪟 Windows</strong></summary>
 
-1. Download `Bango_<version>_x64-setup.exe` (or the `.msi` for enterprise installs).
+1. Download [`Bango_2.5.0_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_x64-setup.exe) (or the [`.msi`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_x64_en-US.msi) for enterprise installs).
 2. Double-click to run the installer.
 3. **Windows SmartScreen** will show a warning: *"Windows protected your PC"*
    - Click **"More info"**
@@ -363,7 +358,7 @@ If your organization blocks unsigned installers via Group Policy, use the MSI pa
 <details>
 <summary><strong>🍎 macOS</strong></summary>
 
-1. Download `Bango_<version>_aarch64.dmg`.
+1. Download [`Bango_2.5.0_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_aarch64.dmg).
 2. Double-click the `.dmg` file to open it.
 3. Drag **Bango** to the **Applications** folder.
 4. On first launch, **macOS Gatekeeper** will block the app: *"Bango cannot be opened because the developer cannot be verified."*
@@ -384,6 +379,8 @@ After bypassing once, the app will launch normally on subsequent opens.
 ### Build from Source
 
 If you prefer to build Bango yourself, or need to run on an architecture without pre-built binaries, follow the instructions in [Getting Started](#getting-started) below.
+
+> **RPM:** RPM packages are not published by CI. To produce one, run `npm run tauri build -- --bundles rpm` on a Linux host (requires `rpm`/`rpmbuild`). Add `rpm` to `bundle.targets` in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) to make it the default.
 
 ---
 
@@ -573,7 +570,7 @@ This project is licensed under the [Apache License 2.0](https://www.apache.org/l
 Copyright 2025-2026 BonCode (Bilal Soylu)
 
 Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
+you may not use this file in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
