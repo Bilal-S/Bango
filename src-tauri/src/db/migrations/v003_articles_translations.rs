@@ -33,6 +33,20 @@
 //! `language = 'French'` means "originally French, now translated to English;
 //! originals in `article_original_content`". No `original_language` or
 //! `detected_language` columns are added.
+//!
+//! ## Crash-recovery contract
+//!
+//! The migration's `ALTER TABLE articles ADD COLUMN is_translated` (and the
+//! three sibling columns) have no `IF NOT EXISTS` guard - SQLite does not
+//! support that syntax for `ADD COLUMN`. The migration runner
+//! (`db::migration::run_migrations`) wraps this migration in a transaction so
+//! a crash between the DDL and the `user_version` bump rolls back cleanly.
+//! Additionally, `db::migration::heal_partial_migrations` detects databases
+//! corrupted by older non-transactional builds (where the DDL committed but
+//! `user_version` stayed at 2) by probing for `articles.is_translated` and,
+//! if present, advances `user_version` to 3 without re-running these ALTERs.
+//! If you add another `ALTER TABLE ... ADD COLUMN` migration in the future,
+//! extend `heal_partial_migrations` with a marker-column check for it.
 
 pub const VERSION: i32 = 3;
 

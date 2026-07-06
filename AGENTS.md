@@ -99,7 +99,15 @@ describe each durable boundary so agents can locate the right area. Create a chi
   `sections.rs`, `chunking.rs`, `text_tokens.rs` [Tier 3 shared
   tokenizer for FTS5 BM25 + screening chunk scoring]). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
-  `invoke_handler!` list and auto-loads the bundled `journal_index.db` on first startup.
+  `invoke_handler!` list, auto-loads the bundled `journal_index.db` on first
+  startup, and shows a native modal dialog (via `tauri-plugin-dialog`) if
+  `run_migrations` fails in `.setup()` - the message names the resolved
+  `app_data_dir` path and the three database files (`bango.db`,
+  `bango.db-wal`, `bango.db-shm`) to back up or delete before restarting.
+  Platform DB paths (`BonCode.Bango` identifier): Windows
+  `%APPDATA%\BonCode.Bango\bango.db`, macOS
+  `~/Library/Application Support/BonCode.Bango/bango.db`, Linux
+  `~/.local/share/BonCode.Bango/bango.db`.
   - **`src-tauri/src/db/chunk_repo.rs`** - Tier 3 article chunk storage (`article_chunks`
     table, created by migration v003; was in v002 pre-release but v002 was reverted to
     `wiki_index_manifest`-only after deployment, so the FTS5 drop + article_chunks +
@@ -491,13 +499,31 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `article_chunks` creation, and `audit_entries` rebuild were in v002 pre-release but
     moved to v003 after v002 was deployed with only `wiki_index_manifest`. v001 is
     updated so fresh DBs get the expanded audit CHECK constraint directly.
+  - **`src-tauri/src/db/migration.rs`** - migration runner. **Transactional**:
+    each migration's `up_sql` + `user_version` bump run in a single
+    `unchecked_transaction` so a crash between the DDL and the version pragma
+    rolls back cleanly (previously they were two autocommit statements, so a
+    force-quit between them left the DB half-migrated). **Self-healing
+    pre-pass** (`heal_partial_migrations`): detects DBs corrupted by older
+    non-transactional builds by probing for the v003 marker column
+    (`articles.is_translated`) while `user_version < 3`; if present it advances
+    `user_version` to 3 without re-running the dangerous `ALTER TABLE ADD
+    COLUMN` statements (SQLite has no `IF NOT EXISTS` for ADD COLUMN). Future
+    migrations that add another `ALTER TABLE ... ADD COLUMN` MUST extend
+    `heal_partial_migrations` with a marker-column check. 5 inline unit tests
+    + `tests/migration_recovery_test.rs` (3 integration tests simulating the
+    partial v003 state that crashed pre-fix builds).
   - **`src-tauri/src/db/migrations/v003_articles_translations.rs`** - Post-v002 schema
     (VERSION 3). Carries the reverted v002 content (FTS5 drop, `article_chunks`,
     `audit_entries` rebuild with `figure_descriptions` + `ai_screen_enhanced`) plus
     translation schema: `articles` columns (`is_translated`, `translation_status`,
     `translation_error`, `translated_at`), `article_original_content` +
     `article_original_chunks` tables, and `audit_entries` CHECK expansion for
-    `translation` + `translation_error`. Plan: `.worktrees/language-plan-v2.md`.
+    `translation` + `translation_error`. The `ALTER TABLE ADD COLUMN` statements
+    have no `IF NOT EXISTS` guard (SQLite limitation), so the transactional
+    runner + `heal_partial_migrations` pre-pass in `db/migration.rs` are the
+    contract that prevents duplicate-column crashes on re-run. Plan:
+    `.worktrees/language-plan-v2.md`.
   - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
     `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
     UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:

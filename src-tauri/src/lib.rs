@@ -37,6 +37,7 @@ use db::connection::DbState;
 use db::schema_check::{check_schema, SchemaStatus};
 use llm::orchestrator::LlmOrchestrator;
 use tauri::Manager;
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 /// Application-level feature flags set at startup.
 #[derive(Debug, Clone)]
@@ -88,6 +89,7 @@ pub fn run() {
 
             if let Err(e) = crate::db::migration::run_migrations(&conn) {
                 eprintln!("fatal: failed to run database migrations: {e:#}");
+                show_migration_failure_dialog(app, &app_data_dir, &format!("{e:#}"));
                 std::process::exit(1);
             }
 
@@ -357,6 +359,48 @@ pub(crate) fn load_journal_index_if_empty_handle(
     let conn = db::connection::lock_conn(&guard.conn)?;
     let resource_path = resolve_journal_resource_path(app.path());
     load_journal_index_from_path(&conn, &resource_path)
+}
+
+/// Show a native modal dialog when the database migrations fail at startup.
+///
+/// Migrations run inside `.setup()` before the webview exists, so a native OS
+/// dialog is the only viable UX. The message shows the resolved `app_data_dir`
+/// path (so the user does not have to guess where the database files live),
+/// explains the most common cause (an interrupted update), and tells the user
+/// to back up or delete the database files and restart. The underlying error
+/// string is appended at the bottom so the user can copy-paste it into a
+/// support request.
+///
+/// The dialog is `blocking_show` because the caller (`run` setup hook) exits
+/// the process immediately after this returns.
+fn show_migration_failure_dialog(app: &tauri::App, app_data_dir: &std::path::Path, error: &str) {
+    let dir_display = app_data_dir.display();
+
+    // Build the platform-specific database file list. WAL journal mode
+    // (enabled in `create_connection_at`) creates two sidecar files; all
+    // three should be deleted together for a clean reset.
+    let db_files = ["bango.db", "bango.db-wal", "bango.db-shm"]
+        .into_iter()
+        .map(|f| format!("  - {f}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let message = format!(
+        "Bango could not open its database, so the app cannot continue.\n\n\
+         This usually happens after an interrupted update (for example, the \
+         app was force-closed while it was finishing a database migration).\n\n\
+         To recover:\n\
+         1. Back up your data (optional but recommended):\n    {dir_display}\n\n\
+         2. Delete these files:\n{db_files}\n\n\
+         3. Restart Bango.\n\n\
+         Technical details (for support):\n{error}"
+    );
+
+    app.dialog()
+        .message(message)
+        .title("Bango - Cannot start")
+        .kind(MessageDialogKind::Error)
+        .blocking_show();
 }
 
 /// Resolve the path to the bundled `journal_index.db`, preferring the bundle
