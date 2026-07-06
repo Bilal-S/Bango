@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import appIcon from '@/assets/app-icon.png';
+import { initialDataLoaded } from '@/composables/use-dashboard';
+import { useArticlesStore } from '@/stores/articles';
 import ShareDialog from './share-dialog.vue';
 
 const props = defineProps<{
@@ -43,6 +45,91 @@ const helpItem: NavItem = { label: 'Help Guide', icon: 'help', route: '/help' };
 
 const showShareDialog = ref(false);
 
+// --- Share Bango startup attention animation ---
+// Two-stage sequence, both fire at most once per app session:
+//   Stage 1 (6s after data-ready): zoom pulse (Option B)
+//   Stage 2 (2 minutes after data-ready): soft glow pulse (Option C)
+// Both no-op when prefers-reduced-motion: reduce is set.
+// Stage 1 is delayed so it does not compete with other startup activity
+// (loading overlay dismiss, store pre-warming, wiki drift check, etc.).
+const STAGE_1_DELAY_MS = 3 * 1000; // 6 seconds
+const ZOOM_PULSE_MS = 700;
+const GLOW_PULSE_MS = 1400;
+const STAGE_2_DELAY_MS = 2 * 60 * 1000; // 2 minutes
+
+const shareZoom = ref(false);
+const shareGlow = ref(false);
+
+let stage1DelayTimer: ReturnType<typeof setTimeout> | null = null;
+let stage1Timer: ReturnType<typeof setTimeout> | null = null;
+let stage2Timer: ReturnType<typeof setTimeout> | null = null;
+
+/** True once across the whole app session so the attention animation never
+ *  repeats on remount / navigation. Module-scoped, not component-scoped. */
+let attentionPlayedThisSession = false;
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
+function runStage1(): void {
+  shareZoom.value = true;
+  stage1Timer = setTimeout(() => {
+    shareZoom.value = false;
+    stage1Timer = null;
+  }, ZOOM_PULSE_MS);
+}
+
+function runStage2(): void {
+  shareGlow.value = true;
+  stage2Timer = setTimeout(() => {
+    shareGlow.value = false;
+    stage2Timer = null;
+  }, GLOW_PULSE_MS);
+}
+
+watch(
+  initialDataLoaded,
+  (loaded) => {
+    if (!loaded || attentionPlayedThisSession) return;
+    // Only draw attention when there is real data (not a fresh database).
+    if (useArticlesStore().articles.length === 0) return;
+    attentionPlayedThisSession = true;
+
+    if (prefersReducedMotion()) return;
+
+    // Stage 1: zoom pulse after a short delay so it does not compete with
+    // other startup activity (loading overlay dismiss, store pre-warming,
+    // wiki drift check, etc.).
+    stage1DelayTimer = setTimeout(() => {
+      stage1DelayTimer = null;
+      runStage1();
+    }, STAGE_1_DELAY_MS);
+    // Stage 2: soft glow pulse 2 minutes later.
+    stage2Timer = setTimeout(runStage2, STAGE_2_DELAY_MS);
+  },
+  { immediate: true }
+);
+
+onBeforeUnmount(() => {
+  if (stage1DelayTimer !== null) {
+    clearTimeout(stage1DelayTimer);
+    stage1DelayTimer = null;
+  }
+  if (stage1Timer !== null) {
+    clearTimeout(stage1Timer);
+    stage1Timer = null;
+  }
+  if (stage2Timer !== null) {
+    clearTimeout(stage2Timer);
+    stage2Timer = null;
+  }
+});
+
 function handleNavClick(): void {
   if (props.mobileOpen) {
     emit('closeMobile');
@@ -81,14 +168,19 @@ function handleNavClick(): void {
         </router-link>
       </li>
     </ul>
+    <div class="sidebar__divider" />
     <button
-      class="sidebar__share-btn"
-      :class="{ 'sidebar__share-btn--collapsed': collapsed }"
+      class="sidebar__link sidebar__share-btn"
+      :class="{
+        'sidebar__link--collapsed': collapsed,
+        'sidebar__share-btn--zoom': shareZoom,
+        'sidebar__share-btn--glow': shareGlow,
+      }"
       :title="collapsed ? 'Share Bango' : undefined"
       @click="showShareDialog = true"
     >
-      <span class="material-symbols-outlined sidebar__share-icon">share</span>
-      <span v-if="!collapsed" class="sidebar__share-label">Share Bango</span>
+      <span class="material-symbols-outlined sidebar__icon">share</span>
+      <span v-if="!collapsed" class="sidebar__label">Share Bango</span>
     </button>
     <ShareDialog v-if="showShareDialog" @close="showShareDialog = false" />
     <div class="sidebar__divider" />
@@ -292,51 +384,77 @@ function handleNavClick(): void {
   background-color: rgba(255, 255, 255, 0.08);
 }
 
-/* Share Bango - hero-style centered column with a larger icon + label stack.
- * Visually distinct from the inline nav links because Share is an outbound
- * growth action, not a navigation target. */
+/* Share Bango uses the shared .sidebar__link styles for an icon + label row
+ * identical to Settings / Help Guide. The only addition is symmetric vertical
+ * spacing so the button sits centered in its own section between the two
+ * dividers (after Settings and before Help Guide). */
 .sidebar__share-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  padding: var(--space-3) var(--space-2);
-  margin: var(--space-2) var(--space-4);
-  border-radius: var(--radius-default);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  width: 100%;
+  margin-block: var(--space-2);
   background: none;
-  color: var(--color-sidebar-text);
+  border: none;
   cursor: pointer;
   font-family: inherit;
-  transition:
-    background-color 0.15s,
-    border-color 0.15s;
+  /* Keep the button above its neighbors so the scale + glow are not clipped
+   * by adjacent sidebar rows during the attention animation. */
+  position: relative;
+  transform-origin: center;
 }
 
-.sidebar__share-btn:hover {
-  background-color: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.2);
+/* Stage 1: zoom pulse - scale up then settle, with a primary-color glow that
+ * fades in during scale-up and out during settle. The transform-origin is
+ * center so the pulse is symmetric in both collapsed (icon) and expanded
+ * (icon + label) layouts. */
+.sidebar__share-btn--zoom {
+  animation: share-zoom-pulse 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 2;
 }
 
-.sidebar__share-icon {
-  font-size: 32px;
-  line-height: 1;
+@keyframes share-zoom-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+  40% {
+    transform: scale(1.12);
+    box-shadow: 0 0 18px 4px rgba(99, 102, 241, 0.65);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
 }
 
-.sidebar__share-label {
-  font-size: var(--font-size-caption);
-  font-weight: var(--font-weight-semibold);
-  text-align: center;
+/* Stage 2: soft glow pulse - no scale, just two gentle primary-color glows
+ * that breathe to re-attract attention without motion. */
+.sidebar__share-btn--glow {
+  animation: share-glow-pulse 1.4s ease-in-out;
+  z-index: 2;
 }
 
-.sidebar__share-btn--collapsed {
-  flex-direction: row;
-  margin: var(--space-2);
-  padding: var(--space-2);
-  border: none;
+@keyframes share-glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+  25% {
+    box-shadow: 0 0 14px 3px rgba(99, 102, 241, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+  75% {
+    box-shadow: 0 0 14px 3px rgba(99, 102, 241, 0.5);
+  }
 }
 
-.sidebar__share-btn--collapsed .sidebar__share-icon {
-  font-size: 20px;
+/* Respect users who prefer reduced motion: the script short-circuits before
+ * adding the class, but this is a defensive guard in case the class is ever
+ * applied through another path. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__share-btn--zoom,
+  .sidebar__share-btn--glow {
+    animation: none;
+  }
 }
 </style>

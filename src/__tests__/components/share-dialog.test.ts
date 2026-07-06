@@ -149,6 +149,14 @@ describe('share-dialog.vue', () => {
     expect(wrapper.emitted('close')).toBeTruthy();
   });
 
+  it('emits close when the close (X) button is clicked', async () => {
+    const wrapper = mountDialog();
+    const closeBtn = wrapper.find('.share-dialog__close');
+    expect(closeBtn.exists()).toBe(true);
+    await closeBtn.trigger('click');
+    expect(wrapper.emitted('close')).toBeTruthy();
+  });
+
   it('surfaces an error when openUrl rejects', async () => {
     openUrlMock.mockRejectedValueOnce(new Error('blocked by OS'));
     const wrapper = mountDialog();

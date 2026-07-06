@@ -67,8 +67,22 @@ async function openPlatform(): Promise<void> {
 <template>
   <div class="dialog-overlay" @click.self="emit('close')">
     <div class="dialog share-dialog" tabindex="0" @keydown.escape="emit('close')">
+      <button
+        class="share-dialog__close"
+        type="button"
+        title="Close"
+        aria-label="Close"
+        @click="emit('close')"
+      >
+        <span class="material-symbols-outlined">close</span>
+      </button>
       <h2>Share Bango</h2>
-
+      <div class="simple-info">
+        <p>
+          Please help spread the word about Bango. Choose a platform or channel you prefer. You can,
+          of course, change the message as needed.
+        </p>
+      </div>
       <div v-if="error" class="share-dialog__error">{{ error }}</div>
 
       <div class="field">
@@ -136,10 +150,56 @@ async function openPlatform(): Promise<void> {
 .share-dialog {
   width: 480px;
   max-width: 90vw;
+  position: relative;
+  padding-right: 2.75rem;
 }
 
 .share-dialog:focus {
   outline: none;
+}
+
+/* Plain black-text intro paragraph in the standard body font.
+ * Deliberately NOT a colored callout - just normal paragraph styling. */
+.simple-info {
+  color: var(--color-on-surface, #1b1b24);
+  font-family: var(--font-family, Inter, system-ui, -apple-system, sans-serif);
+  font-size: var(--font-size-body, 14px);
+  line-height: var(--line-height-body, 1.5);
+}
+
+.simple-info p {
+  margin: 0;
+  word-break: break-word;
+}
+
+/* Close (X) icon button - top-right, mirrors batch-ref-progress__close pattern */
+.share-dialog__close {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--color-on-surface-variant, #464555);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm, 0.25rem);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.share-dialog__close:hover {
+  background-color: var(--color-surface-container-high, #e4e1ee);
+  color: var(--color-on-surface, #1b1b24);
+}
+
+.share-dialog__close .material-symbols-outlined {
+  font-size: 20px;
 }
 
 .share-dialog__error {

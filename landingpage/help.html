@@ -2497,6 +2497,18 @@
             <!-- Quick nav -->
             <nav style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem">
               <a
+                href="#ref-ai-philosophy"
+                style="
+                  font-size: 0.75rem;
+                  padding: 0.25rem 0.625rem;
+                  border-radius: 9999px;
+                  background: #eef2ff;
+                  color: #4f46e5;
+                  text-decoration: none;
+                "
+                >AI Integration & Philosophy</a
+              >
+              <a
                 href="#ref-dashboard"
                 style="
                   font-size: 0.75rem;
@@ -2569,6 +2581,18 @@
                 >AI Screening</a
               >
               <a
+                href="#ref-translation"
+                style="
+                  font-size: 0.75rem;
+                  padding: 0.25rem 0.625rem;
+                  border-radius: 9999px;
+                  background: #eef2ff;
+                  color: #4f46e5;
+                  text-decoration: none;
+                "
+                >Translations</a
+              >
+              <a
                 href="#ref-review"
                 style="
                   font-size: 0.75rem;
@@ -2629,18 +2653,6 @@
                 >Wiki</a
               >
               <a
-                href="#ref-ai-philosophy"
-                style="
-                  font-size: 0.75rem;
-                  padding: 0.25rem 0.625rem;
-                  border-radius: 9999px;
-                  background: #eef2ff;
-                  color: #4f46e5;
-                  text-decoration: none;
-                "
-                >AI Integration & Philosophy</a
-              >
-              <a
                 href="#ref-settings"
                 style="
                   font-size: 0.75rem;
@@ -2667,6 +2679,145 @@
             </nav>
 
             <div id="ref-content">
+              <!-- AI Integration & Philosophy -->
+              <section class="ref-section" id="ref-ai-philosophy">
+                <header class="ref-section__header">
+                  <span class="material-symbols-outlined ref-section__icon">psychology</span>
+                  <h2 class="ref-section__title">AI Integration & Philosophy</h2>
+                </header>
+                <div class="ref-section__body">
+                  <p>
+                    Bango is designed with a specific philosophy: AI should serve as a
+                    high-accuracy, transparent research assistant that helps you organize and
+                    analyze literature, not a black-box decision-maker that replaces human
+                    oversight.
+                  </p>
+
+                  <h3>How Bango Works with AI</h3>
+                  <p>
+                    Traditional AI chat interfaces require you to copy-paste or upload entire PDFs
+                    into a single context window. In contrast, Bango treats papers the way a human
+                    researcher does: section by section, with the most relevant passages surfaced on
+                    demand.
+                  </p>
+                  <ul>
+                    <li>
+                      <strong>Section-Aware PDF Extraction:</strong> When you attach a PDF, Bango
+                      parses the text and splits it into structured Method, Results, and Discussion
+                      passages. This ensures important sections are not lost to context window
+                      limits.
+                    </li>
+                    <li>
+                      <strong>Criteria-Targeted Chunking:</strong> Rather than feeding an entire
+                      paper to the AI, Bango's retrieval engine ranks and pulls only the top-K
+                      passages matching your criteria.
+                    </li>
+                    <li>
+                      <strong>Grounded Citation Mapping:</strong> Every AI summary, screening
+                      advice, and chat answer is directly mapped to the source passage (e.g.,
+                      <code>Smith 2023 (§Methods)</code>). These labels are interactive links that
+                      open the source text, so you can verify the AI's work.
+                    </li>
+                    <li>
+                      <strong>Deterministic Logic Layer:</strong> Bango evaluates conflict
+                      resolution rules locally in SQLite based on your criteria priorities, using
+                      the LLM solely to advise on matches.
+                    </li>
+                  </ul>
+
+                  <h3>Bango RAG vs. Dumping Documents into Chat Windows</h3>
+                  <div class="ref-comparison-wrapper">
+                    <table class="ref-comparison-table">
+                      <thead>
+                        <tr>
+                          <th>Dimension</th>
+                          <th>Dumping in Chat Windows (ChatGPT/Claude UI)</th>
+                          <th>Bango Structured Retrieval (RAG)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>Context Truncation</strong></td>
+                          <td>High. Long papers exceed limits and get silently cut off.</td>
+                          <td>
+                            None. Section-by-section parsing and word budgets prevent context
+                            overflow.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td><strong>Hallucination Risk</strong></td>
+                          <td>
+                            High. The model generates summaries based on incomplete or recalled
+                            memory.
+                          </td>
+                          <td>
+                            Low. The model is constrained to analyze only target, extracted
+                            passages.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td><strong>Verifiability</strong></td>
+                          <td>
+                            Low. Answers are plain text; you must search the PDF to locate the
+                            source.
+                          </td>
+                          <td>
+                            High. Interactive passage links (e.g., <code>§Methods</code>) open the
+                            exact source text.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td><strong>Reproducibility</strong></td>
+                          <td>
+                            None. Repeated questions yield different outputs; there is no saved
+                            history.
+                          </td>
+                          <td>
+                            Full. Every decision is logged in an immutable database audit trail.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td><strong>Structured Comparison</strong></td>
+                          <td>
+                            Manual. You must copy/paste data to spreadsheets to compare papers
+                            side-by-side.
+                          </td>
+                          <td>
+                            Automatic. Standard variables (sample size, design, effect sizes) are
+                            parsed into cards.
+                          </td>
+                        </tr>
+                        <tr>
+                          <td><strong>Setup Complexity</strong></td>
+                          <td>Instant. Just upload or paste text and type.</td>
+                          <td>
+                            Structured. Requires importing bibliography files and attaching PDFs.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <h3>Benefits & Drawbacks of Bango's Approach</h3>
+                  <p>
+                    While Bango's structured approach provides the rigor needed for systematic
+                    reviews, it represents a different set of trade-offs:
+                  </p>
+                  <ul>
+                    <li>
+                      <strong>Benefits:</strong> Perfect audit trails for PRISMA reporting,
+                      automatic re-evaluation when criteria change, and lower API token costs by
+                      avoiding sending unnecessary parts of the paper.
+                    </li>
+                    <li>
+                      <strong>Drawbacks:</strong> Processing requires a multi-phase pipeline
+                      (import, text extraction, chunking, and database mapping) that takes longer to
+                      run than a simple chat prompt, and requires attaching original PDF files.
+                    </li>
+                  </ul>
+                </div>
+              </section>
+
               <!-- Dashboard -->
               <section class="ref-section" id="ref-dashboard">
                 <header class="ref-section__header">
@@ -2953,6 +3104,133 @@ ER  - </pre
                       it from where it stopped.
                     </li>
                   </ul>
+                </div>
+              </section>
+
+              <!-- Translations -->
+              <section class="ref-section" id="ref-translation">
+                <header class="ref-section__header">
+                  <span class="material-symbols-outlined ref-section__icon">translate</span>
+                  <h2 class="ref-section__title">Translations</h2>
+                </header>
+                <div class="ref-section__body">
+                  <p>
+                    Bango can translate non-English articles to English before AI workflows process
+                    them. This is a <strong>permanent rewrite</strong>: after translation, the
+                    working article fields hold English text, and the originals are preserved in
+                    archive tables but currently not visible. Translation is
+                    <strong>experimental</strong> and <strong>opt-in</strong>. To enable it use the
+                    <strong>Auto Translate</strong> setting in the Settings page.
+                  </p>
+
+                  <h3>How It Works</h3>
+                  <p>
+                    When <strong>Auto Translate</strong> is enabled in Settings, Bango detects the
+                    article's language from the RIS/BibTeX <code>language</code> field. English
+                    articles and articles with blank language are skipped. Non-English articles are
+                    translated using your configured LLM provider.
+                  </p>
+                  <p>
+                    The scope of translation is chosen automatically from whether the article has
+                    full text attached:
+                  </p>
+                  <ul>
+                    <li>
+                      <strong>MetadataOnly</strong>: Translates the title and abstract. Used during
+                      import when no full text is attached, and during the screening pre-translation
+                      step.
+                    </li>
+                    <li>
+                      <strong>FullText</strong>: Translates the title, abstract, all article chunks,
+                      then re-chunks the stitched English result for screening. Used when full text
+                      is attached and during batch import.
+                    </li>
+                  </ul>
+
+                  <h3>Implicit Translations</h3>
+                  <p>
+                    Please note: Even if you do not have <strong>Auto Translate</strong> enabled you
+                    may be causing implicit translations via the LLM that you use. When you submit
+                    non-english articles for AI screening or AI Summary the LLM you choose decides
+                    whether to translate these and or respond in english or the original language.
+                    Thus explicit translations via enabling the
+                    <strong>Auto Translate</strong> setting may be preferable as they will be more
+                    reproducable.
+                  </p>
+
+                  <h3>Translation State Machine</h3>
+                  <p>
+                    Each article tracks its translation lifecycle through five states which you can
+                    also review in the audit logs for articles:
+                  </p>
+                  <ul>
+                    <li><strong>none</strong> : Never translated. Initial state.</li>
+                    <li>
+                      <strong>queued</strong> : Job sent to the worker. Waiting to be processed.
+                    </li>
+                    <li>
+                      <strong>running</strong> : Bango is actively translating (LLM call in flight).
+                    </li>
+                    <li><strong>succeeded</strong> : Translation complete - with a time stamp.</li>
+                    <li>
+                      <strong>failed</strong> : Translation errored. This holds the error message.
+                      You can retry via the translate button.
+                    </li>
+                  </ul>
+
+                  <h3>Screening-Time Translation</h3>
+                  <p>
+                    When <strong>Auto Translate</strong> is on, the screening engine explicitly runs
+                    a pre-translation step before the AI reads any abstracts. It queries unscreened
+                    working articles with non-English language, enqueues Metadata (abstract and
+                    keywords) translation jobs, and waits for all to complete. The screening
+                    progress bar shows "Translating 3/12 articles..." during this stage. The
+                    readiness check also reports <code>pending</code> so you know how many articles
+                    need translation before screening can begin.
+                  </p>
+
+                  <h3>Manual Translation</h3>
+                  <p>
+                    A translate button appears on the article detail header for any non-English
+                    article. Clicking it opens a confirmation dialog (warning about the permanent
+                    rewrite and token cost), then enqueues the job. Popup messages provide feedback
+                    at each stage. A red <strong>TRANSLATED</strong> badge appears on the header
+                    once translation succeeds.
+                  </p>
+
+                  <h3>Original Content Archive</h3>
+                  <p>
+                    Before the working <code>articles</code> row is rewritten, the original-language
+                    text is saved to two dedicated tables. These are currently not visible in UI but
+                    can be queried from database with other tools:
+                  </p>
+                  <ul>
+                    <li>
+                      <strong>article_original_content</strong> : Stores original title, abstract,
+                      full text, and the source language at translation time.
+                    </li>
+                    <li>
+                      <strong>article_original_chunks</strong> : Stores the pre-translation chunk
+                      coordinate space (section, content, word count). After translation, English
+                      chunks live in <code>article_chunks</code> with their own independent indices.
+                    </li>
+                  </ul>
+
+                  <h3>Batch Import Integration</h3>
+                  <p>
+                    Translations are also integrated into batch imports and imported full text pdf
+                    will also automatically translated if the setting is enabled.
+                  </p>
+
+                  <h3>Multilingual Section Classification</h3>
+                  <p>
+                    To correctly chunk non-English full text, Bango's section classifier supports 10
+                    languages beyond English: French, Spanish, Japanese, Chinese, German, Russian,
+                    Portuguese, Italian, Arabic, and Turkish. Each language maps academic section
+                    keywords (Abstract, Introduction, Methods, Results, Discussion, Conclusion,
+                    References) to its native terms. A Unicode-aware numbered-heading regex detects
+                    headings in non-Latin scripts (Cyrillic, CJK, Arabic).
+                  </p>
                 </div>
               </section>
 
@@ -3563,145 +3841,6 @@ ER  - </pre
                     <code>.png</code>, <code>.mp4</code>) are listed in the export report under
                     <em>unsupported</em> and excluded from the LLM prompt.
                   </p>
-                </div>
-              </section>
-
-              <!-- AI Integration & Philosophy -->
-              <section class="ref-section" id="ref-ai-philosophy">
-                <header class="ref-section__header">
-                  <span class="material-symbols-outlined ref-section__icon">psychology</span>
-                  <h2 class="ref-section__title">AI Integration & Philosophy</h2>
-                </header>
-                <div class="ref-section__body">
-                  <p>
-                    Bango is designed with a specific philosophy: AI should serve as a
-                    high-accuracy, transparent research assistant that helps you organize and
-                    analyze literature, not a black-box decision-maker that replaces human
-                    oversight.
-                  </p>
-
-                  <h3>How Bango Works with AI</h3>
-                  <p>
-                    Traditional AI chat interfaces require you to copy-paste or upload entire PDFs
-                    into a single context window. In contrast, Bango treats papers the way a human
-                    researcher does: section by section, with the most relevant passages surfaced on
-                    demand.
-                  </p>
-                  <ul>
-                    <li>
-                      <strong>Section-Aware PDF Extraction:</strong> When you attach a PDF, Bango
-                      parses the text and splits it into structured Method, Results, and Discussion
-                      passages. This ensures important sections are not lost to context window
-                      limits.
-                    </li>
-                    <li>
-                      <strong>Criteria-Targeted Chunking:</strong> Rather than feeding an entire
-                      paper to the AI, Bango's retrieval engine ranks and pulls only the top-K
-                      passages matching your criteria.
-                    </li>
-                    <li>
-                      <strong>Grounded Citation Mapping:</strong> Every AI summary, screening
-                      advice, and chat answer is directly mapped to the source passage (e.g.,
-                      <code>Smith 2023 (§Methods)</code>). These labels are interactive links that
-                      open the source text, so you can verify the AI's work.
-                    </li>
-                    <li>
-                      <strong>Deterministic Logic Layer:</strong> Bango evaluates conflict
-                      resolution rules locally in SQLite based on your criteria priorities, using
-                      the LLM solely to advise on matches.
-                    </li>
-                  </ul>
-
-                  <h3>Bango RAG vs. Dumping Documents into Chat Windows</h3>
-                  <div class="ref-comparison-wrapper">
-                    <table class="ref-comparison-table">
-                      <thead>
-                        <tr>
-                          <th>Dimension</th>
-                          <th>Dumping in Chat Windows (ChatGPT/Claude UI)</th>
-                          <th>Bango Structured Retrieval (RAG)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td><strong>Context Truncation</strong></td>
-                          <td>High. Long papers exceed limits and get silently cut off.</td>
-                          <td>
-                            None. Section-by-section parsing and word budgets prevent context
-                            overflow.
-                          </td>
-                        </tr>
-                        <tr>
-                          <td><strong>Hallucination Risk</strong></td>
-                          <td>
-                            High. The model generates summaries based on incomplete or recalled
-                            memory.
-                          </td>
-                          <td>
-                            Low. The model is constrained to analyze only target, extracted
-                            passages.
-                          </td>
-                        </tr>
-                        <tr>
-                          <td><strong>Verifiability</strong></td>
-                          <td>
-                            Low. Answers are plain text; you must search the PDF to locate the
-                            source.
-                          </td>
-                          <td>
-                            High. Interactive passage links (e.g., <code>§Methods</code>) open the
-                            exact source text.
-                          </td>
-                        </tr>
-                        <tr>
-                          <td><strong>Reproducibility</strong></td>
-                          <td>
-                            None. Repeated questions yield different outputs; there is no saved
-                            history.
-                          </td>
-                          <td>
-                            Full. Every decision is logged in an immutable database audit trail.
-                          </td>
-                        </tr>
-                        <tr>
-                          <td><strong>Structured Comparison</strong></td>
-                          <td>
-                            Manual. You must copy/paste data to spreadsheets to compare papers
-                            side-by-side.
-                          </td>
-                          <td>
-                            Automatic. Standard variables (sample size, design, effect sizes) are
-                            parsed into cards.
-                          </td>
-                        </tr>
-                        <tr>
-                          <td><strong>Setup Complexity</strong></td>
-                          <td>Instant. Just upload or paste text and type.</td>
-                          <td>
-                            Structured. Requires importing bibliography files and attaching PDFs.
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <h3>Benefits & Drawbacks of Bango's Approach</h3>
-                  <p>
-                    While Bango's structured approach provides the rigor needed for systematic
-                    reviews, it represents a different set of trade-offs:
-                  </p>
-                  <ul>
-                    <li>
-                      <strong>Benefits:</strong> Perfect audit trails for PRISMA reporting,
-                      automatic re-evaluation when criteria change, and lower API token costs by
-                      avoiding sending unnecessary parts of the paper.
-                    </li>
-                    <li>
-                      <strong>Drawbacks:</strong> Processing requires a multi-phase pipeline
-                      (import, text extraction, chunking, and database mapping) that takes longer to
-                      run than a simple chat prompt, and requires attaching original PDF files.
-                    </li>
-                  </ul>
                 </div>
               </section>
 
