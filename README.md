@@ -285,14 +285,15 @@ Pre-built installers for all major platforms are available on the [GitHub Releas
 
 | File | Best For |
 |------|----------|
-| [`Bango_2.5.0_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_x64-setup.exe) | **Recommended.** Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. |
+| [`Bango_2.5.0_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_x64-setup.exe) | Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. You will be asked to grant permissions during install. |
 | [`Bango_2.5.0_x64_en-US.msi`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_x64_en-US.msi) | Enterprise or automated deployments. Windows Installer package suitable for group policy distribution. |
+| [`Microsoft Store`](https://apps.microsoft.com/detail/9np2bhgxt8h3) | **Recommended.**  Microsoft verified and signed installer for personal use. |
 
 #### macOS
 
 | File | Best For |
 |------|----------|
-| [`Bango_2.5.0_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_aarch64.dmg) | **Recommended.** For Apple Silicon (M-CPU) Macs. Drag-and-drop install to Applications. |
+| [`Bango_2.5.0_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.5.0/Bango_2.5.0_aarch64.dmg) | **Recommended.** For Apple Silicon (M-CPU) Macs. Drag-and-drop install to Applications. You will be asked to grant permissions during install. |
 
 > **Note:** macOS builds are for **Apple Silicon (ARM64)** only. Intel (x86_64) Macs are not supported.
 
