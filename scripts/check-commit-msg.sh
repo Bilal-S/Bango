@@ -17,7 +17,12 @@
 #   docs: update AGENTS.md wiki section
 set -euo pipefail
 
-commit_msg_file="$1"
+commit_msg_file="${1:-}"
+if [[ -z "$commit_msg_file" ]]; then
+  echo "ERROR: commit-msg hook invoked without a message file path." >&2
+  echo "       Expected invocation: $0 <path-to-commit-message-file>" >&2
+  exit 1
+fi
 first_line=$(head -n 1 "$commit_msg_file")
 
 # Exempt auto-generated commits.
