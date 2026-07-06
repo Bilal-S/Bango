@@ -205,6 +205,45 @@ impl LlmOrchestrator {
         })?
     }
 
+    /// List available models for a provider's discovery endpoint.
+    ///
+    /// Routes the metadata/discovery call through the orchestrator so it
+    /// participates in concurrency limiting (`max_concurrent_requests`) and
+    /// rate limiting (`request_delay_ms`) just like chat-completion calls.
+    /// This matters because some providers (e.g. OpenAI) count `/models`
+    /// requests against the same rate-limit budget as completions.
+    pub async fn list_models(
+        &self,
+        provider: &crate::models::llm_config::LlmProvider,
+        endpoint_url: &str,
+        api_key: Option<&str>,
+    ) -> Result<Vec<String>, AppError> {
+        // Acquire semaphore permit (waits if at concurrency limit).
+        let sem = self.semaphore.read().unwrap_or_else(|p| p.into_inner()).clone();
+        let _permit = sem
+            .acquire()
+            .await
+            .map_err(|_| AppError::Import("LLM orchestrator closed".to_string()))?;
+
+        // Rate limiting: ensure minimum delay between requests.
+        self.enforce_rate_limit().await;
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            client::list_models(provider, endpoint_url, api_key),
+        )
+        .await
+        .map_err(|_| {
+            AppError::Import("LLM list-models request timed out after 30 seconds".to_string())
+        })?;
+
+        if let Err(ref e) = result {
+            eprintln!("[LlmOrchestrator] list-models request failed: {e}");
+        }
+
+        result
+    }
+
     /// Get number of available semaphore permits (for diagnostics).
     ///
     /// Reflects the *current* semaphore only. Immediately after

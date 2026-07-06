@@ -155,6 +155,26 @@ pub fn log_error(conn: &Connection, details: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Best-effort wrapper around [`log_error`] for the common "I'm in an error arm
+/// and want to record what happened, but I must not mask the real error"
+/// pattern. Acquires the shared connection mutex tolerantly; if the mutex is
+/// poisoned OR the audit write itself fails, the failure is swallowed because
+/// the caller is already on its way to returning a more important error.
+///
+/// This exists so call sites do not inline `if let Ok(conn) = ...lock()` blocks
+/// (which trip the "MUST route through `lock_conn`" rule). Use this instead of
+/// `log_error` ONLY when you are inside an `Err(e) =>` arm and intend to
+/// `return Err(e)` immediately after - for non-error-path audit writes, call
+/// `log_error` directly with a `lock_conn` guard.
+pub fn log_error_best_effort(conn_mutex: &std::sync::Mutex<Connection>, details: &str) {
+    let Ok(conn) = conn_mutex.lock() else {
+        // Mutex poisoned: cannot record the audit row. The caller is already
+        // returning a real error, so do not mask it with a poison complaint.
+        return;
+    };
+    let _ = log_error(&conn, details);
+}
+
 /// Get generic audit entries (system errors with empty article_id).
 pub fn get_generic_audit_entries(
     conn: &Connection,

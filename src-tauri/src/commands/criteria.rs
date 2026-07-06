@@ -174,10 +174,10 @@ Rules:
         .await;
     if let Err(ref e) = result {
         let err_msg = e.to_string();
-        if let Ok(conn) = db_state.conn.lock() {
-            let _ =
-                audit_repo::log_error(&conn, &format!("Criteria generation failed: {}", err_msg));
-        }
+        audit_repo::log_error_best_effort(
+            &db_state.conn,
+            &format!("Criteria generation failed: {}", err_msg),
+        );
     }
     let (response, _) = result?;
 
@@ -312,9 +312,10 @@ Do not return JSON."#,
         .await;
     if let Err(ref e) = result {
         let err_msg = e.to_string();
-        if let Ok(conn) = db_state.conn.lock() {
-            let _ = audit_repo::log_error(&conn, &format!("Criteria critique failed: {}", err_msg));
-        }
+        audit_repo::log_error_best_effort(
+            &db_state.conn,
+            &format!("Criteria critique failed: {}", err_msg),
+        );
     }
     let (response, _) = result?;
 

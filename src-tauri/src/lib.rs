@@ -111,7 +111,11 @@ pub fn run() {
             let premium_requested = premium_from_cli || premium_from_env;
             {
                 let guard = app.state::<DbState>();
-                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                // Route through `lock_conn` so a poisoned mutex is surfaced as
+                // `AppError::LockPoisoned` instead of silently proceeding with a
+                // recovered guard. Poison here means a prior panic corrupted
+                // application state; fail loudly rather than continuing.
+                let conn = db::connection::lock_conn(&guard.conn)?;
                 if premium_requested {
                     if let Err(e) =
                         db::app_settings_repo::set_setting(&conn, "flag_premium", Some("true"))
@@ -124,7 +128,7 @@ pub fn run() {
             // Read authoritative flag values from DB (persists across restarts).
             let premium = {
                 let guard = app.state::<DbState>();
-                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                let conn = db::connection::lock_conn(&guard.conn)?;
                 db::app_settings_repo::get_setting(&conn, "flag_premium")
                     .ok()
                     .flatten()
@@ -136,7 +140,7 @@ pub fn run() {
             // Initialize LLM orchestrator from saved config (defaults if no config saved yet)
             let (max_conc, delay_ms) = {
                 let guard = app.state::<DbState>();
-                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                let conn = db::connection::lock_conn(&guard.conn)?;
                 match crate::db::llm_config_repo::get_config(&conn) {
                     Ok(Some(cfg)) => {
                         (cfg.max_concurrent_requests as usize, cfg.request_delay_ms as u64)
@@ -162,7 +166,7 @@ pub fn run() {
                 translation::worker::spawn_translation_worker(app.handle().clone());
             {
                 let guard = app.state::<DbState>();
-                let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+                let conn = db::connection::lock_conn(&guard.conn)?;
                 translation::worker::reenqueue_stranded_on_startup(&conn, translation_handle.sender());
             }
             app.manage(translation_handle);
@@ -350,7 +354,7 @@ pub(crate) fn load_journal_index_if_empty_handle(
     app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let guard = app.state::<DbState>();
-    let conn = guard.conn.lock().unwrap_or_else(|e| e.into_inner());
+    let conn = db::connection::lock_conn(&guard.conn)?;
     let resource_path = resolve_journal_resource_path(app.path());
     load_journal_index_from_path(&conn, &resource_path)
 }

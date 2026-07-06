@@ -66,12 +66,13 @@ pub async fn scrape_citation_chaser_cmd(
     let get_refs = get_references.unwrap_or(true);
     let get_cits = get_citations.unwrap_or(true);
 
-    // Resolve output directory from app settings.
+    // Resolve output directory from app settings. Tolerate a poisoned mutex
+    // by falling back to the default directory; scraping will surface its own
+    // error if the resolved path is not writable.
     let output_path = if let Some(db_state) = app.try_state::<DbState>() {
-        if let Ok(conn) = db_state.conn.lock() {
-            resolve_ris_dir(&conn)
-        } else {
-            compute_ris_output_dir()
+        match crate::db::connection::lock_conn(&db_state.conn) {
+            Ok(conn) => resolve_ris_dir(&conn),
+            Err(_) => compute_ris_output_dir(),
         }
     } else {
         compute_ris_output_dir()
@@ -104,17 +105,15 @@ pub async fn scrape_citation_chaser_cmd(
 
     match result {
         Ok(scrape_result) => {
-            // Log success to audit
+            // Log success to audit (best-effort; the scrape itself succeeded).
             if let Some(db_state) = app.try_state::<DbState>() {
-                if let Ok(conn) = db_state.conn.lock() {
-                    let details = format!(
-                        "Citation Chaser success scrape for DOI {}: refs={}, cites={}",
-                        doi,
-                        scrape_result.references_ris.is_some(),
-                        scrape_result.citations_ris.is_some(),
-                    );
-                    let _ = audit_repo::log_error(&conn, &details);
-                }
+                let details = format!(
+                    "Citation Chaser success scrape for DOI {}: refs={}, cites={}",
+                    doi,
+                    scrape_result.references_ris.is_some(),
+                    scrape_result.citations_ris.is_some(),
+                );
+                audit_repo::log_error_best_effort(&db_state.conn, &details);
             }
 
             Ok(ScrapeResultDto {
@@ -123,14 +122,12 @@ pub async fn scrape_citation_chaser_cmd(
             })
         }
         Err(err) => {
-            // Log error to audit table
+            // Log error to audit table (best-effort; the real error is returned).
             if let Some(db_state) = app.try_state::<DbState>() {
-                if let Ok(conn) = db_state.conn.lock() {
-                    let _ = audit_repo::log_error(
-                        &conn,
-                        &format!("Citation Chaser scrape failed for DOI {doi}: {err}"),
-                    );
-                }
+                audit_repo::log_error_best_effort(
+                    &db_state.conn,
+                    &format!("Citation Chaser scrape failed for DOI {doi}: {err}"),
+                );
             }
             Err(AppError::Scraping(err.to_string()))
         }

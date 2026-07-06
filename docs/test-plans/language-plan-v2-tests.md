@@ -21,7 +21,7 @@ Row format (machine-parseable):
 | `src-tauri/tests/translation_queue_test.rs::full_text_job_translates_chunks_and_rechunks_english` | Covers `TC-07` |
 | `src-tauri/tests/translation_queue_test.rs::translation_job_persists_original_content_tables` | Covers `TC-10` |
 | `src-tauri/tests/translation_queue_test.rs::translation_job_writes_audit_success_and_failure` | Covers `TC-13` |
-| `src-tauri/tests/translation_queue_test.rs::startup_reenqueues_queued_and_running_articles` | Covers worker crash recovery |
+| `src-tauri/tests/translation_queue_test.rs::startup_fails_queued_and_running_articles` | Covers worker crash recovery (STARTUP_STRANDED_CAP = 0: no auto-recovery; user retries manually) |
 | `src-tauri/tests/translation_queue_test.rs::translation_write_back_is_single_transaction` | Covers single-transaction atomicity |
 | `src-tauri/tests/batch_import_translation_test.rs::phase_order_is_fulltext_citations_translation_summaries` | Covers `TC-08` |
 | `src-tauri/tests/batch_import_translation_test.rs::summary_waits_for_required_translation` | Covers `TC-08` |

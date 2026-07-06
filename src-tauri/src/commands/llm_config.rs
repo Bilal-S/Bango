@@ -6,7 +6,7 @@ use tauri::State;
 use crate::db::connection::DbState;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
-use crate::llm::{client, orchestrator::LlmOrchestrator};
+use crate::llm::orchestrator::LlmOrchestrator;
 use crate::models::llm_config::{LlmConfig, LlmProvider};
 
 #[tauri::command]
@@ -101,8 +101,16 @@ pub struct ListModelsRequest {
 }
 
 #[tauri::command]
-pub async fn list_llm_models(request: ListModelsRequest) -> Result<Vec<String>, AppError> {
-    client::list_models(&request.provider, &request.endpoint_url, request.api_key.as_deref()).await
+pub async fn list_llm_models(
+    orchestrator: State<'_, Arc<LlmOrchestrator>>,
+    request: ListModelsRequest,
+) -> Result<Vec<String>, AppError> {
+    // Route through the orchestrator so the discovery call participates in
+    // concurrency + rate limiting (CLAUDE.md: "All LLM calls MUST go through
+    // LlmOrchestrator"). Never call `client::list_models` directly here.
+    orchestrator
+        .list_models(&request.provider, &request.endpoint_url, request.api_key.as_deref())
+        .await
 }
 
 #[tauri::command]

@@ -25,10 +25,16 @@ preserved in `article_original_content` and `article_original_chunks`.
   `succeeded`|`failed`) + `is_translated` (0/1) + `translation_error` +
   `translated_at`.
 - The in-memory queue is a `tokio::mpsc` channel owned by a single worker task
-  spawned once at app startup in `lib.rs`. Crash recovery re-enqueues any
-  article with `translation_status IN ('queued','running') AND is_translated = 0`,
-  choosing `FullText` when `has_full_text = 1` else `MetadataOnly` so a stranded
-  full-text job does not silently degrade to metadata-only on restart.
+  spawned once at app startup in `lib.rs`. Crash recovery
+  (`reenqueue_stranded_on_startup`) finds any article with
+  `translation_status IN ('queued','running') AND is_translated = 0`. Because
+  `STARTUP_STRANDED_CAP = 0` (decision: no auto-recovery on restart), **no**
+  stranded job is re-enqueued — every stranded row is marked `failed` with a
+  `translation_error` audit note. The user selectively retranslates via the
+  manual translate button on the article detail header (the enqueue gate
+  accepts `failed`). Raising the cap to a positive `N` re-enables bounded
+  re-enqueueing of the first `N` stranded jobs, choosing `FullText` when
+  `has_full_text = 1` else `MetadataOnly`.
 - The enqueue path reads `translation_status` before sending to the channel:
   - `none` or `failed` -> write `queued` then send.
   - `queued`, `running`, or `succeeded` -> skip silently.

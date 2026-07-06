@@ -438,8 +438,12 @@ fn translation_job_writes_audit_success_and_failure() {
 }
 
 #[test]
-fn startup_reenqueues_queued_and_running_articles() {
-    // Crash recovery: startup re-sends articles stuck in queued/running.
+fn startup_fails_queued_and_running_articles() {
+    // Crash recovery (STARTUP_STRANDED_CAP = 0): startup must NOT re-enqueue
+    // any stranded article. Every queued/running row is marked `failed` with a
+    // non-empty translation_error; succeeded+is_translated rows are untouched.
+    // The user selectively retranslates via the manual translate button (the
+    // enqueue gate accepts `failed`).
     let conn = setup_db();
     let queued_id = seed_non_english_article(&conn, "Titre un", "Résumé un.");
     let running_id = seed_non_english_article(&conn, "Titre deux", "Résumé deux.");
@@ -448,7 +452,7 @@ fn startup_reenqueues_queued_and_running_articles() {
     // Simulate crash mid-flight: set statuses directly (no worker running).
     article_repo::update_translation_status(&conn, &queued_id, "queued").expect("set queued");
     article_repo::update_translation_status(&conn, &running_id, "running").expect("set running");
-    // succeeded + is_translated=1 must NOT be re-enqueued.
+    // succeeded + is_translated=1 is NOT stranded and must be untouched.
     conn.execute(
         "UPDATE articles SET translation_status='succeeded', is_translated=1 WHERE id=?1",
         rusqlite::params![succeeded_id],
@@ -459,67 +463,36 @@ fn startup_reenqueues_queued_and_running_articles() {
     let (sender, mut receiver) = tokio::sync::mpsc::channel::<TranslationJob>(64);
     reenqueue_stranded_on_startup(&conn, &sender);
 
-    // Drain the channel synchronously (non-blocking).
-    let mut drained = Vec::new();
-    while let Ok(job) = receiver.try_recv() {
-        drained.push(job);
-    }
-
-    let enqueued_ids: Vec<&str> = drained.iter().map(|j| j.article_id.as_str()).collect();
-    assert!(enqueued_ids.contains(&queued_id.as_str()), "queued article must be re-enqueued");
-    assert!(enqueued_ids.contains(&running_id.as_str()), "running article must be re-enqueued");
+    // Drain the channel synchronously (non-blocking). With cap = 0 the worker
+    // must receive ZERO jobs - no auto-recovery.
+    let drained: Vec<TranslationJob> = (&mut receiver).try_recv().into_iter().collect();
     assert!(
-        !enqueued_ids.contains(&succeeded_id.as_str()),
-        "succeeded+translated article must NOT be re-enqueued"
+        drained.is_empty(),
+        "STARTUP_STRANDED_CAP = 0 must not re-enqueue any stranded job, got {drained:?}"
     );
 
-    // Re-enqueued articles reset to 'queued'.
+    // Stranded articles are now `failed` with a non-empty error message.
     let q_status = article_repo::get_translation_status(&conn, &queued_id).expect("status");
-    assert_eq!(q_status.translation_status, "queued");
+    assert_eq!(q_status.translation_status, "failed", "queued article must be failed on restart");
+    assert!(
+        q_status.translation_error.as_deref().is_some_and(|e| !e.is_empty()),
+        "failed article must carry a non-empty translation_error"
+    );
     let r_status = article_repo::get_translation_status(&conn, &running_id).expect("status");
-    assert_eq!(r_status.translation_status, "queued");
-}
-
-#[test]
-fn startup_reenqueue_picks_kind_from_has_full_text() {
-    // Crash recovery job-kind selection (plan §Crash recovery on startup):
-    // a stranded article with `has_full_text = 1` must re-enqueue as
-    // `FullText`, not `MetadataOnly` - otherwise the full text + chunks stay
-    // in the original language while the article is marked `is_translated`.
-    let conn = setup_db();
-    let with_ft_id = seed_non_english_article(&conn, "Titre un", "Résumé un.");
-    let without_ft_id = seed_non_english_article(&conn, "Titre deux", "Résumé deux.");
-
-    // Simulate crash mid-flight with has_full_text set on one article.
-    conn.execute(
-        "UPDATE articles SET translation_status='running', has_full_text=1, \
-         full_text='French full text body.' WHERE id=?1",
-        rusqlite::params![with_ft_id],
-    )
-    .expect("set running + has_full_text");
-    article_repo::update_translation_status(&conn, &without_ft_id, "queued").expect("set queued");
-
-    let (sender, mut receiver) = tokio::sync::mpsc::channel::<TranslationJob>(64);
-    reenqueue_stranded_on_startup(&conn, &sender);
-
-    let mut drained = Vec::new();
-    while let Ok(job) = receiver.try_recv() {
-        drained.push(job);
-    }
-
-    let with_ft_job = drained.iter().find(|j| j.article_id == with_ft_id);
-    assert!(with_ft_job.is_some(), "has_full_text stranded article must be re-enqueued");
+    assert_eq!(r_status.translation_status, "failed", "running article must be failed on restart");
     assert!(
-        matches!(with_ft_job.unwrap().kind, TranslationJobKind::FullText),
-        "stranded article with has_full_text must re-enqueue as FullText"
+        r_status.translation_error.as_deref().is_some_and(|e| !e.is_empty()),
+        "failed article must carry a non-empty translation_error"
     );
 
-    let without_ft_job = drained.iter().find(|j| j.article_id == without_ft_id);
-    assert!(without_ft_job.is_some(), "no-full-text stranded article must be re-enqueued");
-    assert!(
-        matches!(without_ft_job.unwrap().kind, TranslationJobKind::MetadataOnly),
-        "stranded article without has_full_text must re-enqueue as MetadataOnly"
+    // The succeeded+translated article is NOT stranded and stays untouched.
+    let s_status = article_repo::get_translation_status(&conn, &succeeded_id).expect("status");
+    assert_eq!(
+        s_status.translation_status, "succeeded",
+        "succeeded+translated article must NOT be touched by crash recovery"
     );
+    assert!(s_status.is_translated);
+    assert!(s_status.translation_error.is_none());
 }
 
 #[test]

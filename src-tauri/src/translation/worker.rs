@@ -3,9 +3,9 @@
 //! There is no `translation_jobs` table. The DB-backed progress record lives on
 //! the `articles` row (`translation_status` + `is_translated`). The worker is a
 //! single Tokio task spawned once at app startup; it owns a
-//! `tokio::mpsc::Receiver<TranslationJob>` channel. Crash recovery re-enqueues
-//! any article with `translation_status IN ('queued','running') AND
-//! is_translated = 0`.
+//! `tokio::mpsc::Receiver<TranslationJob>` channel. Crash recovery marks any
+//! article with `translation_status IN ('queued','running') AND is_translated = 0`
+//! as `failed` (see [`STARTUP_STRANDED_CAP`]); the user retries manually.
 //!
 //! Per the in-memory translation queue and worker design.
 
@@ -184,29 +184,33 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
     TranslationWorkerHandle { sender }
 }
 
-/// Maximum number of stranded jobs re-enqueued at startup. A large backlog
+/// Maximum number of stranded jobs re-enqueued at startup.
+///
+/// **Decision: no auto-recovery on restart.** Set to `0` so every stranded
+/// article (one left in `queued`/`running` when the previous process died) is
+/// marked `failed` with a retryable audit note instead of being silently
+/// re-enqueued. The user selectively retranslates via the manual translate
+/// button on the article detail header (the enqueue gate accepts `failed`).
+///
+/// Set this to a positive `N` to re-enable bounded re-enqueueing of the first
+/// `N` stranded jobs; any excess is still marked `failed`. A large backlog
 /// (e.g. a crash during a 200-article batch import) would otherwise dump all
 /// of them into the channel at once, producing a startup burst that saturates
-/// the worker and contends with UI/LLM traffic. Capped excess is marked
-/// `failed` with a retryable audit note so it surfaces in the Audit Timeline
-/// instead of silently lingering in `queued`/`running`.
-pub const STARTUP_STRANDED_CAP: usize = 20;
+/// the worker and contends with UI/LLM traffic.
+pub const STARTUP_STRANDED_CAP: usize = 0;
 
-/// Crash recovery: re-enqueue articles stranded in `queued` or `running` at
-/// startup. Called once after the worker task is spawned so the jobs land in a
-/// live channel. Non-fatal - errors are logged.
+/// Crash recovery for articles stranded in `queued` or `running` at startup.
+/// Called once after the worker task is spawned. Non-fatal - errors are logged.
 ///
-/// Each stranded article is re-enqueued with the correct `TranslationJobKind`
-/// based on its `has_full_text` flag (`FullText` when true, else `MetadataOnly`)
-/// so a stranded full-text job does not silently degrade to metadata-only on
-/// restart (which would leave full text + chunks in the original language while
-/// marking the article `is_translated = 1`).
-///
-/// **Startup cap (Tier 1c)**: at most [`STARTUP_STRANDED_CAP`] jobs are
-/// re-enqueued. Excess rows are reset to `failed` via
-/// [`article_repo::mark_stranded_capped_failed`] with a retryable audit note,
-/// so they are not silently lost - the user can retry them individually from
-/// the article detail panel.
+/// With [`STARTUP_STRANDED_CAP`] = 0 (the current decision), **no** stranded
+/// job is re-enqueued: every stranded row is reset to `failed` via
+/// [`article_repo::mark_stranded_capped_failed`] with a retryable audit note.
+/// The user selectively retranslates via the manual translate button on the
+/// article detail header (the enqueue gate accepts `failed`). Raising the cap
+/// to a positive `N` re-enables bounded re-enqueueing of the first `N`
+/// stranded jobs, choosing `FullText` when `has_full_text = 1` else
+/// `MetadataOnly` so a stranded full-text job does not silently degrade to
+/// metadata-only on restart.
 pub fn reenqueue_stranded_on_startup(
     conn: &rusqlite::Connection,
     sender: &mpsc::Sender<TranslationJob>,
@@ -233,9 +237,14 @@ pub fn reenqueue_stranded_on_startup(
             }
 
             if !capped.is_empty() {
+                // User-facing audit note. With STARTUP_STRANDED_CAP = 0 this is
+                // the path every stranded article takes; the wording avoids the
+                // odd "capped at 0" phrasing while staying accurate for a
+                // future positive cap.
                 let note = format!(
-                    "Startup translation-recovery capped at {STARTUP_STRANDED_CAP}; \
-                     this article was not re-enqueued automatically. Retry it manually."
+                    "Translation interrupted by application restart and not auto-recovered. \
+                     Retry it manually from the article detail panel. \
+                     (Startup recovery cap: {STARTUP_STRANDED_CAP}.)"
                 );
                 if let Err(e) = article_repo::mark_stranded_capped_failed(conn, &capped, &note) {
                     eprintln!("[translation] failed to mark capped stranded jobs as failed: {e}");

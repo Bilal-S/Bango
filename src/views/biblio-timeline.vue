@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import VueApexCharts from 'vue3-apexcharts';
-import type { ApexOptions, ApexYAxis } from 'apexcharts';
+import type { ApexOptions, ApexTooltipCustomOpts, ApexYAxis } from 'apexcharts';
 import { useBibliometrics } from '@/composables/use-bibliometrics';
 import { useTimelineState } from '@/composables/use-timeline-state';
 import { useViewport } from '@/composables/use-viewport';
@@ -357,14 +357,16 @@ const chartOptions = computed<ApexOptions>(() => {
       theme: 'light',
       ...(isStacked
         ? {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            custom: ({ series: s, dataPointIndex, w }: any) => {
+            custom: ({ series: s, dataPointIndex, w }: ApexTooltipCustomOpts) => {
               const year = xCategories.value[dataPointIndex] ?? '';
               let rows = '';
+              // `w.config.series` is a complex union in the ApexCharts types;
+              // narrow to the axis-series shape (objects with `name`) we build.
+              const namedSeries = (w.config.series ?? []) as { name?: string }[];
               s.forEach((vals: number[], si: number) => {
                 const val = vals[dataPointIndex] ?? 0;
                 if (val > 0) {
-                  const seriesName = w.config.series[si]?.name ?? '';
+                  const seriesName = namedSeries[si]?.name ?? '';
                   const fullName = journalFullNameMap.value.get(seriesName) ?? seriesName;
                   rows += `<div class="apexcharts-tooltip-series-group"><span class="apexcharts-tooltip-marker"></span><span class="apexcharts-tooltip-text"><span class="apexcharts-tooltip-y-group"><span class="apexcharts-tooltip-text-y-label">${fullName}</span><span class="apexcharts-tooltip-text-y-value">: <strong>${val}</strong></span></span></span></div>`;
                 }

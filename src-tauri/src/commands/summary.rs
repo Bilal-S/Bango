@@ -265,14 +265,13 @@ pub async fn generate_article_ai_summary_inner(
     let (response_text, _tokens) = match llm_result {
         Ok(v) => v,
         Err(e) => {
-            // Log error to general diagnostic audit
+            // Log error to general diagnostic audit (best-effort; the real
+            // error is returned below).
             let err_msg = e.to_string();
-            if let Ok(conn) = db_state.conn.lock() {
-                let _ = crate::db::audit_repo::log_error(
-                    &conn,
-                    &format!("AI summary failed for article {article_id} ({title}): {err_msg}"),
-                );
-            }
+            crate::db::audit_repo::log_error_best_effort(
+                &db_state.conn,
+                &format!("AI summary failed for article {article_id} ({title}): {err_msg}"),
+            );
             // Emit error event so frontend can react
             let _ = app_handle.emit(
                 "article-ai-summary-error",
@@ -293,12 +292,10 @@ pub async fn generate_article_ai_summary_inner(
         Ok(v) => v,
         Err(e) => {
             let err_msg = format!("Invalid JSON response from LLM: {e}");
-            if let Ok(conn) = db_state.conn.lock() {
-                let _ = crate::db::audit_repo::log_error(
-                    &conn,
-                    &format!("AI summary failed for article {article_id} ({title}): {err_msg}"),
-                );
-            }
+            crate::db::audit_repo::log_error_best_effort(
+                &db_state.conn,
+                &format!("AI summary failed for article {article_id} ({title}): {err_msg}"),
+            );
             let _ = app_handle.emit(
                 "article-ai-summary-error",
                 serde_json::json!({ "articleId": article_id, "error": err_msg }),
@@ -482,14 +479,12 @@ pub async fn generate_figure_descriptions(
         Ok(v) => v,
         Err(e) => {
             let err_msg = e.to_string();
-            if let Ok(conn) = db_state.conn.lock() {
-                let _ = crate::db::audit_repo::log_error(
-                    &conn,
-                    &format!(
-                        "Figure descriptions failed for article {article_id} ({title}): {err_msg}"
-                    ),
-                );
-            }
+            crate::db::audit_repo::log_error_best_effort(
+                &db_state.conn,
+                &format!(
+                    "Figure descriptions failed for article {article_id} ({title}): {err_msg}"
+                ),
+            );
             let _ = app_handle.emit(
                 "article-figure-descriptions-error",
                 serde_json::json!({ "articleId": article_id, "error": err_msg }),
@@ -503,14 +498,10 @@ pub async fn generate_figure_descriptions(
         Ok(d) => d,
         Err(e) => {
             let err_msg = e.to_string();
-            if let Ok(conn) = db_state.conn.lock() {
-                let _ = crate::db::audit_repo::log_error(
-                    &conn,
-                    &format!(
-                        "Figure descriptions parse failed for article {article_id}: {err_msg}"
-                    ),
-                );
-            }
+            crate::db::audit_repo::log_error_best_effort(
+                &db_state.conn,
+                &format!("Figure descriptions parse failed for article {article_id}: {err_msg}"),
+            );
             let _ = app_handle.emit(
                 "article-figure-descriptions-error",
                 serde_json::json!({ "articleId": article_id, "error": err_msg }),
@@ -641,14 +632,12 @@ pub async fn generate_unified_summary(
             Ok(v) => v,
             Err(e) => {
                 let err_msg = e.to_string();
-                if let Ok(conn) = db_state.conn.lock() {
-                    let _ = crate::db::audit_repo::log_error(
-                        &conn,
-                        &format!(
-                            "Unified summary (monolithic fallback) failed for article {article_id} ({title}): {err_msg}"
-                        ),
-                    );
-                }
+                crate::db::audit_repo::log_error_best_effort(
+                    &db_state.conn,
+                    &format!(
+                        "Unified summary (monolithic fallback) failed for article {article_id} ({title}): {err_msg}"
+                    ),
+                );
                 let _ = app_handle.emit(
                     "article-ai-summary-error",
                     serde_json::json!({ "articleId": article_id, "error": err_msg }),
@@ -712,14 +701,10 @@ pub async fn generate_unified_summary(
         Ok(v) => v,
         Err(e) => {
             let err_msg = e.to_string();
-            if let Ok(conn) = db_state.conn.lock() {
-                let _ = crate::db::audit_repo::log_error(
-                    &conn,
-                    &format!(
-                        "Unified summary section call failed for article {article_id}: {err_msg}"
-                    ),
-                );
-            }
+            crate::db::audit_repo::log_error_best_effort(
+                &db_state.conn,
+                &format!("Unified summary section call failed for article {article_id}: {err_msg}"),
+            );
             let _ = app_handle.emit(
                 "article-ai-summary-error",
                 serde_json::json!({ "articleId": article_id, "error": err_msg }),

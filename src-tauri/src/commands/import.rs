@@ -290,9 +290,9 @@ pub async fn import_ris_file(
 /// Log an import error to both the audit table and stderr.
 fn log_import_error(app: &AppHandle, message: &str) {
     if let Some(db_state) = app.try_state::<DbState>() {
-        if let Ok(conn) = db_state.conn.lock() {
-            let _ = audit_repo::log_error(&conn, message);
-        }
+        // `try_state` returns Option (state may be tearing down during shutdown);
+        // the inner best-effort helper tolerates a poisoned mutex.
+        audit_repo::log_error_best_effort(&db_state.conn, message);
     }
 }
 
