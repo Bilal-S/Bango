@@ -4,7 +4,7 @@
 
 # Bango
 
-**Your Literature Reviview Assistant**
+**Your Literature Review Assistant**
 <br>AI-accelerated systematic literature review screening with built-in bibliometric analysis and knowledge wiki
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/Bilal-S/Bango)](https://github.com/Bilal-S/Bango/releases)
