@@ -67,6 +67,46 @@ describe('platform helpers', () => {
     });
   });
 
+  describe('isWindowsPlatform', () => {
+    it('returns true for Windows platform strings', async () => {
+      for (const p of ['Win32', 'Win64', 'Windows', 'WinCE']) {
+        setNavigatorPlatform(p);
+        const { isWindowsPlatform } = await importFresh();
+        expect(isWindowsPlatform(), `${p} should be Windows`).toBe(true);
+      }
+    });
+
+    it('returns false for macOS / Linux platform strings', async () => {
+      for (const p of ['MacIntel', 'Macintosh', 'Linux x86_64', 'Linux armv7l']) {
+        setNavigatorPlatform(p);
+        const { isWindowsPlatform } = await importFresh();
+        expect(isWindowsPlatform(), `${p} should not be Windows`).toBe(false);
+      }
+    });
+
+    it('returns false when navigator is absent (SSR / tests)', async () => {
+      const desc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+      const g = globalThis as unknown as { navigator?: Navigator };
+      delete g.navigator;
+      try {
+        const { isWindowsPlatform } = await importFresh();
+        expect(isWindowsPlatform()).toBe(false);
+      } finally {
+        if (desc) Object.defineProperty(globalThis, 'navigator', desc);
+      }
+    });
+
+    it('returns false when navigator.platform is not a string', async () => {
+      Object.defineProperty(globalThis, 'navigator', {
+        value: { ...(original ?? {}) },
+        configurable: true,
+        writable: true,
+      });
+      const { isWindowsPlatform } = await importFresh();
+      expect(isWindowsPlatform()).toBe(false);
+    });
+  });
+
   describe('SHORTCUT_MODIFIER', () => {
     it('resolves to "Cmd" on an Apple platform', async () => {
       setNavigatorPlatform('MacIntel');

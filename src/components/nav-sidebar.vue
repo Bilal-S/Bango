@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useRoute } from 'vue-router';
 import appIcon from '@/assets/app-icon.png';
+import ShareDialog from './share-dialog.vue';
 
 const props = defineProps<{
   collapsed?: boolean;
@@ -38,6 +40,8 @@ const navItems: NavItem[] = [
 ];
 
 const helpItem: NavItem = { label: 'Help Guide', icon: 'help', route: '/help' };
+
+const showShareDialog = ref(false);
 
 function handleNavClick(): void {
   if (props.mobileOpen) {
@@ -77,6 +81,16 @@ function handleNavClick(): void {
         </router-link>
       </li>
     </ul>
+    <button
+      class="sidebar__share-btn"
+      :class="{ 'sidebar__share-btn--collapsed': collapsed }"
+      :title="collapsed ? 'Share Bango' : undefined"
+      @click="showShareDialog = true"
+    >
+      <span class="material-symbols-outlined sidebar__share-icon">share</span>
+      <span v-if="!collapsed" class="sidebar__share-label">Share Bango</span>
+    </button>
+    <ShareDialog v-if="showShareDialog" @close="showShareDialog = false" />
     <div class="sidebar__divider" />
     <div class="sidebar__footer">
       <router-link
@@ -276,5 +290,53 @@ function handleNavClick(): void {
 
 .sidebar__collapse-btn:hover {
   background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Share Bango - hero-style centered column with a larger icon + label stack.
+ * Visually distinct from the inline nav links because Share is an outbound
+ * growth action, not a navigation target. */
+.sidebar__share-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: var(--space-3) var(--space-2);
+  margin: var(--space-2) var(--space-4);
+  border-radius: var(--radius-default);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: none;
+  color: var(--color-sidebar-text);
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+
+.sidebar__share-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.sidebar__share-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.sidebar__share-label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
+}
+
+.sidebar__share-btn--collapsed {
+  flex-direction: row;
+  margin: var(--space-2);
+  padding: var(--space-2);
+  border: none;
+}
+
+.sidebar__share-btn--collapsed .sidebar__share-icon {
+  font-size: 20px;
 }
 </style>

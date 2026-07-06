@@ -8,6 +8,7 @@
  */
 
 const MAC_PLATFORMS = new Set(['MacIntel', 'Macintosh', 'Mac68K', 'iPhone', 'iPad', 'iPod']);
+const WINDOWS_PLATFORMS = new Set(['Win32', 'Win64', 'Windows', 'WinCE']);
 
 /**
  * Returns true when running on an Apple platform (macOS / iOS / iPadOS), used
@@ -19,6 +20,20 @@ const MAC_PLATFORMS = new Set(['MacIntel', 'Macintosh', 'Mac68K', 'iPhone', 'iPa
 export function isMacPlatform(): boolean {
   if (typeof navigator === 'undefined' || typeof navigator.platform !== 'string') return false;
   return MAC_PLATFORMS.has(navigator.platform);
+}
+
+/**
+ * Returns true when running on a Windows platform, used to route the
+ * "Share Bango" link to the Microsoft Store URL (with UTM attribution)
+ * instead of the GitHub project URL. Returns false for macOS, Linux, and
+ * unknown platforms.
+ *
+ * Resilient to `navigator` absence (SSR / unit-test runtimes): returns false
+ * instead of throwing.
+ */
+export function isWindowsPlatform(): boolean {
+  if (typeof navigator === 'undefined' || typeof navigator.platform !== 'string') return false;
+  return WINDOWS_PLATFORMS.has(navigator.platform);
 }
 
 /**
