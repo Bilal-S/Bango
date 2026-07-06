@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import type { ScreeningMode } from '@/types';
 import { isTauri } from '@/composables/use-tauri-command';
@@ -19,8 +19,10 @@ function toggleAutoNavigate(): void {
 
 // ── Tier 3: Screening Mode (abstract | enhanced | two_stage) ────────────────
 // Persisted in app_settings (not localStorage) so it survives across devices
-// via project backup. Enhanced / Two-stage are disabled until at least one
-// full-text article exists.
+// via project backup. All three modes are always selectable; the engine
+// applies Enhanced / Two-stage evidence retrieval only to articles that have
+// full text attached and silently falls back to abstract-only screening for
+// the rest (and for the whole run while no full text exists).
 const screeningMode = ref<ScreeningMode>('abstract');
 const fullTextArticleCount = ref(0);
 const modeLoading = ref(false);
@@ -50,11 +52,10 @@ const modes: Array<{
   },
 ];
 
-const advancedDisabled = (mode: ScreeningMode): boolean =>
-  (mode === 'enhanced' || mode === 'two_stage') && fullTextArticleCount.value < 1;
-
-const advancedDisabledTooltip = (mode: ScreeningMode): string =>
-  advancedDisabled(mode) ? 'Attach full text to at least one article to enable this mode.' : '';
+// True when the active mode can use full-text evidence but no article has FT.
+const advancedModeWithoutFullText = computed(
+  () => screeningMode.value !== 'abstract' && fullTextArticleCount.value < 1
+);
 
 async function loadScreeningMode(): Promise<void> {
   if (!isTauri()) {
@@ -78,7 +79,7 @@ async function loadScreeningMode(): Promise<void> {
 }
 
 async function selectMode(mode: ScreeningMode): Promise<void> {
-  if (advancedDisabled(mode) || mode === screeningMode.value) return;
+  if (mode === screeningMode.value) return;
   screeningMode.value = mode;
   if (!isTauri()) return;
   try {
@@ -110,15 +111,9 @@ onMounted(() => {
         class="mode-select"
         :value="screeningMode"
         :disabled="modeLoading"
-        :title="advancedDisabled(screeningMode) ? advancedDisabledTooltip(screeningMode) : ''"
         @change="selectMode(($event.target as HTMLSelectElement).value as ScreeningMode)"
       >
-        <option
-          v-for="m in modes"
-          :key="m.value"
-          :value="m.value"
-          :disabled="advancedDisabled(m.value)"
-        >
+        <option v-for="m in modes" :key="m.value" :value="m.value">
           {{ m.label }}
         </option>
       </select>
@@ -126,8 +121,19 @@ onMounted(() => {
         {{ modes.find((m) => m.value === screeningMode)?.description }}
       </p>
       <p v-if="modeError" class="settings-card__status mode-error">{{ modeError }}</p>
-      <p v-if="fullTextArticleCount < 1" class="settings-card__hint">
-        Enhanced and Two-stage modes require at least one article with attached full text.
+      <!-- Condition + fallback notice. Modes are always selectable; the engine
+           falls back to abstract-only screening per article until full text is
+           attached. -->
+      <p v-if="advancedModeWithoutFullText" class="mode-select__fallback">
+        No articles have full text attached yet. This mode will fall back to abstract-only screening
+        until at least one article has full text.
+      </p>
+      <p
+        v-else-if="screeningMode !== 'abstract' && fullTextArticleCount > 0"
+        class="mode-select__active"
+      >
+        {{ fullTextArticleCount }} article(s) have full text attached - evidence retrieval is
+        active.
       </p>
     </div>
 
@@ -207,5 +213,29 @@ onMounted(() => {
 .mode-error {
   color: #991b1b;
   background-color: #fef2f2;
+}
+
+.mode-select__fallback {
+  font-size: 12px;
+  color: #92400e;
+  background-color: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-default, 0.375rem);
+  padding: 0.5rem 0.625rem;
+  line-height: 1.4;
+  margin-top: 0.375rem;
+  max-width: 480px;
+}
+
+.mode-select__active {
+  font-size: 12px;
+  color: #065f46;
+  background-color: #d1fae5;
+  border: 1px solid #a7f3d0;
+  border-radius: var(--radius-default, 0.375rem);
+  padding: 0.5rem 0.625rem;
+  line-height: 1.4;
+  margin-top: 0.375rem;
+  max-width: 480px;
 }
 </style>

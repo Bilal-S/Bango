@@ -41,6 +41,26 @@ fn seed_article_with_full_text(conn: &rusqlite::Connection, title: &str) -> Stri
     id
 }
 
+/// Like `seed_article_with_full_text` but leaves `has_full_text = 0` (the
+/// default), so the engine must fall back to abstract-only screening even
+/// when an advanced mode is configured.
+fn seed_article_without_full_text(conn: &rusqlite::Connection, title: &str) -> String {
+    let article = NewArticle {
+        title: title.to_string(),
+        abstract_text: format!("Abstract for {title} about sugar taxes in children."),
+        authors: vec!["Author".to_string()],
+        publication_year: Some(2024),
+        keywords: vec!["sugar".to_string()],
+        import_source: Some("test".to_string()),
+        ..Default::default()
+    };
+    let inserted = article_repo::insert_articles_batch(conn, &[article], "test").expect("insert");
+    let id = inserted[0].id.clone();
+    article_repo::move_articles_to_working_batch(conn, std::slice::from_ref(&id))
+        .expect("move to working");
+    id
+}
+
 fn seed_chunks(conn: &rusqlite::Connection, article_id: &str, chunks: &[(&str, &str)]) {
     let chunk_structs: Vec<Chunk> = chunks
         .iter()
@@ -404,5 +424,71 @@ async fn enhanced_audit_label_names_matched_section_only() {
     assert!(
         !details.contains("§Results"),
         "audit must NOT claim §Results when no Results chunk was sent: {details}"
+    );
+}
+
+// ── Always-selectable mode: Enhanced / Two-stage configured but the article
+//    has NO full text attached (`has_full_text = 0`). The engine must fall
+//    back to abstract-only screening for that article - no evidence block in
+//    the prompt, and (for two-stage) no stage-2 call even at borderline conf.
+//    This locks in the contract that all three modes are always selectable in
+//    the Settings UI while the engine degrades per-article.
+
+#[tokio::test]
+async fn enhanced_mode_falls_back_to_abstract_when_no_full_text() {
+    let db = setup_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        // No full text, no chunks - pure abstract article.
+        seed_article_without_full_text(&conn, "Abstract Only Enhanced");
+        seed_criteria(&conn)
+    };
+    let inc_id = inclusion_id(&criteria);
+    let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
+    let engine = ScreeningEngine::with_batch_size(1);
+    engine
+        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None)
+        .await
+        .expect("run_sync");
+
+    // Single LLM call (enhanced is single-stage).
+    assert_eq!(mock.call_count.load(Ordering::SeqCst), 1);
+    // The prompt must NOT carry the evidence block since there is no full text.
+    let evidence_seen = mock.evidence_seen.lock().unwrap().clone();
+    assert!(
+        evidence_seen.first() == Some(&false),
+        "enhanced mode must fall back to abstract-only when no full text: {evidence_seen:?}"
+    );
+}
+
+#[tokio::test]
+async fn two_stage_mode_falls_back_to_abstract_when_no_full_text() {
+    let db = setup_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        // No full text, no chunks - pure abstract article.
+        seed_article_without_full_text(&conn, "Abstract Only Two-Stage");
+        seed_criteria(&conn)
+    };
+    let inc_id = inclusion_id(&criteria);
+    // Stage-1 confidence 0.55 is borderline, but without full text the engine
+    // must NOT trigger stage 2 (the borderline filter requires has_full_text).
+    let mock =
+        CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
+    let engine = ScreeningEngine::with_batch_size(1);
+    engine
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .await
+        .expect("run_sync");
+
+    assert_eq!(
+        mock.call_count.load(Ordering::SeqCst),
+        1,
+        "two-stage must NOT trigger stage 2 for articles without full text"
+    );
+    let evidence_seen = mock.evidence_seen.lock().unwrap().clone();
+    assert!(
+        evidence_seen.first() == Some(&false),
+        "two-stage stage 1 must be abstract-only when no full text: {evidence_seen:?}"
     );
 }

@@ -150,7 +150,14 @@ describe each durable boundary so agents can locate the right area. Create a chi
     mutex); the Settings "Rebuild text chunks" button calls the same fn with
     `force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
     `get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` commands.
-    Migration `v002_wiki_manifest.rs` adds `ai_screen_enhanced` (along with
+    **Always-selectable mode + per-article fallback**: all three modes are
+    selectable in Settings regardless of attachments/articles; Enhanced and
+    Two-stage evidence retrieval is applied per article only when
+    `has_full_text=1` and the run falls back to abstract-only screening
+    otherwise (the engine already degrades per-article; the Settings UI no
+    longer gates selection on `full_text_article_count >= 1`). The Settings
+    card shows a fallback notice (no full text) or an active notice (full text
+    present). Migration `v002_wiki_manifest.rs` adds `ai_screen_enhanced` (along with
     `figure_descriptions`) to the `audit_entries.action` CHECK constraint in the
     single audit_entries rebuild (SQLite CHECK constraints can't be ALTERed; uses the
     rename-create-copy-drop pattern). **Stage-2 progress**: every early-exit
@@ -643,7 +650,9 @@ describe each durable boundary so agents can locate the right area. Create a chi
     auto-translate [DB-backed `app_settings.auto_translate`; experimental; default
     enabled; translates non-English articles to English during AI processing - see
     `app_settings_repo.rs` entry above]),
-    `settings-screening-preferences.vue` (screening-mode dropdown + auto-navigate toggle),
+    `settings-screening-preferences.vue` (screening-mode dropdown + auto-navigate toggle;
+    all three modes always selectable, with a fallback/active notice driven by
+    `get_full_text_article_count`),
     `settings-storage.vue` (storage root picker + directory-tree visual),
     `settings-reprocessing.vue` (text-chunks rebuild + Batch Import processor:
     full-text attach + Citation Chaser RIS import + optional AI summary
