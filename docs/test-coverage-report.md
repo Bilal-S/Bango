@@ -45,7 +45,7 @@ logic they delegate to is tested via the modules below).
 | `wiki/agents_contract.rs` | 70 | 100% | ✅ |
 | `wiki/engine.rs` | 371 | 98.38% | ✅ |
 | `wiki/fts.rs` | 305 | 98.36% | ✅ |
-| `wiki/ingest.rs` | 304 | 96.05% | ✅ |
+| `wiki/ingest/` (mod, batching, consolidation, authors, synthesis, concepts, sources, slugs) | 304 | 96.05% (pre-split baseline) | ✅ |
 | `wiki/frontmatter.rs` | 242 | 96.69% | ✅ |
 | `wiki/templates.rs` | 54 | 77.78% | ✅ |
 | `wiki/storage.rs` | 154 | 77.27% | ✅ |

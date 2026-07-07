@@ -105,7 +105,7 @@ preserved in `article_original_content` and `article_original_chunks`.
   `translation_status` leaving `running`.
 - **Batched chunk dispatch** (`engine.rs`): `translate_full_text`
   packs chunks into context-window-sized batches (`build_chunk_batches`,
-  mirroring `wiki/ingest.rs::build_ingest_prompt_batches` with
+  mirroring `wiki/ingest/batching.rs::build_ingest_prompt_batches` with
   `INPUT_BUDGET_FRACTION = 0.4`, floor `MIN_BATCH_INPUT_CHARS = 4_000`, cap
   `MAX_BATCH_INPUT_CHARS = 80_000`) and sends each batch as ONE LLM call
   carrying a JSON-lines payload (`{"<chunk_id>": "<text>"}` per line). The

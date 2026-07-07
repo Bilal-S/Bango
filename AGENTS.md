@@ -226,13 +226,22 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `log.md`), `agents_contract.rs` (ingest + lint rules contract), `templates.rs` (page
     templates), `frontmatter.rs` (dependency-free YAML parser/serializer),
     `raw_export.rs` (included-article export + user-file extraction for PDF/TXT/HTML/etc),
-    `fts.rs` (FTS5 BM25 search index + **two-tier external-edit drift detection**), `ingest.rs` (LLM page generation: prompt builder,
-    `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild, **parallel chunked
-    ingest**), `engine.rs` (deterministic lint + `build_graph` for link graph
+    `fts.rs` (FTS5 BM25 search index + **two-tier external-edit drift detection**),
+    `ingest/` (directory module: LLM page generation - prompt builder,
+    `<!-- PAGE:slug -->` response parser, page writer, FTS5 rebuild, **parallel
+    chunked ingest**; submodules: `mod.rs` core pipeline + re-exports,
+    `batching.rs` chunked/parallel batch building + `run_chunked_ingest`,
+    `consolidation.rs` deterministic dedup + `[[wikilink]]` rewrite,
+    `authors.rs` Phase 1 author manifest + pre-seed, `synthesis.rs` Phase 2
+    synthesis pre-seed, `concepts.rs` Phase 3 concept hub pre-seed,
+    `sources.rs` Layer 1 external-document source pages, `slugs.rs` shared
+    `squeeze_slug` helper. Inline tests extracted to
+    `tests/wiki_ingest_test.rs` per `docs/CLAUDE.md` §Testing), `engine.rs`
+    (deterministic lint + `build_graph` for link graph
     visualization), `chat.rs` (token-budgeted RAG chat over FTS5 index; self-heals the
     FTS table via `fts::ensure_index_populated` when the index is empty OR its row count
     mismatches the number of `.md` pages on disk).
-    **Parallel chunked ingest** (`ingest.rs`): `wiki_ingest`, `wiki_rebuild`, and
+    **Parallel chunked ingest** (`ingest/batching.rs`): `wiki_ingest`, `wiki_rebuild`, and
     `wiki_export_and_ingest` no longer make one monolithic LLM call. They split raw
     sources into batches sized to `config.context_window_tokens * 0.4` (input budget;
     remainder is available for output pages), dispatch all batches concurrently via a

@@ -465,7 +465,7 @@ fn startup_fails_queued_and_running_articles() {
 
     // Drain the channel synchronously (non-blocking). With cap = 0 the worker
     // must receive ZERO jobs - no auto-recovery.
-    let drained: Vec<TranslationJob> = (&mut receiver).try_recv().into_iter().collect();
+    let drained: Vec<TranslationJob> = receiver.try_recv().into_iter().collect();
     assert!(
         drained.is_empty(),
         "STARTUP_STRANDED_CAP = 0 must not re-enqueue any stranded job, got {drained:?}"

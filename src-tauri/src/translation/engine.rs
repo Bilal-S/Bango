@@ -279,7 +279,7 @@ pub async fn translate_metadata_only(
 // Full-text translation packs multiple chunks into a single LLM call sized to
 // the configured context window, then parses the JSON-map response and resends
 // any chunks the model skipped or truncated. This mirrors the proven
-// `wiki/ingest.rs::build_ingest_prompt_batches` pattern and reduces a 46-chunk
+// `wiki/ingest/batching.rs::build_ingest_prompt_batches` pattern and reduces a 46-chunk
 // article from 46 per-chunk calls to ~2-3 batched calls.
 
 /// Fraction of the context window reserved for the input side (system prompt +
@@ -318,7 +318,7 @@ structure. Return a JSON object mapping each chunk_id to its translated \
 English text. Output ONLY the JSON object - no commentary, no markdown fences.";
 
 /// Approximate token count for a chunk of text (1 token ~= 4 chars for Latin
-/// scripts). Mirrors the `wiki/ingest.rs::estimate_tokens` heuristic.
+/// scripts). Mirrors the `wiki/ingest/batching.rs::estimate_tokens` heuristic.
 #[must_use]
 fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
@@ -354,7 +354,7 @@ pub struct ChunkBatch {
 /// Sequential fill in `chunk_index` order: keep adding chunks to the current
 /// batch until the next chunk would exceed the input budget, then flush.
 /// Guarantees every chunk lands in exactly one batch and the stitched output is
-/// in input order. Mirrors `wiki/ingest.rs::build_ingest_prompt_batches`.
+/// in input order. Mirrors `wiki/ingest/batching.rs::build_ingest_prompt_batches`.
 ///
 /// Returns an empty `Vec` when `chunks` is empty.
 #[must_use]
