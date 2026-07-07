@@ -98,10 +98,14 @@ function closeFullTextView(): void {
   fullTextExpanded.value = false;
 }
 
-/** Toggle full-text expand */
+/** Toggle full-text expand.
+ *  Syncs the panel's full-screen state on both directions so collapsing the
+ *  reader also exits full-screen (previously it only requested full-screen
+ *  when expanding, leaving the panel stuck full-width until the reader was
+ *  closed and the underlying detail panel collapsed). */
 function toggleFullTextExpand(): void {
   fullTextExpanded.value = !fullTextExpanded.value;
-  if (fullTextExpanded.value && !props.fullScreen) {
+  if (fullTextExpanded.value !== props.fullScreen) {
     emit('toggleFullScreen');
   }
 }

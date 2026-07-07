@@ -221,8 +221,13 @@ const {
       @request-translate="requestTranslation(article.id, article.title)"
     />
 
-    <!-- Scrollable Content -->
-    <div class="flex-1 overflow-y-auto p-6 space-y-8">
+    <!-- Scrollable Content.
+         In full-screen the panel chrome fills the viewport width; the article
+         body is centered in a readable column so wide viewports stay legible. -->
+    <div
+      class="flex-1 overflow-y-auto p-6 space-y-8"
+      :class="fullScreen ? 'max-w-[1100px] mx-auto' : ''"
+    >
       <!-- AI Decision Card -->
       <AiDecisionCard v-if="article.aiDecision" :article="article" />
 
@@ -418,8 +423,6 @@ const {
 .detail-panel--fullscreen {
   width: 100%;
   flex-shrink: 1;
-  max-width: 960px;
-  margin: 0 auto;
   border-left: none;
   box-shadow: none;
 }
