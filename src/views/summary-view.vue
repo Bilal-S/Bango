@@ -2,17 +2,40 @@
 import { ref, computed, onMounted } from 'vue';
 import { marked } from 'marked';
 import { useSummary, type CitationStyle } from '@/composables/use-summary';
+import { useGapAnalysis } from '@/composables/use-gap-analysis';
 import { useArticlesStore } from '@/stores/articles';
 import { useCriteriaStore } from '@/stores/criteria';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
-const { summaryText, loading, error, citationStyle, loadSaved, generate, formatGeneratedAt } =
-  useSummary();
+const {
+  summaryText,
+  loading: summaryLoading,
+  error: summaryError,
+  citationStyle,
+  loadSaved: loadSavedSummary,
+  generate: generateSummary,
+  formatGeneratedAt: formatSummaryGeneratedAt,
+} = useSummary();
+
+const {
+  gapText,
+  loading: gapLoading,
+  error: gapError,
+  loadSaved: loadSavedGap,
+  generate: generateGap,
+  formatGeneratedAt: formatGapGeneratedAt,
+} = useGapAnalysis();
+
 const articlesStore = useArticlesStore();
 const criteriaStore = useCriteriaStore();
 const llmConfigStore = useLlmConfigStore();
+
+/** Active output mode: Literature Review (existing) or Research Gaps (new).
+ *  Defaults to the literature review so the existing UX is unchanged. Set
+ *  implicitly by which generate button is clicked; no toggle UI. */
+const mode = ref<'review' | 'gaps'>('review');
 
 const copied = ref(false);
 
@@ -23,6 +46,21 @@ const hasAims = computed(() => criteriaStore.aims.length > 0);
 const hasLlmConfig = computed(() => llmConfigStore.config.apiKeyEncrypted !== null);
 
 const canGenerate = computed(() => includedCount.value > 0 && hasAims.value && hasLlmConfig.value);
+
+/** Any generation in flight (either mode). Used to cross-disable the two
+ *  generate buttons so only one report can run at a time. */
+const anyLoading = computed(() => summaryLoading.value || gapLoading.value);
+
+/** Active error is mode-specific. */
+const activeError = computed(() => (mode.value === 'review' ? summaryError.value : gapError.value));
+
+/** Active output text is mode-specific. */
+const activeText = computed(() => (mode.value === 'review' ? summaryText.value : gapText.value));
+
+/** Active generated-at formatter is mode-specific. */
+function activeFormatGeneratedAt(): string | null {
+  return mode.value === 'review' ? formatSummaryGeneratedAt() : formatGapGeneratedAt();
+}
 
 const missingRequirements = computed<string[]>(() => {
   const missing: string[] = [];
@@ -38,35 +76,49 @@ const missingRequirements = computed<string[]>(() => {
   return missing;
 });
 
-/** Render markdown summary as HTML */
+/** Render the active mode's markdown summary as HTML. */
 const renderedHtml = computed(() => {
-  if (!summaryText.value) return '';
-  return marked.parse(summaryText.value) as string;
+  if (!activeText.value) return '';
+  return marked.parse(activeText.value) as string;
 });
 
-async function handleGenerate(): Promise<void> {
-  if (!canGenerate.value || loading.value) return;
-  await generate(citationStyle.value);
+/** Generate the literature review and switch the output area to it. */
+async function handleGenerateSummary(): Promise<void> {
+  if (!canGenerate.value || anyLoading.value) return;
+  mode.value = 'review';
+  await generateSummary(citationStyle.value);
+}
+
+/** Generate the research gap report and switch the output area to it. */
+async function handleGenerateGap(): Promise<void> {
+  if (!canGenerate.value || anyLoading.value) return;
+  mode.value = 'gaps';
+  await generateGap(citationStyle.value);
 }
 
 async function copyToClipboard(): Promise<void> {
-  if (!summaryText.value) return;
-  await navigator.clipboard.writeText(summaryText.value);
+  if (!activeText.value) return;
+  await navigator.clipboard.writeText(activeText.value);
   copied.value = true;
   setTimeout(() => {
     copied.value = false;
   }, 2000);
 }
 
+/** Export filename switches with mode so the saved file matches the content. */
+function exportFilename(): string {
+  return mode.value === 'review' ? 'literature-review.md' : 'research-gaps.md';
+}
+
 async function exportMarkdown(): Promise<void> {
-  if (!summaryText.value) return;
+  if (!activeText.value) return;
   try {
     const filePath = await save({
-      defaultPath: 'literature-review.md',
+      defaultPath: exportFilename(),
       filters: [{ name: 'Markdown', extensions: ['md'] }],
     });
     if (filePath) {
-      await tauriCommand('write_text_to_file', { path: filePath, content: summaryText.value });
+      await tauriCommand('write_text_to_file', { path: filePath, content: activeText.value });
     }
   } catch (e: unknown) {
     console.error('Failed to export markdown:', e);
@@ -74,7 +126,9 @@ async function exportMarkdown(): Promise<void> {
 }
 
 function exportPdf(): void {
-  if (!summaryText.value) return;
+  if (!activeText.value) return;
+
+  const printTitle = mode.value === 'review' ? 'Literature Review' : 'Research Gaps';
 
   // Create a hidden iframe to avoid Tauri's window.open restriction
   const iframe = document.createElement('iframe');
@@ -96,7 +150,7 @@ function exportPdf(): void {
   doc.write(`<!DOCTYPE html>
 <html>
 <head>
-  <title>Literature Review</title>
+  <title>${printTitle}</title>
   <style>
     body {
       font-family: 'Georgia', 'Times New Roman', serif;
@@ -144,8 +198,8 @@ onMounted(async () => {
     criteriaStore.fetchIfNeeded(),
     llmConfigStore.fetchIfNeeded(),
   ]);
-  // Restore previously saved summary
-  await loadSaved();
+  // Restore previously saved outputs for both modes.
+  await Promise.all([loadSavedSummary(), loadSavedGap()]);
 });
 </script>
 
@@ -158,12 +212,30 @@ onMounted(async () => {
         <p class="summary-header__tagline">Have AI create a summary based on included papers.</p>
       </div>
       <div class="summary-header__actions">
+        <!-- Two side-by-side generate buttons. The left (Research Gap Report)
+             is secondary style; the right (Summarize Findings) is primary.
+             Clicking either switches the output area to that report and
+             regenerates it. While either is running, both are disabled. -->
         <button
           class="btn btn--primary"
-          :disabled="!canGenerate || loading"
-          @click="handleGenerate"
+          :disabled="!canGenerate || anyLoading"
+          @click="handleGenerateGap"
         >
-          <template v-if="loading">
+          <template v-if="gapLoading">
+            <span class="material-symbols-outlined btn__spinner">progress_activity</span>
+            Generating...
+          </template>
+          <template v-else>
+            <span class="material-symbols-outlined btn__icon">lightbulb</span>
+            Research Gap Report
+          </template>
+        </button>
+        <button
+          class="btn btn--primary"
+          :disabled="!canGenerate || anyLoading"
+          @click="handleGenerateSummary"
+        >
+          <template v-if="summaryLoading">
             <span class="material-symbols-outlined btn__spinner">progress_activity</span>
             Generating...
           </template>
@@ -179,7 +251,7 @@ onMounted(async () => {
     <div v-if="!canGenerate" class="summary-requirements">
       <span class="material-symbols-outlined summary-requirements__icon">info</span>
       <div class="summary-requirements__content">
-        <p class="summary-requirements__title">Before you can generate a summary:</p>
+        <p class="summary-requirements__title">Before you can generate a report:</p>
         <ul class="summary-requirements__list">
           <li v-for="(req, idx) in missingRequirements" :key="idx">{{ req }}</li>
         </ul>
@@ -187,9 +259,9 @@ onMounted(async () => {
     </div>
 
     <!-- Error -->
-    <div v-if="error" class="summary-view__error">
+    <div v-if="activeError" class="summary-view__error">
       <span class="material-symbols-outlined">error</span>
-      {{ error }}
+      {{ activeError }}
     </div>
 
     <!-- Output toolbar + content (always visible when requirements met) -->
@@ -208,28 +280,28 @@ onMounted(async () => {
         <div class="summary-toolbar__meta">
           {{ includedCount }} article{{ includedCount !== 1 ? 's' : '' }} &middot;
           {{ criteriaStore.aims.length }} aim{{ criteriaStore.aims.length !== 1 ? 's' : '' }}
-          <template v-if="formatGeneratedAt()">
-            &middot; generated: {{ formatGeneratedAt() }}
+          <template v-if="activeFormatGeneratedAt()">
+            &middot; generated: {{ activeFormatGeneratedAt() }}
           </template>
         </div>
         <!-- Right: Export buttons -->
         <div class="summary-toolbar__exports">
-          <button class="btn btn--secondary" :disabled="!summaryText" @click="copyToClipboard">
+          <button class="btn btn--secondary" :disabled="!activeText" @click="copyToClipboard">
             <span class="material-symbols-outlined btn__icon">content_copy</span>
             {{ copied ? 'Copied!' : 'Copy' }}
           </button>
-          <button class="btn btn--secondary" :disabled="!summaryText" @click="exportMarkdown">
+          <button class="btn btn--secondary" :disabled="!activeText" @click="exportMarkdown">
             <span class="material-symbols-outlined btn__icon">description</span>
             Export Markdown
           </button>
-          <button class="btn btn--secondary" :disabled="!summaryText" @click="exportPdf">
+          <button class="btn btn--secondary" :disabled="!activeText" @click="exportPdf">
             <span class="material-symbols-outlined btn__icon">picture_as_pdf</span>
             Export PDF
           </button>
         </div>
       </div>
       <!-- eslint-disable-next-line vue/no-v-html -- trusted LLM output rendered via marked -->
-      <div v-if="summaryText" class="summary-view__markdown markdown-body" v-html="renderedHtml" />
+      <div v-if="activeText" class="summary-view__markdown markdown-body" v-html="renderedHtml" />
     </div>
   </div>
 </template>

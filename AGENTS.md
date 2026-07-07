@@ -730,6 +730,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     underlying message so all four views report failures with equal detail. The
     low-level IPC + refresh logic stays in `useArticleFullText`/`useArticleSearch`; this
     composable owns only the file-dialog + toast shell).
+    `use-gap-analysis.ts` (Research Gap Analysis singleton: `gapText`/`loading`/`error`/
+    `generatedAt` refs + `generate(style)`/`loadSaved`/`clearGapAnalysis`/`formatGeneratedAt`;
+    mirrors `use-summary.ts` 1:1 and backs the "Research Gap Report" button in
+    `summary-view.vue`; calls `analyze_research_gaps` + `get_saved_gap_analysis`).
   - **`src/utils/`** - pure utilities: `network-export.ts` (graph PNG/GEXF export via the
     `save()` + `write_text_to_file` pattern), `formatters.ts`, `color.ts`, `debounce.ts`,
     `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `llm-error.ts`,

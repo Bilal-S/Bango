@@ -1,6 +1,10 @@
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::llm_config::LlmConfig;
+use crate::summary::gap_analysis::{
+    build_gap_analysis_prompt, build_gap_synthesis_prompt, BiblioContext, GapPromptInput,
+    GAP_ANALYSIS_SYSTEM_PROMPT,
+};
 use crate::summary::prompt::{self, ScreeningData, SummaryPromptInput};
 
 pub use crate::summary::prompt::ArticleSummary;
@@ -229,6 +233,190 @@ Return only the plain text of the literature review. Do not wrap it in code fenc
 
     let (response, _tokens) = orchestrator
         .send(config, prompt::SYSTEM_PROMPT, &synthesis_prompt, LlmRequestType::SummaryGeneration)
+        .await?;
+    Ok(response.trim().to_string())
+}
+
+// ── Research Gap Analysis ──────────────────────────────────────────────────
+//
+// Mirrors `generate_summary`'s shape (batch + synthesize when the corpus
+// exceeds 80% of the context window). Same token heuristic so the two paths
+// do not diverge on the article axis.
+
+/// Input for the gap-analysis engine. Same fields as `SummaryInput` plus the
+/// pre-rendered screening summary and the `BiblioContext` aggregate.
+pub struct GapAnalysisInput {
+    pub config: LlmConfig,
+    pub aim_texts: Vec<String>,
+    pub articles: Vec<ArticleSummary>,
+    pub screening_data: ScreeningData,
+    pub citation_style: String,
+    pub inclusion_criteria: Vec<String>,
+    pub exclusion_criteria: Vec<String>,
+    pub biblio_context: BiblioContext,
+}
+
+impl GapAnalysisInput {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        config: LlmConfig,
+        aim_texts: Vec<String>,
+        articles: Vec<ArticleSummary>,
+        screening_data: ScreeningData,
+        citation_style: String,
+        inclusion_criteria: Vec<String>,
+        exclusion_criteria: Vec<String>,
+        biblio_context: BiblioContext,
+    ) -> Self {
+        Self {
+            config,
+            aim_texts,
+            articles,
+            screening_data,
+            citation_style,
+            inclusion_criteria,
+            exclusion_criteria,
+            biblio_context,
+        }
+    }
+}
+
+/// Generate the Research Gap Analysis report over the included corpus.
+///
+/// Returns a single Markdown document. When the estimated token footprint
+/// exceeds 80% of the context window, the corpus is split in half, each half
+/// is analyzed separately, and the two partial gap reports are synthesized
+/// into one coherent document (mirrors `generate_summary`'s batching strategy).
+pub async fn generate_gap_analysis(
+    orchestrator: &LlmOrchestrator,
+    input: GapAnalysisInput,
+) -> Result<String, AppError> {
+    if input.articles.is_empty() {
+        return Err(AppError::Validation("No included articles to analyze".to_string()));
+    }
+
+    let context_limit = (input.config.context_window_tokens as f64 * 0.8) as usize;
+
+    // Same heuristic as `generate_summary`: title + abstract + authors +
+    // keywords + evidence + criteria chars, /4. The estimator MUST see every
+    // field threaded into the prompt or batching silently underflows the
+    // window on large projects.
+    let criteria_chars: usize = input
+        .inclusion_criteria
+        .iter()
+        .chain(input.exclusion_criteria.iter())
+        .map(|c| c.len() + 4)
+        .sum();
+    let total_chars: usize = input
+        .articles
+        .iter()
+        .map(|a| {
+            a.title.len()
+                + a.abstract_text.len()
+                + a.authors.join("; ").len()
+                + a.keywords.join(", ").len()
+                + a.evidence.as_ref().map_or(0, |e| e.len() + 12)
+        })
+        .sum();
+    let estimated_tokens = (total_chars + criteria_chars) / 4;
+
+    let response = if estimated_tokens > context_limit {
+        // Batch: split articles in half, analyze each, then synthesize the two
+        // partial gap reports into one coherent document.
+        let batch_size = (input.articles.len() / 2).max(1);
+        let batch_a = &input.articles[..batch_size];
+        let batch_b = &input.articles[batch_size..];
+
+        let gap_a = gap_batch(
+            orchestrator,
+            &input.config,
+            &input.aim_texts,
+            &input.screening_data,
+            &input.citation_style,
+            &input.inclusion_criteria,
+            &input.exclusion_criteria,
+            &input.biblio_context,
+            batch_a,
+        )
+        .await?;
+        // If the second batch is empty (only one article), skip the second call
+        // and the synthesis; return the first partial directly.
+        if batch_b.is_empty() {
+            return Ok(gap_a);
+        }
+        let gap_b = gap_batch(
+            orchestrator,
+            &input.config,
+            &input.aim_texts,
+            &input.screening_data,
+            &input.citation_style,
+            &input.inclusion_criteria,
+            &input.exclusion_criteria,
+            &input.biblio_context,
+            batch_b,
+        )
+        .await?;
+
+        // Synthesize the two partial gap reports into one coherent document.
+        let synthesis_prompt =
+            build_gap_synthesis_prompt(&input.aim_texts, &input.citation_style, &gap_a, &gap_b);
+        let (response, _tokens) = orchestrator
+            .send(
+                &input.config,
+                GAP_ANALYSIS_SYSTEM_PROMPT,
+                &synthesis_prompt,
+                LlmRequestType::GapAnalysis,
+            )
+            .await?;
+        response.trim().to_string()
+    } else {
+        gap_batch(
+            orchestrator,
+            &input.config,
+            &input.aim_texts,
+            &input.screening_data,
+            &input.citation_style,
+            &input.inclusion_criteria,
+            &input.exclusion_criteria,
+            &input.biblio_context,
+            &input.articles,
+        )
+        .await?
+    };
+
+    Ok(response)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn gap_batch(
+    orchestrator: &LlmOrchestrator,
+    config: &LlmConfig,
+    aims: &[String],
+    screening: &ScreeningData,
+    citation_style: &str,
+    inclusion_criteria: &[String],
+    exclusion_criteria: &[String],
+    biblio_context: &BiblioContext,
+    articles: &[ArticleSummary],
+) -> Result<String, AppError> {
+    // Pre-render the screening summary once per batch (reuses the shared
+    // `format_screening_summary` so the gap prompt and the literature-review
+    // prompt stay consistent on the methodology axis).
+    let screening_summary =
+        prompt::format_screening_summary(screening, inclusion_criteria, exclusion_criteria);
+
+    let input = GapPromptInput {
+        aims: aims.to_vec(),
+        screening_summary,
+        citation_style: citation_style.to_string(),
+        articles: articles.to_vec(),
+        biblio_context: biblio_context.clone(),
+        inclusion_criteria: inclusion_criteria.to_vec(),
+        exclusion_criteria: exclusion_criteria.to_vec(),
+    };
+    let user_prompt = build_gap_analysis_prompt(&input);
+    let (response, _tokens) = orchestrator
+        .send(config, GAP_ANALYSIS_SYSTEM_PROMPT, &user_prompt, LlmRequestType::GapAnalysis)
         .await?;
     Ok(response.trim().to_string())
 }

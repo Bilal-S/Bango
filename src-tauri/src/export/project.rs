@@ -241,6 +241,8 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     tx.execute("DELETE FROM llm_config", [])?;
     // Clear any previously generated summary (it was for different articles)
     tx.execute("DELETE FROM summary", [])?;
+    // Clear any previously generated gap analysis (same rationale as summary).
+    tx.execute("DELETE FROM gap_analysis", [])?;
 
     // Restore research aims
     for aim in &backup.research_aims {

@@ -220,9 +220,13 @@ async function onProjectFileSelected(event: Event): Promise<void> {
           <!-- Section 1: Start a New Project -->
           <div class="dashboard__empty-section">
             <h3 class="dashboard__empty-section-label">Start a New Project</h3>
+            <button class="dashboard__empty-cta" @click="navigateTo('/criteria')">
+              <span class="material-symbols-outlined dashboard__empty-cta-icon">rule</span>
+              Set Criteria
+            </button>
             <button class="dashboard__empty-cta" @click="navigateTo('/import')">
               <span class="material-symbols-outlined dashboard__empty-cta-icon">upload_file</span>
-              Import References
+              Import Articles
             </button>
           </div>
 

@@ -169,15 +169,17 @@ mod tests {
     #[test]
     fn heal_is_noop_when_version_already_current() {
         let conn = mem_conn();
-        // Full migration chain applied: version=3, marker column exists. heal
-        // must be a no-op because the version is not stale.
+        // Full migration chain applied (v001 + v002 + v003 + v004): version=4,
+        // v003 marker column exists. heal must be a no-op because the version is
+        // not stale (the heal pre-pass only advances to 3 when the marker exists
+        // AND user_version < 3).
         crate::db::migration::run_migrations(&conn).unwrap();
         let v_before: i32 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(v_before, 3);
+        assert_eq!(v_before, 4);
 
         heal_partial_migrations(&conn).unwrap();
         let v_after: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(v_after, 3);
+        assert_eq!(v_after, 4);
     }
 }

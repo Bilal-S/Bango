@@ -53,6 +53,12 @@ pub enum LlmRequestType {
     /// `TranslationLlmClient` that logs `job_id`/`part_id` before delegating
     /// to the orchestrator via `send_with_type(LlmRequestType::Translation)`.
     Translation,
+    /// Research Gap Analysis: corpus-wide Markdown report over included
+    /// articles (thematic coverage, identified gaps, methodological landscape,
+    /// future directions). Distinguishes the call from `SummaryGeneration`
+    /// (the literature review) in diagnostics so per-mode cost and failure
+    /// rates are visible.
+    GapAnalysis,
 }
 
 /// Centralized LLM request coordinator.

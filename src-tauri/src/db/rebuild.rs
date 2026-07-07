@@ -30,6 +30,8 @@ const DROP_TABLES: &[&str] = &[
     "labels",
     "llm_config",
     "summary",
+    // Research Gap Analysis report (single-row, mirrors `summary`).
+    "gap_analysis",
     "app_settings",
     // Article chunk storage (T1.2/T3.1)
     "article_chunks",

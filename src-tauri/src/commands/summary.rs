@@ -4,14 +4,17 @@ use tauri::{Emitter, Manager, State};
 
 use crate::db::app_settings_repo;
 use crate::db::article_repo;
+use crate::db::biblio_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
+use crate::db::gap_analysis_repo;
 use crate::db::llm_config_repo;
 use crate::db::summary_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::prisma::data;
-use crate::summary::engine::{self, SummaryInput};
+use crate::summary::engine::{self, GapAnalysisInput, SummaryInput};
+use crate::summary::gap_analysis::BiblioContext;
 use crate::summary::prompt::{
     build_figure_description_prompt, build_section_context, build_synthesis_prompt,
     ensure_schema_version_v2, filter_high_value_sections, merge_figure_descriptions_into_blob,
@@ -892,4 +895,222 @@ pub async fn generate_unified_summary(
     );
 
     Ok(unified_json)
+}
+
+// ── Research Gap Analysis ──────────────────────────────────────────────────
+
+/// The maximum number of top journals / terms / countries rendered into the
+/// `BiblioContext` block. Keeps the prompt bounded without truncating the
+/// article list (which is the real signal).
+const GAP_TOP_N: i32 = 10;
+
+/// Generate a Research Gap Analysis report over the included corpus.
+///
+/// Mirrors `generate_summary`'s lock/release shape: short critical section for
+/// reads, release before the LLM call, re-lock for the write. The engine fn
+/// handles batching + synthesis when the corpus exceeds 80% of the context
+/// window.
+///
+/// The report is persisted in the single-row `gap_analysis` table (mirrors
+/// `summary`) and returned as a Markdown string. On success no audit row is
+/// written (matching `generate_summary`); on error a generic `error` audit
+/// entry is logged via `log_error_best_effort` so no `audit_entries` CHECK
+/// migration is needed.
+#[tauri::command]
+pub async fn analyze_research_gaps(
+    db_state: State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+    citation_style: Option<String>,
+) -> Result<String, AppError> {
+    let style = citation_style.unwrap_or_else(|| "APA".to_string());
+
+    // 1. Read all DB data synchronously while holding the lock.
+    let gap_input = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+
+        let config = llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+        let aim_list = criteria_repo::get_all_aims(&conn)?;
+        let aim_texts: Vec<String> = aim_list.iter().map(|a| a.text.clone()).collect();
+        let included = article_repo::get_articles_by_status(&conn, "included")?;
+
+        // Split criteria by type (same as `generate_summary`).
+        let all_criteria = criteria_repo::get_all_criteria(&conn)?;
+        let inclusion_criteria: Vec<String> = all_criteria
+            .iter()
+            .filter(|c| {
+                matches!(c.criterion_type, crate::models::criterion::CriterionType::Inclusion)
+            })
+            .map(|c| c.text.clone())
+            .collect();
+        let exclusion_criteria: Vec<String> = all_criteria
+            .iter()
+            .filter(|c| {
+                matches!(c.criterion_type, crate::models::criterion::CriterionType::Exclusion)
+            })
+            .map(|c| c.text.clone())
+            .collect();
+
+        // Shape-A evidence enrichment (same setting as the literature review).
+        let evidence_mode = app_settings_repo::get_setting(&conn, "summary_evidence_mode")?
+            .unwrap_or_else(|| "abstract_only".to_string());
+        let use_evidence = evidence_mode == "with_summary_facts";
+
+        let articles: Vec<ArticleSummary> = included
+            .iter()
+            .map(|a| {
+                let mut combined: Vec<String> = a.keywords.clone();
+                for tag in &a.tags {
+                    if !combined.iter().any(|k| k.eq_ignore_ascii_case(tag)) {
+                        combined.push(tag.clone());
+                    }
+                }
+                let evidence = if use_evidence {
+                    crate::summary::prompt::format_ai_summary_as_evidence(
+                        a.full_text_ai_summary.as_deref(),
+                    )
+                } else {
+                    None
+                };
+                ArticleSummary {
+                    title: a.title.clone(),
+                    authors: a.authors.clone(),
+                    year: a.publication_year,
+                    abstract_text: a.abstract_text.clone(),
+                    keywords: combined,
+                    evidence,
+                }
+            })
+            .collect();
+
+        // PRISMA + screening counts (same as `generate_summary`).
+        let prisma = data::compute_prisma_data(&conn)?;
+        let ai_screened: usize = conn
+            .query_row("SELECT COUNT(*) FROM articles WHERE ai_decision IS NOT NULL", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+        let manual_reviewed: usize = conn
+            .query_row("SELECT COUNT(*) FROM articles WHERE manual_override = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap_or(0);
+        let screening_data = ScreeningData {
+            records_identified: prisma.records_identified,
+            duplicates_removed: prisma.duplicates_removed,
+            records_screened: prisma.records_screened,
+            records_excluded: prisma.records_excluded,
+            records_excluded_with_reasons: prisma.records_excluded_with_reasons,
+            records_assessed: prisma.records_assessed,
+            records_in_progress: prisma.records_in_progress,
+            studies_included: prisma.studies_included,
+            ai_screened,
+            manual_reviewed,
+            exclusion_reasons: prisma
+                .exclusion_reasons
+                .iter()
+                .map(|r| (r.criterion_text.clone(), r.count))
+                .collect(),
+        };
+
+        let biblio_context = build_biblio_context(&conn);
+
+        GapAnalysisInput::new(
+            config,
+            aim_texts,
+            articles,
+            screening_data,
+            style.clone(),
+            inclusion_criteria,
+            exclusion_criteria,
+            biblio_context,
+        )
+    }; // conn lock released
+
+    // 2. Call the engine (handles batching + synthesis).
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
+    let result = engine::generate_gap_analysis(&orchestrator, gap_input).await?;
+
+    // 3. Persist + flag.
+    let generated_at = chrono::Utc::now().to_rfc3339();
+    {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        gap_analysis_repo::save_gap_analysis(&conn, &result, &style, &generated_at)?;
+        // The report cites biblio-derived facts; flag a refresh so the next
+        // normalize run keeps the biblio tables consistent if the corpus changed.
+        app_settings_repo::mark_biblio_needs_refresh(&conn);
+    }
+
+    Ok(result)
+}
+
+/// Return the persisted gap-analysis report (if any), mirroring
+/// `get_saved_summary`.
+#[tauri::command]
+pub fn get_saved_gap_analysis(
+    db_state: State<'_, DbState>,
+) -> Result<Option<gap_analysis_repo::SavedGapAnalysis>, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    gap_analysis_repo::get_gap_analysis(&conn)
+}
+
+/// Build the `BiblioContext` for the gap-analysis prompt from the existing
+/// biblio tables. Degrades gracefully when biblio has not been normalized yet
+/// (all fields empty/default) so the gap report still runs on a fresh project.
+fn build_biblio_context(conn: &rusqlite::Connection) -> BiblioContext {
+    // Year range + pubs_by_year + journal distribution from KPIs.
+    let (year_range, pubs_by_year, top_journals) = match biblio_repo::get_biblio_kpis(conn) {
+        Ok(kpis) => {
+            let year_range = kpis.year_from.zip(kpis.year_to);
+            let pubs_by_year =
+                kpis.pubs_by_year.into_iter().map(|yc| (yc.year, yc.count)).collect::<Vec<_>>();
+            // Aggregate journal_distribution (per journal, per year) into
+            // top journals by total article count.
+            let mut journal_counts: std::collections::HashMap<String, i32> =
+                std::collections::HashMap::new();
+            for jyd in &kpis.journal_distribution {
+                if jyd.journal.is_empty() {
+                    continue;
+                }
+                *journal_counts.entry(jyd.journal.clone()).or_insert(0) += jyd.count;
+            }
+            let mut top_journals: Vec<(String, i32)> = journal_counts.into_iter().collect();
+            top_journals.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            top_journals.truncate(GAP_TOP_N as usize);
+            (year_range, pubs_by_year, top_journals)
+        }
+        Err(_) => (None, Vec::new(), Vec::new()),
+    };
+
+    // Top terms by article_count (already ordered DESC by `get_all_terms`).
+    let top_terms = biblio_repo::get_all_terms(conn)
+        .unwrap_or_default()
+        .into_iter()
+        .take(GAP_TOP_N as usize)
+        .map(|t| (t.normalized_term, t.article_count))
+        .collect::<Vec<_>>();
+
+    // Geographic distribution: group biblio_institutions.country by the number
+    // of distinct included articles linked (via biblio_author_affiliations).
+    // Direct SQL is cleaner here than threading through the model layer.
+    let geographic_distribution = conn
+        .prepare(
+            "SELECT bi.country, COUNT(DISTINCT baa.article_id) AS cnt \
+             FROM biblio_institutions bi \
+             JOIN biblio_author_affiliations baa ON baa.institution_id = bi.id \
+             JOIN articles a ON a.id = baa.article_id \
+             WHERE a.status = 'included' AND bi.country IS NOT NULL AND bi.country != '' \
+             GROUP BY bi.country \
+             ORDER BY cnt DESC \
+             LIMIT ?1",
+        )
+        .and_then(|mut stmt| {
+            let rows = stmt.query_map(rusqlite::params![GAP_TOP_N], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
+            })?;
+            Ok(rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+        })
+        .unwrap_or_default();
+
+    BiblioContext { year_range, pubs_by_year, top_journals, top_terms, geographic_distribution }
 }

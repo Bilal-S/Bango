@@ -57,8 +57,9 @@ fn run_migrations_recovers_from_partial_v003_state() {
     // Post-fix: the heal pre-pass detects the marker and advances the version.
     run_migrations(&conn).expect("recovery should succeed");
 
-    // Version is now 3 - v003 was NOT re-run, just acknowledged.
-    assert_eq!(user_version(&conn), 3);
+    // Version is now 4 - v003 was NOT re-run (heal advanced to 3), then v004
+    // ran normally on top.
+    assert_eq!(user_version(&conn), 4);
 
     // All v003 schema artifacts are present and usable.
     assert!(column_exists(&conn, "articles", "is_translated"));
@@ -116,7 +117,8 @@ fn run_migrations_on_fresh_db_has_full_translation_schema() {
     // (where the marker column is absent). The full v003 DDL must run.
     let conn = create_connection().expect("connection");
     run_migrations(&conn).expect("migrations");
-    assert_eq!(user_version(&conn), 3);
+    // Fresh DB runs the full chain through v004.
+    assert_eq!(user_version(&conn), 4);
     assert!(column_exists(&conn, "articles", "is_translated"));
     assert!(column_exists(&conn, "articles", "translation_status"));
 }

@@ -6,6 +6,7 @@ pub mod biblio_repo;
 pub mod chunk_repo;
 pub mod connection;
 pub mod criteria_repo;
+pub mod gap_analysis_repo;
 pub mod journal_repo;
 pub mod label_repo;
 pub mod llm_config_repo;

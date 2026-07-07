@@ -267,6 +267,8 @@ pub fn run() {
             commands::summary::generate_article_ai_summary,
             commands::summary::generate_figure_descriptions,
             commands::summary::generate_unified_summary,
+            commands::summary::analyze_research_gaps,
+            commands::summary::get_saved_gap_analysis,
             commands::translation::enqueue_article_translation,
             commands::translation::get_translation_status,
             commands::translation::retry_translation_job,
