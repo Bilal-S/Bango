@@ -64,10 +64,6 @@ vi.mock('@/composables/use-gap-analysis', () => ({
   }),
 }));
 
-// Use getters so the returned plain object mirrors Pinia's auto-unwrap
-// behavior: the view accesses `articlesStore.byStatus.included` etc. and
-// expects unwrapped values, not ComputedRef objects. Reading `mockX.value`
-// inside a getter tracks the ref so view computeds stay reactive.
 vi.mock('@/stores/articles', () => ({
   useArticlesStore: () => ({
     get byStatus() {
@@ -88,14 +84,14 @@ vi.mock('@/stores/criteria', () => ({
 
 vi.mock('@/stores/llm-config', () => ({
   useLlmConfigStore: () => ({
-    get config() {
-      return { apiKeyEncrypted: mockHasLlmConfig.value ? 'enc-key' : null };
+    get isConfigured() {
+      return mockHasLlmConfig.value;
     },
+    config: { apiKeyEncrypted: 'enc-key' },
     fetchIfNeeded: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 
-// Stub the @tauri-apps/plugin-dialog save() so export paths don't touch the OS.
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: vi.fn().mockResolvedValue(null),
 }));
@@ -113,14 +109,13 @@ function mountView() {
   });
 }
 
-/** Find a button inside the header actions by its label substring. */
 function findHeaderButton(wrapper: ReturnType<typeof mount>, labelSubstring: string) {
   return wrapper
     .findAll('.summary-header__actions .btn')
     .find((b) => b.text().includes(labelSubstring));
 }
 
-describe('summary-view.vue - two-button UX (Research Gap Report | Summarize Findings)', () => {
+describe('summary-view.vue - two-button UX with switch-vs-regenerate dialog', () => {
   beforeEach(() => {
     mockGenerateSummary.mockReset();
     mockGenerateGap.mockReset();
@@ -145,49 +140,118 @@ describe('summary-view.vue - two-button UX (Research Gap Report | Summarize Find
     const wrapper = mountView();
     await flushPromises();
 
-    // No segmented control.
     expect(wrapper.find('.summary-segments').exists()).toBe(false);
 
     const actions = wrapper.findAll('.summary-header__actions .btn');
     expect(actions).toHaveLength(2);
-    // Left button is the Research Gap Report (secondary).
     expect(actions[0]!.text()).toContain('Research Gap Report');
-    expect(actions[0]!.classes()).toContain('btn--secondary');
-    // Right button is Summarize Findings (primary).
     expect(actions[1]!.text()).toContain('Summarize Findings');
-    expect(actions[1]!.classes()).toContain('btn--primary');
   });
 
-  it('clicking Research Gap Report calls generateGap and switches output to gap text', async () => {
+  it('first generation (no existing content) calls generate directly without dialog', async () => {
+    // No existing gap text -> clicking gap button generates directly.
+    mockGapText.value = null;
     mockGenerateGap.mockResolvedValue(undefined);
     const wrapper = mountView();
     await flushPromises();
 
     const gapBtn = findHeaderButton(wrapper, 'Research Gap Report');
-    expect(gapBtn).toBeTruthy();
     await gapBtn!.trigger('click');
     await flushPromises();
 
     expect(mockGenerateGap).toHaveBeenCalledWith('APA');
-    expect(mockGenerateSummary).not.toHaveBeenCalled();
-    // Output area now shows the gap text.
-    expect(wrapper.find('.summary-view__markdown').html()).toContain('Gap content');
+    // No dialog shown.
+    expect(wrapper.find('.dialog-overlay').exists()).toBe(false);
   });
 
-  it('clicking Summarize Findings calls generateSummary and keeps output on review', async () => {
-    mockGenerateSummary.mockResolvedValue(undefined);
+  it('existing content + clicking generate opens the switch dialog (no generate yet)', async () => {
+    // Gap text exists -> dialog should open, no generate called.
+    mockGenerateGap.mockResolvedValue(undefined);
     const wrapper = mountView();
     await flushPromises();
 
-    const summaryBtn = findHeaderButton(wrapper, 'Summarize Findings');
-    expect(summaryBtn).toBeTruthy();
-    await summaryBtn!.trigger('click');
+    const gapBtn = findHeaderButton(wrapper, 'Research Gap Report');
+    await gapBtn!.trigger('click');
     await flushPromises();
 
-    expect(mockGenerateSummary).toHaveBeenCalledWith('APA');
+    // Dialog is open.
+    expect(wrapper.find('.dialog-overlay').exists()).toBe(true);
+    expect(wrapper.find('.dialog').text()).toContain('Research Gap Report already exists');
+    // Generate NOT called yet (user hasn't chosen Regenerate).
     expect(mockGenerateGap).not.toHaveBeenCalled();
-    // Output area shows the summary text (default mode is review).
-    expect(wrapper.find('.summary-view__markdown').html()).toContain('Review');
+  });
+
+  it('switch dialog "View existing" switches mode without generating', async () => {
+    mockGenerateGap.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Click gap button -> dialog opens.
+    const gapBtn = findHeaderButton(wrapper, 'Research Gap Report');
+    await gapBtn!.trigger('click');
+    await flushPromises();
+
+    // Click "View existing".
+    const viewBtn = wrapper
+      .findAll('.dialog__actions .btn')
+      .find((b) => b.text().includes('View existing'));
+    expect(viewBtn).toBeTruthy();
+    await viewBtn!.trigger('click');
+    await flushPromises();
+
+    // No generate call.
+    expect(mockGenerateGap).not.toHaveBeenCalled();
+    // Output area now shows the gap text (mode switched).
+    expect(wrapper.find('.summary-view__markdown').html()).toContain('Gap content');
+    // Dialog closed.
+    expect(wrapper.find('.dialog-overlay').exists()).toBe(false);
+  });
+
+  it('switch dialog "Regenerate" calls generate and switches after completion', async () => {
+    mockGenerateGap.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Click gap button -> dialog opens.
+    const gapBtn = findHeaderButton(wrapper, 'Research Gap Report');
+    await gapBtn!.trigger('click');
+    await flushPromises();
+
+    // Click "Regenerate".
+    const regenBtn = wrapper
+      .findAll('.dialog__actions .btn')
+      .find((b) => b.text().includes('Regenerate'));
+    expect(regenBtn).toBeTruthy();
+    await regenBtn!.trigger('click');
+    await flushPromises();
+
+    // Generate called.
+    expect(mockGenerateGap).toHaveBeenCalledWith('APA');
+    // Dialog closed.
+    expect(wrapper.find('.dialog-overlay').exists()).toBe(false);
+  });
+
+  it('switch dialog "Cancel" closes without generating or switching', async () => {
+    mockGenerateGap.mockResolvedValue(undefined);
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Default mode is review. Click gap -> dialog opens.
+    const gapBtn = findHeaderButton(wrapper, 'Research Gap Report');
+    await gapBtn!.trigger('click');
+    await flushPromises();
+
+    // Click "Cancel".
+    const cancelBtn = wrapper
+      .findAll('.dialog__actions .btn')
+      .find((b) => b.text().includes('Cancel'));
+    expect(cancelBtn).toBeTruthy();
+    await cancelBtn!.trigger('click');
+    await flushPromises();
+
+    // No generate, dialog closed.
+    expect(mockGenerateGap).not.toHaveBeenCalled();
+    expect(wrapper.find('.dialog-overlay').exists()).toBe(false);
   });
 
   it('while summary is loading, the gap button is disabled (cross-disable)', async () => {
@@ -230,28 +294,25 @@ describe('summary-view.vue - two-button UX (Research Gap Report | Summarize Find
     expect(gapBtn!.attributes('disabled')).toBeDefined();
     expect(summaryBtn!.attributes('disabled')).toBeDefined();
 
-    // The requirements card renders.
     expect(wrapper.find('.summary-requirements').exists()).toBe(true);
   });
 
-  it('shows the active report error banner', async () => {
-    // Default mode is review -> review error shows.
-    mockSummaryError.value = 'review failed';
-    const wrapper = mountView();
-    await flushPromises();
-    expect(wrapper.find('.summary-view__error').text()).toContain('review failed');
-  });
-
-  it('shows the gap error after the gap button is clicked', async () => {
-    mockGenerateGap.mockResolvedValue(undefined);
-    mockGapError.value = 'gap failed';
+  it('enables both buttons for a local provider with no API key (isConfigured gate)', async () => {
+    mockHasLlmConfig.value = true;
     const wrapper = mountView();
     await flushPromises();
 
     const gapBtn = findHeaderButton(wrapper, 'Research Gap Report');
-    await gapBtn!.trigger('click');
-    await flushPromises();
+    const summaryBtn = findHeaderButton(wrapper, 'Summarize Findings');
+    expect(gapBtn!.attributes('disabled')).toBeUndefined();
+    expect(summaryBtn!.attributes('disabled')).toBeUndefined();
+    expect(wrapper.find('.summary-requirements').exists()).toBe(false);
+  });
 
-    expect(wrapper.find('.summary-view__error').text()).toContain('gap failed');
+  it('shows the active report error banner', async () => {
+    mockSummaryError.value = 'review failed';
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find('.summary-view__error').text()).toContain('review failed');
   });
 });

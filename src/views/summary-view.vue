@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { marked } from 'marked';
 import { useSummary, type CitationStyle } from '@/composables/use-summary';
 import { useGapAnalysis } from '@/composables/use-gap-analysis';
@@ -39,11 +39,30 @@ const mode = ref<'review' | 'gaps'>('review');
 
 const copied = ref(false);
 
+/** Switch-vs-regenerate dialog state. When the user clicks a generate button
+ *  whose target report already has content, we open this dialog instead of
+ *  regenerating blindly. The user can either view the existing report
+ *  (instant, no LLM call) or regenerate it (overwrites the persisted report).
+ *  `pendingKind` records which report the user clicked; `showSwitchDialog`
+ *  controls the overlay visibility. */
+const pendingKind = ref<'review' | 'gap' | null>(null);
+const showSwitchDialog = ref(false);
+
+/** Human-readable name for the pending report kind, used in the dialog. */
+const pendingKindLabel = computed(() =>
+  pendingKind.value === 'gap' ? 'Research Gap Report' : 'Literature Review'
+);
+
 const CITATION_STYLES: CitationStyle[] = ['APA', 'MLA', 'Chicago', 'IEEE', 'AMA'];
 
 const includedCount = computed(() => articlesStore.byStatus.included);
 const hasAims = computed(() => criteriaStore.aims.length > 0);
-const hasLlmConfig = computed(() => llmConfigStore.config.apiKeyEncrypted !== null);
+// Delegate to the canonical store getter (`isConfigured`) so the gate stays in
+// sync with the backend `llm_config_repo::has_config` contract and correctly
+// recognizes local providers (Ollama / LM Studio / llama.cpp) that have no API
+// key. Re-deriving from `apiKeyEncrypted` here would incorrectly disable the
+// buttons for every local provider.
+const hasLlmConfig = computed(() => llmConfigStore.isConfigured);
 
 const canGenerate = computed(() => includedCount.value > 0 && hasAims.value && hasLlmConfig.value);
 
@@ -76,24 +95,83 @@ const missingRequirements = computed<string[]>(() => {
   return missing;
 });
 
-/** Render the active mode's markdown summary as HTML. */
-const renderedHtml = computed(() => {
-  if (!activeText.value) return '';
-  return marked.parse(activeText.value) as string;
-});
+/** Rendered HTML of the active report. Kept as a `ref` driven by an explicit
+ *  `watch(activeText)` (NOT a computed) so the DOM re-renders in the same tick
+ *  the underlying `gapText`/`summaryText` singleton ref mutates after an LLM
+ *  call returns. The computed form occasionally failed to trigger a repaint on
+ *  live LLM completion (the test suite passed but the running app did not
+ *  update until a route change forced `onMounted` to re-read); the explicit
+ *  watch sidesteps that scheduler edge case. */
+const renderedHtml = ref<string>('');
 
-/** Generate the literature review and switch the output area to it. */
-async function handleGenerateSummary(): Promise<void> {
+watch(
+  activeText,
+  (text) => {
+    renderedHtml.value = text ? (marked.parse(text) as string) : '';
+  },
+  { immediate: true }
+);
+
+/** Entry point for the "Summarize Findings" button. If the target report
+ *  already has content, open the switch-vs-regenerate dialog; otherwise
+ *  generate directly. */
+function handleGenerateSummary(): void {
   if (!canGenerate.value || anyLoading.value) return;
-  mode.value = 'review';
-  await generateSummary(citationStyle.value);
+  if (summaryText.value) {
+    pendingKind.value = 'review';
+    showSwitchDialog.value = true;
+  } else {
+    void doGenerate('review');
+  }
 }
 
-/** Generate the research gap report and switch the output area to it. */
-async function handleGenerateGap(): Promise<void> {
+/** Entry point for the "Research Gap Report" button. Same dialog logic. */
+function handleGenerateGap(): void {
   if (!canGenerate.value || anyLoading.value) return;
-  mode.value = 'gaps';
-  await generateGap(citationStyle.value);
+  if (gapText.value) {
+    pendingKind.value = 'gap';
+    showSwitchDialog.value = true;
+  } else {
+    void doGenerate('gap');
+  }
+}
+
+/** Switch to the existing report (no LLM call). Closes the dialog. */
+function viewExisting(): void {
+  if (pendingKind.value === 'gap') {
+    mode.value = 'gaps';
+  } else {
+    mode.value = 'review';
+  }
+  closeSwitchDialog();
+}
+
+/** Regenerate the pending report (overwrites the persisted version). Closes
+ *  the dialog and kicks off the LLM call via `doGenerate`. */
+function regenerateExisting(): void {
+  const kind = pendingKind.value;
+  closeSwitchDialog();
+  if (kind) void doGenerate(kind);
+}
+
+/** Close the switch-vs-regenerate dialog without taking any action. */
+function closeSwitchDialog(): void {
+  showSwitchDialog.value = false;
+  pendingKind.value = null;
+}
+
+/** Shared generation path. Calls the matching composable, then switches
+ *  `mode` AFTER the await resolves so the output area stays on the current
+ *  report until the new one is ready (avoids the "text switches immediately"
+ *  flash of the old saved report). */
+async function doGenerate(kind: 'review' | 'gap'): Promise<void> {
+  if (kind === 'review') {
+    await generateSummary(citationStyle.value);
+    mode.value = 'review';
+  } else {
+    await generateGap(citationStyle.value);
+    mode.value = 'gaps';
+  }
 }
 
 async function copyToClipboard(): Promise<void> {
@@ -209,7 +287,9 @@ onMounted(async () => {
     <header class="summary-header">
       <div>
         <h1 class="page-title">AI Summary</h1>
-        <p class="summary-header__tagline">Have AI create a summary based on included papers.</p>
+        <p class="summary-header__tagline">
+          Have AI create a summary based on included papers. (AI makes mistakes)
+        </p>
       </div>
       <div class="summary-header__actions">
         <!-- Two side-by-side generate buttons. The left (Research Gap Report)
@@ -303,6 +383,30 @@ onMounted(async () => {
       <!-- eslint-disable-next-line vue/no-v-html -- trusted LLM output rendered via marked -->
       <div v-if="activeText" class="summary-view__markdown markdown-body" v-html="renderedHtml" />
     </div>
+
+    <!-- Switch-vs-regenerate dialog. Shown when the user clicks a generate
+         button whose target report already has content. Offers two paths:
+         view the existing report (no LLM call) or regenerate (overwrites). -->
+    <div v-if="showSwitchDialog" class="dialog-overlay" @click.self="closeSwitchDialog">
+      <div class="dialog">
+        <h2 class="dialog__title">{{ pendingKindLabel }} already exists</h2>
+        <p class="dialog__desc">
+          A {{ pendingKindLabel.toLowerCase() }} has already been generated. Do you want to view the
+          existing report or generate a new one?
+        </p>
+        <div class="dialog__actions">
+          <button class="btn btn--secondary" @click="closeSwitchDialog">Cancel</button>
+          <button class="btn btn--outline" @click="regenerateExisting">
+            <span class="material-symbols-outlined btn__icon">refresh</span>
+            Regenerate
+          </button>
+          <button class="btn btn--primary" @click="viewExisting">
+            <span class="material-symbols-outlined btn__icon">visibility</span>
+            View existing
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -379,6 +483,7 @@ onMounted(async () => {
   align-items: flex-end;
   gap: var(--space-4);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .summary-toolbar__style {
@@ -463,6 +568,16 @@ onMounted(async () => {
   background-color: var(--color-surface-container-highest);
 }
 
+.btn--outline {
+  background-color: transparent;
+  color: var(--color-on-surface);
+  border-color: var(--color-outline);
+}
+
+.btn--outline:hover:not(:disabled) {
+  background-color: var(--color-surface-container);
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -506,6 +621,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
 }
 
 /* ── Rendered markdown output ── */
@@ -514,7 +631,8 @@ onMounted(async () => {
   border: 1px solid var(--color-outline-variant);
   border-radius: var(--radius-default);
   background-color: var(--color-surface-container-low);
-  max-height: 70vh;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   line-height: 1.8;
   color: var(--color-on-surface);
