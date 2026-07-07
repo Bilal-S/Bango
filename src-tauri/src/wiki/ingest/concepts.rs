@@ -24,7 +24,10 @@ pub struct TermRow {
 
 /// Query the top-N terms by total frequency across included articles, with the
 /// list of articles each appears in + the top co-occurring terms.
-fn fetch_top_terms(conn: &Connection, limit: usize) -> Result<Vec<TermRow>, AppError> {
+///
+/// Shared by `preseed_concept_hubs` and `methods::fetch_methods_from_terms`
+/// (the abstracts-only fallback path).
+pub(super) fn fetch_top_terms(conn: &Connection, limit: usize) -> Result<Vec<TermRow>, AppError> {
     // Top terms by total frequency.
     let mut stmt = conn.prepare(
         "SELECT bt.id, bt.raw_term, bt.normalized_term, SUM(bat.frequency) as total_freq \

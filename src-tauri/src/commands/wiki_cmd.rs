@@ -665,6 +665,12 @@ fn build_batches_with_manifest(
     // Caps at 25 terms so the concept layer stays curated + high-signal.
     let _ = ingest::preseed_concept_hubs(conn, root, 25);
 
+    // Phase 4: Pre-seed method hubs from AI-summary `study_design` (when
+    // present) with a `biblio_terms` fallback for abstracts-only corpora.
+    // Caps at 25 so the methods layer stays curated + high-signal. Uses a
+    // curated study-design lexicon so non-methodological terms are filtered.
+    let _ = ingest::preseed_methods(conn, root, 25);
+
     // Layer 1 (External Documents): Pre-seed source pages for user-uploaded
     // documents (Add Documents). Each external doc in `raw/` with a
     // `source_kind: user_*` gets a first-class wiki node at

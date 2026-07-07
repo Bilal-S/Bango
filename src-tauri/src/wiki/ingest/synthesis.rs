@@ -48,7 +48,7 @@ pub struct ParsedSectionSummary {
 /// Parse an article's `full_text_ai_summary` JSON blob into a `ParsedAiSummary`.
 /// Returns `None` when the blob is empty or unparseable (the caller skips that
 /// article gracefully).
-pub(super) fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
+pub fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;

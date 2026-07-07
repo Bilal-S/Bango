@@ -252,9 +252,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     slug-forwarding. Per-batch failures are tolerated (recorded in `report.errors`;
     other batches still write). Key types: `IngestBatch`, `IngestLlmSender` (injectable
     trait; production `OrchestratorIngestSender`, test `FakeSender`),
-    `build_ingest_prompt_batches`, `run_chunked_ingest`. The legacy single-call
-    `build_ingest_prompt` + `write_pages_from_response` remain for backward compat and
-    regression tests.
+    `build_ingest_prompt_batches`, `run_chunked_ingest`. (`write_pages_from_response`
+    remains for the async write-and-index path; the legacy single-call
+    `build_ingest_prompt` was deleted in the Tier B2 hallucination-reduction
+    pass - the batch path now covers all production callers.)
     **Multi-batch consolidation** (gated on `batches.len() > 1`): when the corpus
     splits into multiple parallel batches, independent batches often produce
     near-duplicate pages for the same concept (`childhood-obesity` vs
@@ -284,7 +285,7 @@ describe each durable boundary so agents can locate the right area. Create a chi
     Single-batch runs (`batches.len() == 1`) skip all consolidation - the LLM sees
     all sources at once and produces a self-consistent page set, so the manifest,
     pre-seed, dedup, and link rewrite are zero-cost no-ops.
-    **Deterministic 4-layer pre-seed matrix** (`build_batches_with_manifest` in
+    **Deterministic 5-layer pre-seed matrix** (`build_batches_with_manifest` in
     `commands/wiki_cmd.rs`, runs unconditionally before the LLM on every
     single-batch AND multi-batch run): (1) `preseed_authors` writes rich author
     pages from `biblio_authors` (metrics, publications, research areas,
@@ -295,20 +296,43 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `tags` = keyword-derived `[[concept-slug]]` candidates; (3)
     `preseed_concept_hubs` writes top-25 `wiki/concepts/{term-slug}.md` hub
     pages from `biblio_terms`, each linking to its articles (`[[uuid]]`) +
-    co-occurring concepts; (4) **`preseed_document_source_pages`** writes one
+    co-occurring concepts; (4) **`preseed_methods`** writes top-25
+    `wiki/methods/{method-slug}.md` hub pages from AI-summary `study_design`
+    (when present) with a `biblio_terms` fallback for abstracts-only corpora;
+    a curated study-design lexicon (`STUDY_DESIGN_LEXICON` in
+    `ingest/methods.rs`) canonicalizes synonyms (e.g. "RCT" →
+    `randomized-controlled-trial`) so non-methodological terms are filtered;
+    (5) **`preseed_document_source_pages`** writes one
     `wiki/sources/{user-slug}.md` per user-uploaded document (Add Documents →
     PDF/TXT/web, identified by `source_kind: user_*`) so external documents get
     a first-class wiki node and `[^art-user-slug]` / `[[user-slug]]` citations
     resolve to a navigable page instead of "Page not found". This layer mirrors
     the article→synthesis symmetry: every raw source has a corresponding wiki
-    node. All four respect `status: reviewed` (user-edited) pages. Together they
-    form a connected graph backbone (author ↔ synthesis ↔ concept ↔ source) that
-    exists before the LLM runs, so the wiki is never missing
-    author/synthesis/concept/source pages regardless of which LLM model is used.
-    Tested in `wiki_deterministic_test.rs`. Design + phases 4-5 (LLM prompt
-    narrowing, `concepts` field in AI summary schema) in
-    `.worktrees/DONOTUSE/wiki-improvement-plan.md`; external-document ingestion +
-    linking design in `.worktrees/DONOTUSE/wiki-improvement-plan2.md`.
+    node. All five respect `status: reviewed` (user-edited) pages. Together they
+    form a connected graph backbone (author ↔ synthesis ↔ concept ↔ method ↔
+    source) that exists before the LLM runs, so the wiki is never missing
+    author/synthesis/concept/method/source pages regardless of which LLM model
+    is used. Tested in `wiki_deterministic_test.rs` + `wiki_methods_preseed_test.rs`.
+    Design + phases 4-5 (LLM prompt narrowing, `concepts` field in AI summary
+    schema) in `.worktrees/DONOTUSE/wiki-improvement-plan.md`; external-document
+    ingestion + linking design in `.worktrees/DONOTUSE/wiki-improvement-plan2.md`;
+    hallucination-reduction plan (methods pre-seed + grounding gate + prompt
+    cleanup) in `.worktrees/wiki-implementation.md`.
+    **Tier A1 grounding gate** (`engine.rs` `LintKind::UngroundedPage`): after
+    every ingest, `run_chunked_ingest` runs `engine::lint` and counts pages
+    failing the ERROR-level provenance check (LLM-generated
+    concept/method/synthesis pages missing `source_articles` frontmatter).
+    Author/source pages are exempt (pre-seeded with a different provenance
+    shape). The WARNING-level check (missing `[^art-]` citations in the body)
+    surfaces via the standalone `wiki_lint` command. The error count is appended
+    to `IngestReport.errors` so the UI + diagnostics can flag ungrounded pages.
+    Tested in `wiki_grounding_test.rs`.
+    **Temperature inheritance**: wiki ingest inherits the global
+    `LlmConfig.temperature` (default 0.2, suitable for deterministic KB
+    generation). There is no per-`LlmRequestType` override; users targeting
+    maximal determinism should set it to `0` in Settings and rely on
+    `skip_temperature` for incompatible models (the orchestrator + `client.rs`
+    own the `skip_temperature` gate + retry-without-temperature path).
     `commands/wiki_cmd.rs` exposes
     all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,

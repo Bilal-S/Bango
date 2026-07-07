@@ -176,16 +176,17 @@ fn build_batch_prompt(
          links: []\n\
          ---\n\
          <Markdown body with [[wikilinks]] to other pages>\n\n\
-         IMPORTANT: Author pages (for corpus authors), synthesis pages (one per \
-         included article, derived from AI summaries), and concept pages (top \
-         terms from the keyword index) have ALREADY been pre-seeded \
-         deterministically. Do NOT create duplicate pages for them. Link to \
-         the existing pages instead using the slugs shown in the source index \
-         and the author manifest section above. \
-         Focus your output on THEMATIC CROSS-CUTTING synthesis pages that \
-         connect multiple sources (e.g. 'Sugar Reformulation', 'Health \
-         Inequalities Impact') and any NEW author pages for authors that \
-         appear only in uploaded documents (see the author directive above). \
+         IMPORTANT: Author pages, synthesis pages, concept pages, AND method \
+         pages have ALREADY been pre-seeded deterministically. Do NOT create \
+         duplicate pages for them. Link to the existing pages instead using \
+         the slugs shown in the source index and the author manifest above. \
+         Focus your output on: \
+         1. THEMATIC CROSS-CUTTING synthesis pages that connect multiple \
+         sources (e.g. 'Sugar Reformulation', 'Health Inequalities Impact'). \
+         2. Any NEW author pages for authors that appear only in uploaded \
+         documents (see the author directive above). \
+         Only create pages for entities that genuinely appear in the source \
+         material. Do not invent topics to fill a quota. \
          Do NOT include raw file paths (/raw/...), file names, or source_file \
          references in your output. Use [^art-id] source references or \
          [[wikilinks]] instead. Use [[slug]] links to connect related pages \
@@ -424,6 +425,30 @@ pub async fn run_chunked_ingest(
                     ),
                 },
             );
+        }
+    }
+
+    // Tier A1 grounding gate: run the lint and append the count of pages
+    // failing the ERROR-level provenance check (missing `source_articles`) to
+    // the report. The WARNING-level check (missing `[^art-]` citations) is
+    // surfaced via the standalone `wiki_lint` command instead of the ingest
+    // report, so a missing citation does not fail an otherwise-successful
+    // ingest. Failures are non-fatal (pages are already written) but surface
+    // in the report so the UI + diagnostics can show the user which pages need
+    // review. Author/source pages are exempt (pre-seeded).
+    if let Ok(lint_report) = crate::wiki::engine::lint(root) {
+        let ungrounded_errors = lint_report
+            .issues
+            .iter()
+            .filter(|i| {
+                i.kind == crate::wiki::engine::LintKind::UngroundedPage
+                    && i.severity == crate::wiki::engine::LintSeverity::Error
+            })
+            .count();
+        if ungrounded_errors > 0 {
+            report.errors.push(format!(
+                "{ungrounded_errors} ungrounded page(s) detected (missing source_articles provenance)"
+            ));
         }
     }
 

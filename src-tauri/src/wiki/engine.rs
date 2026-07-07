@@ -41,6 +41,11 @@ pub enum LintKind {
     MissingFrontmatter,
     MissingField,
     StalePage,
+    /// The page is LLM-generated but has no provenance: either no
+    /// `source_articles` frontmatter or no `[^art-` footnote citations in the
+    /// body. Author/source pages are exempt (they are pre-seeded with a
+    /// different provenance shape).
+    UngroundedPage,
 }
 
 /// A full lint report.
@@ -149,6 +154,34 @@ pub fn lint(root: &Path) -> Result<LintReport, AppError> {
                     LintSeverity::Warning,
                     LintKind::BrokenLink,
                     format!("[[{target}]] points to a non-existent page"),
+                );
+            }
+        }
+
+        // Tier A1 grounding gate: LLM-generated pages (concept/method/synthesis)
+        // must carry provenance. Author and source pages are exempt (pre-seeded
+        // with a different provenance shape). The deterministic pre-seeds all
+        // set `source_articles`, so this gate catches only LLM fabrications.
+        let page_type = fm.get("type").unwrap_or("");
+        let is_grounded_type = matches!(page_type, "concept" | "method" | "synthesis");
+        if is_grounded_type {
+            let sources = frontmatter::parse_list(fm.get("source_articles").unwrap_or(""));
+            if sources.is_empty() {
+                report.push(
+                    path,
+                    &slug,
+                    LintSeverity::Error,
+                    LintKind::UngroundedPage,
+                    "page has no source_articles provenance".to_string(),
+                );
+            }
+            if !body.contains("[^art-") {
+                report.push(
+                    path,
+                    &slug,
+                    LintSeverity::Warning,
+                    LintKind::UngroundedPage,
+                    "page body has no [^art-id] citations".to_string(),
                 );
             }
         }
@@ -379,6 +412,8 @@ mod tests {
         fm.set("slug", slug);
         fm.set("status", "draft");
         fm.set("links", "[]");
+        // Grounding contract (Tier A1): concept pages must carry provenance.
+        fm.set("source_articles", "[\"art-1\"]");
         frontmatter::write_file(&dir.join(format!("{slug}.md")), &fm, body).unwrap();
     }
 

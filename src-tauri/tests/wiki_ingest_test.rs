@@ -190,6 +190,11 @@ See [[alpha]].
     assert!(log.contains("ingest"));
 }
 
+// NOTE: The legacy single-call `build_ingest_prompt` was deleted (Tier B2 of
+// the wiki-hallucination plan). These two tests were migrated onto the
+// production batch path `build_ingest_prompt_batches`, which produces
+// equivalent single-batch output when given a large context window.
+
 #[test]
 fn build_ingest_prompt_includes_sources_and_contract() {
     let tmp = TempDir::new().unwrap();
@@ -208,9 +213,10 @@ fn build_ingest_prompt_includes_sources_and_contract() {
     fm.set("links", "[]");
     frontmatter::write_file(&root.join("raw/art-1.md"), &fm, "Article content here").unwrap();
 
-    let (prompt, count, truncated) = bango_lib::wiki::ingest::build_ingest_prompt(root).unwrap();
-    assert_eq!(count, 1);
-    assert!(!truncated);
+    // Single source + large window -> one batch carrying contract + source.
+    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
     assert!(prompt.contains("Agent Contract"));
     assert!(prompt.contains("Article One"));
     assert!(prompt.contains("Article content here"));
@@ -218,13 +224,16 @@ fn build_ingest_prompt_includes_sources_and_contract() {
 }
 
 #[test]
-fn build_ingest_prompt_truncates_when_over_budget() {
+fn build_ingest_prompt_splits_when_over_budget() {
+    // Migrated from the legacy truncation test. The batch path SPLITS the
+    // corpus into multiple batches instead of truncating, so we assert the
+    // multi-batch outcome (the production behavior).
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join("raw")).unwrap();
     std::fs::write(root.join("AGENTS.md"), "Contract").unwrap();
 
-    // Write many large sources to exceed budget.
+    // Write many large sources to exceed a small context window's budget.
     for i in 0..50 {
         let mut fm = Frontmatter::default();
         let id = format!("art-{i}");
@@ -241,9 +250,13 @@ fn build_ingest_prompt_truncates_when_over_budget() {
         frontmatter::write_file(&path, &fm, &body).unwrap();
     }
 
-    let (_prompt, count, truncated) = bango_lib::wiki::ingest::build_ingest_prompt(root).unwrap();
-    assert!(truncated);
-    assert!(count > 10); // all sources were counted
+    // Tiny context window forces a multi-batch split (no truncation).
+    let batches = build_ingest_prompt_batches(root, 2_000, None).unwrap();
+    assert!(batches.len() > 1, "expected multiple batches, got {}", batches.len());
+    // Every source appears in exactly one batch's source_slugs.
+    let mut all: Vec<String> = batches.iter().flat_map(|b| b.source_slugs.clone()).collect();
+    all.sort();
+    assert_eq!(all.len(), 50, "all 50 sources must be covered across batches");
 }
 
 #[test]
@@ -466,6 +479,45 @@ fn build_ingest_prompt_batches_empty_when_no_sources() {
 }
 
 #[test]
+fn batch_prompt_contains_no_quota_language() {
+    // Tier D1 guard: the batch directive must NOT contain "at least N" quota
+    // language (it causes hallucination - the LLM invents entities to hit the
+    // count). Asserts the production batch prompt is quota-free.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
+    assert!(
+        !prompt.to_lowercase().contains("at least "),
+        "batch prompt must not contain quota language, got: {prompt}"
+    );
+    assert!(
+        !prompt.contains("Generate 3-5") && !prompt.contains("Generate 1-2"),
+        "batch prompt must not contain numeric page-count quotas, got: {prompt}"
+    );
+}
+
+#[test]
+fn batch_prompt_lists_methods_as_pre_seeded() {
+    // Tier D1 guard: the batch directive must list method pages in the
+    // pre-seeded set so the LLM links to them instead of creating duplicates.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
+    assert!(
+        prompt.contains("method") && prompt.contains("ALREADY been pre-seeded"),
+        "batch prompt must list methods in the pre-seeded set, got: {prompt}"
+    );
+}
+
+#[test]
 fn build_ingest_prompt_batches_injects_manifest_section() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
@@ -517,12 +569,15 @@ impl IngestLlmSender for FakeSender {
             tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
         }
         // Emit one PAGE per (slug: ...) occurrence in the batch sources.
+        // Each page carries source_articles + a [^art-] ref so it passes the
+        // Tier A1 grounding gate (the post-ingest lint flags ungrounded pages).
         let mut out = String::new();
         for cap in regex::Regex::new(r"slug: (art-\d+)").unwrap().captures_iter(prompt) {
             let slug = &cap[1];
             out.push_str(&format!(
                 "<!-- PAGE:{slug} -->\n---\nid: {slug}\ntitle: \"{slug}\"\ntype: concept\n\
-                 slug: {slug}\nsummary: \"\"\nstatus: draft\nlinks: []\n---\n\n# {slug}\n\nBody.\n\n"
+                 slug: {slug}\nsummary: \"\"\nstatus: draft\nlinks: []\n\
+                 source_articles: [\"{slug}\"]\n---\n\n# {slug}\n\nBody. [^art-{slug}]\n\n"
             ));
         }
         Ok(out)

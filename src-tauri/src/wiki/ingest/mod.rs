@@ -19,7 +19,7 @@
 //! This is a directory module. The concerns are split across focused submodules:
 //! - [`mod`] (this file): core types (`IngestReport`, `ParsedPage`), the core
 //!   pipeline (`write_pages_from_response`, `finalize_ingest`,
-//!   `build_ingest_prompt`, `parse_llm_pages`, `write_page`), and re-exports.
+//!   `parse_llm_pages`, `write_page`), and re-exports.
 //! - [`batching`]: chunked/parallel batch building + the LLM sender trait +
 //!   `run_chunked_ingest`.
 //! - [`consolidation`]: deterministic dedup + `[[wikilink]]` rewrite
@@ -27,6 +27,8 @@
 //! - [`authors`]: Phase 1 author manifest + pre-seed.
 //! - [`synthesis`]: Phase 2 synthesis pre-seed from AI summaries.
 //! - [`concepts`]: Phase 3 concept hub pre-seed from `biblio_terms`.
+//! - [`methods`]: Phase 4 method hub pre-seed from AI-summary `study_design`
+//!   with a `biblio_terms` fallback (abstracts-only corpora).
 //! - [`sources`]: Layer 1 external-document source page pre-seed.
 //! - [`slugs`]: shared slug squeezing utilities (dedupes the former
 //!   `author_slug` / `concept_slug` near-duplicate logic).
@@ -39,12 +41,12 @@ use tauri::Emitter;
 use crate::error::AppError;
 use crate::wiki::frontmatter::{self, Frontmatter};
 use crate::wiki::fts;
-use crate::wiki::raw_export;
 
 pub mod authors;
 pub mod batching;
 pub mod concepts;
 pub mod consolidation;
+pub mod methods;
 pub mod slugs;
 pub mod sources;
 pub mod synthesis;
@@ -59,6 +61,7 @@ pub use batching::{
 };
 pub use concepts::preseed_concept_hubs;
 pub use consolidation::{consolidate_pages, rewrite_page_links};
+pub use methods::preseed_methods;
 pub use sources::preseed_document_source_pages;
 pub use synthesis::preseed_synthesis_from_ai_summaries;
 
@@ -160,61 +163,6 @@ pub fn finalize_ingest(
     crate::db::app_settings_repo::clear_wiki_needs_refresh(conn);
 
     Ok(())
-}
-
-/// Build the user prompt from raw sources + the AGENTS.md contract.
-/// Returns `(prompt, source_count, truncated)`.
-pub fn build_ingest_prompt(root: &Path) -> Result<(String, usize, bool), AppError> {
-    // Read the AGENTS.md contract.
-    let agents_path = root.join("AGENTS.md");
-    let contract = std::fs::read_to_string(&agents_path).unwrap_or_default();
-
-    // Collect raw sources.
-    let raw_files = raw_export::list_raw_files(root)?;
-    let source_count = raw_files.len();
-
-    // Concatenate sources, respecting the char budget.
-    let mut sources_text = String::new();
-    let mut truncated = false;
-    for (path, fm) in &raw_files {
-        let (_fm, body) = frontmatter::read_file(path)?;
-        let title = fm.get("title").unwrap_or("Untitled");
-        let slug = fm.get("slug").unwrap_or("");
-        let entry = format!("### Source: {title} (slug: {slug})\n\n{body}\n\n---\n\n");
-        if sources_text.len() + entry.len() > MAX_SOURCE_CHARS {
-            truncated = true;
-            break;
-        }
-        sources_text.push_str(&entry);
-    }
-
-    let prompt = format!(
-        "{contract}\n\n\
-         # Raw Sources\n\n\
-         {sources_text}\n\n\
-         # Instructions\n\n\
-         Synthesize the above sources into wiki pages. Output each page in this exact format:\n\n\
-         <!-- PAGE:slug -->\n\
-         ---\n\
-         id: <slug>\n\
-         title: \"<title>\"\n\
-         type: concept | author | method | synthesis\n\
-         slug: <kebab-case-slug>\n\
-         summary: \"<1-2 sentence summary>\"\n\
-         status: draft\n\
-         links: []\n\
-         ---\n\
-         <Markdown body with [[wikilinks]] to other pages>\n\n\
-         IMPORTANT: Create a wiki page for EVERY source document. Do not skip any sources. Each \
-         source should appear in at least one page. \
-         Do NOT include raw file paths (/raw/...), file names, or source_file references \
-         in your output. Use [^art-id] source references or [[wikilinks]] instead. \
-         Generate at least 3-5 concept pages, 1-2 synthesis pages, and author pages for \
-         prominent authors. Use [[slug]] links to connect related pages. Each page must \
-         start with the <!-- PAGE:slug --> delimiter."
-    );
-
-    Ok((prompt, source_count, truncated))
 }
 
 /// Parse the LLM response into pages.

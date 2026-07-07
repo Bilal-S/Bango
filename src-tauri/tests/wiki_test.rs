@@ -333,7 +333,10 @@ fn write_wiki_page(root: &std::path::Path, subdir: &str, slug: &str, title: &str
     fm.set("type", "concept");
     fm.set("summary", &format!("{title} summary"));
     fm.set("status", "draft");
-    fm.set("source_articles", "[]");
+    // Grounding contract (Tier A1): carry provenance so the grounding gate
+    // does not flag these test pages. Concept pages with empty
+    // source_articles are flagged as ungrounded.
+    fm.set("source_articles", "[\"art-1\"]");
     fm.set("links", "[]");
     frontmatter::write_file(&dir.join(format!("{slug}.md")), &fm, body).unwrap();
 }
@@ -700,6 +703,8 @@ async fn ingest_run_from_response_writes_and_indexes() {
 
 #[test]
 fn ingest_build_prompt_includes_contract_and_sources() {
+    // Migrated from the deleted legacy `build_ingest_prompt` onto the
+    // production batch path `build_ingest_prompt_batches` (Tier B2).
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     std::fs::create_dir_all(root.join("raw")).unwrap();
@@ -715,9 +720,10 @@ fn ingest_build_prompt_includes_contract_and_sources() {
     fm.set("links", "[]");
     frontmatter::write_file(&root.join("raw/src-1.md"), &fm, "Source content").unwrap();
 
-    let (prompt, count, truncated) = ingest::build_ingest_prompt(root).unwrap();
-    assert_eq!(count, 1);
-    assert!(!truncated);
+    // Single source + large window -> one batch carrying contract + source.
+    let batches = ingest::build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
     assert!(prompt.contains("Contract"));
     assert!(prompt.contains("Source One"));
 }
