@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
 import { useDemo } from '@/composables/use-demo';
+import { useExport } from '@/composables/use-export';
 
 const router = useRouter();
 const {
@@ -141,6 +142,43 @@ function navigateToArticlesWithStatus(status: string): void {
 }
 
 const { demoLoading, demoError, loadDemo } = useDemo(router);
+const { importProject } = useExport();
+
+// --- Load Existing Project (from a .bango.json backup file) ---
+// Uses a hidden HTML <input type="file"> rather than the Tauri fs dialog so
+// the picker can read from any directory (the `fs:allow-read-file` capability
+// is scoped to `$DOCUMENT/**`). This mirrors the Settings import-backup flow.
+const projectFileInput = ref<HTMLInputElement | null>(null);
+const projectLoading = ref(false);
+const projectError = ref<string | null>(null);
+
+/** Trigger the hidden file input click (opens the OS file picker). */
+function loadExistingProject(): void {
+  if (projectLoading.value) return;
+  projectError.value = null;
+  projectFileInput.value?.click();
+}
+
+/** Handle the file chosen via the hidden input: import via the shared
+ *  `useExport().importProject` helper (which handles the
+ *  `import_project_backup` IPC + full store refresh + loading overlay). */
+async function onProjectFileSelected(event: Event): Promise<void> {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  // Reset the input value so selecting the same file twice re-fires change.
+  target.value = '';
+  projectLoading.value = true;
+  projectError.value = null;
+  try {
+    const ok = await importProject(file);
+    if (ok) router.push('/');
+  } catch (e: unknown) {
+    projectError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    projectLoading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -176,12 +214,40 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
           <div class="dashboard__empty-icon material-symbols-outlined">import_export</div>
           <h2 class="dashboard__empty-title">No articles yet</h2>
           <p class="dashboard__empty-desc">
-            Import a RIS or BibTex file to get started with your systematic review.
+            Start a new systematic review or load an existing Bango project.
           </p>
-          <div class="dashboard__empty-actions">
+
+          <!-- Section 1: Start a New Project -->
+          <div class="dashboard__empty-section">
+            <h3 class="dashboard__empty-section-label">Start a New Project</h3>
             <button class="dashboard__empty-cta" @click="navigateTo('/import')">
               <span class="material-symbols-outlined dashboard__empty-cta-icon">upload_file</span>
               Import References
+            </button>
+          </div>
+
+          <!-- Divider between the two sections -->
+          <div class="dashboard__empty-divider" aria-hidden="true">
+            <span>or load an existing project</span>
+          </div>
+
+          <!-- Section 2: Load Existing Project -->
+          <div class="dashboard__empty-section">
+            <h3 class="dashboard__empty-section-label">Load Existing Project</h3>
+            <button
+              class="dashboard__empty-cta"
+              :disabled="projectLoading"
+              @click="loadExistingProject()"
+            >
+              <span
+                v-if="projectLoading"
+                class="material-symbols-outlined dashboard__empty-cta-icon"
+                >progress_activity</span
+              >
+              <span v-else class="material-symbols-outlined dashboard__empty-cta-icon"
+                >folder_open</span
+              >
+              {{ projectLoading ? 'Loading…' : 'Load from File' }}
             </button>
             <span class="dashboard__empty-or">or</span>
             <button
@@ -198,7 +264,20 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
               {{ demoLoading ? 'Loading…' : 'Load Demo Project' }}
             </button>
           </div>
+
+          <p v-if="projectError" class="dashboard__empty-error">{{ projectError }}</p>
           <p v-if="demoError" class="dashboard__empty-error">{{ demoError }}</p>
+
+          <!-- Hidden file input backing the "Load from File" button.
+               Uses the HTML picker (not the Tauri fs dialog) so files can be
+               read from any directory; mirrors Settings > Import Backup. -->
+          <input
+            ref="projectFileInput"
+            type="file"
+            accept=".bango.json,.json"
+            class="dashboard__hidden-input"
+            @change="onProjectFileSelected"
+          />
         </div>
       </section>
 
@@ -509,6 +588,41 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
   margin-bottom: var(--space-6);
 }
 
+.dashboard__empty-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.dashboard__empty-section-label {
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-label);
+  color: var(--color-on-surface-variant);
+  margin-bottom: var(--space-1);
+}
+
+/* Divider between the two empty-state sections. A hairline rule with a
+   caption in the gap, so the two sections read as distinct groups. */
+.dashboard__empty-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-6) 0;
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+}
+
+.dashboard__empty-divider::before,
+.dashboard__empty-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-border);
+}
+
 .dashboard__empty-actions {
   display: flex;
   flex-direction: column;
@@ -525,7 +639,9 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
 .dashboard__empty-cta {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
+  width: 100%;
   background-color: var(--color-primary-container);
   color: var(--color-on-primary);
   padding: 10px 20px;
@@ -536,6 +652,11 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
   cursor: pointer;
   white-space: nowrap;
   font-family: inherit;
+}
+
+.dashboard__empty-cta:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .dashboard__empty-cta-icon {
@@ -561,6 +682,19 @@ const { demoLoading, demoError, loadDemo } = useDemo(router);
   color: var(--color-error, #dc2626);
   font-size: var(--font-size-caption);
   margin-top: var(--space-3);
+}
+
+/* Visually hidden file input backing the "Load from File" button. */
+.dashboard__hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Status Tiles */
