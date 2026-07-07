@@ -823,11 +823,14 @@ describe each durable boundary so agents can locate the right area. Create a chi
   `scripts/check-test-inventory.sh` (wired into `npm run check:all`). Each plan that
   specifies a Test Inventory section places its machine-checked `file::function` table
   here as `<plan-name>-tests.md` so the script can grep-named test files at PR time.
-  Current: `language-plan-v2-tests.md` (26 rows across 11 files).
+  Current: `language-plan-v2-tests.md` (26 rows across 11 files),
+  `translation-3-tests.md`, `search-strategy-tests.md` (8 rows: Search
+  Strategy Builder pure helpers).
 - **`.worktrees/`** - planning documents (`language-plan-v2.md` is the active
   translation plan; the superseded `language-plan.md` is archived in `DONOTUSE/`;
   implemented/temporary docs are archived in `DONOTUSE/`, such as the timeline plan
-  `biblio-publication-timeline-plan-v3.md`). Not part of the shipped app.
+  `biblio-publication-timeline-plan-v3.md` and the Search Strategy Builder plan
+  `improve-search-final.md`). Not part of the shipped app.
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
 `-D warnings` on the library crate + vitest + `check:test-inventory`) and

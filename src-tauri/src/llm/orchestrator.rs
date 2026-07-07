@@ -59,6 +59,12 @@ pub enum LlmRequestType {
     /// (the literature review) in diagnostics so per-mode cost and failure
     /// rates are visible.
     GapAnalysis,
+    /// Search Strategy Builder (spec §8.4): generates database-ready Boolean
+    /// search strings for 8 academic databases from the research aims +
+    /// criteria. One call per generation; the result is session-scoped (no
+    /// persistence). Distinguished from `CriteriaGeneration` so diagnostics
+    /// can separate search-strategy requests from criteria suggest/critique.
+    SearchStrategy,
 }
 
 /// Centralized LLM request coordinator.

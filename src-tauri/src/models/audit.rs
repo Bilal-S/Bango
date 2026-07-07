@@ -41,6 +41,11 @@ pub enum AuditAction {
     /// A translation job failed (`translation_status = 'failed'`); the error
     /// message is stored in `details`.
     TranslationError,
+    /// Search Strategy Builder produced a database-ready Boolean search
+    /// strategy from the research aims + criteria (spec §8.4). System-level
+    /// audit row (`article_id = NULL`); the `details` field records a compact
+    /// summary ("Generated 8-database search strategy for N aim(s)").
+    SearchStrategy,
 }
 
 impl AuditAction {
@@ -66,6 +71,7 @@ impl AuditAction {
             Self::WikiIngestError => "wiki_ingest_error",
             Self::Translation => "translation",
             Self::TranslationError => "translation_error",
+            Self::SearchStrategy => "search_strategy",
         }
     }
 }

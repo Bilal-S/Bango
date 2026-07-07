@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { ResearchAim, Criterion } from '@/types';
+import type { SearchStrategyResult } from '@/types/search-strategy';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
 export const useCriteriaStore = defineStore('criteria', () => {
@@ -19,6 +20,21 @@ export const useCriteriaStore = defineStore('criteria', () => {
   const exclusionCritique = ref('');
   const inclusionError = ref<string | null>(null);
   const exclusionError = ref<string | null>(null);
+
+  // ── Search Strategy Builder state (session-scoped, NOT persisted to DB) ──
+  // Mirrors the inclusion/exclusion critique pattern: survives route
+  // navigation so the user can leave the Criteria view and come back, clears
+  // on app close. The audit entry is the only durable record of a run.
+  const generatingSearchStrategy = ref(false);
+  const searchStrategyResult = ref<SearchStrategyResult | null>(null);
+  const searchStrategyError = ref<string | null>(null);
+
+  // ── Critique card collapse state (session-scoped, mirrors the critique
+  // refs above). Persists the user's expand/collapse choice across route
+  // navigation so leaving and returning to the Criteria view preserves it.
+  // Default true so a freshly-generated critique shows expanded.
+  const inclusionCritiqueExpanded = ref(true);
+  const exclusionCritiqueExpanded = ref(true);
 
   async function fetchIfNeeded(): Promise<void> {
     if (initialized.value || !isTauri()) return;
@@ -95,6 +111,13 @@ export const useCriteriaStore = defineStore('criteria', () => {
     exclusionCritique,
     inclusionError,
     exclusionError,
+    // Search Strategy Builder state
+    generatingSearchStrategy,
+    searchStrategyResult,
+    searchStrategyError,
+    // Critique card collapse state (session-scoped)
+    inclusionCritiqueExpanded,
+    exclusionCritiqueExpanded,
     fetchIfNeeded,
     fetchAll,
     invalidate,

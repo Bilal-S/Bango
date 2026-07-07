@@ -155,6 +155,52 @@ pub fn log_error(conn: &Connection, details: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// System-level (non-article, non-error) audit actions recordable via
+/// [`log_system_action`]. Each variant maps to a row in `audit_entries` with
+/// `article_id = NULL` and `source = 'ai'`. Kept distinct from the
+/// article-bound [`AuditAction`] enum so the "no article" contract is
+/// explicit at the call site.
+#[derive(Debug, Clone, Copy)]
+pub enum SystemAction {
+    /// Search Strategy Builder produced a Boolean search strategy (spec §8.4).
+    /// Maps to `action = 'search_strategy'`.
+    SearchStrategy,
+}
+
+impl SystemAction {
+    #[must_use]
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::SearchStrategy => "search_strategy",
+        }
+    }
+}
+
+/// Log a system-level (non-article, non-error) audit row.
+///
+/// Mirrors [`log_error`]'s NULL-writing shape (`article_id = NULL` so the row
+/// surfaces in `get_generic_audit_entries`) but takes an arbitrary action +
+/// records `source = 'ai'` (the actor for system-level successes). Use this
+/// instead of overloading [`create_entry`]'s `article_id: &str` signature
+/// (which would force every caller to pass an empty string and risk the row
+/// being missed by the `article_id IS NULL` filter).
+///
+/// For error-path system rows, keep using [`log_error`] / [`log_error_best_effort`].
+pub fn log_system_action(
+    conn: &Connection,
+    action: SystemAction,
+    details: &str,
+) -> Result<(), AppError> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
+         VALUES (?1, NULL, ?2, ?3, NULL, NULL, ?4, 'ai')",
+        params![id, now, action.as_str(), details],
+    )?;
+    Ok(())
+}
+
 /// Best-effort wrapper around [`log_error`] for the common "I'm in an error arm
 /// and want to record what happened, but I must not mask the real error"
 /// pattern. Acquires the shared connection mutex tolerantly; if the mutex is

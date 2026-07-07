@@ -51,7 +51,7 @@ The SQLite schema consists of the following primary tables. All IDs are UUID str
     *   `import_source` (originating filename), `imported_at`
 *   **`article_tags`**: `article_id` (FK), `tag_id` (FK) [PK: composite]
 *   **`article_labels`**: `article_id` (FK), `label_id` (FK) [PK: composite]
-*   **`audit_entries`**: `id` (PK), `article_id` (FK), `action` (e.g., `'import'`, `'status_change'`, `'ai_screen'`, `'translation'`, `'translation_error'`, `'reference_import'`, `'error'`), `from_status`, `to_status`, `details`, `source` (`'ai'`, `'user'`, `'system'`), `timestamp`
+*   **`audit_entries`**: `id` (PK), `article_id` (FK), `action` (e.g., `'import'`, `'status_change'`, `'ai_screen'`, `'translation'`, `'translation_error'`, `'reference_import'`, `'search_strategy'`, `'error'`), `from_status`, `to_status`, `details`, `source` (`'ai'`, `'user'`, `'system'`), `timestamp`
 
 #### Translation Archive Tables
 *   **`article_original_content`**:
@@ -294,6 +294,21 @@ The `analyze_research_gaps` command produces a corpus-wide Markdown gap-analysis
 
 ---
 
+### 8.4 Search Strategy Builder
+
+The `suggest_search_strategy` command generates database-ready Boolean search strings for 8 academic databases (PubMed, Scopus, Web of Science, Cochrane Library, EBSCOhost, JSTOR, ScienceDirect, arXiv) from the research aims and inclusion/exclusion criteria the user has already defined in the Criteria view. Surfaced inline as a collapsible card below the Research Aims section in `criteria-editor.vue`, replacing the entry-count span with a "Suggest Search Strategy" button gated on `hasAims && llmConnected`.
+
+*   **Scope**: copy-only. The feature builds text strings the researcher pastes into each database's own search interface. It does NOT execute searches against any database, query MeSH/EMTREE APIs, or validate that terms return results.
+*   **Inputs**: aims (required) + criteria (optional; enriches the prompt). Read directly from the DB; the command takes no parameters.
+*   **Prompt**: the system prompt embeds a full database-syntax cheatsheet (operators, field codes, format conventions) so the LLM produces syntactically correct strings per platform. The user prompt supplies the aims + criteria and a compact JSON schema contract (PICO breakdown, one Boolean string per database, notes, warnings).
+*   **Output contract**: a single JSON object with PICO concept blocks (concept + 3-8 synonyms each), a `strategies` object carrying `{oneLine, notes}` per database, and a `warnings` array (e.g., missing-concept concerns, the Semantic Scholar non-Boolean advisory). Semantic Scholar does NOT support Boolean operators, so no query string is generated for it; a warning is emitted instead.
+*   **Persistence**: session-scoped Pinia store (NOT the DB). The result survives route navigation and clears on app close - identical to how `inclusionCritique` / `exclusionCritique` already behave. The audit entry is the only durable record of a generation run.
+*   **Audit**: a successful run writes a system-level `search_strategy` audit entry (`article_id = NULL`, `source = "ai"`) via a new `log_system_action` helper. The `search_strategy` action is added to the `audit_entries.action` CHECK constraint in migration v004. On error, a generic `error` audit entry is logged via `log_error_best_effort` and the failure surfaces in the inline error card.
+*   **New `LlmRequestType::SearchStrategy` variant** categorizes the request for diagnostics.
+*   **Pure helpers**: `build_search_strategy_prompt` (system + user prompt pair) and `parse_search_strategy_response` (fence-strip via the shared `summary::prompt::strip_code_fences` + deserialize) are extracted as `pub fn`s so `src-tauri/tests/search_strategy_test.rs` can exercise them without `State<DbState>`.
+
+---
+
 ## 9. UI Layout & Design System
 
 The application design is based on the **"Scholarly Precision"** style, utilizing a dense, minimalist Notion-like aesthetic.
@@ -333,7 +348,7 @@ The following features remain explicitly **out of scope**:
 *   Multi-project workspaces or project file selectors.
 *   Multi-user real-time collaboration or blind review synchronization.
 *   Full-text screening is no longer out of scope: see §4.3.1 for the bounded `enhanced` and `two_stage` modes. Naive whole-paper screening (sending the entire full text to the LLM) remains out of scope due to cost; Tier 3 sends only the abstract plus the top-K criteria-matched chunks.
-*   Automatic query builders or direct PubMed/external API integrations.
+*   Automatic query builders are no longer out of scope: see §8.4 for the bounded Search Strategy Builder (LLM-generated Boolean strings, copy-only, no database API execution). Direct PubMed/external API integrations (executing searches against remote databases, fetching results, or querying MeSH/EMTREE term registries) remain out of scope.
 *   Interactive PDF text highlighting or annotation.
 *   Global undo/redo action stacks or edit rollbacks.
 
@@ -343,6 +358,7 @@ The following features remain explicitly **out of scope**:
 
 | Version | Date | Key Improvements |
 |---------|------|------------------|
+| **v6.7** | 2026-07-07 | Search Strategy Builder (§8.4): new `suggest_search_strategy` command generates database-ready Boolean search strings for 8 academic databases (PubMed, Scopus, Web of Science, Cochrane Library, EBSCOhost, JSTOR, ScienceDirect, arXiv) from research aims + criteria. Surfaced inline as a collapsible card below the Research Aims section in `criteria-editor.vue` (replaces the entry-count span with a "Suggest Search Strategy" button gated on `hasAims && llmConnected`). Copy-only - no database API execution. Session-scoped Pinia store (no result persistence); the audit entry is the durable record. Migration v004 additionally extends the `audit_entries.action` CHECK constraint with `'search_strategy'` (rename-create-copy-drop, bundled with the gap_analysis CREATE TABLE since v004 is undeployed). New `AuditAction::SearchStrategy` variant + `parse_action` arm. New `audit_repo::log_system_action` helper for system-level non-error audit rows. New `LlmRequestType::SearchStrategy` variant. Pure `build_search_strategy_prompt` + `parse_search_strategy_response` helpers for testability. Lifted the §11 "Automatic query builders" exclusion for this bounded copy-only mode; direct PubMed/external API integrations remain out of scope. |
 | **v6.6** | 2026-07-07 | Research Gap Analysis (§8.3): new `analyze_research_gaps` command produces a corpus-wide Markdown gap-analysis report (Thematic Coverage, Identified Gaps, Methodological Landscape, Future Research Directions, References). Surfaced via a "Research Gap Report" button placed to the left of "Summarize Findings" in the AI Summary view header; clicking either regenerates its report and switches the output area to it, and while one is running the other is disabled. Both share the same toolbar, gating, and export buttons. Mirrors `generate_summary`'s batching strategy (split + synthesize when the corpus exceeds 80% of the context window). Persisted in a new single-row `gap_analysis` table (migration v004; cleared on import/reset alongside `summary`; NOT exported in backups). No audit-CHECK migration: success path writes no audit row, error path uses the existing `error` action. New `LlmRequestType::GapAnalysis` variant. |
 | **v6.5** | 2026-07-06 | Screening-mode selector is always selectable in Settings. Previously Enhanced and Two-stage were disabled until at least one article had full text attached. Now all three modes can be chosen at any time; the engine applies Enhanced/Two-stage evidence retrieval per article only when `has_full_text = 1` and falls back to abstract-only screening otherwise. The Settings card shows a fallback notice (no full text) or an active notice (full text present). Updated §4.3.1. |
 | **v6.4** | 2026-07-05 | Translation crash-recovery flip: `STARTUP_STRANDED_CAP` lowered from 20 to 0 so a restart no longer auto-re-enqueues stranded `queued`/`running` translation jobs. Every stranded article is marked `failed` with a `translation_error` audit note; the user selectively retranslates via the manual translate button on the article detail header (the enqueue gate accepts `failed`). Updated §4.4.5. |

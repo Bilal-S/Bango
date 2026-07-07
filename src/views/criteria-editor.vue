@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { marked } from 'marked';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import { formatLlmError } from '@/utils/llm-error';
+import type { SearchStrategyResult } from '@/types/search-strategy';
+import SearchStrategyCard from '@/components/search-strategy-card.vue';
 import type { Priority } from '@/types';
 
 const criteriaStore = useCriteriaStore();
@@ -29,6 +32,13 @@ const inclusionCritiqueText = computed(() => criteriaStore.inclusionCritique);
 const exclusionCritiqueText = computed(() => criteriaStore.exclusionCritique);
 const inclusionError = computed(() => criteriaStore.inclusionError);
 const exclusionError = computed(() => criteriaStore.exclusionError);
+
+// Search Strategy Builder state (session-scoped, mirrors the critique refs).
+const generatingSearchStrategy = computed(() => criteriaStore.generatingSearchStrategy);
+const searchStrategyResult = computed<SearchStrategyResult | null>(
+  () => criteriaStore.searchStrategyResult
+);
+const searchStrategyError = computed(() => criteriaStore.searchStrategyError);
 
 const inclusionCriteria = computed(() =>
   criteria.value.filter((c) => c.criterionType === 'inclusion')
@@ -148,10 +158,17 @@ function priorityLabel(priority: Priority): string {
 // ── AI assistant logic ──────────────────────────────────────────────
 
 const hasAims = computed(() => aims.value.length > 0);
-const llmConnected = computed(
-  () => llmConfigStore.initialized && llmConfigStore.config.apiKeyEncrypted !== null
-);
-const canUseAi = computed(() => hasAims.value && llmConnected.value);
+// Use the store's canonical getter so local providers (LM Studio / Ollama /
+// llama.cpp) enable the AI buttons. Re-deriving from `apiKeyEncrypted` would
+// wrongly disable them - see `isConfigured` docstring in `llm-config.ts`.
+const canUseAi = computed(() => hasAims.value && llmConfigStore.isConfigured);
+
+const canGenerateStrategy = computed(() => hasAims.value && llmConfigStore.isConfigured);
+const strategyButtonTitle = computed(() => {
+  if (!hasAims.value) return 'Add at least one research aim first';
+  if (!llmConfigStore.isConfigured) return 'Configure an LLM in Settings first';
+  return 'Generate database-ready Boolean search strings from your aims';
+});
 
 const inclusionButtonLabel = computed(() =>
   inclusionCriteria.value.length === 0 ? 'Generate with AI' : 'Critique with AI'
@@ -176,6 +193,8 @@ async function handleInclusionAi(): Promise<void> {
         request: { criterionType: 'inclusion' },
       });
       criteriaStore.inclusionCritique = result.critique;
+      // Auto-expand so a freshly-generated critique shows its body.
+      criteriaStore.inclusionCritiqueExpanded = true;
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -185,9 +204,19 @@ async function handleInclusionAi(): Promise<void> {
   }
 }
 
-/** Split plain-text critique into paragraphs for safe rendering. */
-function critiqueParagraphs(text: string): string[] {
-  return text.split('\n\n').filter((p) => p.trim().length > 0);
+/** Dismiss the inclusion critique card: clear the text and reset the collapse
+ * state so the next generation starts expanded. */
+function dismissInclusionCritique(): void {
+  criteriaStore.inclusionCritique = '';
+  criteriaStore.inclusionCritiqueExpanded = true;
+}
+
+/** Render LLM Markdown critique to safe HTML. Matches the pattern in
+ * `summary-view.vue`, `chat-view.vue`, and `wiki-page-editor.vue`:
+ * `marked.parse(text) as string` fed to `v-html`. Content is LLM-generated
+ * critique prose (no user-controlled wikilinks/footnotes). */
+function renderCritiqueMarkdown(text: string): string {
+  return marked.parse(text) as string;
 }
 
 async function handleExclusionAi(): Promise<void> {
@@ -206,12 +235,38 @@ async function handleExclusionAi(): Promise<void> {
         request: { criterionType: 'exclusion' },
       });
       criteriaStore.exclusionCritique = result.critique;
+      // Auto-expand so a freshly-generated critique shows its body.
+      criteriaStore.exclusionCritiqueExpanded = true;
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     criteriaStore.exclusionError = msg;
   } finally {
     criteriaStore.generatingExclusion = false;
+  }
+}
+
+/** Dismiss the exclusion critique card: clear the text and reset the collapse
+ * state so the next generation starts expanded. */
+function dismissExclusionCritique(): void {
+  criteriaStore.exclusionCritique = '';
+  criteriaStore.exclusionCritiqueExpanded = true;
+}
+
+// ── Search Strategy Builder ────────────────────────────────────────────
+
+async function handleSearchStrategy(): Promise<void> {
+  if (!canGenerateStrategy.value || generatingSearchStrategy.value) return;
+  criteriaStore.generatingSearchStrategy = true;
+  criteriaStore.searchStrategyError = null;
+  try {
+    const result = await tauriCommand<SearchStrategyResult>('suggest_search_strategy');
+    criteriaStore.searchStrategyResult = result;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    criteriaStore.searchStrategyError = msg;
+  } finally {
+    criteriaStore.generatingSearchStrategy = false;
   }
 }
 </script>
@@ -230,7 +285,20 @@ async function handleExclusionAi(): Promise<void> {
           <span class="material-symbols-outlined text-primary">target</span>
           <h2 class="section-panel__title">Research Aims</h2>
         </div>
-        <span class="section-panel__count">{{ aims.length }} Entries</span>
+        <div v-if="generatingSearchStrategy" class="ai-loading">
+          <span class="material-symbols-outlined animate-spin">progress_activity</span>
+          <span>Generating…</span>
+        </div>
+        <button
+          v-else
+          class="ai-btn"
+          :disabled="!canGenerateStrategy"
+          :title="strategyButtonTitle"
+          @click="handleSearchStrategy"
+        >
+          <span class="material-symbols-outlined">manage_search</span>
+          Suggest Search Strategy
+        </button>
       </div>
       <div class="space-y-3">
         <div v-for="(aim, index) in aims" :key="aim.id" class="aim-row group">
@@ -253,6 +321,47 @@ async function handleExclusionAi(): Promise<void> {
         </div>
       </div>
     </section>
+
+    <!-- Search Strategy error card -->
+    <div v-if="searchStrategyError" class="ai-error-card">
+      <div class="ai-error-card__header">
+        <div class="ai-error-card__title-group">
+          <span class="material-symbols-outlined">error</span>
+          <span class="ai-error-card__title">Search Strategy Generation Failed</span>
+        </div>
+        <button class="ai-error-card__dismiss" @click="criteriaStore.searchStrategyError = null">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="ai-error-card__body">
+        <p class="ai-error-card__prefix">{{ formatLlmError(searchStrategyError).prefix }}</p>
+        <p v-if="formatLlmError(searchStrategyError).cause" class="ai-error-card__cause">
+          <strong>Cause:</strong> {{ formatLlmError(searchStrategyError).cause }}
+        </p>
+        <p v-if="formatLlmError(searchStrategyError).solution" class="ai-error-card__solution">
+          <strong>Solution:</strong> {{ formatLlmError(searchStrategyError).solution }}
+        </p>
+        <details class="ai-error-card__details">
+          <summary>Technical details</summary>
+          <pre>{{ searchStrategyError }}</pre>
+        </details>
+        <a
+          :href="formatLlmError(searchStrategyError).helpLink"
+          class="ai-error-card__help-link"
+          target="_blank"
+        >
+          <span class="material-symbols-outlined" style="font-size: 14px">help</span>
+          Troubleshooting guide
+        </a>
+      </div>
+    </div>
+
+    <!-- Search Strategy result card (session-scoped) -->
+    <SearchStrategyCard
+      v-if="searchStrategyResult"
+      :result="searchStrategyResult"
+      @dismiss="criteriaStore.searchStrategyResult = null"
+    />
 
     <!-- Section 2: Inclusion Criteria -->
     <section class="section-panel">
@@ -373,15 +482,29 @@ async function handleExclusionAi(): Promise<void> {
           <span class="material-symbols-outlined">auto_awesome</span>
           <span class="ai-critique-card__title">AI Critique - Inclusion Criteria</span>
         </div>
-        <button class="ai-critique-card__dismiss" @click="criteriaStore.inclusionCritique = ''">
-          <span class="material-symbols-outlined">close</span>
-        </button>
+        <div class="ai-critique-card__header-actions">
+          <button
+            class="ai-critique-card__toggle"
+            :title="criteriaStore.inclusionCritiqueExpanded ? 'Collapse' : 'Expand'"
+            @click="
+              criteriaStore.inclusionCritiqueExpanded = !criteriaStore.inclusionCritiqueExpanded
+            "
+          >
+            <span class="material-symbols-outlined">{{
+              criteriaStore.inclusionCritiqueExpanded ? 'expand_less' : 'expand_more'
+            }}</span>
+          </button>
+          <button class="ai-critique-card__dismiss" @click="dismissInclusionCritique">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
       </div>
-      <div class="ai-critique-card__body">
-        <p v-for="(para, i) in critiqueParagraphs(inclusionCritiqueText)" :key="i">
-          {{ para }}
-        </p>
-      </div>
+      <!-- eslint-disable-next-line vue/no-v-html -- LLM-generated critique prose parsed by marked -->
+      <div
+        v-if="criteriaStore.inclusionCritiqueExpanded"
+        class="markdown-content ai-critique-card__body"
+        v-html="renderCritiqueMarkdown(inclusionCritiqueText)"
+      ></div>
     </div>
 
     <!-- Section 3: Exclusion Criteria -->
@@ -503,15 +626,29 @@ async function handleExclusionAi(): Promise<void> {
           <span class="material-symbols-outlined">auto_awesome</span>
           <span class="ai-critique-card__title">AI Critique - Exclusion Criteria</span>
         </div>
-        <button class="ai-critique-card__dismiss" @click="criteriaStore.exclusionCritique = ''">
-          <span class="material-symbols-outlined">close</span>
-        </button>
+        <div class="ai-critique-card__header-actions">
+          <button
+            class="ai-critique-card__toggle"
+            :title="criteriaStore.exclusionCritiqueExpanded ? 'Collapse' : 'Expand'"
+            @click="
+              criteriaStore.exclusionCritiqueExpanded = !criteriaStore.exclusionCritiqueExpanded
+            "
+          >
+            <span class="material-symbols-outlined">{{
+              criteriaStore.exclusionCritiqueExpanded ? 'expand_less' : 'expand_more'
+            }}</span>
+          </button>
+          <button class="ai-critique-card__dismiss" @click="dismissExclusionCritique">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
       </div>
-      <div class="ai-critique-card__body">
-        <p v-for="(para, i) in critiqueParagraphs(exclusionCritiqueText)" :key="i">
-          {{ para }}
-        </p>
-      </div>
+      <!-- eslint-disable-next-line vue/no-v-html -- LLM-generated critique prose parsed by marked -->
+      <div
+        v-if="criteriaStore.exclusionCritiqueExpanded"
+        class="markdown-content ai-critique-card__body"
+        v-html="renderCritiqueMarkdown(exclusionCritiqueText)"
+      ></div>
     </div>
   </div>
 </template>
@@ -901,6 +1038,40 @@ async function handleExclusionAi(): Promise<void> {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 0.75rem;
+}
+
+/* Collapse/expand + close actions wrapper for the critique card header
+ * (same shape as the search-strategy-card header actions). */
+.ai-critique-card__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Collapse/expand chevron toggle for the critique cards. Values mirror
+ * `.search-strategy-card__toggle` so the two card families stay visually
+ * consistent. */
+.ai-critique-card__toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  display: flex;
+  align-items: center;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+
+.ai-critique-card__toggle:hover {
+  color: #6b21a8;
+  background-color: #ede9fe;
+}
+
+.ai-critique-card__toggle .material-symbols-outlined {
+  font-size: 20px;
 }
 
 .ai-critique-card__title-group {
