@@ -380,25 +380,6 @@ async function handleSearchStrategy(): Promise<void> {
         </button>
       </div>
 
-      <!-- Add new inclusion criterion -->
-      <div class="add-criterion-row">
-        <input
-          v-model="newInclusionText"
-          type="text"
-          class="add-criterion-row__input"
-          placeholder="Define an inclusion criterion..."
-          @keyup.enter="addInclusion"
-        />
-        <select v-model="newInclusionPriority" class="priority-select">
-          <option value="critical">Critical</option>
-          <option value="high">High</option>
-          <option value="standard">Standard</option>
-          <option value="low">Low</option>
-          <option value="optional">Optional</option>
-        </select>
-        <button class="btn-primary-sm" @click="addInclusion">Add</button>
-      </div>
-
       <div class="space-y-4 mt-4">
         <div
           v-for="c in inclusionCriteria"
@@ -438,6 +419,33 @@ async function handleSearchStrategy(): Promise<void> {
             </button>
           </div>
         </div>
+
+        <!-- Add new inclusion criterion (at the END, like Research Aims) -->
+        <div class="criterion-add-row">
+          <span class="aim-row__number">{{ inclusionCriteria.length + 1 }}</span>
+          <select
+            v-model="newInclusionPriority"
+            class="priority-select criterion-add-row__priority"
+          >
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="standard">Standard</option>
+            <option value="low">Low</option>
+            <option value="optional">Optional</option>
+          </select>
+
+          <input
+            v-model="newInclusionText"
+            type="text"
+            class="criterion-add-row__input"
+            placeholder="Add new inclusion criterion..."
+            @keyup.enter="addInclusion"
+          />
+          <button class="btn-primary-sm criterion-add-row__add-btn" @click="addInclusion">
+            Add
+          </button>
+        </div>
+        <p class="criterion-add-row__hint">Hit enter or click Add button to save criterion</p>
       </div>
     </section>
 
@@ -499,12 +507,11 @@ async function handleSearchStrategy(): Promise<void> {
           </button>
         </div>
       </div>
-      <!-- eslint-disable-next-line vue/no-v-html -- LLM-generated critique prose parsed by marked -->
       <div
         v-if="criteriaStore.inclusionCritiqueExpanded"
         class="markdown-content ai-critique-card__body"
         v-html="renderCritiqueMarkdown(inclusionCritiqueText)"
-      ></div>
+      />
     </div>
 
     <!-- Section 3: Exclusion Criteria -->
@@ -522,25 +529,6 @@ async function handleSearchStrategy(): Promise<void> {
           <span class="material-symbols-outlined">auto_awesome</span>
           {{ exclusionButtonLabel }}
         </button>
-      </div>
-
-      <!-- Add new exclusion criterion -->
-      <div class="add-criterion-row">
-        <input
-          v-model="newExclusionText"
-          type="text"
-          class="add-criterion-row__input"
-          placeholder="Define an exclusion criterion..."
-          @keyup.enter="addExclusion"
-        />
-        <select v-model="newExclusionPriority" class="priority-select">
-          <option value="critical">Critical</option>
-          <option value="high">High</option>
-          <option value="standard">Standard</option>
-          <option value="low">Low</option>
-          <option value="optional">Optional</option>
-        </select>
-        <button class="btn-primary-sm" @click="addExclusion">Add</button>
       </div>
 
       <div class="space-y-4 mt-4">
@@ -582,6 +570,33 @@ async function handleSearchStrategy(): Promise<void> {
             </button>
           </div>
         </div>
+
+        <!-- Add new exclusion criterion (at the END, like Research Aims) -->
+        <div class="criterion-add-row">
+          <span class="aim-row__number">{{ exclusionCriteria.length + 1 }}</span>
+          <select
+            v-model="newExclusionPriority"
+            class="priority-select criterion-add-row__priority"
+          >
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="standard">Standard</option>
+            <option value="low">Low</option>
+            <option value="optional">Optional</option>
+          </select>
+
+          <input
+            v-model="newExclusionText"
+            type="text"
+            class="criterion-add-row__input"
+            placeholder="Add new exclusion criterion..."
+            @keyup.enter="addExclusion"
+          />
+          <button class="btn-primary-sm criterion-add-row__add-btn" @click="addExclusion">
+            Add
+          </button>
+        </div>
+        <p class="criterion-add-row__hint">Hit enter or click Add button to save criterion</p>
       </div>
     </section>
 
@@ -643,12 +658,11 @@ async function handleSearchStrategy(): Promise<void> {
           </button>
         </div>
       </div>
-      <!-- eslint-disable-next-line vue/no-v-html -- LLM-generated critique prose parsed by marked -->
       <div
         v-if="criteriaStore.exclusionCritiqueExpanded"
         class="markdown-content ai-critique-card__body"
         v-html="renderCritiqueMarkdown(exclusionCritiqueText)"
-      ></div>
+      />
     </div>
   </div>
 </template>
@@ -785,41 +799,66 @@ async function handleSearchStrategy(): Promise<void> {
   opacity: 1;
 }
 
-/* Add criterion row */
-.add-criterion-row {
+/* Criterion add-row (mirrors the Research Aims dashed-input pattern, extended
+ * with a priority dropdown + Add button on the left of the input). Sits at the
+ * END of the criteria list, with a number prefix matching the existing cards. */
+.criterion-add-row {
   display: flex;
-  gap: 0.5rem;
   align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
-@media (max-width: 767px) {
-  .add-criterion-row {
-    flex-wrap: wrap;
-  }
-
-  .add-criterion-row__input {
-    flex: 1 1 100%;
-  }
-
-  .priority-select {
-    flex: 1;
-  }
+.criterion-add-row__priority {
+  width: auto;
+  flex-shrink: 0;
 }
 
-.add-criterion-row__input {
+.criterion-add-row__add-btn {
+  flex-shrink: 0;
+}
+
+.criterion-add-row__input {
   flex: 1;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #c7c4d8;
-  border-radius: 0.5rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed #e2e8f0;
+  padding: 0.5rem 0;
   font-size: 14px;
   line-height: 20px;
+  color: #94a3b8;
+  font-style: italic;
   outline: none;
   transition: border-color 0.15s;
 }
 
-.add-criterion-row__input:focus {
-  border-color: #3525cd;
-  box-shadow: 0 0 0 1px #3525cd;
+.criterion-add-row__input::placeholder {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.criterion-add-row__input:focus {
+  border-bottom-color: #4f46e5;
+  color: #1b1b24;
+  font-style: normal;
+}
+
+.criterion-add-row__hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0.25rem 0 0 0;
+  padding-left: 2.75rem;
+}
+
+@media (max-width: 767px) {
+  .criterion-add-row {
+    flex-wrap: wrap;
+  }
+
+  .criterion-add-row__input {
+    flex: 1 1 100%;
+    order: 99;
+  }
 }
 
 /* Priority select */

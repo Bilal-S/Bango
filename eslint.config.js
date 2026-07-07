@@ -47,5 +47,17 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': 'off',
     },
   },
+  // Per-file override: the critique cards in criteria-editor.vue render
+  // LLM-generated Markdown via `v-html` after parsing with `marked`. The
+  // content is model output (no user-controlled HTML/wikilinks), matching
+  // the security stance of summary-view.vue / chat-view.vue / wiki-page-*.vue.
+  // File-level disable is used so multi-line `v-html` elements stay lint-clean
+  // regardless of how the formatter wraps them.
+  {
+    files: ['src/views/criteria-editor.vue'],
+    rules: {
+      'vue/no-v-html': 'off',
+    },
+  },
   prettierConfig
 );
