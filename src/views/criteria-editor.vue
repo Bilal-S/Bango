@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, nextTick, watch } from 'vue';
 import { marked } from 'marked';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
@@ -8,6 +8,8 @@ import { formatLlmError } from '@/utils/llm-error';
 import type { SearchStrategyResult } from '@/types/search-strategy';
 import SearchStrategyCard from '@/components/search-strategy-card.vue';
 import type { Priority } from '@/types';
+import { useInlineEdit } from '@/composables/use-inline-edit';
+import type { Criterion, ResearchAim } from '@/types';
 
 const criteriaStore = useCriteriaStore();
 const llmConfigStore = useLlmConfigStore();
@@ -121,6 +123,176 @@ async function deleteCriterion(id: string): Promise<void> {
   await tauriCommand('delete_criterion', { id });
   await refetch();
 }
+
+async function updateAim(id: string, text: string): Promise<void> {
+  await tauriCommand('update_research_aim', {
+    request: { id, text },
+  });
+  await refetch();
+}
+
+async function updateCriterionText(id: string, text: string, priority: Priority): Promise<void> {
+  await tauriCommand('update_criterion', {
+    request: { id, text, priority },
+  });
+  await refetch();
+}
+
+// ── Inline edit controllers ───────────────────────────────────────────
+// One controller for aims, one for criteria (covers both inclusion and
+// exclusion; criterion ids are globally-unique UUIDs so a single controller
+// can track which one is being edited without cross-section confusion).
+const aimEdit = useInlineEdit<ResearchAim>({
+  saveItem: async (item, newText) => {
+    await updateAim(item.id, newText);
+  },
+  deleteItem: async (item) => {
+    await deleteAim(item.id);
+  },
+  getText: (item) => item.text,
+});
+
+const criterionEdit = useInlineEdit<Criterion>({
+  saveItem: async (item, newText) => {
+    await updateCriterionText(item.id, newText, item.priority);
+  },
+  deleteItem: async (item) => {
+    await deleteCriterion(item.id);
+  },
+  getText: (item) => item.text,
+});
+
+/**
+ * Character offset (within the read-only text) where the user double-clicked,
+ * captured BEFORE the input swaps in. Used to place the edit caret at the click
+ * point so typing inserts at the cursor instead of replacing a select-all.
+ * `null` means "no offset captured -> default to position 0".
+ */
+const pendingCaretOffset = ref<number | null>(null);
+
+/**
+ * Compute the character offset of a text node under a (clientX, clientY) point.
+ * Uses the standard `caretPositionFromPoint` when available (Firefox) and the
+ * widely-supported WebKit/Chromium `caretRangeFromPoint` fallback. Returns `null`
+ * if neither API is available or the point is not over a text node.
+ */
+function caretOffsetAtPoint(x: number, y: number): number | null {
+  // Standard (Firefox): returns { offsetNode, offset }.
+  const perf = document as unknown as {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+  };
+  if (typeof perf.caretPositionFromPoint === 'function') {
+    const pos = perf.caretPositionFromPoint(x, y);
+    if (pos && typeof pos.offset === 'number') return pos.offset;
+    return null;
+  }
+  // WebKit / Chromium: returns a Range whose start is the caret.
+  const doc = document as unknown as {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  if (typeof doc.caretRangeFromPoint === 'function') {
+    const range = doc.caretRangeFromPoint(x, y);
+    if (range) return range.startOffset;
+  }
+  return null;
+}
+
+/**
+ * Double-click handler wrapper: capture the caret offset at the click point
+ * (computed against the read-only text element that was clicked) BEFORE entering
+ * edit mode, then defer to `controller.startEdit`. The stored offset is consumed
+ * by `focusInlineInput` once the <input> mounts.
+ */
+function handleInlineDblClick<T extends { id: string }>(
+  item: T,
+  event: MouseEvent,
+  controller: { startEdit: (item: T) => void }
+): void {
+  pendingCaretOffset.value = caretOffsetAtPoint(event.clientX, event.clientY);
+  controller.startEdit(item);
+}
+
+/**
+ * Plain template ref for whichever inline-edit <textarea> is currently mounted.
+ * At most one is visible at a time (only the editing row renders a textarea), so
+ * a single shared ref is sufficient. Deliberately NOT a function ref: a
+ * function ref would re-run on every render (including the re-render triggered
+ * by `v-model` on each keystroke) and re-focus / re-set the caret, which would
+ * jump the caret back to position 0 while the user is typing.
+ */
+const inlineInputEl = ref<HTMLTextAreaElement | null>(null);
+
+/**
+ * Auto-grow the editing textarea to fit its content (min 2 rows, max ~6 rows
+ * before it scrolls). Called once on edit-start and on every `@input` so the
+ * box always matches the text height. Idempotent and cheap.
+ */
+function autoResizeTextarea(): void {
+  const el = inlineInputEl.value;
+  if (!(el instanceof HTMLTextAreaElement)) return;
+  el.style.height = 'auto';
+  // scrollHeight is the content height; clamp to a 6-row cap (~144px at 24px
+  // line-height) so very long text scrolls instead of growing unbounded.
+  el.style.height = Math.min(el.scrollHeight, 144) + 'px';
+}
+
+/**
+ * Focus the inline-edit textarea and place the edit caret (NOT a selection) at
+ * the captured click offset, falling back to position 0. Runs ONCE per
+ * edit-session start, triggered by the `watch` on the editing id - never during
+ * typing. Also auto-resizes the textarea so multi-line text fits on open.
+ */
+function placeCaretOnce(): void {
+  const el = inlineInputEl.value;
+  if (!(el instanceof HTMLTextAreaElement)) return;
+  autoResizeTextarea();
+  el.focus();
+  const value = el.value;
+  const requested = pendingCaretOffset.value;
+  pendingCaretOffset.value = null;
+  // Clamp to [0, value.length]; default to 0 when no offset was captured.
+  const pos = requested === null ? 0 : Math.max(0, Math.min(requested, value.length));
+  el.setSelectionRange(pos, pos);
+}
+
+/**
+ * Keydown handler for the inline-edit <textarea>. Chat-dialog convention:
+ *   - Enter (no shift)  -> commit (save)
+ *   - Shift+Enter       -> newline (default textarea behavior, no preventDefault)
+ * Only listens for Enter; Escape and blur are handled by their own bindings.
+ */
+function onTextareaEnter<T extends { id: string }>(
+  item: T,
+  event: KeyboardEvent,
+  controller: { commitEdit: (item: T) => Promise<void> }
+): void {
+  if (event.shiftKey) return; // let the newline through
+  event.preventDefault();
+  void controller.commitEdit(item);
+}
+
+/**
+ * Watch the aim editing id: when it transitions to a real id (entering edit
+ * mode), wait one tick for the <input> to mount, then place the caret once.
+ * Subsequent keystrokes update `draftText` via `v-model` but do NOT re-fire
+ * this watcher (the id does not change while typing), so the caret is never
+ * disturbed mid-edit.
+ */
+watch(aimEdit.editingId, (next, prev) => {
+  if (prev === null && next !== null) {
+    nextTick(placeCaretOnce);
+  }
+});
+
+/**
+ * Same watch for criteria (covers both inclusion + exclusion; only one
+ * criterion can be edited at a time so a single watcher suffices).
+ */
+watch(criterionEdit.editingId, (next, prev) => {
+  if (prev === null && next !== null) {
+    nextTick(placeCaretOnce);
+  }
+});
 
 function priorityBorderClass(priority: Priority): string {
   const map: Record<Priority, string> = {
@@ -303,7 +475,27 @@ async function handleSearchStrategy(): Promise<void> {
       <div class="space-y-3">
         <div v-for="(aim, index) in aims" :key="aim.id" class="aim-row group">
           <span class="aim-row__number">{{ index + 1 }}</span>
-          <span class="aim-row__text">{{ aim.text }}</span>
+          <div v-if="aimEdit.isEditing(aim.id)" class="inline-edit-wrap">
+            <textarea
+              ref="inlineInputEl"
+              v-model="aimEdit.draftText.value"
+              rows="2"
+              class="inline-edit-textarea"
+              :class="{ 'inline-edit-textarea--saving': aimEdit.saving.value }"
+              @keydown.enter="onTextareaEnter(aim, $event, aimEdit)"
+              @keydown.escape.prevent="aimEdit.cancelEdit()"
+              @input="autoResizeTextarea"
+              @blur="aimEdit.commitEdit(aim)"
+            />
+            <p class="inline-edit-hint">Hit enter to save and SHIFT-ENTER for new line.</p>
+          </div>
+          <span
+            v-else
+            class="aim-row__text aim-row__text--editable"
+            title="Double-click to edit"
+            @dblclick="handleInlineDblClick(aim, $event, aimEdit)"
+            >{{ aim.text }}</span
+          >
           <button class="aim-row__delete" @click="deleteAim(aim.id)">
             <span class="material-symbols-outlined">delete</span>
           </button>
@@ -394,7 +586,28 @@ async function handleSearchStrategy(): Promise<void> {
             <label class="criterion-card__label" :class="priorityLabelClass(c.priority)">
               {{ priorityLabel(c.priority) }}
             </label>
-            <p class="criterion-card__text">{{ c.text }}</p>
+            <div v-if="criterionEdit.isEditing(c.id)" class="inline-edit-wrap">
+              <textarea
+                ref="inlineInputEl"
+                v-model="criterionEdit.draftText.value"
+                rows="2"
+                class="inline-edit-textarea"
+                :class="{ 'inline-edit-textarea--saving': criterionEdit.saving.value }"
+                @keydown.enter="onTextareaEnter(c, $event, criterionEdit)"
+                @keydown.escape.prevent="criterionEdit.cancelEdit()"
+                @input="autoResizeTextarea"
+                @blur="criterionEdit.commitEdit(c)"
+              />
+              <p class="inline-edit-hint">Hit enter to save and SHIFT-ENTER for new line.</p>
+            </div>
+            <p
+              v-else
+              class="criterion-card__text criterion-card__text--editable"
+              title="Double-click to edit"
+              @dblclick="handleInlineDblClick(c, $event, criterionEdit)"
+            >
+              {{ c.text }}
+            </p>
           </div>
           <div class="criterion-card__actions">
             <select
@@ -545,7 +758,28 @@ async function handleSearchStrategy(): Promise<void> {
             <label class="criterion-card__label" :class="priorityLabelClass(c.priority)">
               {{ priorityLabel(c.priority) }}
             </label>
-            <p class="criterion-card__text">{{ c.text }}</p>
+            <div v-if="criterionEdit.isEditing(c.id)" class="inline-edit-wrap">
+              <textarea
+                ref="inlineInputEl"
+                v-model="criterionEdit.draftText.value"
+                rows="2"
+                class="inline-edit-textarea"
+                :class="{ 'inline-edit-textarea--saving': criterionEdit.saving.value }"
+                @keydown.enter="onTextareaEnter(c, $event, criterionEdit)"
+                @keydown.escape.prevent="criterionEdit.cancelEdit()"
+                @input="autoResizeTextarea"
+                @blur="criterionEdit.commitEdit(c)"
+              />
+              <p class="inline-edit-hint">Hit enter to save and SHIFT-ENTER for new line.</p>
+            </div>
+            <p
+              v-else
+              class="criterion-card__text criterion-card__text--editable"
+              title="Double-click to edit"
+              @dblclick="handleInlineDblClick(c, $event, criterionEdit)"
+            >
+              {{ c.text }}
+            </p>
           </div>
           <div class="criterion-card__actions">
             <select
@@ -758,6 +992,69 @@ async function handleSearchStrategy(): Promise<void> {
   color: #1b1b24;
 }
 
+/* Inline-edit affordances: read-only text shows a text caret on hover + a
+ * tooltip hint; the editing <input> reuses the dashed-underline aesthetic of
+ * the "add new" row so inline editing looks native to the section. */
+.aim-row__text--editable {
+  cursor: text;
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  margin: -0.125rem -0.25rem;
+  transition: background-color 0.15s;
+}
+
+.aim-row__text--editable:hover {
+  background-color: #f8fafc;
+}
+
+/* Shared inline-edit textarea styles - one consistent multi-line editor
+ * across Research Aims, Inclusion, and Exclusion sections. Mirrors the
+ * focused-border + soft-ring aesthetic of the former criterion-card input,
+ * extended to a 2-row auto-growing textarea so multi-line text is easy to
+ * edit. A small hint line under the box matches the "add new" row pattern. */
+.inline-edit-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.inline-edit-textarea {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #4f46e5;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  font-size: 14px;
+  line-height: 20px;
+  color: #1b1b24;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
+  /* Min 2 rows, max ~6 rows (auto-grow via autoResizeTextarea). */
+  min-height: 48px;
+  max-height: 144px;
+  overflow-y: auto;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.inline-edit-textarea:focus {
+  border-color: #3525cd;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.2);
+}
+
+.inline-edit-textarea--saving {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.inline-edit-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0.25rem 0 0 0;
+}
+
 .aim-row__input {
   flex: 1;
   background: transparent;
@@ -934,6 +1231,18 @@ async function handleSearchStrategy(): Promise<void> {
   font-size: 14px;
   line-height: 20px;
   color: #1b1b24;
+}
+
+.criterion-card__text--editable {
+  cursor: text;
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.25rem;
+  margin: -0.125rem -0.25rem;
+  transition: background-color 0.15s;
+}
+
+.criterion-card__text--editable:hover {
+  background-color: #f8fafc;
 }
 
 .criterion-card__actions {

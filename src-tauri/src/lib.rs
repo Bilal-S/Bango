@@ -192,6 +192,7 @@ pub fn run() {
             commands::dedup::resolve_fuzzy_match,
             commands::criteria::get_research_aims,
             commands::criteria::create_research_aim,
+            commands::criteria::update_research_aim,
             commands::criteria::delete_research_aim,
             commands::criteria::get_criteria,
             commands::criteria::create_criterion,

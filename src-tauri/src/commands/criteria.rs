@@ -38,6 +38,22 @@ pub fn delete_research_aim(db_state: State<'_, DbState>, id: String) -> Result<(
     criteria_repo::delete_aim(&conn, &id)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAimRequest {
+    pub id: String,
+    pub text: String,
+}
+
+#[tauri::command]
+pub fn update_research_aim(
+    db_state: State<'_, DbState>,
+    request: UpdateAimRequest,
+) -> Result<ResearchAim, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    criteria_repo::update_aim(&conn, &request.id, &request.text)
+}
+
 #[tauri::command]
 pub fn get_criteria(db_state: State<'_, DbState>) -> Result<Vec<Criterion>, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;

@@ -450,8 +450,13 @@ watch(
                 priority values.
               </li>
               <li>
-                <strong>Edit / Delete:</strong> Actions on each row to modify text or permanently
-                delete criteria.
+                <strong>Inline Edit:</strong> Double-click any aim or criterion text to edit it in
+                place in a multi-line box. Press <kbd>Enter</kbd> or click outside to save;
+                <kbd>Shift</kbd>+<kbd>Enter</kbd> inserts a new line; press <kbd>Esc</kbd> to
+                cancel. Saving an empty field deletes the item.
+              </li>
+              <li>
+                <strong>Delete:</strong> The trash icon on each row permanently deletes the item.
               </li>
             </ul>
           </div>
