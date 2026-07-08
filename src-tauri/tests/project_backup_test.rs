@@ -2,6 +2,7 @@
 //! Verifies all tables survive serialize → deserialize correctly.
 
 use bango_lib::db::article_repo;
+use bango_lib::db::audit_repo;
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::export::project::{export_project, import_project};
@@ -444,4 +445,102 @@ fn test_export_import_preserves_article_data() {
     assert_eq!(doi, "10.1234/test");
     assert_eq!(journal, "Nature");
     assert_eq!(year, 2024);
+}
+
+/// System-level audit entries (article_id = NULL, details = NULL) must survive
+/// a backup/restore round-trip with NULLs intact. Regression test for the bug
+/// where `get_str` returned "" for JSON null, corrupting NULL → empty string.
+#[test]
+fn export_import_preserves_null_audit_article_id() {
+    let conn = setup_db();
+
+    // Seed an article so the FK on article-bound entries doesn't fail.
+    let a = article_repo::insert_article(&conn, &new_article("Test Article")).expect("insert");
+    article_repo::move_to_working(&conn, &a.id).expect("move to working");
+
+    // Create a system-level audit entry (article_id = NULL, details = NULL).
+    audit_repo::log_error(&conn, "System error: LLM connection failed").expect("log_error");
+
+    // Create an article-bound audit entry for comparison.
+    audit_repo::create_entry(&conn, &a.id, "import", None, None, Some("Imported"), "system")
+        .expect("create_entry");
+
+    assert_eq!(count_rows(&conn, "audit_entries"), 2);
+
+    // Export → import into a fresh DB.
+    let json = export_project(&conn).expect("export");
+    let conn2 = setup_db();
+    import_project(&conn2, &json).expect("import");
+
+    // Both rows must survive.
+    assert_eq!(count_rows(&conn2, "audit_entries"), 2);
+
+    // The system-level row must still have article_id IS NULL (not "").
+    let null_count: i64 = conn2
+        .query_row("SELECT COUNT(*) FROM audit_entries WHERE article_id IS NULL", [], |row| {
+            row.get(0)
+        })
+        .expect("count null article_id");
+    assert_eq!(null_count, 1, "system-level audit entry must preserve article_id = NULL");
+
+    // The system-level row must also have details preserved.
+    let details: String = conn2
+        .query_row("SELECT details FROM audit_entries WHERE article_id IS NULL", [], |row| {
+            row.get(0)
+        })
+        .expect("query system audit details");
+    assert_eq!(details, "System error: LLM connection failed");
+
+    // The article-bound row must have the correct article_id.
+    let bound_id: String = conn2
+        .query_row("SELECT article_id FROM audit_entries WHERE article_id IS NOT NULL", [], |row| {
+            row.get(0)
+        })
+        .expect("query article-bound audit");
+    assert_eq!(bound_id, a.id);
+}
+
+/// Audit entries with NULL details (e.g. dedup_flag with no details) must
+/// survive a round-trip with details = NULL, not empty string.
+#[test]
+fn export_import_preserves_null_audit_details() {
+    let conn = setup_db();
+
+    let a = article_repo::insert_article(&conn, &new_article("Test Article")).expect("insert");
+    article_repo::move_to_working(&conn, &a.id).expect("move to working");
+
+    // Create an audit entry with details = NULL.
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, details, source) \
+         VALUES (?1, ?2, ?3, 'dedup_flag', NULL, 'user')",
+        rusqlite::params![id, a.id, now],
+    )
+    .expect("insert null-details audit");
+
+    // Verify pre-condition.
+    let is_null: bool = conn
+        .query_row(
+            "SELECT details IS NULL FROM audit_entries WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .expect("check details null");
+    assert!(is_null, "pre: details must be NULL");
+
+    // Export → import.
+    let json = export_project(&conn).expect("export");
+    let conn2 = setup_db();
+    import_project(&conn2, &json).expect("import");
+
+    // Details must still be NULL.
+    let is_null: bool = conn2
+        .query_row(
+            "SELECT details IS NULL FROM audit_entries WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .expect("check details null after import");
+    assert!(is_null, "post: details must remain NULL after round-trip");
 }

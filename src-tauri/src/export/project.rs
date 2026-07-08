@@ -656,15 +656,26 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
     }
 
-    // Restore audit entries
+    // Restore audit entries.
+    //
+    // `article_id` and `details` are nullable columns: system-level entries
+    // (errors, wiki warnings, search strategies) store NULL. The export path
+    // serializes NULL as JSON null; `get_str` would return "" for those,
+    // corrupting the round-trip. We use Option<String> extraction here so
+    // rusqlite maps None → SQL NULL.
     for ae in &backup.audit_entries {
         let id = get_str(ae, "id");
-        let article_id = get_str(ae, "articleId");
+        let article_id: Option<String> = ae
+            .get("articleId")
+            .or_else(|| ae.get("article_id"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let timestamp = get_str(ae, "timestamp");
         let action = get_str(ae, "action");
         let from_status = get_str_field(ae, "fromStatus", "from_status");
         let to_status = get_str_field(ae, "toStatus", "to_status");
-        let details = get_str(ae, "details");
+        let details: Option<String> =
+            ae.get("details").and_then(|v| v.as_str()).map(|s| s.to_string());
         let source = get_str(ae, "source");
         tx.execute(
             "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
