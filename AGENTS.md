@@ -84,7 +84,7 @@ Top-level source directories. No child `AGENTS.md` files exist yet; these entrie
 describe each durable boundary so agents can locate the right area. Create a child
 `AGENTS.md` under a folder only when that folder grows its own local rules.
 
-- **`src-tauri/src/`** - Rust backend (Tauri 2.x). Owned modules: `db/` (repos +
+- **`src-tauri/src/`** - Rust backend (Tauri 2.x). Article state machine (§4.2 of the spec): **moving an article back to `working` from any other status (`included`/`rejected`/`duplicate`) always resets the screening flags (`screened_at = NULL`, `screening_error = 0`)** so the article becomes eligible for re-screening on the next run. Both `update_article_status` and `bulk_update_article_status` enforce this rule. Without the reset the stale `screened_at` timestamp survives the status change and excludes the article from `get_next_unscreened_working_batch`, leaving it stuck in a "previously screened" limbo that surfaces in the Error tab even though `screening_error` is `0`. The audit entry notes "(screening flags reset for re-screening)" when the reset fires. Tested in `tests/status_transition_screening_flags_test.rs`. Owned modules: `db/` (repos +
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern), `screening/`,
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
   (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:

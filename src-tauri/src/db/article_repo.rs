@@ -633,10 +633,34 @@ pub fn update_article_status(
             row.get(0)
         })?;
 
-    conn.execute(
-        "UPDATE articles SET status = ?1, manual_override = 1, changed_at = datetime('now') WHERE id = ?2",
-        params![new_status, article_id],
-    )?;
+    // When moving an article back to 'working', reset the screening flags so the
+    // article becomes eligible for re-screening on the next run. Without this the
+    // stale `screened_at` timestamp survives the status change and excludes the
+    // article from `get_next_unscreened_working_batch`, leaving it stuck in a
+    // "previously screened" limbo that surfaces in the Error tab even though
+    // `screening_error` is 0. See the state machine in `docs/bango-v4-spec.md`
+    // §4.2 - "Working ↔ Included ↔ Rejected" is an explicit allowed transition.
+    if new_status == "working" {
+        conn.execute(
+            "UPDATE articles SET status = ?1, manual_override = 1, \
+             screened_at = NULL, screening_error = 0, changed_at = datetime('now') \
+             WHERE id = ?2",
+            params![new_status, article_id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE articles SET status = ?1, manual_override = 1, changed_at = datetime('now') \
+             WHERE id = ?2",
+            params![new_status, article_id],
+        )?;
+    }
+
+    let audit_detail =
+        if new_status == "working" && old_status != "working" && old_status != "duplicate" {
+            "Manual status change (screening flags reset for re-screening)"
+        } else {
+            "Manual status change"
+        };
 
     crate::db::audit_repo::create_entry(
         conn,
@@ -644,7 +668,7 @@ pub fn update_article_status(
         "status_change",
         Some(&old_status),
         Some(new_status),
-        Some("Manual status change"),
+        Some(audit_detail),
         "user",
     )?;
 
@@ -976,6 +1000,12 @@ pub fn reset_working_list(conn: &Connection) -> Result<usize, AppError> {
 }
 
 /// Bulk update status for multiple articles in a single transaction.
+///
+/// When moving articles back to 'working', reset the screening flags
+/// (`screened_at`, `screening_error`) so the articles become eligible for
+/// re-screening on the next run. This mirrors the single-article
+/// `update_article_status` behavior - see the state-machine note there and
+/// in `docs/bango-v4-spec.md` §4.2.
 pub fn bulk_update_article_status(
     conn: &Connection,
     ids: &[String],
@@ -986,10 +1016,21 @@ pub fn bulk_update_article_status(
     }
     let mut count = 0usize;
     for id in ids {
-        let rows = conn.execute(
-            "UPDATE articles SET status = ?1, manual_override = 1, changed_at = datetime('now') WHERE id = ?2",
-            params![new_status, id],
-        )?;
+        let rows = if new_status == "working" {
+            conn.execute(
+                "UPDATE articles SET status = ?1, manual_override = 1, \
+                 screened_at = NULL, screening_error = 0, changed_at = datetime('now') \
+                 WHERE id = ?2",
+                params![new_status, id],
+            )?
+        } else {
+            conn.execute(
+                "UPDATE articles SET status = ?1, manual_override = 1, \
+                 changed_at = datetime('now') \
+                 WHERE id = ?2",
+                params![new_status, id],
+            )?
+        };
         count += rows;
     }
     Ok(count)
