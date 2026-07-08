@@ -193,6 +193,7 @@ fn build_batch_prompt(
          slug: <kebab-case-slug>\n\
          summary: \"<1-2 sentence summary>\"\n\
          status: draft\n\
+         source_articles: [\"<article-id>\"]\n\
          links: []\n\
          ---\n\
          <Markdown body with [[wikilinks]] to other pages>\n\n\
@@ -206,8 +207,12 @@ fn build_batch_prompt(
          (e.g. randomized-controlled-trial, meta-analysis, systematic-review, \
          difference-in-differences). Only create pages for methods that \
          genuinely appear in the source material. \
-         2. THEMATIC CROSS-CUTTING synthesis pages that connect multiple \
-         sources (e.g. 'Sugar Reformulation', 'Health Inequalities Impact'). \
+         2. TOPICAL and THEMATIC pages that emerge from the sources. This \
+         includes cross-cutting synthesis (e.g. 'Sugar Reformulation', 'Health \
+         Inequalities Impact') AND section/aspect pages that a source naturally \
+         covers (e.g. 'Study Population', 'Intervention Design', 'Policy \
+         Context'). Use the synthesis template. Create pages for entities and \
+         themes that genuinely appear in the source material. \
          3. Any NEW author pages for authors that appear only in uploaded \
          documents (see the author directive above). \
          Only create pages for entities that genuinely appear in the source \
@@ -466,26 +471,42 @@ pub async fn run_chunked_ingest(
         }
     }
 
-    // Tier A1 grounding gate: run the lint and append the count of pages
-    // failing the ERROR-level provenance check (missing `source_articles`) to
-    // the report. The WARNING-level check (missing `[^art-]` citations) is
-    // surfaced via the standalone `wiki_lint` command instead of the ingest
-    // report, so a missing citation does not fail an otherwise-successful
-    // ingest. Failures are non-fatal (pages are already written) but surface
-    // in the report so the UI + diagnostics can show the user which pages need
-    // review. Author/source pages are exempt (pre-seeded).
+    // Tier A1 grounding gate: run the lint and append the count + slugs of
+    // pages failing the provenance checks to the report. The message includes
+    // the page slugs + the specific failure reason (missing source_articles vs
+    // missing [^art-id] citations) so the user can see exactly which pages are
+    // affected without having to run the standalone Lint command. Failures are
+    // non-fatal (pages are already written) but surface in the report + the
+    // audit log (via log_wiki_ingest_warnings in the command layer) so the UI
+    // + Diagnostics can show the user which pages need review. Author/source
+    // pages are exempt (pre-seeded with a different provenance shape).
     if let Ok(lint_report) = crate::wiki::engine::lint(root) {
-        let ungrounded_errors = lint_report
+        let ungrounded: Vec<&crate::wiki::engine::LintIssue> = lint_report
             .issues
             .iter()
-            .filter(|i| {
-                i.kind == crate::wiki::engine::LintKind::UngroundedPage
-                    && i.severity == crate::wiki::engine::LintSeverity::Error
-            })
-            .count();
-        if ungrounded_errors > 0 {
+            .filter(|i| i.kind == crate::wiki::engine::LintKind::UngroundedPage)
+            .collect();
+        if !ungrounded.is_empty() {
+            // Group by slug so the message reads cleanly: "sugar-tax (missing
+            // source_articles), obesity (missing [^art-id] citations)".
+            let mut by_slug: std::collections::BTreeMap<&str, Vec<&str>> =
+                std::collections::BTreeMap::new();
+            for issue in &ungrounded {
+                let reason = if issue.severity == crate::wiki::engine::LintSeverity::Error {
+                    "missing source_articles"
+                } else {
+                    "missing [^art-id] citations"
+                };
+                by_slug.entry(issue.slug.as_str()).or_default().push(reason);
+            }
+            let details: Vec<String> = by_slug
+                .iter()
+                .map(|(slug, reasons)| format!("{slug} ({})", reasons.join(", ")))
+                .collect();
             report.errors.push(format!(
-                "{ungrounded_errors} ungrounded page(s) detected (missing source_articles provenance)"
+                "{} ungrounded page(s): {}",
+                ungrounded.len(),
+                details.join("; ")
             ));
         }
     }

@@ -105,10 +105,7 @@ fn preseed_synthesis_renders_v2_section_summaries_with_typed_facts() {
         body.contains("**Sample size:** n=1,234"),
         "body should contain sample_size typed fact"
     );
-    assert!(
-        body.contains("**Effect size:** d=0.45"),
-        "body should contain effect_size typed fact"
-    );
+    assert!(body.contains("**Effect size:** d=0.45"), "body should contain effect_size typed fact");
     assert!(
         body.contains("**Confidence interval:** 95% CI [0.30, 0.60]"),
         "body should contain confidence_interval typed fact"
@@ -123,14 +120,8 @@ fn preseed_synthesis_renders_v2_section_summaries_with_typed_facts() {
     assert!(body.contains("Point B"), "Methods key points should be present");
 
     // Non-standard section names render with their raw name.
-    assert!(
-        body.contains("## Limitations"),
-        "non-standard section name should render as-is"
-    );
-    assert!(
-        body.contains("Some limitations noted."),
-        "non-standard section summary should render"
-    );
+    assert!(body.contains("## Limitations"), "non-standard section name should render as-is");
+    assert!(body.contains("Some limitations noted."), "non-standard section summary should render");
 }
 
 // ---------------------------------------------------------------------------

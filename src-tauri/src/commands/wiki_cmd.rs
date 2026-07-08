@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::db::app_settings_repo;
-use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::wiki::{
@@ -612,6 +611,9 @@ pub async fn wiki_ingest(
 
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
+    // Surface non-fatal warnings (ungrounded pages, batch failures) in
+    // Settings > Diagnostics so the user can see what went wrong.
+    log_wiki_ingest_warnings(&conn, &report);
     Ok(report)
 }
 
@@ -808,16 +810,36 @@ fn emit_wiki_progress(app_handle: &tauri::AppHandle, step: usize, message: &str)
 }
 
 /// Log a wiki ingest error to the audit table for later lookup.
+///
+/// Writes `article_id = NULL` (NOT an empty string) so the row is picked up by
+/// the Settings > Diagnostics query `WHERE article_id IS NULL`. The generic
+/// `audit_repo::log_error` does the same but uses action='error'; we keep the
+/// `wiki_ingest_error` action here for semantic clarity while still writing NULL.
 fn log_wiki_error(conn: &rusqlite::Connection, error_msg: &str) {
-    let _ = audit_repo::create_entry(
-        conn,
-        "", // no specific article - wiki-level error
-        "wiki_ingest_error",
-        None,
-        None,
-        Some(error_msg),
-        "system",
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, from_status, to_status, details, source) \
+         VALUES (?1, NULL, ?2, 'wiki_ingest_error', NULL, NULL, ?3, 'system')",
+        rusqlite::params![id, now, error_msg],
     );
+}
+
+/// Log non-fatal ingest warnings (e.g. ungrounded pages, batch failures) to the
+/// audit table so they surface in Settings > Diagnostics and Notification
+/// History. Called after a successful ingest when `report.errors` is non-empty.
+/// Without this, the user sees only the toast count ("1 errors") with no way to
+/// find out what the error was.
+fn log_wiki_ingest_warnings(conn: &rusqlite::Connection, report: &ingest::IngestReport) {
+    if report.errors.is_empty() {
+        return;
+    }
+    let summary = format!(
+        "Wiki ingest completed with {} warning(s): {}",
+        report.errors.len(),
+        report.errors.join("; ")
+    );
+    log_wiki_error(conn, &summary);
 }
 
 /// Full rebuild: scaffold (if needed) + export included articles + process user files
@@ -889,6 +911,9 @@ async fn wiki_rebuild_inner(
     emit_wiki_progress(app_handle, 95, "Indexing pages...");
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
+    // Surface non-fatal warnings (ungrounded pages, batch failures) in
+    // Settings > Diagnostics so the user can see what went wrong.
+    log_wiki_ingest_warnings(&conn, &report);
 
     emit_wiki_progress(app_handle, 100, &format!("Done: {} pages written", report.pages_written));
     Ok(report)
@@ -953,6 +978,8 @@ async fn wiki_export_and_ingest_inner(
     emit_wiki_progress(app_handle, 95, "Indexing pages...");
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     ingest::finalize_ingest(&conn, &root, &mut report)?;
+    // Surface non-fatal warnings in Diagnostics.
+    log_wiki_ingest_warnings(&conn, &report);
 
     emit_wiki_progress(app_handle, 100, &format!("Done: {} pages written", report.pages_written));
     Ok(report)

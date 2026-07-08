@@ -11,6 +11,8 @@ use crate::error::AppError;
 /// A template definition: `(filename, content)`.
 const TEMPLATES: &[(&str, &str)] = &[
     ("concept.md", CONCEPT_TEMPLATE),
+    ("method.md", METHOD_TEMPLATE),
+    ("synthesis.md", SYNTHESIS_TEMPLATE),
     ("author.md", AUTHOR_TEMPLATE),
     ("source.md", SOURCE_TEMPLATE),
 ];
@@ -65,6 +67,78 @@ llm_model: <model-id>\n\
 \n\
 - [[related-concept-1]]\n\
 - [[related-concept-2]]\n\
+\n\
+[^art-<article-id>]: /raw/<article-id>.md\n\
+";
+
+const METHOD_TEMPLATE: &str = "\
+---\n\
+id: <uuid>\n\
+title: \"<Method Name>\"\n\
+type: method\n\
+slug: <kebab-case-slug>\n\
+summary: \"<1-2 sentence digest: N articles use this method>.\"\n\
+created: <ISO-8601>\n\
+updated: <ISO-8601>\n\
+status: draft\n\
+source_articles: [\"<article-uuid>\"]\n\
+tags: []\n\
+links: [\"[[related-method]]\"]\n\
+content_source: metadata\n\
+llm_model: <model-id>\n\
+---\n\
+\n\
+# <Method Name>\n\
+\n\
+<Opening paragraph describing the method and its relevance to the review.>\n\
+\n\
+## Relevant Studies\n\
+\n\
+- [[article-uuid]] [^art-<article-id>]\n\
+\n\
+## Related Methods\n\
+\n\
+- [[related-method-1]]\n\
+- [[related-method-2]]\n\
+\n\
+[^art-<article-id>]: /raw/<article-id>.md\n\
+";
+
+const SYNTHESIS_TEMPLATE: &str = "\
+---\n\
+id: <uuid>\n\
+title: \"<Synthesis Title>\"\n\
+type: synthesis\n\
+slug: <kebab-case-slug>\n\
+summary: \"<1-2 sentence digest of the cross-cutting theme or section>.\"\n\
+created: <ISO-8601>\n\
+updated: <ISO-8601>\n\
+status: draft\n\
+source_articles: [\"<article-uuid>\"]\n\
+tags: []\n\
+links: [\"[[concept]]\", \"[[method]]\"]\n\
+content_source: <full_text|ai_summary|abstract>\n\
+llm_model: <model-id>\n\
+---\n\
+\n\
+# <Synthesis Title>\n\
+\n\
+<Opening paragraph framing the cross-cutting theme, study aspect, or section\n\
+that connects multiple sources.>\n\
+\n\
+## Summary\n\
+\n\
+<Synthesis of the evidence across the relevant sources.>\n\
+\n\
+## Key Insights\n\
+\n\
+- Insight from [[article-or-author]] [^art-<article-id>]\n\
+- Contrasting insight [^art-<article-id>]\n\
+\n\
+## Related\n\
+\n\
+- [[concept-1]]\n\
+- [[method-1]]\n\
 \n\
 [^art-<article-id>]: /raw/<article-id>.md\n\
 ";

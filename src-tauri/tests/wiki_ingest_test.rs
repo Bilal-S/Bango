@@ -403,22 +403,13 @@ fn render_author_page_includes_coauthors_section() {
         body.contains("[[author-smith-k]]"),
         "coauthor slug should appear as wikilink, got: {body}"
     );
-    assert!(
-        body.contains("Smith, K"),
-        "coauthor display name should appear, got: {body}"
-    );
-    assert!(
-        body.contains("3 shared"),
-        "shared paper count should appear, got: {body}"
-    );
+    assert!(body.contains("Smith, K"), "coauthor display name should appear, got: {body}");
+    assert!(body.contains("3 shared"), "shared paper count should appear, got: {body}");
     assert!(
         body.contains("[[author-jones-m]]"),
         "second coauthor wikilink should appear, got: {body}"
     );
-    assert!(
-        body.contains("1 shared"),
-        "second coauthor shared count should appear, got: {body}"
-    );
+    assert!(body.contains("1 shared"), "second coauthor shared count should appear, got: {body}");
 }
 
 // -----------------------------------------------------------------
@@ -561,6 +552,25 @@ fn batch_prompt_contains_no_quota_language() {
 }
 
 #[test]
+fn batch_prompt_format_block_includes_source_articles() {
+    // The format block in the batch prompt must include `source_articles` in
+    // the frontmatter template. Without it, the LLM copies the format exactly
+    // and omits the field, triggering the Tier A1 grounding gate (which flags
+    // pages missing source_articles provenance).
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
+    assert!(
+        prompt.contains("source_articles: [\"<article-id>\"]"),
+        "format block must include source_articles so the LLM emits it, got: {prompt}"
+    );
+}
+
+#[test]
 fn batch_prompt_methods_directive_when_pre_seeded() {
     // When methods were pre-seeded, the directive tells the LLM to link, not
     // duplicate. The focus list still asks for methods (so gaps are filled).
@@ -608,6 +618,32 @@ fn batch_prompt_methods_directive_when_not_pre_seeded() {
 }
 
 #[test]
+fn batch_prompt_invites_topical_and_section_pages_from_sources() {
+    // The focus list item 2 must invite TOPICAL/section pages (not just
+    // thematic cross-cutting synthesis) so the LLM can create relevant
+    // section pages from uploaded raw documents.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
+    assert!(
+        prompt.contains("TOPICAL and THEMATIC"),
+        "focus list must invite topical pages, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("section/aspect pages"),
+        "focus list must mention section/aspect pages, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("Use the synthesis template"),
+        "focus list must direct the LLM to the synthesis template for these pages, got: {prompt}"
+    );
+}
+
+#[test]
 fn build_ingest_prompt_batches_injects_manifest_section() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
@@ -631,11 +667,14 @@ fn build_ingest_prompt_batches_injects_manifest_section() {
     assert!(batches[0].prompt.contains("LINK, DON'T DUPLICATE"));
     assert!(batches[0].prompt.contains("New Authors from Uploaded Documents"));
     assert!(batches[0].prompt.contains("you SHOULD create a new author page"));
-    // Gap 1: Phase-4 prompt wording must also be present so a revert is
-    // caught. The thematic-only directive narrows the LLM's output to
-    // cross-cutting synthesis + new-author pages.
+    // The directive carries the pre-seed claim + the topical/thematic focus
+    // wording so a revert is caught.
     assert!(batches[0].prompt.contains("ALREADY been pre-seeded"));
-    assert!(batches[0].prompt.contains("THEMATIC CROSS-CUTTING"));
+    assert!(
+        batches[0].prompt.contains("TOPICAL and THEMATIC"),
+        "prompt should invite topical + thematic pages, got: {}",
+        batches[0].prompt
+    );
 }
 
 #[test]
@@ -760,7 +799,8 @@ async fn run_chunked_ingest_processes_batches_in_parallel_and_writes_all_pages()
     let n_batches = batches.len();
     assert!(n_batches > 1);
 
-    let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender { delay_ms: 30, fail_marker: None, omit_provenance: false });
+    let sender: Arc<dyn IngestLlmSender> =
+        Arc::new(FakeSender { delay_ms: 30, fail_marker: None, omit_provenance: false });
     let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
 
     // One page per source (6) regardless of how many batches.
@@ -810,7 +850,8 @@ async fn run_chunked_ingest_empty_when_no_batches() {
     let root = tmp.path();
     bango_lib::wiki::storage::scaffold_tree(root).unwrap();
 
-    let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: false });
+    let sender: Arc<dyn IngestLlmSender> =
+        Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: false });
     let report = run_chunked_ingest(root, Vec::new(), sender, None, (25, 95)).await.unwrap();
     assert_eq!(report.pages_written, 0);
     assert!(report.errors.is_empty());
@@ -874,6 +915,17 @@ async fn run_chunked_ingest_reports_ungrounded_llm_pages() {
     assert!(
         has_grounding_err,
         "ingest report should list ungrounded pages, got errors: {:?}",
+        report.errors
+    );
+    // The error message should include the page slug(s) so the user can see
+    // exactly which pages are affected (Tier A1 diagnostic improvement).
+    let includes_slug = report
+        .errors
+        .iter()
+        .any(|e| e.contains("art-0") || e.contains("art-1") || e.contains("art-2"));
+    assert!(
+        includes_slug,
+        "ingest report should include the ungrounded page slug(s), got errors: {:?}",
         report.errors
     );
 }
