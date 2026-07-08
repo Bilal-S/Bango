@@ -16,7 +16,7 @@ use bango_lib::error::AppError;
 use bango_lib::wiki::frontmatter::{self, Frontmatter};
 use bango_lib::wiki::fts;
 use bango_lib::wiki::ingest::authors::{
-    render_author_page, AuthorArticle, AuthorManifest, AuthorManifestEntry,
+    render_author_page, AuthorArticle, AuthorManifest, AuthorManifestEntry, CoauthorLink,
 };
 use bango_lib::wiki::ingest::batching::{build_ingest_prompt_batches, MAX_BATCH_INPUT_CHARS};
 use bango_lib::wiki::ingest::consolidation::{jaccard_similarity, rewrite_body_links};
@@ -361,6 +361,66 @@ fn render_author_page_emits_art_prefixed_refs_and_no_raw_lines() {
     assert!(body.contains("h-index: 5"));
 }
 
+#[test]
+fn render_author_page_includes_coauthors_section() {
+    // When an author has coauthors (derived from shared publications via
+    // `collect_coauthors`), the rendered page must include a "Frequent
+    // Collaborators" section with `[[author-slug]]` links and shared paper
+    // counts.
+    let entry = AuthorManifestEntry {
+        slug: "author-doe-j".to_string(),
+        display_name: "Doe, J".to_string(),
+        article_count: 1,
+        articles: vec![AuthorArticle {
+            id: "11111111-1111-1111-1111-111111111111".to_string(),
+            title: "Paper One".to_string(),
+            year: Some(2021),
+            journal: Some("Nature".to_string()),
+        }],
+        coauthors: vec![
+            CoauthorLink {
+                slug: "author-smith-k".to_string(),
+                display_name: "Smith, K".to_string(),
+                shared_papers: 3,
+            },
+            CoauthorLink {
+                slug: "author-jones-m".to_string(),
+                display_name: "Jones, M".to_string(),
+                shared_papers: 1,
+            },
+        ],
+        h_index: None,
+        total_citations: 0,
+        ..Default::default()
+    };
+    let (_fm, body) = render_author_page(&entry);
+
+    assert!(
+        body.contains("## Frequent Collaborators"),
+        "author page with coauthors should have a Frequent Collaborators section, got: {body}"
+    );
+    assert!(
+        body.contains("[[author-smith-k]]"),
+        "coauthor slug should appear as wikilink, got: {body}"
+    );
+    assert!(
+        body.contains("Smith, K"),
+        "coauthor display name should appear, got: {body}"
+    );
+    assert!(
+        body.contains("3 shared"),
+        "shared paper count should appear, got: {body}"
+    );
+    assert!(
+        body.contains("[[author-jones-m]]"),
+        "second coauthor wikilink should appear, got: {body}"
+    );
+    assert!(
+        body.contains("1 shared"),
+        "second coauthor shared count should appear, got: {body}"
+    );
+}
+
 // -----------------------------------------------------------------
 // Chunked / parallel ingest
 // -----------------------------------------------------------------
@@ -578,6 +638,68 @@ fn build_ingest_prompt_batches_injects_manifest_section() {
     assert!(batches[0].prompt.contains("THEMATIC CROSS-CUTTING"));
 }
 
+#[test]
+fn build_ingest_prompt_includes_external_docs_section() {
+    // When a batch contains user-uploaded documents (slug starts with "user-"),
+    // the prompt must include an "External Documents (Pre-Seeded Source Pages)"
+    // section listing each document's slug and title. This ensures the LLM
+    // links to pre-seeded source pages instead of inventing duplicates.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("raw")).unwrap();
+    std::fs::write(root.join("AGENTS.md"), "# Contract").unwrap();
+
+    // Write one article-export source (slug does NOT start with "user-").
+    let mut art_fm = Frontmatter::default();
+    art_fm.set("id", "art-1");
+    art_fm.set("title", "Article One");
+    art_fm.set("type", "source");
+    art_fm.set("slug", "art-1");
+    art_fm.set("status", "draft");
+    art_fm.set("summary", "");
+    art_fm.set("links", "[]");
+    frontmatter::write_file(&root.join("raw/art-1.md"), &art_fm, "Article body.").unwrap();
+
+    // Write one user-uploaded document (slug starts with "user-", the heuristic
+    // that triggers the external-docs section). Mirrors `raw_export::add_user_file`.
+    let mut user_fm = Frontmatter::default();
+    user_fm.set("id", "user-my-report");
+    user_fm.set("title", "My Research Report");
+    user_fm.set("type", "source");
+    user_fm.set("slug", "user-my-report");
+    user_fm.set("status", "draft");
+    user_fm.set("summary", "");
+    user_fm.set("links", "[]");
+    user_fm.set("source_kind", "user_pdf");
+    user_fm.set("source_file", "report.pdf");
+    frontmatter::write_file(&root.join("raw/user-my-report.md"), &user_fm, "Report body.").unwrap();
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
+
+    // The prompt carries the External Documents section.
+    assert!(
+        prompt.contains("# External Documents (Pre-Seeded Source Pages)"),
+        "prompt should include external docs header when user-* sources present, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("[[user-my-report]]"),
+        "prompt should list the user doc slug as a wikilink, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("My Research Report"),
+        "prompt should list the user doc title, got: {prompt}"
+    );
+    // Article-export sources are NOT listed in this section.
+    let ext_section_start = prompt.find("# External Documents").unwrap();
+    let ext_section = &prompt[ext_section_start..];
+    assert!(
+        !ext_section.contains("[[art-1]]"),
+        "article exports should NOT appear in external docs section"
+    );
+}
+
 /// Fake sender: sleeps to simulate LLM latency, then returns one page per
 /// source slug embedded in the prompt. Lets us exercise the parallel path
 /// deterministically.
@@ -585,6 +707,10 @@ struct FakeSender {
     delay_ms: u64,
     /// When set, the batch whose prompt contains this substring errors.
     fail_marker: Option<String>,
+    /// When true, emitted pages carry NO `source_articles` frontmatter and NO
+    /// `[^art-]` citations — simulating an LLM that hallucinates ungrounded
+    /// pages. The post-ingest grounding gate (Tier A1) flags these.
+    omit_provenance: bool,
 }
 
 #[async_trait]
@@ -599,16 +725,24 @@ impl IngestLlmSender for FakeSender {
             tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
         }
         // Emit one PAGE per (slug: ...) occurrence in the batch sources.
-        // Each page carries source_articles + a [^art-] ref so it passes the
-        // Tier A1 grounding gate (the post-ingest lint flags ungrounded pages).
+        // When omit_provenance is true, pages lack source_articles + [^art-]
+        // refs, triggering the Tier A1 grounding gate.
         let mut out = String::new();
         for cap in regex::Regex::new(r"slug: (art-\d+)").unwrap().captures_iter(prompt) {
             let slug = &cap[1];
-            out.push_str(&format!(
-                "<!-- PAGE:{slug} -->\n---\nid: {slug}\ntitle: \"{slug}\"\ntype: concept\n\
-                 slug: {slug}\nsummary: \"\"\nstatus: draft\nlinks: []\n\
-                 source_articles: [\"{slug}\"]\n---\n\n# {slug}\n\nBody. [^art-{slug}]\n\n"
-            ));
+            if self.omit_provenance {
+                out.push_str(&format!(
+                    "<!-- PAGE:{slug} -->\n---\nid: {slug}\ntitle: \"{slug}\"\ntype: concept\n\
+                     slug: {slug}\nsummary: \"\"\nstatus: draft\nlinks: []\n\
+                     ---\n\n# {slug}\n\nBody with no citations.\n\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "<!-- PAGE:{slug} -->\n---\nid: {slug}\ntitle: \"{slug}\"\ntype: concept\n\
+                     slug: {slug}\nsummary: \"\"\nstatus: draft\nlinks: []\n\
+                     source_articles: [\"{slug}\"]\n---\n\n# {slug}\n\nBody. [^art-{slug}]\n\n"
+                ));
+            }
         }
         Ok(out)
     }
@@ -626,7 +760,7 @@ async fn run_chunked_ingest_processes_batches_in_parallel_and_writes_all_pages()
     let n_batches = batches.len();
     assert!(n_batches > 1);
 
-    let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender { delay_ms: 30, fail_marker: None });
+    let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender { delay_ms: 30, fail_marker: None, omit_provenance: false });
     let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
 
     // One page per source (6) regardless of how many batches.
@@ -654,6 +788,7 @@ async fn run_chunked_ingest_continues_on_single_batch_failure() {
     let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender {
         delay_ms: 0,
         fail_marker: Some("### Source: Article 0".to_string()),
+        omit_provenance: false,
     });
     let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
 
@@ -675,7 +810,7 @@ async fn run_chunked_ingest_empty_when_no_batches() {
     let root = tmp.path();
     bango_lib::wiki::storage::scaffold_tree(root).unwrap();
 
-    let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender { delay_ms: 0, fail_marker: None });
+    let sender: Arc<dyn IngestLlmSender> = Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: false });
     let report = run_chunked_ingest(root, Vec::new(), sender, None, (25, 95)).await.unwrap();
     assert_eq!(report.pages_written, 0);
     assert!(report.errors.is_empty());
@@ -694,7 +829,7 @@ async fn run_chunked_ingest_parallel_is_faster_than_sequential_sum() {
     assert!(batches.len() >= 3);
 
     let sender: Arc<dyn IngestLlmSender> =
-        Arc::new(FakeSender { delay_ms: 100, fail_marker: None });
+        Arc::new(FakeSender { delay_ms: 100, fail_marker: None, omit_provenance: false });
     let start = std::time::Instant::now();
     let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
     let elapsed = start.elapsed();
@@ -705,6 +840,41 @@ async fn run_chunked_ingest_parallel_is_faster_than_sequential_sum() {
     assert!(
         elapsed < std::time::Duration::from_millis(400),
         "parallel ingest took too long ({elapsed:?}); concurrency not effective"
+    );
+}
+
+// -----------------------------------------------------------------
+// Tier A1 grounding gate: post-ingest lint reports ungrounded pages
+// -----------------------------------------------------------------
+
+#[tokio::test]
+async fn run_chunked_ingest_reports_ungrounded_llm_pages() {
+    // When the LLM emits pages without source_articles or [^art-] citations,
+    // the post-ingest grounding gate (Tier A1) appends an ungrounded-page count
+    // to report.errors. This test uses FakeSender with omit_provenance=true.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 3, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+
+    let sender: Arc<dyn IngestLlmSender> =
+        Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: true });
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+
+    // Pages are still written (gate is non-fatal).
+    assert_eq!(report.pages_written, 3);
+    // But the errors field carries the grounding gate message.
+    let has_grounding_err = report
+        .errors
+        .iter()
+        .any(|e| e.contains("ungrounded page") && e.contains("source_articles"));
+    assert!(
+        has_grounding_err,
+        "ingest report should list ungrounded pages, got errors: {:?}",
+        report.errors
     );
 }
 

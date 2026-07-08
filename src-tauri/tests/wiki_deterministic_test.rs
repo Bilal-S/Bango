@@ -78,6 +78,61 @@ fn preseed_synthesis_respects_reviewed_pages() {
     assert_eq!(written, 0, "reviewed synthesis page should not be overwritten");
 }
 
+#[test]
+fn preseed_synthesis_renders_v2_section_summaries_with_typed_facts() {
+    // The T1.3 v2 AI-summary blob carries `section_summaries` with typed facts
+    // (study_design, sample_size, effect_size, confidence_interval). These
+    // enrich the synthesis page body AND power the methods pre-seed (Phase 4).
+    // This test verifies all typed facts are rendered in the output body.
+    let (conn, root) = setup_db_with_v2_summary();
+    let written = ingest::preseed_synthesis_from_ai_summaries(&conn, &root).unwrap();
+    assert_eq!(written, 1, "v2 summary should produce a synthesis page");
+
+    let path = root.join("wiki/synthesis/art-222.md");
+    assert!(path.exists());
+    let (_fm, body) = frontmatter::read_file(&path).unwrap();
+
+    // Section headings rendered.
+    assert!(body.contains("## Methods"), "body should have ## Methods heading");
+    assert!(body.contains("## Results"), "body should have ## Results heading");
+
+    // Typed facts rendered as labeled bullets in the Methods section.
+    assert!(
+        body.contains("**Study design:** Randomized Controlled Trial"),
+        "body should contain study_design typed fact"
+    );
+    assert!(
+        body.contains("**Sample size:** n=1,234"),
+        "body should contain sample_size typed fact"
+    );
+    assert!(
+        body.contains("**Effect size:** d=0.45"),
+        "body should contain effect_size typed fact"
+    );
+    assert!(
+        body.contains("**Confidence interval:** 95% CI [0.30, 0.60]"),
+        "body should contain confidence_interval typed fact"
+    );
+
+    // Section summary text rendered.
+    assert!(body.contains("We ran an RCT."));
+    assert!(body.contains("Significant results found."));
+
+    // Key points rendered (Methods section has them; Results section does not).
+    assert!(body.contains("Point A"), "Methods key points should be present");
+    assert!(body.contains("Point B"), "Methods key points should be present");
+
+    // Non-standard section names render with their raw name.
+    assert!(
+        body.contains("## Limitations"),
+        "non-standard section name should render as-is"
+    );
+    assert!(
+        body.contains("Some limitations noted."),
+        "non-standard section summary should render"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3: concept hub pre-seed
 // ---------------------------------------------------------------------------
@@ -240,6 +295,57 @@ fn setup_db_with_malformed_summary() -> (Connection, std::path::PathBuf) {
     bango_lib::wiki::storage::scaffold_tree(&root).unwrap();
 
     insert_included_article(&conn, "art-1", "Bad JSON", Some("not valid json {"));
+    std::mem::forget(tmp);
+    (conn, root)
+}
+
+fn setup_db_with_v2_summary() -> (Connection, std::path::PathBuf) {
+    let conn = Connection::open_in_memory().unwrap();
+    bango_lib::db::migration::run_migrations(&conn).unwrap();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    bango_lib::wiki::storage::scaffold_tree(&root).unwrap();
+
+    // A v2 AI-summary blob with section_summaries carrying all four typed facts
+    // plus a non-standard section name ("Limitations" instead of
+    // Methods/Results/Discussion).
+    let v2_summary = r#"{
+        "summary_150_250_words": "This is the v2 digest with typed facts.",
+        "key_insights": ["Key finding"],
+        "keywords": ["rct", "methods-test"],
+        "field": "medicine",
+        "subfield": "epidemiology",
+        "section_summaries": [
+            {
+                "section": "Methods",
+                "summary": "We ran an RCT.",
+                "key_points": ["Point A", "Point B"],
+                "study_design": "Randomized Controlled Trial",
+                "sample_size": "n=1,234",
+                "effect_size": "d=0.45",
+                "confidence_interval": "95% CI [0.30, 0.60]"
+            },
+            {
+                "section": "Results",
+                "summary": "Significant results found.",
+                "key_points": [],
+                "study_design": null,
+                "sample_size": null,
+                "effect_size": null,
+                "confidence_interval": null
+            },
+            {
+                "section": "Limitations",
+                "summary": "Some limitations noted.",
+                "key_points": [],
+                "study_design": null,
+                "sample_size": null,
+                "effect_size": null,
+                "confidence_interval": null
+            }
+        ]
+    }"#;
+    insert_included_article(&conn, "art-222", "V2 Summary Article", Some(v2_summary));
     std::mem::forget(tmp);
     (conn, root)
 }
