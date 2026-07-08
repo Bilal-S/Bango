@@ -18,15 +18,21 @@ fn sample_input(article: ArticleEntry) -> ScreeningPromptInput {
             id: "inc-1".to_string(),
             text: "Must be about SSB taxes".to_string(),
             priority: Priority::Standard,
+            // Global numbering: inclusion is 1..N. Single inclusion criterion → 1.
+            global_number: 1,
         }],
         exclusion_criteria: vec![CriterionEntry {
             id: "exc-1".to_string(),
             text: "Not about children".to_string(),
             priority: Priority::Standard,
+            // Global numbering: exclusion continues N+1..N+M. After 1 inclusion
+            // criterion, this exclusion criterion is number 2 (NOT 1).
+            global_number: 2,
         }],
         articles: vec![article],
         existing_tags: vec![],
         existing_labels: vec![],
+        custom_logic: None,
     }
 }
 
@@ -80,6 +86,90 @@ fn build_prompt_evidence_block_labels_section() {
     let prompt = build_screening_prompt(&sample_input(article));
     assert!(prompt.contains("[§Methods]"), "evidence block must label the Methods section");
     assert!(prompt.contains("[§Results]"), "evidence block must label the Results section");
+}
+
+// ── Global numbering + Custom Screening Instructions ──────────────────────
+
+#[test]
+fn build_prompt_uses_global_numbering_across_inclusion_and_exclusion() {
+    // With 1 inclusion + 1 exclusion, the prompt must label the inclusion
+    // criterion `1.` and the exclusion criterion `2.` (continuing the global
+    // scheme), NOT `1.` and `1.` (the old per-type restart behavior).
+    let prompt = build_screening_prompt(&sample_input(sample_article()));
+    assert!(
+        prompt.contains("1. [inc-1] Must be about SSB taxes"),
+        "inclusion criterion must be numbered with its global number (1): {prompt}"
+    );
+    assert!(
+        prompt.contains("2. [exc-1] Not about children"),
+        "exclusion criterion must continue the global numbering at 2 (not restart at 1): {prompt}"
+    );
+    assert!(!prompt.contains("1. [exc-1]"), "exclusion must NOT restart numbering at 1");
+}
+
+#[test]
+fn build_prompt_omits_custom_logic_section_when_empty() {
+    // `custom_logic: None` → no `## Custom Screening Instructions` header so
+    // abstract-mode prompts stay byte-identical to pre-feature shape.
+    let prompt = build_screening_prompt(&sample_input(sample_article()));
+    assert!(
+        !prompt.contains("## Custom Screening Instructions"),
+        "prompt must NOT include the custom-logic header when custom_logic is None"
+    );
+}
+
+#[test]
+fn build_prompt_includes_custom_logic_section_when_present() {
+    // Non-empty custom_logic → header appears after `## Priority Rules`.
+    let mut input = sample_input(sample_article());
+    input.custom_logic = Some(
+        "Inclusion 1 AND 2 must match. Only then consider inclusion 1 OR exclusion 2.".to_string(),
+    );
+    let prompt = build_screening_prompt(&input);
+    assert!(
+        prompt.contains("## Custom Screening Instructions"),
+        "prompt must include the custom-logic header when custom_logic is Some(non-empty)"
+    );
+    assert!(
+        prompt.contains("Inclusion 1 AND 2 must match"),
+        "prompt must include the user-authored custom-logic text verbatim"
+    );
+    // The section must come AFTER priority rules (so the LLM reads the base
+    // rules first, then the custom override).
+    let priority_idx = prompt.find("## Priority Rules");
+    let custom_idx = prompt.find("## Custom Screening Instructions");
+    assert!(
+        priority_idx.is_some()
+            && custom_idx.is_some()
+            && priority_idx.unwrap() < custom_idx.unwrap(),
+        "custom-logic section must appear after the priority-rules section"
+    );
+}
+
+#[test]
+fn build_prompt_omits_custom_logic_section_when_whitespace_only() {
+    // Whitespace-only custom_logic must be treated as empty (no section).
+    let mut input = sample_input(sample_article());
+    input.custom_logic = Some("   \n\t  ".to_string());
+    let prompt = build_screening_prompt(&input);
+    assert!(
+        !prompt.contains("## Custom Screening Instructions"),
+        "whitespace-only custom_logic must NOT emit the section"
+    );
+}
+
+#[test]
+fn system_prompt_references_custom_screening_instructions() {
+    // The system prompt must instruct the LLM to apply custom screening
+    // instructions when present, referencing criteria by their numbered position.
+    assert!(
+        SYSTEM_PROMPT.contains("Custom Screening Instructions"),
+        "SYSTEM_PROMPT must mention the Custom Screening Instructions feature"
+    );
+    assert!(
+        SYSTEM_PROMPT.contains("numbered position"),
+        "SYSTEM_PROMPT must instruct the LLM to reference criteria by numbered position"
+    );
 }
 
 // ── Tier 4.1: system-prompt cross-check amendment ────────────────────────────

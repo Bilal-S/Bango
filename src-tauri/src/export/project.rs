@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use crate::db::app_settings_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
 
@@ -13,6 +14,17 @@ pub struct ExportMetadata {
     pub exported_at: String,
     pub app_name: String,
     pub app_version: String,
+}
+
+/// One row of the project-portable subset of `app_settings` (see
+/// `app_settings_repo::PROJECT_PORTABLE_SETTINGS`). Only keys in the allowlist
+/// travel with a backup; machine-local state (storage root, premium flag,
+/// staleness flags) stays put.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettingBackup {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,6 +68,11 @@ pub struct ProjectBackup {
     #[serde(default)]
     pub article_original_chunks: Vec<serde_json::Value>,
     pub llm_config: Option<LlmConfigBackup>,
+    /// Project-portable `app_settings` rows (screening rules, summary mode,
+    /// auto-translate, screening-mode params). `#[serde(default)]` so old
+    /// backups without this field import cleanly (empty list → no-op).
+    #[serde(default)]
+    pub app_settings: Vec<AppSettingBackup>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,6 +116,14 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
         model_name: c.model_name,
     });
 
+    // Project-portable app_settings (screening rules, summary mode,
+    // auto-translate, screening-mode params). Only the allowlisted keys travel
+    // with the backup; machine-local state (storage root, premium flag,
+    // staleness flags) is deliberately excluded.
+    let portable_settings = app_settings_repo::export_project_portable_settings(conn)?;
+    let app_settings: Vec<AppSettingBackup> =
+        portable_settings.into_iter().map(|(key, value)| AppSettingBackup { key, value }).collect();
+
     let backup = ProjectBackup {
         metadata: ExportMetadata {
             spec_version: "3.0".to_string(),
@@ -129,6 +154,7 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
         article_original_content,
         article_original_chunks,
         llm_config: llm_backup,
+        app_settings,
     };
 
     serde_json::to_string_pretty(&backup).map_err(AppError::Serialization)
@@ -910,6 +936,22 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
              temperature, max_concurrent_requests, request_delay_ms, context_window_tokens) \
              VALUES (1, ?1, ?2, ?3, 0.2, 3, 500, 50000)",
             rusqlite::params![llm_backup.provider, llm_backup.endpoint_url, llm_backup.model_name],
+        )?;
+    }
+
+    // Restore project-portable app_settings (screening rules, summary mode,
+    // auto-translate, screening-mode params). Only allowlisted keys from the
+    // backup are applied; absent keys leave the target machine's value
+    // untouched. The `is_project_portable` guard is defense-in-depth: even if
+    // a hand-edited backup adds a non-allowlisted key, it is ignored.
+    for setting in &backup.app_settings {
+        if !app_settings_repo::is_project_portable(&setting.key) {
+            continue;
+        }
+        tx.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![setting.key, setting.value],
         )?;
     }
 

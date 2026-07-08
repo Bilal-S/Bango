@@ -29,7 +29,7 @@ preserved in `article_original_content` and `article_original_chunks`.
   (`reenqueue_stranded_on_startup`) finds any article with
   `translation_status IN ('queued','running') AND is_translated = 0`. Because
   `STARTUP_STRANDED_CAP = 0` (decision: no auto-recovery on restart), **no**
-  stranded job is re-enqueued — every stranded row is marked `failed` with a
+  stranded job is re-enqueued - every stranded row is marked `failed` with a
   `translation_error` audit note. The user selectively retranslates via the
   manual translate button on the article detail header (the enqueue gate
   accepts `failed`). Raising the cap to a positive `N` re-enables bounded

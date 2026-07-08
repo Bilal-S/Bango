@@ -20,8 +20,8 @@ macro_rules! debug_log {
 }
 
 use crate::db::{
-    app_settings_repo::ScreeningMode, article_repo, audit_repo, biblio_repo, chunk_repo,
-    label_repo, tag_repo,
+    app_settings_repo::{self, ScreeningMode},
+    article_repo, audit_repo, biblio_repo, chunk_repo, label_repo, tag_repo,
 };
 use crate::error::AppError;
 use crate::llm::orchestrator::LlmRequestType;
@@ -223,14 +223,18 @@ impl ScreeningEngine {
         let global_numbering =
             build_global_criterion_numbering(&inclusion_criteria, &exclusion_criteria);
 
-        // Fetch existing tags and labels for the prompt so the LLM prefers matching them
-        let (existing_tag_names, existing_label_names) = {
+        // Fetch existing tags and labels for the prompt so the LLM prefers matching them.
+        // Also read the optional custom screening-instructions text once (reused by
+        // every batch + two-stage stage-2 prompt in this run).
+        let (existing_tag_names, existing_label_names, custom_logic) = {
             let c = crate::db::connection::lock_conn(conn_mutex)?;
             let tags = tag_repo::get_all_tags(&c)?;
             let labels = label_repo::get_all_labels(&c)?;
+            let logic = app_settings_repo::get_screening_custom_logic(&c)?;
             (
                 tags.into_iter().map(|t| t.name).collect::<Vec<_>>(),
                 labels.into_iter().map(|l| l.name).collect::<Vec<_>>(),
+                logic,
             )
         };
 
@@ -243,6 +247,7 @@ impl ScreeningEngine {
                 id: c.id.clone(),
                 text: c.text.clone(),
                 priority: c.priority,
+                global_number: *global_numbering.get(&c.id).unwrap_or(&0),
             })
             .collect();
         let exc_entries: Vec<CriterionEntry> = exclusion_criteria
@@ -251,6 +256,7 @@ impl ScreeningEngine {
                 id: c.id.clone(),
                 text: c.text.clone(),
                 priority: c.priority,
+                global_number: *global_numbering.get(&c.id).unwrap_or(&0),
             })
             .collect();
 
@@ -404,6 +410,7 @@ impl ScreeningEngine {
                 articles: article_entries,
                 existing_tags: existing_tag_names.clone(),
                 existing_labels: existing_label_names.clone(),
+                custom_logic: custom_logic.clone(),
             };
 
             let user_prompt = prompt::build_screening_prompt(&prompt_input);
@@ -732,6 +739,7 @@ impl ScreeningEngine {
                                     articles: vec![entry],
                                     existing_tags: existing_tag_names.clone(),
                                     existing_labels: existing_label_names.clone(),
+                                    custom_logic: custom_logic.clone(),
                                 };
                                 let user_prompt = prompt::build_screening_prompt(&prompt_input);
                                 let system_prompt = prompt::SYSTEM_PROMPT;

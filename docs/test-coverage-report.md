@@ -97,7 +97,7 @@ New test files:
 - Composables: `use-feature-flags`, `use-viewport`, `use-tauri-command`, `use-toast`, `use-demo`, `use-llm-config`.
 - Components: `confidence-bar`, `screening-stats`, `detail-header`, `screening-progress-bar`, `audit-timeline`, `matched-criteria`, `article-metadata`, `ai-decision-card`, `article-notes`.
 
-### Vue/TS (30.71% → 32.22%) + Rust (56.5% → 65.47%) — 2026-07-04
+### Vue/TS (30.71% → 32.22%) + Rust (56.5% → 65.47%) - 2026-07-04
 
 New test files:
 - Stores: `labels-store.test.ts` (9 tests), `tags-store.test.ts` (9 tests), `screening-store.test.ts` (16 tests).

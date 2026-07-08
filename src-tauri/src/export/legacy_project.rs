@@ -85,6 +85,10 @@ pub fn export_legacy_project(conn: &Connection) -> Result<String, AppError> {
         article_original_content: Vec::new(),
         article_original_chunks: Vec::new(),
         llm_config: llm_backup,
+        // Legacy schema predates project-portable app_settings (screening
+        // rules, summary mode, auto-translate); emit empty so the upgrade
+        // path produces a backup the modern importer accepts.
+        app_settings: Vec::new(),
     };
 
     serde_json::to_string_pretty(&backup).map_err(AppError::Serialization)

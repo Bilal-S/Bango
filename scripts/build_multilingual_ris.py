@@ -3,7 +3,7 @@
 
 This script reads ``tests/assets/multilingual-oa/manifest.json``, converts each
 per-article ``.ris.json`` file into a single RIS record (using the tag set that
-Bango's importer understands — see ``src-tauri/src/export/ris_writer.rs``), and
+Bango's importer understands - see ``src-tauri/src/export/ris_writer.rs``), and
 writes the concatenated result to
 ``tests/assets/multilingual-oa/multilinguage.ris``.
 

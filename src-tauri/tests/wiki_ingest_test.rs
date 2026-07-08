@@ -747,7 +747,7 @@ struct FakeSender {
     /// When set, the batch whose prompt contains this substring errors.
     fail_marker: Option<String>,
     /// When true, emitted pages carry NO `source_articles` frontmatter and NO
-    /// `[^art-]` citations — simulating an LLM that hallucinates ungrounded
+    /// `[^art-]` citations - simulating an LLM that hallucinates ungrounded
     /// pages. The post-ingest grounding gate (Tier A1) flags these.
     omit_provenance: bool,
 }

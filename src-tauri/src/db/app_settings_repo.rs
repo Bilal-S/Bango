@@ -354,6 +354,95 @@ pub fn set_two_stage_expected_borderline_fraction(
     set_setting(conn, TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY, Some(&value.to_string()))
 }
 
+// ── Custom Screening Instructions ────────────────────────────────────────────
+
+/// The `app_settings` key for the optional custom screening-instructions text.
+///
+/// Free-text combinatorial rules the LLM applies during screening (AND/OR
+/// gates, hard exclusions, conditional inclusion). References criteria by
+/// their globally unique number (inclusion `1..N`, exclusion continues
+/// `N+1..N+M`, matching the Criteria screen). Empty/absent = today's
+/// priority-only behavior (backward-compatible). Stored verbatim (only
+/// trimmed of surrounding whitespace on read).
+pub const SCREENING_CUSTOM_LOGIC_KEY: &str = "screening_custom_logic";
+
+/// Read the custom screening-instructions text. Returns `None` when the key
+/// is absent or the stored value trims to empty.
+pub fn get_screening_custom_logic(conn: &Connection) -> Result<Option<String>, AppError> {
+    Ok(get_setting(conn, SCREENING_CUSTOM_LOGIC_KEY)?
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty()))
+}
+
+/// Persist the custom screening-instructions text. The value is trimmed of
+/// surrounding whitespace before storage; an empty value is allowed and
+/// effectively disables the feature.
+pub fn set_screening_custom_logic(conn: &Connection, value: &str) -> Result<(), AppError> {
+    set_setting(conn, SCREENING_CUSTOM_LOGIC_KEY, Some(value.trim()))
+}
+
+// ── Project-portable settings (export/import) ───────────────────────────────
+//
+// `app_settings` mixes project-level intent (screening rules, summary mode,
+// auto-translate) with machine-local state (storage root, premium flag,
+// staleness flags). Only the project-level subset travels with a backup so
+// restoring a project on a new machine preserves the user's screening
+// configuration without leaking secrets or clobbering local state.
+
+/// The subset of `app_settings` keys that travel with a project backup.
+///
+/// - `screening_custom_logic` - combinatorial screening rules (the new feature)
+/// - `summary_evidence_mode` - literature-review evidence enrichment
+/// - `auto_translate` - experimental non-English → English translation toggle
+/// - `screening_mode` + enhanced/two-stage params - per-run screening behavior
+///
+/// Explicitly **excluded** (stay machine-local, never exported):
+/// `storage_root`, `flag_premium`, `biblio_needs_refresh`, `wiki_needs_refresh`,
+/// `wiki_dir_hash`, `fulltext_storage_dir` (legacy).
+pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
+    SCREENING_CUSTOM_LOGIC_KEY,
+    AUTO_TRANSLATE_KEY,
+    "summary_evidence_mode",
+    SCREENING_MODE_KEY,
+    ENHANCED_TOP_K_KEY,
+    ENHANCED_SCREENING_SECTIONS_KEY,
+    TWO_STAGE_LOW_KEY,
+    TWO_STAGE_HIGH_KEY,
+    CHUNK_BUDGET_PER_ARTICLE_KEY,
+    TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY,
+];
+
+/// Whether a given `app_settings` key should travel with a project backup.
+#[must_use]
+pub fn is_project_portable(key: &str) -> bool {
+    PROJECT_PORTABLE_SETTINGS.contains(&key)
+}
+
+/// Export the project-portable `app_settings` rows as `(key, value)` pairs.
+/// Used by `export::project::export_project` so a backup → restore cycle
+/// preserves the user's screening configuration across machines. Rows with
+/// NULL or empty values are omitted (they'd be no-ops on import anyway).
+pub fn export_project_portable_settings(
+    conn: &Connection,
+) -> Result<Vec<(String, String)>, AppError> {
+    let mut stmt = conn.prepare("SELECT key, value FROM app_settings")?;
+    let rows =
+        stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (key, value) = row?;
+        if !is_project_portable(&key) {
+            continue;
+        }
+        if let Some(v) = value {
+            if !v.is_empty() {
+                out.push((key, v));
+            }
+        }
+    }
+    Ok(out)
+}
+
 // ── Auto Translate setting ──────────────────────────────────────────────────
 
 /// The `app_settings` key for the experimental auto-translate toggle.

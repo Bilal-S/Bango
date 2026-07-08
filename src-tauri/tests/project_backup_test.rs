@@ -500,6 +500,154 @@ fn export_import_preserves_null_audit_article_id() {
     assert_eq!(bound_id, a.id);
 }
 
+/// Project-portable `app_settings` (screening rules, summary mode,
+/// auto-translate, screening-mode params) must survive a backup → restore
+/// cycle. Machine-local state (storage root, premium flag, staleness flags)
+/// must NOT be exported.
+#[test]
+fn export_import_round_trips_portable_app_settings() {
+    use bango_lib::db::app_settings_repo;
+
+    let conn = setup_db();
+    seed_core_data(&conn);
+
+    // Seed a portable setting (the new custom screening logic).
+    let custom_logic = "Inclusion 1 AND 2 must match; then consider 3 OR 4.";
+    app_settings_repo::set_screening_custom_logic(&conn, custom_logic)
+        .expect("set screening_custom_logic");
+    // Seed another portable setting (screening mode).
+    app_settings_repo::set_screening_mode(&conn, app_settings_repo::ScreeningMode::Enhanced)
+        .expect("set screening_mode");
+    // Seed a machine-local setting that must NOT be exported.
+    app_settings_repo::set_setting(&conn, "storage_root", Some("/tmp/machine-local-path"))
+        .expect("set storage_root");
+
+    // Export → parse JSON → verify portable settings are present + machine-local
+    // settings are absent.
+    let json = export_project(&conn).expect("export");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    let settings = parsed["appSettings"].as_array().expect("appSettings array");
+    let keys: Vec<&str> = settings.iter().filter_map(|s| s["key"].as_str()).collect();
+    assert!(
+        keys.contains(&"screening_custom_logic"),
+        "portable setting screening_custom_logic must be exported: {keys:?}"
+    );
+    assert!(
+        keys.contains(&"screening_mode"),
+        "portable setting screening_mode must be exported: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"storage_root"),
+        "machine-local storage_root must NOT be exported: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"flag_premium"),
+        "machine-local flag_premium must NOT be exported: {keys:?}"
+    );
+
+    // Import into a fresh DB → verify the portable settings round-tripped.
+    let conn2 = setup_db();
+    import_project(&conn2, &json).expect("import");
+
+    let restored_logic = app_settings_repo::get_screening_custom_logic(&conn2)
+        .expect("get_screening_custom_logic")
+        .expect("screening_custom_logic must be restored");
+    assert_eq!(restored_logic, custom_logic, "screening_custom_logic must round-trip verbatim");
+
+    let restored_mode = app_settings_repo::get_screening_mode(&conn2).expect("get_screening_mode");
+    assert_eq!(
+        restored_mode,
+        app_settings_repo::ScreeningMode::Enhanced,
+        "screening_mode must round-trip"
+    );
+
+    // The fresh DB's storage_root must NOT have been clobbered by the backup's
+    // value (which was deliberately excluded). It should resolve to the
+    // platform default (or whatever the fresh DB computed), not /tmp/...
+    let restored_root = app_settings_repo::get_storage_root(&conn2).expect("get_storage_root");
+    assert_ne!(
+        restored_root, "/tmp/machine-local-path",
+        "machine-local storage_root must NOT be imported (would clobber target machine's path)"
+    );
+}
+
+/// An old backup without an `appSettings` field must import cleanly
+/// (`#[serde(default)]`). Regression for backward-compat with pre-feature
+/// backups.
+#[test]
+fn import_old_backup_without_app_settings_field() {
+    use bango_lib::db::app_settings_repo;
+
+    let conn = setup_db();
+    let old_backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.5.6"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "llmConfig": null
+    }"#;
+
+    import_project(&conn, old_backup).expect("import of old backup should succeed");
+
+    // No app_settings were in the backup → the target machine's values are
+    // untouched (absent → defaults).
+    assert_eq!(
+        app_settings_repo::get_screening_custom_logic(&conn).expect("get"),
+        None,
+        "absent setting in old backup must not set anything"
+    );
+}
+
+/// A hand-edited backup that adds a non-allowlisted key to `appSettings`
+/// must NOT be imported (defense-in-depth against the allowlist being
+/// bypassed by manual editing).
+#[test]
+fn import_ignores_non_allowlisted_app_settings() {
+    use bango_lib::db::app_settings_repo;
+
+    let conn = setup_db();
+    let malicious_backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.5.6"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "llmConfig": null,
+        "appSettings": [
+            {"key": "storage_root", "value": "/tmp/attacker-path"},
+            {"key": "flag_premium", "value": "true"}
+        ]
+    }"#;
+
+    import_project(&conn, malicious_backup).expect("import should succeed (ignoring bad keys)");
+
+    // storage_root must NOT have been overwritten by the malicious value.
+    let root = app_settings_repo::get_storage_root(&conn).expect("get_storage_root");
+    assert_ne!(root, "/tmp/attacker-path", "non-allowlisted storage_root must be ignored");
+    // flag_premium must NOT have been flipped to true.
+    let premium = app_settings_repo::get_setting(&conn, "flag_premium").expect("get_setting");
+    assert_ne!(premium.as_deref(), Some("true"), "non-allowlisted flag_premium must be ignored");
+}
+
 /// Audit entries with NULL details (e.g. dedup_flag with no details) must
 /// survive a round-trip with details = NULL, not empty string.
 #[test]

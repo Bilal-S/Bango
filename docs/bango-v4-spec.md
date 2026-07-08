@@ -133,7 +133,7 @@ Upon import, new articles are run sequentially through a prioritized strategy pi
 *   **Execution**: Multi-threaded async worker running in the background with user-configured batch size, concurrency, and delay. `start_screening` also accepts an optional `max_articles` cap, limiting a run to `min(max_articles, unscreened_count)` articles so users can process a bounded subset. Exponential backoff handles rate-limiting (429 errors).
 *   **Readiness Check**: Enforces presence of >= 1 aim, >= 1 inclusion, and >= 1 exclusion criterion, valid LLM config, and performs a worst-case per-article token estimation. Warns the user if any estimated footprint exceeds 80% of `contextWindowTokens` (minimum required: 50,000). The worst-case footprint is recomputed by the active screening mode (see §4.3.1): Abstract uses today's abstract-only estimate; Enhanced adds the per-article chunk budget; Two-stage adds the budget times the expected borderline fraction.
 *   **Advisory Prompts**: Batch prompt details aims, criteria, and articles, requesting JSON output containing the advisory `decision`, `reasoning` (citing specific sentences), `matched_inclusion_criteria`, `matched_exclusion_criteria`, `suggested_tags`, `extracted_terms`, and `confidence`. The app executes the deterministic resolution locally. Where supporting full-text evidence is provided (Enhanced / Two-stage stage 2), the system prompt instructs the model to use it only to verify criteria matches; the primary decision rests on the abstract.
-*   **Screening-Time Abstract Translation**: When `auto_translate` is enabled (see §8.1), a pre-screening translation step runs before chunk-backfill and the main screening loop. The background task queries unscreened `working` articles with non-English `language` and `translation_status IN ('none','failed')`, enqueues `MetadataOnly` translation jobs (title + abstract only — full text is not touched), and waits for all to complete. The existing `screening:progress` channel emits a translation sub-stage (`stage = "translating"`, `stage_total = N`) so the progress bar shows "Translating 3/12 articles..." before flipping to the normal screening stage. `get_screening_readiness` returns `pendingTranslations: number` (0 when `auto_translate` is off) for a pre-start UI hint. This ensures the screening LLM always receives English abstracts.
+*   **Screening-Time Abstract Translation**: When `auto_translate` is enabled (see §8.1), a pre-screening translation step runs before chunk-backfill and the main screening loop. The background task queries unscreened `working` articles with non-English `language` and `translation_status IN ('none','failed')`, enqueues `MetadataOnly` translation jobs (title + abstract only - full text is not touched), and waits for all to complete. The existing `screening:progress` channel emits a translation sub-stage (`stage = "translating"`, `stage_total = N`) so the progress bar shows "Translating 3/12 articles..." before flipping to the normal screening stage. `get_screening_readiness` returns `pendingTranslations: number` (0 when `auto_translate` is off) for a pre-start UI hint. This ensures the screening LLM always receives English abstracts.
 
 ### 4.3.1 Screening Modes
 The `screening_mode` setting (`abstract` | `enhanced` | `two_stage`, default `abstract`) selects how the screening engine treats the full text of articles that have one attached.
@@ -185,7 +185,7 @@ Two translation job kinds are selected automatically from the article's `has_ful
 | `MetadataOnly` | Title + abstract | Import (no full text attached), screening pre-step |
 | `FullText` | Title + abstract + all `article_chunks` content, then re-chunks the stitched English result | Full-text attach, manual translate button on article with full text, batch import Phase 3 for articles with full text |
 
-The `language` column on `articles` records the original language and is immutable — it is never overwritten by translation. `is_translated = 1` with `language = 'French'` means "originally French, now translated to English; originals in `article_original_content`."
+The `language` column on `articles` records the original language and is immutable - it is never overwritten by translation. `is_translated = 1` with `language = 'French'` means "originally French, now translated to English; originals in `article_original_content`."
 
 #### 4.4.3 Queue Worker
 
@@ -193,17 +193,17 @@ A single `tokio::spawn`-ed worker task with a `tokio::mpsc` channel (capacity 64
 
 - **Enqueue gate** (`none`/`failed` → write `queued` + send to channel; `is_translated = 1` or status `queued`/`running`/`succeeded` → skip).
 - **Batch enqueue** uses a single filtered `SELECT` + `UPDATE` to mark all eligible articles `queued` in one transaction, then sends jobs to the channel.
-- **Execution** uses a 3-burst pattern: lock DB to read article + mark `running`, release lock for LLM call, lock DB to write-back translation + audit entry — so the worker never holds the database lock across an `.await` point.
+- **Execution** uses a 3-burst pattern: lock DB to read article + mark `running`, release lock for LLM call, lock DB to write-back translation + audit entry - so the worker never holds the database lock across an `.await` point.
 - **`LlmConfig` caching**: the worker caches the LLM config and invalidates it upon receiving a `translation:config-changed` event (emitted by `save_llm_config`).
 - On completion (success or failure), the worker emits a `translation:complete` event with `{ articleId, success, error? }` for frontend toast feedback.
 
 #### 4.4.4 Dedicated Worker Connection
 
-The translation worker holds its own SQLite connection via `WorkerDbState` (separate from the main `DbState`). This ensures translation work never blocks UI command handlers — the two connections operate independently under WAL mode. All connections set `PRAGMA busy_timeout=5000` so concurrent writers wait instead of returning `SQLITE_BUSY`.
+The translation worker holds its own SQLite connection via `WorkerDbState` (separate from the main `DbState`). This ensures translation work never blocks UI command handlers - the two connections operate independently under WAL mode. All connections set `PRAGMA busy_timeout=5000` so concurrent writers wait instead of returning `SQLITE_BUSY`.
 
 #### 4.4.5 Crash Recovery
 
-On app startup, `reenqueue_stranded_on_startup` queries `articles WHERE translation_status IN ('queued','running') AND is_translated = 0`. Because `STARTUP_STRANDED_CAP = 0`, **no** stranded article is re-enqueued automatically — every stranded row is reset to `failed` with a `translation_error` audit note (the worker that owned it has died). The user selectively retranslates via the manual translate button on the article detail header (the enqueue gate accepts `failed`). Set `STARTUP_STRANDED_CAP` to a positive `N` to re-enable bounded re-enqueueing of the first `N` stranded jobs; any excess is still marked `failed`.
+On app startup, `reenqueue_stranded_on_startup` queries `articles WHERE translation_status IN ('queued','running') AND is_translated = 0`. Because `STARTUP_STRANDED_CAP = 0`, **no** stranded article is re-enqueued automatically - every stranded row is reset to `failed` with a `translation_error` audit note (the worker that owned it has died). The user selectively retranslates via the manual translate button on the article detail header (the enqueue gate accepts `failed`). Set `STARTUP_STRANDED_CAP` to a positive `N` to re-enable bounded re-enqueueing of the first `N` stranded jobs; any excess is still marked `failed`.
 
 #### 4.4.6 Batch Import Integration
 

@@ -11,7 +11,10 @@ Evidence marked `[Source: AI Summary]` is a structured distillation - reliable f
 (study design, sample size) but may contain hallucinations; cross-check any summary fact against \
 the `[Source: Full Text - verbatim]` chunk when both are present. If the abstract, summary, and \
 verbatim chunk conflict, note the discrepancy in your reasoning and prefer the verbatim chunk \
-for specific sentences.
+for specific sentences. \
+If a Custom Screening Instructions section is provided, apply those rules strictly when deciding \
+include/exclude. Reference criteria by their numbered position (inclusion is numbered 1..N, then \
+exclusion continues at N+1..N+M, so every number is unique across both lists).
 
 Return a JSON array matching this schema, one object per article, in the same order as submitted:
 [
@@ -36,6 +39,12 @@ pub struct CriterionEntry {
     pub id: String,
     pub text: String,
     pub priority: Priority,
+    /// Globally unique 1-based number (inclusion `1..N`, exclusion continues
+    /// `N+1..N+M`) matching the Criteria screen. The prompt formats each line
+    /// as `{global_number}. [{id}] {text}` so user-authored combinatorial
+    /// rules ("criterion 3 AND 5") resolve identically across the UI, the
+    /// prompt, and the LLM's reasoning.
+    pub global_number: usize,
 }
 
 #[derive(Clone)]
@@ -65,6 +74,12 @@ pub struct ScreeningPromptInput {
     pub articles: Vec<ArticleEntry>,
     pub existing_tags: Vec<String>,
     pub existing_labels: Vec<String>,
+    /// Optional free-text combinatorial rules the LLM applies strictly
+    /// (AND/OR gates, hard exclusions, conditional inclusion). References
+    /// criteria by their `global_number`. `None` or whitespace-only omits the
+    /// `## Custom Screening Instructions` section entirely (byte-identical to
+    /// pre-feature prompts → backward-compatible).
+    pub custom_logic: Option<String>,
 }
 
 /// Returns true when all criteria (both inclusion and exclusion) share the same priority,
@@ -129,8 +144,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
     } else {
         sorted_inclusion
             .iter()
-            .enumerate()
-            .map(|(i, c)| format!("{}. [{}] {}", i + 1, c.id, c.text))
+            .map(|c| format!("{}. [{}] {}", c.global_number, c.id, c.text))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -140,8 +154,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
     } else {
         sorted_exclusion
             .iter()
-            .enumerate()
-            .map(|(i, c)| format!("{}. [{}] {}", i + 1, c.id, c.text))
+            .map(|c| format!("{}. [{}] {}", c.global_number, c.id, c.text))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -152,6 +165,16 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         "Higher priority rules always outweigh lower priority rules.\n\
          - If inclusion and exclusion criteria of equal priority both match, favor inclusion."
             .to_string()
+    };
+
+    // Custom Screening Instructions section. Omitted entirely when the setting
+    // is absent or trims to empty → byte-identical to pre-feature prompts
+    // (backward-compat for existing prompt tests + cost).
+    let custom_logic_section = match input.custom_logic.as_deref().map(str::trim) {
+        Some(text) if !text.is_empty() => {
+            format!("\n## Custom Screening Instructions\n{text}\n", text = text)
+        }
+        _ => String::new(),
     };
 
     // Build articles JSON array
@@ -235,7 +258,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
 
 ## Priority Rules
 {priority_rules}
-{existing_tags_section}
+{custom_logic_section}{existing_tags_section}
 {existing_labels_section}
 ## Articles
 {articles_json}{evidence_section}"#,
@@ -245,6 +268,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         exclusion_header = exclusion_header,
         exclusion_list = exclusion_list,
         priority_rules = priority_rules,
+        custom_logic_section = custom_logic_section,
         existing_tags_section = existing_tags_section,
         existing_labels_section = existing_labels_section,
         articles_json = articles_json,

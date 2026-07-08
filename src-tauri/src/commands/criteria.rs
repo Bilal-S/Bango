@@ -337,3 +337,133 @@ Do not return JSON."#,
 
     Ok(CritiqueCriteriaResult { critique: response })
 }
+
+// ── Check Rules: holistic ruleset consistency review ────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckRulesResult {
+    pub critique: String,
+}
+
+/// Run an LLM consistency review of the whole screening ruleset: both
+/// inclusion + exclusion criteria (with global numbering so the model sees the
+/// same numbers the user sees on the Criteria screen) PLUS any custom screening
+/// instructions. Returns plain-text critique; non-fatal errors are logged to
+/// the audit trail (mirrors `critique_criteria`).
+#[tauri::command]
+pub async fn check_rules(
+    db_state: State<'_, DbState>,
+    orchestrator: State<'_, Arc<LlmOrchestrator>>,
+) -> Result<CheckRulesResult, AppError> {
+    let (config, aims, inclusion_criteria, exclusion_criteria, custom_logic) = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let config = llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+        let aims = criteria_repo::get_all_aims(&conn)?;
+        if aims.is_empty() {
+            return Err(AppError::Validation(
+                "Research aims must be defined before checking rules".to_string(),
+            ));
+        }
+        let inclusion = criteria_repo::get_criteria_by_type(&conn, "inclusion")?;
+        let exclusion = criteria_repo::get_criteria_by_type(&conn, "exclusion")?;
+        if inclusion.is_empty() && exclusion.is_empty() {
+            return Err(AppError::Validation("No criteria defined to review".to_string()));
+        }
+        let logic = crate::db::app_settings_repo::get_screening_custom_logic(&conn)?;
+        (config, aims, inclusion, exclusion, logic)
+    };
+
+    // Build global numbering: inclusion 1..N, then exclusion N+1..N+M (mirrors
+    // the Criteria screen so the LLM sees the same numbers the user sees).
+    let inclusion_refs: Vec<&Criterion> = inclusion_criteria.iter().collect();
+    let exclusion_refs: Vec<&Criterion> = exclusion_criteria.iter().collect();
+    let global_numbering = crate::screening::engine::build_global_criterion_numbering(
+        &inclusion_refs,
+        &exclusion_refs,
+    );
+
+    let aims_list: Vec<String> =
+        aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
+
+    let inc_list: Vec<String> = inclusion_criteria
+        .iter()
+        .map(|c| {
+            format!(
+                "{}. [{}] {} (priority: {})",
+                global_numbering.get(&c.id).unwrap_or(&0),
+                c.id,
+                c.text,
+                c.priority.as_str()
+            )
+        })
+        .collect();
+    let exc_list: Vec<String> = exclusion_criteria
+        .iter()
+        .map(|c| {
+            format!(
+                "{}. [{}] {} (priority: {})",
+                global_numbering.get(&c.id).unwrap_or(&0),
+                c.id,
+                c.text,
+                c.priority.as_str()
+            )
+        })
+        .collect();
+
+    let custom_logic_section = match custom_logic.as_deref() {
+        Some(text) if !text.trim().is_empty() => {
+            format!("\n## Custom Screening Instructions\n{}\n", text.trim())
+        }
+        _ => "\n## Custom Screening Instructions\n(none defined)\n".to_string(),
+    };
+
+    let system_prompt = "You are a systematic literature review ruleset reviewer. Evaluate the \
+        consistency, completeness, and clarity of the inclusion criteria, exclusion criteria, \
+        and any custom combinatorial screening instructions. Reference criteria by their \
+        numbered position. Provide specific, actionable feedback as plain text.";
+
+    let user_prompt = format!(
+        r#"## Task
+Review the complete screening ruleset for a systematic literature review. Identify:
+1. Contradictions between inclusion and exclusion criteria
+2. Overlapping or duplicate criteria (within or across types)
+3. Ambiguous or unclear criteria wording
+4. Custom-rule references to criterion numbers that don't exist or are out of range
+5. Custom-rule logic that conflicts with the stated priorities
+6. Missing priorities or priority mis-orderings
+7. Gaps where common screening dimensions (population, intervention, outcomes, study design) are uncovered
+
+## Research Aims
+{research_aims}
+
+## Inclusion Criteria (numbered 1..N)
+{inclusion}
+
+## Exclusion Criteria (numbering continues N+1..N+M)
+{exclusion}
+{custom_logic_section}
+Provide your critique as plain text with specific recommendations. Group findings under the headings: Contradictions, Overlaps, Ambiguity, Custom-Rule Issues, Priority Issues, Gaps. Do not return JSON."#,
+        research_aims = aims_list.join("\n"),
+        inclusion =
+            if inc_list.is_empty() { "(none defined)".to_string() } else { inc_list.join("\n") },
+        exclusion =
+            if exc_list.is_empty() { "(none defined)".to_string() } else { exc_list.join("\n") },
+        custom_logic_section = custom_logic_section,
+    );
+
+    let result = orchestrator
+        .send(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
+        .await;
+    if let Err(ref e) = result {
+        let err_msg = e.to_string();
+        audit_repo::log_error_best_effort(
+            &db_state.conn,
+            &format!("Check rules failed: {}", err_msg),
+        );
+    }
+    let (response, _) = result?;
+
+    Ok(CheckRulesResult { critique: response })
+}

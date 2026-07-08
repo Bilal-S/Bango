@@ -21,6 +21,16 @@ export const useCriteriaStore = defineStore('criteria', () => {
   const inclusionError = ref<string | null>(null);
   const exclusionError = ref<string | null>(null);
 
+  // ── Custom Screening Instructions + Check Rules state ─────────────
+  // `customLogic` is loaded once on mount and persisted via Save. The
+  // rules-check critique mirrors the inclusion/exclusion critique pattern
+  // (persists across route navigation, dismissible, collapsible).
+  const customLogic = ref('');
+  const customLogicLoaded = ref(false);
+  const generatingRulesCheck = ref(false);
+  const rulesCritique = ref('');
+  const rulesError = ref<string | null>(null);
+
   // ── Search Strategy Builder state (session-scoped, NOT persisted to DB) ──
   // Mirrors the inclusion/exclusion critique pattern: survives route
   // navigation so the user can leave the Criteria view and come back, clears
@@ -35,6 +45,41 @@ export const useCriteriaStore = defineStore('criteria', () => {
   // Default true so a freshly-generated critique shows expanded.
   const inclusionCritiqueExpanded = ref(true);
   const exclusionCritiqueExpanded = ref(true);
+  const rulesCritiqueExpanded = ref(true);
+
+  /** Load the persisted custom screening-instructions text (once). */
+  async function loadCustomLogic(): Promise<void> {
+    if (customLogicLoaded.value || !isTauri()) return;
+    try {
+      const value = await tauriCommand<string | null>('get_screening_custom_logic');
+      customLogic.value = value ?? '';
+    } catch {
+      customLogic.value = '';
+    } finally {
+      customLogicLoaded.value = true;
+    }
+  }
+
+  /** Persist the custom screening-instructions text. Trims surrounding whitespace. */
+  async function saveCustomLogic(text: string): Promise<void> {
+    await tauriCommand('set_screening_custom_logic', { value: text });
+    customLogic.value = text;
+  }
+
+  /** Run the holistic ruleset consistency review (Check Rules button). */
+  async function runRulesCheck(): Promise<void> {
+    generatingRulesCheck.value = true;
+    rulesError.value = null;
+    try {
+      const result = await tauriCommand<{ critique: string }>('check_rules');
+      rulesCritique.value = result.critique;
+      rulesCritiqueExpanded.value = true;
+    } catch (e: unknown) {
+      rulesError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+      generatingRulesCheck.value = false;
+    }
+  }
 
   async function fetchIfNeeded(): Promise<void> {
     if (initialized.value || !isTauri()) return;
@@ -111,6 +156,16 @@ export const useCriteriaStore = defineStore('criteria', () => {
     exclusionCritique,
     inclusionError,
     exclusionError,
+    // Custom Screening Instructions + Check Rules state
+    customLogic,
+    customLogicLoaded,
+    generatingRulesCheck,
+    rulesCritique,
+    rulesError,
+    rulesCritiqueExpanded,
+    loadCustomLogic,
+    saveCustomLogic,
+    runRulesCheck,
     // Search Strategy Builder state
     generatingSearchStrategy,
     searchStrategyResult,

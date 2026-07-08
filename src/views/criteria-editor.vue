@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue';
+import { ref, computed, nextTick, watch, onMounted } from 'vue';
 import { marked } from 'marked';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
 import { useLlmConfigStore } from '@/stores/llm-config';
+import { useToast } from '@/composables/use-toast';
 import { formatLlmError } from '@/utils/llm-error';
 import type { SearchStrategyResult } from '@/types/search-strategy';
 import SearchStrategyCard from '@/components/search-strategy-card.vue';
 import type { Priority } from '@/types';
 import { useInlineEdit } from '@/composables/use-inline-edit';
 import type { Criterion, ResearchAim } from '@/types';
+
+const toast = useToast();
 
 const criteriaStore = useCriteriaStore();
 const llmConfigStore = useLlmConfigStore();
@@ -424,6 +427,62 @@ function dismissExclusionCritique(): void {
   criteriaStore.exclusionCritique = '';
   criteriaStore.exclusionCritiqueExpanded = true;
 }
+
+// ── Custom Screening Instructions + Check Rules ────────────────────────
+// Local draft mirrors the persisted store value while the user edits. We
+// load on mount and seed the draft from the store so navigation away and
+// back preserves unsaved edits within the session.
+const customLogicDraft = ref('');
+const customLogicSaving = ref(false);
+const showHelpPopover = ref(false);
+let helpPopoverTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function showHelp(): void {
+  if (helpPopoverTimeout) {
+    clearTimeout(helpPopoverTimeout);
+    helpPopoverTimeout = null;
+  }
+  showHelpPopover.value = true;
+}
+
+function scheduleHideHelp(): void {
+  if (helpPopoverTimeout) clearTimeout(helpPopoverTimeout);
+  helpPopoverTimeout = setTimeout(() => {
+    showHelpPopover.value = false;
+  }, 200);
+}
+
+async function saveCustomLogic(): Promise<void> {
+  customLogicSaving.value = true;
+  try {
+    await criteriaStore.saveCustomLogic(customLogicDraft.value);
+    toast.show('Custom screening instructions saved.', 'success');
+  } catch (e: unknown) {
+    toast.show(
+      `Failed to save instructions: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    );
+  } finally {
+    customLogicSaving.value = false;
+  }
+}
+
+async function handleCheckRules(): Promise<void> {
+  if (!canUseAi.value || criteriaStore.generatingRulesCheck) return;
+  await criteriaStore.runRulesCheck();
+}
+
+/** Dismiss the rules-check critique card: clear the text and reset collapse. */
+function dismissRulesCritique(): void {
+  criteriaStore.rulesCritique = '';
+  criteriaStore.rulesCritiqueExpanded = true;
+}
+
+onMounted(() => {
+  void criteriaStore.loadCustomLogic().then(() => {
+    customLogicDraft.value = criteriaStore.customLogic;
+  });
+});
 
 // ── Search Strategy Builder ────────────────────────────────────────────
 
@@ -896,6 +955,165 @@ async function handleSearchStrategy(): Promise<void> {
         v-if="criteriaStore.exclusionCritiqueExpanded"
         class="markdown-content ai-critique-card__body"
         v-html="renderCritiqueMarkdown(exclusionCritiqueText)"
+      />
+    </div>
+
+    <!-- Section 4: Custom Screening Instructions -->
+    <section class="section-panel">
+      <div class="section-panel__header">
+        <div class="section-panel__title-group">
+          <span class="material-symbols-outlined text-indigo-600">rule</span>
+          <h2 class="section-panel__title">Custom Screening Instructions</h2>
+        </div>
+        <!-- Help popover: hover/focus the question-mark icon to see the AND/OR
+             syntax guide. Uses a delayed hide so the user can move the pointer
+             from the icon into the popover body without dismissing it. -->
+        <div class="help-popover" @mouseenter="showHelp" @mouseleave="scheduleHideHelp">
+          <button
+            type="button"
+            class="help-popover__icon"
+            title="How to use Custom Screening Instructions"
+            aria-label="How to use Custom Screening Instructions"
+            @focus="showHelp"
+            @blur="scheduleHideHelp"
+            @click="showHelpPopover = !showHelpPopover"
+          >
+            <span class="material-symbols-outlined">help</span>
+          </button>
+          <Transition name="help-popover">
+            <div
+              v-if="showHelpPopover"
+              class="help-popover__panel"
+              role="tooltip"
+              @mouseenter="showHelp"
+              @mouseleave="scheduleHideHelp"
+            >
+              <p class="help-popover__lead">
+                Optional rules your AI applies when deciding include/exclude. Reference criteria by
+                their numbered position (inclusion is
+                <code>1..N</code>, exclusion continues <code>N+1..N+M</code>, matching the numbers
+                shown on this screen).
+              </p>
+              <p class="help-popover__examples-label">Examples:</p>
+              <ul class="help-popover__examples">
+                <li>
+                  "Inclusion criteria 2, 3, and 4 are mandatory AND gates - all three must match for
+                  inclusion."
+                </li>
+                <li>
+                  "Only if 2-4 are all satisfied, consider inclusion criterion 5 OR 6 as the final
+                  inclusion signal."
+                </li>
+                <li>
+                  "Exclusion criterion 9 is a hard gate; if it matches, ignore inclusion criteria
+                  11-14."
+                </li>
+                <li>
+                  "If inclusion 3 and 7 both match, exclusion 5 OR 6 must NOT match for inclusion."
+                </li>
+              </ul>
+              <p class="help-popover__footer">Leave blank for default priority-only behavior.</p>
+            </div>
+          </Transition>
+        </div>
+      </div>
+
+      <div class="custom-logic">
+        <textarea
+          v-model="customLogicDraft"
+          class="custom-logic__textarea"
+          rows="5"
+          placeholder="e.g. Inclusion criteria 2, 3, and 4 are mandatory AND gates - all three must match for inclusion. Only then consider inclusion criterion 5 OR 6."
+        />
+        <div class="custom-logic__actions">
+          <button
+            class="custom-logic__save-btn"
+            :disabled="customLogicSaving"
+            @click="saveCustomLogic"
+          >
+            <span v-if="customLogicSaving" class="material-symbols-outlined animate-spin"
+              >progress_activity</span
+            >
+            <span v-else>Save</span>
+          </button>
+          <div v-if="criteriaStore.generatingRulesCheck" class="ai-loading">
+            <span class="material-symbols-outlined animate-spin">progress_activity</span>
+            <span>Checking…</span>
+          </div>
+          <button
+            v-else
+            class="ai-btn"
+            :disabled="!canUseAi"
+            :title="
+              !canUseAi
+                ? 'Add at least one research aim and configure an LLM first'
+                : 'Run an AI consistency review of the whole ruleset'
+            "
+            @click="handleCheckRules"
+          >
+            <span class="material-symbols-outlined">auto_awesome</span>
+            Check Rules
+          </button>
+        </div>
+        <p class="custom-logic__hint">
+          Saved instructions are applied on the next screening run. Use the criterion numbers shown
+          above.
+        </p>
+      </div>
+    </section>
+
+    <!-- AI Error: Check Rules -->
+    <div v-if="criteriaStore.rulesError" class="ai-error-card">
+      <div class="ai-error-card__header">
+        <div class="ai-error-card__title-group">
+          <span class="material-symbols-outlined">error</span>
+          <span class="ai-error-card__title">Check Rules Failed</span>
+        </div>
+        <button class="ai-error-card__dismiss" @click="criteriaStore.rulesError = null">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+      <div class="ai-error-card__body">
+        <p class="ai-error-card__prefix">{{ formatLlmError(criteriaStore.rulesError).prefix }}</p>
+        <p v-if="formatLlmError(criteriaStore.rulesError).cause" class="ai-error-card__cause">
+          <strong>Cause:</strong> {{ formatLlmError(criteriaStore.rulesError).cause }}
+        </p>
+        <p v-if="formatLlmError(criteriaStore.rulesError).solution" class="ai-error-card__solution">
+          <strong>Solution:</strong> {{ formatLlmError(criteriaStore.rulesError).solution }}
+        </p>
+        <details class="ai-error-card__details">
+          <summary>Technical details</summary>
+          <pre>{{ criteriaStore.rulesError }}</pre>
+        </details>
+      </div>
+    </div>
+
+    <!-- AI Critique: Check Rules -->
+    <div v-if="criteriaStore.rulesCritique" class="ai-critique-card">
+      <div class="ai-critique-card__header">
+        <div class="ai-critique-card__title-group">
+          <span class="material-symbols-outlined">auto_awesome</span>
+          <span class="ai-critique-card__title">Rules Consistency Review</span>
+        </div>
+        <div class="ai-critique-card__header-actions">
+          <button
+            class="ai-critique-card__toggle"
+            :title="criteriaStore.rulesCritiqueExpanded ? 'Collapse' : 'Expand'"
+            @click="criteriaStore.rulesCritiqueExpanded = !criteriaStore.rulesCritiqueExpanded"
+          >
+            <span class="material-symbols-outlined">{{
+              criteriaStore.rulesCritiqueExpanded ? 'expand_less' : 'expand_more'
+            }}</span>
+          </button>
+          <button class="ai-critique-card__dismiss" @click="dismissRulesCritique">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+      </div>
+      <div
+        v-if="criteriaStore.rulesCritiqueExpanded"
+        class="markdown-content ai-critique-card__body"
+        v-html="renderCritiqueMarkdown(criteriaStore.rulesCritique)"
       />
     </div>
   </div>
@@ -1589,5 +1807,186 @@ async function handleSearchStrategy(): Promise<void> {
 
 .ai-error-card__help-link:hover {
   text-decoration: underline;
+}
+
+/* ── Section 4: Custom Screening Instructions ────────────────────────── */
+
+.custom-logic {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.custom-logic__textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background-color: #ffffff;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  color: #1b1b24;
+  resize: vertical;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.custom-logic__textarea:focus {
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
+}
+
+.custom-logic__textarea::placeholder {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.custom-logic__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.custom-logic__save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background-color: #3525cd;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  min-width: 4rem;
+  justify-content: center;
+}
+
+.custom-logic__save-btn:hover:not(:disabled) {
+  background-color: #4f46e5;
+}
+
+.custom-logic__save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.custom-logic__save-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.custom-logic__hint {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* Help popover (rich hover/focus tooltip for the question-mark icon) */
+.help-popover {
+  position: relative;
+  display: inline-flex;
+}
+
+.help-popover__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  border: none;
+  background-color: #f1f5f9;
+  color: #64748b;
+  cursor: help;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.help-popover__icon:hover,
+.help-popover__icon:focus-visible {
+  background-color: #e0e7ff;
+  color: #4338ca;
+}
+
+.help-popover__icon .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.help-popover__panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 380px;
+  max-width: calc(100vw - 2rem);
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  padding: 0.875rem 1rem;
+  font-size: 12px;
+  line-height: 18px;
+  color: #475569;
+}
+
+.help-popover__panel code {
+  background-color: #f1f5f9;
+  color: #4338ca;
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.1875rem;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.help-popover__lead {
+  margin: 0 0 0.5rem;
+}
+
+.help-popover__examples-label {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+  color: #1b1b24;
+}
+
+.help-popover__examples {
+  margin: 0 0 0.5rem;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.help-popover__examples li {
+  color: #64748b;
+}
+
+.help-popover__footer {
+  margin: 0;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* Popover enter/leave transition */
+.help-popover-enter-active,
+.help-popover-leave-active {
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.help-popover-enter-from,
+.help-popover-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 </style>

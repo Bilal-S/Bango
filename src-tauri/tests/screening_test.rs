@@ -24,6 +24,7 @@ fn make_single_article_input() -> ScreeningPromptInput {
         }],
         existing_tags: vec![],
         existing_labels: vec![],
+        custom_logic: None,
     }
 }
 
@@ -152,11 +153,13 @@ fn test_build_prompt_contains_criteria() {
             id: "c1".to_string(),
             text: "Must be about ML".to_string(),
             priority: Priority::Critical,
+            global_number: 1,
         }],
         exclusion_criteria: vec![CriterionEntry {
             id: "c2".to_string(),
             text: "Not a review".to_string(),
             priority: Priority::High,
+            global_number: 2,
         }],
         ..make_single_article_input()
     };
@@ -214,17 +217,20 @@ fn test_build_prompt_simplified_priority_when_all_same() {
                 id: "c1".to_string(),
                 text: "Inc 1".to_string(),
                 priority: Priority::Standard,
+                global_number: 1,
             },
             CriterionEntry {
                 id: "c2".to_string(),
                 text: "Inc 2".to_string(),
                 priority: Priority::Standard,
+                global_number: 2,
             },
         ],
         exclusion_criteria: vec![CriterionEntry {
             id: "c3".to_string(),
             text: "Exc 1".to_string(),
             priority: Priority::Standard,
+            global_number: 3,
         }],
         ..make_single_article_input()
     };
@@ -245,17 +251,20 @@ fn test_build_prompt_priority_ordering_when_mixed() {
                 id: "c1".to_string(),
                 text: "Low inc".to_string(),
                 priority: Priority::Low,
+                global_number: 1,
             },
             CriterionEntry {
                 id: "c2".to_string(),
                 text: "Critical inc".to_string(),
                 priority: Priority::Critical,
+                global_number: 2,
             },
         ],
         exclusion_criteria: vec![CriterionEntry {
             id: "c3".to_string(),
             text: "High exc".to_string(),
             priority: Priority::High,
+            global_number: 3,
         }],
         ..make_single_article_input()
     };

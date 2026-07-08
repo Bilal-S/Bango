@@ -86,6 +86,29 @@ pub fn set_auto_translate(
     app_settings_repo::set_auto_translate(&conn, enabled)
 }
 
+/// Read the optional custom screening-instructions text. Returns `null` when
+/// the key is absent or empty (today's priority-only behavior). Powers the
+/// Criteria screen -> "Custom Screening Instructions" textarea.
+#[tauri::command]
+pub fn get_screening_custom_logic(
+    db_state: tauri::State<'_, DbState>,
+) -> Result<Option<String>, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    app_settings_repo::get_screening_custom_logic(&conn)
+}
+
+/// Persist the custom screening-instructions text. The value is trimmed of
+/// surrounding whitespace; an empty string is allowed and effectively
+/// disables the feature.
+#[tauri::command]
+pub fn set_screening_custom_logic(
+    db_state: tauri::State<'_, DbState>,
+    value: String,
+) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    app_settings_repo::set_screening_custom_logic(&conn, &value)
+}
+
 /// Compute the platform default root: `~/Documents/Bango/`.
 fn compute_default_storage_root() -> String {
     let docs = dirs::document_dir()
