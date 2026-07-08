@@ -46,9 +46,11 @@ function onPageSizeChange(event: Event): void {
       <button
         class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors shrink-0"
         :class="
-          showFilters
-            ? 'bg-indigo-100 text-indigo-700'
-            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+          isFiltered
+            ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+            : showFilters
+              ? 'bg-indigo-100 text-indigo-700'
+              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
         "
         @click="emit('toggleFilters')"
       >

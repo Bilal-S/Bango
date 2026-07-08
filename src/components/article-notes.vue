@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import type { Article } from '@/types';
 
 const props = defineProps<{
@@ -20,10 +20,28 @@ function toggleImportedNotes(): void {
 // User notes editing
 const editingNotes = ref(false);
 const noteDraft = ref('');
+const noteTextareaRef = ref<HTMLTextAreaElement | null>(null);
 
 watch(editingNotes, (val) => {
   if (val) noteDraft.value = props.article.userNotes ?? '';
 });
+
+/**
+ * Open the note editor from a double-click on the display/placeholder text.
+ * Clears any browser word-selection caused by the dblclick gesture and places
+ * the textarea caret at the end of the existing note text (no selection).
+ */
+function startEditingNotes(): void {
+  window.getSelection()?.removeAllRanges();
+  editingNotes.value = true;
+  void nextTick(() => {
+    const el = noteTextareaRef.value;
+    if (!el) return;
+    el.focus();
+    const end = el.value.length;
+    el.setSelectionRange(end, end);
+  });
+}
 
 function saveNotes(): void {
   emit('updateNotes', props.article.id, noteDraft.value);
@@ -73,6 +91,7 @@ function cancelNotes(): void {
     </div>
     <div v-if="editingNotes" class="space-y-2">
       <textarea
+        ref="noteTextareaRef"
         v-model="noteDraft"
         class="w-full text-sm border border-slate-200 rounded-lg p-3 focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-y min-h-[80px]"
         placeholder="Add notes about this article…"
@@ -94,10 +113,19 @@ function cancelNotes(): void {
     </div>
     <p
       v-else-if="article.userNotes"
-      class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-slate-50 p-3 rounded-lg"
+      class="text-body-main font-body-main text-on-surface-variant leading-relaxed bg-slate-50 p-3 rounded-lg cursor-pointer hover:bg-slate-100 transition-colors whitespace-pre-line"
+      title="Double-click to edit"
+      @dblclick.prevent="startEditingNotes"
     >
       {{ article.userNotes }}
     </p>
-    <p v-else class="text-xs text-slate-400 italic">No notes yet. Click edit to add.</p>
+    <p
+      v-else
+      class="text-xs text-slate-400 italic cursor-pointer hover:text-slate-500 transition-colors select-none"
+      title="Double-click to add notes"
+      @dblclick.prevent="startEditingNotes"
+    >
+      No notes yet. Double-click to add.
+    </p>
   </section>
 </template>

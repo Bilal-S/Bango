@@ -4,7 +4,8 @@ import type { ArticleFilter } from '@/composables/use-article-search';
 import type { TitleMatchType } from '@/composables/use-article-search';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
-import { getColorScheme } from '@/utils/color';
+import { getColorScheme, type ColorScheme } from '@/utils/color';
+import SuggestInput from '@/components/suggest-input.vue';
 
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
@@ -56,7 +57,29 @@ function toggleLabel(label: string): void {
   updateField('labels', updated);
 }
 
+/** Color scheme for a tag (custom or hash-derived). */
+function tagColor(name: string): ColorScheme {
+  return getColorScheme(name, tagsStore.tags.find((t) => t.name === name)?.color);
+}
+
+/** Color scheme for a label (custom or hash-derived). */
+function labelColor(name: string): ColorScheme {
+  return getColorScheme(name, labelsStore.labels.find((l) => l.name === name)?.color);
+}
+
 const showAuthorDropdown = ref(false);
+const tagInputValue = ref('');
+const labelInputValue = ref('');
+
+/** Tags not yet selected (drives the add combobox dropdown). */
+const availableTags = computed((): string[] =>
+  props.allTags.filter((t) => !props.filter.tags.includes(t))
+);
+
+/** Labels not yet selected (drives the add combobox dropdown). */
+const availableLabels = computed((): string[] =>
+  props.allLabels.filter((l) => !props.filter.labels.includes(l))
+);
 
 function hideAuthorDropdown(): void {
   window.setTimeout(() => (showAuthorDropdown.value = false), 200);
@@ -212,94 +235,81 @@ const matchedAuthors = computed(() => {
       <!-- Tags -->
       <div>
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Tags</label>
-        <div class="flex flex-wrap gap-1.5">
-          <button
-            v-for="tag in allTags"
+        <!-- Active removable pills (bounded height so many tags never grow the panel) -->
+        <div
+          v-if="filter.tags.length > 0"
+          class="flex flex-wrap gap-1.5 mb-2 max-h-32 overflow-y-auto"
+        >
+          <span
+            v-for="tag in filter.tags"
             :key="tag"
-            class="px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors border"
-            :style="
-              filter.tags.includes(tag)
-                ? {
-                    backgroundColor: getColorScheme(
-                      tag,
-                      tagsStore.tags.find((t) => t.name === tag)?.color
-                    ).bg,
-                    color: getColorScheme(tag, tagsStore.tags.find((t) => t.name === tag)?.color)
-                      .text,
-                    borderColor: getColorScheme(
-                      tag,
-                      tagsStore.tags.find((t) => t.name === tag)?.color
-                    ).base,
-                    boxShadow: `0 0 0 2px ${getColorScheme(tag, tagsStore.tags.find((t) => t.name === tag)?.color).border}`,
-                  }
-                : {
-                    backgroundColor: getColorScheme(
-                      tag,
-                      tagsStore.tags.find((t) => t.name === tag)?.color
-                    ).bg,
-                    color: getColorScheme(tag, tagsStore.tags.find((t) => t.name === tag)?.color)
-                      .text,
-                    borderColor: 'transparent',
-                  }
-            "
-            @click="toggleTag(tag)"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border"
+            :style="{
+              backgroundColor: tagColor(tag).bg,
+              color: tagColor(tag).text,
+              borderColor: tagColor(tag).base,
+            }"
           >
             {{ tag }}
-          </button>
-          <span v-if="allTags.length === 0" class="text-[11px] text-slate-400 italic">
-            No tags available
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              :title="`Remove ${tag}`"
+              @click="toggleTag(tag)"
+            >
+              ×
+            </button>
           </span>
         </div>
+        <!-- Search-and-add combobox (dropdown already has its own max-h-40 scroll) -->
+        <SuggestInput
+          v-if="allTags.length > 0"
+          v-model="tagInputValue"
+          :suggestions="availableTags"
+          placeholder="Search tags to add..."
+          @select="toggleTag"
+        />
+        <span v-else class="text-[11px] text-slate-400 italic">No tags available</span>
       </div>
 
       <!-- Labels -->
       <div>
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Labels</label>
-        <div class="flex flex-wrap gap-1.5">
-          <button
-            v-for="label in allLabels"
+        <!-- Active removable pills (bounded height so many labels never grow the panel) -->
+        <div
+          v-if="filter.labels.length > 0"
+          class="flex flex-wrap gap-1.5 mb-2 max-h-32 overflow-y-auto"
+        >
+          <span
+            v-for="label in filter.labels"
             :key="label"
-            class="px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors border"
-            :style="
-              filter.labels.includes(label)
-                ? {
-                    backgroundColor: getColorScheme(
-                      label,
-                      labelsStore.labels.find((l) => l.name === label)?.color
-                    ).bg,
-                    color: getColorScheme(
-                      label,
-                      labelsStore.labels.find((l) => l.name === label)?.color
-                    ).text,
-                    borderColor: getColorScheme(
-                      label,
-                      labelsStore.labels.find((l) => l.name === label)?.color
-                    ).base,
-                    boxShadow: `0 0 0 2px ${getColorScheme(label, labelsStore.labels.find((l) => l.name === label)?.color).border}`,
-                  }
-                : {
-                    backgroundColor: getColorScheme(
-                      label,
-                      labelsStore.labels.find((l) => l.name === label)?.color
-                    ).bg,
-                    color: getColorScheme(
-                      label,
-                      labelsStore.labels.find((l) => l.name === label)?.color
-                    ).text,
-                    borderColor: getColorScheme(
-                      label,
-                      labelsStore.labels.find((l) => l.name === label)?.color
-                    ).border,
-                  }
-            "
-            @click="toggleLabel(label)"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border"
+            :style="{
+              backgroundColor: labelColor(label).bg,
+              color: labelColor(label).text,
+              borderColor: labelColor(label).base,
+            }"
           >
             {{ label }}
-          </button>
-          <span v-if="allLabels.length === 0" class="text-[11px] text-slate-400 italic">
-            No labels available
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              :title="`Remove ${label}`"
+              @click="toggleLabel(label)"
+            >
+              ×
+            </button>
           </span>
         </div>
+        <!-- Search-and-add combobox (dropdown already has its own max-h-40 scroll) -->
+        <SuggestInput
+          v-if="allLabels.length > 0"
+          v-model="labelInputValue"
+          :suggestions="availableLabels"
+          placeholder="Search labels to add..."
+          @select="toggleLabel"
+        />
+        <span v-else class="text-[11px] text-slate-400 italic">No labels available</span>
       </div>
     </div>
 
