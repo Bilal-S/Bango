@@ -171,7 +171,7 @@ async fn two_stage_skips_clear_cut_include() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
         .await
         .expect("run_sync");
     assert_eq!(
@@ -195,7 +195,7 @@ async fn two_stage_skips_clear_cut_exclude() {
     let mock = CountingMock::new(response("exclude", 0.2, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
         .await
         .expect("run_sync");
     assert_eq!(
@@ -220,7 +220,7 @@ async fn two_stage_triggers_on_borderline() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
         .await
         .expect("run_sync");
     assert_eq!(
@@ -249,7 +249,7 @@ async fn two_stage_logs_both_passes_to_audit() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
         .await
         .expect("run_sync");
     let conn = db.lock().unwrap();
@@ -282,7 +282,7 @@ async fn enhanced_mode_always_sends_evidence() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None, None)
         .await
         .expect("run_sync");
     let evidence_seen = mock.evidence_seen.lock().unwrap().clone();
@@ -341,7 +341,7 @@ async fn two_stage_progress_updates_when_evidence_filtered_out() {
     );
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
         .await
         .expect("run_sync");
 
@@ -375,7 +375,7 @@ async fn two_stage_accumulates_actual_tokens() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
         .await
         .expect("run_sync");
 
@@ -406,7 +406,7 @@ async fn enhanced_audit_label_names_matched_section_only() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None, None)
         .await
         .expect("run_sync");
 
@@ -447,7 +447,7 @@ async fn enhanced_mode_falls_back_to_abstract_when_no_full_text() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None, None)
         .await
         .expect("run_sync");
 
@@ -477,7 +477,7 @@ async fn two_stage_mode_falls_back_to_abstract_when_no_full_text() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
         .await
         .expect("run_sync");
 

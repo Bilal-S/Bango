@@ -78,7 +78,7 @@ async fn max_articles_cap_processes_only_requested_count() {
     let engine = ScreeningEngine::with_batch_size(1);
     let llm = AlwaysIncludeMock::new();
 
-    engine.run_sync(&db, &llm, 0, criteria, aims, config, None).await.expect("run_sync");
+    engine.run_sync(&db, &llm, 0, criteria, aims, config, None, None).await.expect("run_sync");
 
     let progress = engine.get_progress().await;
     assert_eq!(progress.total, 2, "progress total should match cap");

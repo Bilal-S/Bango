@@ -2,6 +2,7 @@
 import { onMounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useArticleSearch } from '@/composables/use-article-search';
+import { useScreening } from '@/composables/use-screening';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
 import { requestArticleAiSummary } from '@/composables/use-ai-summary';
@@ -95,6 +96,7 @@ const {
   deleteFullTextAttachment,
   readFullTextContent,
 } = useArticleSearch();
+const { screenArticle } = useScreening();
 
 const activeReferencePaperId = ref<string | null>(null);
 
@@ -598,6 +600,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
       @close="handleCloseDetail"
       @navigate-prev="navigatePrev"
       @navigate-next="navigateNext"
+      @screen-article="screenArticle"
       @move-article="handleMoveArticle"
       @update-notes="updateNotes"
       @update-tags="updateTags"

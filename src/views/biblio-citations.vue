@@ -10,6 +10,7 @@ import { useNetworkView } from '../composables/use-network-view';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { useMainPathWorker } from '../composables/use-main-path-worker';
 import { useArticleSearch } from '../composables/use-article-search';
+import { useScreening } from '@/composables/use-screening';
 import { useToast } from '../composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { debounce } from '../utils/debounce';
@@ -77,6 +78,7 @@ const {
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
+const { screenArticle } = useScreening();
 
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
@@ -465,6 +467,7 @@ async function onResetAnalysis() {
         @update-tags="updateTags"
         @update-labels="updateLabels"
         @update-criteria="updateCriteria"
+        @screen-article="screenArticle"
         @move-article="moveArticle"
         @attach-full-text="handleAttachFullText"
         @delete-full-text="deleteFullTextAttachment"

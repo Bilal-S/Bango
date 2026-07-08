@@ -48,7 +48,7 @@ impl IngestLlmSender for DupSimulatingSender {
              source_articles: [\"art-0\"]\n\
              ---\n\n\
              # Childhood Obesity\n\n\
-             A concept. See [[obesity-childhood]].\n"
+             A concept backed by [^art-0]. See [[obesity-childhood]].\n"
         } else if is_batch_1 {
             // Batch 1: produces obesity-childhood, links to childhood-obesity.
             "<!-- PAGE:obesity-childhood -->\n\
@@ -63,7 +63,7 @@ impl IngestLlmSender for DupSimulatingSender {
              source_articles: [\"art-1\"]\n\
              ---\n\n\
              # Obesity Childhood\n\n\
-             Same concept, different slug. See [[childhood-obesity]].\n"
+             Same concept from [^art-1], different slug. See [[childhood-obesity]].\n"
         } else {
             // Any other batch: no pages (shouldn't happen in this test).
             ""
@@ -125,6 +125,12 @@ async fn multi_batch_ingest_consolidates_cross_batch_duplicates() {
     assert!(full_file.contains("Childhood Obesity"), "canonical title present");
     assert!(full_file.contains("Additional perspectives"), "merged body appended");
     assert!(full_file.contains("Obesity Childhood"), "duplicate body merged in");
+
+    // Tier A1 grounding contract: the merged body must carry [^art-id] citations
+    // for all source articles so the post-ingest lint doesn't flag the page as
+    // ungrounded.
+    assert!(full_file.contains("[^art-0]"), "merged body must cite art-0");
+    assert!(full_file.contains("[^art-1]"), "merged body must cite art-1");
 
     // Split frontmatter from body: the link rewrite targets the BODY (clickable
     // [[wikilinks]]), not the frontmatter `links:` declaration list (which is a

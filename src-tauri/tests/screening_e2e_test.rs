@@ -175,7 +175,7 @@ async fn test_happy_path_bare_array_batch2() {
     let engine = ScreeningEngine::with_batch_size(2);
 
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
         .await
         .expect("run_sync");
 
@@ -204,7 +204,7 @@ async fn test_envelope_format() {
     let engine = ScreeningEngine::with_batch_size(2);
 
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
         .await
         .expect("run_sync");
 
@@ -230,7 +230,7 @@ async fn test_partial_error_one_batch_malformed() {
     let engine = ScreeningEngine::with_batch_size(2);
 
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
         .await
         .expect("run_sync");
 
@@ -263,7 +263,7 @@ async fn test_cancel_mid_run() {
 
     let mock = CancelAwareMock::new(6, 2, 100);
     engine_clone
-        .run_sync(&db, &mock, 10, criteria, aims, ScreeningConfig::default(), None)
+        .run_sync(&db, &mock, 10, criteria, aims, ScreeningConfig::default(), None, None)
         .await
         .expect("run_sync");
 
@@ -302,6 +302,7 @@ async fn test_resume_after_cancel() {
                 aims.clone(),
                 ScreeningConfig::default(),
                 None,
+                None, // batch-screening mode: no targeted article ID
             )
             .await
             .expect("run 1");
@@ -331,7 +332,7 @@ async fn test_resume_after_cancel() {
         let engine = ScreeningEngine::with_batch_size(2);
 
         engine
-            .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None)
+            .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
             .await
             .expect("run 2");
 

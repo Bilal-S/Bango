@@ -174,6 +174,12 @@ impl ScreeningEngine {
     ///
     /// `config` (Tier 3) selects abstract / enhanced / two-stage behavior. Pass
     /// `ScreeningConfig::default()` for the legacy abstract-only path.
+    ///
+    /// When `target_article_id` is `Some(id)`, the engine screens that specific
+    /// article (by UUID) instead of the next-by-`sequence_id` batch. Used by the
+    /// per-article "Screen" button in the article detail panel. The article must
+    /// be in `working` status and unscreened; otherwise the engine exits
+    /// immediately with `Ok(())` (no-op, not an error).
     #[allow(clippy::too_many_arguments)]
     pub async fn run_sync(
         &self,
@@ -184,6 +190,7 @@ impl ScreeningEngine {
         aims: Vec<ResearchAim>,
         config: ScreeningConfig,
         app_handle: Option<tauri::AppHandle>,
+        target_article_id: Option<String>,
     ) -> Result<(), AppError> {
         // Reset state
         *self.cancel_token.lock().await = false;
@@ -295,10 +302,22 @@ impl ScreeningEngine {
                 break;
             }
 
-            // 1. Fetch next batch from DB
+            // 1. Fetch next batch from DB.
+            //    When `target_article_id` is set (per-article "Screen" button
+            //    path), fetch that specific article by UUID instead of the
+            //    next-by-`sequence_id` batch. If the article is not found, not
+            //    in `working` status, or already screened, the lookup returns
+            //    `None` and we exit immediately (no-op, not an error).
             let mut batch = {
                 let c = crate::db::connection::lock_conn(conn_mutex)?;
-                article_repo::get_next_unscreened_working_batch(&c, self.batch_size)?
+                if let Some(ref target_id) = target_article_id {
+                    match article_repo::get_unscreened_working_article_by_id(&c, target_id)? {
+                        Some(article) => vec![article],
+                        None => break,
+                    }
+                } else {
+                    article_repo::get_next_unscreened_working_batch(&c, self.batch_size)?
+                }
             };
 
             if batch.is_empty() {

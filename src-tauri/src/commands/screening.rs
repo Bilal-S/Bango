@@ -271,6 +271,7 @@ pub async fn start_screening(
                 aims,
                 screening_config,
                 Some(app_handle.clone()),
+                None, // batch-screening mode: no targeted article ID
             )
             .await;
 
@@ -421,6 +422,177 @@ pub fn set_screening_mode(
 pub fn get_full_text_article_count(db_state: State<'_, DbState>) -> Result<i64, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     chunk_repo::count_articles_with_full_text(&conn)
+}
+
+/// Screen a single article by its UUID. Powers the per-article "Screen" button
+/// in the article detail panel.
+///
+/// Unlike `start_screening` (which screens the next unscreened working article
+/// in `sequence_id` order), this command targets a specific article ID. The
+/// engine fetches that exact article via
+/// `get_unscreened_working_article_by_id`, builds a single-article prompt,
+/// sends one LLM call, and writes back the decision (tags/labels/audit/biblio
+/// flags) - identical to the batch path but scoped to one article.
+///
+/// Respects the active screening mode (abstract / enhanced / two-stage):
+/// Enhanced mode retrieves criteria-matched full-text chunks for the article
+/// (when `has_full_text = 1`); Two-stage mode runs the borderline confidence
+/// band check and may fire a stage-2 full-text pass.
+///
+/// Emits `screening:progress` events with `currentArticleTitles: [article.title]`
+/// so the frontend spinner on the "Screen" button (and any table-row spinners)
+/// drives off the same global progress store as batch screening. The store
+/// already invalidates the articles + audit stores when the run completes.
+///
+/// Uses the same concurrent-start guard as `start_screening`: if a batch run is
+/// already in progress, this command returns the current progress instead of
+/// starting a new run.
+#[tauri::command]
+pub async fn screen_article(
+    app_handle: AppHandle,
+    db_state: State<'_, DbState>,
+    screening_state: State<'_, ScreeningState>,
+    article_id: String,
+) -> Result<ScreeningProgress, AppError> {
+    // ── Concurrent-start guard ──
+    {
+        let guard = screening_state.engine.read().await;
+        if let Some(ref existing) = *guard {
+            let progress = existing.get_progress().await;
+            if progress.is_running {
+                return Ok(progress);
+            }
+        }
+    }
+
+    let config = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        llm_config_repo::get_config(&conn)?.ok_or_else(|| {
+            AppError::Validation(
+                "LLM not configured. Please set up LLM configuration first.".to_string(),
+            )
+        })?
+    };
+
+    let criteria = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        criteria_repo::get_all_criteria(&conn)?
+    };
+
+    let aims = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        criteria_repo::get_all_aims(&conn)?
+    };
+
+    // Validate prerequisites.
+    if aims.is_empty() {
+        return Err(AppError::Validation(
+            "No research aims defined. Add at least one research aim in the Criteria Editor."
+                .to_string(),
+        ));
+    }
+    if !criteria
+        .iter()
+        .any(|c| matches!(c.criterion_type, crate::models::criterion::CriterionType::Inclusion))
+    {
+        return Err(AppError::Validation(
+            "No inclusion criteria defined. Add at least one inclusion criterion in the Criteria Editor.".to_string(),
+        ));
+    }
+    if !criteria
+        .iter()
+        .any(|c| matches!(c.criterion_type, crate::models::criterion::CriterionType::Exclusion))
+    {
+        return Err(AppError::Validation(
+            "No exclusion criteria defined. Add at least one exclusion criterion in the Criteria Editor.".to_string(),
+        ));
+    }
+
+    // Validate the target article is eligible (working + unscreened). This is
+    // the same eligibility check the engine performs via
+    // `get_unscreened_working_article_by_id`, but doing it here gives us a
+    // precise error message for the toast instead of a silent no-op.
+    {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let eligible =
+            article_repo::get_unscreened_working_article_by_id(&conn, &article_id)?.is_some();
+        if !eligible {
+            return Err(AppError::Validation(format!(
+                "Article {article_id} is not eligible for screening (not found, not in working status, or already screened)."
+            )));
+        }
+    }
+
+    // Build the screening config (mode-aware). The `max_articles` cap is set to
+    // `Some(1)` so the progress total reflects "screening 1 article".
+    let screening_config = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let mode = app_settings_repo::get_screening_mode(&conn)?;
+        ScreeningConfig {
+            mode,
+            enhanced_top_k: app_settings_repo::get_enhanced_top_k(&conn)?,
+            enhanced_sections: app_settings_repo::get_enhanced_screening_sections(&conn)?,
+            two_stage_low: app_settings_repo::get_two_stage_low(&conn)?,
+            two_stage_high: app_settings_repo::get_two_stage_high(&conn)?,
+            chunk_budget_per_article: app_settings_repo::get_chunk_budget_per_article(&conn)?,
+            max_articles: Some(1),
+        }
+    };
+
+    // Create and store engine in state (batch_size = 1 for single-article screen).
+    let engine = Arc::new(ScreeningEngine::with_batch_size(1));
+    let initial_progress = {
+        let mut state_engine = screening_state.engine.write().await;
+        *state_engine = Some(engine.clone());
+        engine.get_progress().await
+    };
+
+    // ── Non-blocking: spawn engine in background task ──
+    let delay_ms = config.request_delay_ms as u64;
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
+    let llm: HttpLlmClient = HttpLlmClient { config, orchestrator };
+    tokio::spawn(async move {
+        let db = app_handle.state::<DbState>();
+        let screening = app_handle.state::<ScreeningState>();
+
+        // Tier 3: for enhanced / two-stage, backfill chunks for the target
+        // article if it has full text but no chunks (pure CPU, no LLM).
+        if screening_config.mode != ScreeningMode::Abstract {
+            if let Ok(conn) = db.conn.lock() {
+                let _ =
+                    crate::commands::full_text::ensure_chunks_for_full_text_articles(&conn, false);
+            }
+        }
+
+        let _ = engine
+            .run_sync(
+                &db.conn,
+                &llm,
+                delay_ms,
+                criteria,
+                aims,
+                screening_config,
+                Some(app_handle.clone()),
+                Some(article_id),
+            )
+            .await;
+
+        // Screening decisions change article statuses (included/rejected), which
+        // alters the bibliometric corpus. Mark it stale.
+        let completed = engine.get_progress().await.completed;
+        if completed > 0 {
+            if let Ok(conn) = db.conn.lock() {
+                crate::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
+                crate::db::app_settings_repo::mark_wiki_needs_refresh(&conn);
+            }
+        }
+
+        // Clear engine from state after completion.
+        let mut state_engine = screening.engine.write().await;
+        *state_engine = None;
+    });
+
+    Ok(initial_progress)
 }
 
 // ── Tier 3: pre-screening translation step (decision b) ─────────────────────

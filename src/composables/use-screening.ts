@@ -19,6 +19,51 @@ export function useScreening() {
     await store.fetchReadiness();
   }
 
+  /**
+   * Screen a single article by its UUID. Powers the per-article "Screen" button
+   * in the article detail panel. The backend `screen_article` command targets
+   * the exact article (not the next-by-sequence-id one the batch path would
+   * pick) and emits `screening:progress` events with `currentArticleTitles:
+   * [article.title]` so the spinner on the button (and any table-row spinners)
+   * drives off the same global progress store as batch screening.
+   *
+   * The concurrent-start guard lives on the backend: if a batch run is already
+   * in progress, the command returns the current progress instead of starting a
+   * new run, and the spinner state on the button reflects that.
+   */
+  async function screenArticle(articleId: string): Promise<void> {
+    loading.value = true;
+    error.value = null;
+
+    // Optimistically show progress bar immediately (before IPC returns).
+    store.setProgress({
+      total: 1,
+      completed: 0,
+      included: 0,
+      rejected: 0,
+      errors: 0,
+      isRunning: true,
+      currentArticleTitles: [],
+      elapsedMs: 0,
+      estimatedRemainingMs: null,
+    });
+
+    // Start listening for live progress events immediately
+    store.startListening();
+
+    try {
+      const result = await tauriCommand<ScreeningProgress>('screen_article', { articleId });
+      if (result.total > 0) {
+        store.setProgress(result);
+      }
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+      store.setProgress(null);
+    } finally {
+      loading.value = false;
+    }
+  }
+
   async function startScreening(batchSize?: number, maxArticles?: number): Promise<void> {
     loading.value = true;
     error.value = null;
@@ -118,6 +163,7 @@ export function useScreening() {
     percentage,
     estimatedTimeRemaining,
     fetchReadiness,
+    screenArticle,
     startScreening,
     refreshProgress,
     pauseScreening,

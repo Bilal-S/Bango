@@ -9,6 +9,7 @@ import type { WikiStatus } from '@/types/wiki';
 import { marked } from 'marked';
 import { renderWikiMarkdown } from '@/utils/wiki-markdown';
 import { useArticleSearch } from '@/composables/use-article-search';
+import { useScreening } from '@/composables/use-screening';
 import { useWiki } from '@/composables/use-wiki';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -76,6 +77,7 @@ const {
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
+const { screenArticle } = useScreening();
 
 // Synchronize updates from the detail view back into the chat's article list
 watch(detailArticle, (newVal) => {
@@ -637,6 +639,7 @@ const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
         @update-tags="updateTags"
         @update-labels="updateLabels"
         @update-criteria="updateCriteria"
+        @screen-article="screenArticle"
         @move-article="moveArticle"
         @attach-full-text="handleAttachFullText"
         @delete-full-text="deleteFullTextAttachment"

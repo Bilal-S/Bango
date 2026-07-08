@@ -253,6 +253,7 @@ pub fn run() {
             commands::full_text::rebuild_article_chunks,
             commands::screening::get_screening_readiness,
             commands::screening::start_screening,
+            commands::screening::screen_article,
             commands::screening::get_screening_progress,
             commands::screening::pause_screening,
             commands::screening::resume_screening,

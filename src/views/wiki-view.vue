@@ -13,6 +13,7 @@ import WikiPageEditor from '@/components/wiki/wiki-page-editor.vue';
 import WikiGraphPanel from '@/components/wiki/wiki-graph-panel.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import { useArticleSearch } from '@/composables/use-article-search';
+import { useScreening } from '@/composables/use-screening';
 import { useToast } from '@/composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { openPath } from '@tauri-apps/plugin-opener';
@@ -52,6 +53,7 @@ const {
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
+const { screenArticle } = useScreening();
 
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
@@ -748,6 +750,7 @@ watch(searchQuery, (q) => {
         @update-tags="updateTags"
         @update-labels="updateLabels"
         @update-criteria="updateCriteria"
+        @screen-article="screenArticle"
         @move-article="moveArticle"
         @attach-full-text="handleAttachFullText"
         @delete-full-text="deleteFullTextAttachment"

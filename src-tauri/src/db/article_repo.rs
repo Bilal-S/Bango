@@ -151,6 +151,100 @@ pub fn get_next_unscreened_working_batch(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Fetch a specific unscreened working article by its UUID, using the same
+/// minimal field set as `get_next_unscreened_working_batch` (only the columns
+/// needed by the screening prompt). Returns `None` if the article is not found,
+/// not in `working` status, or has already been screened (`screened_at IS NOT
+/// NULL`).
+///
+/// Powers the per-article "Screen" button in the article detail panel: the user
+/// clicks Screen on a specific article and the engine screens that exact ID
+/// (instead of the next-by-`sequence_id` one the batch path would pick). The
+/// `Option` return lets the command layer distinguish "article already
+/// screened / not eligible" from "article not found" without a separate
+/// existence check.
+pub fn get_unscreened_working_article_by_id(
+    conn: &Connection,
+    article_id: &str,
+) -> Result<Option<Article>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, sequence_id, title, abstract_text, authors, publication_year, has_full_text \
+         FROM articles \
+         WHERE id = ?1 AND status = 'working' AND screened_at IS NULL",
+    )?;
+    let mut rows = stmt.query_map([article_id], |row| {
+        Ok(Article {
+            id: row.get(0)?,
+            sequence_id: row.get(1)?,
+            title: row.get(2)?,
+            abstract_text: row.get(3)?,
+            authors: serde_json::from_str(&row.get::<_, String>(4)?).unwrap_or_default(),
+            publication_year: row.get(5)?,
+            status: crate::models::article::ArticleStatus::Working,
+            screening_error: false,
+            doi: None,
+            journal: None,
+            volume: None,
+            issue: None,
+            start_page: None,
+            end_page: None,
+            keywords: vec![],
+            url: None,
+            language: None,
+            publisher: None,
+            publisher_city: None,
+            publisher_address: None,
+            issn: None,
+            eissn: None,
+            journal_index_id: None,
+            reference_type: None,
+            date: None,
+            author_address: None,
+            affiliation: None,
+            accession_number: None,
+            custom_field3: None,
+            journal_abbreviation: None,
+            journal_iso_abbreviation: None,
+            notes: None,
+            web_of_science_db: None,
+            user_notes: None,
+            ris_extras: None,
+            duplicate_of: None,
+            ai_decision: None,
+            ai_reasoning: None,
+            ai_confidence: None,
+            matched_inclusion_criteria: vec![],
+            matched_exclusion_criteria: vec![],
+            tags: vec![],
+            labels: vec![],
+            manual_override: false,
+            import_source: None,
+            imported_at: "".to_string(),
+            changed_at: "".to_string(),
+            screened_at: None,
+            data_length: None,
+            token_estimate: None,
+            actual_tokens: None,
+            full_text: None,
+            full_text_ai_summary: None,
+            num_cited: None,
+            num_references: None,
+            has_citation_details: false,
+            has_reference_details: false,
+            has_full_text: row.get::<_, i32>(6)? != 0,
+            full_text_file_name: None,
+            has_figures_or_tables: false,
+            is_translated: false,
+            translation_status: "none".to_string(),
+            translation_error: None,
+            translated_at: None,
+        })
+    })?;
+    // Take the first row (there can be at most one since `id` is the primary key).
+    let article = rows.next().transpose()?;
+    Ok(article)
+}
+
 pub fn remaining_capacity(conn: &Connection) -> Result<usize, AppError> {
     let count = count_articles(conn)?;
     Ok(MAX_ARTICLES.saturating_sub(count))

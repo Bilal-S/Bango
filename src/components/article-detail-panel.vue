@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { Article, AuditEntry } from '@/types';
 import AuditTimeline from './audit-timeline.vue';
 import DetailHeader from './detail-header.vue';
@@ -13,6 +13,7 @@ import ArticleNotes from './article-notes.vue';
 import ArticleReferences from './article-references.vue';
 import FullTextReader from './full-text-reader.vue';
 import { useLlmConfigStore } from '@/stores/llm-config';
+import { useScreeningStore } from '@/stores/screening';
 import {
   requestArticleAiSummary,
   parseAiSummary,
@@ -40,6 +41,7 @@ const emit = defineEmits<{
   close: [];
   navigatePrev: [];
   navigateNext: [];
+  screenArticle: [id: string];
   moveArticle: [id: string, newStatus: string];
   updateNotes: [id: string, notes: string];
   updateTags: [id: string, tagIds: string[]];
@@ -57,6 +59,7 @@ const emit = defineEmits<{
 }>();
 
 const llmConfigStore = useLlmConfigStore();
+const screeningStore = useScreeningStore();
 
 // Ensure store is loaded
 void llmConfigStore.fetchIfNeeded();
@@ -117,8 +120,49 @@ const isTranslationEligible = computed(() => {
   return true;
 });
 
+// Whether this article is currently being screened (drives the Screen button
+// spinner). The screening store's progress events carry the titles of the
+// articles in the current batch in `currentArticleTitles`; we match against
+// the current article's title to detect the in-flight state. When screening
+// completes the article's status changes (to included/rejected/error) and the
+// Screen button auto-hides via its `v-if` condition.
+const isArticleBeingScreened = computed(
+  () =>
+    screeningStore.progress?.isRunning === true &&
+    screeningStore.progress.currentArticleTitles.includes(props.article.title)
+);
+
+// Whether the Screen button should be shown (article is in the working list,
+// unscreened, not in error state, and LLM is configured). The button auto-hides
+// when screening completes because the article's status changes or `screenedAt`
+// gets set, flipping the `status === 'working'` condition to false.
+const canScreenArticle = computed(
+  () =>
+    props.article.status === 'working' &&
+    !props.article.screeningError &&
+    !props.article.screenedAt &&
+    isLlmConfigured.value
+);
+
 // Determine the file type icon based on filename
 const fullTextFileIcon = computed(() => getFullTextFileIcon(props.article.fullTextFileName));
+
+// Refresh the article when its screening run completes so the status, AI
+// decision, reasoning, and audit trail update live without requiring the user
+// to navigate away and back. The transition we care about is `true → false`:
+// the article was being screened, and now screening is done (the backend has
+// written the new status + ai_decision to the DB). Emitting `refreshArticle`
+// triggers the parent's existing handler, which calls `selectArticle(id)` to
+// re-fetch the article + audit trail and update `selectedArticle`.
+//
+// This precisely targets the article that was screened (not every screening
+// completion), so it does not cause unnecessary refreshes when navigating
+// between articles during an unrelated batch run.
+watch(isArticleBeingScreened, (beingScreened, wasBeingScreened) => {
+  if (wasBeingScreened === true && beingScreened === false) {
+    emit('refreshArticle', props.article.id);
+  }
+});
 
 /** Trigger AI summary generation */
 function handleRequestAiSummary(): void {
@@ -384,6 +428,28 @@ const {
       </div>
       <!-- Right: Action buttons -->
       <div class="flex gap-3 flex-1 justify-end">
+        <!-- Screen button: visible only for working + unscreened articles when
+             LLM is configured. Shows a spinner when screening is in progress for
+             this article. Auto-hides when screening completes (status changes to
+             included/rejected/error or screenedAt gets set). -->
+        <button
+          v-if="canScreenArticle"
+          :disabled="isArticleBeingScreened"
+          class="inline-flex items-center gap-1.5 bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+          :title="
+            isArticleBeingScreened
+              ? 'Screening in progress...'
+              : 'Submit this article to the AI screening pipeline'
+          "
+          @click="emit('screenArticle', article.id)"
+        >
+          <span
+            v-if="isArticleBeingScreened"
+            class="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"
+          />
+          <span v-else class="material-symbols-outlined text-[16px]">psychology</span>
+          Screen
+        </button>
         <button
           v-if="article.status !== 'included'"
           class="bg-emerald-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-emerald-700 active:scale-95 transition-all shadow-sm cursor-pointer"
