@@ -398,6 +398,7 @@ const isWorkingListScreened = computed((): boolean => {
               </button>
               <input
                 id="num-to-process-input"
+                maxlength="4"
                 class="screening-view__stepper-input"
                 type="text"
                 inputmode="numeric"
@@ -1000,7 +1001,7 @@ const isWorkingListScreened = computed((): boolean => {
 }
 
 .screening-view__stepper-input {
-  width: 3.5ch;
+  width: 7.5ch;
   text-align: center;
   font-size: var(--font-size-body);
   font-weight: var(--font-weight-semibold);
@@ -1012,7 +1013,7 @@ const isWorkingListScreened = computed((): boolean => {
   padding: var(--space-1) var(--space-2);
   outline: none;
   transition: border-color 0.15s ease;
-  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .screening-view__stepper-input::-webkit-outer-spin-button,
