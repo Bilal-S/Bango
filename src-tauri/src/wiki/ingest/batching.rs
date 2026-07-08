@@ -135,11 +135,19 @@ fn build_external_docs_section(batch_sources: &[&RawSource]) -> String {
 
 /// Build a single batch's prompt from the contract, the full source index,
 /// the batch's source bodies, and the standard instructions block.
+///
+/// `methods_pre_seeded` controls the methods directive: when `true`, the
+/// directive tells the LLM that method pages are pre-seeded and to link, not
+/// duplicate. When `false`, it tells the LLM methods are NOT pre-seeded and it
+/// should create them. Either way, the focus list asks the LLM to create
+/// method pages for methodologies present in the sources, so gaps are always
+/// filled (the consolidation pass dedups any overlaps).
 fn build_batch_prompt(
     contract: &str,
     source_index: &str,
     batch_sources: &[&RawSource],
     author_manifest: Option<&AuthorManifest>,
+    methods_pre_seeded: bool,
 ) -> String {
     let mut sources_text = String::new();
     for s in batch_sources {
@@ -152,6 +160,18 @@ fn build_batch_prompt(
     let manifest_section =
         author_manifest.map(AuthorManifest::to_prompt_section).unwrap_or_default();
     let external_docs_section = build_external_docs_section(batch_sources);
+    // Methods directive: conditional on whether the deterministic pre-seed
+    // actually wrote any method pages. When it did, tell the LLM to link, not
+    // duplicate. When it didn't, tell the LLM methods are NOT pre-seeded and
+    // it should create them. Either way, the focus list below asks the LLM to
+    // create methods so gaps are filled.
+    let methods_directive = if methods_pre_seeded {
+        "Method pages have ALSO been pre-seeded deterministically. Do NOT \
+         create duplicate pages for them either - link to the existing pages."
+    } else {
+        "Method pages have NOT been pre-seeded for this corpus. You SHOULD \
+         create method pages for research methodologies present in the sources."
+    };
     format!(
         "{contract}\n\n\
          # Full Source Index (for cross-referencing)\n\n\
@@ -176,14 +196,19 @@ fn build_batch_prompt(
          links: []\n\
          ---\n\
          <Markdown body with [[wikilinks]] to other pages>\n\n\
-         IMPORTANT: Author pages, synthesis pages, concept pages, AND method \
-         pages have ALREADY been pre-seeded deterministically. Do NOT create \
-         duplicate pages for them. Link to the existing pages instead using \
-         the slugs shown in the source index and the author manifest above. \
+         IMPORTANT: Author pages, synthesis pages, AND concept pages have \
+         ALREADY been pre-seeded deterministically. Do NOT create duplicate \
+         pages for them. Link to the existing pages instead using the slugs \
+         shown in the source index and the author manifest above. \
+         {methods_directive} \
          Focus your output on: \
-         1. THEMATIC CROSS-CUTTING synthesis pages that connect multiple \
+         1. METHOD pages for research methodologies present in the sources \
+         (e.g. randomized-controlled-trial, meta-analysis, systematic-review, \
+         difference-in-differences). Only create pages for methods that \
+         genuinely appear in the source material. \
+         2. THEMATIC CROSS-CUTTING synthesis pages that connect multiple \
          sources (e.g. 'Sugar Reformulation', 'Health Inequalities Impact'). \
-         2. Any NEW author pages for authors that appear only in uploaded \
+         3. Any NEW author pages for authors that appear only in uploaded \
          documents (see the author directive above). \
          Only create pages for entities that genuinely appear in the source \
          material. Do not invent topics to fill a quota. \
@@ -204,6 +229,7 @@ pub fn build_ingest_prompt_batches(
     root: &Path,
     context_window_tokens: i32,
     author_manifest: Option<&AuthorManifest>,
+    methods_pre_seeded: bool,
 ) -> Result<Vec<IngestBatch>, AppError> {
     let contract = std::fs::read_to_string(root.join("AGENTS.md")).unwrap_or_default();
     let sources = load_raw_sources(root)?;
@@ -229,7 +255,13 @@ pub fn build_ingest_prompt_batches(
         let entry_len = src.body.len() + slug.len() + src.title.len() + 40;
         if !current.is_empty() && current_len + entry_len > usable_budget {
             // Flush current batch.
-            let prompt = build_batch_prompt(&contract, &source_index, &current, author_manifest);
+            let prompt = build_batch_prompt(
+                &contract,
+                &source_index,
+                &current,
+                author_manifest,
+                methods_pre_seeded,
+            );
             let slugs: Vec<String> = current.iter().map(|s| s.slug.clone()).collect();
             batches.push((slugs, prompt));
             current.clear();
@@ -239,7 +271,13 @@ pub fn build_ingest_prompt_batches(
         current_len += entry_len;
     }
     if !current.is_empty() {
-        let prompt = build_batch_prompt(&contract, &source_index, &current, author_manifest);
+        let prompt = build_batch_prompt(
+            &contract,
+            &source_index,
+            &current,
+            author_manifest,
+            methods_pre_seeded,
+        );
         let slugs: Vec<String> = current.iter().map(|s| s.slug.clone()).collect();
         batches.push((slugs, prompt));
     }
@@ -285,7 +323,7 @@ impl IngestLlmSender for OrchestratorIngestSender {
     }
 }
 
-/// Static system prompt shared by the chunked and legacy single-call paths.
+/// Static system prompt shared by the chunked ingest path.
 pub const INGEST_SYSTEM_PROMPT: &str = "You are a research knowledge-base synthesizer. Follow \
      the AGENTS.md contract strictly. Output wiki pages in the exact delimited format requested. \
      Use [[wikilinks]] to connect pages, and ALWAYS use the exact lowercase kebab-case slug of \

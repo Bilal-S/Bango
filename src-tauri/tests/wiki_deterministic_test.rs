@@ -160,7 +160,8 @@ async fn build_batches_unconditionally_pre_seeds_authors_on_single_batch() {
     if !manifest.entries.is_empty() {
         let _ = ingest::preseed_authors(&root, &manifest);
     }
-    let batches = ingest::build_ingest_prompt_batches(&root, 50_000, Some(&manifest)).unwrap();
+    let batches =
+        ingest::build_ingest_prompt_batches(&root, 50_000, Some(&manifest), false).unwrap();
     let sender: Arc<dyn IngestLlmSender> = Arc::new(EmptySender);
     let _report = ingest::run_chunked_ingest(&root, batches, sender, None, (25, 95)).await.unwrap();
 

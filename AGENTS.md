@@ -301,7 +301,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     (when present) with a `biblio_terms` fallback for abstracts-only corpora;
     a curated study-design lexicon (`STUDY_DESIGN_LEXICON` in
     `ingest/methods.rs`) canonicalizes synonyms (e.g. "RCT" →
-    `randomized-controlled-trial`) so non-methodological terms are filtered;
+    `randomized-controlled-trial`) so non-methodological terms are filtered.
+    When the pre-seed writes >=1 method page, the batch directive tells the LLM
+    methods are handled (link, don't duplicate); when it writes 0 pages, the
+    directive flips to "methods NOT pre-seeded - create them" + the focus list
+    always asks the LLM for METHOD pages so `wiki/methods/` is never empty;
     (5) **`preseed_document_source_pages`** writes one
     `wiki/sources/{user-slug}.md` per user-uploaded document (Add Documents →
     PDF/TXT/web, identified by `source_kind: user_*`) so external documents get

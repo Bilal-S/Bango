@@ -721,7 +721,7 @@ fn ingest_build_prompt_includes_contract_and_sources() {
     frontmatter::write_file(&root.join("raw/src-1.md"), &fm, "Source content").unwrap();
 
     // Single source + large window -> one batch carrying contract + source.
-    let batches = ingest::build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    let batches = ingest::build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
     assert_eq!(batches.len(), 1);
     let prompt = &batches[0].prompt;
     assert!(prompt.contains("Contract"));

@@ -94,7 +94,7 @@ fn build_two_batches(root: &std::path::Path) -> Vec<ingest::IngestBatch> {
     write_source(root, "art-0", "Article 0", &"x".repeat(3_000));
     write_source(root, "art-1", "Article 1", &"x".repeat(3_000));
     // Tiny context window -> 2 batches (each source is larger than the budget).
-    ingest::build_ingest_prompt_batches(root, 2_000, None).unwrap()
+    ingest::build_ingest_prompt_batches(root, 2_000, None, false).unwrap()
 }
 
 #[tokio::test]
@@ -155,7 +155,7 @@ async fn single_batch_ingest_skips_consolidation() {
     // One small source -> one batch.
     write_source(root, "art-0", "Article 0", "small body");
 
-    let batches = ingest::build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    let batches = ingest::build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
     assert_eq!(batches.len(), 1, "fixture should produce a single batch");
 
     // Sender emits two pages with the SAME slug to prove consolidation is

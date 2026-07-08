@@ -669,7 +669,7 @@ fn build_batches_with_manifest(
     // present) with a `biblio_terms` fallback for abstracts-only corpora.
     // Caps at 25 so the methods layer stays curated + high-signal. Uses a
     // curated study-design lexicon so non-methodological terms are filtered.
-    let _ = ingest::preseed_methods(conn, root, 25);
+    let methods_written = ingest::preseed_methods(conn, root, 25).unwrap_or(0);
 
     // Layer 1 (External Documents): Pre-seed source pages for user-uploaded
     // documents (Add Documents). Each external doc in `raw/` with a
@@ -681,10 +681,21 @@ fn build_batches_with_manifest(
     // Rebuild batches with the manifest injected (when non-empty). The
     // manifest's `to_prompt_section()` directive tells the LLM NOT to create
     // author pages and to link to the canonical slugs instead.
+    let methods_pre_seeded = methods_written > 0;
     if manifest.entries.is_empty() {
-        ingest::build_ingest_prompt_batches(root, config.context_window_tokens, None)
+        ingest::build_ingest_prompt_batches(
+            root,
+            config.context_window_tokens,
+            None,
+            methods_pre_seeded,
+        )
     } else {
-        ingest::build_ingest_prompt_batches(root, config.context_window_tokens, Some(&manifest))
+        ingest::build_ingest_prompt_batches(
+            root,
+            config.context_window_tokens,
+            Some(&manifest),
+            methods_pre_seeded,
+        )
     }
 }
 

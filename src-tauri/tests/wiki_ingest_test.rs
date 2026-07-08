@@ -214,7 +214,7 @@ fn build_ingest_prompt_includes_sources_and_contract() {
     frontmatter::write_file(&root.join("raw/art-1.md"), &fm, "Article content here").unwrap();
 
     // Single source + large window -> one batch carrying contract + source.
-    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
     assert_eq!(batches.len(), 1);
     let prompt = &batches[0].prompt;
     assert!(prompt.contains("Agent Contract"));
@@ -251,7 +251,7 @@ fn build_ingest_prompt_splits_when_over_budget() {
     }
 
     // Tiny context window forces a multi-batch split (no truncation).
-    let batches = build_ingest_prompt_batches(root, 2_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
     assert!(batches.len() > 1, "expected multiple batches, got {}", batches.len());
     // Every source appears in exactly one batch's source_slugs.
     let mut all: Vec<String> = batches.iter().flat_map(|b| b.source_slugs.clone()).collect();
@@ -405,7 +405,7 @@ fn build_ingest_prompt_batches_single_batch_when_small() {
     let root = tmp.path();
     write_many_sources(root, 2, 500);
 
-    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].index, 0);
     assert_eq!(batches[0].total, 1);
@@ -426,7 +426,7 @@ fn build_ingest_prompt_batches_splits_large_corpus() {
     // into multiple batches.
     write_many_sources(root, 20, 2000);
 
-    let batches = build_ingest_prompt_batches(root, 2_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
     assert!(batches.len() > 1, "expected multiple batches, got {}", batches.len());
 
     // Every batch index + total is consistent.
@@ -449,7 +449,7 @@ fn build_ingest_prompt_batches_carries_full_source_index_in_every_batch() {
     let root = tmp.path();
     write_many_sources(root, 6, 2000);
 
-    let batches = build_ingest_prompt_batches(root, 2_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
     assert!(batches.len() > 1);
     // Each batch prompt must reference ALL 6 sources in the index, even
     // though each batch only fully processes a subset. This is what makes
@@ -474,7 +474,7 @@ fn build_ingest_prompt_batches_empty_when_no_sources() {
     std::fs::create_dir_all(root.join("raw")).unwrap();
     std::fs::write(root.join("AGENTS.md"), "# Contract").unwrap();
 
-    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
     assert!(batches.is_empty());
 }
 
@@ -487,7 +487,7 @@ fn batch_prompt_contains_no_quota_language() {
     let root = tmp.path();
     write_many_sources(root, 2, 500);
 
-    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
     assert_eq!(batches.len(), 1);
     let prompt = &batches[0].prompt;
     assert!(
@@ -501,19 +501,49 @@ fn batch_prompt_contains_no_quota_language() {
 }
 
 #[test]
-fn batch_prompt_lists_methods_as_pre_seeded() {
-    // Tier D1 guard: the batch directive must list method pages in the
-    // pre-seeded set so the LLM links to them instead of creating duplicates.
+fn batch_prompt_methods_directive_when_pre_seeded() {
+    // When methods were pre-seeded, the directive tells the LLM to link, not
+    // duplicate. The focus list still asks for methods (so gaps are filled).
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     write_many_sources(root, 2, 500);
 
-    let batches = build_ingest_prompt_batches(root, 50_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 50_000, None, true).unwrap();
     assert_eq!(batches.len(), 1);
     let prompt = &batches[0].prompt;
     assert!(
-        prompt.contains("method") && prompt.contains("ALREADY been pre-seeded"),
-        "batch prompt must list methods in the pre-seeded set, got: {prompt}"
+        prompt.contains("Method pages have ALSO been pre-seeded"),
+        "when methods_pre_seeded=true, directive must say methods are pre-seeded, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("METHOD pages for research methodologies"),
+        "focus list must still mention methods even when pre-seeded, got: {prompt}"
+    );
+}
+
+#[test]
+fn batch_prompt_methods_directive_when_not_pre_seeded() {
+    // When methods were NOT pre-seeded, the directive tells the LLM to create
+    // them. This is the critical fix: the LLM is always asked to produce method
+    // pages when the pre-seed didn't.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
+    assert!(
+        prompt.contains("Method pages have NOT been pre-seeded"),
+        "when methods_pre_seeded=false, directive must say methods are NOT pre-seeded, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("You SHOULD create method pages"),
+        "when methods_pre_seeded=false, directive must tell the LLM to create methods, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("METHOD pages for research methodologies"),
+        "focus list must mention methods, got: {prompt}"
     );
 }
 
@@ -532,7 +562,7 @@ fn build_ingest_prompt_batches_injects_manifest_section() {
             ..Default::default()
         }],
     };
-    let batches = build_ingest_prompt_batches(root, 50_000, Some(&manifest)).unwrap();
+    let batches = build_ingest_prompt_batches(root, 50_000, Some(&manifest), false).unwrap();
     assert_eq!(batches.len(), 1);
     assert!(batches[0].prompt.contains("Author Pages (Pre-Seeded"));
     assert!(batches[0].prompt.contains("[[author-smith-j]]"));
@@ -592,7 +622,7 @@ async fn run_chunked_ingest_processes_batches_in_parallel_and_writes_all_pages()
     // 6 sources, small window -> multiple batches.
     write_many_sources(root, 6, 2000);
 
-    let batches = build_ingest_prompt_batches(root, 2_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
     let n_batches = batches.len();
     assert!(n_batches > 1);
 
@@ -617,7 +647,7 @@ async fn run_chunked_ingest_continues_on_single_batch_failure() {
     bango_lib::wiki::storage::scaffold_tree(root).unwrap();
     write_many_sources(root, 6, 2000);
 
-    let batches = build_ingest_prompt_batches(root, 2_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
     // Force the batch that fully processes art-0 to fail. Use the unique
     // "Raw Sources for THIS Batch" header marker so only that one batch
     // errors (every batch carries art-0 in the shared source index).
@@ -660,7 +690,7 @@ async fn run_chunked_ingest_parallel_is_faster_than_sequential_sum() {
     bango_lib::wiki::storage::scaffold_tree(root).unwrap();
     write_many_sources(root, 8, 2000);
 
-    let batches = build_ingest_prompt_batches(root, 2_000, None).unwrap();
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
     assert!(batches.len() >= 3);
 
     let sender: Arc<dyn IngestLlmSender> =
