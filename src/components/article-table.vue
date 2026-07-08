@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
-import type { Article } from '@/types';
+import type { Article, ArticleStatus } from '@/types';
 import StatusBadge from './status-badge.vue';
 import ConfidenceBar from './confidence-bar.vue';
 import { getPublicationTypeLabel } from '@/utils/formatters';
@@ -59,6 +59,53 @@ function formatDate(dateStr: string | null): string {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+
+// Status-colored selection bar: the left border on the `#` column matches the
+// article's status pill color when the row is selected, so the user can see at
+// a glance which list the open article belongs to. Defaults to indigo for any
+// unrecognized status.
+function statusBorderColor(status: ArticleStatus): string {
+  switch (status) {
+    case 'working':
+      return 'border-l-amber-500';
+    case 'included':
+      return 'border-l-emerald-600';
+    case 'rejected':
+      return 'border-l-rose-600';
+    case 'duplicate':
+      return 'border-l-blue-600';
+    default:
+      return 'border-l-indigo-600';
+  }
+}
+
+// Flash animation on status change: when an article's status changes (e.g. the
+// user moves it from working to rejected), the row briefly flashes in the new
+// status color so the update is visually confirmed. We track the previous
+// status per article ID and flag rows whose status just changed; the flag is
+// cleared after the CSS animation duration (~1.2s).
+const recentlyChangedIds = ref<Set<string>>(new Set());
+const previousStatusById = ref<Map<string, ArticleStatus>>(new Map());
+
+watch(
+  () => props.articles,
+  (newArticles) => {
+    for (const article of newArticles) {
+      const prev = previousStatusById.value.get(article.id);
+      if (prev !== undefined && prev !== article.status) {
+        recentlyChangedIds.value.add(article.id);
+        // Clear the flag after the animation completes so re-renders don't re-trigger.
+        const id = article.id;
+        window.setTimeout(() => {
+          recentlyChangedIds.value.delete(id);
+          recentlyChangedIds.value = new Set(recentlyChangedIds.value);
+        }, 1200);
+      }
+      previousStatusById.value.set(article.id, article.status);
+    }
+  },
+  { deep: false, immediate: true }
+);
 
 // Auto-scroll to keep the selected row visible when navigating via prev/next
 watch(
@@ -180,7 +227,11 @@ watch(
               :key="article.id"
               :data-article-id="article.id"
               class="hover:bg-slate-50/80 transition-colors group cursor-pointer"
-              :class="{ 'bg-indigo-50': selectedId === article.id }"
+              :class="{
+                'bg-indigo-50': selectedId === article.id,
+                'status-flash': recentlyChangedIds.has(article.id),
+                [`status-flash-${article.status}`]: recentlyChangedIds.has(article.id),
+              }"
               @click="$emit('select', article.id)"
             >
               <!-- Checkbox cell -->
@@ -196,7 +247,11 @@ watch(
               </td>
               <td
                 class="col-index py-5 px-2 text-body-sm text-slate-500 font-mono border-l-4 transition-colors"
-                :class="selectedId === article.id ? 'border-l-indigo-600' : 'border-l-transparent'"
+                :class="
+                  selectedId === article.id
+                    ? statusBorderColor(article.status)
+                    : 'border-l-transparent'
+                "
               >
                 {{ article.sequenceId }}
               </td>
@@ -337,5 +392,61 @@ watch(
 }
 .checkbox-target:hover {
   background: rgba(99, 102, 241, 0.06);
+}
+
+/* ── Status-change flash animation ────────────────────────────── */
+/* When an article's status changes (e.g. working → rejected), the row
+ * briefly flashes in the new status color so the update is visually
+ * confirmed. The `recentlyChangedIds` Set in the script toggles the
+ * `status-flash` + `status-flash-{status}` classes for ~1.2s. */
+@keyframes status-flash-working {
+  0% {
+    background-color: rgba(245, 158, 11, 0.18);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes status-flash-included {
+  0% {
+    background-color: rgba(16, 185, 129, 0.18);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes status-flash-rejected {
+  0% {
+    background-color: rgba(244, 63, 94, 0.18);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes status-flash-duplicate {
+  0% {
+    background-color: rgba(59, 130, 246, 0.18);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.status-flash {
+  animation-duration: 1.2s;
+  animation-fill-mode: both;
+  animation-timing-function: ease-out;
+}
+.status-flash-working {
+  animation-name: status-flash-working;
+}
+.status-flash-included {
+  animation-name: status-flash-included;
+}
+.status-flash-rejected {
+  animation-name: status-flash-rejected;
+}
+.status-flash-duplicate {
+  animation-name: status-flash-duplicate;
 }
 </style>

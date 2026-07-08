@@ -75,7 +75,7 @@ async function addTag(val: string): Promise<void> {
       <SuggestInput
         v-model="newTag"
         :suggestions="tagSuggestions"
-        placeholder="Add tag…"
+        placeholder="Add content tag…"
         class="flex-1"
         @select="addTag"
         @enter="addTag"

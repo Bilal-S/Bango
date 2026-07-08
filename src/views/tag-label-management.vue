@@ -105,11 +105,14 @@ function onLabelColorChange(labelId: string, event: Event): void {
 }
 
 function filterByTag(tagId: string): void {
-  router.push({ path: '/articles', query: { tags: tagId } });
+  router.push({ path: '/articles', query: { tags: tagId, status: 'all', filterCollapsed: '1' } });
 }
 
 function filterByLabel(labelId: string): void {
-  router.push({ path: '/articles', query: { labels: labelId } });
+  router.push({
+    path: '/articles',
+    query: { labels: labelId, status: 'all', filterCollapsed: '1' },
+  });
 }
 </script>
 
@@ -239,7 +242,7 @@ function filterByLabel(labelId: string): void {
                     :title="tag.articleCount > 0 ? 'see assigned' : 'not assigned'"
                     @click="filterByTag(tag.id)"
                   >
-                    <span class="material-symbols-outlined text-[16px]">link</span>
+                    <span class="material-symbols-outlined text-[16px]">filter_arrow_right</span>
                   </button>
                   <label
                     class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
@@ -376,7 +379,7 @@ function filterByLabel(labelId: string): void {
                     :title="label.articleCount > 0 ? 'see assigned' : 'not assigned'"
                     @click="filterByLabel(label.id)"
                   >
-                    <span class="material-symbols-outlined text-[16px]">link</span>
+                    <span class="material-symbols-outlined text-[16px]">filter_arrow_right</span>
                   </button>
                   <label
                     class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"

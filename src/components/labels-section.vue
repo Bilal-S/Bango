@@ -75,7 +75,7 @@ async function addLabel(val: string): Promise<void> {
       <SuggestInput
         v-model="newLabel"
         :suggestions="labelSuggestions"
-        placeholder="Add label…"
+        placeholder="Add workflow label…"
         class="flex-1"
         @select="addLabel"
         @enter="addLabel"

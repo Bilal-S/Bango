@@ -502,6 +502,13 @@ export function useArticleSearch() {
     /** When true, keep the filter panel collapsed even though filters are applied. */
     filterCollapsed?: boolean;
   }): Promise<void> {
+    // Compute the filter-panel visibility flag once so every branch (tags,
+    // labels, year, journal, author) honors `filterCollapsed` consistently.
+    // When `filterCollapsed` is true (e.g. navigating from the Tags & Labels
+    // screen or Bibliometrics deep-links), the panel stays collapsed even
+    // though filters are applied.
+    const showPanel = !params.filterCollapsed;
+
     if (params.status && STATUS_TABS.includes(params.status as StatusTab)) {
       activeStatusTab.value = params.status as StatusTab;
       if (params.status === 'error') {
@@ -519,7 +526,7 @@ export function useArticleSearch() {
         .filter((n): n is string => !!n);
       filter.tags = tagNames;
       query.tags = tagNames;
-      showFilters.value = true;
+      if (showPanel) showFilters.value = true;
     }
     if (params.labels && params.labels.length > 0) {
       // Resolve label IDs to names for both display and query
@@ -528,9 +535,8 @@ export function useArticleSearch() {
         .filter((n): n is string => !!n);
       filter.labels = labelNames;
       query.labels = labelNames;
-      showFilters.value = true;
+      if (showPanel) showFilters.value = true;
     }
-    const showPanel = !params.filterCollapsed;
     if (params.yearFrom !== undefined && Number.isFinite(params.yearFrom)) {
       filter.yearFrom = params.yearFrom;
       query.yearFrom = params.yearFrom;

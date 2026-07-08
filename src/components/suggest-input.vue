@@ -34,8 +34,13 @@ function onFocus(): void {
 
 function selectSuggestion(name: string): void {
   emit('select', name);
-  emit('update:modelValue', name);
-  isOpen.value = false;
+  // Clear the input and keep the dropdown open so the user can immediately
+  // add another entry. The parent's @select handler updates the article +
+  // refreshes the suggestions list, so the dropdown re-populates with the
+  // remaining (un-assigned) entries. This matches the "revert to initial
+  // state with dropdown open" UX requested for the tags/labels flow.
+  emit('update:modelValue', '');
+  isOpen.value = true;
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -44,9 +49,10 @@ function onKeydown(event: KeyboardEvent): void {
     const val = props.modelValue.trim();
     if (val) {
       emit('enter', val);
+      // Clear the input and keep the dropdown open (same rationale as
+      // selectSuggestion above) instead of closing + blurring.
       emit('update:modelValue', '');
-      isOpen.value = false;
-      (event.target as HTMLInputElement).blur();
+      isOpen.value = true;
     }
   } else if (event.key === 'Escape') {
     isOpen.value = false;
