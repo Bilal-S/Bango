@@ -1,19 +1,28 @@
-//! Post-v004 schema addition: extend the `audit_entries.action` CHECK
-//! constraint to include `'note_add'`.
+//! Post-v004 schema additions:
 //!
-//! The `update_article_notes` command previously reused `'status_change'`
-//! for note-addition audit rows, which made the audit trail misleading
-//! (a note edit appeared as a status change). This migration adds the
-//! dedicated `'note_add'` action value so note edits are correctly
-//! categorized.
+//! 1. Extend the `audit_entries.action` CHECK constraint to include
+//!    `'note_add'`. The `update_article_notes` command previously reused
+//!    `'status_change'` for note-addition audit rows, which made the audit
+//!    trail misleading (a note edit appeared as a status change). This
+//!    migration adds the dedicated `'note_add'` action value so note edits
+//!    are correctly categorized.
 //!
-//! SQLite CHECK constraints cannot be ALTERed; this migration uses the
+//! 2. Add a covering index on the translation-state columns of `articles`.
+//!    The crash-recovery query `get_stranded_translation_articles` filters on
+//!    `translation_status IN ('queued','running') AND is_translated = 0`,
+//!    which runs on every app startup. Without an index this is a full table
+//!    scan of up to 10,000 rows on a cold cache - especially costly on
+//!    Windows where real-time antivirus intercepts every page read. The
+//!    composite index makes that lookup an index range scan.
+//!
+//! SQLite CHECK constraints cannot be ALTERed; the audit rebuild uses the
 //! rename-create-copy-drop pattern (same as v003's two audit rebuilds and
 //! v004's single rebuild).
 //!
-//! Pure CHECK rebuild (no `ALTER TABLE ADD COLUMN`): idempotent, so the
-//! `heal_partial_migrations` marker-probe pattern (required for ADD COLUMN
-//! migrations like v003) is not needed here.
+//! Both operations are idempotent (CHECK rebuild via rename-create-copy-drop;
+//! `CREATE INDEX IF NOT EXISTS`), so the `heal_partial_migrations`
+//! marker-probe pattern (required for ADD COLUMN migrations like v003) is not
+//! needed here.
 
 pub const VERSION: i32 = 5;
 
@@ -49,4 +58,11 @@ SELECT id, action, article_id, details, from_status, source, timestamp, to_statu
 FROM audit_entries_v005_old;
 
 DROP TABLE audit_entries_v005_old;
+
+-- Index the translation-state columns so the startup stranded-recovery query
+-- (`translation_status IN ('queued','running') AND is_translated = 0`) is an
+-- index range scan instead of a full table scan. Also speeds up
+-- `get_translatable_import_ids` which filters on `is_translated` + status.
+CREATE INDEX IF NOT EXISTS idx_articles_translation_status
+    ON articles(translation_status, is_translated);
 ";

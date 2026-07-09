@@ -93,30 +93,21 @@ pub fn run() {
                 std::process::exit(1);
             }
 
-            // ── Journal Index: auto-load from bundled portal DB on first startup ──
-            // IMPORTANT: journal_index is system-distributed reference data.
-            // Do NOT include in project backup export/import or reset operations.
-            let resource_path = resolve_journal_resource_path(app.path());
-            if let Err(e) = load_journal_index_from_path(&conn, &resource_path) {
-                eprintln!("warning: failed to load journal index: {e:#}");
-            }
-
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
             app.manage(StartupStatus { schema: std::sync::Mutex::new(schema_status) });
 
-            // Parse CLI / env flags and persist feature flags to DB.
+            // ── Premium flag: synchronous (gates a bootstrap feature) ──
+            // The frontend reads `isPremium` once during bootstrap and uses it
+            // to gate the batch reference scraping feature, so this must be
+            // ready before any IPC call. The two queries are tiny (~1ms).
             let args: Vec<String> = std::env::args().collect();
             let premium_from_cli = args.iter().any(|a| a == "--premium");
             let premium_from_env = std::env::var("BANGO_PREMIUM")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
             let premium_requested = premium_from_cli || premium_from_env;
-            {
+            let premium = {
                 let guard = app.state::<DbState>();
-                // Route through `lock_conn` so a poisoned mutex is surfaced as
-                // `AppError::LockPoisoned` instead of silently proceeding with a
-                // recovered guard. Poison here means a prior panic corrupted
-                // application state; fail loudly rather than continuing.
                 let conn = db::connection::lock_conn(&guard.conn)?;
                 if premium_requested {
                     if let Err(e) =
@@ -125,12 +116,6 @@ pub fn run() {
                         eprintln!("warning: failed to persist flag_premium: {e:#}");
                     }
                 }
-            }
-
-            // Read authoritative flag values from DB (persists across restarts).
-            let premium = {
-                let guard = app.state::<DbState>();
-                let conn = db::connection::lock_conn(&guard.conn)?;
                 db::app_settings_repo::get_setting(&conn, "flag_premium")
                     .ok()
                     .flatten()
@@ -139,39 +124,22 @@ pub fn run() {
             };
             app.manage(AppFlags { premium });
 
-            // Initialize LLM orchestrator from saved config (defaults if no config saved yet)
-            let (max_conc, delay_ms) = {
-                let guard = app.state::<DbState>();
-                let conn = db::connection::lock_conn(&guard.conn)?;
-                match crate::db::llm_config_repo::get_config(&conn) {
-                    Ok(Some(cfg)) => {
-                        (cfg.max_concurrent_requests as usize, cfg.request_delay_ms as u64)
-                    }
-                    _ => (3, 500), // defaults
-                }
-            };
-            app.manage(std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms)));
-
-            // Tier 1e: the in-process broadcast bus the worker emits on after
-            // each job. Managed BEFORE the worker spawns so the worker's first
-            // job can always find it. Batch-import Phase 3 and the screening
-            // translation pre-step subscribe to await completion without
-            // polling the DB.
-            app.manage(translation::TranslationDoneBus::new());
-
-            // ── Translation worker ──
-            // Spawn the in-memory translation queue after the orchestrator is
-            // managed so the worker can fetch it per-job. Then re-enqueue any
-            // articles stranded in `queued`/`running` at startup (crash
-            // recovery). The handle is managed so command wrappers can enqueue.
-            let translation_handle =
-                translation::worker::spawn_translation_worker(app.handle().clone());
-            {
-                let guard = app.state::<DbState>();
-                let conn = db::connection::lock_conn(&guard.conn)?;
-                translation::worker::reenqueue_stranded_on_startup(&conn, translation_handle.sender());
-            }
-            app.manage(translation_handle);
+            // ── Defer non-critical init to a background thread ──
+            // Journal index auto-load, LLM orchestrator creation, and the
+            // translation worker are NOT needed during the initial dashboard
+            // render. The frontend `bootstrap()` fetches only touch `DbState`
+            // + `AppFlags`, both ready synchronously above. By the time the
+            // user clicks anything that needs the orchestrator or worker
+            // (screening, chat, translate), this background thread (a few DB
+            // reads + a channel spawn, ~50-200ms) has long finished.
+            //
+            // A dedicated OS thread is used (not `tauri::async_runtime::spawn`)
+            // because the work is entirely synchronous blocking I/O. Spawning
+            // it on the async runtime would stall an executor worker thread.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                init_background_state(&handle);
+            });
 
             Ok(())
         })
@@ -368,6 +336,77 @@ pub(crate) fn load_journal_index_if_empty_handle(
     let conn = db::connection::lock_conn(&guard.conn)?;
     let resource_path = resolve_journal_resource_path(app.path());
     load_journal_index_from_path(&conn, &resource_path)
+}
+
+/// Background initialization: runs everything that does NOT need to block
+/// `.setup()` from returning. Runs on a dedicated OS thread
+/// (`std::thread::spawn`) because the work is entirely synchronous blocking
+/// I/O, so it must not occupy a tokio executor worker thread.
+///
+/// Operations (in order):
+/// 1. Journal index auto-load (first-startup bulk copy; no-op if populated).
+/// 2. LLM orchestrator creation from saved config (defaults if none).
+/// 3. Translation worker spawn + stranded-article crash recovery.
+///
+/// Each step is independent and logs + skips on error so a failure in one
+/// does not prevent the others from running.
+fn init_background_state(handle: &tauri::AppHandle) {
+    // Journal Index auto-load.
+    let resource_path = resolve_journal_resource_path(handle.path());
+    {
+        let db = handle.state::<DbState>();
+        let result = db::connection::lock_conn(&db.conn);
+        match result {
+            Ok(conn) => {
+                if let Err(e) = load_journal_index_from_path(&conn, &resource_path) {
+                    eprintln!("warning: failed to load journal index: {e:#}");
+                }
+            }
+            Err(e) => eprintln!("warning: failed to lock DB for journal index load: {e:#}"),
+        }
+    }
+
+    // LLM orchestrator from saved config (defaults if no config saved yet).
+    let (max_conc, delay_ms) = {
+        let db = handle.state::<DbState>();
+        let result = db::connection::lock_conn(&db.conn);
+        match result {
+            Ok(conn) => match crate::db::llm_config_repo::get_config(&conn) {
+                Ok(Some(cfg)) => {
+                    (cfg.max_concurrent_requests as usize, cfg.request_delay_ms as u64)
+                }
+                _ => (3, 500), // defaults
+            },
+            Err(e) => {
+                eprintln!("warning: failed to lock DB for LLM config: {e:#}");
+                (3, 500)
+            }
+        }
+    };
+    handle.manage(std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms)));
+
+    // Tier 1e: the in-process broadcast bus the worker emits on after each
+    // job. Managed BEFORE the worker spawns so the worker's first job can
+    // always find it.
+    handle.manage(translation::TranslationDoneBus::new());
+
+    // Translation worker + stranded recovery. The worker is spawned after the
+    // orchestrator + bus are managed so it can fetch them per-job.
+    let translation_handle = translation::worker::spawn_translation_worker(handle.clone());
+    {
+        let db = handle.state::<DbState>();
+        let result = db::connection::lock_conn(&db.conn);
+        match result {
+            Ok(conn) => {
+                translation::worker::reenqueue_stranded_on_startup(
+                    &conn,
+                    translation_handle.sender(),
+                );
+            }
+            Err(e) => eprintln!("warning: failed to lock DB for stranded recovery: {e:#}"),
+        }
+    }
+    handle.manage(translation_handle);
 }
 
 /// Show a native modal dialog when the database migrations fail at startup.

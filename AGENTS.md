@@ -615,15 +615,19 @@ describe each durable boundary so agents can locate the right area. Create a chi
     contract that prevents duplicate-column crashes on re-run. Plan:
     `.worktrees/language-plan-v2.md`.
   - **`src-tauri/src/db/migrations/v005_audit_note_add.rs`** - Post-v004 schema
-    (VERSION 5). Rebuilds `audit_entries` to add `'note_add'` to the `action`
-    CHECK constraint. The `update_article_notes` command previously reused
-    `'status_change'` for note-addition audit rows, which made the audit trail
-    misleading (a note edit appeared as a status change). v005 adds the
-    dedicated `'note_add'` action so note edits are correctly categorized.
-    Same rename-create-copy-drop pattern as v003/v004. Pure CHECK rebuild
-    (no `ALTER TABLE ADD COLUMN`), so `heal_partial_migrations` is not needed.
-    v001 is updated so fresh DBs get `note_add` in the initial CHECK constraint
-    directly. Frontend `AuditAction` type + `formatAuditAction` labels +
+    (VERSION 5, **not yet deployed**). Two additions folded into one migration:
+    (1) rebuilds `audit_entries` to add `'note_add'` to the `action` CHECK
+    constraint (the `update_article_notes` command previously reused
+    `'status_change'`, making note edits appear as status changes; same
+    rename-create-copy-drop pattern as v003/v004); (2) creates
+    `idx_articles_translation_status` on
+    `articles(translation_status, is_translated)` so the startup
+    stranded-recovery query is an index range scan instead of a full table
+    scan - folded directly into v005 (rather than a separate v006) because
+    v005 had not been deployed yet. Both operations are idempotent, so
+    `heal_partial_migrations` is not needed. v001 is updated so fresh DBs get
+    `note_add` in the initial CHECK constraint directly.
+    Frontend `AuditAction` type + `formatAuditAction` labels +
     `audit-timeline.vue` `actionLabels` all include `note_add` -> "Note Added".
     The dashboard Recent Activity feed now carries `articleId` on each entry
     so the dot icon is a clickable button (title "Go to article") that
