@@ -107,28 +107,26 @@ pub fn get_activity_feed(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ActivityFeedEntry>, AppError> {
+    // ORDER BY applies directly to the UNION ALL result so SQLite
+    // cannot silently drop the sort on a wrapped sub-select.
     let mut stmt = conn.prepare(
-        "SELECT id, timestamp, kind, action, article_id, details, source, article_title, \
-                filename, count \
-         FROM (\
-           SELECT ae.id, ae.timestamp, 'audit' as kind, \
-                  ae.action, ae.article_id, ae.details, ae.source, \
-                  SUBSTR(a.title, 1, 55) as article_title, \
-                  NULL as filename, NULL as count \
-           FROM audit_entries ae \
-           LEFT JOIN articles a ON a.id = ae.article_id \
-           WHERE ae.action != 'import' AND ae.action != 'error' \
-           UNION ALL \
-           SELECT MIN(id), MIN(timestamp), 'import', \
-                  'import', NULL, \
-                  REPLACE(details, 'Imported from ', ''), \
-                  'system', NULL, \
-                  REPLACE(details, 'Imported from ', ''), \
-                  COUNT(*) \
-           FROM audit_entries \
-           WHERE action = 'import' \
-           GROUP BY details \
-         ) \
+        "SELECT ae.id, ae.timestamp, 'audit' as kind, \
+                ae.action, ae.article_id, ae.details, ae.source, \
+                SUBSTR(a.title, 1, 55) as article_title, \
+                NULL as filename, NULL as count \
+         FROM audit_entries ae \
+         LEFT JOIN articles a ON a.id = ae.article_id \
+         WHERE ae.action != 'import' AND ae.action != 'error' \
+         UNION ALL \
+         SELECT MIN(id), MIN(timestamp), 'import', \
+                'import', NULL, \
+                REPLACE(details, 'Imported from ', ''), \
+                'system', NULL, \
+                REPLACE(details, 'Imported from ', ''), \
+                COUNT(*) \
+         FROM audit_entries \
+         WHERE action = 'import' \
+         GROUP BY details \
          ORDER BY timestamp DESC LIMIT ?1 OFFSET ?2",
     )?;
     let rows = stmt.query_map(params![limit, offset], |row| {

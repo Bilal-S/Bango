@@ -178,11 +178,12 @@ export function useDashboard() {
   const hasMoreActivities = computed(() => auditStore.hasMore);
   const error = computed(() => articlesStore.error);
 
-  /** Activity feed — the backend merges and sorts in one query; no
-   *  client-side merge or re-sort needed. Data arrives in correct
-   *  timestamp-descending order. */
+  /** Activity feed — the backend merges and sorts in one query; a
+   *  client-side sort is applied as a defense-in-depth safety net so
+   *  the display order is always newest-first regardless of the
+   *  underlying data order. */
   const groupedAudit = computed<GroupedAuditEntry[]>(() => {
-    return auditStore.feed.map((entry) => ({
+    const items: GroupedAuditEntry[] = auditStore.feed.map((entry) => ({
       id: entry.id,
       action: entry.kind === 'import' ? 'import' : (entry.action ?? ''),
       source: entry.kind === 'import' ? 'system' : (entry.source ?? ''),
@@ -192,6 +193,8 @@ export function useDashboard() {
       articleId: entry.articleId ?? null,
       count: entry.count ?? undefined,
     }));
+    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return items;
   });
 
   /** Load more activity entries (pagination) */
