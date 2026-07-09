@@ -175,13 +175,13 @@ pub fn lint(root: &Path) -> Result<LintReport, AppError> {
                     "page has no source_articles provenance".to_string(),
                 );
             }
-            if !body.contains("[^art-") {
+            if !body.contains("[^art-") && !body.contains("[[") {
                 report.push(
                     path,
                     &slug,
                     LintSeverity::Warning,
                     LintKind::UngroundedPage,
-                    "page body has no [^art-id] citations".to_string(),
+                    "page body has no [^art-id] citations or [[wikilinks]]".to_string(),
                 );
             }
         }

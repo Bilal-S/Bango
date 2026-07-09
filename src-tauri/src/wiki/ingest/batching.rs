@@ -495,7 +495,7 @@ pub async fn run_chunked_ingest(
                 let reason = if issue.severity == crate::wiki::engine::LintSeverity::Error {
                     "missing source_articles"
                 } else {
-                    "missing [^art-id] citations"
+                    "missing [^art-id] citations or [[wikilinks]]"
                 };
                 by_slug.entry(issue.slug.as_str()).or_default().push(reason);
             }
