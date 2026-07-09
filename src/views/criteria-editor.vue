@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted } from 'vue';
+import { onBeforeRouteLeave } from 'vue-router';
 import { marked } from 'marked';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
@@ -433,7 +434,6 @@ function dismissExclusionCritique(): void {
 // load on mount and seed the draft from the store so navigation away and
 // back preserves unsaved edits within the session.
 const customLogicDraft = ref('');
-const customLogicSaving = ref(false);
 const showHelpPopover = ref(false);
 let helpPopoverTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -452,18 +452,17 @@ function scheduleHideHelp(): void {
   }, 200);
 }
 
-async function saveCustomLogic(): Promise<void> {
-  customLogicSaving.value = true;
+async function autoSaveCustomLogic(): Promise<void> {
+  const draft = customLogicDraft.value;
+  if (draft === criteriaStore.customLogic) return;
   try {
-    await criteriaStore.saveCustomLogic(customLogicDraft.value);
-    toast.show('Custom screening instructions saved.', 'success');
+    await criteriaStore.saveCustomLogic(draft);
+    criteriaStore.customLogic = draft;
   } catch (e: unknown) {
     toast.show(
       `Failed to save instructions: ${e instanceof Error ? e.message : String(e)}`,
       'error'
     );
-  } finally {
-    customLogicSaving.value = false;
   }
 }
 
@@ -477,6 +476,10 @@ function dismissRulesCritique(): void {
   criteriaStore.rulesCritique = '';
   criteriaStore.rulesCritiqueExpanded = true;
 }
+
+onBeforeRouteLeave(() => {
+  void autoSaveCustomLogic();
+});
 
 onMounted(() => {
   void criteriaStore.loadCustomLogic().then(() => {
@@ -964,58 +967,77 @@ async function handleSearchStrategy(): Promise<void> {
         <div class="section-panel__title-group">
           <span class="material-symbols-outlined text-indigo-600">rule</span>
           <h2 class="section-panel__title">Custom Screening Instructions</h2>
-        </div>
-        <!-- Help popover: hover/focus the question-mark icon to see the AND/OR
-             syntax guide. Uses a delayed hide so the user can move the pointer
-             from the icon into the popover body without dismissing it. -->
-        <div class="help-popover" @mouseenter="showHelp" @mouseleave="scheduleHideHelp">
-          <button
-            type="button"
-            class="help-popover__icon"
-            title="How to use Custom Screening Instructions"
-            aria-label="How to use Custom Screening Instructions"
-            @focus="showHelp"
-            @blur="scheduleHideHelp"
-            @click="showHelpPopover = !showHelpPopover"
-          >
-            <span class="material-symbols-outlined">help</span>
-          </button>
-          <Transition name="help-popover">
-            <div
-              v-if="showHelpPopover"
-              class="help-popover__panel"
-              role="tooltip"
-              @mouseenter="showHelp"
-              @mouseleave="scheduleHideHelp"
+          <!-- Help popover: hover/focus the question-mark icon to see the AND/OR
+               syntax guide. Uses a delayed hide so the user can move the pointer
+               from the icon into the popover body without dismissing it. -->
+          <div class="help-popover" @mouseenter="showHelp" @mouseleave="scheduleHideHelp">
+            <button
+              type="button"
+              class="help-popover__icon"
+              title="How to use Custom Screening Instructions"
+              aria-label="How to use Custom Screening Instructions"
+              @focus="showHelp"
+              @blur="scheduleHideHelp"
+              @click="showHelpPopover = !showHelpPopover"
             >
-              <p class="help-popover__lead">
-                Optional rules your AI applies when deciding include/exclude. Reference criteria by
-                their numbered position (inclusion is
-                <code>1..N</code>, exclusion continues <code>N+1..N+M</code>, matching the numbers
-                shown on this screen).
-              </p>
-              <p class="help-popover__examples-label">Examples:</p>
-              <ul class="help-popover__examples">
-                <li>
-                  "Inclusion criteria 2, 3, and 4 are mandatory AND gates - all three must match for
-                  inclusion."
-                </li>
-                <li>
-                  "Only if 2-4 are all satisfied, consider inclusion criterion 5 OR 6 as the final
-                  inclusion signal."
-                </li>
-                <li>
-                  "Exclusion criterion 9 is a hard gate; if it matches, ignore inclusion criteria
-                  11-14."
-                </li>
-                <li>
-                  "If inclusion 3 and 7 both match, exclusion 5 OR 6 must NOT match for inclusion."
-                </li>
-              </ul>
-              <p class="help-popover__footer">Leave blank for default priority-only behavior.</p>
-            </div>
-          </Transition>
+              <span class="material-symbols-outlined">help</span>
+            </button>
+            <Transition name="help-popover">
+              <div
+                v-if="showHelpPopover"
+                class="help-popover__panel"
+                role="tooltip"
+                @mouseenter="showHelp"
+                @mouseleave="scheduleHideHelp"
+              >
+                <p class="help-popover__lead">
+                  Optional rules your AI applies when deciding include/exclude. Reference criteria
+                  by their numbered position (inclusion is
+                  <code>1..N</code>, exclusion continues <code>N+1..N+M</code>, matching the numbers
+                  shown on this screen).
+                </p>
+                <p class="help-popover__examples-label">Examples:</p>
+                <ul class="help-popover__examples">
+                  <li>
+                    "Inclusion criteria 2, 3, and 4 are mandatory AND gates - all three must match
+                    for inclusion."
+                  </li>
+                  <li>
+                    "Only if 2-4 are all satisfied, consider inclusion criterion 5 OR 6 as the final
+                    inclusion signal."
+                  </li>
+                  <li>
+                    "Exclusion criterion 9 is a hard gate; if it matches, ignore inclusion criteria
+                    11-14."
+                  </li>
+                  <li>
+                    "If inclusion 3 and 7 both match, exclusion 5 OR 6 must NOT match for
+                    inclusion."
+                  </li>
+                </ul>
+                <p class="help-popover__footer">Leave blank for default priority-only behavior.</p>
+              </div>
+            </Transition>
+          </div>
         </div>
+        <div v-if="criteriaStore.generatingRulesCheck" class="ai-loading">
+          <span class="material-symbols-outlined animate-spin">progress_activity</span>
+          <span>Checking…</span>
+        </div>
+        <button
+          v-else
+          class="ai-btn"
+          :disabled="!canUseAi"
+          :title="
+            !canUseAi
+              ? 'Add at least one research aim and configure an LLM first'
+              : 'Run an AI consistency review of the whole ruleset'
+          "
+          @click="handleCheckRules"
+        >
+          <span class="material-symbols-outlined">auto_awesome</span>
+          Check Rules
+        </button>
       </div>
 
       <div class="custom-logic">
@@ -1024,40 +1046,10 @@ async function handleSearchStrategy(): Promise<void> {
           class="custom-logic__textarea"
           rows="5"
           placeholder="e.g. Inclusion criteria 2, 3, and 4 are mandatory AND gates - all three must match for inclusion. Only then consider inclusion criterion 5 OR 6."
+          @blur="autoSaveCustomLogic"
         />
-        <div class="custom-logic__actions">
-          <button
-            class="custom-logic__save-btn"
-            :disabled="customLogicSaving"
-            @click="saveCustomLogic"
-          >
-            <span v-if="customLogicSaving" class="material-symbols-outlined animate-spin"
-              >progress_activity</span
-            >
-            <span v-else>Save</span>
-          </button>
-          <div v-if="criteriaStore.generatingRulesCheck" class="ai-loading">
-            <span class="material-symbols-outlined animate-spin">progress_activity</span>
-            <span>Checking…</span>
-          </div>
-          <button
-            v-else
-            class="ai-btn"
-            :disabled="!canUseAi"
-            :title="
-              !canUseAi
-                ? 'Add at least one research aim and configure an LLM first'
-                : 'Run an AI consistency review of the whole ruleset'
-            "
-            @click="handleCheckRules"
-          >
-            <span class="material-symbols-outlined">auto_awesome</span>
-            Check Rules
-          </button>
-        </div>
         <p class="custom-logic__hint">
-          Saved instructions are applied on the next screening run. Use the criterion numbers shown
-          above.
+          Saved automatically on navigation. Use the criterion numbers shown above.
         </p>
       </div>
     </section>
@@ -1845,43 +1837,6 @@ async function handleSearchStrategy(): Promise<void> {
   font-style: italic;
 }
 
-.custom-logic__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.custom-logic__save-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  background-color: #3525cd;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 600;
-  padding: 0.5rem 1rem;
-  border-radius: 0.375rem;
-  border: none;
-  cursor: pointer;
-  transition: background-color 0.15s;
-  min-width: 4rem;
-  justify-content: center;
-}
-
-.custom-logic__save-btn:hover:not(:disabled) {
-  background-color: #4f46e5;
-}
-
-.custom-logic__save-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.custom-logic__save-btn .material-symbols-outlined {
-  font-size: 18px;
-}
-
 .custom-logic__hint {
   font-size: 12px;
   color: #94a3b8;
@@ -1923,7 +1878,7 @@ async function handleSearchStrategy(): Promise<void> {
 .help-popover__panel {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   z-index: 30;
   width: 380px;
   max-width: calc(100vw - 2rem);
