@@ -60,6 +60,8 @@ const wikiSources = computed(() => {
       authors: a.authors ?? [],
       year: a.publicationYear ?? null,
       doi: a.doi ?? null,
+      abstractText: a.abstractText ?? '',
+      journal: a.journal ?? null,
     });
   }
   return map;

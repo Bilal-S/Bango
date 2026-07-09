@@ -178,7 +178,7 @@ export function useDashboard() {
   const hasMoreActivities = computed(() => auditStore.hasMore);
   const error = computed(() => articlesStore.error);
 
-  /** Activity feed — the backend merges and sorts in one query; a
+  /** Activity feed - the backend merges and sorts in one query; a
    *  client-side sort is applied as a defense-in-depth safety net so
    *  the display order is always newest-first regardless of the
    *  underlying data order. */

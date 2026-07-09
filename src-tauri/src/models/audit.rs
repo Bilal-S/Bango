@@ -35,7 +35,6 @@ pub enum AuditAction {
     DedupAuto,
     ReferenceImport,
     ReferenceMatch,
-    WikiIngestError,
     /// Plan-A translation rewrote the working article text to English
     /// (`translation_status = 'succeeded'`).
     Translation,
@@ -70,7 +69,6 @@ impl AuditAction {
             Self::DedupAuto => "dedup_auto",
             Self::ReferenceImport => "reference_import",
             Self::ReferenceMatch => "reference_match",
-            Self::WikiIngestError => "wiki_ingest_error",
             Self::Translation => "translation",
             Self::TranslationError => "translation_error",
             Self::SearchStrategy => "search_strategy",
@@ -109,7 +107,7 @@ pub struct ImportActivity {
 
 /// A unified activity-feed entry that merges individual audit rows and grouped
 /// import rows into a single timestamp-ordered stream. The frontend receives a
-/// flat, correctly paginated list — no client-side merge or re-sort needed.
+/// flat, correctly paginated list - no client-side merge or re-sort needed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityFeedEntry {

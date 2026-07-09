@@ -48,13 +48,15 @@ rust-stemmers = "1.2"
 # EUC-JP / CP949 / GB18030 byte encodings without a ToUnicode CMap. `unpdf`
 # returns those raw byte values as Latin-1 code points (mojibake); the recovery
 # pass in `utils::pdf_extract::recover_mojibake` re-decodes them.
-encoding_rs = "0.8"
-chardetng = "0.1"
+ encoding_rs = "0.8"
+ chardetng = "0.1"
+ zip = "2"
 
 [dev-dependencies]
 mockito = "1"
 tempfile = "3"
 proptest = "1"
+zip = "2"
 
 # Clippy lint config. The lints that fire on idiomatic test patterns
 # (`unwrap_used`, `expect_used`, `panic`) are NOT escalated here because the

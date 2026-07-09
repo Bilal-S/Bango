@@ -391,7 +391,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `wiki_chat`, `wiki_get_graph`, `wiki_ingest`, `wiki_list_pages`, `wiki_list_sources`,
     `wiki_rebuild` (one-click full pipeline: scaffold + export + ingest + FTS5, emits
     `wiki:progress` events), `wiki_export_and_ingest` (export + ingest after Add Documents),
-    and `wiki_check_for_updates`. `wiki_search` rebuilds the FTS index if empty;
+    and `wiki_check_for_updates`, plus `wiki_export_site` (static-site zip export: the
+    frontend renders all HTML via `renderWikiMarkdown(staticMode)` + depth-aware
+    `slugToHref`/`artIdToHref` resolvers and passes a `SiteExportBundle` to this command,
+    which writes the staging dir, copies the wiki + user-doc Markdown tree, zips, and
+    moves the zip to the frontend-chosen path; no `blocking_pick_file` in the backend).
+    `wiki_search` rebuilds the FTS index if empty;
     `wiki_update_page` / `wiki_delete_page` rebuild it on every edit/delete so chat + search
     stay in sync with user changes (both use `rebuild_index_with_manifest` so the drift
     manifest stays in sync too).
@@ -863,7 +868,10 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `google-trends.ts` (Trends embed URL builder + date-range validators),
     `wiki-markdown.ts` (shared wiki Markdown renderer: `renderWikiMarkdown(text, opts?)`
     converts `[[slug]]` / `[[slug|alias]]` to `.wikilink` anchors and `[^art-id]`
-    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs). T2.3
+    footnotes to `.art-ref` anchors (with `data-slug` / `data-art-id` attrs); a
+    `staticMode` post-pass (`convertVueLinksToStatic`) rewrites those anchors to
+    standard `<a href>` for the static-site exporter (missing targets render as
+    `<span class="ref-missing">`). T2.3
     Phase 3 added `(§Section)` suffix parsing: a citation like `[[slug]] (§Methods)`
     renders the chip plus a muted `<span class="section-badge">§Methods</span>` badge
     so the reader can locate the passage. The badge styling lives in
@@ -893,6 +901,14 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `raw_export.rs::resolve_user_file_title` enriches PDF titles via `lopdf` (reads
     the `/Title` entry from the Info dictionary) so the pre-seeded source page + the
     LLM prompt use the document's real title instead of the filename stem.
+    `wiki-site-export.ts` (static-site export engine: gathers pages + sources via
+    existing wiki commands, renders each page to standalone HTML reusing
+    `renderWikiMarkdown(staticMode)` with depth-aware `slugToHref`/`artIdToHref`
+    resolver closures, generates article-stub pages for referenced articles
+    without synthesis pages, builds `index.html` + `style.css` + `search.js` +
+    `search-index.json`, opens the save dialog, and passes a `SiteExportBundle`
+    to the `wiki_export_site` backend command). Pure helpers tested in
+    `src/__tests__/utils/wiki-site-export.test.ts`.
     `platform.ts` (`isMacPlatform()` reads
     `navigator.platform`; `SHORTCUT_MODIFIER` constant resolves to `'Cmd'` or `'Alt'`.
     Dependency-free, resilient to `navigator` absence. Used by `wiki-view.vue` to pick the
@@ -948,7 +964,8 @@ describe each durable boundary so agents can locate the right area. Create a chi
   here as `<plan-name>-tests.md` so the script can grep-named test files at PR time.
   Current: `language-plan-v2-tests.md` (26 rows across 11 files),
   `translation-3-tests.md`, `search-strategy-tests.md` (8 rows: Search
-  Strategy Builder pure helpers).
+  Strategy Builder pure helpers), `wiki-export-tests.md` (12 rows: Wiki
+  static-site export zip + markdown-tree + staticMode helpers).
 - **`.worktrees/`** - planning documents (`language-plan-v2.md` is the active
   translation plan; the superseded `language-plan.md` is archived in `DONOTUSE/`;
   implemented/temporary docs are archived in `DONOTUSE/`, such as the timeline plan

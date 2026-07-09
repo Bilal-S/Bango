@@ -15,6 +15,14 @@
  * Used by both `wiki-page-viewer.vue` (with a populated sources map) and the
  * chat bubbles in `chat-view.vue` (sources optional). Keeping the transform in
  * one place guarantees identical click targets and styling hooks.
+ *
+ * **Static mode**: when `staticMode` is true, each regex pass emits `href`
+ * attributes directly (using the `slugToHref` / `artIdToHref` resolvers) so the
+ * exported HTML works without Vue click handlers. Missing targets render as
+ * `<span class="ref-missing">`. This is done in-pass (not as a post-pass) so
+ * `marked.parse()` receives HTML with correct `href` attributes — avoiding the
+ * fragile regex-on-final-HTML approach that broke when `marked` reformatted
+ * anchors.
  */
 import { marked } from 'marked';
 import type { WikiSourceInfo } from '@/types/wiki';
@@ -42,6 +50,17 @@ export interface RenderWikiMarkdownOptions {
    * source). Falls back to a green `.art-ref` when no synthesis page exists in
    * `pageTitles` for the uuid. Defaults to `false` (green art-refs everywhere). */
   linkArtRefsToSynthesis?: boolean;
+  /** When true, emit standard `href` attributes instead of `data-slug` /
+   * `data-art-id`. Used by the static-site exporter so links work without Vue
+   * click handlers. When a resolver returns null (missing target), the link
+   * renders as a greyed-out `<span class="ref-missing">`. */
+  staticMode?: boolean;
+  /** Resolver: wiki page slug -> relative HTML path (e.g. "../concepts/x.html").
+   * Required when `staticMode` is true. Returns null for non-existent slugs. */
+  slugToHref?: (slug: string) => string | null;
+  /** Resolver: article UUID -> relative HTML path for the stub or synthesis
+   * page. Returns null when the article has no page (renders as plain text). */
+  artIdToHref?: (uuid: string) => string | null;
 }
 
 /**
@@ -84,20 +103,77 @@ function escapeText(value: string): string {
  */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Build a green `.art-ref` anchor for an article UUID with its source label. */
-function makeArtRef(uuid: string, source: WikiSourceInfo): string {
+/**
+ * Build a green `.art-ref` anchor for an article UUID with its source label.
+ *
+ * In static mode, emits `href` from `artIdToHref` (or a `.ref-missing` span
+ * when the resolver returns null). In Vue mode, emits `data-art-id`.
+ */
+function makeArtRef(
+  uuid: string,
+  source: WikiSourceInfo,
+  opts?: RenderWikiMarkdownOptions
+): string {
   const label = escapeText(formatArtRefLabel(source));
   const titleAttr = escapeAttr(source.title);
+  if (opts?.staticMode) {
+    const href = opts.artIdToHref?.(uuid);
+    if (href) {
+      return `<a class="art-ref" href="${escapeAttr(href)}" title="${titleAttr}">${label}</a>`;
+    }
+    return `<span class="ref-missing">${label}</span>`;
+  }
   return `<a class="art-ref" data-art-id="${uuid}" title="${titleAttr}">${label}</a>`;
+}
+
+/**
+ * Build a `.wikilink--synthesis` anchor for a wiki page slug.
+ *
+ * In static mode, emits `href` from `slugToHref` (or `.ref-missing`). In Vue
+ * mode, emits `data-slug`.
+ */
+function makeSynthesisChip(slug: string, label: string, opts?: RenderWikiMarkdownOptions): string {
+  const safeLabel = escapeText(label);
+  const safeSlug = escapeAttr(slug);
+  if (opts?.staticMode) {
+    const href = opts.slugToHref?.(slug);
+    if (href) {
+      return `<a class="wikilink wikilink--synthesis" href="${escapeAttr(href)}">${safeLabel}</a>`;
+    }
+    return `<span class="ref-missing">${safeLabel}</span>`;
+  }
+  return `<a class="wikilink wikilink--synthesis" data-slug="${safeSlug}">${safeLabel}</a>`;
+}
+
+/**
+ * Build a plain `.wikilink` anchor for a non-UUID slug.
+ *
+ * In static mode, emits `href` from `slugToHref` (or `.ref-missing`). In Vue
+ * mode, emits `data-slug`.
+ */
+function makeWikilink(slug: string, label: string, opts?: RenderWikiMarkdownOptions): string {
+  const safeLabel = escapeText(label);
+  const safeSlug = escapeAttr(slug.toLowerCase());
+  if (opts?.staticMode) {
+    const href = opts.slugToHref?.(slug);
+    if (href) {
+      return `<a class="wikilink" href="${escapeAttr(href)}">${safeLabel}</a>`;
+    }
+    return `<span class="ref-missing">${safeLabel}</span>`;
+  }
+  return `<a class="wikilink" data-slug="${safeSlug}">${safeLabel}</a>`;
 }
 
 /**
  * Render wiki Markdown to an HTML string.
  *
- * The returned HTML contains `.wikilink` and `.art-ref` anchors with
- * `data-slug` / `data-art-id` attributes. Callers attach a single delegated
- * click handler that reads those attributes (see `wiki-page-viewer.vue` and
- * `chat-view.vue`).
+ * The returned HTML contains `.wikilink` and `.art-ref` anchors. In Vue mode
+ * (default), they carry `data-slug` / `data-art-id` attributes and callers
+ * attach a single delegated click handler that reads those attributes (see
+ * `wiki-page-viewer.vue` and `chat-view.vue`).
+ *
+ * In static mode, each pass emits `href` attributes directly so the HTML works
+ * in a static browser without Vue click handlers.
  */
 export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOptions): string {
   if (!text) return '';
@@ -115,8 +191,7 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
   //    - Else if the UUID matches a wiki page slug (pageTitles), emit a pink
   //      synthesis-styled chip (opens wiki reader).
   //    - Else if source metadata is available, emit a green `.art-ref` (opens
-  //      article detail). This branch replaced the former `[[uuid|Title]]`
-  //      emission so article UUIDs render as article links, not wiki links.
+  //      article detail).
   //    - Else emit [[uuid]] (indigo wikilink, clickable, visible UUID).
   //    The lookbehinds exclude UUIDs that are already inside `[[...]]`
   //    (preceded by `[` or `|`), inside `[^art-...]` (preceded by `art-`), or
@@ -131,17 +206,15 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
       const pageTitle = pageTitles?.get(uuid);
       // Chat view: articles take priority over wiki pages.
       if (articlePriority && source) {
-        return makeArtRef(uuid, source);
+        return makeArtRef(uuid, source, opts);
       }
       // Default / wiki viewer: wiki page title -> synthesis chip (pink).
       if (pageTitle) {
-        const label = escapeText(pageTitle);
-        const safeSlug = escapeAttr(uuid);
-        return `<a class="wikilink wikilink--synthesis" data-slug="${safeSlug}">${label}</a>`;
+        return makeSynthesisChip(uuid, pageTitle, opts);
       }
       // Source metadata -> green art-ref (article detail).
       if (source) {
-        return makeArtRef(uuid, source);
+        return makeArtRef(uuid, source, opts);
       }
       // Fallback: plain wikilink (indigo, clickable, visible UUID).
       return `[[${uuid}]]`;
@@ -168,10 +241,10 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
     const source = sources?.get(artId);
     const pageTitle = pageTitles?.get(artId);
     if (pageTitle) {
-      return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(artId)}">${escapeText(pageTitle)}</a>`;
+      return makeSynthesisChip(artId, pageTitle, opts);
     }
-    const label = source ? escapeText(formatArtRefLabel(source)) : escapeText(artId);
-    return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(artId)}">${label}</a>`;
+    const label = source ? formatArtRefLabel(source) : artId;
+    return makeSynthesisChip(artId, label, opts);
   });
 
   // 1. [^art-{id}] and [^{id}] footnotes -> clickable source references,
@@ -202,21 +275,20 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
     const pageTitle = pageTitles?.get(artId);
     const isUuid = UUID_RE.test(artId);
     if (linkToSynthesis && pageTitle) {
-      const label = escapeText(pageTitle);
-      const safeSlug = escapeAttr(artId);
-      return `<a class="wikilink wikilink--synthesis" data-slug="${safeSlug}">${label}</a>`;
+      return makeSynthesisChip(artId, pageTitle, opts);
     }
     // Non-UUID id with a wiki page (uploaded-document source page from Layer 1,
     // or a synthesis page) -> open the wiki page, not a (non-existent) article.
     if (!isUuid && pageTitle) {
-      const label = escapeText(pageTitle);
-      const safeSlug = escapeAttr(artId);
-      return `<a class="wikilink wikilink--synthesis" data-slug="${safeSlug}">${label}</a>`;
+      return makeSynthesisChip(artId, pageTitle, opts);
     }
     if (source) {
-      return makeArtRef(artId, source);
+      return makeArtRef(artId, source, opts);
     }
     const shortId = artId.slice(0, 8);
+    if (opts?.staticMode) {
+      return `<span class="ref-missing">[${shortId}]</span>`;
+    }
     return `<a class="art-ref art-ref--missing" data-art-id="${artId}">[${shortId}]</a>`;
   });
 
@@ -254,25 +326,24 @@ export function renderWikiMarkdown(text: string, opts?: RenderWikiMarkdownOption
         const source = sources?.get(uuid);
         // Default / wiki viewer: pageTitles wins (pink synthesis chip).
         if (!articlePriority && pageTitle) {
-          return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
+          return makeSynthesisChip(uuid, pageTitle, opts);
         }
         // Chat view with articlePriority: sources win (green art-ref).
         if (source) {
-          return makeArtRef(uuid, source);
+          return makeArtRef(uuid, source, opts);
         }
         // pageTitles fallback (when articlePriority is true but no source).
         if (pageTitle) {
-          return `<a class="wikilink wikilink--synthesis" data-slug="${escapeAttr(uuid)}">${escapeText(pageTitle)}</a>`;
+          return makeSynthesisChip(uuid, pageTitle, opts);
         }
         // No metadata: default wikilink with the raw UUID as text (still clickable).
       }
       const linkText = alias?.trim() || trimmedSlug;
-      const safeSlug = escapeAttr(trimmedSlug.toLowerCase());
       const badge =
         section && section.trim()
           ? `<span class="section-badge">§${escapeText(section.trim())}</span>`
           : '';
-      return `<a class="wikilink" data-slug="${safeSlug}">${escapeText(linkText)}</a>${badge}`;
+      return `${makeWikilink(trimmedSlug, linkText, opts)}${badge}`;
     }
   );
 

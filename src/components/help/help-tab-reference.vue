@@ -220,6 +220,30 @@ watch(
           </button>
           <button
             class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-gap-report' }"
+            @click="selectRefSection('ref-gap-report')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">lightbulb</span>
+            Research Gap Report
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-search-strategy' }"
+            @click="selectRefSection('ref-search-strategy')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">search</span>
+            Search Strategy Builder
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-complex-screening' }"
+            @click="selectRefSection('ref-complex-screening')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">account_tree</span>
+            Complex Screening Rules
+          </button>
+          <button
+            class="ref-nav__link"
             :class="{ 'ref-nav__link--active': activeRefSection === 'ref-wiki' }"
             @click="selectRefSection('ref-wiki')"
           >
@@ -1095,6 +1119,173 @@ ER  - </pre
           </div>
         </section>
 
+        <!-- SECTION: RESEARCH GAP REPORT -->
+        <section id="ref-gap-report" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">lightbulb</span>
+            <h2 class="ref-section__title">Research Gap Report</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Research Gap Report</strong> is an AI-generated analysis that identifies
+              unexplored or under-explored research areas in your included article corpus. It is
+              available from the <strong>Summary</strong> screen.
+            </p>
+            <h3>What It Does</h3>
+            <ul>
+              <li>
+                Reads all included article summaries and key insights to build a comprehensive
+                picture of the current research landscape.
+              </li>
+              <li>
+                Identifies topics, methods, populations, or angles that are missing or
+                underrepresented across your corpus.
+              </li>
+              <li>
+                Produces a structured report with gap themes, supporting evidence from existing
+                studies, and suggested research directions.
+              </li>
+            </ul>
+            <h3>Use Cases</h3>
+            <ul>
+              <li>
+                Framing <strong>&ldquo;future work&rdquo;</strong> sections in your own
+                publications.
+              </li>
+              <li>Writing grant proposals that target genuine knowledge gaps.</li>
+              <li>Validating that your systematic review scope is comprehensive.</li>
+              <li>Identifying niche areas where your research team has a competitive advantage.</li>
+            </ul>
+            <h3>How to Use</h3>
+            <ol>
+              <li>Navigate to the <strong>Summary</strong> screen in the sidebar.</li>
+              <li>Click the <strong>Research Gap Report</strong> button in the toolbar.</li>
+              <li>
+                The report is saved in the database and remains available until you regenerate it.
+              </li>
+            </ol>
+            <p>
+              <em>Note:</em> The gap report uses token-optimized retrieval, so even large corpora
+              stay within your LLM's context window budget.
+            </p>
+          </div>
+        </section>
+
+        <!-- SECTION: SEARCH STRATEGY BUILDER -->
+        <section id="ref-search-strategy" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">search</span>
+            <h2 class="ref-section__title">Search Strategy Builder</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Search Strategy Builder</strong> generates database-ready Boolean search
+              strings from your research aims. It is available on the
+              <strong>Criteria</strong> screen and uses AI to translate plain-language aims into
+              structured query syntax.
+            </p>
+            <h3>How It Works</h3>
+            <ul>
+              <li>
+                The AI reads all research aims from the Criteria screen to understand your review
+                scope.
+              </li>
+              <li>
+                It produces structured queries with <strong>MeSH terms</strong>,
+                <strong>free-text keywords</strong>,
+                <strong>Boolean operators</strong> (<code>AND</code>, <code>OR</code>,
+                <code>NOT</code>), and <strong>field tags</strong> (e.g.
+                <code>[Title/Abstract]</code> for PubMed).
+              </li>
+              <li>
+                The result is displayed as a formatted card you can copy directly into PubMed,
+                Scopus, Web of Science, or any other academic database.
+              </li>
+            </ul>
+            <h3>How to Use</h3>
+            <ol>
+              <li>Navigate to the <strong>Criteria</strong> screen in the sidebar.</li>
+              <li>Ensure you have at least one research aim and a configured LLM provider.</li>
+              <li>
+                Click the <strong>Generate Search Strategy</strong> button (identified by the
+                sparkle icon).
+              </li>
+              <li>
+                The result appears as a card below the button. Copy any query string with one click.
+              </li>
+            </ol>
+            <p>
+              <em>Tip:</em> Regenerate the strategy whenever you update your aims to keep your
+              database queries aligned with your review scope.
+            </p>
+          </div>
+        </section>
+
+        <!-- SECTION: COMPLEX SCREENING RULES -->
+        <section id="ref-complex-screening" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">account_tree</span>
+            <h2 class="ref-section__title">Complex Screening Rules</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Custom Screening Instructions</strong> panel (Section 4 of the
+              <strong>Criteria</strong> screen) lets you define advanced logic beyond the standard
+              priority-based matching: AND/OR gates, hard exclusions, and conditional inclusion
+              rules that give your AI fine-grained control over screening decisions.
+            </p>
+            <h3>How to Write Rules</h3>
+            <ul>
+              <li>
+                Reference criteria by their <strong>numbered position</strong> shown on the Criteria
+                screen. Inclusion criteria are numbered <code>1..N</code> and exclusion criteria
+                continue <code>N+1..N+M</code>, so every criterion has a unique global number.
+              </li>
+              <li>
+                <strong>AND gates:</strong> &ldquo;Inclusion criteria 2, 3, and 4 are mandatory AND
+                gates - all three must match for inclusion.&rdquo;
+              </li>
+              <li>
+                <strong>Conditional inclusion:</strong> &ldquo;Only if criteria 2&ndash;4 are all
+                satisfied, consider inclusion criterion 5 OR 6 as the final signal.&rdquo;
+              </li>
+              <li>
+                <strong>Hard exclusions:</strong> &ldquo;Exclusion criterion 9 is a hard gate; if it
+                matches, ignore inclusion criteria 11&ndash;14.&rdquo;
+              </li>
+              <li>
+                <strong>Combined guarding:</strong> &ldquo;If inclusion 3 and 7 both match,
+                exclusion 5 OR 6 must NOT match for inclusion.&rdquo;
+              </li>
+            </ul>
+            <p>
+              Click the <strong>help icon</strong> (<code>?</code>) next to the heading for a live
+              syntax guide with more examples.
+            </p>
+            <h3>Auto-Save &amp; Check Rules</h3>
+            <ul>
+              <li>
+                <strong>Auto-save:</strong> Your instructions save automatically when you leave the
+                text area (click outside) or navigate to another screen. No manual Save button
+                needed.
+              </li>
+              <li>
+                <strong>Check Rules:</strong> The sparkle button in the section header runs an AI
+                consistency review over your entire ruleset (aims, criteria, <em>and</em> custom
+                instructions), flagging contradictions, ambiguity, and missing edge cases.
+              </li>
+              <li>
+                Saved instructions are injected into every screening prompt as a
+                <code>## Custom Screening Instructions</code> section.
+              </li>
+            </ul>
+            <p>
+              <em>Tip:</em> Leave the field blank for the default priority-only behavior. Rules are
+              only applied when you start a new screening run.
+            </p>
+          </div>
+        </section>
+
         <!-- SECTION: WIKI -->
         <section id="ref-wiki" class="ref-section">
           <header class="ref-section__header">
@@ -1433,6 +1624,81 @@ ER  - </pre
               (free) or any Markdown editor as a read-only companion view. Bango remains the source
               of truth: edits you make inside Bango rebuild the FTS index, so chat and search stay
               in sync. Obsidian is <em>optional</em> - everything works inside Bango without it.
+            </p>
+
+            <h3>Export Wiki as Website</h3>
+            <p>
+              The <strong>Export Wiki Website</strong> option (Wiki toolbar or the global Export
+              menu in the article list) packages your entire wiki as a self-contained static
+              <code>.zip</code> website:
+            </p>
+            <ul>
+              <li>
+                Every wiki page becomes a standalone <code>.html</code> file with full navigation.
+              </li>
+              <li>
+                Article references resolve to metadata-only stub pages (no full text - copyright
+                safe).
+              </li>
+              <li>
+                Includes a built-in search engine, styling, and a clickable graph view with
+                ForceAtlas2 layout.
+              </li>
+              <li>
+                Extract the zip and open <code>index.html</code> in any browser - no server
+                required.
+              </li>
+            </ul>
+            <p>
+              Use this to share your research synthesis with colleagues, submit as supplemental
+              material, or archive your review for posterity.
+            </p>
+
+            <h3>Hosting Your Wiki Online</h3>
+            <p>
+              The exported wiki is a folder of static HTML files. You can host it for free on any
+              static site hosting service - no backend, no database, no server configuration needed:
+            </p>
+            <h4>GitHub Pages</h4>
+            <ul>
+              <li>
+                Create a GitHub repository, upload the extracted wiki folder, and enable
+                <strong>GitHub Pages</strong> in the repository settings (Settings &rarr; Pages
+                &rarr; deploy from main branch).
+              </li>
+              <li>
+                Your wiki is live at
+                <code>https://your-username.github.io/repo-name/</code>.
+              </li>
+              <li>Free, fast, and updates automatically when you push new exports.</li>
+            </ul>
+            <h4>Netlify</h4>
+            <ul>
+              <li>
+                Drag and drop the extracted wiki folder onto
+                <a href="https://app.netlify.com/drop" target="_blank" rel="noopener noreferrer"
+                  >Netlify Drop</a
+                >.
+              </li>
+              <li>
+                Your site is live instantly with a shareable URL. Connect a custom domain for free.
+              </li>
+            </ul>
+            <h4>Vercel</h4>
+            <ul>
+              <li>
+                Upload the folder to a Git repository or use the
+                <a href="https://vercel.com/new" target="_blank" rel="noopener noreferrer"
+                  >Vercel CLI</a
+                >
+                (<code>vercel</code> command in the extracted folder).
+              </li>
+              <li>Deploys instantly with automatic HTTPS and a shareable URL.</li>
+            </ul>
+            <p>
+              <em>Tip:</em> If you prefer keeping things offline, you can also share the extracted
+              folder via cloud storage (OneDrive, Google Drive). Recipients download and open
+              <code>index.html</code> in their browser - no hosting required.
             </p>
 
             <h3>Deleting & Resetting</h3>

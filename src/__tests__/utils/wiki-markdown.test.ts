@@ -3,7 +3,7 @@ import { renderWikiMarkdown, formatArtRefLabel } from '@/utils/wiki-markdown';
 import type { WikiSourceInfo } from '@/types/wiki';
 
 function src(id: string, title: string, year: number | null): WikiSourceInfo {
-  return { id, title, authors: [], year, doi: null };
+  return { id, title, authors: [], year, doi: null, abstractText: '', journal: null };
 }
 
 describe('renderWikiMarkdown', () => {
@@ -578,5 +578,66 @@ describe('section badge (T2.3)', () => {
     expect(out).toContain('>the levy<');
     expect(out).toContain('section-badge');
     expect(out).toContain('§Results');
+  });
+});
+
+// ── Static mode (wiki static-site export) ────────────────────────────────────
+
+describe('staticMode (static-site export)', () => {
+  it('static_mode_emits_href_for_wikilink: emits href instead of data-slug', () => {
+    const out = renderWikiMarkdown('See [[sugar-tax]].', {
+      staticMode: true,
+      slugToHref: (slug) => `pages/concepts/${slug}.html`,
+    });
+    expect(out).toContain('href="pages/concepts/sugar-tax.html"');
+    expect(out).not.toContain('data-slug=');
+  });
+
+  it('static_mode_emits_href_for_art_ref: [^art-id] resolves to stub href', () => {
+    const uuid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const sources = new Map([[uuid, src(uuid, 'A Study', 2024)]]);
+    const out = renderWikiMarkdown(`See [^art-${uuid}].`, {
+      sources,
+      staticMode: true,
+      slugToHref: () => null,
+      artIdToHref: (id) => `pages/articles/${id}.html`,
+    });
+    expect(out).toContain('href="pages/articles/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.html"');
+    expect(out).not.toContain('data-art-id=');
+  });
+
+  it('static_mode_renders_ref_missing_for_broken_link: missing slug -> span', () => {
+    const out = renderWikiMarkdown('See [[missing-page]].', {
+      staticMode: true,
+      slugToHref: () => null,
+    });
+    expect(out).toContain('ref-missing');
+    expect(out).not.toContain('href=');
+  });
+
+  it('static_mode_handles_definition_lines: [^art-id]: converted to href', () => {
+    const uuid = '11111111-2222-3333-4444-555555555555';
+    const sources = new Map([[uuid, src(uuid, 'Cited Paper', 2021)]]);
+    const md = `Prose [^art-${uuid}].\n\n[^art-${uuid}]: citation text`;
+    const out = renderWikiMarkdown(md, {
+      sources,
+      staticMode: true,
+      slugToHref: (s) => `pages/synthesis/${s}.html`,
+      artIdToHref: (id) => `pages/articles/${id}.html`,
+    });
+    // The definition line should produce an href anchor, not a data-slug.
+    expect(out).toContain('href="pages/synthesis/11111111-2222-3333-4444-555555555555.html"');
+    // No literal definition syntax leaks.
+    expect(out).not.toContain(']:');
+  });
+
+  it('static_mode_depth_aware_links: page at depth 1 emits ../ prefix', () => {
+    // A depth-aware resolver created for a page at depth 1 (e.g.
+    // pages/concepts/x.html) must emit "../pages/..." relative paths.
+    const out = renderWikiMarkdown('See [[sugar-tax]].', {
+      staticMode: true,
+      slugToHref: (slug) => `../pages/concepts/${slug}.html`,
+    });
+    expect(out).toContain('href="../pages/concepts/sugar-tax.html"');
   });
 });

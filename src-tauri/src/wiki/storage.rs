@@ -133,7 +133,7 @@ pub fn count_markdown(root: &Path, subdir: &str, recursive: bool) -> usize {
 }
 
 /// Collect all `.md` file paths under `base`, optionally recursive.
-fn walk_markdown(base: &Path, recursive: bool) -> Vec<PathBuf> {
+pub(crate) fn walk_markdown(base: &Path, recursive: bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let Ok(rd) = std::fs::read_dir(base) else {
         return out;

@@ -315,6 +315,8 @@ pub fn run() {
             commands::wiki_cmd::wiki_rebuild,
             commands::wiki_cmd::wiki_export_and_ingest,
             commands::wiki_cmd::wiki_check_for_updates,
+            commands::wiki_cmd::wiki_generate_export,
+            commands::wiki_cmd::wiki_zip_export,
         ]);
 
     #[cfg(debug_assertions)]

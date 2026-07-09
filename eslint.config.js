@@ -5,7 +5,18 @@ import prettierConfig from 'eslint-config-prettier';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'src-tauri/**', 'node_modules/**'] },
+  {
+    ignores: [
+      'dist/**',
+      'src-tauri/**',
+      'node_modules/**',
+      // Planning docs + exported test output - not shipped source.
+      '.worktrees/**',
+      // Standalone static microsite - ships its own vanilla JS that uses
+      // browser globals (document, window) and is not part of the Tauri app.
+      'landingpage/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...pluginVue.configs['flat/recommended'],

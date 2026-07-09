@@ -6,3 +6,7 @@ src-tauri/Cargo.lock
 .claude
 package-lock.json
 *.md
+# Planning docs + exported test output - not shipped source.
+.worktrees
+# Standalone static microsite - not part of the Tauri app build.
+landingpage

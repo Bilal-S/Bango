@@ -1,5 +1,8 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import '@/styles/help-shared.css';
+
+const router = useRouter();
 
 /**
  * Understanding Bibliometrics tab.
@@ -22,9 +25,15 @@ import '@/styles/help-shared.css';
       </p>
       <p class="ht-intro__desc" style="margin-top: 12px">
         Bango includes six interconnected bibliometric modules. They all operate on your project's
-        <strong>included articles</strong> and the citation/reference data you have imported. Before
-        any module can display results, you must run <strong>Refresh</strong> from the Bibliometrics
-        dashboard once to build the analytical data layer.
+        <strong>included articles</strong> and the citation/reference data you have imported (<a
+          href="#"
+          style="color: #4f46e5; font-weight: 600; text-decoration: none"
+          @click.prevent="
+            router.push({ query: { tab: 'reference' }, hash: '#ref-references-citations' })
+          "
+          >see References &amp; Citations</a
+        >). Before any module can display results, you must run <strong>Refresh</strong> from the
+        Bibliometrics dashboard once to build the analytical data layer.
       </p>
     </section>
 

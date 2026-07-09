@@ -33,7 +33,7 @@ const activityListEl = ref<HTMLElement | null>(null);
 
 // Track batch boundaries for the permanent "── N new ──" separators and the
 // TransitionGroup staggered fade-in. Since the backend now returns a single
-// merged, timestamp-sorted feed, new entries always land at the end — so
+// merged, timestamp-sorted feed, new entries always land at the end - so
 // prevCount correctly identifies the boundary.
 const batchBoundaryIndices = ref<Set<number>>(new Set());
 

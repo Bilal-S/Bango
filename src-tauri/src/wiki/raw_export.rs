@@ -99,6 +99,13 @@ fn article_frontmatter(article: &Article, content_source: &str) -> Frontmatter {
     if let Some(ref d) = article.doi {
         fm.set("doi", d);
     }
+    // Store the abstract in frontmatter so the static-site exporter can render
+    // metadata-only article stub pages without a second DB query. The body
+    // carries the full content (full_text/ai_summary/abstract fallback); the
+    // abstract is kept separately here for the copyright-safe stub.
+    if !article.abstract_text.is_empty() {
+        fm.set("abstract_text", &article.abstract_text);
+    }
     if !article.keywords.is_empty() {
         fm.set("keywords", &fmt_list(&article.keywords));
     }
@@ -395,14 +402,13 @@ fn strip_html(html: &str) -> Result<String, AppError> {
 
 /// Decode the handful of HTML entities most likely to appear in research notes.
 fn decode_html_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
+    s.replace("\u{0026}amp;", "\u{0026}")
+        .replace("\u{0026}lt;", "<")
+        .replace("\u{0026}gt;", ">")
+        .replace("\u{0026}quot;", "\"")
         .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
-        .replace("&mdash;", "-")
-        .replace("&ndash;", "-")
+        .replace("\u{0026}nbsp;", " ")
+        .replace("\u{0026}ndash;", "-")
 }
 
 /// Collapse runs of whitespace into single spaces; preserve newlines.

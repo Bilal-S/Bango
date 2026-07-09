@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useWiki } from '@/composables/use-wiki';
 import { useToast } from '@/composables/use-toast';
 import { useChatStore } from '@/stores/chat';
+import { useExport } from '@/composables/use-export';
 import type { WikiStatus } from '@/types/wiki';
 
 const props = defineProps<{
@@ -49,6 +50,10 @@ const ingesting = ref(false);
 const deleting = ref(false);
 const rebuilding = ref(false);
 const checkingUpdates = ref(false);
+const generatingSite = ref(false);
+const showExportDialog = ref(false);
+const exportTitle = ref('');
+const wikiGenerated = ref(false);
 const lintReport = ref<import('@/types/wiki').LintReport | null>(null);
 
 async function handleInit(): Promise<void> {
@@ -316,6 +321,65 @@ async function confirmDeleteWiki(): Promise<void> {
   }
 }
 
+/** Open the Export Website dialog with the project title pre-filled. */
+function handleExportWebsite(): void {
+  const { defaultWikiTitle } = useExport();
+  exportTitle.value = defaultWikiTitle();
+  showExportDialog.value = true;
+}
+
+/** Step 1: Generate the wiki static site to `wiki-root/wiki-export/`.
+ *  After generation, the dialog switches to show "Open in Browser" and
+ *  "Download as Zip" actions. */
+async function handleGenerateSite(): Promise<void> {
+  const title = exportTitle.value.trim();
+  if (!title) return;
+  generatingSite.value = true;
+  try {
+    const { generateWikiSite } = useExport();
+    const ok = await generateWikiSite(title);
+    if (ok) {
+      toast.show('Wiki website generated. You can now test it or download as zip.', 'success');
+      wikiGenerated.value = true;
+    }
+  } catch {
+    toast.show('Failed to generate wiki website', 'error');
+  } finally {
+    generatingSite.value = false;
+  }
+}
+
+/** Open the generated `index.html` in the OS default browser for testing. */
+async function handleOpenInBrowser(): Promise<void> {
+  try {
+    const { openWikiExport } = useExport();
+    const ok = await openWikiExport();
+    if (!ok) {
+      toast.show('Failed to open wiki website. Generate it first.', 'error');
+    }
+  } catch {
+    toast.show('Failed to open wiki website in browser', 'error');
+  }
+}
+
+/** Step 2: Zip the `wiki-export/` directory into a user-chosen `.zip` file. */
+async function handleDownloadZip(): Promise<void> {
+  generatingSite.value = true;
+  try {
+    const { downloadWikiZip } = useExport();
+    const result = await downloadWikiZip(exportTitle.value.trim());
+    if (result !== null) {
+      toast.show(`Wiki website zipped to: ${result}`, 'success');
+      showExportDialog.value = false;
+      wikiGenerated.value = false;
+    }
+  } catch {
+    toast.show('Failed to zip wiki website', 'error');
+  } finally {
+    generatingSite.value = false;
+  }
+}
+
 /** Whether the wiki has been scaffolded (AGENTS.md present). */
 function isInitialized(): boolean {
   return props.status?.initialized === true;
@@ -514,6 +578,25 @@ function handleChat(): void {
           <span class="material-symbols-outlined text-[16px] text-slate-500">update</span>
           {{ checkingUpdates ? 'Checking...' : 'Check for Updates' }}
         </button>
+        <!-- Export Website: static-site generation + zip -->
+        <button
+          class="wiki-toolbar__menu-item"
+          :disabled="generatingSite || !isInitialized()"
+          :title="
+            isInitialized()
+              ? 'Generate the wiki as a static website you can test locally and download as zip'
+              : 'Initialize the wiki first'
+          "
+          @click="
+            () => {
+              closeActionsMenu();
+              handleExportWebsite();
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">public</span>
+          {{ generatingSite ? 'Generating...' : 'Export Website' }}
+        </button>
         <!-- Divider -->
         <hr class="wiki-toolbar__menu-divider" />
         <!-- Delete Wiki -->
@@ -647,6 +730,102 @@ function handleChat(): void {
           <button class="btn btn--secondary" @click="showDeleteDialog = false">Cancel</button>
           <button class="btn btn--danger" :disabled="deleting" @click="confirmDeleteWiki">
             {{ deleting ? 'Deleting...' : 'Delete Wiki' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Website dialog: two-step flow (Generate → Test → Download Zip).
+         Truly modal: NO click-outside dismiss. -->
+    <div v-if="showExportDialog" class="dialog-overlay">
+      <div class="dialog">
+        <!-- Close (X) button, top-right corner -->
+        <button
+          class="dialog__close"
+          title="Close"
+          :disabled="generatingSite"
+          @click="
+            () => {
+              showExportDialog = false;
+              wikiGenerated = false;
+            }
+          "
+        >
+          <span class="material-symbols-outlined">close</span>
+        </button>
+        <h3 class="dialog__title">Export Wiki Website</h3>
+        <p class="dialog__desc">
+          Generate a self-contained static website from your wiki. You can test it locally in your
+          browser, then download as a <code>.zip</code> file. Article references resolve to
+          metadata-only stub pages (no full text - copyright safe).
+        </p>
+        <div class="dialog__danger-box">
+          <span class="material-symbols-outlined">warning</span>
+          <span>
+            Uploaded documents may be copyrighted. Only export content you have the right to
+            distribute.
+          </span>
+        </div>
+
+        <!-- Step 1: Title input + Generate button -->
+        <label v-if="!wikiGenerated" class="field">
+          <span class="field__label">Project Title</span>
+          <input
+            v-model="exportTitle"
+            type="text"
+            class="field__input"
+            placeholder="Wiki title"
+            :disabled="generatingSite"
+          />
+        </label>
+
+        <!-- Step 2: After generation, show Open + Download actions -->
+        <div v-if="wikiGenerated" class="dialog__success-box">
+          <span class="material-symbols-outlined">check_circle</span>
+          <span>Website generated successfully. Test it in your browser or download as zip.</span>
+        </div>
+
+        <div class="dialog__actions">
+          <button
+            class="btn btn--secondary"
+            :disabled="generatingSite"
+            @click="
+              () => {
+                showExportDialog = false;
+                wikiGenerated = false;
+              }
+            "
+          >
+            {{ wikiGenerated ? 'Close' : 'Cancel' }}
+          </button>
+
+          <!-- Step 1 action: Generate -->
+          <button
+            v-if="!wikiGenerated"
+            class="btn btn--primary"
+            :disabled="generatingSite || !exportTitle.trim()"
+            @click="handleGenerateSite"
+          >
+            {{ generatingSite ? 'Generating...' : 'Generate Website' }}
+          </button>
+
+          <!-- Step 2 actions: Open in Browser + Download as Zip -->
+          <button
+            v-if="wikiGenerated"
+            class="btn btn--secondary"
+            :disabled="generatingSite"
+            @click="handleOpenInBrowser"
+          >
+            <span class="material-symbols-outlined text-[16px]">open_in_browser</span>
+            Open in Browser
+          </button>
+          <button
+            v-if="wikiGenerated"
+            class="btn btn--primary"
+            :disabled="generatingSite"
+            @click="handleDownloadZip"
+          >
+            {{ generatingSite ? 'Zipping...' : 'Download as Zip' }}
           </button>
         </div>
       </div>

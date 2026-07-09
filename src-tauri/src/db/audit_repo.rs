@@ -101,7 +101,7 @@ pub fn get_import_activities(
 
 /// Return a unified, timestamp-ordered activity feed by merging individual
 /// audit entries and grouped import rows in one SQL query. The caller gets
-/// a flat, correctly paginated list — no client-side merge or re-sort needed.
+/// a flat, correctly paginated list - no client-side merge or re-sort needed.
 pub fn get_activity_feed(
     conn: &Connection,
     limit: usize,
@@ -298,7 +298,6 @@ fn parse_action(s: &str) -> AuditAction {
         "dedup_auto" => AuditAction::DedupAuto,
         "reference_import" => AuditAction::ReferenceImport,
         "reference_match" => AuditAction::ReferenceMatch,
-        "wiki_ingest_error" => AuditAction::WikiIngestError,
         "translation" => AuditAction::Translation,
         "translation_error" => AuditAction::TranslationError,
         _ => AuditAction::StatusChange,

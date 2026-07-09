@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
-/** Shape returned by the Rust `get_activity_feed` command — a single merged,
+/** Shape returned by the Rust `get_activity_feed` command - a single merged,
  *  timestamp-ordered stream of audit entries and import groups. */
 export interface ActivityFeedEntry {
   id: string;
@@ -33,7 +33,7 @@ export const useAuditStore = defineStore('audit', () => {
     await fetch();
   }
 
-  /** Initial fetch — replaces feed with the first page. */
+  /** Initial fetch - replaces feed with the first page. */
   async function fetch(): Promise<void> {
     loading.value = true;
     try {

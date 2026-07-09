@@ -8,7 +8,7 @@
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`.
   Never auto-add your agent name as a co-author (`Co-Authored-By:` trailer) to commit messages.
 - Never manually modify `CHANGELOG.md` or any file marked as auto-generated.
-- Never use the emdash character (`—`).  
+- Never use the emdash character (`-`).  
   Use a plain dash (`-`) instead in all generated text and comments.
 
 ## Engineering Principles

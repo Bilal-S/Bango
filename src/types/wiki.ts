@@ -90,13 +90,45 @@ export interface WikiProgress {
   message: string;
 }
 
-/** A raw source article's metadata for reference resolution. */
+/** A raw source article's metadata for reference resolution + static-site
+ * article stub rendering. */
 export interface WikiSourceInfo {
   id: string;
   title: string;
   authors: string[];
   year: number | null;
   doi: string | null;
+  /** Article abstract (copyright-safe metadata). Used by the static-site
+   * exporter to render article-stub pages. */
+  abstractText: string;
+  /** Journal name (metadata). */
+  journal: string | null;
+}
+
+/** A single text file in the static-site export bundle. */
+export interface ExportFile {
+  /** Relative path within the export (e.g. "pages/concepts/sugar.html"). */
+  path: string;
+  /** File content (UTF-8 text). */
+  content: string;
+}
+
+/** The complete export bundle sent to `wiki_generate_export`. */
+export interface SiteExportBundle {
+  /** All HTML/CSS/JS/JSON files to write. */
+  files: ExportFile[];
+  /** Project title for the zip filename + index header. */
+  projectTitle: string;
+}
+
+/** Result of `wiki_generate_export`: paths + file count for the generated site. */
+export interface GenerateExportResult {
+  /** Absolute path to the `wiki-export/` directory. */
+  exportDir: string;
+  /** Absolute path to `index.html` inside `wiki-export/`. */
+  indexPath: string;
+  /** Total number of files written (HTML + CSS + JS + JSON + markdown). */
+  fileCount: number;
 }
 
 /** Lightweight page summary for the sidebar list (no body). */
