@@ -1,129 +1,88 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
-import type { AuditEntry } from '@/types';
 
-/** Shape returned by the Rust `get_import_activities` command */
-interface ImportActivity {
+/** Shape returned by the Rust `get_activity_feed` command — a single merged,
+ *  timestamp-ordered stream of audit entries and import groups. */
+export interface ActivityFeedEntry {
   id: string;
   timestamp: string;
-  filename: string;
-  count: number;
+  kind: 'audit' | 'import';
+  action: string | null;
+  articleId: string | null;
+  details: string | null;
+  source: string | null;
+  articleTitle: string | null;
+  filename: string | null;
+  count: number | null;
 }
 
 const PAGE_SIZE = 10;
 
 export const useAuditStore = defineStore('audit', () => {
-  const recentAudit = ref<AuditEntry[]>([]);
-  const importActivities = ref<ImportActivity[]>([]);
+  const feed = ref<ActivityFeedEntry[]>([]);
   const loading = ref(false);
   const initialized = ref(false);
 
-  // Pagination state
-  const auditOffset = ref(0);
-  const importOffset = ref(0);
-  const hasMoreAudit = ref(true);
-  const hasMoreImports = ref(true);
+  const offset = ref(0);
+  const hasMore = ref(true);
   const loadingMore = ref(false);
-
-  /** Total items currently loaded (used to compute next offset) */
-  const totalLoaded = computed(() => recentAudit.value.length + importActivities.value.length);
 
   async function fetchIfNeeded(): Promise<void> {
     if (initialized.value || !isTauri()) return;
     await fetch();
   }
 
-  /** Initial fetch - resets all state */
+  /** Initial fetch — replaces feed with the first page. */
   async function fetch(): Promise<void> {
     loading.value = true;
     try {
-      const [audit, imports] = await Promise.all([
-        tauriCommand<AuditEntry[]>('get_recent_audit_entries', { limit: PAGE_SIZE, offset: 0 }),
-        tauriCommand<ImportActivity[]>('get_import_activities', { limit: PAGE_SIZE, offset: 0 }),
-      ]);
-      recentAudit.value = audit;
-      importActivities.value = imports;
-      auditOffset.value = audit.length;
-      importOffset.value = imports.length;
-      hasMoreAudit.value = audit.length === PAGE_SIZE;
-      hasMoreImports.value = imports.length === PAGE_SIZE;
+      const entries = await tauriCommand<ActivityFeedEntry[]>('get_activity_feed', {
+        limit: PAGE_SIZE,
+        offset: 0,
+      });
+      feed.value = entries;
+      offset.value = entries.length;
+      hasMore.value = entries.length === PAGE_SIZE;
       initialized.value = true;
     } finally {
       loading.value = false;
     }
   }
 
-  /** Load the next page of both audit entries and import activities, merged by timestamp */
+  /** Load the next page of the merged feed. */
   async function loadMore(): Promise<void> {
-    if (loadingMore.value || (!hasMoreAudit.value && !hasMoreImports.value)) return;
+    if (loadingMore.value || !hasMore.value) return;
     loadingMore.value = true;
     try {
-      let totalNewItems = 0;
-      const promises: Promise<unknown>[] = [];
-
-      if (hasMoreAudit.value) {
-        promises.push(
-          tauriCommand<AuditEntry[]>('get_recent_audit_entries', {
-            limit: PAGE_SIZE,
-            offset: auditOffset.value,
-          }).then((entries) => {
-            recentAudit.value = [...recentAudit.value, ...entries];
-            auditOffset.value += entries.length;
-            hasMoreAudit.value = entries.length === PAGE_SIZE;
-            totalNewItems += entries.length;
-          })
-        );
+      const entries = await tauriCommand<ActivityFeedEntry[]>('get_activity_feed', {
+        limit: PAGE_SIZE,
+        offset: offset.value,
+      });
+      if (entries.length > 0) {
+        feed.value = [...feed.value, ...entries];
+        offset.value += entries.length;
       }
-
-      if (hasMoreImports.value) {
-        promises.push(
-          tauriCommand<ImportActivity[]>('get_import_activities', {
-            limit: PAGE_SIZE,
-            offset: importOffset.value,
-          }).then((imports) => {
-            importActivities.value = [...importActivities.value, ...imports];
-            importOffset.value += imports.length;
-            hasMoreImports.value = imports.length === PAGE_SIZE;
-            totalNewItems += imports.length;
-          })
-        );
-      }
-
-      await Promise.all(promises);
-
-      // Guard: if both streams returned 0 items, there are definitely no more
-      // records. This catches the edge case where the last batch from one or
-      // both streams was exactly PAGE_SIZE, leaving hasMore=true, but the next
-      // batch is empty.
-      if (totalNewItems === 0) {
-        hasMoreAudit.value = false;
-        hasMoreImports.value = false;
-      }
+      hasMore.value = entries.length === PAGE_SIZE;
     } finally {
       loadingMore.value = false;
     }
   }
 
   function invalidate(): void {
-    recentAudit.value = [];
-    importActivities.value = [];
+    feed.value = [];
     initialized.value = false;
-    auditOffset.value = 0;
-    importOffset.value = 0;
-    hasMoreAudit.value = true;
-    hasMoreImports.value = true;
+    offset.value = 0;
+    hasMore.value = true;
   }
 
   return {
-    recentAudit,
-    importActivities,
+    feed,
     loading,
     loadingMore,
     initialized,
-    hasMoreAudit,
-    hasMoreImports,
-    totalLoaded,
+    hasMore,
+    offset,
     fetchIfNeeded,
     fetch,
     loadMore,

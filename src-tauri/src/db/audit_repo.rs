@@ -1,7 +1,9 @@
 use rusqlite::{params, Connection};
 
 use crate::error::AppError;
-use crate::models::audit::{AuditAction, AuditEntry, AuditSource, ImportActivity};
+use crate::models::audit::{
+    ActivityFeedEntry, AuditAction, AuditEntry, AuditSource, ImportActivity,
+};
 
 pub fn get_audit_trail(conn: &Connection, article_id: &str) -> Result<Vec<AuditEntry>, AppError> {
     let mut stmt = conn.prepare(
@@ -19,17 +21,33 @@ pub fn get_recent_audit_entries(
     conn: &Connection,
     limit: usize,
     offset: usize,
+    before_timestamp: Option<&str>,
 ) -> Result<Vec<AuditEntry>, AppError> {
-    // Exclude 'import' entries - those are served by get_import_activities instead
-    let mut stmt = conn.prepare(
-        "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
-         ae.details, ae.source, SUBSTR(a.title, 1, 55) as article_title \
-         FROM audit_entries ae \
-         LEFT JOIN articles a ON a.id = ae.article_id \
-         WHERE ae.action != 'import' AND ae.action != 'error' ORDER BY ae.timestamp DESC LIMIT ?1 OFFSET ?2",
-    )?;
-    let rows = stmt.query_map(params![limit, offset], row_to_audit_entry)?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    if let Some(ts) = before_timestamp {
+        // Cursor-based: only return entries strictly older than the cursor.
+        // offset is ignored in cursor mode.
+        let mut stmt = conn.prepare(
+            "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
+             ae.details, ae.source, SUBSTR(a.title, 1, 55) as article_title \
+             FROM audit_entries ae \
+             LEFT JOIN articles a ON a.id = ae.article_id \
+             WHERE ae.action != 'import' AND ae.action != 'error' AND ae.timestamp < ?1 \
+             ORDER BY ae.timestamp DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![ts, limit], row_to_audit_entry)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    } else {
+        // Initial load: offset-based pagination (no cursor).
+        let mut stmt = conn.prepare(
+            "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
+             ae.details, ae.source, SUBSTR(a.title, 1, 55) as article_title \
+             FROM audit_entries ae \
+             LEFT JOIN articles a ON a.id = ae.article_id \
+             WHERE ae.action != 'import' AND ae.action != 'error' ORDER BY ae.timestamp DESC LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], row_to_audit_entry)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
 }
 
 /// Returns one row per import file with the correct article count,
@@ -38,20 +56,93 @@ pub fn get_import_activities(
     conn: &Connection,
     limit: usize,
     offset: usize,
+    before_timestamp: Option<&str>,
 ) -> Result<Vec<ImportActivity>, AppError> {
+    if let Some(ts) = before_timestamp {
+        // Cursor-based: only return import groups where the earliest entry
+        // is strictly older than the cursor. offset is ignored in cursor mode.
+        let mut stmt = conn.prepare(
+            "SELECT MIN(id) as id, MIN(timestamp) as timestamp, \
+             REPLACE(details, 'Imported from ', '') as filename, COUNT(*) as count \
+             FROM audit_entries WHERE action = 'import' \
+             GROUP BY details \
+             HAVING MIN(timestamp) < ?1 \
+             ORDER BY MIN(timestamp) DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![ts, limit], |row| {
+            Ok(ImportActivity {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                filename: row.get(2)?,
+                count: row.get::<_, usize>(3)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    } else {
+        // Initial load: offset-based pagination (no cursor).
+        let mut stmt = conn.prepare(
+            "SELECT MIN(id) as id, MIN(timestamp) as timestamp, \
+             REPLACE(details, 'Imported from ', '') as filename, COUNT(*) as count \
+             FROM audit_entries WHERE action = 'import' \
+             GROUP BY details \
+             ORDER BY MIN(timestamp) DESC LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            Ok(ImportActivity {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                filename: row.get(2)?,
+                count: row.get::<_, usize>(3)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+}
+
+/// Return a unified, timestamp-ordered activity feed by merging individual
+/// audit entries and grouped import rows in one SQL query. The caller gets
+/// a flat, correctly paginated list — no client-side merge or re-sort needed.
+pub fn get_activity_feed(
+    conn: &Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ActivityFeedEntry>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT MIN(id) as id, MIN(timestamp) as timestamp, \
-         REPLACE(details, 'Imported from ', '') as filename, COUNT(*) as count \
-         FROM audit_entries WHERE action = 'import' \
-         GROUP BY details \
-         ORDER BY MIN(timestamp) DESC LIMIT ?1 OFFSET ?2",
+        "SELECT id, timestamp, kind, action, article_id, details, source, article_title, \
+                filename, count \
+         FROM (\
+           SELECT ae.id, ae.timestamp, 'audit' as kind, \
+                  ae.action, ae.article_id, ae.details, ae.source, \
+                  SUBSTR(a.title, 1, 55) as article_title, \
+                  NULL as filename, NULL as count \
+           FROM audit_entries ae \
+           LEFT JOIN articles a ON a.id = ae.article_id \
+           WHERE ae.action != 'import' AND ae.action != 'error' \
+           UNION ALL \
+           SELECT MIN(id), MIN(timestamp), 'import', \
+                  'import', NULL, \
+                  REPLACE(details, 'Imported from ', ''), \
+                  'system', NULL, \
+                  REPLACE(details, 'Imported from ', ''), \
+                  COUNT(*) \
+           FROM audit_entries \
+           WHERE action = 'import' \
+           GROUP BY details \
+         ) \
+         ORDER BY timestamp DESC LIMIT ?1 OFFSET ?2",
     )?;
     let rows = stmt.query_map(params![limit, offset], |row| {
-        Ok(ImportActivity {
+        Ok(ActivityFeedEntry {
             id: row.get(0)?,
             timestamp: row.get(1)?,
-            filename: row.get(2)?,
-            count: row.get::<_, usize>(3)?,
+            kind: row.get(2)?,
+            action: row.get(3)?,
+            article_id: row.get(4)?,
+            details: row.get(5)?,
+            source: row.get(6)?,
+            article_title: row.get(7)?,
+            filename: row.get(8)?,
+            count: row.get(9)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())

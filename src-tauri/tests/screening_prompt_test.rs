@@ -193,3 +193,39 @@ fn system_prompt_includes_cross_check_instruction() {
         "SYSTEM_PROMPT must reference the verbatim provenance label: {SYSTEM_PROMPT}"
     );
 }
+
+// ── Tag/Label guideline tests ──
+
+#[test]
+fn system_prompt_includes_tag_length_instruction() {
+    // The system prompt must instruct the LLM that tags are at most 35 chars
+    // so the backend sanitization (MAX_NEW_TAG_LABEL_LEN = 35) never has to
+    // silently truncate a too-long name and lose context.
+    assert!(
+        SYSTEM_PROMPT.contains("35 characters"),
+        "SYSTEM_PROMPT must specify the 35-char tag limit: {SYSTEM_PROMPT}"
+    );
+}
+
+#[test]
+fn system_prompt_includes_no_prefix_instruction() {
+    // The system prompt must tell the LLM NOT to prefix tags with
+    // "inclusion:" or "exclusion:" - those prefixes are for labels, not tags.
+    assert!(
+        SYSTEM_PROMPT.contains("Do NOT prefix tags with"),
+        "SYSTEM_PROMPT must instruct the LLM not to prefix tags: {SYSTEM_PROMPT}"
+    );
+}
+
+#[test]
+fn system_prompt_includes_concise_descriptor_instruction() {
+    // Tags must be concise descriptors, not full justifications or criterion text.
+    assert!(
+        SYSTEM_PROMPT.contains("concise descriptors"),
+        "SYSTEM_PROMPT must instruct that tags are concise descriptors: {SYSTEM_PROMPT}"
+    );
+    assert!(
+        SYSTEM_PROMPT.contains("NOT justifications"),
+        "SYSTEM_PROMPT must instruct that tags are not justifications: {SYSTEM_PROMPT}"
+    );
+}

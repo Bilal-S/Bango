@@ -148,9 +148,24 @@ describe each durable boundary so agents can locate the right area. Create a chi
     stage 2). `ScreeningProgress` gains `stage`/`stage_total` for the progress sub-line.
     `prompt.rs` `ArticleEntry` gains `full_text_evidence: Option<String>`; the prompt emits
     a `## Supporting Evidence from Full Text` block (chunks prefixed `[§Methods]`/`[§Results]`)
-    only when `Some` (abstract-mode prompts stay byte-identical). `llm_client.rs` gains a
+    only when `Some` (abstract-mode prompts stay byte-identical). `prompt.rs` `SYSTEM_PROMPT`
+    carries a `## Tag and Label Guidelines` section (v6.9): instructs the LLM that
+    `suggested_tags` are concise descriptors (≤ 35 chars, lowercase, hyphenated, no
+    `inclusion:`/`exclusion:` prefixes - those are for labels). `llm_client.rs` gains a
     non-breaking `send_with_type(system, user, LlmRequestType)` default method (delegates to
     `send`); only `HttpLlmClient` overrides it to route the type through the orchestrator.
+    **Tag/label sanitization** (v6.9): `engine.rs` exposes pure `#[must_use]`
+    `sanitize_tag_or_label_name(raw, max_len)` + `truncate_at_word_boundary(s, max_len)`.
+    The sanitizer strips `inclusion:`/`exclusion:`/`inclusion -`/`exclusion -` prefixes,
+    lowercases, replaces spaces/underscores with hyphens, collapses repeated hyphens,
+    trims leading/trailing hyphens, and truncates at the last word boundary (never
+    mid-word); a single overlong word with no hyphens hard-truncates at the limit.
+    `MAX_NEW_TAG_LABEL_LEN = 35` (raised from 30). Both `create_or_match_tag` and
+    `create_or_match_label` route through the sanitizer so auto-generated criterion
+    labels (`"Inclusion: {text}"`) no longer leak the prefix into the stored name.
+    Tested in `tests/screening_engine_test.rs` (12 sanitize + 3 truncate + 3
+    create_or_match edge cases) + `tests/screening_prompt_test.rs` (3 system-prompt
+    guideline tests).
     `commands/screening.rs` reads mode + params from `app_settings` and runs
     `ensure_chunks_for_full_text_articles(conn, force=false)` inside the spawned
     background task before `run_sync` (NOT in the synchronous IPC handler, so the
@@ -188,6 +203,26 @@ describe each durable boundary so agents can locate the right area. Create a chi
     + Gap 3 progress-on-filtered + Gap 6 token-accumulation + Gap 7 accurate
     audit-label) + 1 budget-guard integration test + `tests/token_estimation_test.rs`
     (4 pure-helper cases).
+  - **`src-tauri/src/commands/tags.rs`** + **`src-tauri/src/commands/labels.rs`** -
+    Tag & Label management commands (v6.9 standard-taxonomy surfacing).
+    `tags.rs` owns `STANDARD_STUDY_TAGS` (20 methodology/study-type tags:
+    `systematic-review`, `meta-analysis`, `randomized-controlled-trial`, `cohort-study`,
+    `case-control-study`, `cross-sectional-study`, `qualitative-study`, `mixed-methods`,
+    `pilot-study`, `protocol`, `scoping-review`, `umbrella-review`, `narrative-review`,
+    `experimental-study`, `observational-study`, `longitudinal-study`, `prevalence-study`,
+    `cost-effectiveness`, `validation-study`, `editorial`) injected into the `suggest_tags`
+    prompt as a `## Standard Study-Type Tags` section instructing the LLM to include up
+    to 4 when relevant. `labels.rs` owns `STANDARD_WORKFLOW_LABELS` (12 workflow-state
+    labels: `priority-read`, `strong-methodology`, `weak-methodology`, `needs-full-text`,
+    `disputed`, `key-paper`, `borderline`, `duplicate-suspect`, `excluded-by-criteria`,
+    `included-by-criteria`, `needs-discussion`, `flagged`) injected into the
+    `suggest_labels` prompt similarly. All standard entries are pre-validated to pass the
+    35-char `sanitize_tag_or_label_name` gate so the backend sanitizer never silently
+    truncates them. Both prompts also reinforce the ≤ 35-char + no-prefix rules so the
+    standalone suggestion path stays consistent with the screening-time path.
+    Frontend `tag-label-management.vue` (v6.9): double-click any tag/label chip to edit
+    in place (same affordance as the criteria editor); `nextTick` auto-focus + select
+    the input on edit-start, `@blur` commits, `Escape` cancels.
   - **`src-tauri/src/db/app_settings_repo.rs`** - key/value `app_settings` store. Holds
     `storage_root` (Bango documents root; `fulltext/`, `ris/`, `wiki-root/` derive from it
     as subdirectories; lazy-migrated from the legacy `fulltext_storage_dir` key by

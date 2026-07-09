@@ -24,6 +24,35 @@ const MIN_KEYWORD_FREQUENCY: usize = 2;
 /// Maximum number of keywords to send to the LLM.
 const MAX_KEYWORDS: usize = 200;
 
+/// Standard field-of-study tags that classify content by research methodology
+/// and study type. These are commonly used across academic disciplines and
+/// should be suggested by the LLM (up to 4) when they match the corpus.
+///
+/// All entries are lowercase, hyphenated, and ≤ 35 chars so they pass the
+/// backend sanitization in `screening::engine::sanitize_tag_or_label_name`.
+const STANDARD_STUDY_TAGS: &[&str] = &[
+    "systematic-review",
+    "meta-analysis",
+    "randomized-controlled-trial",
+    "cohort-study",
+    "case-control-study",
+    "cross-sectional-study",
+    "qualitative-study",
+    "mixed-methods",
+    "pilot-study",
+    "protocol",
+    "scoping-review",
+    "umbrella-review",
+    "narrative-review",
+    "experimental-study",
+    "observational-study",
+    "longitudinal-study",
+    "prevalence-study",
+    "cost-effectiveness",
+    "validation-study",
+    "editorial",
+];
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TagWithCount {
@@ -244,6 +273,8 @@ pub async fn suggest_tags(
     let criteria_section =
         if criteria_text.is_empty() { String::new() } else { format!("\n{}", criteria_text) };
 
+    let standard_tags_str = STANDARD_STUDY_TAGS.join(", ");
+
     let user_prompt = format!(
         r#"## Task
 Generate a concise set of content-category tags for organizing articles in a systematic literature review.
@@ -252,7 +283,12 @@ Tags should represent meaningful topic, methodology, or relevance categories der
 {article_section}
 ## Article Keywords (frequency-ranked, from all working articles)
 {keywords}
-{criteria_section}
+ {criteria_section}
+## Standard Study-Type Tags
+The following standard field-of-study tags classify research methodology and study type.
+Include up to 4 of these when they are relevant to the corpus (in addition to the corpus-derived tags):
+[{standard_tags}]
+
 ## Response Format
 Return JSON exactly matching this schema:
 {{
@@ -260,13 +296,15 @@ Return JSON exactly matching this schema:
 }}
 
 Rules:
-- Generate 10-30 tags.
-- Each tag should be a short, lowercase, hyphenated string (e.g., "machine-learning", "clinical-trial").
-- Tags should be derived from the articles, keywords, and review criteria shown above.
+- Generate 10-30 tags total (including any standard tags you select).
+- Each tag must be a short, lowercase, hyphenated string (e.g., "machine-learning", "clinical-trial").
+- Each tag must be at most 35 characters. Do NOT prefix tags with "inclusion:" or "exclusion:".
+- Tags should be derived from the articles, keywords, and review criteria shown above, plus any relevant standard study-type tags.
 - Do not duplicate or overlap concepts."#,
         article_section = article_section,
         keywords = keywords_str,
         criteria_section = criteria_section,
+        standard_tags = standard_tags_str,
     );
 
     // ── LLM call ────────────────────────────────────────────────────

@@ -175,37 +175,23 @@ export function useDashboard() {
 
   const loading = computed(() => articlesStore.loading || auditStore.loading);
   const loadingMoreActivities = computed(() => auditStore.loadingMore);
-  const hasMoreActivities = computed(() => auditStore.hasMoreAudit || auditStore.hasMoreImports);
+  const hasMoreActivities = computed(() => auditStore.hasMore);
   const error = computed(() => articlesStore.error);
 
-  /** Merged timeline: import activities + other audit entries */
+  /** Activity feed — the backend merges and sorts in one query; no
+   *  client-side merge or re-sort needed. Data arrives in correct
+   *  timestamp-descending order. */
   const groupedAudit = computed<GroupedAuditEntry[]>(() => {
-    const nonImport: GroupedAuditEntry[] = auditStore.recentAudit.map((entry) => ({
+    return auditStore.feed.map((entry) => ({
       id: entry.id,
-      action: entry.action,
-      source: entry.source,
+      action: entry.kind === 'import' ? 'import' : (entry.action ?? ''),
+      source: entry.kind === 'import' ? 'system' : (entry.source ?? ''),
       timestamp: entry.timestamp,
-      details: stripUuidFromDetails(entry.details),
-      articleTitle: entry.articleTitle,
-      articleId: entry.articleId || null,
+      details: stripUuidFromDetails(entry.filename ?? entry.details),
+      articleTitle: entry.articleTitle ?? null,
+      articleId: entry.articleId ?? null,
+      count: entry.count ?? undefined,
     }));
-
-    const merged: GroupedAuditEntry[] = [
-      ...auditStore.importActivities.map(
-        (act): GroupedAuditEntry => ({
-          id: act.id,
-          action: 'import',
-          source: 'system',
-          timestamp: act.timestamp,
-          details: stripUuidFromDetails(act.filename),
-          count: act.count,
-        })
-      ),
-      ...nonImport,
-    ];
-
-    merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    return merged;
   });
 
   /** Load more activity entries (pagination) */

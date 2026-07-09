@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
@@ -23,6 +23,10 @@ const editingTagId = ref<string | null>(null);
 const editingTagName = ref('');
 const editingLabelId = ref<string | null>(null);
 const editingLabelName = ref('');
+
+// Template refs for auto-focusing the edit input when edit mode starts.
+const tagEditInput = ref<HTMLInputElement | null>(null);
+const labelEditInput = ref<HTMLInputElement | null>(null);
 
 const isLoading = computed(() => tagsStore.loading && labelsStore.loading);
 const hasError = computed(() => tagsStore.error || labelsStore.error);
@@ -53,6 +57,11 @@ async function addLabel(): Promise<void> {
 function startEditingTag(id: string, currentName: string): void {
   editingTagId.value = id;
   editingTagName.value = currentName;
+  // Auto-focus + select the edit input on next tick (after the v-if renders).
+  void nextTick(() => {
+    tagEditInput.value?.focus();
+    tagEditInput.value?.select();
+  });
 }
 
 async function saveTagEdit(): Promise<void> {
@@ -75,6 +84,11 @@ function cancelTagEdit(): void {
 function startEditingLabel(id: string, currentName: string): void {
   editingLabelId.value = id;
   editingLabelName.value = currentName;
+  // Auto-focus + select the edit input on next tick (after the v-if renders).
+  void nextTick(() => {
+    labelEditInput.value?.focus();
+    labelEditInput.value?.select();
+  });
 }
 
 async function saveLabelEdit(): Promise<void> {
@@ -216,20 +230,28 @@ function filterByLabel(labelId: string): void {
               :key="tag.id"
               class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
             >
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 flex-1 min-w-0">
                 <template v-if="editingTagId === tag.id">
                   <input
+                    ref="tagEditInput"
                     v-model="editingTagName"
-                    class="px-2 py-1 bg-surface-container-lowest border border-primary rounded-lg focus:ring-1 focus:ring-primary font-mono text-mono text-on-surface transition-all w-48"
+                    class="px-2 py-1 bg-surface-container-lowest border border-primary rounded-lg focus:ring-1 focus:ring-primary font-mono text-mono text-on-surface transition-all w-full min-w-0"
                     @keyup.enter="saveTagEdit"
                     @keyup.escape="cancelTagEdit"
+                    @blur="saveTagEdit"
                   />
                 </template>
                 <template v-else>
-                  <TagChip :name="tag.name" :color="tag.color" />
+                  <span
+                    class="cursor-pointer"
+                    title="Double-click to edit"
+                    @dblclick="startEditingTag(tag.id, tag.name)"
+                  >
+                    <TagChip :name="tag.name" :color="tag.color" />
+                  </span>
                 </template>
               </div>
-              <div class="flex items-center gap-4">
+              <div class="flex items-center gap-4 flex-shrink-0">
                 <span class="font-body-sm text-body-sm text-on-surface-variant">{{
                   formatArticleCount(tag.articleCount)
                 }}</span>
@@ -353,20 +375,28 @@ function filterByLabel(labelId: string): void {
               :key="label.id"
               class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
             >
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 flex-1 min-w-0">
                 <template v-if="editingLabelId === label.id">
                   <input
+                    ref="labelEditInput"
                     v-model="editingLabelName"
-                    class="px-2 py-1 bg-surface-container-lowest border border-secondary rounded-lg focus:ring-1 focus:ring-secondary font-mono text-mono text-on-surface transition-all w-48"
+                    class="px-2 py-1 bg-surface-container-lowest border border-secondary rounded-lg focus:ring-1 focus:ring-secondary font-mono text-mono text-on-surface transition-all w-full min-w-0"
                     @keyup.enter="saveLabelEdit"
                     @keyup.escape="cancelLabelEdit"
+                    @blur="saveLabelEdit"
                   />
                 </template>
                 <template v-else>
-                  <LabelChip :name="label.name" :color="label.color" />
+                  <span
+                    class="cursor-pointer"
+                    title="Double-click to edit"
+                    @dblclick="startEditingLabel(label.id, label.name)"
+                  >
+                    <LabelChip :name="label.name" :color="label.color" />
+                  </span>
                 </template>
               </div>
-              <div class="flex items-center gap-4">
+              <div class="flex items-center gap-4 flex-shrink-0">
                 <span class="font-body-sm text-body-sm text-on-surface-variant">{{
                   formatArticleCount(label.articleCount)
                 }}</span>

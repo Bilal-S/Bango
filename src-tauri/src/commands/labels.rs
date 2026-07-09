@@ -12,6 +12,28 @@ use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::label::Label;
 
+/// Standard workflow labels that classify articles by review process state,
+/// quality assessment, and decision category. These complement the corpus-
+/// derived labels and should be suggested by the LLM (up to 4) when they
+/// match the review's screening workflow.
+///
+/// All entries are lowercase, hyphenated, and ≤ 35 chars so they pass the
+/// backend sanitization in `screening::engine::sanitize_tag_or_label_name`.
+const STANDARD_WORKFLOW_LABELS: &[&str] = &[
+    "priority-read",
+    "strong-methodology",
+    "weak-methodology",
+    "needs-full-text",
+    "disputed",
+    "key-paper",
+    "borderline",
+    "duplicate-suspect",
+    "excluded-by-criteria",
+    "included-by-criteria",
+    "needs-discussion",
+    "flagged",
+];
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LabelWithCount {
@@ -140,6 +162,8 @@ pub async fn suggest_labels(
         .map(|(i, c)| format!("{}. {}", i + 1, c.text))
         .collect();
 
+    let standard_labels_str = STANDARD_WORKFLOW_LABELS.join(", ");
+
     let user_prompt = format!(
         r#"## Task
 Generate a set of workflow labels for tracking articles through a systematic literature review screening process.
@@ -155,6 +179,11 @@ their workflow based on the review's research aims and screening criteria.
 ## Exclusion Criteria
 {exclusion}
 
+## Standard Workflow Labels
+The following standard workflow labels classify articles by review process state, quality assessment, and decision category.
+Include up to 4 of these when they are relevant to the review workflow (in addition to the criteria-derived labels):
+[{standard_labels}]
+
 ## Response Format
 Return JSON exactly matching this schema:
 {{
@@ -162,10 +191,11 @@ Return JSON exactly matching this schema:
 }}
 
 Rules:
-- Generate 5-15 labels.
-- Each label should be a short, lowercase, hyphenated string (e.g., "priority-read", "strong-methodology", "needs-full-text").
+- Generate 5-15 labels total (including any standard labels you select).
+- Each label must be a short, lowercase, hyphenated string (e.g., "priority-read", "strong-methodology", "needs-full-text").
+- Each label must be at most 35 characters. Do NOT prefix labels with "inclusion:" or "exclusion:".
 - Labels should be oriented around the research aims and screening criteria - reflecting the types of decisions and
-  categorizations a reviewer would need when screening articles against these specific criteria.
+  categorizations a reviewer would need when screening articles against these specific criteria, plus any relevant standard workflow labels.
 - Do not duplicate or overlap concepts.
 - Labels should capture workflow states (e.g., review stages), quality assessments (e.g., methodology strength),
   and relevance indicators (e.g., alignment with specific aims)."#,
@@ -184,6 +214,7 @@ Rules:
         } else {
             exc_list.join("\n")
         },
+        standard_labels = standard_labels_str,
     );
 
     let system_prompt = "You are a systematic literature review assistant. Generate a set of workflow labels for tracking the screening process based on research aims and screening criteria.";

@@ -16,6 +16,13 @@ If a Custom Screening Instructions section is provided, apply those rules strict
 include/exclude. Reference criteria by their numbered position (inclusion is numbered 1..N, then \
 exclusion continues at N+1..N+M, so every number is unique across both lists).
 
+## Tag and Label Guidelines
+- `suggested_tags` describe the article's content, topic, or methodology (e.g. \"machine-learning\", \"systematic-review\"). \
+- Tags must be concise descriptors, NOT justifications or full criterion text. \
+- Each tag must be at most 35 characters, lowercase, and hyphenated. \
+- Do NOT prefix tags with \"inclusion:\" or \"exclusion:\" - those prefixes are for labels, not tags. \
+- Tags should be short, meaningful, and reusable across articles.
+
 Return a JSON array matching this schema, one object per article, in the same order as submitted:
 [
   {

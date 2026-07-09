@@ -6,7 +6,7 @@ use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::models::article::Article;
-use crate::models::audit::{AuditEntry, ImportActivity};
+use crate::models::audit::{ActivityFeedEntry, AuditEntry, ImportActivity};
 use crate::models::biblio::JournalInfo;
 
 #[tauri::command]
@@ -60,11 +60,12 @@ pub fn get_recent_audit_entries(
     db_state: State<'_, DbState>,
     limit: Option<usize>,
     offset: Option<usize>,
+    before_timestamp: Option<String>,
 ) -> Result<Vec<AuditEntry>, AppError> {
     let limit = limit.unwrap_or(10);
     let offset = offset.unwrap_or(0);
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    audit_repo::get_recent_audit_entries(&conn, limit, offset)
+    audit_repo::get_recent_audit_entries(&conn, limit, offset, before_timestamp.as_deref())
 }
 
 #[tauri::command]
@@ -185,11 +186,12 @@ pub fn get_import_activities(
     db_state: State<'_, DbState>,
     limit: Option<usize>,
     offset: Option<usize>,
+    before_timestamp: Option<String>,
 ) -> Result<Vec<ImportActivity>, AppError> {
     let limit = limit.unwrap_or(10);
     let offset = offset.unwrap_or(0);
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    audit_repo::get_import_activities(&conn, limit, offset)
+    audit_repo::get_import_activities(&conn, limit, offset, before_timestamp.as_deref())
 }
 
 #[tauri::command]
@@ -200,6 +202,18 @@ pub fn get_generic_audit_entries(
     let limit = limit.unwrap_or(10);
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     audit_repo::get_generic_audit_entries(&conn, limit)
+}
+
+#[tauri::command]
+pub fn get_activity_feed(
+    db_state: State<'_, DbState>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<Vec<ActivityFeedEntry>, AppError> {
+    let limit = limit.unwrap_or(10);
+    let offset = offset.unwrap_or(0);
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    audit_repo::get_activity_feed(&conn, limit, offset)
 }
 
 #[tauri::command]

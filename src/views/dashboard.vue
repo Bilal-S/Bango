@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, nextTick } from 'vue';
+import { onMounted, ref, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   useDashboard,
@@ -31,9 +31,18 @@ const {
 // Activity list scroll container ref (for preserving scroll position on load-more)
 const activityListEl = ref<HTMLElement | null>(null);
 
-// Track batch boundaries so we can render a thicker divider between "more" batches.
-// batchBoundaryIndices holds the index of the first item in each batch after the first.
+// Track batch boundaries for the permanent "── N new ──" separators and the
+// TransitionGroup staggered fade-in. Since the backend now returns a single
+// merged, timestamp-sorted feed, new entries always land at the end — so
+// prevCount correctly identifies the boundary.
 const batchBoundaryIndices = ref<Set<number>>(new Set());
+
+/** Index of the first item in the most recently loaded batch (for animation). */
+const newBatchStart = computed<number>(() => {
+  const sorted = [...batchBoundaryIndices.value].sort((a, b) => b - a);
+  if (sorted.length === 0) return -1;
+  return sorted[0]!;
+});
 
 // Re-fetch data every time dashboard is mounted (e.g. after import + invalidation)
 onMounted(() => {
@@ -42,29 +51,31 @@ onMounted(() => {
 
 /**
  * Load more activities while preserving the scroll position so the user sees
- * the newly appended records. Without this, the browser keeps scrollTop fixed
- * and the new content appears below the fold (user has to scroll down manually).
+ * the newly appended records. New entries always land at the end of the
+ * sorted feed, so prevCount reliably identifies the batch boundary.
  */
 async function handleLoadMore(): Promise<void> {
   const el = activityListEl.value;
   const prevScrollHeight = el?.scrollHeight ?? 0;
   const prevCount = groupedAudit.value.length;
   await loadMoreActivities();
-  // Record the batch boundary so the template can render a thicker divider
-  // before the first newly appended item.
   if (groupedAudit.value.length > prevCount) {
     batchBoundaryIndices.value.add(prevCount);
   }
   await nextTick();
   if (el) {
-    // Scroll to where the new content starts so the user sees the appended records
     el.scrollTop = prevScrollHeight;
   }
 }
 
-/** Check if an item at the given index is the first in a new "more" batch. */
 function isBatchBoundary(index: number): boolean {
   return batchBoundaryIndices.value.has(index);
+}
+
+function staggeredStyle(index: number): Record<string, string> | undefined {
+  const start = newBatchStart.value;
+  if (start < 0 || index < start) return undefined;
+  return { '--enter-delay': `${(index - start) * 0.05}s` };
 }
 
 interface StatusTile {
@@ -325,74 +336,83 @@ async function onProjectFileSelected(event: Event): Promise<void> {
                 <p>No recent activity to display.</p>
               </div>
               <div v-else ref="activityListEl" class="dashboard__activity-list">
-                <template v-for="(entry, index) in groupedAudit" :key="entry.id">
-                  <hr v-if="isBatchBoundary(index)" class="activity-item__batch-divider" />
-                  <div
-                    class="activity-item"
-                    :class="{ 'activity-item--clickable': entry.articleId }"
-                  >
-                    <button
-                      v-if="entry.articleId"
-                      class="activity-item__dot"
-                      :class="{
-                        'activity-item__dot--ai': entry.source === 'ai',
-                        'activity-item__dot--system': entry.source === 'system',
-                      }"
-                      title="Go to article"
-                      @click="navigateToArticle(entry.articleId)"
-                    >
-                      <span class="material-symbols-outlined activity-item__dot-icon">{{
-                        entry.source === 'ai'
-                          ? 'auto_awesome'
-                          : entry.source === 'system'
-                            ? 'settings'
-                            : 'radio_button_checked'
-                      }}</span>
-                    </button>
+                <TransitionGroup name="activity-item" tag="div" class="dashboard__activity-group">
+                  <template v-for="(entry, index) in groupedAudit" :key="entry.id">
+                    <div v-if="isBatchBoundary(index)" class="activity-item__batch-separator">
+                      <span class="activity-item__batch-separator-label">
+                        {{ groupedAudit.length - index }} new
+                      </span>
+                    </div>
                     <div
-                      v-else
-                      class="activity-item__dot"
-                      :class="{
-                        'activity-item__dot--ai': entry.source === 'ai',
-                        'activity-item__dot--system': entry.source === 'system',
-                      }"
+                      class="activity-item"
+                      :class="{ 'activity-item--clickable': entry.articleId }"
+                      :style="staggeredStyle(index)"
                     >
-                      <span class="material-symbols-outlined activity-item__dot-icon">{{
-                        entry.source === 'ai'
-                          ? 'auto_awesome'
-                          : entry.source === 'system'
-                            ? 'settings'
-                            : 'radio_button_checked'
-                      }}</span>
+                      <button
+                        v-if="entry.articleId"
+                        class="activity-item__dot"
+                        :class="{
+                          'activity-item__dot--ai': entry.source === 'ai',
+                          'activity-item__dot--system': entry.source === 'system',
+                        }"
+                        title="Go to article"
+                        @click="navigateToArticle(entry.articleId)"
+                      >
+                        <span class="material-symbols-outlined activity-item__dot-icon">{{
+                          entry.source === 'ai'
+                            ? 'auto_awesome'
+                            : entry.source === 'system'
+                              ? 'settings'
+                              : 'radio_button_checked'
+                        }}</span>
+                      </button>
+                      <div
+                        v-else
+                        class="activity-item__dot"
+                        :class="{
+                          'activity-item__dot--ai': entry.source === 'ai',
+                          'activity-item__dot--system': entry.source === 'system',
+                        }"
+                      >
+                        <span class="material-symbols-outlined activity-item__dot-icon">{{
+                          entry.source === 'ai'
+                            ? 'auto_awesome'
+                            : entry.source === 'system'
+                              ? 'settings'
+                              : 'radio_button_checked'
+                        }}</span>
+                      </div>
+                      <div class="activity-item__content">
+                        <p class="activity-item__text">
+                          <span class="activity-item__action">
+                            {{ formatAuditAction(entry.action) }}
+                          </span>
+                          <span v-if="entry.source === 'ai'" class="activity-item__source">
+                            by AI</span
+                          >
+                          <span v-if="entry.articleTitle" class="activity-item__title">
+                            - {{ entry.articleTitle
+                            }}{{ entry.articleTitle.length >= 55 ? '...' : '' }}
+                          </span>
+                          <span v-if="entry.count && entry.count > 1" class="activity-item__count">
+                            {{ entry.count }} articles
+                          </span>
+                        </p>
+                        <p v-if="entry.details" class="activity-item__details">
+                          {{ entry.details }}
+                        </p>
+                      </div>
+                      <div class="activity-item__time-col">
+                        <span class="activity-item__time-value">{{
+                          formatRelativeTimeParts(entry.timestamp).value
+                        }}</span>
+                        <span class="activity-item__time-suffix">{{
+                          formatRelativeTimeParts(entry.timestamp).suffix
+                        }}</span>
+                      </div>
                     </div>
-                    <div class="activity-item__content">
-                      <p class="activity-item__text">
-                        <span class="activity-item__action">
-                          {{ formatAuditAction(entry.action) }}
-                        </span>
-                        <span v-if="entry.source === 'ai'" class="activity-item__source">
-                          by AI</span
-                        >
-                        <span v-if="entry.articleTitle" class="activity-item__title">
-                          - {{ entry.articleTitle
-                          }}{{ entry.articleTitle.length >= 55 ? '...' : '' }}
-                        </span>
-                        <span v-if="entry.count && entry.count > 1" class="activity-item__count">
-                          {{ entry.count }} articles
-                        </span>
-                      </p>
-                      <p v-if="entry.details" class="activity-item__details">{{ entry.details }}</p>
-                    </div>
-                    <div class="activity-item__time-col">
-                      <span class="activity-item__time-value">{{
-                        formatRelativeTimeParts(entry.timestamp).value
-                      }}</span>
-                      <span class="activity-item__time-suffix">{{
-                        formatRelativeTimeParts(entry.timestamp).suffix
-                      }}</span>
-                    </div>
-                  </div>
-                </template>
+                  </template>
+                </TransitionGroup>
 
                 <!-- Load more link (click-based pagination) -->
                 <button
@@ -1006,14 +1026,6 @@ button.activity-item__dot:hover {
   line-height: 1.1;
 }
 
-/* Thicker divider between "more" batches */
-.activity-item__batch-divider {
-  border: none;
-  border-top: 2px solid #cbd5e1;
-  margin: 0;
-  width: 100%;
-}
-
 /* Load more link (click-based pagination) */
 .dashboard__load-more {
   display: flex;
@@ -1202,5 +1214,46 @@ button.activity-item__dot:hover {
   background-color: #818cf8;
   border-radius: 3px;
   transition: width 0.4s ease;
+}
+
+/* ── Batch separator between "more" pages ── */
+.activity-item__batch-separator {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.375rem 0;
+}
+
+.activity-item__batch-separator::before,
+.activity-item__batch-separator::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid #e2e8f0;
+}
+
+.activity-item__batch-separator-label {
+  font-size: 0.6875rem;
+  color: #94a3b8;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* ── TransitionGroup: staggered fade-in for newly loaded items ── */
+.activity-item-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.activity-item-enter-active {
+  transition:
+    opacity 0.25s ease-out,
+    transform 0.25s ease-out;
+  transition-delay: var(--enter-delay, 0s);
+}
+
+.activity-item-move {
+  transition: transform 0.3s ease;
 }
 </style>

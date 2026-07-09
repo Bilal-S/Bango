@@ -4,7 +4,7 @@ use bango_lib::models::criterion::{Criterion, CriterionType, Priority};
 use bango_lib::screening::engine::{
     augment_matched_from_reasoning, balance_braces, build_global_criterion_numbering,
     create_or_match_label, create_or_match_tag, extract_json, process_screening_responses,
-    ScreeningEngine,
+    sanitize_tag_or_label_name, truncate_at_word_boundary, ScreeningEngine,
 };
 use rusqlite::Connection;
 
@@ -177,20 +177,24 @@ fn test_tag_creates_new_when_no_match() {
 }
 
 #[test]
-fn test_tag_trimmed_to_30_chars() {
+fn test_tag_truncated_to_35_chars_at_word_boundary() {
     let conn = setup_test_db();
     let article_id = "art-tag-trim";
     insert_test_article(&conn, article_id);
     create_or_match_tag(
         &conn,
-        "this-is-a-very-long-tag-name-that-exceeds-thirty-chars",
+        "this-is-a-very-long-tag-name-that-exceeds-the-thirty-five-char-limit",
         article_id,
     )
     .unwrap();
     let name: String = conn
         .query_row("SELECT name FROM tags WHERE source = 'ai_suggested'", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(name.len(), 30);
+    assert!(name.len() <= 35, "tag must be at most 35 chars, got {name} (len {})", name.len());
+    // Truncation must occur at a word boundary (hyphen), not mid-word.
+    // The raw input after the 35-char window starts mid-word at "char-limit",
+    // so the stored name should end before that fragment.
+    assert!(!name.ends_with("char"), "tag must not be cut mid-word, got: {name}");
 }
 
 // ── create_or_match_label tests ──
@@ -223,7 +227,7 @@ fn test_label_creates_new_when_no_match() {
 }
 
 #[test]
-fn test_label_trimmed_to_30_chars() {
+fn test_label_strips_prefix_and_truncates_at_word_boundary() {
     let conn = setup_test_db();
     let article_id = "art-label-trim";
     insert_test_article(&conn, article_id);
@@ -232,7 +236,12 @@ fn test_label_trimmed_to_30_chars() {
     let name: String = conn
         .query_row("SELECT name FROM labels WHERE source = 'ai_generated'", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(name.len(), 30);
+    assert!(name.len() <= 35, "label must be at most 35 chars, got {name} (len {})", name.len());
+    assert!(
+        !name.starts_with("inclusion:"),
+        "label must have the 'inclusion:' prefix stripped, got: {name}"
+    );
+    assert!(!name.ends_with("criterion"), "label must not be cut mid-word, got: {name}");
 }
 
 // ── balance_braces tests ──
@@ -420,13 +429,13 @@ fn test_response_more_results_than_articles() {
 // ── create_or_match_tag: additional edge cases ──
 
 #[test]
-fn test_tag_exactly_30_chars_not_trimmed() {
+fn test_tag_exactly_35_chars_not_trimmed() {
     let conn = setup_test_db();
     let article_id = "art-tag-exact";
     insert_test_article(&conn, article_id);
 
-    let exact_tag = "123456789012345678901234567890"; // exactly 30 chars
-    assert_eq!(exact_tag.len(), 30);
+    let exact_tag = "12345678901234567890123456789012345"; // exactly 35 chars
+    assert_eq!(exact_tag.len(), 35);
     create_or_match_tag(&conn, exact_tag, article_id).unwrap();
 
     let name: String = conn
@@ -515,4 +524,107 @@ fn test_global_numbering_sequential() {
     assert_eq!(map.get("a"), Some(&1));
     assert_eq!(map.get("b"), Some(&2));
     assert_eq!(map.get("c"), Some(&3)); // exclusion continues after inclusion
+}
+
+// ── sanitize_tag_or_label_name tests ──
+
+#[test]
+fn test_sanitize_strips_inclusion_prefix() {
+    assert_eq!(sanitize_tag_or_label_name("Inclusion: machine-learning", 35), "machine-learning");
+}
+
+#[test]
+fn test_sanitize_strips_exclusion_prefix() {
+    assert_eq!(sanitize_tag_or_label_name("Exclusion: not-a-review", 35), "not-a-review");
+}
+
+#[test]
+fn test_sanitize_strips_inclusion_dash_prefix() {
+    assert_eq!(sanitize_tag_or_label_name("Inclusion - some-tag", 35), "some-tag");
+}
+
+#[test]
+fn test_sanitize_replaces_spaces_with_hyphens() {
+    assert_eq!(
+        sanitize_tag_or_label_name("machine learning models", 35),
+        "machine-learning-models"
+    );
+}
+
+#[test]
+fn test_sanitize_replaces_underscores_with_hyphens() {
+    assert_eq!(sanitize_tag_or_label_name("machine_learning", 35), "machine-learning");
+}
+
+#[test]
+fn test_sanitize_collapses_repeated_hyphens() {
+    assert_eq!(sanitize_tag_or_label_name("machine--learning", 35), "machine-learning");
+}
+
+#[test]
+fn test_sanitize_lowercases_input() {
+    assert_eq!(sanitize_tag_or_label_name("Machine-Learning", 35), "machine-learning");
+}
+
+#[test]
+fn test_sanitize_truncates_at_word_boundary() {
+    let input = "this-is-a-very-long-tag-name-that-exceeds-the-thirty-five-char-limit";
+    let result = sanitize_tag_or_label_name(input, 35);
+    assert!(
+        result.len() <= 35,
+        "result must be at most 35 chars, got {result} (len {})",
+        result.len()
+    );
+    assert!(!result.ends_with("char"), "result must not be cut mid-word, got: {result}");
+}
+
+#[test]
+fn test_sanitize_within_limit_unchanged() {
+    assert_eq!(sanitize_tag_or_label_name("systematic-review", 35), "systematic-review");
+}
+
+#[test]
+fn test_sanitize_empty_string_after_strip() {
+    assert_eq!(sanitize_tag_or_label_name("Inclusion:", 35), "");
+}
+
+#[test]
+fn test_sanitize_whitespace_only() {
+    assert_eq!(sanitize_tag_or_label_name("   ", 35), "");
+}
+
+#[test]
+fn test_sanitize_trims_leading_trailing_hyphens() {
+    assert_eq!(sanitize_tag_or_label_name("--machine-learning--", 35), "machine-learning");
+}
+
+#[test]
+fn test_sanitize_single_long_word_hard_truncates() {
+    // No hyphens within the limit - hard truncate (single-word name).
+    let input = "supercalifragilisticexpialidociousmethodology";
+    let result = sanitize_tag_or_label_name(input, 35);
+    assert_eq!(result.len(), 35);
+    assert_eq!(result, "supercalifragilisticexpialidociousm");
+}
+
+// ── truncate_at_word_boundary tests ──
+
+#[test]
+fn test_truncate_at_word_boundary_within_limit() {
+    assert_eq!(truncate_at_word_boundary("short", 35), "short");
+}
+
+#[test]
+fn test_truncate_at_word_boundary_truncates_at_hyphen() {
+    let input = "this-is-a-very-long-tag-name-that-exceeds-limit";
+    let result = truncate_at_word_boundary(input, 20);
+    assert!(result.len() <= 20, "result must be at most 20 chars, got {result}");
+    assert!(!result.ends_with("tag"), "result must not be cut mid-word, got: {result}");
+}
+
+#[test]
+fn test_truncate_at_word_boundary_no_hyphen_hard_truncates() {
+    let input = "supercalifragilisticexpialidocious";
+    let result = truncate_at_word_boundary(input, 10);
+    assert_eq!(result, "supercalif");
 }

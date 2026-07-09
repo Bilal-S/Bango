@@ -106,3 +106,29 @@ pub struct ImportActivity {
     pub filename: String,
     pub count: usize,
 }
+
+/// A unified activity-feed entry that merges individual audit rows and grouped
+/// import rows into a single timestamp-ordered stream. The frontend receives a
+/// flat, correctly paginated list — no client-side merge or re-sort needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityFeedEntry {
+    pub id: String,
+    pub timestamp: String,
+    /// `"audit"` for individual entries, `"import"` for grouped import rows.
+    pub kind: String,
+    /// Audit-specific: the action label (e.g. `"ai_screen"`, `"status_change"`).
+    pub action: Option<String>,
+    /// Audit-specific: the article UUID, or `null` for system-level entries.
+    pub article_id: Option<String>,
+    /// Human-readable detail text (audit details or import filename).
+    pub details: Option<String>,
+    /// Audit-specific: `"ai"`, `"user"`, or `"system"`.
+    pub source: Option<String>,
+    /// Audit-specific: first 55 chars of the article title.
+    pub article_title: Option<String>,
+    /// Import-specific: the filename without the `Imported from ` prefix.
+    pub filename: Option<String>,
+    /// Import-specific: number of articles in this import batch.
+    pub count: Option<usize>,
+}

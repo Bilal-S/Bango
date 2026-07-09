@@ -233,6 +233,7 @@ pub fn run() {
             commands::articles::override_ai_decision,
             commands::articles::update_article_criteria,
             commands::articles::get_import_activities,
+            commands::articles::get_activity_feed,
             commands::articles::get_generic_audit_entries,
             commands::articles::clear_generic_audit,
             commands::articles::rematch_journals,

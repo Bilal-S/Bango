@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
-import { useAuditStore } from '@/stores/audit';
-import type { AuditEntry } from '@/types';
+import { useAuditStore, type ActivityFeedEntry } from '@/stores/audit';
 
 vi.mock('@/composables/use-tauri-command', () => ({
   isTauri: () => true,
@@ -10,22 +9,31 @@ vi.mock('@/composables/use-tauri-command', () => ({
 
 import { tauriCommand } from '@/composables/use-tauri-command';
 
-const sampleAudit: AuditEntry[] = [
+const sampleFeed: ActivityFeedEntry[] = [
   {
     id: 'a1',
-    articleId: 'art1',
     timestamp: '2026-01-02T00:00:00Z',
+    kind: 'audit',
     action: 'status_change',
-    fromStatus: 'working',
-    toStatus: 'included',
+    articleId: 'art1',
     details: 'changed',
     source: 'user',
     articleTitle: 'Paper',
+    filename: null,
+    count: null,
   },
-];
-
-const sampleImports = [
-  { id: 'i1', timestamp: '2026-01-01T00:00:00Z', filename: 'papers.ris', count: 5 },
+  {
+    id: 'i1',
+    timestamp: '2026-01-01T00:00:00Z',
+    kind: 'import',
+    action: 'import',
+    articleId: null,
+    details: null,
+    source: 'system',
+    articleTitle: null,
+    filename: 'papers.ris',
+    count: 5,
+  },
 ];
 
 describe('useAuditStore', () => {
@@ -36,30 +44,27 @@ describe('useAuditStore', () => {
 
   it('starts empty and uninitialized', () => {
     const store = useAuditStore();
-    expect(store.recentAudit).toEqual([]);
-    expect(store.importActivities).toEqual([]);
+    expect(store.feed).toEqual([]);
     expect(store.loading).toBe(false);
     expect(store.initialized).toBe(false);
-    expect(store.totalLoaded).toBe(0);
-    expect(store.hasMoreAudit).toBe(true);
-    expect(store.hasMoreImports).toBe(true);
+    expect(store.offset).toBe(0);
+    expect(store.hasMore).toBe(true);
   });
 
-  it('fetch populates both audit and imports', async () => {
+  it('fetch populates the feed', async () => {
     vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
-      if (cmd === 'get_recent_audit_entries') return Promise.resolve(sampleAudit);
-      if (cmd === 'get_import_activities') return Promise.resolve(sampleImports);
+      if (cmd === 'get_activity_feed') return Promise.resolve(sampleFeed);
       return Promise.resolve([]);
     });
 
     const store = useAuditStore();
     await store.fetch();
 
-    expect(store.recentAudit).toEqual(sampleAudit);
-    expect(store.importActivities).toEqual(sampleImports);
+    expect(store.feed).toEqual(sampleFeed);
     expect(store.initialized).toBe(true);
     expect(store.loading).toBe(false);
-    expect(store.totalLoaded).toBe(2);
+    expect(store.offset).toBe(2);
+    expect(store.hasMore).toBe(false);
   });
 
   it('fetchIfNeeded does nothing when already initialized', async () => {
@@ -70,50 +75,62 @@ describe('useAuditStore', () => {
     expect(tauriCommand).not.toHaveBeenCalled();
   });
 
-  it('loadMore fetches additional pages when more available', async () => {
-    // Prime the store with a full page (10 items) so hasMoreAudit stays true
-    const fullAuditPage: AuditEntry[] = Array.from({ length: 10 }, (_, i) => ({
+  it('loadMore fetches next page and appends', async () => {
+    const fullPage: ActivityFeedEntry[] = Array.from({ length: 10 }, (_, i) => ({
       id: `a${i}`,
-      articleId: 'x',
       timestamp: '2026-01-01T00:00:00Z',
-      action: 'import' as const,
-      fromStatus: null,
-      toStatus: null,
+      kind: 'audit' as const,
+      action: 'ai_screen',
+      articleId: 'x',
       details: '',
-      source: 'system' as const,
+      source: 'ai',
       articleTitle: null,
+      filename: null,
+      count: null,
     }));
     vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
-      if (cmd === 'get_recent_audit_entries') return Promise.resolve(fullAuditPage);
-      if (cmd === 'get_import_activities') return Promise.resolve(sampleImports);
+      if (cmd === 'get_activity_feed') return Promise.resolve(fullPage);
       return Promise.resolve([]);
     });
 
     const store = useAuditStore();
     await store.fetch();
+    expect(store.feed.length).toBe(10);
+    expect(store.hasMore).toBe(true);
 
-    // Second page returns 0 results -> hasMore becomes false
-    vi.mocked(tauriCommand).mockResolvedValue([]);
+    // Second page returns 3 items → hasMore becomes false
+    const secondPage: ActivityFeedEntry[] = Array.from({ length: 3 }, (_, i) => ({
+      id: `b${i}`,
+      timestamp: '2025-01-01T00:00:00Z',
+      kind: 'audit' as const,
+      action: 'tag_add',
+      articleId: 'y',
+      details: '',
+      source: 'user',
+      articleTitle: null,
+      filename: null,
+      count: null,
+    }));
+    vi.mocked(tauriCommand).mockResolvedValue(secondPage);
     await store.loadMore();
 
-    expect(store.hasMoreAudit).toBe(false);
-    expect(store.recentAudit.length).toBe(10);
+    expect(store.feed.length).toBe(13);
+    expect(store.hasMore).toBe(false);
+    expect(store.offset).toBe(13);
   });
 
   it('loadMore is a no-op when no more pages', async () => {
     const store = useAuditStore();
-    store.hasMoreAudit = false;
-    store.hasMoreImports = false;
+    store.hasMore = false;
     await store.loadMore();
     expect(tauriCommand).not.toHaveBeenCalled();
   });
 
   it('loadMore guards against concurrent calls', async () => {
     const store = useAuditStore();
-    store.hasMoreAudit = true;
-    store.hasMoreImports = false; // narrow to a single command call
+    store.hasMore = true;
     let resolveFirst: () => void;
-    const p = new Promise<unknown[]>((r) => {
+    const p = new Promise<ActivityFeedEntry[]>((r) => {
       resolveFirst = () => r([]);
     });
     vi.mocked(tauriCommand).mockReturnValue(p);
@@ -129,14 +146,14 @@ describe('useAuditStore', () => {
 
   it('invalidate resets all state', () => {
     const store = useAuditStore();
-    store.recentAudit = sampleAudit;
-    store.importActivities = sampleImports;
+    store.feed = sampleFeed;
     store.initialized = true;
-    store.hasMoreAudit = false;
+    store.hasMore = false;
+    store.offset = 10;
     store.invalidate();
-    expect(store.recentAudit).toEqual([]);
-    expect(store.importActivities).toEqual([]);
+    expect(store.feed).toEqual([]);
     expect(store.initialized).toBe(false);
-    expect(store.hasMoreAudit).toBe(true);
+    expect(store.hasMore).toBe(true);
+    expect(store.offset).toBe(0);
   });
 });
