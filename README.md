@@ -278,22 +278,22 @@ Pre-built installers for all major platforms are available on the [GitHub Releas
 
 | File | Best For |
 |------|----------|
-| [`Bango_2.5.6_amd64.AppImage`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_amd64.AppImage) | **Recommended.** Portable; no installation required. Works on any modern Linux distribution. |
-| [`Bango_2.5.6_amd64.deb`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_amd64.deb) | Debian, Ubuntu, and derivatives. Installs via the system package manager. |
+| [`Bango_2.6.2_amd64.AppImage`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_amd64.AppImage) | **Recommended.** Portable; no installation required. Works on any modern Linux distribution. |
+| [`Bango_2.6.2_amd64.deb`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_amd64.deb) | Debian, Ubuntu, and derivatives. Installs via the system package manager. |
 
 #### Windows
 
 | File | Best For |
 |------|----------|
-| [`Bango_2.5.6_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_x64-setup.exe) | Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. You will be asked to grant permissions during install. |
-| [`Bango_2.5.6_x64_en-US.msi`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_x64_en-US.msi) | Enterprise or automated deployments. Windows Installer package suitable for group policy distribution. |
+| [`Bango_2.6.2_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_x64-setup.exe) | Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. You will be asked to grant permissions during install. |
+| [`Bango_2.6.2_x64_en-US.msi`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_x64_en-US.msi) | Enterprise or automated deployments. Windows Installer package suitable for group policy distribution. |
 | [`Microsoft Store`](https://apps.microsoft.com/detail/9np2bhgxt8h3) | **Recommended.**  Microsoft verified and signed installer for personal use. |
 
 #### macOS
 
 | File | Best For |
 |------|----------|
-| [`Bango_2.5.6_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_aarch64.dmg) | **Recommended.** For Apple Silicon (M-CPU) Macs. Drag-and-drop install to Applications. You will be asked to grant permissions during install. |
+| [`Bango_2.6.2_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_aarch64.dmg) | **Recommended.** For Apple Silicon (M-CPU) Macs. Drag-and-drop install to Applications. You will be asked to grant permissions during install. |
 
 > **Note:** macOS builds are for **Apple Silicon (ARM64)** only. Intel (x86_64) Macs are not supported.
 
@@ -345,7 +345,7 @@ Linux does not enforce code signing, so no additional security bypass steps are 
 <details>
 <summary><strong>🪟 Windows</strong></summary>
 
-1. Download [`Bango_2.5.6_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_x64-setup.exe) (or the [`.msi`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_x64_en-US.msi) for enterprise installs).
+1. Download [`Bango_2.6.2_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_x64-setup.exe) (or the [`.msi`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_x64_en-US.msi) for enterprise installs).
 2. Double-click to run the installer.
 3. **Windows SmartScreen** will show a warning: *"Windows protected your PC"*
    - Click **"More info"**
@@ -359,7 +359,7 @@ If your organization blocks unsigned installers via Group Policy, use the MSI pa
 <details>
 <summary><strong>🍎 macOS</strong></summary>
 
-1. Download [`Bango_2.5.6_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.5.6/Bango_2.5.6_aarch64.dmg).
+1. Download [`Bango_2.6.2_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v2.6.2/Bango_2.6.2_aarch64.dmg).
 2. Double-click the `.dmg` file to open it.
 3. Drag **Bango** to the **Applications** folder.
 4. On first launch, **macOS Gatekeeper** will block the app: *"Bango cannot be opened because the developer cannot be verified."*
