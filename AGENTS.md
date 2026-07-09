@@ -579,6 +579,35 @@ describe each durable boundary so agents can locate the right area. Create a chi
     runner + `heal_partial_migrations` pre-pass in `db/migration.rs` are the
     contract that prevents duplicate-column crashes on re-run. Plan:
     `.worktrees/language-plan-v2.md`.
+  - **`src-tauri/src/db/migrations/v005_audit_note_add.rs`** - Post-v004 schema
+    (VERSION 5). Rebuilds `audit_entries` to add `'note_add'` to the `action`
+    CHECK constraint. The `update_article_notes` command previously reused
+    `'status_change'` for note-addition audit rows, which made the audit trail
+    misleading (a note edit appeared as a status change). v005 adds the
+    dedicated `'note_add'` action so note edits are correctly categorized.
+    Same rename-create-copy-drop pattern as v003/v004. Pure CHECK rebuild
+    (no `ALTER TABLE ADD COLUMN`), so `heal_partial_migrations` is not needed.
+    v001 is updated so fresh DBs get `note_add` in the initial CHECK constraint
+    directly. Frontend `AuditAction` type + `formatAuditAction` labels +
+    `audit-timeline.vue` `actionLabels` all include `note_add` -> "Note Added".
+    The dashboard Recent Activity feed now carries `articleId` on each entry
+    so the dot icon is a clickable button (title "Go to article") that
+    deep-links to `/articles?articleId=<id>`, opening the article detail in
+    the All articles view. The activity layout is compacted (24px dot, 13px
+    text, tighter padding) and all action labels use Title Case.
+    **Audit entry coalescing** (`audit_repo::create_or_update_entry`):
+    when a second audit entry with the same `article_id + action + source`
+    arrives within `COALESCE_WINDOW_SECS` (300 seconds / 5 minutes), the
+    existing row is **updated** (details + timestamp) instead of inserting
+    a new row. This prevents audit-trail spam when the user makes several
+    rapid edits of the same type (e.g. adding 3 labels one at a time
+    produces a single `label_add` entry showing the final count). Used by
+    `update_article_notes`, `update_article_tags`, `update_article_labels`,
+    and `update_article_criteria`. Entries with different actions, articles,
+    sources, or timestamps older than the window are NOT coalesced. Tested
+    in `tests/audit_coalesce_test.rs` (5 tests: coalesce rapid same-type,
+    different actions, different articles, different sources, expired
+    window).
   - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
     `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
     UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:

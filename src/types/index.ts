@@ -190,6 +190,7 @@ export type AuditAction =
   | 'dedup_merge'
   | 'dedup_flag'
   | 'status_change'
+  | 'note_add'
   | 'tag_add'
   | 'tag_remove'
   | 'label_add'

@@ -31,7 +31,7 @@ describe('audit-timeline.vue - translation actions (language-plan-v2)', () => {
       },
     });
     const html = wrapper.html();
-    expect(html).toContain('Article Translated');
+    expect(html).toContain('Translation');
     expect(html).toContain('Translation Failed');
   });
 });

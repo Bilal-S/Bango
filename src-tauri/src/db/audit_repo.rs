@@ -6,7 +6,7 @@ use crate::models::audit::{AuditAction, AuditEntry, AuditSource, ImportActivity}
 pub fn get_audit_trail(conn: &Connection, article_id: &str) -> Result<Vec<AuditEntry>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
-         ae.details, ae.source, SUBSTR(a.title, 1, 40) as article_title \
+         ae.details, ae.source, SUBSTR(a.title, 1, 55) as article_title \
          FROM audit_entries ae \
          LEFT JOIN articles a ON a.id = ae.article_id \
          WHERE ae.article_id = ?1 ORDER BY ae.timestamp DESC",
@@ -23,7 +23,7 @@ pub fn get_recent_audit_entries(
     // Exclude 'import' entries - those are served by get_import_activities instead
     let mut stmt = conn.prepare(
         "SELECT ae.id, ae.article_id, ae.timestamp, ae.action, ae.from_status, ae.to_status, \
-         ae.details, ae.source, SUBSTR(a.title, 1, 40) as article_title \
+         ae.details, ae.source, SUBSTR(a.title, 1, 55) as article_title \
          FROM audit_entries ae \
          LEFT JOIN articles a ON a.id = ae.article_id \
          WHERE ae.action != 'import' AND ae.action != 'error' ORDER BY ae.timestamp DESC LIMIT ?1 OFFSET ?2",
@@ -57,6 +57,14 @@ pub fn get_import_activities(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Coalescing window for [`create_or_update_entry`]. When a second entry with
+/// the same `article_id + action + source` arrives within this many seconds of
+/// the previous one, the existing row is updated instead of inserting a new
+/// row. This prevents audit-trail spam when the user makes several rapid edits
+/// of the same type (e.g. adding 3 labels one at a time produces a single
+/// `label_add` entry showing the final count).
+const COALESCE_WINDOW_SECS: i64 = 300;
+
 pub fn create_entry(
     conn: &Connection,
     article_id: &str,
@@ -75,7 +83,7 @@ pub fn create_entry(
     )?;
     // Fetch article title for context
     let article_title: Option<String> = conn
-        .query_row("SELECT SUBSTR(title, 1, 40) FROM articles WHERE id = ?1", [article_id], |row| {
+        .query_row("SELECT SUBSTR(title, 1, 55) FROM articles WHERE id = ?1", [article_id], |row| {
             row.get(0)
         })
         .ok();
@@ -91,6 +99,78 @@ pub fn create_entry(
         source: parse_source(source),
         article_title,
     })
+}
+
+/// Create an audit entry, or **coalesce** with the most recent matching entry
+/// if one exists within the [`COALESCE_WINDOW_SECS`] window.
+///
+/// Coalescing matches on `article_id + action + source`. When a match is found,
+/// the existing row's `details`, `from_status`, `to_status`, and `timestamp` are
+/// updated to reflect the latest change. This prevents audit-trail spam when the
+/// user makes several rapid edits of the same type (e.g. adding 3 labels one at
+/// a time produces a single `label_add` entry showing the final count).
+///
+/// When no recent matching entry exists, this delegates to [`create_entry`] and
+/// inserts a new row.
+pub fn create_or_update_entry(
+    conn: &Connection,
+    article_id: &str,
+    action: &str,
+    from_status: Option<&str>,
+    to_status: Option<&str>,
+    details: Option<&str>,
+    source: &str,
+) -> Result<AuditEntry, AppError> {
+    // Look for the most recent entry with the same article_id + action + source
+    // within the coalesce window. SQLite's `datetime('now', '-N seconds')`
+    // computes the cutoff in UTC, matching the RFC3339 timestamps we write.
+    let cutoff = chrono::Utc::now()
+        .checked_sub_signed(chrono::Duration::seconds(COALESCE_WINDOW_SECS))
+        .map(|t| t.to_rfc3339())
+        .unwrap_or_default();
+
+    let existing_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM audit_entries \
+             WHERE article_id = ?1 AND action = ?2 AND source = ?3 \
+             AND timestamp >= ?4 \
+             ORDER BY timestamp DESC LIMIT 1",
+            params![article_id, action, source, cutoff],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if let Some(id) = existing_id {
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE audit_entries \
+             SET details = ?1, from_status = ?2, to_status = ?3, timestamp = ?4 \
+             WHERE id = ?5",
+            params![details, from_status, to_status, now, id],
+        )?;
+        // Fetch article title for context
+        let article_title: Option<String> = conn
+            .query_row(
+                "SELECT SUBSTR(title, 1, 55) FROM articles WHERE id = ?1",
+                [article_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        return Ok(AuditEntry {
+            id,
+            article_id: article_id.to_string(),
+            timestamp: now,
+            action: parse_action(action),
+            from_status: from_status.map(String::from),
+            to_status: to_status.map(String::from),
+            details: details.map(String::from),
+            source: parse_source(source),
+            article_title,
+        });
+    }
+
+    create_entry(conn, article_id, action, from_status, to_status, details, source)
 }
 
 fn row_to_audit_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
@@ -115,6 +195,7 @@ fn parse_action(s: &str) -> AuditAction {
         "dedup_merge" => AuditAction::DedupMerge,
         "dedup_flag" => AuditAction::DedupFlag,
         "status_change" => AuditAction::StatusChange,
+        "note_add" => AuditAction::NoteAdd,
         "tag_add" => AuditAction::TagAdd,
         "tag_remove" => AuditAction::TagRemove,
         "label_add" => AuditAction::LabelAdd,

@@ -119,6 +119,9 @@ onMounted(() => {
   const author = typeof route.query.author === 'string' ? route.query.author : undefined;
   // filterCollapsed=1 → keep the filter panel collapsed (filters still applied)
   const filterCollapsed = route.query.filterCollapsed === '1';
+  // articleId deep-link from the dashboard "Go to article" dot: load the All
+  // articles view and select the specific article so the detail panel opens.
+  const articleId = typeof route.query.articleId === 'string' ? route.query.articleId : undefined;
 
   if (
     status ||
@@ -138,9 +141,13 @@ onMounted(() => {
       journal,
       author,
       filterCollapsed,
+    }).then(() => {
+      if (articleId) void selectArticle(articleId);
     });
   } else {
-    void search();
+    void search().then(() => {
+      if (articleId) void selectArticle(articleId);
+    });
   }
 });
 

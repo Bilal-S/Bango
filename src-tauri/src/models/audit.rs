@@ -16,12 +16,13 @@ pub struct AuditEntry {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum AuditAction {
     Import,
     DedupMerge,
     DedupFlag,
     StatusChange,
+    NoteAdd,
     TagAdd,
     TagRemove,
     LabelAdd,
@@ -56,6 +57,7 @@ impl AuditAction {
             Self::DedupMerge => "dedup_merge",
             Self::DedupFlag => "dedup_flag",
             Self::StatusChange => "status_change",
+            Self::NoteAdd => "note_add",
             Self::TagAdd => "tag_add",
             Self::TagRemove => "tag_remove",
             Self::LabelAdd => "label_add",

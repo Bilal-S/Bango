@@ -75,10 +75,10 @@ pub fn update_article_notes(
 ) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_user_notes(&conn, &id, &notes)?;
-    audit_repo::create_entry(
+    audit_repo::create_or_update_entry(
         &conn,
         &id,
-        "status_change",
+        "note_add",
         None,
         None,
         Some(&format!("Notes updated: {}", if notes.is_empty() { "(cleared)" } else { &notes })),
@@ -95,7 +95,7 @@ pub fn update_article_tags(
 ) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_article_tags(&conn, &id, &tag_ids)?;
-    audit_repo::create_entry(
+    audit_repo::create_or_update_entry(
         &conn,
         &id,
         "tag_add",
@@ -118,7 +118,7 @@ pub fn update_article_labels(
 ) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_article_labels(&conn, &id, &label_ids)?;
-    audit_repo::create_entry(
+    audit_repo::create_or_update_entry(
         &conn,
         &id,
         "label_add",
@@ -164,7 +164,7 @@ pub fn update_article_criteria(
 ) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     article_repo::update_article_criteria(&conn, &id, &inclusion_ids, &exclusion_ids)?;
-    audit_repo::create_entry(
+    audit_repo::create_or_update_entry(
         &conn,
         &id,
         "criteria_match",

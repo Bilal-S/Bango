@@ -20,7 +20,7 @@ interface ScreeningProgress {
 }
 
 /** A single audit entry or a group of import entries */
-interface GroupedAuditEntry {
+export interface GroupedAuditEntry {
   id: string;
   action: string;
   source: string;
@@ -28,6 +28,8 @@ interface GroupedAuditEntry {
   details: string | null;
   /** First 40 chars of article title for context */
   articleTitle?: string | null;
+  /** Article ID for navigation (null for system/import-grouped entries) */
+  articleId?: string | null;
   /** For grouped imports: how many articles were imported */
   count?: number;
 }
@@ -185,6 +187,7 @@ export function useDashboard() {
       timestamp: entry.timestamp,
       details: stripUuidFromDetails(entry.details),
       articleTitle: entry.articleTitle,
+      articleId: entry.articleId || null,
     }));
 
     const merged: GroupedAuditEntry[] = [
@@ -282,23 +285,47 @@ export function useDashboard() {
 
 export function formatAuditAction(action: string): string {
   const LABELS: Record<string, string> = {
-    import: 'Imported',
-    dedup_merge: 'Merged duplicate',
-    dedup_flag: 'Flagged duplicate',
-    status_change: 'Changed status',
-    tag_add: 'Added tag',
-    tag_remove: 'Removed tag',
-    label_add: 'Added label',
-    label_remove: 'Removed label',
-    criteria_match: 'Matched criteria',
-    ai_screen: 'AI screened',
-    manual_override: 'Manual override',
-    ai_summary: 'AI summary generated',
+    import: 'Import',
+    dedup_merge: 'Duplicate Merged',
+    dedup_flag: 'Duplicate Flagged',
+    dedup_auto: 'Auto Dedup',
+    status_change: 'Status Change',
+    note_add: 'Note Added',
+    tag_add: 'Tag Added',
+    tag_remove: 'Tag Removed',
+    label_add: 'Label Added',
+    label_remove: 'Label Removed',
+    criteria_match: 'Criteria Matched',
+    ai_screen: 'AI Screening',
+    ai_screen_enhanced: 'AI Enhanced Screening',
+    manual_override: 'Manual Override',
+    ai_summary: 'AI Summary',
+    reference_import: 'Reference Imported',
+    reference_match: 'Reference Matched',
+    translation: 'Translation',
+    translation_error: 'Translation Failed',
+    figure_descriptions: 'Figure Descriptions',
+    wiki_ingest_error: 'Wiki Ingest Error',
+    search_strategy: 'Search Strategy',
+    error: 'Error',
   };
   return LABELS[action] ?? action;
 }
 
 export function formatRelativeTime(isoTimestamp: string): string {
+  const parts = formatRelativeTimeParts(isoTimestamp);
+  return `${parts.value} ${parts.suffix}`;
+}
+
+/**
+ * Split a relative time string into a value (e.g. "36m") and a suffix (e.g.
+ * "ago") so the dashboard can stack them in a compact right-aligned column.
+ * Returns `{ value: "just", suffix: "now" }` for recent timestamps.
+ */
+export function formatRelativeTimeParts(isoTimestamp: string): {
+  value: string;
+  suffix: string;
+} {
   const now = Date.now();
   const then = new Date(isoTimestamp).getTime();
   const diffMs = now - then;
@@ -307,9 +334,9 @@ export function formatRelativeTime(isoTimestamp: string): string {
   const diffHours = Math.floor(diffMinutes / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffSeconds < 60) return 'just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return new Date(isoTimestamp).toLocaleDateString();
+  if (diffSeconds < 60) return { value: 'just', suffix: 'now' };
+  if (diffMinutes < 60) return { value: `${diffMinutes}m`, suffix: 'ago' };
+  if (diffHours < 24) return { value: `${diffHours}h`, suffix: 'ago' };
+  if (diffDays < 7) return { value: `${diffDays}d`, suffix: 'ago' };
+  return { value: new Date(isoTimestamp).toLocaleDateString(), suffix: '' };
 }

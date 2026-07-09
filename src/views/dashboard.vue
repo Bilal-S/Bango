@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { onMounted, ref, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
-import { useDashboard, formatAuditAction, formatRelativeTime } from '@/composables/use-dashboard';
+import {
+  useDashboard,
+  formatAuditAction,
+  formatRelativeTimeParts,
+} from '@/composables/use-dashboard';
 import { useDemo } from '@/composables/use-demo';
 import { useExport } from '@/composables/use-export';
 
@@ -24,46 +28,43 @@ const {
   loadMoreActivities,
 } = useDashboard();
 
+// Activity list scroll container ref (for preserving scroll position on load-more)
+const activityListEl = ref<HTMLElement | null>(null);
+
+// Track batch boundaries so we can render a thicker divider between "more" batches.
+// batchBoundaryIndices holds the index of the first item in each batch after the first.
+const batchBoundaryIndices = ref<Set<number>>(new Set());
+
 // Re-fetch data every time dashboard is mounted (e.g. after import + invalidation)
 onMounted(() => {
   refresh();
-  setupInfiniteScroll();
 });
 
-onBeforeUnmount(() => {
-  teardownInfiniteScroll();
-});
-
-// --- Infinite scroll via IntersectionObserver ---
-const scrollSentinel = ref<HTMLElement | null>(null);
-const activityListEl = ref<HTMLElement | null>(null);
-let observer: IntersectionObserver | null = null;
-
-function setupInfiniteScroll(): void {
-  if (!window.IntersectionObserver) return;
-  // Use the activity list container as the scroll root
-  const root = activityListEl.value;
-  observer = new IntersectionObserver(
-    (entries) => {
-      if (entries[0]?.isIntersecting && hasMoreActivities.value && !loadingMoreActivities.value) {
-        loadMoreActivities();
-      }
-    },
-    { root: root ?? undefined, rootMargin: '100px' }
-  );
-  // Observe on next tick so the sentinel element exists in DOM
-  setTimeout(() => {
-    if (scrollSentinel.value && observer) {
-      observer.observe(scrollSentinel.value);
-    }
-  }, 0);
+/**
+ * Load more activities while preserving the scroll position so the user sees
+ * the newly appended records. Without this, the browser keeps scrollTop fixed
+ * and the new content appears below the fold (user has to scroll down manually).
+ */
+async function handleLoadMore(): Promise<void> {
+  const el = activityListEl.value;
+  const prevScrollHeight = el?.scrollHeight ?? 0;
+  const prevCount = groupedAudit.value.length;
+  await loadMoreActivities();
+  // Record the batch boundary so the template can render a thicker divider
+  // before the first newly appended item.
+  if (groupedAudit.value.length > prevCount) {
+    batchBoundaryIndices.value.add(prevCount);
+  }
+  await nextTick();
+  if (el) {
+    // Scroll to where the new content starts so the user sees the appended records
+    el.scrollTop = prevScrollHeight;
+  }
 }
 
-function teardownInfiniteScroll(): void {
-  if (observer) {
-    observer.disconnect();
-    observer = null;
-  }
+/** Check if an item at the given index is the first in a new "more" batch. */
+function isBatchBoundary(index: number): boolean {
+  return batchBoundaryIndices.value.has(index);
 }
 
 interface StatusTile {
@@ -139,6 +140,11 @@ function navigateTo(route: string): void {
 
 function navigateToArticlesWithStatus(status: string): void {
   router.push({ path: '/articles', query: { status } });
+}
+
+/** Navigate to a specific article in the All articles view. */
+function navigateToArticle(articleId: string): void {
+  router.push({ path: '/articles', query: { articleId } });
 }
 
 const { demoLoading, demoError, loadDemo } = useDemo(router);
@@ -319,64 +325,89 @@ async function onProjectFileSelected(event: Event): Promise<void> {
                 <p>No recent activity to display.</p>
               </div>
               <div v-else ref="activityListEl" class="dashboard__activity-list">
-                <div v-for="entry in groupedAudit" :key="entry.id" class="activity-item">
+                <template v-for="(entry, index) in groupedAudit" :key="entry.id">
+                  <hr v-if="isBatchBoundary(index)" class="activity-item__batch-divider" />
                   <div
-                    class="activity-item__icon"
-                    :class="{
-                      'activity-item__icon--ai': entry.source === 'ai',
-                      'activity-item__icon--system': entry.source === 'system',
-                    }"
+                    class="activity-item"
+                    :class="{ 'activity-item--clickable': entry.articleId }"
                   >
-                    <template v-if="entry.source === 'ai'"
-                      ><span class="material-symbols-outlined">auto_awesome</span></template
+                    <button
+                      v-if="entry.articleId"
+                      class="activity-item__dot"
+                      :class="{
+                        'activity-item__dot--ai': entry.source === 'ai',
+                        'activity-item__dot--system': entry.source === 'system',
+                      }"
+                      title="Go to article"
+                      @click="navigateToArticle(entry.articleId)"
                     >
-                    <template v-else-if="entry.source === 'system'"
-                      ><span class="material-symbols-outlined">settings</span></template
+                      <span class="material-symbols-outlined activity-item__dot-icon">{{
+                        entry.source === 'ai'
+                          ? 'auto_awesome'
+                          : entry.source === 'system'
+                            ? 'settings'
+                            : 'radio_button_checked'
+                      }}</span>
+                    </button>
+                    <div
+                      v-else
+                      class="activity-item__dot"
+                      :class="{
+                        'activity-item__dot--ai': entry.source === 'ai',
+                        'activity-item__dot--system': entry.source === 'system',
+                      }"
                     >
-                    <template v-else
-                      ><span class="material-symbols-outlined">radio_button_checked</span></template
-                    >
+                      <span class="material-symbols-outlined activity-item__dot-icon">{{
+                        entry.source === 'ai'
+                          ? 'auto_awesome'
+                          : entry.source === 'system'
+                            ? 'settings'
+                            : 'radio_button_checked'
+                      }}</span>
+                    </div>
+                    <div class="activity-item__content">
+                      <p class="activity-item__text">
+                        <span class="activity-item__action">
+                          {{ formatAuditAction(entry.action) }}
+                        </span>
+                        <span v-if="entry.source === 'ai'" class="activity-item__source">
+                          by AI</span
+                        >
+                        <span v-if="entry.articleTitle" class="activity-item__title">
+                          - {{ entry.articleTitle
+                          }}{{ entry.articleTitle.length >= 55 ? '...' : '' }}
+                        </span>
+                        <span v-if="entry.count && entry.count > 1" class="activity-item__count">
+                          {{ entry.count }} articles
+                        </span>
+                      </p>
+                      <p v-if="entry.details" class="activity-item__details">{{ entry.details }}</p>
+                    </div>
+                    <div class="activity-item__time-col">
+                      <span class="activity-item__time-value">{{
+                        formatRelativeTimeParts(entry.timestamp).value
+                      }}</span>
+                      <span class="activity-item__time-suffix">{{
+                        formatRelativeTimeParts(entry.timestamp).suffix
+                      }}</span>
+                    </div>
                   </div>
-                  <div class="activity-item__content">
-                    <p class="activity-item__text">
-                      <span class="activity-item__action">
-                        {{ formatAuditAction(entry.action) }}
-                      </span>
-                      <span class="activity-item__source">
-                        <template v-if="entry.source === 'ai'"> by AI</template>
-                        <template v-else-if="entry.source === 'user'"> by User</template>
-                      </span>
-                      <span v-if="entry.articleTitle" class="activity-item__title">
-                        - {{ entry.articleTitle }}{{ entry.articleTitle.length >= 40 ? '...' : '' }}
-                      </span>
-                      <span v-if="entry.count && entry.count > 1" class="activity-item__count">
-                        {{ entry.count }} articles
-                      </span>
-                      <span v-if="entry.details" class="activity-item__details">
-                        - {{ entry.details }}
-                      </span>
-                    </p>
-                    <p class="activity-item__time">
-                      {{ formatRelativeTime(entry.timestamp) }}
-                    </p>
-                  </div>
-                </div>
+                </template>
 
-                <!-- Infinite scroll sentinel inside scroll container -->
-                <div
-                  v-if="hasMoreActivities && groupedAudit.length > 0"
-                  ref="scrollSentinel"
-                  class="dashboard__scroll-sentinel"
+                <!-- Load more link (click-based pagination) -->
+                <button
+                  v-if="hasMoreActivities"
+                  class="dashboard__load-more"
+                  :disabled="loadingMoreActivities"
+                  @click="handleLoadMore"
                 >
                   <span
                     v-if="loadingMoreActivities"
                     class="material-symbols-outlined dashboard__scroll-spinner"
                     >progress_activity</span
                   >
-                  <span v-if="loadingMoreActivities" class="dashboard__scroll-text"
-                    >Loading more&hellip;</span
-                  >
-                </div>
+                  <span v-else>more</span>
+                </button>
               </div>
             </div>
           </div>
@@ -853,8 +884,8 @@ async function onProjectFileSelected(event: Event): Promise<void> {
 .activity-item {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-4);
-  padding: var(--space-4);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   transition: background-color 0.15s;
 }
 
@@ -862,31 +893,54 @@ async function onProjectFileSelected(event: Event): Promise<void> {
   background-color: #f8fafc;
 }
 
-.activity-item + .activity-item {
+.activity-item:not(:first-child) {
   border-top: 1px solid #f1f5f9;
 }
 
-.activity-item__icon {
-  width: 32px;
-  height: 32px;
+.activity-item--clickable {
+  cursor: default;
+}
+
+.activity-item__dot {
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background-color: #f1f5f9;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 14px;
-  color: var(--color-outline);
+  border: none;
+  padding: 0;
+  cursor: default;
+  transition:
+    background-color 0.15s,
+    transform 0.1s;
 }
 
-.activity-item__icon--ai {
+.activity-item__dot--ai {
   background-color: #eef2ff;
   color: #4f46e5;
 }
 
-.activity-item__icon--system {
+.activity-item__dot--system {
   background-color: #f1f5f9;
   color: var(--color-outline);
+}
+
+/* When the dot is a button (clickable article link), make it interactive */
+button.activity-item__dot {
+  cursor: pointer;
+}
+
+button.activity-item__dot:hover {
+  background-color: #c7d2fe;
+  color: #4338ca;
+  transform: scale(1.15);
+}
+
+.activity-item__dot-icon {
+  font-size: 13px;
 }
 
 .activity-item__content {
@@ -895,9 +949,10 @@ async function onProjectFileSelected(event: Event): Promise<void> {
 }
 
 .activity-item__text {
-  font-size: var(--font-size-body);
+  font-size: 13px;
   color: var(--color-on-surface);
-  line-height: var(--line-height-body);
+  line-height: 1.4;
+  margin: 0;
 }
 
 .activity-item__action {
@@ -913,7 +968,7 @@ async function onProjectFileSelected(event: Event): Promise<void> {
 
 .activity-item__source {
   color: var(--color-on-surface-variant);
-  font-size: var(--font-size-body);
+  font-size: 12px;
 }
 
 .activity-item__title {
@@ -922,28 +977,72 @@ async function onProjectFileSelected(event: Event): Promise<void> {
 }
 
 .activity-item__details {
-  color: var(--color-on-surface-variant);
-}
-
-.activity-item__time {
   font-size: 12px;
-  color: var(--color-outline);
-  margin-top: 2px;
+  color: var(--color-on-surface-variant);
+  margin: 2px 0 0 0;
+  line-height: 1.3;
 }
 
-/* Infinite scroll sentinel */
-.dashboard__scroll-sentinel {
+.activity-item__time-col {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  color: var(--color-on-surface-variant);
-  font-size: var(--font-size-caption);
+  flex-shrink: 0;
+  min-width: 32px;
+  padding-left: var(--space-2);
+}
+
+.activity-item__time-value {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-outline);
+  line-height: 1.1;
+}
+
+.activity-item__time-suffix {
+  font-size: 10px;
+  color: var(--color-outline);
+  line-height: 1.1;
+}
+
+/* Thicker divider between "more" batches */
+.activity-item__batch-divider {
+  border: none;
+  border-top: 2px solid #cbd5e1;
+  margin: 0;
+  width: 100%;
+}
+
+/* Load more link (click-based pagination) */
+.dashboard__load-more {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-top: 1px solid #f1f5f9;
+  background: transparent;
+  color: #4f46e5;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-family: inherit;
+}
+
+.dashboard__load-more:hover:not(:disabled) {
+  background-color: #eef2ff;
+}
+
+.dashboard__load-more:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .dashboard__scroll-spinner {
-  font-size: 18px;
+  font-size: 14px;
   animation: spin 1s linear infinite;
 }
 
@@ -954,11 +1053,6 @@ async function onProjectFileSelected(event: Event): Promise<void> {
   to {
     transform: rotate(360deg);
   }
-}
-
-.dashboard__scroll-text {
-  font-size: var(--font-size-caption);
-  color: var(--color-on-surface-variant);
 }
 
 /* Sidebar */

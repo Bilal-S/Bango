@@ -2,7 +2,8 @@
 //!
 //! Mirrors the summary-repo pattern: in-memory SQLite via `run_migrations`,
 //! save/get round-trip, clear -> absent. Also verifies the v004 migration
-//! created the `gap_analysis` table and set `user_version = 4`.
+//! created the `gap_analysis` table and set `user_version = 4` (now 5 after
+//! v005).
 
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::gap_analysis_repo;
@@ -54,16 +55,17 @@ fn clear_makes_row_absent() {
     assert!(gap_analysis_repo::get_gap_analysis(&conn).unwrap().is_none());
 }
 
-/// v004 must create the `gap_analysis` table and bump `user_version` to 4.
+/// v004 must create the `gap_analysis` table. After all migrations
+/// (v001-v005), `user_version` must be 5.
 #[test]
 fn migration_v004_creates_gap_analysis_table_and_sets_user_version() {
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("Failed to run migrations");
 
-    // user_version must be 4 (v001 + v002 + v003 + v004).
+    // user_version must be 5 (v001 + v002 + v003 + v004 + v005).
     let version: i64 =
         conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("PRAGMA failed");
-    assert_eq!(version, 4, "user_version must be 4 after migrations v001-v004");
+    assert_eq!(version, 5, "user_version must be 5 after migrations v001-v005");
 
     // The gap_analysis table must exist.
     let exists: i64 = conn

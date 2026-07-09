@@ -59,6 +59,7 @@ export const useAuditStore = defineStore('audit', () => {
     if (loadingMore.value || (!hasMoreAudit.value && !hasMoreImports.value)) return;
     loadingMore.value = true;
     try {
+      let totalNewItems = 0;
       const promises: Promise<unknown>[] = [];
 
       if (hasMoreAudit.value) {
@@ -70,6 +71,7 @@ export const useAuditStore = defineStore('audit', () => {
             recentAudit.value = [...recentAudit.value, ...entries];
             auditOffset.value += entries.length;
             hasMoreAudit.value = entries.length === PAGE_SIZE;
+            totalNewItems += entries.length;
           })
         );
       }
@@ -83,11 +85,21 @@ export const useAuditStore = defineStore('audit', () => {
             importActivities.value = [...importActivities.value, ...imports];
             importOffset.value += imports.length;
             hasMoreImports.value = imports.length === PAGE_SIZE;
+            totalNewItems += imports.length;
           })
         );
       }
 
       await Promise.all(promises);
+
+      // Guard: if both streams returned 0 items, there are definitely no more
+      // records. This catches the edge case where the last batch from one or
+      // both streams was exactly PAGE_SIZE, leaving hasMore=true, but the next
+      // batch is empty.
+      if (totalNewItems === 0) {
+        hasMoreAudit.value = false;
+        hasMoreImports.value = false;
+      }
     } finally {
       loadingMore.value = false;
     }

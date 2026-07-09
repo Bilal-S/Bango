@@ -45,8 +45,8 @@ describe('audit-timeline.vue', () => {
         ],
       },
     });
-    expect(wrapper.text()).toContain('Article Imported');
-    expect(wrapper.text()).toContain('Status Changed');
+    expect(wrapper.text()).toContain('Import');
+    expect(wrapper.text()).toContain('Status Change');
   });
 
   it('renders source attribution', () => {
@@ -87,6 +87,15 @@ describe('audit-timeline.vue', () => {
     });
     expect(wrapper.text()).not.toContain('550e8400');
     expect(wrapper.text()).toContain('Status changed');
+  });
+
+  it('renders note_add action label', () => {
+    const wrapper = mount(AuditTimeline, {
+      props: {
+        entries: [makeEntry({ id: 'e1', action: 'note_add' })],
+      },
+    });
+    expect(wrapper.text()).toContain('Note Added');
   });
 
   it('renders view link for duplicate references and emits navigateToArticle', async () => {

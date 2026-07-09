@@ -11,22 +11,23 @@ const emit = defineEmits<{
 }>();
 
 const actionLabels: Record<AuditAction, string> = {
-  import: 'Article Imported',
+  import: 'Import',
   dedup_merge: 'Duplicate Merged',
   dedup_flag: 'Duplicate Flagged',
-  status_change: 'Status Changed',
+  status_change: 'Status Change',
+  note_add: 'Note Added',
   tag_add: 'Tag Added',
   tag_remove: 'Tag Removed',
   label_add: 'Label Added',
   label_remove: 'Label Removed',
   criteria_match: 'Criteria Matched',
-  ai_screen: 'AI Screening Completed',
+  ai_screen: 'AI Screening',
   manual_override: 'Manual Override',
-  ai_summary: 'AI Summary Generated',
+  ai_summary: 'AI Summary',
   reference_import: 'Reference Imported',
   reference_match: 'Reference Matched',
   error: 'Error',
-  translation: 'Article Translated',
+  translation: 'Translation',
   translation_error: 'Translation Failed',
 };
 
