@@ -40,7 +40,7 @@ interface ArticleQuery {
 
 type SortDirection = 'asc' | 'desc';
 
-const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references')[] = [
+const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references' | 'search')[] = [
   'all',
   'duplicate',
   'working',
@@ -48,6 +48,7 @@ const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references')[] =
   'rejected',
   'error',
   'references',
+  'search',
 ] as const;
 
 type StatusTab = (typeof STATUS_TABS)[number];
@@ -121,7 +122,7 @@ export function useArticleSearch() {
     offset: 0,
   });
 
-  const statusCounts = ref<ArticleCounts>({
+  const statusCounts = ref<ArticleCounts & { search?: number }>({
     // Seed from the pre-warmed store so counts render immediately
     // without waiting for the get_article_counts IPC round-trip.
     all: articlesStore.totalImported,
@@ -131,6 +132,7 @@ export function useArticleSearch() {
     rejected: articlesStore.byStatus.rejected,
     error: 0,
     references: 0,
+    search: 0,
   });
 
   async function fetchCounts(): Promise<void> {
@@ -219,8 +221,9 @@ export function useArticleSearch() {
 
   function setStatusTab(tab: StatusTab): void {
     activeStatusTab.value = tab;
-    // "references" tab: no article query needed – the ReferencesView component handles its own data
-    if (tab === 'references') {
+    // "references" + "search" tabs: no article query needed - the components
+    // handle their own data (ReferencesView / OpenAlexSearch).
+    if (tab === 'references' || tab === 'search') {
       return;
     }
     // "error" tab: show working articles that have screening errors

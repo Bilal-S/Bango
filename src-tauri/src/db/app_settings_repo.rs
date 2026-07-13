@@ -410,6 +410,8 @@ pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     TWO_STAGE_HIGH_KEY,
     CHUNK_BUDGET_PER_ARTICLE_KEY,
     TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY,
+    "openalex_mailto",
+    "openalex_retrieve_references",
 ];
 
 /// Whether a given `app_settings` key should travel with a project backup.

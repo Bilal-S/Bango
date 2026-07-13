@@ -311,6 +311,76 @@ The `suggest_search_strategy` command generates database-ready Boolean search st
 
 ---
 
+### 8.5 OpenAlex Search Integration
+
+OpenAlex catalog search enables researchers to discover and import scholarly
+works from the OpenAlex open catalog (270M+ works) directly into Bango's article
+library. OpenAlex is free and open; the `/works` endpoint costs nothing and the
+optional `api_key` only raises the rate-limit tier.
+
+#### 8.5.1 Search & Import
+
+- **Search tab** in the article list status row (`All | ... | References | Search`):
+  a non-status surface with no count badge and no persistent state (session-scoped
+  Pinia store).
+- **Manual mode** (always available): free-text Boolean query (`AND`, `OR`, `NOT`,
+  quoted phrases) with filter controls (year range, work type, language, OA toggle,
+  show-retracted toggle). `has_abstract:true` is always appended; `is_retracted:false`
+  is the default (toggle to reveal).
+- **Smart Search mode** (LLM-configured only): generates an OpenAlex-optimized
+  Boolean query from research aims + inclusion/exclusion criteria via
+  `LlmRequestType::OpenAlexSmartSearch`. The user reviews/edits the query in an
+  editable text box before execution. Suggested filters auto-populate the filter panel.
+- **Results**: 200-character word-boundary abstract snippets (truncated in Rust),
+  DOI-based library check greys out existing articles, split-window detail panel with
+  full abstract + author affiliations + biblio metadata.
+- **Import**: single + bulk "Add to Working" reuses the existing
+  `insert_articles_batch` -> `classify_imported_articles` ->
+  `resolve_journal_links` pipeline (parity with RIS/BibTeX import). Toast:
+  "Added N to Working, M to Duplicates". No migration needed (`'import'` action
+  already in the `audit_entries` CHECK constraint).
+
+#### 8.5.2 Reference + Citation Harvest (Tier 2)
+
+When `openalex_retrieve_references` is enabled (default off), the import
+batch-fetches both directions of the citation graph:
+- **Outgoing references** (`referenced_works`): the article's bibliography,
+  fetched via `/works?filter=openalex:W1|W2|...|W50` and stored as
+  `ReferenceType::Reference`.
+- **Incoming citations** (`cites:` filter): works that cite this article,
+  fetched via `/works?filter=cites:W12345` (paginated, 50 per page) and stored as
+  `ReferenceType::Citation`.
+
+Both populate `reference_papers` + `article_reference_links`, feeding
+citation-network bibliometrics. A 100ms pause between batches stays within the
+free-tier rate limit (10 req/s). 429 errors are logged to the article's audit
+trail so the user can see when rate limiting prevented some data from being
+downloaded.
+
+#### 8.5.3 PDF Download + AI Summary (Tier 2)
+
+When an imported work has an Open Access URL or PDF URL, the import
+automatically downloads the PDF and attaches it as full text via the existing
+`attach_full_text_inner` pipeline (text extraction + section extraction +
+chunking). If the LLM is configured, an AI summary is auto-generated immediately
+after the attach, matching the `bango-full-text-summaries` localStorage flag
+behavior from the manual attach flow. Failures (CAPTCHA, paywall, extraction
+error) are non-fatal and logged to the audit trail.
+
+#### 8.5.4 Criteria Integration (Tier 3)
+
+A card in the Criteria Editor (below the Search Strategy Builder) provides
+two one-click entry points: "Search OpenAlex Now" navigates to the Search tab
+with an empty query; "Smart Search OpenAlex" (LLM-configured only) generates a
+query from aims + criteria, pre-loads it into the search box, and navigates.
+
+#### 8.5.5 Settings
+
+Three `app_settings` keys: `openalex_api_key` (AES-256-GCM encrypted, excluded
+from project backups), `openalex_mailto` (polite-pool email, portable),
+`openalex_retrieve_references` (reference + citation harvest toggle, default
+false, portable).
+
 ## 9. UI Layout & Design System
 
 The application design is based on the **"Scholarly Precision"** style, utilizing a dense, minimalist Notion-like aesthetic.
@@ -351,7 +421,7 @@ The following features remain explicitly **out of scope**:
 *   Multi-project workspaces or project file selectors.
 *   Multi-user real-time collaboration or blind review synchronization.
 *   Full-text screening is no longer out of scope: see §4.3.1 for the bounded `enhanced` and `two_stage` modes. Naive whole-paper screening (sending the entire full text to the LLM) remains out of scope due to cost; Tier 3 sends only the abstract plus the top-K criteria-matched chunks.
-*   Automatic query builders are no longer out of scope: see §8.4 for the bounded Search Strategy Builder (LLM-generated Boolean strings, copy-only, no database API execution). Direct PubMed/external API integrations (executing searches against remote databases, fetching results, or querying MeSH/EMTREE term registries) remain out of scope.
+*   Automatic query builders are no longer out of scope: see §8.4 for the bounded Search Strategy Builder (LLM-generated Boolean strings, copy-only, no database API execution). Direct PubMed/external API integrations (executing searches against remote databases, fetching results, or querying MeSH/EMTREE term registries) remain out of scope, with the single exception of OpenAlex Works search per §8.5.
 *   Static site publishing is no longer out of scope: see §10.2 for the bounded local-only Wiki static-site zip export (offline HTML + Markdown). Hosting/deployment integration (one-click deploy to a provider) remains out of scope.
 *   Interactive PDF text highlighting or annotation.
 *   Global undo/redo action stacks or edit rollbacks.
@@ -361,7 +431,9 @@ The following features remain explicitly **out of scope**:
 ## Change Log
 
 | Version | Date | Key Improvements |
+| **v8.0** | 2026-07-12 | OpenAlex Search Integration (§8.5): new `search_openalex` + `import_openalex_articles` + `check_dois_in_library` + `smart_search_openalex` + `get_openalex_settings`/`set_openalex_settings` + `download_and_attach_openalex_pdf` commands. Rust `src-tauri/src/openalex/` module (`mod.rs`, `client.rs`, `mapping.rs`, `search.rs`, `smart_search.rs`, `reference_harvest.rs`) handles all HTTP + abstract reconstruction + 200-char snippet truncation + reference/citation harvest + PDF download. 3-phase import pipeline: (1) sync DB insert + classify + resolve journals, (2) async reference + citation harvest (both directions: outgoing `referenced_works` + incoming `cites:` filter, gated on `openalex_retrieve_references`), (3) async PDF download with auto AI summary if LLM configured. 100ms batch pause + 429 audit logging. Results displayed in a new "Search" tab in `article-list.vue` with split-window detail panel, sticky action bar (Select All + Add to Working + Clear), and indigo halo on the selected card. Import reuses the existing `insert_articles_batch` -> `classify_imported_articles` -> `resolve_journal_links` pipeline (parity with RIS/BibTeX import). Smart Search mode: when LLM is configured, generates an OpenAlex Boolean query from aims + criteria (new `LlmRequestType::OpenAlexSmartSearch`). `has_abstract:true` always-on filter; `is_retracted:false` default-on (toggle to reveal). New `app_settings` keys: `openalex_api_key` (encrypted, excluded from backups), `openalex_mailto`, `openalex_retrieve_references` (both portable). `openalex_mailto` + `openalex_retrieve_references` added to `PROJECT_PORTABLE_SETTINGS`. Carved out a specific OpenAlex-only exception in §11; direct PubMed/other external API integrations remain out of scope. Tests split into `openalex_mapping_test.rs` (10), `openalex_search_test.rs` (5), `openalex_import_test.rs` (5+1 ignored), `openalex_smart_search_test.rs` (5) = 25 Rust + 5 TS. |
 |---------|------|------------------|
+| **v8.0** | 2026-07-12 | OpenAlex Search Integration (§8.5): new `search_openalex` + `import_openalex_articles` + `check_dois_in_library` + `smart_search_openalex` + `get_openalex_settings`/`set_openalex_settings` + `download_and_attach_openalex_pdf` commands. Rust `src-tauri/src/openalex/` module handles all HTTP + abstract reconstruction + 200-char snippet truncation + reference/citation harvest + PDF download. 3-phase import pipeline: (1) sync DB insert + classify + resolve journals, (2) async reference + citation harvest (both directions: outgoing `referenced_works` + incoming `cites:` filter, gated on `openalex_retrieve_references`), (3) async PDF download with auto AI summary if LLM configured. 100ms batch pause + 429 audit logging. Results in a new Search tab with split-window detail panel, sticky action bar, and indigo halo on the selected card. Import reuses the existing `insert_articles_batch` pipeline (parity with RIS/BibTeX). Smart Search mode generates an OpenAlex Boolean query from aims + criteria via `LlmRequestType::OpenAlexSmartSearch`. New `app_settings` keys: `openalex_api_key` (encrypted, excluded from backups), `openalex_mailto`, `openalex_retrieve_references` (both portable, added to `PROJECT_PORTABLE_SETTINGS`). Carved out a specific OpenAlex-only exception in §11. Tests split into 4 files: 25 Rust + 5 TS. |
 | **v7.0** | 2026-07-09 | Wiki Static Site Export (§10.2): new `wiki_export_site` command packages the LLM Wiki as a self-contained static website (HTML + CSS + JS + original Markdown) in a `.zip` file. Article references resolve to either synthesis pages or metadata-only stub pages (title, authors, year, journal, DOI, abstract - no full text, copyright safe). Wiki-generated pages and user-uploaded document companions are included as HTML + Markdown; DB article full text/PDFs are never included. The frontend renders all HTML reusing `renderWikiMarkdown` with a new `staticMode` that emits standard `href` anchors (via the depth-aware `slugToHref`/`artIdToHref` resolvers + a `convertVueLinksToStatic` post-pass); missing targets render as greyed-out `<span class="ref-missing">`. The frontend owns the save dialog (matching `export_ris_to_file`/`export_project_to_file`); the backend owns file I/O + zip (new `zip = "2"` dependency). `WikiSourceInfo` extended with `abstractText` + `journal` so stubs render from a single `wiki_list_sources` fetch. `raw_export.rs` article frontmatter now stores `abstract_text` for the same reason. Triggered from the global Export dialog (`export-dialog.vue`) with a copyright warning + Project Title input (default = first research aim). `storage::walk_markdown` promoted to `pub(crate)` and reused for the markdown tree copy (no new `walkdir` dependency). 4 Rust integration tests + 8 TS tests cover zip generation, markdown-tree exclusion rules, depth-aware link resolution, and `staticMode` rendering. Lifted the §11 "Static site publishing" exclusion for this bounded local-only zip export; hosting/deployment integration remains out of scope. |
 | **v6.9** | 2026-07-09 | Tags & Labels improvements (§2.1, §4.3). (1) **Tag/label truncation + prefix fix**: the screening system prompt now instructs the LLM that `suggested_tags` must be concise descriptors (≤ 35 chars, lowercase, hyphenated, no `inclusion:`/`exclusion:` prefixes). The backend sanitizer `screening::engine::sanitize_tag_or_label_name` (pure `#[must_use]`) enforces this as defense-in-depth: strips `inclusion:`/`exclusion:`/`inclusion -`/`exclusion -` prefixes, lowercases, replaces spaces/underscores with hyphens, collapses repeated hyphens, and truncates at the last word boundary (never mid-word). `MAX_NEW_TAG_LABEL_LEN` raised from 30 → 35; `create_or_match_tag` and `create_or_match_label` both route through the sanitizer so auto-generated criterion labels (`"Inclusion: {text}"`) no longer leak the prefix into the stored name. 15 new tests cover the sanitizer + truncation. (2) **Double-click inline editing** in the Tags & Labels screen (`tag-label-management.vue`): double-click any tag/label chip to edit it in place; `nextTick` auto-focus + select, `@blur` commits, `Escape` cancels (same affordance as the criteria editor). (3) **Standard taxonomy surfacing**: the standalone `suggest_tags` command now injects `STANDARD_STUDY_TAGS` (20 methodology/study-type tags: `systematic-review`, `meta-analysis`, `rct`, `cohort-study`, etc.) and `suggest_labels` injects `STANDARD_WORKFLOW_LABELS` (12 workflow-state labels: `priority-read`, `strong-methodology`, `borderline`, etc.) into their prompts, instructing the LLM to include up to 4 from each when relevant. All standard entries are pre-validated to pass the 35-char sanitizer. |
 | **v6.8** | 2026-07-07 | Inline criteria/aim editing (§4.1): double-click any research aim, inclusion criterion, or exclusion criterion in `criteria-editor.vue` to edit its text in place. `Enter` or click-outside commits; `Escape` cancels. Committing an empty draft deletes the item (treats empty as delete). New `update_research_aim` Tauri command (thin shim over the existing `criteria_repo::update_aim` repo fn) registered in `lib.rs`; the existing `update_criterion` command is reused for text edits. New `useInlineEdit` composable (`src/composables/use-inline-edit.ts`) owns the trim/empty-delete/unchanged-shortcut/saving-guard semantics so they stay pure + unit-testable; wired into the view twice (one instance for aims, one for both criterion sections since criterion ids are globally-unique UUIDs). The editing control is a single shared multi-line `<textarea>` (auto-growing, 2-6 rows) with a `Hit enter to save and SHIFT-ENTER for new line.` hint under the box, consistent across all three sections; `Enter` saves, `Shift+Enter` inserts a newline, `Esc` cancels, blur saves. Standard affordances: `cursor: text` + hover highlight + `title="Double-click to edit"` tooltip on the read-only text. Caret placement runs once on edit-start (via a `watch` on the editing id + a plain template ref, NOT a function ref) so typing never disturbs the caret. |

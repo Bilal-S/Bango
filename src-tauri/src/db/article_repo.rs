@@ -1606,6 +1606,32 @@ pub fn get_article_counts(
     Ok(counts)
 }
 
+/// Check which DOIs from the input list already exist in the `articles` table.
+/// Uses a single batched query with a dynamically-built parameterized `IN (...)`
+/// clause. Returns the subset of DOIs that are present in the library.
+///
+/// Used by the OpenAlex search integration to grey out the "Add" button for
+/// works whose DOI already matches an article in the library.
+pub fn check_dois_in_library(conn: &Connection, dois: &[String]) -> Result<Vec<String>, AppError> {
+    if dois.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Build a parameterized IN clause: `WHERE doi IN (?1, ?2, ?3, ...)`
+    let placeholders: Vec<String> = (1..=dois.len()).map(|i| format!("?{i}")).collect();
+    let placeholder_str = placeholders.join(", ");
+    let sql = format!("SELECT DISTINCT doi FROM articles WHERE doi IN ({placeholder_str})");
+
+    let params: Vec<&dyn rusqlite::types::ToSql> =
+        dois.iter().map(|d| d as &dyn rusqlite::types::ToSql).collect();
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0))?;
+    let found: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+
+    Ok(found)
+}
+
 /// Post-import step: resolve `journal_index_id` for articles that have ISSN/eISSN/journal name
 /// but no journal link yet. Non-fatal - errors are silently ignored.
 pub fn resolve_journal_links(conn: &Connection, articles: &[Article]) -> usize {

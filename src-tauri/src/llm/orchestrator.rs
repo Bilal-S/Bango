@@ -65,6 +65,10 @@ pub enum LlmRequestType {
     /// persistence). Distinguished from `CriteriaGeneration` so diagnostics
     /// can separate search-strategy requests from criteria suggest/critique.
     SearchStrategy,
+    /// OpenAlex Smart Search (Tier 2): generates an OpenAlex Boolean query
+    /// from research aims + inclusion/exclusion criteria. The user reviews
+    /// the query before executing it against the OpenAlex API.
+    OpenAlexSmartSearch,
 }
 
 /// Centralized LLM request coordinator.

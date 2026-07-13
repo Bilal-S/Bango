@@ -18,6 +18,7 @@ import BulkActionBar from '@/components/bulk-action-bar.vue';
 import ExportDialog from '@/components/export-dialog.vue';
 import SuggestInput from '@/components/suggest-input.vue';
 import ReferencesView from '@/components/references-view.vue';
+import OpenAlexSearch from '@/components/openalex-search.vue';
 import BatchRefProgress from '@/components/batch-ref-progress.vue';
 
 const route = useRoute();
@@ -223,6 +224,7 @@ const STATUS_TAB_LABELS: Record<string, string> = {
   rejected: 'Rejected',
   error: 'Errors',
   references: 'References',
+  search: 'Search',
 };
 
 const STATUS_TAB_TIPS: Record<string, string> = {
@@ -233,6 +235,7 @@ const STATUS_TAB_TIPS: Record<string, string> = {
   error: 'Articles with errors:check audit trail',
   duplicate: 'Duplicate articles',
   references: 'Browse all reference & citation papers',
+  search: 'Search the OpenAlex catalog',
 };
 
 function showDecisionNotification(message: string, type: 'success' | 'info'): void {
@@ -450,7 +453,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
           @click="setStatusTab(tab)"
         >
           <span>{{ STATUS_TAB_LABELS[tab] }}</span>
-          <span class="ml-1.5 text-[11px] font-mono">
+          <span v-if="tab !== 'search'" class="ml-1.5 text-[11px] font-mono">
             {{ statusCounts[tab] ?? 0 }}
           </span>
           <!-- Active underline -->
@@ -470,9 +473,12 @@ async function handleBatchScrapeRefs(): Promise<void> {
         @update:active-paper-id="activeReferencePaperId = $event"
       />
 
-      <!-- Toolbar (hidden on References tab) -->
+      <!-- Search Tab Content (OpenAlex) -->
+      <OpenAlexSearch v-if="activeStatusTab === 'search'" />
+
+      <!-- Toolbar (hidden on References + Search tabs) -->
       <ArticleToolbar
-        v-if="activeStatusTab !== 'references'"
+        v-if="activeStatusTab !== 'references' && activeStatusTab !== 'search'"
         :search-text="searchText"
         :show-filters="showFilters"
         :page-size="pageSize"
@@ -510,9 +516,9 @@ async function handleBatchScrapeRefs(): Promise<void> {
         @close="resetBatchProgress"
       />
 
-      <!-- Filter Panel (collapsible) -->
+      <!-- Filter Panel (collapsible, hidden on References + Search tabs) -->
       <ArticleFilterPanel
-        v-if="showFilters && activeStatusTab !== 'references'"
+        v-if="showFilters && activeStatusTab !== 'references' && activeStatusTab !== 'search'"
         :filter="filter"
         :all-authors="allAuthors"
         :all-tags="allTags"
@@ -523,8 +529,8 @@ async function handleBatchScrapeRefs(): Promise<void> {
         @update:filter="handleUpdateFilter"
       />
 
-      <!-- Article Table (hidden on References tab) -->
-      <template v-if="activeStatusTab !== 'references'">
+      <!-- Article Table (hidden on References + Search tabs) -->
+      <template v-if="activeStatusTab !== 'references' && activeStatusTab !== 'search'">
         <div v-if="loading" class="text-center py-16 text-slate-400 text-sm">Loading...</div>
         <template v-else>
           <ArticleTable

@@ -22,6 +22,7 @@ pub mod error;
 pub mod export;
 pub mod llm;
 pub mod models;
+pub mod openalex;
 pub mod prisma;
 pub mod ris;
 pub mod scraping;
@@ -317,6 +318,13 @@ pub fn run() {
             commands::wiki_cmd::wiki_check_for_updates,
             commands::wiki_cmd::wiki_generate_export,
             commands::wiki_cmd::wiki_zip_export,
+            commands::openalex::search_openalex,
+            commands::openalex::import_openalex_articles,
+            commands::openalex::check_dois_in_library,
+            commands::openalex::get_openalex_settings,
+            commands::openalex::set_openalex_settings,
+            commands::openalex::smart_search_openalex,
+            commands::openalex::download_and_attach_openalex_pdf,
         ]);
 
     #[cfg(debug_assertions)]

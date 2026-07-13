@@ -58,6 +58,18 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': 'off',
     },
   },
+  // Node.js scripts (build helpers, not shipped source) need Node globals.
+  {
+    files: ['*.mjs', '**/*.mjs', 'scripts/**'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
   // Per-file override: the critique cards in criteria-editor.vue render
   // LLM-generated Markdown via `v-html` after parsing with `marked`. The
   // content is model output (no user-controlled HTML/wikilinks), matching

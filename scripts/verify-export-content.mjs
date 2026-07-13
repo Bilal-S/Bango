@@ -43,7 +43,7 @@ function walkDir(dir, pattern) {
 }
 
 // Parse [[slug|alias]] or [[slug]] links from markdown
-function parseWikilinks(md) {
+function _parseWikilinks(md) {
   const re = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
   const links = [];
   let m;
@@ -54,7 +54,7 @@ function parseWikilinks(md) {
 }
 
 // Parse [^art-id] footnotes from markdown
-function parseArtRefs(md) {
+function _parseArtRefs(md) {
   const re = /\[\^([^\]]+)\]/g;
   const refs = [];
   let m;
@@ -153,13 +153,17 @@ for (const htmlPath of htmlFiles.slice(0, 20)) {
   // Check for visible UUIDs
   const visibleUuids = findVisibleUuids(html);
   if (visibleUuids.length > 0) {
-    warnings.push(`${relativePath}: ${visibleUuids.length} visible UUIDs (may be intentional anchor text)`);
+    warnings.push(
+      `${relativePath}: ${visibleUuids.length} visible UUIDs (may be intentional anchor text)`
+    );
   }
 
   // Check for dangling footnotes
   const danglingFootnotes = findDanglingFootnotes(html);
   if (danglingFootnotes.length > 0) {
-    errors.push(`${relativePath}: ${danglingFootnotes.length} unresolved footnotes: ${danglingFootnotes.join(', ')}`);
+    errors.push(
+      `${relativePath}: ${danglingFootnotes.length} unresolved footnotes: ${danglingFootnotes.join(', ')}`
+    );
   }
 }
 
@@ -188,10 +192,26 @@ console.log('');
 // Check 3: Key content pages have expected structure
 console.log('--- Check 3: Content page structure ---');
 const expectedPages = [
-  { path: 'concept/food.html', expect: ['<article class="wiki-page', '<div class="markdown-content"'] },
-  { path: 'author/author-rogers-n.html', expect: ['<article class="wiki-page', '<div class="markdown-content"'] },
-  { path: 'synthesis/soft-drinks-industry-levy.html', expect: ['<article class="wiki-page', '<div class="markdown-content"', '<nav class="breadcrumb"'] },
-  { path: 'method/controlled-interrupted-time-series.html', expect: ['<article class="wiki-page', '<div class="markdown-content"'] },
+  {
+    path: 'concept/food.html',
+    expect: ['<article class="wiki-page', '<div class="markdown-content"'],
+  },
+  {
+    path: 'author/author-rogers-n.html',
+    expect: ['<article class="wiki-page', '<div class="markdown-content"'],
+  },
+  {
+    path: 'synthesis/soft-drinks-industry-levy.html',
+    expect: [
+      '<article class="wiki-page',
+      '<div class="markdown-content"',
+      '<nav class="breadcrumb"',
+    ],
+  },
+  {
+    path: 'method/controlled-interrupted-time-series.html',
+    expect: ['<article class="wiki-page', '<div class="markdown-content"'],
+  },
 ];
 
 for (const { path, expect } of expectedPages) {
@@ -215,7 +235,12 @@ console.log(`  Checked ${expectedPages.length} key pages\n`);
 console.log('--- Check 4: Index page structure ---');
 try {
   const indexHtml = readFileSync(join(exportDir, 'index.html'), 'utf-8');
-  const indexExpected = ['<div class="index-header"', '<input type="text" id="search-input"', 'class="page-card"', '<section class="page-section"'];
+  const indexExpected = [
+    '<div class="index-header"',
+    '<input type="text" id="search-input"',
+    'class="page-card"',
+    '<section class="page-section"',
+  ];
   const missing = indexExpected.filter((e) => !indexHtml.includes(e));
   if (missing.length > 0) {
     errors.push(`index.html: missing: ${missing.join(', ')}`);

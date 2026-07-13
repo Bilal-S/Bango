@@ -208,10 +208,7 @@ const combined = [
   PAGE_CHROME_CSS,
 ].join('\n');
 
-const exportDir = join(
-  process.env.HOME || '/home/user',
-  'Documents/Bango/wiki-root/wiki-export'
-);
+const exportDir = join(process.env.HOME || '/home/user', 'Documents/Bango/wiki-root/wiki-export');
 const stylePath = join(exportDir, 'style.css');
 
 writeFileSync(stylePath, combined, 'utf-8');

@@ -5,6 +5,7 @@ import SettingsScreeningPreferences from '@/components/settings/settings-screeni
 import SettingsStorage from '@/components/settings/settings-storage.vue';
 import SettingsReprocessing from '@/components/settings/settings-reprocessing.vue';
 import SettingsProjectManagement from '@/components/settings/settings-project-management.vue';
+import SettingsOpenAlex from '@/components/settings/settings-openalex.vue';
 import SettingsNotificationHistory from '@/components/settings/settings-notification-history.vue';
 import SettingsDiagnostics from '@/components/settings/settings-diagnostics.vue';
 </script>
@@ -30,6 +31,7 @@ import SettingsDiagnostics from '@/components/settings/settings-diagnostics.vue'
       <SettingsStorage />
       <SettingsReprocessing />
       <SettingsProjectManagement />
+      <SettingsOpenAlex />
       <SettingsNotificationHistory />
       <SettingsDiagnostics />
     </div>

@@ -248,7 +248,21 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `commands::criteria::check_rules` runs an LLM consistency review over the
     whole ruleset incl. custom rules; the screening prompt now numbers
     inclusion `1..N` then exclusion continues `N+1..N+M` via
-    `CriterionEntry.global_number` so "criterion 11" is unambiguous).
+    `CriterionEntry.global_number` so "criterion 11" is unambiguous),
+    `openalex_api_key` (AES-256-GCM encrypted; optional; raises rate-limit tier
+    from 10 to 100 req/s; set/read via `openalex::mod.rs::get_api_key` /
+    `set_api_key`; **deliberately excluded from `PROJECT_PORTABLE_SETTINGS`** -
+    API key, never exported),
+    `openalex_mailto` (plaintext string; user email for the OpenAlex polite
+    pool; sent as `mailto` query param on every request; **included in
+    `PROJECT_PORTABLE_SETTINGS`** - non-secret user preference; if unset, a
+    Bango app default `"research@bango.app"` is used),
+    `openalex_retrieve_references` (plaintext boolean `"true"`/`"false"`;
+    gates the OpenAlex Reference + Citation Harvest: when enabled, importing
+    from OpenAlex batch-fetches both outgoing `referenced_works` and incoming
+    `cites:` citations and populates `reference_papers` +
+    `article_reference_links`; defaults to `false`; **included in
+    `PROJECT_PORTABLE_SETTINGS`** - non-secret user preference).
     `mark_biblio_needs_refresh(conn)` is called by every mutation that
     changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
     project backup restore in `commands/export_cmd::import_project_backup`,
@@ -442,6 +456,32 @@ describe each durable boundary so agents can locate the right area. Create a chi
     button that deep-links into `/chat` with `chatStore.setWikiReady(true)` +
     `chatStore.setSource('wiki')` pre-applied, so the user lands in Wiki-mode RAG
     chat in one click (gated on LLM configured + wiki initialized with pages).
+  - **`src-tauri/src/openalex/`** - OpenAlex catalog search integration (§8.5).
+    Modules: `mod.rs` (types: `OpenAlexWork`, `OpenAlexSearchResponse`,
+    `OpenAlexFilters`, `OpenAlexResultItem` + `get_api_key`/`set_api_key`/
+    `get_mailto` helpers), `client.rs` (HTTP client with 429 retry +
+    `mailto`/`api_key` injection + 100ms batch pause + `download_pdf` +
+    `fetch_citing_works` for cited_by direction), `mapping.rs` (pure helpers:
+    `reconstruct_abstract`, `truncate_snippet`, `map_work_to_new_article`,
+    `map_works_to_new_articles`, `map_work_to_reference_paper`), `search.rs`
+    (`build_search_url` with percent-encoding), `smart_search.rs` (LLM-generated
+    Boolean query from aims + criteria via `LlmRequestType::OpenAlexSmartSearch`),
+    `reference_harvest.rs` (batch-fetch both outgoing `referenced_works` and
+    incoming `cites:` citations when `openalex_retrieve_references` is enabled;
+    inserts as `reference_papers` + `article_reference_links` with
+    `ReferenceType::Reference` / `ReferenceType::Citation`; 429 errors logged
+    to audit trail). Commands live in `commands/openalex.rs`: `search_openalex`,
+    `import_openalex_articles` (3-phase: sync DB insert + async ref/citation
+    harvest + async PDF download with auto AI summary), `check_dois_in_library`,
+    `smart_search_openalex`, `get_openalex_settings` / `set_openalex_settings`,
+    `download_and_attach_openalex_pdf`. Import reuses the existing
+    `insert_articles_batch` -> `classify_imported_articles` ->
+    `resolve_journal_links` pipeline (parity with RIS/BibTeX). No migration
+    needed (`'import'` already in `audit_entries.action` CHECK). Tested in
+    `tests/openalex_mapping_test.rs` (10 tests) +
+    `tests/openalex_search_test.rs` (5 tests) +
+    `tests/openalex_import_test.rs` (5 tests + 1 ignored Tier 2 stub) +
+    `tests/openalex_smart_search_test.rs` (5 tests).
   - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:
@@ -496,7 +536,11 @@ describe each durable boundary so agents can locate the right area. Create a chi
     enhanced/two-stage params). The `appSettings` field is `#[serde(default)]` so old
     backups without it import cleanly. Only allowlisted keys are exported/imported
     (defense-in-depth via `is_project_portable`); machine-local state (`storage_root`,
-    `flag_premium`, the `*_needs_refresh` flags, `wiki_dir_hash`) is deliberately excluded.
+    `flag_premium`, the `*_needs_refresh` flags, `wiki_dir_hash`, `openalex_api_key`) is
+    deliberately excluded. **DOX rule: any change to `app_settings` keys (adding, renaming,
+    or removing a setting) MUST trigger a review of `PROJECT_PORTABLE_SETTINGS` in
+    `app_settings_repo.rs` to decide whether the new key should travel with project backups.
+    Secrets (API keys, encrypted values) must NEVER be added to the allowlist.**
     The 9 `biblio_*` tables are NOT exported - they are dynamically generated by
     `biblio_normalize` and would bloat backups and trigger UNIQUE constraint violations on
     import. `article_chunks` is also NOT exported - it is regenerated at attach time; the
@@ -791,6 +835,27 @@ describe each durable boundary so agents can locate the right area. Create a chi
     is in an input/textarea/contenteditable, in edit mode, on the Graph tab, or at the
     history bounds. `selectedSlug` is a read-only computed alias over the history's current
     entry; all mutations go through `navigate()` / `goBack()` / `goForward()` / `clear()`.
+  - **`src/components/openalex-search.vue`** - OpenAlex Search tab content: search bar,
+    Smart Search button, sort + pagination controls, results list with sticky action bar
+    (Select All + Add to Working + Clear), and split-window detail panel. Renders
+    `<OpenAlexResultItem>` and `<OpenAlexDetailPanel>`.
+  - **`src/components/openalex-result-item.vue`** - Single search result row: checkbox,
+    title, meta line (author, journal, year, OA badge, cited-by count), 200-char snippet,
+    "Already in library" grey-out, "Retracted" badge, indigo border + box-shadow halo
+    when its detail panel is open.
+  - **`src/components/openalex-detail-panel.vue`** - Right-side split-window detail panel:
+    full abstract, authors with affiliations, journal/biblio metadata, DOI link, keywords,
+    OA/PDF links, "Add" button (single-article import), "Close" button, "Open in OpenAlex"
+    external link.
+  - **`src/components/settings/settings-openalex.vue`** - OpenAlex settings card: API key
+    (encrypted via AES-256-GCM, clear/replace), mailto email (polite pool), Retrieve
+    References toggle (default off, with rate-limit warning).
+  - **`src/stores/openalex.ts`** - Pinia store for session-scoped search state (query,
+    results, pagination, sort, filters, selection, loading/error, smartSearchAvailable).
+    Search, import (`importSelected` + `importSingle`), and DOI-library-check actions
+    wrap the Tauri commands. Tested by `src/__tests__/openalex-store.test.ts` (5 tests).
+  - **`src/types/openalex.ts`** - TypeScript interfaces for OpenAlex API types +
+    `SORT_OPTIONS`, `PER_PAGE_OPTIONS`, `DEFAULT_OPENALEX_FILTERS` constants.
   - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted } from 'vue';
-import { onBeforeRouteLeave } from 'vue-router';
+import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import { marked } from 'marked';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
@@ -9,7 +9,9 @@ import { useToast } from '@/composables/use-toast';
 import { formatLlmError } from '@/utils/llm-error';
 import type { SearchStrategyResult } from '@/types/search-strategy';
 import SearchStrategyCard from '@/components/search-strategy-card.vue';
+import { useOpenAlexStore } from '@/stores/openalex';
 import type { Priority } from '@/types';
+import type { SmartSearchQuery } from '@/types/openalex';
 import { useInlineEdit } from '@/composables/use-inline-edit';
 import type { Criterion, ResearchAim } from '@/types';
 
@@ -503,6 +505,46 @@ async function handleSearchStrategy(): Promise<void> {
     criteriaStore.generatingSearchStrategy = false;
   }
 }
+
+// ── OpenAlex Search Integration (Tier 3) ───────────────────────────────
+
+const router = useRouter();
+const openalexStore = useOpenAlexStore();
+const openalexLoading = ref(false);
+
+/** Navigate to the Articles Search tab with an empty query. */
+function handleOpenAlexSearchNow(): void {
+  void router.push({ path: '/articles', query: { status: 'search' } });
+}
+
+/** Call the LLM Smart Search, land the query in the OpenAlex store, then
+ *  navigate to the Articles Search tab so the user can review and execute. */
+async function handleOpenAlexSmartSearch(): Promise<void> {
+  if (!canUseAi.value || openalexLoading.value) return;
+  openalexLoading.value = true;
+  try {
+    const result = await tauriCommand<SmartSearchQuery>('smart_search_openalex');
+    openalexStore.setQuery(result.searchQuery);
+    // Auto-populate filters from suggested filters.
+    if (result.suggestedFilters.publicationYear) {
+      const [fromStr, toStr] = result.suggestedFilters.publicationYear.split('-');
+      openalexStore.filters = {
+        ...openalexStore.filters,
+        yearFrom: fromStr ? Number(fromStr) : null,
+        yearTo: toStr ? Number(toStr) : null,
+        workTypes:
+          result.suggestedFilters.type.length > 0
+            ? [...result.suggestedFilters.type]
+            : openalexStore.filters.workTypes,
+      };
+    }
+    void router.push({ path: '/articles', query: { status: 'search' } });
+  } catch (err: unknown) {
+    toast.show(`Smart Search failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+  } finally {
+    openalexLoading.value = false;
+  }
+}
 </script>
 
 <template>
@@ -616,6 +658,43 @@ async function handleSearchStrategy(): Promise<void> {
       :result="searchStrategyResult"
       @dismiss="criteriaStore.searchStrategyResult = null"
     />
+
+    <!-- OpenAlex Search card (Tier 3: bridges criteria to executed search) -->
+    <section class="section-panel openalex-card">
+      <div class="section-panel__header">
+        <div class="section-panel__title-group">
+          <span class="material-symbols-outlined text-indigo-600">travel_explore</span>
+          <h2 class="section-panel__title">OpenAlex Search</h2>
+        </div>
+        <div v-if="openalexLoading" class="ai-loading">
+          <span class="material-symbols-outlined animate-spin">progress_activity</span>
+          <span>Generating...</span>
+        </div>
+      </div>
+      <p class="openalex-card__desc">
+        Search the OpenAlex catalog of 300M+ scholarly works directly from Bango. Import results
+        into your Working list with one click.
+      </p>
+      <div class="openalex-card__actions">
+        <button class="ai-btn" @click="handleOpenAlexSearchNow">
+          <span class="material-symbols-outlined">search</span>
+          Search OpenAlex Now
+        </button>
+        <button
+          class="ai-btn"
+          :disabled="!canUseAi || openalexLoading"
+          :title="
+            !canUseAi
+              ? 'Configure an LLM in Settings first'
+              : 'Generate an OpenAlex Boolean query from your aims + criteria'
+          "
+          @click="handleOpenAlexSmartSearch"
+        >
+          <span class="material-symbols-outlined">auto_awesome</span>
+          Smart Search OpenAlex
+        </button>
+      </div>
+    </section>
 
     <!-- Section 2: Inclusion Criteria -->
     <section class="section-panel">
@@ -1172,6 +1251,20 @@ async function handleSearchStrategy(): Promise<void> {
   font-size: 12px;
   color: #94a3b8;
   font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* OpenAlex card (Tier 3) */
+.openalex-card__desc {
+  font-size: 14px;
+  line-height: 22px;
+  color: #475569;
+  margin-bottom: 1rem;
+}
+
+.openalex-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 /* Aim rows */
