@@ -6,7 +6,7 @@ import CocitationDetailPanel from '../components/cocitation-detail-panel.vue';
 import CocitationHeatmap from '../components/cocitation-heatmap.vue';
 import { useCocitationNetwork } from '../composables/use-cocitation-network';
 import { useNetworkView } from '../composables/use-network-view';
-import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { applyCocitationGraphFilters } from '../utils/graph-filters';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CocitationNode, CocitationEdge } from '../types/biblio-cocitation';
 
@@ -49,8 +49,6 @@ const {
   graphType: 'undirected',
   recalculateIterations: 150,
 });
-
-const { applyKeywordGraphFilters } = useSigmaRenderer();
 
 // Control state (co-citation-specific)
 const scope = ref<'included' | 'all'>('included');
@@ -166,6 +164,19 @@ function onNavigateToPaper(nodeId: string) {
   graphRef.value?.locateNode(nodeId);
 }
 
+/**
+ * Handle the sidebar autocomplete "locate paper" event: focus + pan/zoom to
+ * the node AND open the detail panel. `locateByLabel` returns the node id when
+ * a match is found; we feed it into the same node-selection path as a direct
+ * click so the panel context is consistent.
+ */
+function onLocatePaper(label: string) {
+  const nodeId = locateByLabel(label);
+  if (nodeId) {
+    selectedPaper.value = getNode(nodeId);
+  }
+}
+
 async function onParamsChange() {
   selectedPaper.value = null;
   focusNode(null);
@@ -180,11 +191,11 @@ async function onParamsChange() {
 
 function onFilterChange(filters: { search: string }) {
   if (!graph.value) return;
-  const result = applyKeywordGraphFilters(graph.value, {
-    minOccurrences: 0,
-    minCooccurrence: 0,
-    search: filters.search,
-  });
+  // Co-citation nodes lack a `weight` attribute (they carry coCitationCount /
+  // citationCount), so the keyword filter cannot be reused — its
+  // `weight >= minOccurrences` check would hide every node. Use the dedicated
+  // co-citation search filter instead.
+  const result = applyCocitationGraphFilters(graph.value, { search: filters.search });
   visibleNodeCount.value = result.visibleNodes;
 }
 
@@ -249,7 +260,7 @@ async function onResetAnalysis() {
           "
           @color-mode-change="colorMode = $event"
           @layout-mode-change="onLayoutModeChange"
-          @locate-paper="(label: string) => locateByLabel(label)"
+          @locate-paper="onLocatePaper"
           @filter-change="onFilterChange"
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"

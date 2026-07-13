@@ -952,7 +952,12 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `summary-view.vue`; calls `analyze_research_gaps` + `get_saved_gap_analysis`).
   - **`src/utils/`** - pure utilities: `network-export.ts` (graph PNG/GEXF export via the
     `save()` + `write_text_to_file` pattern), `formatters.ts`, `color.ts`, `debounce.ts`,
-    `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `llm-error.ts`,
+    `next-paint.ts`, `reference-flatten.ts`, `citation-analysis.ts`, `graph-filters.ts`
+    (pure graph-visibility filters extracted from `use-sigma-renderer.ts`:
+    `applyGraphFilters`/`applyCitationGraphFilters`/`applyKeywordGraphFilters` mutate
+    `hidden` attributes on a `graphology` instance + return visible-node/edge counts;
+    unit-tested in `src/__tests__/utils/graph-filters.test.ts` without DOM/Sigma scaffolding),
+    `llm-error.ts`,
     `google-trends.ts` (Trends embed URL builder + date-range validators),
     `wiki-markdown.ts` (shared wiki Markdown renderer: `renderWikiMarkdown(text, opts?)`
     converts `[[slug]]` / `[[slug|alias]]` to `.wikilink` anchors and `[^art-id]`

@@ -12,12 +12,22 @@
         v-model="searchQuery"
         type="text"
         placeholder="Search papers…"
-        class="w-full pl-8 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+        class="w-full pl-8 pr-8 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
         @input="onSearchInput"
         @keydown.enter="selectFirstSuggestion"
         @keydown.escape="clearSuggestions"
         @focus="showSuggestions = true"
       />
+      <!-- Clear (x) button -->
+      <button
+        v-if="searchQuery"
+        type="button"
+        class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 z-10 cursor-pointer"
+        title="Clear search"
+        @click="clearSearch"
+      >
+        <span class="material-symbols-outlined text-base">close</span>
+      </button>
       <!-- Autocomplete dropdown -->
       <ul
         v-if="showSuggestions && suggestions.length > 0"
@@ -369,6 +379,10 @@ function selectFirstSuggestion() {
     searchQuery.value = first.display;
     showSuggestions.value = false;
     emit('locate-paper', first.label);
+    // Clear the live-hide filter so the focus dimming from locate-paper
+    // takes over on the full graph. Without this, the composite `display`
+    // string matches no node attributes and hides every node.
+    clearSearchFilter();
   }
 }
 
@@ -376,7 +390,26 @@ function selectSuggestion(s: { label: string; display: string; searchText: strin
   searchQuery.value = s.display;
   showSuggestions.value = false;
   emit('locate-paper', s.label);
-  emit('filter-change', { search: searchQuery.value });
+  // Clear the live-hide filter so the focus dimming from locate-paper
+  // takes over on the full graph. Without this, the composite `display`
+  // string matches no node attributes and hides every node.
+  clearSearchFilter();
+}
+
+/** Clear the search box and restore all nodes (no live-hide). */
+function clearSearch() {
+  searchQuery.value = '';
+  showSuggestions.value = false;
+  clearSearchFilter();
+}
+
+/**
+ * Emit a filter-change with an empty search string, which restores all nodes.
+ * Used after selecting a paper so the graph returns to full visibility (with
+ * focus dimming applied by the parent via locate-paper).
+ */
+function clearSearchFilter() {
+  emit('filter-change', { search: '' });
 }
 
 function clearSuggestions() {

@@ -2,7 +2,11 @@ import { ref, shallowRef, onUnmounted } from 'vue';
 import Sigma from 'sigma';
 import { createEdgeArrowProgram, NodeCircleProgram } from 'sigma/rendering';
 import type Graph from 'graphology';
-import { filterNodesByYearRange } from '../utils/citation-analysis';
+import {
+  applyGraphFilters as applyGraphFiltersImpl,
+  applyCitationGraphFilters as applyCitationGraphFiltersImpl,
+  applyKeywordGraphFilters as applyKeywordGraphFiltersImpl,
+} from '../utils/graph-filters';
 
 class NodeBorderProgram extends NodeCircleProgram {
   getDefinition() {
@@ -184,67 +188,20 @@ export function useSigmaRenderer() {
   }
 
   /**
-   * Apply visibility filters to graph nodes based on minPapers, minLinkStrength, and search query.
-   * Returns { visibleNodes, visibleEdges } counts.
+   * Apply visibility filters to graph nodes based on minPapers, minLinkStrength,
+   * maxAuthors, and a search query. Delegates to the pure implementation in
+   * `utils/graph-filters.ts` (unit-tested there without DOM/Sigma scaffolding).
    */
   function applyGraphFilters(
     g: Graph,
     filters: { minPapers: number; minLinkStrength: number; maxAuthors: number; search: string }
   ): { visibleNodes: number; visibleEdges: number } {
-    const { minPapers, minLinkStrength, maxAuthors, search } = filters;
-    const searchLower = search.toLowerCase();
-
-    // First, determine which edges pass the maxAuthors filter.
-    // An edge whose maxAuthorCount exceeds the threshold means it comes from
-    // a mega-author paper, so we drop that edge.
-    const edgeVisible = new Map<string, boolean>();
-    for (const edge of g.edges()) {
-      const mac = (g.getEdgeAttribute(edge, 'maxAuthorCount') as number) ?? 0;
-      edgeVisible.set(edge, mac <= maxAuthors);
-    }
-
-    // Determine which nodes pass the filter
-    const nodeVisible = new Map<string, boolean>();
-    for (const node of g.nodes()) {
-      const weight = g.getNodeAttribute(node, 'weight') as number;
-      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
-      const passesPapers = weight >= minPapers;
-      const passesSearch = !searchLower || label.toLowerCase().includes(searchLower);
-      const visible = passesPapers && passesSearch;
-      nodeVisible.set(node, visible);
-      g.setNodeAttribute(node, 'hidden', !visible);
-    }
-
-    // Then, determine which edges pass all filters
-    let visibleEdges = 0;
-    for (const edge of g.edges()) {
-      const weight = g.getEdgeAttribute(edge, 'weight') as number;
-      const source = g.source(edge);
-      const target = g.target(edge);
-      const passesStrength = weight >= minLinkStrength;
-      const passesMaxAuthors = edgeVisible.get(edge) !== false;
-      const bothEndsVisible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-      const visible = passesStrength && passesMaxAuthors && bothEndsVisible;
-      g.setEdgeAttribute(edge, 'hidden', !visible);
-      if (visible) visibleEdges++;
-    }
-
-    const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
-
-    return { visibleNodes, visibleEdges };
+    return applyGraphFiltersImpl(g, filters);
   }
 
   /**
-   * Apply visibility filters to citation graph nodes based on minCitations,
-   * showIsolated, search query, and optional year range.
-   *
-   * - `minCitations`: hide papers with fewer than N incoming citations.
-   * - `showIsolated`: when false, hide nodes with zero degree (no edges).
-   * - `search`: case-insensitive substring match on label/title/authors.
-   * - `yearRange`: when set, hide nodes whose `year` falls outside [min, max].
-   *   Nodes with null/undefined year are always visible (can't be evaluated).
-   *
-   * Returns { visibleNodes, visibleEdges } counts.
+   * Apply visibility filters to citation graph nodes. Delegates to the pure
+   * implementation in `utils/graph-filters.ts`.
    */
   function applyCitationGraphFilters(
     g: Graph,
@@ -255,91 +212,18 @@ export function useSigmaRenderer() {
       yearRange?: [number, number] | null;
     }
   ): { visibleNodes: number; visibleEdges: number } {
-    const { minCitations, showIsolated, search, yearRange } = filters;
-    const searchLower = search.toLowerCase();
-
-    // Pre-compute the set of nodes passing the year filter once (O(n)),
-    // rather than recomputing inside the per-node loop.
-    const yearPassSet = filterNodesByYearRange(g, yearRange ?? null);
-
-    // Determine which nodes pass the filter
-    const nodeVisible = new Map<string, boolean>();
-    for (const node of g.nodes()) {
-      const numCited = (g.getNodeAttribute(node, 'numCited') as number) ?? 0;
-      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
-      const title = (g.getNodeAttribute(node, 'title') as string) ?? '';
-      const authors = (g.getNodeAttribute(node, 'authors') as string) ?? '';
-      const degree = g.degree(node);
-
-      const passesCitations = numCited >= minCitations;
-      const passesIsolated = showIsolated || degree > 0;
-      const passesSearch =
-        !searchLower ||
-        label.toLowerCase().includes(searchLower) ||
-        title.toLowerCase().includes(searchLower) ||
-        authors.toLowerCase().includes(searchLower);
-      const passesYear = yearPassSet.has(node);
-      const visible = passesCitations && passesIsolated && passesSearch && passesYear;
-      nodeVisible.set(node, visible);
-      g.setNodeAttribute(node, 'hidden', !visible);
-    }
-
-    // Edges are visible only if both endpoints are visible
-    let visibleEdges = 0;
-    for (const edge of g.edges()) {
-      const source = g.source(edge);
-      const target = g.target(edge);
-      const visible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-      g.setEdgeAttribute(edge, 'hidden', !visible);
-      if (visible) visibleEdges++;
-    }
-
-    const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
-
-    return { visibleNodes, visibleEdges };
+    return applyCitationGraphFiltersImpl(g, filters);
   }
 
   /**
-   * Apply visibility filters to keyword graph nodes based on minOccurrences,
-   * minCooccurrence, and search query.
-   *
-   * Returns { visibleNodes, visibleEdges } counts.
+   * Apply visibility filters to keyword graph nodes. Delegates to the pure
+   * implementation in `utils/graph-filters.ts`.
    */
   function applyKeywordGraphFilters(
     g: Graph,
     filters: { minOccurrences: number; minCooccurrence: number; search: string }
   ): { visibleNodes: number; visibleEdges: number } {
-    const { minOccurrences, minCooccurrence, search } = filters;
-    const searchLower = search.toLowerCase();
-
-    // Determine which nodes pass the filter
-    const nodeVisible = new Map<string, boolean>();
-    for (const node of g.nodes()) {
-      const weight = g.getNodeAttribute(node, 'weight') as number;
-      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
-      const passesOccurrences = weight >= minOccurrences;
-      const passesSearch = !searchLower || label.toLowerCase().includes(searchLower);
-      const visible = passesOccurrences && passesSearch;
-      nodeVisible.set(node, visible);
-      g.setNodeAttribute(node, 'hidden', !visible);
-    }
-
-    // Determine which edges pass all filters
-    let visibleEdges = 0;
-    for (const edge of g.edges()) {
-      const weight = g.getEdgeAttribute(edge, 'weight') as number;
-      const source = g.source(edge);
-      const target = g.target(edge);
-      const passesStrength = weight >= minCooccurrence;
-      const bothEndsVisible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-      const visible = passesStrength && bothEndsVisible;
-      g.setEdgeAttribute(edge, 'hidden', !visible);
-      if (visible) visibleEdges++;
-    }
-
-    const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
-
-    return { visibleNodes, visibleEdges };
+    return applyKeywordGraphFiltersImpl(g, filters);
   }
 
   /**

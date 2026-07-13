@@ -193,6 +193,19 @@ function onNavigateToPaper(nodeId: string) {
   graphRef.value?.locateNode(nodeId);
 }
 
+/**
+ * Handle the sidebar autocomplete "locate paper" event: focus + pan/zoom to
+ * the node AND open the detail panel. `locateByLabel` returns the node id when
+ * a match is found; we feed it into the same node-selection path as a direct
+ * click so the panel + isolation context is consistent.
+ */
+function onLocatePaper(label: string) {
+  const nodeId = locateByLabel(label);
+  if (nodeId) {
+    selectedPaper.value = getNode(nodeId);
+  }
+}
+
 /** Enter isolation mode for the currently-selected paper. */
 function onIsolate(direction: IsolationDirection) {
   if (!selectedPaper.value) return;
@@ -345,7 +358,7 @@ async function onResetAnalysis() {
           :isolation-mode="isolationMode"
           @main-path-change="onMainPathChange"
           @filter-change="onFilterChange"
-          @locate-paper="(label: string) => locateByLabel(label)"
+          @locate-paper="onLocatePaper"
           @export-image="onExportImage"
           @color-mode-change="colorMode = $event"
           @layout-mode-change="onLayoutModeChange"
