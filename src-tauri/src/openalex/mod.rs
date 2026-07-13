@@ -33,15 +33,21 @@ pub struct OpenAlexWork {
     pub publication_year: Option<i32>,
     #[serde(alias = "publication_date")]
     pub publication_date: Option<String>,
+    // `#[serde(default)]` so the struct can deserialize from the harvest
+    // response (`HARVEST_SELECT_FIELDS` omits `authorships` in some paths
+    // and `cited_by_count`/`keywords` always - without the default, serde
+    // fails with "missing field" and the entire harvest is silently dropped).
+    #[serde(default, alias = "authorships")]
     pub authorships: Vec<OpenAlexAuthorship>,
     #[serde(alias = "primary_location")]
     pub primary_location: Option<OpenAlexPrimaryLocation>,
     #[serde(alias = "abstract_inverted_index")]
     pub abstract_inverted_index: Option<HashMap<String, Vec<i32>>>,
     pub biblio: Option<OpenAlexBiblio>,
-    #[serde(alias = "cited_by_count")]
+    #[serde(default, alias = "cited_by_count")]
     pub cited_by_count: i32,
     pub language: Option<String>,
+    #[serde(default)]
     pub keywords: Vec<OpenAlexKeyword>,
     #[serde(rename = "type", alias = "type")]
     pub work_type: Option<String>,

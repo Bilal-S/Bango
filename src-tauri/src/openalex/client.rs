@@ -259,6 +259,12 @@ pub async fn fetch_citing_works(
 /// Download a PDF from a URL. Returns the raw bytes if the response is a valid
 /// PDF (checked via content-type header + magic bytes). Returns an error if the
 /// response is an HTML page (likely a CAPTCHA or paywall) or if the download fails.
+///
+/// Sends browser-like headers (`Accept`, `Accept-Language`, `Accept-Encoding`,
+/// `Sec-Fetch-*`) so publishers (MDPI, Elsevier, Springer, etc.) that 403 on
+/// the minimal `Bango/2.0` UA serve the PDF instead of a block page. The
+/// `Referer` is set to the PDF URL's origin so origin-based anti-leech checks
+/// pass.
 pub async fn download_pdf(url: &str) -> Result<Vec<u8>, AppError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -268,27 +274,40 @@ pub async fn download_pdf(url: &str) -> Result<Vec<u8>, AppError> {
             AppError::Import(format!("Failed to build HTTP client for PDF download: {e}"))
         })?;
 
+    // Derive the origin for the Referer header (origin-based anti-leech checks
+    // on publishers like MDPI 403 when the Referer is absent or mismatched).
+    let referer = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(|host| format!("{}://{host}/", parsed.scheme())))
+        .unwrap_or_else(|| url.to_string());
+
     let response = client
         .get(url)
-        .header("User-Agent", "Bango/2.0 (https://bango.boncode.net)")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Accept", "application/pdf,*/*;q=0.8")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("Accept-Encoding", "gzip, deflate, br")
+        .header("Referer", &referer)
+        .header("Sec-Fetch-Dest", "document")
+        .header("Sec-Fetch-Mode", "navigate")
+        .header("Sec-Fetch-Site", "same-origin")
         .send()
         .await
-        .map_err(|e| AppError::Import(format!("PDF download request failed: {e}")))?;
+        .map_err(|e| AppError::Import(format!("PDF download request failed for {url}: {e}")))?;
 
     let status = response.status();
     if !status.is_success() {
-        return Err(AppError::Import(format!("PDF download failed (HTTP {status})")));
+        return Err(AppError::Import(format!("PDF download failed for {url} (HTTP {status})")));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| AppError::Import(format!("Failed to read PDF download response: {e}")))?;
+    let bytes = response.bytes().await.map_err(|e| {
+        AppError::Import(format!("Failed to read PDF download response from {url}: {e}"))
+    })?;
 
     // Validate: must start with %PDF magic bytes.
     if bytes.len() < 4 || &bytes[..4] != b"%PDF" {
         return Err(AppError::Import(
-            "Downloaded content is not a valid PDF (possible CAPTCHA or paywall page). The article was still imported - you can attach the full text manually.".to_string(),
+            format!("Downloaded content from {url} is not a valid PDF (possible CAPTCHA or paywall page). The article was still imported - you can attach the full text manually."),
         ));
     }
 

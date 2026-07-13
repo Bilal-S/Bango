@@ -47,6 +47,9 @@ export const useOpenAlexStore = defineStore('openalex', () => {
 
   const cappedTotalCount = computed(() => Math.min(totalCount.value, 1000));
 
+  /** Count of results that are NOT already in the library (selectable). */
+  const selectableCount = computed(() => results.value.filter((r) => !r.alreadyInLibrary).length);
+
   async function search(): Promise<void> {
     if (!query.value.trim()) {
       error.value = 'Please enter a search query.';
@@ -125,7 +128,10 @@ export const useOpenAlexStore = defineStore('openalex', () => {
   }
 
   function selectAll(): void {
-    selectedIds.value = new Set(results.value.map((r) => r.work.id));
+    // Only select results that are not already in the library.
+    selectedIds.value = new Set(
+      results.value.filter((r) => !r.alreadyInLibrary).map((r) => r.work.id)
+    );
   }
 
   function clearSelection(): void {
@@ -143,6 +149,19 @@ export const useOpenAlexStore = defineStore('openalex', () => {
     hasSearched.value = false;
   }
 
+  /** Read the auto-summarize + section-summaries localStorage flags so the
+   * backend import pipeline can run the AI summary after a successful PDF
+   * attach (mirrors the manual attach path's `onAttached` hook). */
+  function readAutoSummarizeFlags(): {
+    autoSummarize: boolean;
+    includeSectionSummaries: boolean;
+  } {
+    return {
+      autoSummarize: localStorage.getItem('bango-full-text-summaries') === 'true',
+      includeSectionSummaries: localStorage.getItem('bango-section-summaries') === 'true',
+    };
+  }
+
   async function importSelected(): Promise<{ importedCount: number; skippedCount: number } | null> {
     const worksToImport = results.value
       .filter((r) => selectedIds.value.has(r.work.id) && !r.alreadyInLibrary)
@@ -153,9 +172,14 @@ export const useOpenAlexStore = defineStore('openalex', () => {
     }
 
     try {
+      const flags = readAutoSummarizeFlags();
       const result = await tauriCommand<{ importedCount: number; skippedCount: number }>(
         'import_openalex_articles',
-        { works: worksToImport }
+        {
+          works: worksToImport,
+          autoSummarize: flags.autoSummarize,
+          includeSectionSummaries: flags.includeSectionSummaries,
+        }
       );
       clearSelection();
       // Refresh the library DOI check for the current results.
@@ -175,9 +199,14 @@ export const useOpenAlexStore = defineStore('openalex', () => {
     if (!item || item.alreadyInLibrary) return null;
 
     try {
+      const flags = readAutoSummarizeFlags();
       const result = await tauriCommand<{ importedCount: number; skippedCount: number }>(
         'import_openalex_articles',
-        { works: [item.work] }
+        {
+          works: [item.work],
+          autoSummarize: flags.autoSummarize,
+          includeSectionSummaries: flags.includeSectionSummaries,
+        }
       );
       // Update the alreadyInLibrary flag for this result.
       await refreshLibraryFlags();
@@ -285,6 +314,7 @@ export const useOpenAlexStore = defineStore('openalex', () => {
     totalPages,
     selectedResult,
     selectedCount,
+    selectableCount,
     cappedTotalCount,
     // Actions
     search,

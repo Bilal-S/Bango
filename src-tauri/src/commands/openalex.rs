@@ -117,18 +117,27 @@ struct ImportDbResult {
 ///    then batch-insert them as `reference_papers` + `article_reference_links`.
 /// 3. **PDF download** (async, for each imported article with an OA URL):
 ///    download + `attach_full_text_inner`. Non-fatal: failures are logged to
-///    the audit trail.
+///    the article's audit trail (not the generic diagnostic log) so the user
+///    can see them in the Audit Timeline. When `auto_summarize` is true and
+///    the LLM is configured, the AI summary pipeline runs after a successful
+///    attach (mirrors the `bango-full-text-summaries` localStorage behavior
+///    from the manual attach path).
 #[tauri::command]
 pub async fn import_openalex_articles(
     app: AppHandle,
     db_state: State<'_, DbState>,
     works: Vec<OpenAlexWork>,
+    auto_summarize: Option<bool>,
+    include_section_summaries: Option<bool>,
 ) -> Result<ImportResult, AppError> {
     if works.is_empty() {
         return Err(AppError::Import(
             "No works to import. Select at least one result.".to_string(),
         ));
     }
+
+    let auto_summarize = auto_summarize.unwrap_or(false);
+    let include_section_summaries = include_section_summaries.unwrap_or(false);
 
     // Clone the app handle so it's available in both the spawn_blocking closure
     // and the async phases below.
@@ -257,7 +266,10 @@ pub async fn import_openalex_articles(
     }
 
     // Phase 3: PDF download (async, for each imported article with an OA URL).
-    // Non-fatal: failures are logged to the audit trail.
+    // Non-fatal: failures are logged to the article's audit trail (action =
+    // "error") so they surface in the Audit Timeline, NOT just the generic
+    // Diagnostics feed (`log_error_best_effort` writes article_id = NULL).
+    let orchestrator = app.state::<Arc<LlmOrchestrator>>();
     for (article_id, pdf_url) in &db_result.pdf_pairs {
         match openalex::client::download_pdf(pdf_url).await {
             Ok(pdf_bytes) => {
@@ -266,9 +278,10 @@ pub async fn import_openalex_articles(
                 let temp_file = temp_dir.join(format!("openalex_{article_id}.pdf"));
                 if let Err(e) = std::fs::write(&temp_file, &pdf_bytes) {
                     eprintln!("[openalex] PDF temp write failed for article {article_id}: {e}");
-                    audit_repo::log_error_best_effort(
-                        &db_state.conn,
-                        &format!("OpenAlex PDF download: temp file write failed for article {article_id}: {e}"),
+                    let _ = log_article_error(
+                        &db_state,
+                        article_id,
+                        &format!("OpenAlex PDF download: temp file write failed: {e}"),
                     );
                     continue;
                 }
@@ -288,55 +301,49 @@ pub async fn import_openalex_articles(
 
                 match attach_result {
                     Ok(_) => {
-                        let _ = audit_repo::create_entry(
-                            &db_state.conn.lock().unwrap_or_else(|p| p.into_inner()),
+                        let _ = audit_entry(
+                            &db_state,
                             article_id,
                             "full_text_attach",
-                            None,
-                            None,
-                            Some(&format!("PDF downloaded from OpenAlex: {pdf_url}")),
-                            "openalex",
+                            &format!("PDF downloaded from OpenAlex: {pdf_url}"),
                         );
 
-                        // Trigger automatic AI summary if LLM is configured.
-                        // Mirrors the `bango-full-text-summaries` localStorage flag
-                        // behavior from `article-list.vue`'s `onAttached` hook, but
-                        // runs server-side so the OpenAlex import path gets the same
-                        // full processing pipeline (extract → chunk → summarize).
-                        let orchestrator = app.state::<Arc<LlmOrchestrator>>();
-                        let llm_config = {
-                            let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-                            crate::db::llm_config_repo::get_config(&conn)?
-                        };
-                        if let Some(_config) = llm_config {
-                            match crate::commands::summary::generate_article_ai_summary_inner(
-                                &db_state,
-                                &app,
-                                &orchestrator,
-                                article_id,
-                                false, // include_section_summaries: matches the default
-                            )
-                            .await
-                            {
-                                Ok(_) => {
-                                    let _ = audit_repo::create_entry(
-                                        &db_state.conn.lock().unwrap_or_else(|p| p.into_inner()),
-                                        article_id,
-                                        "ai_summary",
-                                        None,
-                                        None,
-                                        Some(
+                        // Trigger automatic AI summary only when the user has
+                        // enabled auto-summarize (the `bango-full-text-summaries`
+                        // localStorage flag, passed through from the frontend)
+                        // AND the LLM is configured. Mirrors the manual attach
+                        // path's `onAttached` hook in `article-list.vue`.
+                        if auto_summarize {
+                            let llm_config = {
+                                let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+                                crate::db::llm_config_repo::get_config(&conn)?
+                            };
+                            if llm_config.is_some() {
+                                match crate::commands::summary::generate_article_ai_summary_inner(
+                                    &db_state,
+                                    &app,
+                                    &orchestrator,
+                                    article_id,
+                                    include_section_summaries,
+                                )
+                                .await
+                                {
+                                    Ok(_) => {
+                                        let _ = audit_entry(
+                                            &db_state,
+                                            article_id,
+                                            "ai_summary",
                                             "Auto-generated AI summary after OpenAlex PDF download",
-                                        ),
-                                        "openalex",
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("[openalex] auto AI summary failed for article {article_id}: {e}");
-                                    audit_repo::log_error_best_effort(
-                                        &db_state.conn,
-                                        &format!("OpenAlex auto AI summary failed for article {article_id}: {e}"),
-                                    );
+                                        );
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[openalex] auto AI summary failed for article {article_id}: {e}");
+                                        let _ = log_article_error(
+                                            &db_state,
+                                            article_id,
+                                            &format!("OpenAlex auto AI summary failed: {e}"),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -345,24 +352,54 @@ pub async fn import_openalex_articles(
                         eprintln!(
                             "[openalex] PDF text extraction failed for article {article_id}: {e}"
                         );
-                        audit_repo::log_error_best_effort(
-                            &db_state.conn,
-                            &format!("OpenAlex PDF download: text extraction failed for article {article_id}: {e}"),
+                        let _ = log_article_error(
+                            &db_state,
+                            article_id,
+                            &format!(
+                            "OpenAlex PDF downloaded from {pdf_url} but text extraction failed: {e}"
+                        ),
                         );
                     }
                 }
             }
             Err(e) => {
                 eprintln!("[openalex] PDF download failed for article {article_id}: {e}");
-                audit_repo::log_error_best_effort(
-                    &db_state.conn,
-                    &format!("OpenAlex PDF download failed for article {article_id}: {e}"),
+                let _ = log_article_error(
+                    &db_state,
+                    article_id,
+                    &format!("OpenAlex PDF download failed from {pdf_url}: {e}"),
                 );
             }
         }
     }
 
     Ok(db_result.import_payload)
+}
+
+/// Write an article-scoped audit entry (action = "error") so the failure
+/// surfaces in the article's Audit Timeline, not just the generic Diagnostics
+/// feed. Acquires the DB lock tolerantly; if the mutex is poisoned the failure
+/// is swallowed because the caller is already on an error/non-fatal path.
+fn log_article_error(
+    db_state: &State<'_, DbState>,
+    article_id: &str,
+    details: &str,
+) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    audit_repo::create_entry(&conn, article_id, "error", None, None, Some(details), "system")
+        .map(|_| ())
+}
+
+/// Write an article-scoped audit entry with the given action + details.
+fn audit_entry(
+    db_state: &State<'_, DbState>,
+    article_id: &str,
+    action: &str,
+    details: &str,
+) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    audit_repo::create_entry(&conn, article_id, action, None, None, Some(details), "openalex")
+        .map(|_| ())
 }
 
 /// Check which DOIs from the input list already exist in the `articles` table.

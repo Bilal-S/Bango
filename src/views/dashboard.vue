@@ -126,6 +126,12 @@ interface QuickAction {
 
 const quickActions: QuickAction[] = [
   {
+    label: 'Search with OpenAlex',
+    description: 'Discover articles from 300M+ scholarly works',
+    icon: 'database_search',
+    route: '/articles?status=search',
+  },
+  {
     label: 'Import Articles',
     description: 'Add new references from search',
     icon: 'upload_file',
@@ -136,12 +142,6 @@ const quickActions: QuickAction[] = [
     description: 'Update inclusion & exclusion rules',
     icon: 'rule',
     route: '/criteria',
-  },
-  {
-    label: 'View PRISMA Flow Diagram',
-    description: 'Track reporting and transparency',
-    icon: 'account_tree',
-    route: '/prisma',
   },
 ];
 

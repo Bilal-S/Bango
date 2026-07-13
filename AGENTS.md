@@ -459,9 +459,18 @@ describe each durable boundary so agents can locate the right area. Create a chi
   - **`src-tauri/src/openalex/`** - OpenAlex catalog search integration (§8.5).
     Modules: `mod.rs` (types: `OpenAlexWork`, `OpenAlexSearchResponse`,
     `OpenAlexFilters`, `OpenAlexResultItem` + `get_api_key`/`set_api_key`/
-    `get_mailto` helpers), `client.rs` (HTTP client with 429 retry +
-    `mailto`/`api_key` injection + 100ms batch pause + `download_pdf` +
-    `fetch_citing_works` for cited_by direction), `mapping.rs` (pure helpers:
+    `get_mailto` helpers; `OpenAlexWork` carries `#[serde(default)]` on
+    `cited_by_count`, `keywords`, and `authorships` so the struct deserializes
+    from any API response subset - the harvest `select` omits
+    `cited_by_count`/`keywords`, and without the default serde fails with
+    "missing field" and silently drops the entire reference/citation harvest),
+    `client.rs` (HTTP client with 429 retry + `mailto`/`api_key` injection +
+    100ms batch pause + `download_pdf` + `fetch_citing_works` for cited_by
+    direction; `download_pdf` sends browser-like headers (`User-Agent`,
+    `Accept`, `Accept-Language`, `Referer`, `Sec-Fetch-*`) so publishers
+    (MDPI, Elsevier, Springer) that 403 on the minimal `Bango/2.0` UA serve
+    the PDF instead of a block page; error messages include the URL + HTTP
+    status for diagnostics), `mapping.rs` (pure helpers:
     `reconstruct_abstract`, `truncate_snippet`, `map_work_to_new_article`,
     `map_works_to_new_articles`, `map_work_to_reference_paper`), `search.rs`
     (`build_search_url` with percent-encoding), `smart_search.rs` (LLM-generated
@@ -469,19 +478,33 @@ describe each durable boundary so agents can locate the right area. Create a chi
     `reference_harvest.rs` (batch-fetch both outgoing `referenced_works` and
     incoming `cites:` citations when `openalex_retrieve_references` is enabled;
     inserts as `reference_papers` + `article_reference_links` with
-    `ReferenceType::Reference` / `ReferenceType::Citation`; 429 errors logged
-    to audit trail). Commands live in `commands/openalex.rs`: `search_openalex`,
+    `ReferenceType::Reference` / `ReferenceType::Citation`; harvest errors
+    logged to the **article's** audit trail via `log_harvest_error` helper
+    which writes `action = "error"` with the article_id so failures surface
+    in the Audit Timeline, not just the generic Diagnostics feed). Commands
+    live in `commands/openalex.rs`: `search_openalex`,
     `import_openalex_articles` (3-phase: sync DB insert + async ref/citation
-    harvest + async PDF download with auto AI summary), `check_dois_in_library`,
+    harvest + async PDF download with auto AI summary; accepts
+    `auto_summarize` + `include_section_summaries` params so the frontend can
+    pass the `bango-full-text-summaries` / `bango-section-summaries`
+    localStorage flags - the backend cannot read localStorage; PDF download
+    + attach + extraction errors are logged to the article's audit trail via
+    `log_article_error` helper, NOT `log_error_best_effort` which writes
+    `article_id = NULL` and hides them from the Audit Timeline), `check_dois_in_library`,
     `smart_search_openalex`, `get_openalex_settings` / `set_openalex_settings`,
     `download_and_attach_openalex_pdf`. Import reuses the existing
     `insert_articles_batch` -> `classify_imported_articles` ->
     `resolve_journal_links` pipeline (parity with RIS/BibTeX). No migration
     needed (`'import'` already in `audit_entries.action` CHECK). Tested in
-    `tests/openalex_mapping_test.rs` (10 tests) +
+    `tests/openalex_mapping_test.rs` (11 tests incl.
+    `deserialize_harvest_response_missing_fields`) +
     `tests/openalex_search_test.rs` (5 tests) +
     `tests/openalex_import_test.rs` (5 tests + 1 ignored Tier 2 stub) +
-    `tests/openalex_smart_search_test.rs` (5 tests).
+    `tests/openalex_smart_search_test.rs` (5 tests). Capabilities
+    (`src-tauri/capabilities/default.json`) allow `https://**` + `http://**`
+    for `opener:allow-open-url` so DOI/PDF/OA links open from the Search
+    detail panel (publisher domains are not predictable, so the allow-list
+    cannot be a fixed domain set).
   - **`src-tauri/src/db/biblio_repo/`** - bibliometric repos (`kpis`, `authors`,
     `networks`, `terms`, `institutions`, `normalization`, `productivity`). Contract:
     `get_biblio_kpis` returns `BiblioKpis` including `journal_distribution:

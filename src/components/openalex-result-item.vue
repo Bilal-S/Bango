@@ -16,11 +16,20 @@ const emit = defineEmits<{
 <template>
   <div
     class="result-item"
-    :class="{ 'result-item--selected': selected, 'result-item--detail-open': detailOpen }"
+    :class="{
+      'result-item--selected': selected,
+      'result-item--detail-open': detailOpen,
+      'result-item--in-library': item.alreadyInLibrary,
+    }"
     @click="emit('openDetail')"
   >
     <div class="result-item__checkbox" @click.stop>
-      <input type="checkbox" :checked="selected" @change="emit('toggleSelect')" />
+      <input
+        type="checkbox"
+        :checked="selected"
+        :disabled="item.alreadyInLibrary"
+        @change="emit('toggleSelect')"
+      />
     </div>
 
     <div class="result-item__content">
@@ -86,6 +95,19 @@ const emit = defineEmits<{
   border-color: #4f46e5;
   background: #ede9fe;
   box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
+}
+
+/* Already-in-library rows are muted + non-interactive (checkbox disabled) */
+.result-item--in-library {
+  opacity: 0.6;
+}
+
+.result-item--in-library:hover {
+  border-color: #e2e8f0;
+}
+
+.result-item--in-library .result-item__checkbox input:disabled {
+  cursor: not-allowed;
 }
 
 .result-item__checkbox {

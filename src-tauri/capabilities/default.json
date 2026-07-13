@@ -11,16 +11,7 @@
     },
     {
       "identifier": "opener:allow-open-url",
-      "allow": [
-        { "url": "https://trends.google.com/**" },
-        { "url": "https://twitter.com/**" },
-        { "url": "https://wa.me/**" },
-        { "url": "https://t.me/**" },
-        { "url": "https://bsky.app/**" },
-        { "url": "https://www.reddit.com/**" },
-        { "url": "https://www.linkedin.com/**" },
-        { "url": "mailto:*" }
-      ]
+      "allow": [{ "url": "https://**" }, { "url": "http://**" }, { "url": "mailto:*" }]
     },
     "pilot:default",
     "dialog:default",

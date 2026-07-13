@@ -64,6 +64,27 @@ pub async fn harvest_references_and_citations(
     }
 }
 
+/// Write an article-scoped audit error entry so harvest failures surface in
+/// the article's Audit Timeline (not just the generic Diagnostics feed).
+fn log_harvest_error(db_state: &State<'_, DbState>, article_id: &str, details: &str) {
+    match crate::db::connection::lock_conn(&db_state.conn) {
+        Ok(conn) => {
+            let _ = audit_repo::create_entry(
+                &conn,
+                article_id,
+                "error",
+                None,
+                None,
+                Some(details),
+                "system",
+            );
+        }
+        Err(e) => {
+            eprintln!("[openalex] harvest error audit write failed for article {article_id}: {e}");
+        }
+    }
+}
+
 /// Fetch and insert the article's outgoing references (its bibliography).
 async fn harvest_outgoing_references(
     article_id: &str,
@@ -117,9 +138,10 @@ async fn harvest_outgoing_references(
         }
         Err(e) => {
             eprintln!("[openalex] reference harvest fetch failed for article {article_id}: {e}");
-            audit_repo::log_error_best_effort(
-                &db_state.conn,
-                &format!("OpenAlex reference harvest failed for article {article_id}: {e}"),
+            log_harvest_error(
+                db_state,
+                article_id,
+                &format!("OpenAlex reference harvest failed: {e}"),
             );
         }
     }
@@ -173,9 +195,10 @@ async fn harvest_incoming_citations(
         }
         Err(e) => {
             eprintln!("[openalex] citation harvest fetch failed for article {article_id}: {e}");
-            audit_repo::log_error_best_effort(
-                &db_state.conn,
-                &format!("OpenAlex citation harvest failed for article {article_id}: {e}"),
+            log_harvest_error(
+                db_state,
+                article_id,
+                &format!("OpenAlex citation harvest failed: {e}"),
             );
         }
     }

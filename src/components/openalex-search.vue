@@ -11,6 +11,11 @@ const store = useOpenAlexStore();
 const toast = useToast();
 const importingSingle = ref(false);
 
+const emit = defineEmits<{
+  /** Emitted after a successful import so the parent can refresh status-tab counts. */
+  imported: [];
+}>();
+
 onMounted(async () => {
   await Promise.all([store.loadSettings(), store.checkSmartSearchAvailability()]);
 });
@@ -33,6 +38,7 @@ async function handleImport(): Promise<void> {
         ? `Added ${working} article(s) to Working, ${dupes} to Duplicates`
         : `Added ${working} article(s) to Working list`;
     toast.show(msg, 'success');
+    emit('imported');
   }
 }
 
@@ -43,6 +49,7 @@ async function handleAddSingle(): Promise<void> {
     const result = await store.importSingle(store.selectedResult.work.id);
     if (result) {
       toast.show('Article added to Working list.', 'success');
+      emit('imported');
     }
   } catch (e: unknown) {
     toast.show(`Failed to add article: ${e}`, 'error');
@@ -156,9 +163,10 @@ async function handleAddSingle(): Promise<void> {
           <label class="action-bar__select">
             <input
               type="checkbox"
-              :checked="store.selectedCount === store.results.length && store.results.length > 0"
+              :checked="store.selectableCount > 0 && store.selectedCount === store.selectableCount"
+              :disabled="store.selectableCount === 0"
               @change="
-                store.selectedCount === store.results.length
+                store.selectedCount === store.selectableCount
                   ? store.clearSelection()
                   : store.selectAll()
               "

@@ -241,6 +241,74 @@ fn map_work_publication_date_to_date_column() {
     assert_eq!(article.date, Some("2023-05-15".to_string()));
 }
 
+/// Verify that an OpenAlex harvest response (which omits `cited_by_count`,
+/// `keywords`, and `is_retracted` from the `select` param) can still be
+/// deserialized into `OpenAlexWork` without a "missing field" error. This
+/// was the root cause of references/citations being silently dropped: the
+/// harvest `select` fields are `id,doi,title,authorships,publication_year,
+/// publication_date,primary_location,biblio,referenced_works,open_access` -
+/// NOT `cited_by_count` or `keywords`. Before the `#[serde(default)]` fix,
+/// serde failed to parse the response and the entire harvest was abandoned.
+#[test]
+fn deserialize_harvest_response_missing_fields() {
+    // This JSON mirrors the exact shape returned by the harvest endpoint
+    // (HARVEST_SELECT_FIELDS). It deliberately omits `cited_by_count`,
+    // `keywords`, `type`, and `is_retracted`.
+    let json = serde_json::json!({
+        "id": "https://openalex.org/W3016681375",
+        "doi": "https://doi.org/10.3390/ijerph17082800",
+        "title": "The COVID-19 Outbreak and Affected Countries Stock Markets Response",
+        "publication_year": 2020,
+        "publication_date": "2020-04-18",
+        "authorships": [{
+            "author_position": "first",
+            "author": {
+                "display_name": "Haiyue Liu",
+                "id": "https://openalex.org/A5102016546"
+            },
+            "institutions": [{
+                "display_name": "Sichuan University",
+                "country": "CN"
+            }]
+        }],
+        "primary_location": {
+            "source": {
+                "display_name": "International Journal of Environmental Research and Public Health",
+                "issn_l": "1660-4601",
+                "issn": ["1660-4601", "1661-7827"]
+            },
+            "landing_page_url": "https://doi.org/10.3390/ijerph17082800",
+            "pdf_url": "https://www.mdpi.com/1660-4601/17/8/2800/pdf"
+        },
+        "biblio": {
+            "volume": "17",
+            "issue": "8",
+            "first_page": "2800",
+            "last_page": "2800"
+        },
+        "referenced_works": [
+            "https://openalex.org/W1963845511",
+            "https://openalex.org/W1968456429"
+        ],
+        "open_access": {
+            "is_oa": true,
+            "oa_status": "gold",
+            "oa_url": "https://www.mdpi.com/1660-4601/17/8/2800/pdf"
+        }
+    });
+
+    let work: OpenAlexWork = serde_json::from_value(json).expect(
+        "Harvest response (missing cited_by_count/keywords) must deserialize after #[serde(default)] fix"
+    );
+
+    // The missing fields default to their zero values.
+    assert_eq!(work.cited_by_count, 0, "cited_by_count should default to 0");
+    assert!(work.keywords.is_empty(), "keywords should default to empty vec");
+    assert!(work.authorships.len() == 1, "authorships should be present");
+    assert_eq!(work.referenced_works.len(), 2, "referenced_works should be present");
+    assert_eq!(work.doi, Some("https://doi.org/10.3390/ijerph17082800".to_string()));
+}
+
 #[test]
 fn map_work_eissn_differs_from_issn_l() {
     let work = OpenAlexWork {

@@ -23,6 +23,7 @@ the PR.
 | `src-tauri/tests/openalex_mapping_test.rs::map_work_strips_doi_prefix` | `https://doi.org/10.xxx/yyy` -> `10.xxx/yyy` (lowercased) |
 | `src-tauri/tests/openalex_mapping_test.rs::map_work_publication_date_to_date_column` | `publication_date` maps to `NewArticle.date` |
 | `src-tauri/tests/openalex_mapping_test.rs::map_work_eissn_differs_from_issn_l` | `eissn` is the first ISSN != `issn_l` |
+| `src-tauri/tests/openalex_mapping_test.rs::deserialize_harvest_response_missing_fields` | Harvest response (missing `cited_by_count`/`keywords`) deserializes after `#[serde(default)]` fix |
 | `src-tauri/tests/openalex_search_test.rs::build_search_url_basic_query` | Plain query builds correct URL with `search=` param |
 | `src-tauri/tests/openalex_search_test.rs::build_search_url_has_abstract_always_on` | URL always contains `filter=has_abstract:true` |
 | `src-tauri/tests/openalex_search_test.rs::build_search_url_is_retracted_default_off` | URL contains `is_retracted:false` by default |

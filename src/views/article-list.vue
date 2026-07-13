@@ -474,7 +474,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
       />
 
       <!-- Search Tab Content (OpenAlex) -->
-      <OpenAlexSearch v-if="activeStatusTab === 'search'" />
+      <OpenAlexSearch v-if="activeStatusTab === 'search'" @imported="handleReferencesUpdated" />
 
       <!-- Toolbar (hidden on References + Search tabs) -->
       <ArticleToolbar
