@@ -29,10 +29,10 @@ export default defineConfig({
       reportsDirectory: 'coverage',
       thresholds: {
         // Ratcheted upward as coverage improves; target is 70% (see docs/CLAUDE.md).
-        statements: 25,
-        branches: 11,
-        functions: 18,
-        lines: 26,
+        statements: 35,
+        branches: 21,
+        functions: 28,
+        lines: 35,
       },
     },
   },

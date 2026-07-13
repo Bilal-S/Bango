@@ -23,11 +23,7 @@ export const MIN_CONTEXT_WINDOW_TOKENS = 16_000;
  * shared constant so any frontend gate (e.g. `isConfigured`, future readiness
  * checks) stays in sync.
  */
-export const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
-  'ollama',
-  'lmStudio',
-  'llamaCpp',
-]);
+const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set(['ollama', 'lmStudio', 'llamaCpp']);
 
 const DEFAULT_CONFIG: LlmConfig = {
   provider: 'openai',

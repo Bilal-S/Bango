@@ -183,50 +183,6 @@ export async function requestArticleAiSummary(
 }
 
 /**
- * Tier 4.4: Request a unified AI summary for an article's full text. This is
- * the recommended replacement for `requestArticleAiSummary` - it auto-routes
- * to the unified path (section calls + figure call + synthesis call) when
- * sections are detectable, and falls back to the monolithic path otherwise.
- * The user does not need to know which path ran.
- *
- * Reuses the same `article-ai-summary-complete` / `article-ai-summary-error`
- * events and the same `pendingSummaries` set as the legacy command so the
- * existing UI wiring works unchanged.
- */
-export async function requestUnifiedSummary(
-  articleId: string,
-  articleTitle: string,
-  onComplete?: (articleId: string) => Promise<void>
-) {
-  const { show } = useToast();
-  try {
-    show('Submitted for AI summary', 'info');
-    pendingSummaries.value.add(articleId);
-
-    // Register the completion callback if provided (reuses the same callback
-    // map as the legacy command - the events are identical).
-    if (onComplete) {
-      summaryCallbacks.set(articleId, onComplete);
-    }
-
-    // Fire-and-forget: the command is async and emits an event on success.
-    invoke<string>('generate_unified_summary', { articleId }).catch((e: unknown) => {
-      pendingSummaries.value.delete(articleId);
-      summaryCallbacks.delete(articleId);
-      const msg = e instanceof Error ? e.message : String(e);
-      show(`AI summary failed: ${msg}`, 'error');
-    });
-  } catch (e) {
-    pendingSummaries.value.delete(articleId);
-    summaryCallbacks.delete(articleId);
-    const msg = e instanceof Error ? e.message : String(e);
-    show(`AI summary failed: ${msg}`, 'error');
-  }
-  // Suppress unused variable warning
-  void articleTitle;
-}
-
-/**
  * Parse a raw AI summary JSON string into a structured object.
  */
 export function parseAiSummary(raw: string | null | undefined): AiSummaryData | null {

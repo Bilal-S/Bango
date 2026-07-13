@@ -154,4 +154,82 @@ describe('useBibliometrics', () => {
 
     expect(normalizeCalled).toBe(false);
   });
+
+  describe('fetchKpis', () => {
+    it('calls biblio_get_kpis and populates kpis', async () => {
+      const kpiData = {
+        includedCount: 10,
+        totalCitations: 100,
+        uniqueAuthors: 5,
+        yearFrom: 2020,
+        yearTo: 2025,
+        pubsPerYear: 2,
+        pubsByYear: [{ year: 2024, count: 5 }],
+        avgGrowthRate: 1.2,
+        refsByYear: [],
+        citationsByYear: [],
+        journalDistribution: [],
+      };
+      vi.mocked(tauriCommand).mockResolvedValueOnce(kpiData);
+
+      const { kpis, fetchKpis } = useBibliometrics();
+      await fetchKpis();
+
+      expect(tauriCommand).toHaveBeenCalledWith('biblio_get_kpis');
+      expect(kpis.value.includedCount).toBe(10);
+      expect(kpis.value.totalCitations).toBe(100);
+      expect(kpis.value.yearFrom).toBe(2020);
+      expect(kpis.value.yearTo).toBe(2025);
+    });
+
+    it('sets error on failure', async () => {
+      vi.mocked(tauriCommand).mockRejectedValueOnce(new Error('DB locked'));
+
+      const { error, fetchKpis } = useBibliometrics();
+      await fetchKpis();
+
+      expect(error.value).toBe('DB locked');
+    });
+  });
+
+  describe('fetchNeedsRefresh', () => {
+    it('returns true when backend reports stale', async () => {
+      vi.mocked(tauriCommand).mockResolvedValueOnce(true);
+
+      const { fetchNeedsRefresh } = useBibliometrics();
+      const result = await fetchNeedsRefresh();
+
+      expect(tauriCommand).toHaveBeenCalledWith('biblio_get_needs_refresh');
+      expect(result).toBe(true);
+    });
+
+    it('returns false on error', async () => {
+      vi.mocked(tauriCommand).mockRejectedValueOnce(new Error('network'));
+
+      const { error, fetchNeedsRefresh } = useBibliometrics();
+      const result = await fetchNeedsRefresh();
+
+      expect(result).toBe(false);
+      expect(error.value).toBe('network');
+    });
+  });
+
+  describe('runNormalization error path', () => {
+    it('sets error and stops normalizing when biblio_normalize fails', async () => {
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'biblio_normalize') {
+          return Promise.reject(new Error('Normalization crash'));
+        }
+        return Promise.resolve({});
+      });
+
+      const { error, normalizing, runNormalization } = useBibliometrics();
+      const normPromise = runNormalization();
+      await new Promise<void>((r) => setTimeout(r, 10));
+      await normPromise;
+
+      expect(normalizing.value).toBe(false);
+      expect(error.value).toBe('Normalization crash');
+    });
+  });
 });

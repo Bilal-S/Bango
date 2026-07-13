@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 
-export type CitationStyle = 'APA' | 'MLA' | 'Chicago' | 'IEEE' | 'AMA';
+type CitationStyle = 'APA' | 'MLA' | 'Chicago' | 'IEEE' | 'AMA';
 
 interface SavedGapAnalysis {
   gapText: string;

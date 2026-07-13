@@ -91,14 +91,6 @@ export interface OpenAlexFilters {
   showRetracted: boolean;
 }
 
-export interface OpenAlexSearchParams {
-  query: string;
-  filters: OpenAlexFilters;
-  sort: string;
-  perPage: number;
-  page: number;
-}
-
 export const DEFAULT_OPENALEX_FILTERS: OpenAlexFilters = {
   yearFrom: null,
   yearTo: null,

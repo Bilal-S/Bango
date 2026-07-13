@@ -20,7 +20,7 @@ interface ScreeningProgress {
 }
 
 /** A single audit entry or a group of import entries */
-export interface GroupedAuditEntry {
+interface GroupedAuditEntry {
   id: string;
   action: string;
   source: string;
@@ -45,9 +45,9 @@ export const initialDataLoaded = ref(false);
  *   3. `build_wiki`     - LLM ok, screening done, wiki not yet built
  *   4. `review_wiki`    - LLM ok, screening done, wiki exists
  */
-export type DashboardCtaState = 'connect_llm' | 'start_screening' | 'build_wiki' | 'review_wiki';
+type DashboardCtaState = 'connect_llm' | 'start_screening' | 'build_wiki' | 'review_wiki';
 
-export interface DashboardCta {
+interface DashboardCta {
   /** Material Symbols icon name (reused from the existing icon set). */
   icon: string;
   /** Button label. */

@@ -118,7 +118,7 @@ const WIKI_LINK_STYLES = `
  * The full export stylesheet: the real `markdown.css` (typography) + the
  * wiki-specific link/chip styles + the page chrome (layout, nav, footer).
  */
-export const STATIC_SITE_CSS = `
+const STATIC_SITE_CSS = `
 /* === markdown.css (the real in-app wiki typography) === */
 ${markdownCss}
 
@@ -252,7 +252,7 @@ article.wiki-page h1, article.article-stub h1 {
 `;
 
 /** The client-side search script (~40 lines vanilla JS). */
-export const SEARCH_JS = `// Client-side search filter for the static wiki site.
+const SEARCH_JS = `// Client-side search filter for the static wiki site.
 (async () => {
   const cards = Array.from(document.querySelectorAll('.page-card'));
   const input = document.getElementById('search-input');
@@ -318,7 +318,7 @@ export function makeSlugToHref(
 }
 
 /** Build a depth-aware `artIdToHref` resolver for the static export. */
-export function makeArtIdToHref(
+function makeArtIdToHref(
   sources: readonly WikiSourceInfo[],
   pages: readonly WikiPageSummary[],
   currentDepth: number
@@ -340,17 +340,17 @@ export function makeArtIdToHref(
 }
 
 /** Check whether a synthesis page exists for a given article UUID. */
-export function hasSynthesisPage(uuid: string, pages: readonly WikiPageSummary[]): boolean {
+function hasSynthesisPage(uuid: string, pages: readonly WikiPageSummary[]): boolean {
   return pages.some((p) => p.pageType === 'synthesis' && p.slug === uuid);
 }
 
 /** Build a `pageTitles` map (slug -> title) from the page list. */
-export function buildPageTitles(pages: readonly WikiPageSummary[]): Map<string, string> {
+function buildPageTitles(pages: readonly WikiPageSummary[]): Map<string, string> {
   return new Map(pages.map((p) => [p.slug, p.title]));
 }
 
 /** Build a `sources` map (id -> WikiSourceInfo) for the renderer. */
-export function buildSourcesMap(sources: readonly WikiSourceInfo[]): Map<string, WikiSourceInfo> {
+function buildSourcesMap(sources: readonly WikiSourceInfo[]): Map<string, WikiSourceInfo> {
   return new Map(sources.map((s) => [s.id, s]));
 }
 
@@ -470,7 +470,7 @@ export function renderArticleStub(
 }
 
 /** Render the index (landing) page: categorized nav + search box. */
-export function renderIndexHtml(ctx: ExportContext, projectTitle: string): string {
+function renderIndexHtml(ctx: ExportContext, projectTitle: string): string {
   const grouped = new Map<string, WikiPageSummary[]>();
   for (const page of ctx.pages) {
     const list = grouped.get(page.pageType) ?? [];
@@ -549,7 +549,7 @@ export function renderIndexHtml(ctx: ExportContext, projectTitle: string): strin
 }
 
 /** Gather all export context from the backend. */
-export async function gatherExportContext(): Promise<ExportContext> {
+async function gatherExportContext(): Promise<ExportContext> {
   const { useWiki } = await import('@/composables/use-wiki');
   const wiki = useWiki();
 
@@ -575,7 +575,7 @@ export async function gatherExportContext(): Promise<ExportContext> {
  * `linkArtRefsToSynthesis` (matching the in-app viewer), generates article
  * stubs, and builds the index + style + search.
  */
-export function buildExportFiles(ctx: ExportContext, projectTitle: string): ExportFile[] {
+function buildExportFiles(ctx: ExportContext, projectTitle: string): ExportFile[] {
   const files: ExportFile[] = [];
   const sourcesMap = buildSourcesMap(ctx.sources);
   const pageTitles = buildPageTitles(ctx.pages);
