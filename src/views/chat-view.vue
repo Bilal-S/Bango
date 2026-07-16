@@ -71,6 +71,7 @@ const {
   selectedArticle: detailArticle,
   auditTrail: detailAuditTrail,
   selectArticle,
+  refreshArticle,
   updateNotes,
   updateTags,
   updateLabels,
@@ -645,7 +646,7 @@ const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
         @move-article="moveArticle"
         @attach-full-text="handleAttachFullText"
         @delete-full-text="deleteFullTextAttachment"
-        @refresh-article="selectArticle"
+        @refresh-article="refreshArticle"
       />
     </Transition>
 

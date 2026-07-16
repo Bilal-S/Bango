@@ -114,6 +114,22 @@ describe('useCriteriaStore', () => {
     expect(store.initialized).toBe(false);
   });
 
+  it('invalidate resets customLogic cache so loadCustomLogic re-fetches', async () => {
+    vi.mocked(tauriCommand).mockResolvedValue('imported rules');
+    const store = useCriteriaStore();
+    // Simulate a prior load: customLogic is populated and the one-shot guard
+    // is latched (the state after visiting the Criteria view once).
+    store.customLogic = 'old rules';
+    store.customLogicLoaded = true;
+    // invalidate() must clear both so the next loadCustomLogic() fetches.
+    store.invalidate();
+    expect(store.customLogic).toBe('');
+    expect(store.customLogicLoaded).toBe(false);
+    await store.loadCustomLogic();
+    expect(tauriCommand).toHaveBeenCalledWith('get_screening_custom_logic');
+    expect(store.customLogic).toBe('imported rules');
+  });
+
   it('exposes AI assistant state', () => {
     const store = useCriteriaStore();
     expect(store.generatingInclusion).toBe(false);

@@ -120,17 +120,32 @@ const isTranslationEligible = computed(() => {
   return true;
 });
 
-// Whether this article is currently being screened (drives the Screen button
-// spinner). The screening store's progress events carry the titles of the
+// Whether this article is currently being screened according to the global
+// screening store. The store's progress events carry the titles of the
 // articles in the current batch in `currentArticleTitles`; we match against
-// the current article's title to detect the in-flight state. When screening
-// completes the article's status changes (to included/rejected/error) and the
-// Screen button auto-hides via its `v-if` condition.
+// the current article's title to detect the in-flight state.
 const isArticleBeingScreened = computed(
   () =>
     screeningStore.progress?.isRunning === true &&
     screeningStore.progress.currentArticleTitles.includes(props.article.title)
 );
+
+// Local in-flight flag: set synchronously on click (before any progress event
+// arrives) and cleared only once the article prop reflects the post-screening
+// state (status changed / screenedAt set / screeningError set). This closes
+// two gaps in the title-match-only approach:
+//   1. At click time the optimistic progress has `currentArticleTitles: []`,
+//      so without this flag the button would briefly look enabled + spinnerless
+//      until the backend's first progress event arrives with the title.
+//   2. After the run completes (isRunning flips false) but before the parent's
+//      refresh IPC resolves, `props.article` still shows the old (working,
+//      unscreened) state. Without this flag the button would briefly look
+//      enabled during that refresh gap.
+const isScreening = ref(false);
+
+// The combined disabled/spinner state: true from the click moment until the
+// article prop is confirmed updated post-screening.
+const isScreeningInProgress = computed(() => isScreening.value || isArticleBeingScreened.value);
 
 // Whether the Screen button should be shown (article is in the working list,
 // unscreened, not in error state, and LLM is configured). The button auto-hides
@@ -142,6 +157,31 @@ const canScreenArticle = computed(
     !props.article.screeningError &&
     !props.article.screenedAt &&
     isLlmConfigured.value
+);
+
+// Reset the local flag once the article prop reflects a post-screening state.
+// This is the primary completion trigger and fires after the parent's
+// `refreshArticle` IPC resolves and updates `props.article`.
+watch(
+  () => [props.article.status, props.article.screenedAt, props.article.screeningError] as const,
+  ([status, screenedAt, screeningError]) => {
+    if (isScreening.value && (status !== 'working' || screenedAt || screeningError)) {
+      isScreening.value = false;
+    }
+  }
+);
+
+// Backup completion trigger: if the global screening run ends but the article
+// prop hasn't updated yet (e.g. the refresh IPC is slow or fails), re-emit
+// `refreshArticle` so the parent retries the fetch. When the article prop
+// eventually updates, the watcher above clears `isScreening`.
+watch(
+  () => screeningStore.progress?.isRunning ?? false,
+  (isRunning, wasRunning) => {
+    if (isScreening.value && wasRunning === true && isRunning === false) {
+      emit('refreshArticle', props.article.id);
+    }
+  }
 );
 
 // Determine the file type icon based on filename
@@ -169,6 +209,17 @@ function handleRequestAiSummary(): void {
   requestArticleAiSummary(props.article.id, props.article.title, async (articleId: string) => {
     emit('refreshArticle', articleId);
   });
+}
+
+/**
+ * Screen button click handler: set the local in-flight flag synchronously so
+ * the button disables + shows the spinner immediately (before any progress
+ * event arrives), then emit `screenArticle` for the parent to invoke the
+ * backend command.
+ */
+function handleScreenClick(): void {
+  isScreening.value = true;
+  emit('screenArticle', props.article.id);
 }
 
 // Audit trail expand/collapse state
@@ -434,17 +485,17 @@ const {
              included/rejected/error or screenedAt gets set). -->
         <button
           v-if="canScreenArticle"
-          :disabled="isArticleBeingScreened"
+          :disabled="isScreeningInProgress"
           class="inline-flex items-center gap-1.5 bg-indigo-600 text-white px-4 py-2 rounded-lg font-semibold text-sm hover:bg-indigo-700 active:scale-95 transition-all shadow-sm cursor-pointer disabled:opacity-60 disabled:cursor-wait"
           :title="
-            isArticleBeingScreened
+            isScreeningInProgress
               ? 'Screening in progress...'
               : 'Submit this article to the AI screening pipeline'
           "
-          @click="emit('screenArticle', article.id)"
+          @click="handleScreenClick"
         >
           <span
-            v-if="isArticleBeingScreened"
+            v-if="isScreeningInProgress"
             class="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin"
           />
           <span v-else class="material-symbols-outlined text-[16px]">psychology</span>

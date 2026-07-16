@@ -109,6 +109,11 @@ export const useCriteriaStore = defineStore('criteria', () => {
     inclusionCriteria.value = [];
     exclusionCriteria.value = [];
     initialized.value = false;
+    // Reset the custom-logic cache so a project import / reset re-fetches the
+    // value from the backend instead of short-circuiting on the one-shot
+    // `customLogicLoaded` guard in `loadCustomLogic`.
+    customLogic.value = '';
+    customLogicLoaded.value = false;
   }
 
   /** Re-fetch from backend without clearing arrays first (preserves scroll position). */

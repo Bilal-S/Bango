@@ -835,6 +835,74 @@ describe('useArticleSearch', () => {
     });
   });
 
+  // ── refreshArticle ─────────────────────────────────────────────────
+  describe('refreshArticle', () => {
+    it('fetches the article, patches the articles list row, and fetches counts', async () => {
+      // Simulate a screening decision: article was `working`, refresh returns
+      // `included` with a screenedAt timestamp.
+      const fresh = {
+        ...sampleArticles[0]!,
+        status: 'included' as const,
+        screenedAt: '2024-02-03',
+        aiConfidence: 0.92,
+      };
+      vi.mocked(tauriCommand).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        if (cmd === 'get_article') {
+          const id = args?.id as string;
+          return id === 'a1' ? Promise.resolve(fresh) : Promise.resolve(sampleArticles[0]);
+        }
+        if (cmd === 'get_audit_trail') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+
+      const { search, selectArticle, refreshArticle, articles, selectedArticle } =
+        useArticleSearch();
+      await search();
+      await selectArticle('a1');
+
+      // Pre-condition: the table row shows the old status
+      expect(articles.value.find((a) => a.id === 'a1')?.status).toBe('working');
+
+      await refreshArticle('a1');
+
+      // selectedArticle reflects the fresh fetch
+      expect(selectedArticle.value?.status).toBe('included');
+      expect(selectedArticle.value?.screenedAt).toBe('2024-02-03');
+
+      // The articles list row is patched (so the table color bar updates)
+      expect(articles.value.find((a) => a.id === 'a1')?.status).toBe('included');
+      expect(articles.value.find((a) => a.id === 'a1')?.screenedAt).toBe('2024-02-03');
+
+      // Counts were fetched (tab badges refresh)
+      expect(tauriCommand).toHaveBeenCalledWith('get_article_counts', {});
+    });
+
+    it('is a no-op for the articles list when the article is not in the list', async () => {
+      vi.mocked(tauriCommand).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        if (cmd === 'get_article') {
+          const id = args?.id as string;
+          return Promise.resolve({ ...sampleArticles[0]!, id, status: 'included' as const });
+        }
+        if (cmd === 'get_audit_trail') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+
+      const { search, refreshArticle, articles, selectedArticle } = useArticleSearch();
+      await search();
+
+      // Refresh an article id that is NOT in the current list - syncArticleToList
+      // should find no index and leave the list unchanged.
+      await refreshArticle('nonexistent');
+      expect(selectedArticle.value?.id).toBe('nonexistent');
+      // The list is unchanged (still the original sampleArticles)
+      expect(articles.value).toEqual(sampleArticles);
+    });
+  });
+
   // ── Navigation ─────────────────────────────────────────────────────
   describe('navigatePrev / navigateNext', () => {
     it('navigateNext selects the next article on the same page', async () => {

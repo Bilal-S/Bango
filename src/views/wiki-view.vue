@@ -45,6 +45,7 @@ const {
   selectedArticle: detailArticle,
   auditTrail: detailAuditTrail,
   selectArticle,
+  refreshArticle,
   updateNotes,
   updateTags,
   updateLabels,
@@ -754,7 +755,7 @@ watch(searchQuery, (q) => {
         @move-article="moveArticle"
         @attach-full-text="handleAttachFullText"
         @delete-full-text="deleteFullTextAttachment"
-        @refresh-article="selectArticle"
+        @refresh-article="refreshArticle"
       />
     </Transition>
   </div>

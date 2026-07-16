@@ -70,6 +70,7 @@ const {
   selectedArticle: detailArticle,
   auditTrail: detailAuditTrail,
   selectArticle,
+  refreshArticle,
   updateNotes,
   updateTags,
   updateLabels,
@@ -484,7 +485,7 @@ async function onResetAnalysis() {
         @move-article="moveArticle"
         @attach-full-text="handleAttachFullText"
         @delete-full-text="deleteFullTextAttachment"
-        @refresh-article="selectArticle"
+        @refresh-article="refreshArticle"
       />
     </Transition>
   </div>

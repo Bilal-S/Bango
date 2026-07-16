@@ -299,6 +299,22 @@ export function useArticleSearch() {
     }
   }
 
+  /**
+   * Refresh the article detail + table row after an operation that changes the
+   * article without going through the explicit status-move path (e.g. AI
+   * screening completion, AI summary generation, translation). Mirrors what
+   * `moveArticle` does for the table: re-fetch the article (updates
+   * `selectedArticle`), patch the articles list row so the table redraws (e.g.
+   * the status color bar updates), and refresh status tab counts in the
+   * background. Falls back to `selectArticle` if the article is no longer in
+   * the list (e.g. status changed + filter excludes it).
+   */
+  async function refreshArticle(id: string): Promise<void> {
+    await selectArticle(id);
+    syncArticleToList(id);
+    void fetchCounts();
+  }
+
   async function moveArticle(
     id: string,
     newStatus: string
@@ -584,6 +600,7 @@ export function useArticleSearch() {
     search,
     fetchCounts,
     selectArticle,
+    refreshArticle,
     moveArticle,
     updateNotes,
     updateTags,

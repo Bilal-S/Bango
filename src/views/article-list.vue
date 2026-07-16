@@ -50,6 +50,7 @@ const {
   navigatePrev,
   navigateNext,
   moveArticle,
+  refreshArticle,
   updateNotes,
   updateTags,
   updateLabels,
@@ -624,7 +625,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
       @attach-full-text="handleAttachFullText"
       @delete-full-text="handleDeleteFullText"
       @read-full-text="handleReadFullText"
-      @refresh-article="selectArticle"
+      @refresh-article="refreshArticle"
       @article-promoted="handleArticlePromoted"
       @references-updated="handleReferencesUpdated"
     />
