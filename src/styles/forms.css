@@ -331,6 +331,68 @@
   font-size: 18px;
 }
 
+/* Compact primary button for inline "Add" affordances next to inputs
+   (e.g. criteria editor, Tags & Labels panels). Promoted from the
+   scoped copy in `criteria-editor.vue` so the Tags & Labels panel
+   component can reuse it. */
+.btn-primary-sm {
+  flex-shrink: 0;
+  padding: 0.5rem 1rem;
+  background-color: var(--color-primary, #3525cd);
+  color: var(--color-on-primary, #ffffff);
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--radius-lg, 0.5rem);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.btn-primary-sm:hover:not(:disabled) {
+  background-color: var(--color-primary-container, #4f46e5);
+}
+
+.btn-primary-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* AI action button - the canonical purple "AI" affordance used across
+   the app (Suggest / Generate / Critique / Smart Search). Promoted from
+   the scoped copy in `criteria-editor.vue` so all AI buttons read as one
+   family. Comment in `criteria-editor.vue` reads: "AI button - matches
+   Tags & Labels pattern". */
+.ai-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background-color: #e8def8;
+  color: #4a1564;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid #c8aee6;
+  border-radius: var(--radius-lg, 0.5rem);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+}
+
+.ai-btn:hover:not(:disabled) {
+  background-color: #d8c8f0;
+}
+
+.ai-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ai-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
 /* ── Spinner ── */
 .spinner {
   animation: spin 1s linear infinite;
