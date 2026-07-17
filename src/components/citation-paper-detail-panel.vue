@@ -71,9 +71,10 @@
             <p class="text-[10px] text-slate-400 uppercase tracking-wide">Cited by</p>
             <p
               v-if="paper.numCited > 0 && citingPapers.length === 0"
-              class="text-[9px] text-slate-400 lowercase mt-0.5 leading-none"
+              class="text-[9px] mt-0.5 leading-none"
+              :class="paper.unmatched ? 'text-slate-400 lowercase' : 'text-amber-600'"
             >
-              (no details available)
+              {{ paper.unmatched ? '(no details available)' : 'not in graph' }}
             </p>
           </div>
           <div class="flex-1 bg-slate-50 rounded-lg px-2.5 py-1.5 text-center">
@@ -81,11 +82,29 @@
             <p class="text-[10px] text-slate-400 uppercase tracking-wide">References</p>
             <p
               v-if="paper.numReferences > 0 && citedPapers.length === 0"
-              class="text-[9px] text-slate-400 lowercase mt-0.5 leading-none"
+              class="text-[9px] mt-0.5 leading-none"
+              :class="paper.unmatched ? 'text-slate-400 lowercase' : 'text-amber-600'"
             >
-              (no details available)
+              {{ paper.unmatched ? '(no details available)' : 'not in graph' }}
             </p>
           </div>
+        </div>
+
+        <!-- Hint: references/citations exist but aren't matched to included articles -->
+        <div
+          v-if="hasHiddenDetails"
+          class="mt-2 flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5"
+        >
+          <span class="material-symbols-outlined text-[12px] text-amber-500 shrink-0">info</span>
+          <p class="text-[10px] text-amber-800 leading-snug">
+            {{ hiddenSummary }}
+            <button
+              class="text-amber-700 hover:text-amber-900 font-semibold underline cursor-pointer"
+              @click="$emit('open-linked-record', paper.id)"
+            >
+              View in article
+            </button>
+          </p>
         </div>
 
         <!-- Isolation controls -->
@@ -220,6 +239,53 @@ const props = defineProps<{
 const onMainPath = computed(
   () => !!props.paper && !!props.mainPathNodes && props.mainPathNodes.has(props.paper.id)
 );
+
+/**
+ * Number of reference papers (outgoing) that exist on the article but are not
+ * rendered as in-graph edges (because they aren't matched to other included
+ * articles). Only applies to matched (real article) nodes; unmatched leaves
+ * always show "(no details available)" since they have no linked papers.
+ */
+const hiddenReferenceCount = computed(() => {
+  if (!props.paper || props.paper.unmatched) return 0;
+  return Math.max(0, props.paper.numReferences - props.citedPapers.length);
+});
+
+/** Number of citing papers (incoming) that exist but aren't in-graph edges. */
+const hiddenCitationCount = computed(() => {
+  if (!props.paper || props.paper.unmatched) return 0;
+  return Math.max(0, props.paper.numCited - props.citingPapers.length);
+});
+
+/**
+ * True when the selected matched article has reference/citation papers that
+ * aren't visible in the graph (they exist in the DB but weren't matched to
+ * other included articles, so no edge was drawn).
+ */
+const hasHiddenDetails = computed(
+  () => hiddenReferenceCount.value > 0 || hiddenCitationCount.value > 0
+);
+
+/** Human-readable summary of the hidden references/citations. */
+const hiddenSummary = computed(() => {
+  const parts: string[] = [];
+  if (hiddenReferenceCount.value > 0) {
+    parts.push(
+      `${hiddenReferenceCount.value} reference${hiddenReferenceCount.value === 1 ? '' : 's'}`
+    );
+  }
+  if (hiddenCitationCount.value > 0) {
+    parts.push(
+      `${hiddenCitationCount.value} citation${hiddenCitationCount.value === 1 ? '' : 's'}`
+    );
+  }
+  if (parts.length === 0) return '';
+  const noun =
+    parts.length === 1
+      ? parts[0]!
+      : parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1]!;
+  return `${noun} not shown in graph (not matched to included articles).`;
+});
 
 /** Whether ancestry isolation is active for the currently-selected paper. */
 const isAncestryActive = computed(
