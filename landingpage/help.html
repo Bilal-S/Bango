@@ -448,6 +448,7 @@
         gap: 0.75rem;
         align-items: center;
         margin-bottom: 0.75rem;
+        flex-wrap: wrap;
       }
       .lai-card__icon {
         font-size: 24px;
@@ -531,6 +532,154 @@
         font-size: 18px;
         color: #ca8a04;
         flex-shrink: 0;
+      }
+
+      /* Free AI section shells + extras */
+      .lai-section {
+        margin-bottom: 2rem;
+      }
+      .lai-section__header {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+        border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 0.75rem;
+        margin-bottom: 1rem;
+      }
+      .lai-section__icon {
+        font-size: 28px;
+        color: #4f46e5;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+      .lai-section__title {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: #0f172a;
+        margin: 0 0 0.25rem 0;
+      }
+      .lai-section__subtitle {
+        font-size: 0.875rem;
+        color: #64748b;
+        line-height: 1.625;
+        margin: 0;
+      }
+      .lai-divider {
+        border: none;
+        border-top: 1px solid #e2e8f0;
+        margin: 2rem 0;
+      }
+
+      /* Free-AI badges */
+      .lai-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        line-height: 1.625;
+        white-space: nowrap;
+      }
+      .lai-badge--ongoing {
+        background-color: #dcfce7;
+        color: #166534;
+        border: 1px solid #86efac;
+      }
+      .lai-badge--trial {
+        background-color: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fcd34d;
+      }
+
+      /* Free-AI card details */
+      .lai-card__points {
+        margin: 0 0 0.75rem 0;
+        padding-left: 1.25rem;
+      }
+      .lai-card__points li {
+        font-size: 0.875rem;
+        color: #475569;
+        line-height: 1.625;
+        margin-bottom: 0.5rem;
+      }
+      .lai-card__points li:last-child {
+        margin-bottom: 0;
+      }
+      .lai-card__models {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-start;
+        background-color: #eef2ff;
+        border: 1px solid #c7d2fe;
+        border-radius: 0.375rem;
+        padding: 0.75rem;
+        font-size: 0.8125rem;
+        color: #3730a3;
+        line-height: 1.625;
+        margin: 0 0 0.75rem 0;
+      }
+      .lai-card__models-icon {
+        font-size: 18px;
+        color: #4f46e5;
+        flex-shrink: 0;
+      }
+      .lai-card__link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        color: #4f46e5;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.875rem;
+      }
+      .lai-card__link:hover {
+        text-decoration: underline;
+      }
+      .lai-card__link .material-symbols-outlined {
+        font-size: 16px;
+      }
+
+      /* Free-AI how-to callout */
+      .lai-howto {
+        display: flex;
+        gap: 1rem;
+        align-items: flex-start;
+        background-color: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 0.75rem;
+        padding: 1.25rem;
+        margin-top: 1.5rem;
+      }
+      .lai-howto__icon {
+        font-size: 22px;
+        color: #b45309;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+      .lai-howto__title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #0f172a;
+        margin: 0 0 0.5rem 0;
+      }
+      .lai-howto__steps {
+        margin: 0;
+        padding-left: 1.25rem;
+      }
+      .lai-howto__steps li {
+        font-size: 0.875rem;
+        color: #475569;
+        line-height: 1.625;
+        margin-bottom: 0.5rem;
+      }
+      .lai-howto__steps li:last-child {
+        margin-bottom: 0;
+      }
+      @media (max-width: 767px) {
+        .lai-howto {
+          flex-direction: column;
+        }
       }
 
       /* Reference sections */
@@ -859,7 +1008,7 @@
               <span class="material-symbols-outlined help-tabs__icon">build</span> Troubleshooting
             </button>
             <button class="help-tabs__btn" role="tab" data-tab="local-ai" aria-selected="false">
-              <span class="material-symbols-outlined help-tabs__icon">smart_toy</span> Local AI
+              <span class="material-symbols-outlined help-tabs__icon">smart_toy</span> Local & Free AI
             </button>
             <button class="help-tabs__btn" role="tab" data-tab="reference" aria-selected="false">
               <span class="material-symbols-outlined help-tabs__icon">library_books</span> Reference
@@ -1218,7 +1367,7 @@
           <!-- ================================================================ -->
           <div class="ht-panel" id="panel-biblio" role="tabpanel" hidden>
             <div class="ht-intro">
-              <h2 class="ht-intro__title">Understanding Bibliometrics</h2>
+              <h2 class="ht-intro__title">Bibliometrics</h2>
               <p class="ht-intro__desc">
                 Bibliometrics is the statistical analysis of books, articles, and other scholarly
                 publications. It helps researchers map scientific fields, trace citation pathways,
@@ -2181,14 +2330,305 @@
           <!-- TAB 4: LOCAL AI -->
           <!-- ================================================================ -->
           <div class="ht-panel" id="panel-local-ai" role="tabpanel" hidden>
+            <!-- Top-level intro -->
             <div class="ht-intro">
-              <h2 class="ht-intro__title">Local AI Setup Guide</h2>
+              <h2 class="ht-intro__title">Local & Free AI</h2>
               <p class="ht-intro__desc">
-                You can run AI models entirely on your own hardware for full privacy, zero API
-                costs, and offline operation. This guide covers the tools, hardware, and
-                configuration you need to get started.
+                Bango can use either a <strong>cloud LLM provider</strong> or a <strong>model
+                running on your own hardware</strong>. This page covers both options: free cloud API
+                keys you can get in minutes, and a complete guide to running models locally for full
+                privacy and zero per-request cost.
               </p>
             </div>
+
+            <!-- ===================== SECTION 1: FREE AI ===================== -->
+            <section class="lai-section">
+              <header class="lai-section__header">
+                <span class="material-symbols-outlined lai-section__icon">cloud</span>
+                <div>
+                  <h3 class="lai-section__title">Free AI</h3>
+                  <p class="lai-section__subtitle">
+                    Get started in minutes with a free API key from a cloud provider. All five
+                    providers below are built into Bango's provider list - no custom endpoints to
+                    configure.
+                  </p>
+                </div>
+              </header>
+
+              <div class="lai-list">
+                <!-- Google -->
+                <div class="lai-card">
+                  <div class="lai-card__header">
+                    <span class="material-symbols-outlined lai-card__icon">auto_awesome</span>
+                    <h3 class="lai-card__title">Google AI Studio (Gemini)</h3>
+                    <span class="lai-badge lai-badge--ongoing"
+                      >Ongoing free tier &middot; Never expires</span
+                    >
+                  </div>
+                  <p class="lai-card__intro">
+                    Rate-limited access to the Gemini family (including Gemini 1.5 / 2.0 Flash and
+                    Pro) through Google AI Studio. The most generous ongoing free tier available,
+                    with very large context windows well-suited to Bango.
+                  </p>
+                  <ul class="lai-card__points">
+                    <li>Go to Google AI Studio and sign in with a Google account.</li>
+                    <li>In the top bar (or left sidebar) click &ldquo;Get API key&rdquo; &rarr; &ldquo;Create API key&rdquo;.</li>
+                    <li>Copy the generated key (it starts with AIza...).</li>
+                    <li>
+                      Free-tier requests may be used by Google to improve products; switch to a paid
+                      billing plan if you need a no-training data guarantee.
+                    </li>
+                  </ul>
+                  <p class="lai-card__models">
+                    <span class="material-symbols-outlined lai-card__models-icon">model_training</span>
+                    Recommended for Bango: gemini-1.5-flash or gemini-2.0-flash (fast, cheap, large
+                    context). Use gemini-1.5-pro for harder reasoning at lower throughput.
+                  </p>
+                  <a
+                    class="lai-card__link"
+                    href="https://aistudio.google.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    ><span class="material-symbols-outlined">open_in_new</span> aistudio.google.com</a
+                  >
+                </div>
+
+                <!-- Mistral -->
+                <div class="lai-card">
+                  <div class="lai-card__header">
+                    <span class="material-symbols-outlined lai-card__icon">bolt</span>
+                    <h3 class="lai-card__title">Mistral AI (La Plateforme)</h3>
+                    <span class="lai-badge lai-badge--ongoing"
+                      >Ongoing free tier (Experiment) &middot; Never expires</span
+                    >
+                  </div>
+                  <p class="lai-card__intro">
+                    The Experiment tier gives rate-limited access to all Mistral models, including
+                    the open-weight and &ldquo;open-mistral-&rdquo; series. A solid always-on option
+                    with no expiry.
+                  </p>
+                  <ul class="lai-card__points">
+                    <li>Create an account at console.mistral.ai (La Plateforme).</li>
+                    <li>Navigate to API Keys and generate a new key.</li>
+                    <li>Copy the key.</li>
+                    <li>
+                      The Experiment tier is intended for prototyping; throughput (requests per
+                      minute) is capped and may change over time.
+                    </li>
+                  </ul>
+                  <p class="lai-card__models">
+                    <span class="material-symbols-outlined lai-card__models-icon">model_training</span>
+                    Recommended for Bango: open-mistral-nemo or mistral-small-latest. Both have a
+                    context window large enough for abstract screening.
+                  </p>
+                  <a
+                    class="lai-card__link"
+                    href="https://console.mistral.ai"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    ><span class="material-symbols-outlined">open_in_new</span> console.mistral.ai</a
+                  >
+                </div>
+
+                <!-- Z.AI -->
+                <div class="lai-card">
+                  <div class="lai-card__header">
+                    <span class="material-symbols-outlined lai-card__icon">flash_on</span>
+                    <h3 class="lai-card__title">Z.AI (GLM)</h3>
+                    <span class="lai-badge lai-badge--ongoing"
+                      >Ongoing free tier &middot; Never expires</span
+                    >
+                  </div>
+                  <p class="lai-card__intro">
+                    Z.AI offers free access to specific lightweight GLM models (such as GLM-4-Flash /
+                    GLM-4.5-Flash) via an OpenAI-compatible API. A good choice for cost-free
+                    screening runs.
+                  </p>
+                  <ul class="lai-card__points">
+                    <li>Sign up at z.ai and verify your account.</li>
+                    <li>Open the API / API Keys section of the console and create a key.</li>
+                    <li>Copy the key.</li>
+                    <li>
+                      In Bango, choose the built-in &ldquo;z.ai&rdquo; provider; only the
+                      whitelisted free models are complimentary.
+                    </li>
+                  </ul>
+                  <p class="lai-card__models">
+                    <span class="material-symbols-outlined lai-card__models-icon">model_training</span>
+                    Recommended for Bango: glm-4-flash or glm-4.5-flash (free). Confirm the current
+                    free-model list in the Z.AI console before large runs.
+                  </p>
+                  <a
+                    class="lai-card__link"
+                    href="https://z.ai"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    ><span class="material-symbols-outlined">open_in_new</span> z.ai</a
+                  >
+                </div>
+
+                <!-- OpenAI -->
+                <div class="lai-card">
+                  <div class="lai-card__header">
+                    <span class="material-symbols-outlined lai-card__icon">redeem</span>
+                    <h3 class="lai-card__title">OpenAI</h3>
+                    <span class="lai-badge lai-badge--trial"
+                      >One-time sign-up credit &middot; Expires in ~3 months</span
+                    >
+                  </div>
+                  <p class="lai-card__intro">
+                    New OpenAI accounts receive a small one-time credit (about $5) that is valid for
+                    roughly three months. Useful for trying Bango end-to-end, but not a long-term
+                    free option.
+                  </p>
+                  <ul class="lai-card__points">
+                    <li>
+                      Create an account at platform.openai.com and add a phone number for
+                      verification.
+                    </li>
+                    <li>The sign-up credit appears on the Billing &rarr; Usage page.</li>
+                    <li>Generate an API key under API Keys &rarr; Create new secret key.</li>
+                    <li>
+                      Once the credit is spent or expires, you are billed per token. Set a monthly
+                      spending limit if you keep the key active.
+                    </li>
+                  </ul>
+                  <p class="lai-card__models">
+                    <span class="material-symbols-outlined lai-card__models-icon">model_training</span>
+                    Recommended for Bango: gpt-4o-mini (cheapest). Use gpt-4o for higher-quality
+                    reasoning when budget allows.
+                  </p>
+                  <a
+                    class="lai-card__link"
+                    href="https://platform.openai.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    ><span class="material-symbols-outlined">open_in_new</span>
+                    platform.openai.com</a
+                  >
+                </div>
+
+                <!-- Anthropic -->
+                <div class="lai-card">
+                  <div class="lai-card__header">
+                    <span class="material-symbols-outlined lai-card__icon">redeem</span>
+                    <h3 class="lai-card__title">Anthropic</h3>
+                    <span class="lai-badge lai-badge--trial"
+                      >One-time sign-up credit &middot; Limited time</span
+                    >
+                  </div>
+                  <p class="lai-card__intro">
+                    New Anthropic console accounts occasionally receive a small promotional credit
+                    (about $5) valid for a limited time. Handy for an initial screening run, after
+                    which billing applies.
+                  </p>
+                  <ul class="lai-card__points">
+                    <li>Create an account at console.anthropic.com and verify your phone number.</li>
+                    <li>Check the Billing / Credits section for any promotional balance.</li>
+                    <li>Generate an API key under API Keys &rarr; Create Key.</li>
+                    <li>
+                      Promotional credit availability and expiry vary by region and over time;
+                      confirm on the Billing page.
+                    </li>
+                  </ul>
+                  <p class="lai-card__models">
+                    <span class="material-symbols-outlined lai-card__models-icon">model_training</span>
+                    Recommended for Bango: claude-3-5-haiku-latest (cheapest, fast). Use a
+                    claude-sonnet variant for stronger reasoning.
+                  </p>
+                  <a
+                    class="lai-card__link"
+                    href="https://console.anthropic.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    ><span class="material-symbols-outlined">open_in_new</span>
+                    console.anthropic.com</a
+                  >
+                </div>
+              </div>
+
+              <!-- Comparison table -->
+              <div class="ht-table-wrapper">
+                <table class="ht-table">
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Ongoing Free Tier</th>
+                      <th>Included Access</th>
+                      <th>Expiration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><strong>Google</strong></td>
+                      <td>Yes</td>
+                      <td>Rate-limited access to Gemini models via AI Studio</td>
+                      <td>Never</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Mistral AI</strong></td>
+                      <td>Yes</td>
+                      <td>Rate-limited access to all models via Experiment tier</td>
+                      <td>Never</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Z.AI</strong></td>
+                      <td>Yes</td>
+                      <td>Access to specific lightweight models (e.g., GLM-4.5-Flash)</td>
+                      <td>Never</td>
+                    </tr>
+                    <tr>
+                      <td><strong>OpenAI</strong></td>
+                      <td>No</td>
+                      <td>One-time $5 sign-up credit</td>
+                      <td>~3 months</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Anthropic</strong></td>
+                      <td>No</td>
+                      <td>One-time $5 sign-up credit</td>
+                      <td>Limited time</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- How to use a free key in Bango -->
+              <div class="lai-howto">
+                <span class="material-symbols-outlined lai-howto__icon">settings</span>
+                <div>
+                  <h4 class="lai-howto__title">Use a free key in Bango</h4>
+                  <ol class="lai-howto__steps">
+                    <li>Open <strong>Settings</strong> from the sidebar.</li>
+                    <li>
+                      Under <strong>AI Provider</strong>, select the matching provider (e.g.
+                      &ldquo;Google Gemini&rdquo; or &ldquo;Mistral AI&rdquo;).
+                    </li>
+                    <li>Paste your API key and (optionally) pick a model from the list.</li>
+                    <li>
+                      Click <strong>Test Connection</strong>. If it succeeds, you are ready to run AI
+                      screening, summaries, and chat.
+                    </li>
+                  </ol>
+                </div>
+              </div>
+            </section>
+
+            <hr class="lai-divider" />
+
+            <!-- ===================== SECTION 2: LOCAL AI SETUP GUIDE ===================== -->
+            <section class="lai-section">
+              <header class="lai-section__header">
+                <span class="material-symbols-outlined lai-section__icon">smart_toy</span>
+                <div>
+                  <h3 class="lai-section__title">Local AI Setup Guide</h3>
+                  <p class="lai-section__subtitle">
+                    You can run AI models entirely on your own hardware for full privacy, zero API
+                    costs, and offline operation. This guide covers the tools, hardware, and
+                    configuration you need to get started.
+                  </p>
+                </div>
+              </header>
 
             <div id="lai-list">
               <div class="lai-card">
@@ -2485,6 +2925,7 @@
                 </ul>
               </div>
             </div>
+            </section>
           </div>
 
           <!-- ================================================================ -->
@@ -3436,7 +3877,7 @@ ER  - </pre
                       style="color: #4f46e5; text-decoration: none; font-weight: 600"
                       onmouseover="this.style.textDecoration = 'underline'"
                       onmouseout="this.style.textDecoration = 'none'"
-                      >Understanding Bibliometrics</a
+                      >Bibliometrics</a
                     >
                     help tab for detailed explanations and use cases for each module.
                   </p>

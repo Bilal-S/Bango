@@ -5,7 +5,7 @@ import '@/styles/help-shared.css';
 const router = useRouter();
 
 /**
- * Understanding Bibliometrics tab.
+ * Bibliometrics tab.
  *
  * Documents all six completed bibliometric analysis modules with concept,
  * implementation details, key controls, and use cases. Content is sourced from
@@ -17,7 +17,7 @@ const router = useRouter();
   <div class="ht-biblio" role="tabpanel">
     <!-- Intro -->
     <section class="ht-intro">
-      <h2 class="ht-intro__title">Understanding Bibliometrics</h2>
+      <h2 class="ht-intro__title">Bibliometrics</h2>
       <p class="ht-intro__desc">
         Bibliometrics is the statistical analysis of books, articles, and other scholarly
         publications. It helps researchers map scientific fields, trace citation pathways, quantify
@@ -35,23 +35,6 @@ const router = useRouter();
         >). Before any module can display results, you must run <strong>Refresh</strong> from the
         Bibliometrics dashboard once to build the analytical data layer.
       </p>
-    </section>
-
-    <!-- Prerequisite callout -->
-    <section class="ht-biblio__callout">
-      <div class="ht-biblio__callout-card">
-        <span class="material-symbols-outlined ht-biblio__callout-icon">play_circle</span>
-        <div>
-          <h4 class="ht-biblio__callout-title">Getting Started</h4>
-          <p class="ht-biblio__callout-desc">
-            Open <strong>Bibliometrics</strong> in the sidebar and click the
-            <strong>Normalize</strong>
-            button. This single transaction parses authors, institutions, terms, and citation links
-            from your active metadata. After it completes, all six analysis modules become available
-            from the dashboard tiles.
-          </p>
-        </div>
-      </div>
     </section>
 
     <!-- =========================================================== -->
@@ -650,11 +633,6 @@ const router = useRouter();
 </template>
 
 <style scoped>
-.ht-biblio {
-  /* Container; uses shared .ht-* intro/footer/about classes */
-}
-
-/* Callout (getting started) */
 .ht-biblio__callout {
   margin-bottom: var(--space-6);
 }

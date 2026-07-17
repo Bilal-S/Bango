@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { watch, ref, computed, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
 import { formatLlmError } from '@/utils/llm-error';
+
+const router = useRouter();
 
 const {
   config,
@@ -18,6 +21,18 @@ const {
 } = useLlmConfig();
 
 const showRawError = ref(false);
+
+/**
+ * Deep-link to the relevant section of the Local & Free AI help tab.
+ * Cloud/network providers -> Free AI section; local providers -> Local AI Setup Guide.
+ */
+function goToProviderHelp(): void {
+  router.push({
+    path: '/help',
+    query: { tab: 'local-ai' },
+    hash: isLocalProvider() ? '#local-ai-setup' : '#free-ai',
+  });
+}
 
 // Max Context Tokens inline editing
 const editingContextTokens = ref(false);
@@ -392,6 +407,16 @@ watch(
                 </a>
               </div>
             </template>
+          </div>
+
+          <!-- Provider-specific help link -->
+          <div class="provider-card__help-link-row">
+            <a class="provider-card__help-link" @click.prevent="goToProviderHelp">
+              <span class="material-symbols-outlined" style="font-size: 14px; margin-right: 4px"
+                >help_outline</span
+              >
+              {{ isLocalProvider() ? 'Setting up local AI' : 'How to get free limited API access' }}
+            </a>
           </div>
         </div>
       </div>
@@ -776,6 +801,27 @@ watch(
 
 .provider-card__raw-toggle:hover {
   opacity: 1;
+  text-decoration: underline;
+}
+
+/* Provider-specific help link (below test-result/error feedback) */
+.provider-card__help-link-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
+.provider-card__help-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-primary, #4f46e5);
+  font-weight: 500;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.provider-card__help-link:hover {
   text-decoration: underline;
 }
 </style>

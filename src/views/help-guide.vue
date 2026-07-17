@@ -22,7 +22,7 @@ function syncHash(): void {
 
 /**
  * Deep-link handler: `/help?tab=<id>` selects the tab; `#hash` is forwarded to
- * the active tab (currently only the Reference tab consumes it for scroll-spy).
+ * the active tab so it can deep-link scroll (Reference and Local AI tabs consume it).
  */
 onMounted(() => {
   const tab = route.query.tab as string | undefined;
@@ -72,7 +72,7 @@ watch(activeTab, () => {
 });
 
 /**
- * Switch to a help tab from a child component (e.g. the "Understanding Bibliometrics"
+ * Switch to a help tab from a child component (e.g. the "Bibliometrics"
  * link inside the Reference tab). Behaves identically to clicking the tab button:
  * updates `activeTab` directly (no route navigation) so the existing watcher scrolls
  * the container to the top of the new tab's content. This keeps the action idempotent
@@ -123,7 +123,7 @@ function handleSwitchTab(tab: string): void {
         @click="activeTab = 'biblio'"
       >
         <span class="material-symbols-outlined help-tabs__icon">hub</span>
-        Understanding Bibliometrics
+        Bibliometrics
       </button>
       <button
         class="help-tabs__btn"
@@ -143,7 +143,7 @@ function handleSwitchTab(tab: string): void {
         @click="activeTab = 'local-ai'"
       >
         <span class="material-symbols-outlined help-tabs__icon">smart_toy</span>
-        Local AI
+        Local & Free AI
       </button>
       <button
         class="help-tabs__btn"
@@ -161,7 +161,7 @@ function handleSwitchTab(tab: string): void {
     <HelpTabGuide v-if="activeTab === 'guide'" />
     <HelpTabBibliometrics v-else-if="activeTab === 'biblio'" />
     <HelpTabTroubleshooting v-else-if="activeTab === 'troubleshoot'" />
-    <HelpTabLocalAi v-else-if="activeTab === 'local-ai'" />
+    <HelpTabLocalAi v-else-if="activeTab === 'local-ai'" :initial-hash="routeHash" />
     <HelpTabReference
       v-else-if="activeTab === 'reference'"
       :initial-hash="routeHash"

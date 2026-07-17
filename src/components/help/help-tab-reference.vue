@@ -950,7 +950,7 @@ ER  - </pre
               keywords across six modules: Co-Authorship, Citation Network, Keyword Co-Occurrence,
               Publication Timeline, Author Productivity, and Co-Citation Analysis. See the
               <button type="button" class="ref-link" @click="emit('switch-tab', 'biblio')">
-                Understanding Bibliometrics
+                Bibliometrics
               </button>
               help tab for detailed explanations and use cases for each module.
             </p>
@@ -1839,10 +1839,6 @@ ER  - </pre
 </template>
 
 <style scoped>
-.ht-reference {
-  /* Container */
-}
-
 .ref-tab-layout {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
