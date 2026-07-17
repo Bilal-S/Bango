@@ -391,6 +391,38 @@ describe('useArticleSearch', () => {
       });
     });
 
+    it('applyFilters forwards excludedTags/excludedLabels to the query', async () => {
+      mockSearchResults();
+      const s = useArticleSearch();
+      s.filter.excludedTags = ['nlp'];
+      s.filter.excludedLabels = ['disputed'];
+      s.applyFilters();
+      await vi.waitFor(() => {
+        expect(tauriCommand).toHaveBeenCalledWith(
+          'query_articles',
+          expect.objectContaining({
+            query: expect.objectContaining({
+              excludedTags: ['nlp'],
+              excludedLabels: ['disputed'],
+            }),
+          })
+        );
+      });
+    });
+
+    it('isFiltered is true when only excludedTags are set', async () => {
+      mockSearchResults();
+      const s = useArticleSearch();
+      // Baseline: no filters
+      expect(s.isFiltered.value).toBe(false);
+      s.applyFilters();
+      s.filter.excludedTags = ['old-topic'];
+      s.applyFilters();
+      await vi.waitFor(() => {
+        expect(s.isFiltered.value).toBe(true);
+      });
+    });
+
     it('applyFilters resets to page 1', async () => {
       mockSearchResults();
       const { applyFilters, currentPage, goToPage } = useArticleSearch();
@@ -405,9 +437,13 @@ describe('useArticleSearch', () => {
       const s = useArticleSearch();
       s.filter.yearFrom = 2020;
       s.filter.tags = ['ml'];
+      s.filter.excludedTags = ['old'];
+      s.filter.excludedLabels = ['dropped'];
       s.clearFilters();
       expect(s.filter.yearFrom).toBeNull();
       expect(s.filter.tags).toEqual([]);
+      expect(s.filter.excludedTags).toEqual([]);
+      expect(s.filter.excludedLabels).toEqual([]);
     });
 
     it('clearFilters resets query params to defaults', async () => {
@@ -424,6 +460,8 @@ describe('useArticleSearch', () => {
               author: null,
               tags: [],
               labels: [],
+              excludedTags: [],
+              excludedLabels: [],
             }),
           })
         );
@@ -515,6 +553,48 @@ describe('useArticleSearch', () => {
       // The composable defaults to "working" tab, activeTotalCount reads from statusCounts
       // After fetchCounts, statusCounts.working = 25
       expect(totalPages.value).toBe(3);
+    });
+
+    // ── Filtered pagination (regression: page count must track the filtered
+    //    result length, NOT the unfiltered tab total) ──────────────────
+    it('totalPages is 1 when filtered even if activeTotalCount is larger', async () => {
+      // Tab total is 25, but the filtered query returns only 2 articles.
+      mockArticlesStore.byStatus.working = 25;
+      const filteredArticles = [sampleArticles[0]!, sampleArticles[1]!];
+      mockSearchResults(filteredArticles, { ...sampleCounts, working: 25 });
+      const s = useArticleSearch();
+      s.filter.tags = ['some-tag'];
+      s.applyFilters();
+      await vi.waitFor(() => expect(s.isFiltered.value).toBe(true));
+      // resultCount = filteredArticles.length = 2; ceil(2/10) = 1 page.
+      expect(s.resultCount.value).toBe(2);
+      expect(s.totalPages.value).toBe(1);
+    });
+
+    it('selectedGlobalIndex is the 1-based position within the filtered page', async () => {
+      // Tab total is 25, but the filtered query returns only 2 articles.
+      mockArticlesStore.byStatus.working = 25;
+      const filteredArticles = [sampleArticles[0]!, sampleArticles[1]!];
+      vi.mocked(tauriCommand).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === 'query_articles') return Promise.resolve(filteredArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve({ ...sampleCounts, working: 25 });
+        if (cmd === 'get_article') {
+          const id = args?.id as string;
+          return Promise.resolve(filteredArticles.find((a) => a.id === id) ?? filteredArticles[0]);
+        }
+        if (cmd === 'get_audit_trail') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+      const s = useArticleSearch();
+      s.filter.tags = ['some-tag'];
+      s.applyFilters();
+      await vi.waitFor(() => expect(s.isFiltered.value).toBe(true));
+      // Select the first filtered article (index 0 → 1-based position 1).
+      await s.selectArticle(filteredArticles[0]!.id);
+      expect(s.selectedGlobalIndex.value).toBe(1);
+      // Selecting the second filtered article yields position 2 (no offset math).
+      await s.selectArticle(filteredArticles[1]!.id);
+      expect(s.selectedGlobalIndex.value).toBe(2);
     });
 
     it('goToPage updates currentPage and offset', async () => {

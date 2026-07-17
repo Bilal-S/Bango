@@ -601,6 +601,15 @@ pub struct ArticleQuery {
     pub tags: Vec<String>,
     #[serde(default)]
     pub labels: Vec<String>,
+    /// Tags the article must NOT have (NOT-filter, exclusion). Mirrors `tags`
+    /// but emits a `NOT IN` clause so the UI can toggle a pill between
+    /// inclusion (`tags`) and exclusion (`excluded_tags`).
+    #[serde(default)]
+    pub excluded_tags: Vec<String>,
+    /// Labels the article must NOT have (NOT-filter, exclusion). Mirrors
+    /// `labels` but emits a `NOT IN` clause.
+    #[serde(default)]
+    pub excluded_labels: Vec<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -675,6 +684,27 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
         let idx = param_values.len() + 1;
         sql.push_str(&format!(
             " AND articles.id IN (SELECT al.article_id FROM article_labels al JOIN labels l ON al.label_id = l.id WHERE LOWER(l.name) = ?{idx})"
+        ));
+        param_values.push(Box::new(label.to_lowercase()));
+    }
+
+    // NOT-filters: articles must NOT have any of these tags/labels. Mirrors the
+    // inclusion loops above but emits `NOT IN` so the UI can toggle a pill
+    // between inclusion (`tags`/`labels`) and exclusion
+    // (`excluded_tags`/`excluded_labels`). An article with no matching row in
+    // the join table is NOT IN the subquery result, so it passes the filter.
+    for tag in &query.excluded_tags {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(
+            " AND articles.id NOT IN (SELECT at.article_id FROM article_tags at JOIN tags t ON at.tag_id = t.id WHERE LOWER(t.name) = ?{idx})"
+        ));
+        param_values.push(Box::new(tag.to_lowercase()));
+    }
+
+    for label in &query.excluded_labels {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(
+            " AND articles.id NOT IN (SELECT al.article_id FROM article_labels al JOIN labels l ON al.label_id = l.id WHERE LOWER(l.name) = ?{idx})"
         ));
         param_values.push(Box::new(label.to_lowercase()));
     }

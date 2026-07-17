@@ -606,7 +606,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
       :has-return-target="hasReturnTarget"
       :full-screen="isDetailFullScreen"
       :article-position="selectedGlobalIndex"
-      :article-total="activeTotalCount"
+      :article-total="resultCount"
       :decision-message="decisionMessage"
       :decision-type="decisionType"
       :open-reader-id="pendingOpenReaderId"

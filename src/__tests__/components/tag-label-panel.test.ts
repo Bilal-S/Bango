@@ -32,7 +32,7 @@ describe('tag-label-panel.vue', () => {
 
   it('renders the subtitle for the tag kind', () => {
     const wrapper = mountPanel({ kind: 'tag', items: [] });
-    expect(wrapper.text()).toContain('Content-category labels');
+    expect(wrapper.text()).toContain('Content labels for grouping');
   });
 
   it('renders the subtitle for the label kind', () => {

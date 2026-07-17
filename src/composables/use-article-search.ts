@@ -19,6 +19,14 @@ export interface ArticleFilter {
   journal: string;
   tags: string[];
   labels: string[];
+  /**
+   * Tags the article must NOT have (NOT-filter). The Article list filter
+   * panel toggles a tag pill between inclusion (`tags`) and exclusion
+   * (`excludedTags`); the backend emits a `NOT IN` clause for these.
+   */
+  excludedTags: string[];
+  /** Labels the article must NOT have (NOT-filter). See {@link excludedTags}. */
+  excludedLabels: string[];
 }
 
 interface ArticleQuery {
@@ -34,6 +42,8 @@ interface ArticleQuery {
   journal: string | null;
   tags: string[];
   labels: string[];
+  excludedTags: string[];
+  excludedLabels: string[];
   limit: number;
   offset: number;
 }
@@ -101,6 +111,8 @@ export function useArticleSearch() {
     journal: '',
     tags: [],
     labels: [],
+    excludedTags: [],
+    excludedLabels: [],
   });
 
   const searchText = ref('');
@@ -118,6 +130,8 @@ export function useArticleSearch() {
     journal: null,
     tags: [],
     labels: [],
+    excludedTags: [],
+    excludedLabels: [],
     limit: 10,
     offset: 0,
   });
@@ -182,6 +196,8 @@ export function useArticleSearch() {
       query.journal ||
       query.tags.length > 0 ||
       query.labels.length > 0 ||
+      query.excludedTags.length > 0 ||
+      query.excludedLabels.length > 0 ||
       query.yearFrom !== null ||
       query.yearTo !== null
     );
@@ -265,6 +281,8 @@ export function useArticleSearch() {
     query.journal = filter.journal || null;
     query.tags = [...filter.tags];
     query.labels = [...filter.labels];
+    query.excludedTags = [...filter.excludedTags];
+    query.excludedLabels = [...filter.excludedLabels];
     resetPage();
     void search();
   }
@@ -278,6 +296,8 @@ export function useArticleSearch() {
     filter.journal = '';
     filter.tags = [];
     filter.labels = [];
+    filter.excludedTags = [];
+    filter.excludedLabels = [];
     query.search = null;
     query.yearFrom = null;
     query.yearTo = null;
@@ -285,6 +305,8 @@ export function useArticleSearch() {
     query.journal = null;
     query.tags = [];
     query.labels = [];
+    query.excludedTags = [];
+    query.excludedLabels = [];
     resetPage();
     void search();
   }

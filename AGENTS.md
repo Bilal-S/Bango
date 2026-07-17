@@ -519,6 +519,23 @@ describe each durable boundary so agents can locate the right area. Create a chi
     (keyword co-occurrence), and `cocitation.rs` (on-demand co-citation computation with 4
     normalization modes: Raw, Cosine, Jaccard, Pearson; `CocitationScope` = included/all
     articles). `mod.rs` re-exports the public API unchanged.
+  - **`src-tauri/src/db/article_repo.rs`** - article CRUD + the `ArticleQuery` filter
+    contract used by `query_articles` (the `query_articles` Tauri command feeds the Article
+    list table). `ArticleQuery` carries four tag/label filter vectors: `tags` +
+    `excluded_tags`, `labels` + `excluded_labels`. The inclusion vectors (`tags`/`labels`)
+    emit `articles.id IN (SELECT ...)` clauses (article must have the tag/label); the
+    exclusion vectors (`excluded_tags`/`excluded_labels`) emit `articles.id NOT IN (SELECT
+    ...)` clauses (article must NOT have the tag/label) so the Article list filter panel can
+    toggle a pill between inclusion and NOT-exclusion. All four are `#[serde(default)]` so
+    old callers omitting them still deserialize. An empty exclusion vector filters nothing.
+    Comparison is `LOWER()`-based (case-insensitive) for both directions. Tested in
+    `tests/article_query_test.rs` (5 NOT-filter tests: excluded tag, excluded label,
+    case-insensitive exclusion, inclusion+exclusion combine, empty-exclusion no-op).
+    Frontend mirror: `ArticleFilter`/`ArticleQuery` in
+    `src/composables/use-article-search.ts` carry `excludedTags`/`excludedLabels`;
+    `src/components/article-filter-panel.vue` renders excluded pills with a bold `NOT:`
+    prefix + strike-through on the name, toggled by clicking the pill body (the `x` button
+    removes entirely via `removeExcludedTag`/`removeExcludedLabel`).
   - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.

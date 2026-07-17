@@ -57,6 +57,69 @@ function toggleLabel(label: string): void {
   updateField('labels', updated);
 }
 
+/**
+ * Remove an excluded tag entirely (from `excludedTags`), without moving it
+ * anywhere. This is the `x` handler on an excluded (NOT:) pill; the inclusion
+ * `x` handler (`toggleTag`) would wrongly re-add the name to `tags` because it
+ * is absent there, so excluded pills need their own remover.
+ */
+function removeExcludedTag(tag: string): void {
+  updateField(
+    'excludedTags',
+    props.filter.excludedTags.filter((t) => t !== tag)
+  );
+}
+
+/** Mirror of {@link removeExcludedTag} for labels. */
+function removeExcludedLabel(label: string): void {
+  updateField(
+    'excludedLabels',
+    props.filter.excludedLabels.filter((l) => l !== label)
+  );
+}
+
+/**
+ * Toggle a tag between inclusion (`tags`) and exclusion (`excludedTags`).
+ * Called when the user clicks the pill body (not the `x` remove button).
+ * A pill can be in three states: absent, included (default), or excluded
+ * (NOT-filter, rendered with a bold `NOT:` prefix). Clicking the pill body
+ * flips included <-> excluded; the `x` button removes it entirely.
+ */
+function toggleTagNegation(tag: string): void {
+  if (props.filter.tags.includes(tag)) {
+    // included -> excluded
+    updateField(
+      'tags',
+      props.filter.tags.filter((t) => t !== tag)
+    );
+    updateField('excludedTags', [...props.filter.excludedTags, tag]);
+  } else if (props.filter.excludedTags.includes(tag)) {
+    // excluded -> included
+    updateField(
+      'excludedTags',
+      props.filter.excludedTags.filter((t) => t !== tag)
+    );
+    updateField('tags', [...props.filter.tags, tag]);
+  }
+}
+
+/** Mirror of {@link toggleTagNegation} for labels. */
+function toggleLabelNegation(label: string): void {
+  if (props.filter.labels.includes(label)) {
+    updateField(
+      'labels',
+      props.filter.labels.filter((l) => l !== label)
+    );
+    updateField('excludedLabels', [...props.filter.excludedLabels, label]);
+  } else if (props.filter.excludedLabels.includes(label)) {
+    updateField(
+      'excludedLabels',
+      props.filter.excludedLabels.filter((l) => l !== label)
+    );
+    updateField('labels', [...props.filter.labels, label]);
+  }
+}
+
 /** Color scheme for a tag (custom or hash-derived). */
 function tagColor(name: string): ColorScheme {
   return getColorScheme(name, tagsStore.tags.find((t) => t.name === name)?.color);
@@ -71,14 +134,25 @@ const showAuthorDropdown = ref(false);
 const tagInputValue = ref('');
 const labelInputValue = ref('');
 
-/** Tags not yet selected (drives the add combobox dropdown). */
+/**
+ * Tags not yet active in any filter role (drives the add combobox dropdown).
+ * A name already present in `tags` (inclusion) OR `excludedTags` (exclusion)
+ * is hidden so the dropdown never offers a duplicate.
+ */
 const availableTags = computed((): string[] =>
-  props.allTags.filter((t) => !props.filter.tags.includes(t))
+  props.allTags.filter(
+    (t) => !props.filter.tags.includes(t) && !props.filter.excludedTags.includes(t)
+  )
 );
 
-/** Labels not yet selected (drives the add combobox dropdown). */
+/**
+ * Labels not yet active in any filter role (drives the add combobox dropdown).
+ * See {@link availableTags}.
+ */
 const availableLabels = computed((): string[] =>
-  props.allLabels.filter((l) => !props.filter.labels.includes(l))
+  props.allLabels.filter(
+    (l) => !props.filter.labels.includes(l) && !props.filter.excludedLabels.includes(l)
+  )
 );
 
 function hideAuthorDropdown(): void {
@@ -234,28 +308,59 @@ const matchedAuthors = computed(() => {
 
       <!-- Tags -->
       <div>
-        <label class="block text-label-caps text-slate-500 uppercase mb-2">Tags</label>
-        <!-- Active removable pills (bounded height so many tags never grow the panel) -->
+        <div class="flex items-baseline justify-between mb-2">
+          <label class="block text-label-caps text-slate-500 uppercase">Tags</label>
+          <span class="text-[10px] text-slate-400 italic">Click tag to toggle exclude.</span>
+        </div>
+        <!-- Active removable pills (bounded height so many tags never grow the panel).
+             A pill can be included (default) or excluded (NOT-filter, bold "NOT:"
+             prefix). Clicking the pill body flips its role; the "x" button removes
+             it entirely. -->
         <div
-          v-if="filter.tags.length > 0"
+          v-if="filter.tags.length > 0 || filter.excludedTags.length > 0"
           class="flex flex-wrap gap-1.5 mb-2 max-h-32 overflow-y-auto"
         >
           <span
             v-for="tag in filter.tags"
             :key="tag"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border"
+            class="afp-pill inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border cursor-pointer select-none"
             :style="{
               backgroundColor: tagColor(tag).bg,
               color: tagColor(tag).text,
               borderColor: tagColor(tag).base,
             }"
+            title="Click to toggle NOT (exclude this tag)"
+            @click="toggleTagNegation(tag)"
           >
             {{ tag }}
             <button
               type="button"
               class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
               :title="`Remove ${tag}`"
-              @click="toggleTag(tag)"
+              @click.stop="toggleTag(tag)"
+            >
+              ×
+            </button>
+          </span>
+          <span
+            v-for="tag in filter.excludedTags"
+            :key="`not-${tag}`"
+            class="afp-pill afp-pill--excluded inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] border cursor-pointer select-none"
+            :style="{
+              backgroundColor: tagColor(tag).bg,
+              color: tagColor(tag).text,
+              borderColor: tagColor(tag).base,
+            }"
+            title="Click to remove NOT (include this tag)"
+            @click="toggleTagNegation(tag)"
+          >
+            <span class="font-bold afp-pill__not">NOT:</span>
+            <span class="afp-pill__name--excluded">{{ tag }}</span>
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              :title="`Remove ${tag}`"
+              @click.stop="removeExcludedTag(tag)"
             >
               ×
             </button>
@@ -274,28 +379,57 @@ const matchedAuthors = computed(() => {
 
       <!-- Labels -->
       <div>
-        <label class="block text-label-caps text-slate-500 uppercase mb-2">Labels</label>
-        <!-- Active removable pills (bounded height so many labels never grow the panel) -->
+        <div class="flex items-baseline justify-between mb-2">
+          <label class="block text-label-caps text-slate-500 uppercase">Labels</label>
+          <span class="text-[10px] text-slate-400 italic">Click label to toggle exclude.</span>
+        </div>
+        <!-- Active removable pills. See the Tags section above for the
+             included / excluded (NOT:) pill behavior. -->
         <div
-          v-if="filter.labels.length > 0"
+          v-if="filter.labels.length > 0 || filter.excludedLabels.length > 0"
           class="flex flex-wrap gap-1.5 mb-2 max-h-32 overflow-y-auto"
         >
           <span
             v-for="label in filter.labels"
             :key="label"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border"
+            class="afp-pill inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border cursor-pointer select-none"
             :style="{
               backgroundColor: labelColor(label).bg,
               color: labelColor(label).text,
               borderColor: labelColor(label).base,
             }"
+            title="Click to toggle NOT (exclude this label)"
+            @click="toggleLabelNegation(label)"
           >
             {{ label }}
             <button
               type="button"
               class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
               :title="`Remove ${label}`"
-              @click="toggleLabel(label)"
+              @click.stop="toggleLabel(label)"
+            >
+              ×
+            </button>
+          </span>
+          <span
+            v-for="label in filter.excludedLabels"
+            :key="`not-${label}`"
+            class="afp-pill afp-pill--excluded inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] border cursor-pointer select-none"
+            :style="{
+              backgroundColor: labelColor(label).bg,
+              color: labelColor(label).text,
+              borderColor: labelColor(label).base,
+            }"
+            title="Click to remove NOT (include this label)"
+            @click="toggleLabelNegation(label)"
+          >
+            <span class="font-bold afp-pill__not">NOT:</span>
+            <span class="afp-pill__name--excluded">{{ label }}</span>
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              :title="`Remove ${label}`"
+              @click.stop="removeExcludedLabel(label)"
             >
               ×
             </button>
@@ -340,5 +474,22 @@ const matchedAuthors = computed(() => {
 .no-spinner {
   appearance: textfield;
   -moz-appearance: textfield;
+}
+
+/* Excluded (NOT:) pills: the bold "NOT:" prefix signals the negation; the
+   actual tag/label name gets a strike-through line so the "exclude" intent is
+   unmistakable even when color alone is subtle. The line targets only the
+   name span (`.afp-pill__name--excluded`), skipping the "NOT:" prefix and the
+   remove ("x") button. */
+.afp-pill--excluded {
+  opacity: 0.85;
+}
+.afp-pill__name--excluded {
+  text-decoration: line-through;
+  text-decoration-color: rgba(0, 0, 0, 0.45);
+  text-decoration-thickness: 1.5px;
+}
+.afp-pill:hover {
+  filter: brightness(0.97);
 }
 </style>
