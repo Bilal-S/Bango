@@ -1,3 +1,8 @@
+use std::borrow::Cow;
+use std::sync::OnceLock;
+use std::time::Duration;
+
+use rand::RngExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -195,6 +200,200 @@ fn is_chat_model(id: &str) -> bool {
     true
 }
 
+// ── Shared HTTP client + retry ───────────────────────────────────────
+
+const LLM_MAX_RETRIES: u32 = 3;
+const LLM_INITIAL_BACKOFF_MS: u64 = 1000;
+const LLM_MAX_BACKOFF_MS: u64 = 10_000;
+
+/// Lazily-built shared HTTP client. Reusing one `reqwest::Client` enables
+/// HTTP keep-alive so repeated LLM calls reuse a single TLS session instead of
+/// performing a fresh handshake on every request. This matters on Windows
+/// (SChannel), where per-request TLS setup is materially more failure-prone
+/// under concurrency and is a strong fit for the Windows-only intermittent
+/// "insufficient permissions" gateway errors that succeed on resubmit.
+///
+/// Only connect/pool timeouts are set here; the per-request wall-clock cap is
+/// owned by the orchestrator's `tokio::time::timeout` (600s) wrapper, which now
+/// also bounds the full retry sequence.
+fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+/// Normalize text bound for an LLM payload: drop carriage returns and coerce
+/// non-breaking spaces (`\u{00A0}`) to ASCII spaces. This is defense-in-depth
+/// hygiene - NBSP slips in easily from PDF extraction, and `\r` can appear in
+/// Windows-edited text. `reqwest::json` already escapes JSON control chars, so
+/// this is NOT required for request correctness; it keeps payloads clean and
+/// deterministic. Fast path returns `Cow::Borrowed` when no change is needed.
+#[must_use]
+fn normalize_llm_text<'a>(input: &'a str) -> Cow<'a, str> {
+    if !input.contains('\r') && !input.contains('\u{00A0}') {
+        return Cow::Borrowed(input);
+    }
+    let cleaned: String = input
+        .chars()
+        .filter(|&c| c != '\r')
+        .map(|c| if c == '\u{00A0}' { ' ' } else { c })
+        .collect();
+    Cow::Owned(cleaned)
+}
+
+/// Decide whether a non-success response should be retried. Classic transient
+/// statuses (429, 408, 5xx) always retry. Additionally, OpenAI/Cloudflare
+/// occasionally emit 401/403 with the exact body `"...insufficient permissions
+/// for this operation."` as a project/org-scope transient that succeeds on
+/// resubmit - empirically observed on Windows. That signature is gated narrowly
+/// on the body string so real auth failures (wrong/revoked key, wrong org)
+/// fail fast instead of burning retry budget.
+#[must_use]
+fn is_retryable_response(status: reqwest::StatusCode, body: &str) -> bool {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status.is_server_error()
+    {
+        return true;
+    }
+    if (status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN)
+        && body.contains("insufficient permissions for this operation")
+    {
+        return true;
+    }
+    false
+}
+
+/// Exponential backoff with jitter, mirroring `openalex::client::calculate_backoff`:
+/// 1s, 2s, 4s (capped at 10s) + random 0-500ms.
+fn calculate_backoff(attempt: u32) -> u64 {
+    let base = LLM_INITIAL_BACKOFF_MS * (1u64 << attempt);
+    let capped = base.min(LLM_MAX_BACKOFF_MS);
+    let mut rng = rand::rng();
+    let jitter = rng.random_range(0..=500);
+    capped + jitter
+}
+
+/// Parse the `Retry-After` header (delta-seconds form) as milliseconds.
+/// Honored up to `LLM_MAX_BACKOFF_MS` so a misconfigured server header cannot
+/// stall the UI indefinitely.
+fn parse_retry_after_ms(resp: &reqwest::Response) -> Option<u64> {
+    resp.headers()
+        .get("retry-after")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(|secs| (secs * 1000).min(LLM_MAX_BACKOFF_MS))
+}
+
+/// Extract OpenAI/Cloudflare trace identifiers (`x-request-id`, `CF-Ray`) for
+/// diagnostics. These are the exact IDs OpenAI support and Cloudflare need to
+/// trace a transient failure. Returned as a bracketed annotation
+/// (e.g. ` [req=req_abc..., cf-ray=...]`) or empty when neither is present.
+fn extract_trace_ids(resp: &reqwest::Response) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(v) = resp.headers().get("x-request-id").and_then(|h| h.to_str().ok()) {
+        parts.push(format!("req={v}"));
+    }
+    if let Some(v) = resp.headers().get("cf-ray").and_then(|h| h.to_str().ok()) {
+        parts.push(format!("cf-ray={v}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", parts.join(", "))
+    }
+}
+
+/// Send a `RequestBuilder` with bounded retry on transient failures
+/// (`is_retryable_response`) and on transport errors. Returns the raw response
+/// body text on success. Each retry logs a trace with the request/cf-ray IDs so
+/// a Windows user can confirm the fix is engaging and paste `req_...` /
+/// `cf-ray=...` into an OpenAI support ticket.
+async fn send_with_retry(
+    builder: &reqwest::RequestBuilder,
+    label: &str,
+) -> Result<String, AppError> {
+    // `RequestBuilder::send` takes `self` (ownership), but this helper receives
+    // `&RequestBuilder`. `RequestBuilder` does not implement `Clone` (the body
+    // may be non-cloneable), but it exposes `try_clone()`. Our builders always
+    // carry a serializable `.json()` body, so `try_clone()` returns `Some` and
+    // each retry attempt re-issues an identical request. If a builder ever
+    // cannot be cloned, we fail fast with a clear error rather than silently
+    // skipping retry or panicking.
+    if builder.try_clone().is_none() {
+        return Err(AppError::Import(
+            "LLM request body is not retryable (non-cloneable RequestBuilder)".to_string(),
+        ));
+    }
+
+    let mut last_error: Option<String> = None;
+    for attempt in 0..=LLM_MAX_RETRIES {
+        // `try_clone()` is `Some` (guarded above). `else` returns an error
+        // instead of panicking, satisfying the no-`unwrap`/`expect` lint.
+        let Some(request_builder) = builder.try_clone() else {
+            return Err(AppError::Import(
+                "LLM request body is not retryable (non-cloneable RequestBuilder)".to_string(),
+            ));
+        };
+        let response = match request_builder.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                // Transport-level failure (connection reset, TLS handshake
+                // error, etc.) - definitionally transient; retry up to the cap.
+                if attempt < LLM_MAX_RETRIES {
+                    let backoff = calculate_backoff(attempt);
+                    eprintln!(
+                        "[LlmClient] {label} attempt {}/{} transport error: {e}; retrying in {backoff}ms",
+                        attempt + 1,
+                        LLM_MAX_RETRIES + 1
+                    );
+                    last_error = Some(format!("LLM request failed: {e}"));
+                    tokio::time::sleep(Duration::from_millis(backoff)).await;
+                    continue;
+                }
+                return Err(AppError::Import(format!(
+                    "LLM request failed after {LLM_MAX_RETRIES} retries: {e}"
+                )));
+            }
+        };
+
+        let status = response.status();
+        if status.is_success() {
+            return response
+                .text()
+                .await
+                .map_err(|e| AppError::Import(format!("Failed to read LLM response body: {e}")));
+        }
+
+        // Non-success: capture trace IDs + Retry-After before consuming the body.
+        let trace = extract_trace_ids(&response);
+        let retry_after = parse_retry_after_ms(&response);
+        let body = response.text().await.unwrap_or_default();
+
+        if attempt < LLM_MAX_RETRIES && is_retryable_response(status, &body) {
+            let backoff = retry_after.unwrap_or_else(|| calculate_backoff(attempt));
+            eprintln!(
+                "[LlmClient] {label} attempt {}/{} failed ({status}){trace}; retrying in {backoff}ms",
+                attempt + 1,
+                LLM_MAX_RETRIES + 1
+            );
+            last_error = Some(format!("LLM request failed ({status}){trace}: {body}"));
+            tokio::time::sleep(Duration::from_millis(backoff)).await;
+            continue;
+        }
+
+        return Err(AppError::Import(format!("LLM request failed ({status}){trace}: {body}")));
+    }
+    Err(AppError::Import(
+        last_error.unwrap_or_else(|| format!("LLM request failed after {LLM_MAX_RETRIES} retries")),
+    ))
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 pub async fn list_models(
@@ -324,7 +523,9 @@ async fn send_google(
     system_prompt: &str,
     user_prompt: &str,
 ) -> Result<(String, usize), AppError> {
-    let client = Client::new();
+    let system_prompt = normalize_llm_text(system_prompt);
+    let user_prompt = normalize_llm_text(user_prompt);
+    let client = shared_client();
     let temp = if config.skip_temperature { None } else { Some(config.temperature) };
     let request = GoogleRequest {
         system_instruction: GoogleSystemInstruction {
@@ -349,28 +550,15 @@ async fn send_google(
         format!("{}/models/{}:generateContent", base_url, config.model_name)
     };
 
-    let response = client
+    let builder = client
         .post(&endpoint)
         .header("Content-Type", "application/json")
         .header("X-goog-api-key", api_key)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| AppError::Import(format!("LLM request failed: {e}")))?;
+        .json(&request);
 
-    let status = response.status();
-    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(AppError::Import("Rate limited (429)".to_string()));
-    }
+    let body_text = send_with_retry(&builder, "Google").await?;
 
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(AppError::Import(format!("LLM request failed ({status}): {body}")));
-    }
-
-    let google_response: GoogleResponse = response
-        .json()
-        .await
+    let google_response: GoogleResponse = serde_json::from_str(&body_text)
         .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
 
     let content = google_response
@@ -391,7 +579,9 @@ async fn send_openai_compatible(
     system_prompt: &str,
     user_prompt: &str,
 ) -> Result<(String, usize), AppError> {
-    let client = Client::new();
+    let system_prompt = normalize_llm_text(system_prompt);
+    let user_prompt = normalize_llm_text(user_prompt);
+    let client = shared_client();
     let temp = if config.skip_temperature { None } else { Some(config.temperature) };
     // Note: `max_tokens` is intentionally NOT sent. Some newer OpenAI-compatible
     // models (e.g. o-series reasoning models) reject `max_tokens` with a 400
@@ -436,30 +626,16 @@ async fn send_openai_compatible(
         _ => base_url.to_string(),
     };
 
-    let response = client
+    let builder = client
         .post(&endpoint)
         .header("Content-Type", "application/json")
         .bearer_auth(api_key)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|e| AppError::Import(format!("LLM request failed: {e}")))?;
+        .json(&request);
 
-    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(AppError::Import("Rate limited (429)".to_string()));
-    }
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(AppError::Import(format!("LLM request failed ({status}): {body}")));
-    }
-
-    // Read raw body text so we can try multiple deserialization strategies
-    let body_text = response
-        .text()
-        .await
-        .map_err(|e| AppError::Import(format!("Failed to read LLM response body: {e}")))?;
+    // `send_with_retry` owns transient retry (429 / 408 / 5xx + transport
+    // errors + the OpenAI "insufficient permissions" 401/403 transient) and
+    // captures `x-request-id` / `CF-Ray` into the error string for diagnostics.
+    let body_text = send_with_retry(&builder, "OpenAI-compatible").await?;
 
     // Strategy 1: Try standard ChatResponse (OpenAI format)
     if let Ok(chat_response) = serde_json::from_str::<ChatResponse>(&body_text) {
@@ -573,4 +749,114 @@ fn extract_content_from_response(value: &serde_json::Value) -> Option<String> {
 fn extract_total_tokens(value: &serde_json::Value) -> usize {
     // Standard OpenAI path
     value["usage"]["total_tokens"].as_u64().unwrap_or(0) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    // ── normalize_llm_text ───────────────────────────────────────────
+
+    #[test]
+    fn normalize_llm_text_identity_fast_path_returns_borrowed() {
+        // Clean input must return Cow::Borrowed (no allocation).
+        match normalize_llm_text("clean ascii text with\nnewlines and\ttabs") {
+            Cow::Borrowed(s) => assert_eq!(s, "clean ascii text with\nnewlines and\ttabs"),
+            Cow::Owned(_) => panic!("expected Cow::Borrowed for clean input"),
+        }
+    }
+
+    #[test]
+    fn normalize_llm_text_strips_carriage_returns() {
+        // `.as_ref()` compares the deref'd &str value, sidestepping the Cow
+        // type-parameter inference that constructing Cow::Owned on the RHS triggers.
+        assert_eq!(normalize_llm_text("line1\r\nline2\rmore").as_ref(), "line1\nline2more");
+        // Lone \r also dropped.
+        assert_eq!(normalize_llm_text("a\rb").as_ref(), "ab");
+    }
+
+    #[test]
+    fn normalize_llm_text_coerces_nbsp_to_ascii_space() {
+        let input = "word\u{00A0}word";
+        assert_eq!(normalize_llm_text(input).as_ref(), "word word");
+    }
+
+    #[test]
+    fn normalize_llm_text_handles_mixed_crlf_and_nbsp() {
+        let input = "title\r\nbody\u{00A0}with nbsp\r";
+        assert_eq!(normalize_llm_text(input).as_ref(), "title\nbody with nbsp");
+    }
+
+    #[test]
+    fn normalize_llm_text_preserves_unicode() {
+        // Non-NBSP unicode (CJK, accented) passes through unchanged.
+        let input = "日本語 résumé café";
+        match normalize_llm_text(input) {
+            Cow::Borrowed(s) => assert_eq!(s, "日本語 résumé café"),
+            Cow::Owned(_) => panic!("expected borrowed for non-NBSP unicode"),
+        }
+    }
+
+    // ── is_retryable_response ────────────────────────────────────────
+
+    #[test]
+    fn is_retryable_classic_transient_statuses_retry() {
+        assert!(is_retryable_response(StatusCode::TOO_MANY_REQUESTS, ""));
+        assert!(is_retryable_response(StatusCode::REQUEST_TIMEOUT, ""));
+        assert!(is_retryable_response(StatusCode::INTERNAL_SERVER_ERROR, ""));
+        assert!(is_retryable_response(StatusCode::BAD_GATEWAY, ""));
+        assert!(is_retryable_response(StatusCode::SERVICE_UNAVAILABLE, ""));
+        assert!(is_retryable_response(StatusCode::GATEWAY_TIMEOUT, ""));
+    }
+
+    #[test]
+    fn is_retryable_permanent_client_errors_do_not_retry() {
+        assert!(!is_retryable_response(StatusCode::BAD_REQUEST, "malformed json"));
+        assert!(!is_retryable_response(StatusCode::NOT_FOUND, "model not found"));
+        // Plain 401/403 without the specific transient body must NOT retry
+        // (these are real auth failures: wrong/revoked key, wrong org).
+        assert!(!is_retryable_response(StatusCode::UNAUTHORIZED, "Incorrect API key provided"));
+        assert!(!is_retryable_response(StatusCode::FORBIDDEN, "access denied"));
+    }
+
+    #[test]
+    fn is_retryable_insufficient_permissions_body_retries_on_401_and_403() {
+        let body = r#"{"error":{"message":"You have insufficient permissions for this operation.","type":"invalid_request_error","param":null,"code":null}}"#;
+        assert!(is_retryable_response(StatusCode::UNAUTHORIZED, body));
+        assert!(is_retryable_response(StatusCode::FORBIDDEN, body));
+    }
+
+    #[test]
+    fn is_retryable_insufficient_permissions_requires_both_status_and_body() {
+        // The body alone does not make a 400 retryable.
+        let body = "insufficient permissions for this operation";
+        assert!(!is_retryable_response(StatusCode::BAD_REQUEST, body));
+        // A similar but non-matching body on 403 does not retry.
+        assert!(!is_retryable_response(StatusCode::FORBIDDEN, "insufficient permission"));
+    }
+
+    // ── calculate_backoff ────────────────────────────────────────────
+
+    #[test]
+    fn calculate_backoff_stays_within_jitter_band() {
+        for attempt in 0..LLM_MAX_RETRIES {
+            let base = (LLM_INITIAL_BACKOFF_MS * (1u64 << attempt)).min(LLM_MAX_BACKOFF_MS);
+            for _ in 0..50 {
+                let backoff = calculate_backoff(attempt);
+                assert!(
+                    (base..=base + 500).contains(&backoff),
+                    "attempt {attempt}: backoff {backoff} outside [{base}, {}]",
+                    base + 500
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn calculate_backoff_caps_at_max_backoff() {
+        // Large attempt must still be capped at LLM_MAX_BACKOFF_MS + jitter.
+        let backoff = calculate_backoff(20);
+        assert!((LLM_MAX_BACKOFF_MS..=LLM_MAX_BACKOFF_MS + 500).contains(&backoff));
+    }
 }

@@ -169,11 +169,15 @@ async fn test_openai_no_usage_returns_zero_tokens() {
 
 #[tokio::test]
 async fn test_openai_rate_limit_429() {
+    // 429 is a transient status: the client retries up to 3 times (4 total
+    // attempts) before surfacing the error. This matches the spec §4.3
+    // "Exponential backoff handles rate-limiting (429 errors)" contract.
     let mut server = mockito::Server::new_async().await;
     let mock = server
         .mock("POST", "/chat/completions")
         .with_status(429)
         .with_body("rate limited")
+        .expect(4) // 1 initial + 3 retries
         .create_async()
         .await;
 
@@ -190,11 +194,14 @@ async fn test_openai_rate_limit_429() {
 
 #[tokio::test]
 async fn test_openai_server_error_500() {
+    // 500 is a transient server error: the client retries up to 3 times
+    // (4 total attempts) before surfacing the error.
     let mut server = mockito::Server::new_async().await;
     let mock = server
         .mock("POST", "/chat/completions")
         .with_status(500)
         .with_body("internal server error")
+        .expect(4) // 1 initial + 3 retries
         .create_async()
         .await;
 
@@ -204,6 +211,69 @@ async fn test_openai_server_error_500() {
     mock.assert_async().await;
     let msg = err.to_string();
     assert!(msg.contains("500"), "expected 500 in error, got: {msg}");
+}
+
+#[tokio::test]
+async fn test_openai_insufficient_permissions_403_is_retried_then_succeeds() {
+    // Regression test for the Windows-only intermittent "insufficient permissions"
+    // gateway error. The body matches the empirically-observed transient exactly
+    // (an `invalid_request_error` with "insufficient permissions for this
+    // operation."). The client must retry this signature on 401/403 and succeed
+    // once the gateway stabilizes, rather than surfacing the error immediately.
+    let mut server = mockito::Server::new_async().await;
+    let error_body = r#"{"error":{"message":"You have insufficient permissions for this operation.","type":"invalid_request_error","param":null,"code":null}}"#;
+
+    // First two attempts: transient 403 with the gated body.
+    let transient = server
+        .mock("POST", "/chat/completions")
+        .with_status(403)
+        .with_header("x-request-id", "req_transient_abc")
+        .with_header("cf-ray", "abc123-ATL")
+        .with_body(error_body)
+        .expect(2)
+        .create_async()
+        .await;
+
+    // Third attempt: success.
+    let success = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(openai_chat_response("recovered", 7))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let config = openai_config(&server.url());
+    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    transient.assert_async().await;
+    success.assert_async().await;
+    assert_eq!(content, "recovered");
+    assert_eq!(tokens, 7);
+}
+
+#[tokio::test]
+async fn test_openai_real_auth_401_is_not_retried() {
+    // A plain 401 WITHOUT the "insufficient permissions" body is a real auth
+    // failure (wrong/revoked key). The client must NOT retry it (avoid burning
+    // budget on a permanent error); it should surface the error after exactly
+    // one attempt.
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(401)
+        .with_body(
+            r#"{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}"#,
+        )
+        .expect(1) // no retry
+        .create_async()
+        .await;
+
+    let config = openai_config(&server.url());
+    let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
+
+    mock.assert_async().await;
+    assert!(err.to_string().contains("401"), "expected 401 error, got: {}", err);
 }
 
 #[tokio::test]
@@ -420,8 +490,11 @@ async fn test_google_standard_response() {
 
 #[tokio::test]
 async fn test_google_rate_limit_429() {
+    // 429 is transient: the Google path now retries (parity with the OpenAI
+    // path), so the mock receives 4 requests (1 initial + 3 retries).
     let mut server = mockito::Server::new_async().await;
-    let mock = server.mock("POST", mockito::Matcher::Any).with_status(429).create_async().await;
+    let mock =
+        server.mock("POST", mockito::Matcher::Any).with_status(429).expect(4).create_async().await;
 
     let config = google_config(&server.url());
     let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
@@ -459,11 +532,14 @@ async fn test_google_endpoint_already_has_generate_content() {
 
 #[tokio::test]
 async fn test_google_server_error() {
+    // 500 is transient: the Google path retries (parity with OpenAI),
+    // so the mock receives 4 requests (1 initial + 3 retries).
     let mut server = mockito::Server::new_async().await;
     let mock = server
         .mock("POST", mockito::Matcher::Any)
         .with_status(500)
         .with_body("google internal error")
+        .expect(4)
         .create_async()
         .await;
 
