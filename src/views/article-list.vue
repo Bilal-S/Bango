@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue';
+import { onMounted, onActivated, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
@@ -20,6 +20,14 @@ import SuggestInput from '@/components/suggest-input.vue';
 import ReferencesView from '@/components/references-view.vue';
 import OpenAlexSearch from '@/components/openalex-search.vue';
 import BatchRefProgress from '@/components/batch-ref-progress.vue';
+
+// Name the component so <keep-alive :include="['WikiView', 'ArticleList']"> in
+// app-shell.vue can cache it across navigation. Vue 3 <script setup> components
+// are anonymous by default. Mirrors the WikiView pattern: UI state (filters,
+// sort, page, opened detail panel, fullscreen) survives navigation away and
+// back, while `onActivated` refreshes the underlying data so rows + badges
+// reflect changes that happened elsewhere.
+defineOptions({ name: 'ArticleList' });
 
 const route = useRoute();
 const router = useRouter();
@@ -109,7 +117,23 @@ function handleNavigateToArticleWithRef(articleId: string, paperId?: string): vo
   navigateToArticle(articleId, paperId);
 }
 
-onMounted(() => {
+/**
+ * Read the route deep-link query params used by the Articles view. Shared by
+ * `onMounted` (initial mount) and `onActivated` (keep-alive re-activation) so
+ * the parsing logic stays in one place.
+ */
+function readRouteDeepLinkParams(): {
+  status?: string;
+  tagsParam?: string[];
+  labelsParam?: string[];
+  yearFrom?: number;
+  yearTo?: number;
+  journal?: string;
+  author?: string;
+  filterCollapsed: boolean;
+  articleId?: string;
+  hasFilterParams: boolean;
+} {
   const status = typeof route.query.status === 'string' ? route.query.status : undefined;
   const tagsParam = typeof route.query.tags === 'string' ? route.query.tags.split(',') : undefined;
   const labelsParam =
@@ -124,8 +148,7 @@ onMounted(() => {
   // articleId deep-link from the dashboard "Go to article" dot: load the All
   // articles view and select the specific article so the detail panel opens.
   const articleId = typeof route.query.articleId === 'string' ? route.query.articleId : undefined;
-
-  if (
+  const hasFilterParams = !!(
     status ||
     tagsParam ||
     labelsParam ||
@@ -133,24 +156,124 @@ onMounted(() => {
     (yearTo !== undefined && Number.isFinite(yearTo)) ||
     journal ||
     author
-  ) {
+  );
+  return {
+    status,
+    tagsParam,
+    labelsParam,
+    yearFrom,
+    yearTo,
+    journal,
+    author,
+    filterCollapsed,
+    articleId,
+    hasFilterParams,
+  };
+}
+
+/**
+ * Apply deep-link params when present: filter params go through
+ * `applyRouteParams`, then the articleId is selected if provided. Returns true
+ * when any deep-link param was applied (caller skips the plain-refresh path);
+ * false when there is nothing to apply.
+ */
+function applyDeepLinkParams(params: ReturnType<typeof readRouteDeepLinkParams>): boolean {
+  const { hasFilterParams, articleId } = params;
+  if (!hasFilterParams && !articleId) return false;
+  if (hasFilterParams) {
     void applyRouteParams({
-      status,
-      tags: tagsParam,
-      labels: labelsParam,
-      yearFrom,
-      yearTo,
-      journal,
-      author,
-      filterCollapsed,
+      status: params.status,
+      tags: params.tagsParam,
+      labels: params.labelsParam,
+      yearFrom: params.yearFrom,
+      yearTo: params.yearTo,
+      journal: params.journal,
+      author: params.author,
+      filterCollapsed: params.filterCollapsed,
     }).then(() => {
       if (articleId) void selectArticle(articleId);
     });
-  } else {
+  } else if (articleId) {
+    // Only an articleId deep-link (e.g. dashboard "Go to article" with no
+    // filter params) - just select it.
+    void selectArticle(articleId);
+  }
+  return true;
+}
+
+onMounted(() => {
+  const params = readRouteDeepLinkParams();
+  const applied = applyDeepLinkParams(params);
+  if (!applied) {
+    // No deep-link params - run the initial search. selectArticle is still
+    // called if an articleId happened to be present without filter params.
     void search().then(() => {
-      if (articleId) void selectArticle(articleId);
+      if (params.articleId) void selectArticle(params.articleId);
     });
   }
+});
+
+/**
+ * Keep-alive re-activation. Preserves all UI state (status tab, filters, sort,
+ * page, opened detail panel, fullscreen, multi-select) and refreshes the
+ * underlying data so the view reflects changes that happened while away:
+ *
+ *  - Tab badges + article rows re-fetch via `search()` (which also calls
+ *    `fetchCounts`), reusing the preserved `query` so filters/sort/page are
+ *    kept.
+ *  - The open article detail + audit trail re-fetch so AI summaries,
+ *    translations, full-text attaches, status changes, etc. are picked up.
+ *  - When the route carries deep-link params that differ from current state
+ *    (dashboard "Go to article" dot, biblio deep-link, tag/label deep-link),
+ *    those override the preserved state - explicit navigation wins.
+ *
+ * Note: Vue fires `onActivated` on the initial mount too (right after
+ * `onMounted`), so the first call must be a no-op to avoid a duplicate search.
+ * `isFirstActivation` is set to false *after* the skip check so the very first
+ * call is the one that short-circuits.
+ */
+let isFirstActivation = true;
+
+onActivated(() => {
+  // Skip the very first activation (fires right after onMounted on the initial
+  // mount). onMounted already did the initial fetch + deep-link application.
+  if (isFirstActivation) {
+    isFirstActivation = false;
+    return;
+  }
+
+  const params = readRouteDeepLinkParams();
+  const articleIdDiffers = !!params.articleId && selectedArticle.value?.id !== params.articleId;
+
+  // Deep-link wins: re-apply filter params and/or select the deep-linked
+  // article when they differ from the current state. This handles the
+  // dashboard "Go to article" dot clicking /articles?articleId=X while the
+  // cached view shows a different article, and biblio/tag/label deep-links
+  // arriving while the view is cached.
+  if (params.hasFilterParams || articleIdDiffers) {
+    applyDeepLinkParams(params);
+    return;
+  }
+
+  // Plain navigation (sidebar click on "Articles" with no query): preserve all
+  // UI state and just refresh the data layer. Skip search() for the References
+  // and Search tabs - those child components own their data.
+  const tab = activeStatusTab.value;
+  if (tab === 'references' || tab === 'search') {
+    // Refresh the tab badges so they reflect imports / screening / bulk edits
+    // that happened while away.
+    void fetchCounts();
+    return;
+  }
+
+  // Normal article tab: re-run the preserved query (refreshes rows + counts)
+  // and refresh the open article detail + audit trail.
+  void (async () => {
+    await search();
+    if (selectedArticle.value) {
+      await selectArticle(selectedArticle.value.id);
+    }
+  })();
 });
 
 /** Whether this article-list was opened via a deep-link from a bibliometric view. */

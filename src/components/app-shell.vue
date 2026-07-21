@@ -102,13 +102,18 @@ const { isVisible: isOperationOverlayVisible, message: operationMessage } = useL
         <span class="app-shell__mobile-title">Bango</span>
       </header>
       <div class="app-shell__content">
-        <!-- Keep-alive caches ONLY the Wiki view so its state (selected page,
-             search query, graph tab, edit mode, scroll position) survives
-             navigation away and back. Other routes are uncached to avoid
-             memory bloat. `include` matches the component name set via
-             `defineOptions({ name: 'WikiView' })` in wiki-view.vue. -->
+        <!-- Keep-alive caches the Wiki view AND the Articles list so their UI
+             state (Wiki: selected page, search query, graph tab, edit mode,
+             scroll position; Articles: applied filters, status tab, sort,
+             pagination, search text, opened article detail + side panel
+             open/closed, fullscreen) survives navigation away and back. Both
+             views re-fetch their underlying data in `onActivated` so rows /
+             badges / detail content reflect changes that happened elsewhere.
+             Other routes are uncached to avoid memory bloat. `include` matches
+             the component names set via `defineOptions({ name: ... })` in
+             wiki-view.vue and article-list.vue. -->
         <router-view v-slot="{ Component }">
-          <keep-alive include="WikiView">
+          <keep-alive :include="['WikiView', 'ArticleList']">
             <component :is="Component" />
           </keep-alive>
         </router-view>

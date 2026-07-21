@@ -138,6 +138,20 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     Constants: `DEFAULT_TOP_K=2`, `DEFAULT_MAX_CHUNK_WORDS=600`, `METHODS_BOOST=0.25`,
     `DEFAULT_CHUNK_BUDGET_PER_ARTICLE=2400`. 11 inline tests + the §T3.7 inventory.
   - **`src-tauri/src/screening/` Tier 3 Phases C/D/E (enhanced + two_stage modes)** -
+    **Custom-logic governance contract** (v8.1): when `app_settings.screening_custom_logic`
+    is present and non-empty (same trim + non-empty gate as the prompt's `## Custom Screening
+    Instructions` emitter), the LLM's `decision` is final and the generic §4.1 priority
+    resolver (`resolution::resolve_decision`) is NOT applied - the resolver cannot understand
+    combinatorial AND/OR/hard-exclusion rules, so it must not second-guess the LLM. The engine
+    computes `has_custom_logic` once per run and routes both stage-1 and stage-2 decisions
+    through `resolution::finalize_decision(llm_decision, input, has_custom_logic)`, which
+    returns the LLM decision verbatim when custom logic is in force and otherwise delegates
+    to `resolve_decision` (drop-in `&str` return via lifetime). The `[App override: ... favored
+    due to priority resolution]` annotation is naturally suppressed because
+    `final_decision == llm_decision` whenever custom logic governs. Projects without custom
+    rules get byte-identical behavior to the historical resolver. Tested in
+    `tests/resolution_test.rs` (4 `finalize_decision` tests + the 7 original `resolve_decision`
+    tests, signature unchanged).
     `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
     (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,
     `chunk_budget_per_article`, optional `max_articles` per-run cap from
@@ -831,7 +845,25 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     scope). `referencePapers`/`articleReferenceLinks` are left empty for the user to
     populate via reference/citation imports. `scripts/enrich_demo.py` is the idempotent
     generator (deterministic UUID5 article IDs); re-run after schema changes.
-  - **`src/views/`** - page-level views. `biblio-dashboard.vue` is the `/bibliometrics`
+  - **`src/views/`** - page-level views. `article-list.vue` (`/articles`) and
+    `wiki-view.vue` (`/wiki`) are **keep-alive cached** via
+    `<keep-alive :include="['WikiView', 'ArticleList']">` in `app-shell.vue` so their
+    UI state survives navigation away and back. Both components name themselves via
+    `defineOptions({ name: ... })` (required for the `include` matcher to find
+    `<script setup>` components). `article-list.vue` caches: active status tab,
+    applied filters (panel + query), sort column/direction, current page + page size,
+    toolbar search text, multi-select set, opened article detail panel + audit trail,
+    and fullscreen state. Its `onActivated` (skipped on the first activation via an
+    `isFirstActivation` guard) refreshes the underlying data so the view reflects
+    changes that happened while away: `search()` re-runs the preserved `query`
+    (rows + tab badges update), and the open article detail + audit trail are
+    re-fetched. Route deep-link params (`?articleId=…`, `?status=…&tags=…`,
+    biblio/tag/label deep-links) override the preserved state when they differ
+    (explicit navigation wins). The References and Search tabs skip `search()`
+    (their child components own their data) but still refresh tab badges. The
+    other three `useArticleSearch()` consumers (`wiki-view.vue`, `chat-view.vue`,
+    `biblio-citations.vue`) are NOT affected - they keep creating fresh per-view
+    composable instances as today. `biblio-dashboard.vue` is the `/bibliometrics`
     parent; child routes (`coauthors`, `citations`, `keywords`, `timeline`, `authors`)
     render in its `<router-view>`. `biblio-timeline.vue` is the Publication Timeline view
     (its secondary "Top Journals" chart auto-hides below `SECONDARY_CHART_MIN_VIEWPORT_HEIGHT`

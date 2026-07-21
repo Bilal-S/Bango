@@ -154,7 +154,8 @@ fn import_openalex_duplicate_doi_skip() {
     let new_article = mapping::map_work_to_new_article(&work);
 
     let first =
-        article_repo::insert_articles_batch(&conn, &[new_article.clone()], "openalex").unwrap();
+        article_repo::insert_articles_batch(&conn, std::slice::from_ref(&new_article), "openalex")
+            .unwrap();
     assert_eq!(first.len(), 1);
 
     let second = article_repo::insert_articles_batch(&conn, &[new_article], "openalex").unwrap();

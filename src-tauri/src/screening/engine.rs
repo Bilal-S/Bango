@@ -238,6 +238,17 @@ impl ScreeningEngine {
             )
         };
 
+        // When the user has authored non-empty Custom Screening Instructions,
+        // those combinatorial rules are the supreme decision authority (the LLM
+        // applies them strictly per the system prompt). The generic 4.1 priority
+        // resolver - which has no understanding of AND/OR gates or hard exclusions
+        // - must not override the LLM's decision in that case. This flag uses the
+        // same trim + non-empty gate as the prompt's `## Custom Screening
+        // Instructions` section emitter, so the two never disagree on whether
+        // custom logic is in force for this run.
+        let has_custom_logic =
+            custom_logic.as_deref().map(str::trim).is_some_and(|text| !text.is_empty());
+
         // Build shared prompt parts (aims, criteria)
         let aim_entries: Vec<AimEntry> =
             aims.iter().map(|a| AimEntry { text: a.text.clone() }).collect();
@@ -563,7 +574,14 @@ impl ScreeningEngine {
                             inclusion_matches: inc_matches,
                             exclusion_matches: exc_matches,
                         };
-                        let final_decision = resolution::resolve_decision(&resolution_input);
+                        // When custom screening rules are present, they govern
+                        // the process: the LLM's decision is final and the
+                        // generic priority resolver is not applied.
+                        let final_decision = resolution::finalize_decision(
+                            &screening.decision,
+                            &resolution_input,
+                            has_custom_logic,
+                        );
 
                         // Augment matched arrays with any criteria UUIDs mentioned in reasoning
                         // but missing from the LLM's matched arrays
@@ -832,8 +850,14 @@ impl ScreeningEngine {
                                             inclusion_matches: inc_matches.clone(),
                                             exclusion_matches: exc_matches.clone(),
                                         };
-                                        let final_decision =
-                                            resolution::resolve_decision(&resolution_input);
+                                        // Same governance rule as stage 1: when
+                                        // custom screening rules are present, the
+                                        // LLM's stage-2 decision is final.
+                                        let final_decision = resolution::finalize_decision(
+                                            &stage2.decision,
+                                            &resolution_input,
+                                            has_custom_logic,
+                                        );
 
                                         // Auto-label from stage-2 matches.
                                         let auto_label_criteria: Vec<(String, String)> =
