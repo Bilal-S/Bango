@@ -954,3 +954,152 @@ async fn single_transient_does_not_double_count_progress() {
     assert_eq!(progress.completed, 0, "no articles screened (F1: no phantom completed)");
     assert!(progress.fatal_error.is_none(), "no fatal_error (below threshold)");
 }
+// ─── Cancellable request_delay_ms (the llmscreen4 fix) ─────────────────
+//
+// These tests prove that clicking Stop during the post-batch
+// `request_delay_ms` throttle aborts the run immediately instead of
+// waiting the full delay. Before the fix, the `sleep(request_delay_ms)`
+// call was not wrapped in a cancel-aware `select!`, so the UI appeared
+// to hang for up to `request_delay_ms` (commonly 1-10s for rate-limit
+// mitigation) after the user clicked Stop.
+//
+// Each test spawns `run_sync` (wrapped in `Arc<ScreeningEngine>` so the
+// same cancel token is shared between the spawned run and the test's
+// `cancel()` call) with a large `request_delay_ms`, waits long enough for
+// the first batch's LLM mock call to resolve and for the engine to enter
+// the inter-batch delay, then calls `cancel()` and asserts the run
+// finishes well before the full delay would have elapsed. The tests use
+// `tokio::time::timeout` so a regression (the fix being reverted) fails
+// fast instead of hanging the test suite.
+
+use std::sync::Arc;
+
+/// Mock LLM client that always returns a valid single-article "include"
+/// screening response. The inclusion-criterion ID is injected so the
+/// response matches the seeded criterion and parses cleanly through the
+/// engine's batch-validation (`screenings.len() == batch.len()`).
+struct AlwaysSucceedMock {
+    inc_id: String,
+}
+
+#[async_trait::async_trait]
+impl LlmClient for AlwaysSucceedMock {
+    async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+        let resp = format!(
+            r#"[{{"decision":"include","reasoning":"R","matchedInclusionCriteria":["{}"],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}}]"#,
+            self.inc_id
+        );
+        // Simulate a small amount of work so the spawned task actually
+        // reaches the post-batch delay before the test calls cancel().
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        Ok((resp, 100))
+    }
+}
+
+/// Stop during the post-success `request_delay_ms` delay should abort the
+/// run immediately (success path, engine.rs ~line 644). Without the fix
+/// this test would hang for ~3s (the full `request_delay_ms`).
+#[tokio::test]
+async fn stop_during_request_delay_success_path() {
+    let db = setup_screening_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_working_articles(&conn, 5);
+        seed_screening_criteria(&conn)
+    };
+    let inc_id = criteria
+        .iter()
+        .find(|c| matches!(c.criterion_type, CriterionType::Inclusion))
+        .expect("inclusion criterion")
+        .id
+        .clone();
+    // Wrap in Arc so the spawned task and the cancel call share the same
+    // cancel token + progress. `run_sync` takes `&self`, so we can call it
+    // through an `Arc` reference.
+    let engine = Arc::new(ScreeningEngine::with_batch_size(1));
+    let mock = AlwaysSucceedMock { inc_id };
+
+    // Spawn the run with a 3s inter-batch delay. The first batch's mock
+    // LLM call completes in ~50ms, then the engine enters the 3s delay.
+    let run_engine = engine.clone();
+    let run_handle = tokio::spawn(async move {
+        let _ = run_engine
+            .run_sync(&db, &mock, 3000, criteria, aims, abstract_config(), None, None)
+            .await;
+    });
+
+    // Wait long enough for batch 1 to complete and the engine to enter the
+    // 3s delay (50ms mock + processing < 200ms; 400ms is a safe margin).
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    // Click Stop. With the fix, the run should exit within milliseconds.
+    let cancel_start = std::time::Instant::now();
+    engine.cancel().await;
+
+    // The run must finish well under the 3s delay. Allow up to 1.5s for
+    // scheduler jitter; a regression hangs for ~3s and hits the 5s cap.
+    let outcome = tokio::time::timeout(std::time::Duration::from_millis(5000), run_handle).await;
+    let elapsed = cancel_start.elapsed().as_millis();
+
+    assert!(
+        outcome.is_ok(),
+        "run did not finish within 5s of cancel (likely hung on the uncancellable sleep)"
+    );
+    assert!(
+        elapsed < 200,
+        "cancel should abort within one scheduler tick, not {elapsed}ms (the 3000ms delay was not interrupted)"
+    );
+
+    // Gap 2: assert the progress state was correctly emitted on cancel.
+    let progress = engine.get_progress().await;
+    assert!(!progress.is_running, "progress should show is_running=false after cancel");
+}
+
+/// Stop during the post-transient-error `request_delay_ms` delay should
+/// abort the run immediately (transient path, engine.rs ~line 631). Without
+/// the fix this test would hang for ~3s.
+#[tokio::test]
+async fn stop_during_request_delay_transient_path() {
+    let db = setup_screening_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_working_articles(&conn, 5);
+        seed_screening_criteria(&conn)
+    };
+    let engine = Arc::new(ScreeningEngine::with_batch_size(1));
+    let mock = Always429Mock;
+
+    // Spawn the run with a 3s inter-batch delay. The first batch fails
+    // instantly with 429 (transient), defers the article, and enters the
+    // 3s delay before the next loop iteration.
+    let run_engine = engine.clone();
+    let run_handle = tokio::spawn(async move {
+        let _ = run_engine
+            .run_sync(&db, &mock, 3000, criteria, aims, abstract_config(), None, None)
+            .await;
+    });
+
+    // Wait long enough for the first 429 to be processed and the engine
+    // to enter the 3s delay (the 429 mock returns instantly; 400ms is a
+    // safe margin that accounts for DB writes + progress emit).
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+    let cancel_start = std::time::Instant::now();
+    engine.cancel().await;
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_millis(5000), run_handle).await;
+    let elapsed = cancel_start.elapsed().as_millis();
+
+    assert!(
+        outcome.is_ok(),
+        "run did not finish within 5s of cancel (likely hung on the uncancellable sleep)"
+    );
+    assert!(
+        elapsed < 200,
+        "cancel should abort within one scheduler tick, not {elapsed}ms (the 3000ms delay was not interrupted)"
+    );
+
+    // Gap 2: assert the progress state was correctly emitted on cancel.
+    let progress = engine.get_progress().await;
+    assert!(!progress.is_running, "progress should show is_running=false after cancel");
+}

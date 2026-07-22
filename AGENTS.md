@@ -211,6 +211,35 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     orchestrator's timeout error now includes actionable guidance ("try reducing
     batch_size or increasing request_delay_ms") instead of the opaque "timed out."
     Tested in `tests/screening_engine_test.rs` (5 `is_auth_failure` tests).
+    **Cancellable inter-batch delay** (v8.5): all three `request_delay_ms`
+    sleeps (success path, transient-error path, stage-2 path) are now wrapped
+    in the private `delay_or_cancel` helper, which races the sleep against
+    `cancel_notify` in a `biased tokio::select!`. Clicking Stop now aborts the
+    run within milliseconds during the inter-batch throttle instead of waiting
+    the full `request_delay_ms` (commonly 1-10s for rate-limit mitigation).
+    The helper MUST NOT use an `if *cancel_token` precondition on the
+    `notified()` select branch: tokio::select! skips polling a branch whose
+    precondition is false, which prevents `notified()` from registering as a
+    waiter, making `notify_waiters()` a no-op and silently losing the cancel
+    signal (the sleep runs to completion). Always poll `notified()` and check
+    the token inside the branch body. On cancel, the in-memory LLM response
+    (if any) is dropped - no partial DB writes, no error marking; articles
+    stay unscreened for the next run, matching the cancel-during-LLM-call
+    contract. The v8.3 LLM-call wrappers (stage-1 + stage-2) now ALSO use the
+    always-poll-notified + check-token-inside pattern (wrapped in a `loop` so
+    the spurious-notify path can `continue` without matching the LLM result
+    type) - the earlier `if` precondition was wrong: reqwest does NOT yield
+    often enough during a slow LLM response, so the cancel signal was lost and
+    Stop had no effect mid-LLM-call. Tested in
+    `tests/screening_engine_test.rs` (2 `stop_during_request_delay_*` tests:
+    success path + transient path; both would hang ~3s without the fix) +
+    `tests/screening_two_stage_test.rs` (`stop_during_request_delay_stage2_path`:
+    covers the stage-2 delay path at engine.rs ~line 986, asserting cancel
+    fires within 200ms AND that the stage-1 decision is preserved when the
+    stage-2 response is dropped on cancel). All three tests also assert
+    `progress.is_running == false` after cancel (progress-state check) and
+    use a tightened `elapsed < 200ms` bound (one scheduler tick, not the
+    earlier generous 1500ms).
     `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
     (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,
     `chunk_budget_per_article`, optional `max_articles` per-run cap from

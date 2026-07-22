@@ -194,6 +194,62 @@ impl ScreeningEngine {
         *self.pause_token.lock().await = false;
     }
 
+    /// Sleep for `delay_ms`, but abort immediately if the engine is cancelled.
+    ///
+    /// Wraps the `request_delay_ms` inter-batch throttle in a `tokio::select!`
+    /// against `cancel_notify`, using the same `biased` pattern as the in-flight
+    /// LLM-call wrappers. Without this, clicking Stop during the post-batch
+    /// delay waits the full `request_delay_ms` (commonly 1-10s for rate-limit
+    /// mitigation) before the loop-top cancel check fires.
+    ///
+    /// Returns `true` if the sleep was aborted by cancellation (caller should
+    /// return immediately; final progress has already been emitted here); returns
+    /// `false` if the sleep completed normally (caller should proceed).
+    ///
+    /// On cancellation the in-memory LLM response (if any) is dropped by the
+    /// caller's `return Ok(())` - no partial DB writes, no error marking.
+    /// Articles stay unscreened and are picked up by the next run, matching
+    /// the existing cancel-during-LLM-call contract.
+    async fn delay_or_cancel(&self, app_handle: &Option<tauri::AppHandle>, delay_ms: u64) -> bool {
+        // Skip the select! entirely for a zero delay (common in tests + when
+        // request_delay_ms is unset). Avoids a pointless notify race + lock.
+        if delay_ms == 0 {
+            return false;
+        }
+        let cancel_notify = self.cancel_notify.clone();
+        tokio::select! {
+            biased;
+            () = cancel_notify.notified() => {
+                // The notify fired. Check whether it was an actual cancel
+                // (notify can fire for other reasons in rare edge cases, and
+                // we must NOT use an `if` precondition on the select branch:
+                // tokio::select! skips polling a branch whose precondition is
+                // false, which would prevent `notified()` from registering as
+                // a waiter. With an unregistered waiter, `notify_waiters()`
+                // is a no-op and the cancel signal is lost - the sleep would
+                // run to completion. Always poll `notified()`, then check the
+                // token here.
+                if *self.cancel_token.lock().await {
+                    // Cancelled during the inter-batch delay: emit final
+                    // progress (is_running=false, titles cleared) + exit.
+                    let mut progress = self.progress.lock().await;
+                    progress.is_running = false;
+                    progress.current_article_titles = vec![];
+                    self.emit_progress(app_handle, &progress);
+                    true
+                } else {
+                    // Spurious notify (not a cancel): complete the delay
+                    // normally by falling through to the sleep branch's
+                    // result. This shouldn't happen in practice because the
+                    // only caller of `notify_waiters()` is `cancel()`, but
+                    // handling it makes the helper robust.
+                    false
+                }
+            }
+            () = tokio::time::sleep(Duration::from_millis(delay_ms)) => false,
+        }
+    }
+
     /// Run the screening engine using the std::sync::Mutex<Connection> from DbState.
     /// If `app_handle` is provided, emits `screening:progress` events after each article.
     /// Accepts an `LlmClient` trait object so tests can inject mocks.
@@ -499,18 +555,33 @@ impl ScreeningEngine {
             // timeout to fire. On cancel: emit final progress and break - no
             // DB write, no error marking, no response processing.
             let llm_result = {
+                // Use a loop so the cancel branch can re-poll on spurious notify
+                // (token false) without needing to match the LLM result type.
+                // Must NOT use an `if` precondition on notified() (see
+                // delay_or_cancel doc-comment): tokio::select! skips polling a
+                // branch whose precondition is false, preventing notified()
+                // from registering as a waiter. Always poll notified(), check
+                // the token inside the branch body.
                 let cancel_notify = self.cancel_notify.clone();
-                tokio::select! {
-                    biased;
-                    () = cancel_notify.notified(), if *self.cancel_token.lock().await => {
-                        // Cancelled: drop the response and exit the run.
-                        let mut progress = self.progress.lock().await;
-                        progress.is_running = false;
-                        progress.current_article_titles = vec![];
-                        self.emit_progress(&app_handle, &progress);
-                        return Ok(());
+                loop {
+                    tokio::select! {
+                        biased;
+                        () = cancel_notify.notified() => {
+                            if *self.cancel_token.lock().await {
+                                // Cancelled: drop the response and exit the run.
+                                let mut progress = self.progress.lock().await;
+                                progress.is_running = false;
+                                progress.current_article_titles = vec![];
+                                self.emit_progress(&app_handle, &progress);
+                                return Ok(());
+                            }
+                            // Spurious notify (token false): re-poll. Cannot happen
+                            // in practice (notify_waiters is only called by cancel),
+                            // but handle it for correctness.
+                            continue;
+                        }
+                        res = llm.send_with_type(system_prompt, &user_prompt, request_type.clone()) => break res,
                     }
-                    res = llm.send_with_type(system_prompt, &user_prompt, request_type.clone()) => res,
                 }
             };
 
@@ -582,15 +653,26 @@ impl ScreeningEngine {
                         // handler below - it would double-count `errors` +
                         // `completed` for the same articles that were already
                         // counted as `deferred` above (F1 regression fix).
-                        sleep(Duration::from_millis(request_delay_ms)).await;
+                        //
+                        // Cancellable delay: if Stop was clicked during the
+                        // post-batch throttle, abort immediately instead of
+                        // waiting up to `request_delay_ms` (1-10s).
+                        if self.delay_or_cancel(&app_handle, request_delay_ms).await {
+                            return Ok(());
+                        }
                         continue;
                     }
                     None
                 }
             };
 
-            // Apply delay between requests
-            sleep(Duration::from_millis(request_delay_ms)).await;
+            // Apply delay between requests (cancellable: Stop aborts here
+            // instead of waiting up to `request_delay_ms` for the next loop-top
+            // cancel check). On cancel, drop the in-memory LLM response without
+            // writing to the DB - articles stay unscreened for the next run.
+            if self.delay_or_cancel(&app_handle, request_delay_ms).await {
+                return Ok(());
+            }
 
             let (response_text, total_tokens) = match response_data {
                 Some(data) => data,
@@ -894,25 +976,37 @@ impl ScreeningEngine {
                                 // also aborts the in-flight stage-2 call immediately
                                 // (drops the future → reqwest cancels).
                                 let stage2_response = {
+                                    // loop+select pattern (see stage-1 wrapper comment).
                                     let cancel_notify = self.cancel_notify.clone();
-                                    tokio::select! {
-                                        biased;
-                                        () = cancel_notify.notified(), if *self.cancel_token.lock().await => {
-                                            // Cancelled mid-stage-2: emit final progress and exit.
-                                            let mut progress = self.progress.lock().await;
-                                            progress.is_running = false;
-                                            progress.current_article_titles = vec![];
-                                            self.emit_progress(&app_handle, &progress);
-                                            return Ok(());
+                                    loop {
+                                        tokio::select! {
+                                            biased;
+                                            () = cancel_notify.notified() => {
+                                                if *self.cancel_token.lock().await {
+                                                    // Cancelled mid-stage-2: emit final progress and exit.
+                                                    let mut progress = self.progress.lock().await;
+                                                    progress.is_running = false;
+                                                    progress.current_article_titles = vec![];
+                                                    self.emit_progress(&app_handle, &progress);
+                                                    return Ok(());
+                                                }
+                                                continue;
+                                            }
+                                            res = llm.send_with_type(
+                                                system_prompt,
+                                                &user_prompt,
+                                                LlmRequestType::EnhancedScreening,
+                                            ) => break res,
                                         }
-                                        res = llm.send_with_type(
-                                            system_prompt,
-                                            &user_prompt,
-                                            LlmRequestType::EnhancedScreening,
-                                        ) => res,
                                     }
                                 };
-                                sleep(Duration::from_millis(request_delay_ms)).await;
+                                // Cancellable stage-2 delay: Stop aborts here
+                                // instead of waiting up to `request_delay_ms`.
+                                // On cancel, drop the stage-2 response without
+                                // writing - the stage-1 decision already stands.
+                                if self.delay_or_cancel(&app_handle, request_delay_ms).await {
+                                    return Ok(());
+                                }
 
                                 let (response_text, total_tokens) = match stage2_response {
                                     Ok(data) => data,

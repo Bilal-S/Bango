@@ -492,3 +492,128 @@ async fn two_stage_mode_falls_back_to_abstract_when_no_full_text() {
         "two-stage stage 1 must be abstract-only when no full text: {evidence_seen:?}"
     );
 }
+
+// ─── Cancellable stage-2 delay (llmscreen5 Gap 1) ───────────────────────────
+//
+// The stage-2 `delay_or_cancel` call site (engine.rs ~line 986) has a distinct
+// contract from the stage-1 success/transient paths: on cancel, the stage-2
+// response is DROPPED without writing, so the stage-1 decision already stands
+// in the DB. This test proves cancel fires within the timing bound AND that the
+// stage-1 decision is preserved (not flipped by the dropped stage-2 response).
+
+use std::sync::Arc;
+
+/// Mock that returns a borderline-confidence stage-1 response on call 0, then
+/// delays ~50ms on the stage-2 call (call 1+) so the engine reaches the
+/// stage-2 `delay_or_cancel` before the test calls `cancel()`.
+struct BorderlineThenDelayMock {
+    stage1: String,
+    stage2: String,
+    call_count: AtomicUsize,
+}
+
+impl BorderlineThenDelayMock {
+    fn new(stage1: String, stage2: String) -> Self {
+        Self { stage1, stage2, call_count: AtomicUsize::new(0) }
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmClient for BorderlineThenDelayMock {
+    async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+        let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
+        if idx == 0 {
+            // Stage 1: return immediately with borderline confidence.
+            Ok((self.stage1.clone(), 100))
+        } else {
+            // Stage 2: delay slightly so the spawned task reaches the
+            // stage-2 `delay_or_cancel` before the test calls cancel().
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            Ok((self.stage2.clone(), 100))
+        }
+    }
+}
+
+/// Stop during the stage-2 `request_delay_ms` delay should abort the run
+/// immediately AND preserve the stage-1 decision (engine.rs ~line 986).
+/// Without the fix this test would hang for ~3s.
+#[tokio::test]
+async fn stop_during_request_delay_stage2_path() {
+    // Wrap db in Arc so the spawned task and the post-run status check can
+    // both access it (the `async move` closure would otherwise move it).
+    let db = Arc::new(setup_db());
+    // Seed the article + chunks, capture the article_id for the post-run
+    // status check. Criteria + aims are owned by run_sync.
+    let article_id = {
+        let conn = db.lock().unwrap();
+        let id = seed_article_with_full_text(&conn, "Borderline Cancel Stage2");
+        seed_chunks(&conn, &id, &[("Methods", "sugar tax study design rct children")]);
+        id
+    };
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_criteria(&conn)
+    };
+    let inc_id = inclusion_id(&criteria);
+
+    // Stage 1: borderline confidence 0.55 with NO matched inclusion criteria
+    // so the resolver keeps "exclude" -> status "rejected". This is essential
+    // for the test: if stage-1 resolved to "include", the stage-2 cancel
+    // preservation check would be meaningless (stage-2 also returns "include").
+    // Stage 2: would override to "include" @ 0.9 (matched inc), but it's
+    // dropped on cancel so stage-1's "rejected" must stand.
+    let stage1_borderline_exclude = r#"[{"decision":"exclude","reasoning":"no inclusion match","matchedInclusionCriteria":[],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.55}]"#.to_string();
+    let mock =
+        BorderlineThenDelayMock::new(stage1_borderline_exclude, response("include", 0.9, &inc_id));
+
+    let engine = Arc::new(ScreeningEngine::with_batch_size(1));
+
+    // Spawn the run with a 2000ms inter-batch delay. Stage 1 completes instantly
+    // (borderline), stage 2's mock delays ~50ms, then the engine enters the
+    // 3s stage-2 delay.
+    let run_engine = engine.clone();
+    let run_db = db.clone();
+    let run_handle = tokio::spawn(async move {
+        let _ = run_engine
+            .run_sync(&run_db, &mock, 2000, criteria, aims, two_stage_config(), None, None)
+            .await;
+    });
+    // Wait long enough for stage 1 + stage 2 mock + stage-2 LLM select!
+    // to resolve, so the engine has entered the stage-2 `delay_or_cancel`.
+    // Stage-1 processing < 100ms; stage-2 mock = 50ms; 700ms is a safe margin.
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+
+    let cancel_start = std::time::Instant::now();
+    engine.cancel().await;
+
+    let outcome = tokio::time::timeout(std::time::Duration::from_millis(5000), run_handle).await;
+    let elapsed = cancel_start.elapsed().as_millis();
+
+    assert!(
+        outcome.is_ok(),
+        "run did not finish within 5s of cancel (likely hung on the uncancellable stage-2 sleep)"
+    );
+    assert!(
+        elapsed < 200,
+        "cancel should abort within one scheduler tick, not {elapsed}ms (the 2000ms stage-2 delay was not interrupted)"
+    );
+
+    // Gap 2: assert the progress state was correctly emitted on cancel.
+    let progress = engine.get_progress().await;
+    assert!(!progress.is_running, "progress should show is_running=false after cancel");
+
+    // The stage-1 decision ("exclude") must be preserved - the stage-2
+    // response was dropped on cancel, so it must NOT have flipped the status.
+    let conn = db.lock().unwrap();
+    let status: String = conn
+        .query_row(
+            "SELECT status FROM articles WHERE id = ?1",
+            rusqlite::params![article_id],
+            |r| r.get(0),
+        )
+        .expect("read status");
+    assert_eq!(
+        status, "rejected",
+        "stage-1 decision (exclude) must be preserved when stage-2 is cancelled"
+    );
+}
