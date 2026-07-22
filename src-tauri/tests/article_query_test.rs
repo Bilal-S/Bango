@@ -1110,3 +1110,83 @@ fn test_empty_excluded_arrays_match_all() {
     let results = article_repo::query_articles(&conn, &query).expect("query failed");
     assert_eq!(results.len(), 2, "Empty excluded arrays must not filter anything");
 }
+
+// ─── get_next_unscreened_working_batch: after_sequence_id cursor ──────
+//
+// The cursor lets the screening engine advance past articles it already
+// attempted in the current run (e.g. a transient LLM error left them
+// unscreened). Without it, the engine would re-fetch the same batch forever.
+
+#[test]
+fn batch_fetch_no_offset_returns_all_unscreened() {
+    let conn = setup_db();
+    seed_working_articles(&conn, &[("A", None), ("B", None), ("C", None)]);
+    let batch = article_repo::get_next_unscreened_working_batch(&conn, 10, None).expect("fetch");
+    assert_eq!(batch.len(), 3, "all 3 unscreened articles returned with no offset");
+}
+
+#[test]
+fn batch_fetch_offset_advances_past_cursor() {
+    let conn = setup_db();
+    seed_working_articles(&conn, &[("A", None), ("B", None), ("C", None), ("D", None)]);
+
+    // First fetch: get all 4 to find the sequence_id of the first 2.
+    let all = article_repo::get_next_unscreened_working_batch(&conn, 10, None).expect("fetch");
+    assert_eq!(all.len(), 4);
+    let second_seq = all[1].sequence_id;
+
+    // Now fetch with offset = second_seq: should return only C and D (2 articles).
+    let batch = article_repo::get_next_unscreened_working_batch(&conn, 10, Some(second_seq))
+        .expect("fetch");
+    assert_eq!(batch.len(), 2, "offset should advance past the first 2 articles");
+    assert_eq!(batch[0].title, "C");
+    assert_eq!(batch[1].title, "D");
+}
+
+#[test]
+fn batch_fetch_offset_with_limit_respects_both() {
+    let conn = setup_db();
+    seed_working_articles(
+        &conn,
+        &[("A", None), ("B", None), ("C", None), ("D", None), ("E", None)],
+    );
+
+    let all = article_repo::get_next_unscreened_working_batch(&conn, 10, None).expect("fetch");
+    let second_seq = all[1].sequence_id;
+
+    // Offset past first 2, limit to 2 → should return C and D only.
+    let batch =
+        article_repo::get_next_unscreened_working_batch(&conn, 2, Some(second_seq)).expect("fetch");
+    assert_eq!(batch.len(), 2);
+    assert_eq!(batch[0].title, "C");
+    assert_eq!(batch[1].title, "D");
+}
+
+#[test]
+fn batch_fetch_offset_beyond_last_returns_empty() {
+    let conn = setup_db();
+    seed_working_articles(&conn, &[("A", None), ("B", None)]);
+
+    let all = article_repo::get_next_unscreened_working_batch(&conn, 10, None).expect("fetch");
+    let last_seq = all[1].sequence_id;
+
+    // Offset past the last article → empty.
+    let batch =
+        article_repo::get_next_unscreened_working_batch(&conn, 10, Some(last_seq)).expect("fetch");
+    assert!(batch.is_empty(), "offset past last article should return empty");
+}
+
+#[test]
+fn batch_fetch_offset_zero_is_equivalent_to_no_offset() {
+    // The implementation uses `unwrap_or(0)` for the cursor, so sequence_id > 0
+    // matches all (sequence_id starts at 1).
+    let conn = setup_db();
+    seed_working_articles(&conn, &[("A", None), ("B", None)]);
+
+    let batch_none =
+        article_repo::get_next_unscreened_working_batch(&conn, 10, None).expect("fetch");
+    let batch_zero =
+        article_repo::get_next_unscreened_working_batch(&conn, 10, Some(0)).expect("fetch");
+    assert_eq!(batch_none.len(), batch_zero.len());
+    assert_eq!(batch_none.len(), 2);
+}

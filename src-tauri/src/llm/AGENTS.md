@@ -34,9 +34,16 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
     ensures real auth failures (wrong/revoked key, wrong org) fail fast after
     one attempt instead of burning retry budget.
   - Never retry: `400`, `404`, and plain `401`/`403` without the gated body.
-- The orchestrator's `tokio::time::timeout` (600s) bounds the FULL retry
-  sequence, not a single attempt - the shared client sets only connect/pool
-  timeouts, no per-request timeout.
+- The orchestrator's `tokio::time::timeout` bounds the FULL retry sequence,
+  not a single attempt. The timeout is per-`LlmRequestType` (v8.2): 120s for
+  `Screening`/`EnhancedScreening`, 600s for all other request types. The
+  shared client sets only connect/pool timeouts, no per-request timeout.
+- The full retry rationale (why the Windows 401/403 transient-body gate exists
+  and why it must NOT be removed) is documented in the `is_retryable_response`
+  doc-comment in `client.rs` - read it before modifying the retry policy.
+- A distinct `eprintln!("[LlmClient] retrying Windows transient ...")` log
+  line fires when the transient-body gate matches, so users can confirm the
+  workaround is engaging in production diagnostics.
 
 ### Shared HTTP client (`client.rs`)
 

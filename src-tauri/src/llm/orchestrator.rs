@@ -182,7 +182,9 @@ impl LlmOrchestrator {
         )
         .await
         .map_err(|_| {
-            AppError::Import(format!("LLM request timed out after {timeout_secs} seconds"))
+            AppError::Import(format!(
+                "LLM request timed out after {timeout_secs} seconds. This is often caused by                  sustained rate limiting (429), server overload (5xx), or a slow model.                  Try reducing batch_size or increasing request_delay_ms in LLM settings."
+            ))
         })?;
 
         // 4. Log errors centrally
@@ -215,7 +217,9 @@ impl LlmOrchestrator {
         )
         .await
         .map_err(|_| {
-            AppError::Import(format!("LLM request timed out after {timeout_secs} seconds"))
+            AppError::Import(format!(
+                "LLM request timed out after {timeout_secs} seconds. This is often caused by                  sustained rate limiting (429), server overload (5xx), or a slow model."
+            ))
         })?;
 
         if let Err(ref e) = result {

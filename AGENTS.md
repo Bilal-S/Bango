@@ -175,6 +175,42 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     attempt-per-batch contract above, a hung or slow screening call now surfaces
     as an error within ~2 minutes instead of stalling the run. Tested in
     `tests/llm_orchestrator_test.rs` (3 `timeout_for` tests).
+    **Immediate Stop + transient-error handling** (v8.3): two coupled changes
+    addressing the critique in `.worktrees/llmscreen.md`. (a) Both stage-1 and
+    stage-2 LLM calls are wrapped in `tokio::select!` against a
+    `tokio::sync::Notify` cancel signal. Clicking Stop drops the in-flight
+    future (cancelling the underlying `reqwest` request) within milliseconds
+    instead of waiting up to 2 minutes; the response is DROPPED (no DB write,
+    no error marking). The `cancel()` method calls `notify_waiters()` in
+    addition to setting the bool flag. (b) Transient LLM errors (429, 401/403
+    Windows transient, 5xx, timeout, transport) now leave articles UNSCREENED
+    (no `screening_error`, no `screened_at`) so the next run picks them up
+    naturally - no manual "Reset Errors" workaround. A new
+    `after_sequence_id: Option<i64>` cursor on
+    `get_next_unscreened_working_batch` + per-run `last_attempted_seq` tracking
+    ensures the current run advances past failed batches instead of re-fetching
+    infinitely. The pure `#[must_use]` helper
+    `screening::engine::is_transient_llm_error(e) -> bool` classifies errors by
+    inspecting the message string (all LLM errors are `AppError::Import(String)`).
+    Non-transient errors (malformed JSON, parse mismatch) keep the existing
+    batch-error-marking behavior. The Windows 401/403 `insufficient permissions`
+    retry rationale is documented in the `is_retryable_response` doc-comment in
+    `client.rs` and in `src-tauri/src/llm/AGENTS.md`. Tested in
+    `tests/screening_engine_test.rs` (8 `is_transient_llm_error` tests) +
+    `tests/article_query_test.rs` (5 `batch_fetch_offset_*` tests).
+    **Auto-stop + fixed phantom progress + actionable timeout** (v8.4): three
+    improvements addressing `.worktrees/llmscreen2.md`. (a) Auth failures
+    (401/403 without the Windows transient body) stop the run immediately
+    (threshold = 1) via new pure `#[must_use]` helper
+    `screening::engine::is_auth_failure(e) -> bool`. Other transients stop
+    after `TRANSIENT_FAILURE_THRESHOLD = 3` consecutive failures. Both set
+    `progress.fatal_error` so the frontend shows a red banner. (b) Transient-
+    deferred articles no longer inflate `progress.completed` or `progress.errors`
+    (the completion percentage was misleading). New `progress.deferred` counter;
+    the frontend renders a muted "N article(s) deferred" notice. (c) The
+    orchestrator's timeout error now includes actionable guidance ("try reducing
+    batch_size or increasing request_delay_ms") instead of the opaque "timed out."
+    Tested in `tests/screening_engine_test.rs` (5 `is_auth_failure` tests).
     `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
     (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,
     `chunk_budget_per_article`, optional `max_articles` per-run cap from

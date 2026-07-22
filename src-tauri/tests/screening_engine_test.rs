@@ -628,3 +628,329 @@ fn test_truncate_at_word_boundary_no_hyphen_hard_truncates() {
     let result = truncate_at_word_boundary(input, 10);
     assert_eq!(result, "supercalif");
 }
+
+// ─── is_transient_llm_error helper ─────────────────────────────────────
+//
+// Transient errors (429/401/403/5xx/timeout/transport) must be classified
+// correctly so the engine leaves articles UNSCREENED instead of mass-marking
+// them as errors.
+
+#[test]
+fn is_transient_llm_error_classifies_429() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM request failed (429 Too Many Requests): rate limited".into());
+    assert!(bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+#[test]
+fn is_transient_llm_error_classifies_401_transient() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import(
+        "LLM request failed (401 Unauthorized): insufficient permissions for this operation".into(),
+    );
+    assert!(bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+#[test]
+fn is_transient_llm_error_classifies_403_transient() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import(
+        "LLM request failed (403 Forbidden): insufficient permissions for this operation".into(),
+    );
+    assert!(bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+#[test]
+fn is_transient_llm_error_classifies_500_server_error() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM request failed (503 Service Unavailable)".into());
+    assert!(bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+#[test]
+fn is_transient_llm_error_classifies_timeout() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM request timed out after 120 seconds".into());
+    assert!(bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+#[test]
+fn is_transient_llm_error_classifies_transport_error() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM request failed: connection reset by peer".into());
+    assert!(bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+#[test]
+fn is_transient_llm_error_rejects_malformed_json() {
+    // Non-transient: content-specific issue unlikely to resolve on retry.
+    use bango_lib::error::AppError;
+    let e = AppError::Import("Failed to parse LLM response as JSON: unexpected token".into());
+    assert!(!bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+#[test]
+fn is_transient_llm_error_rejects_parse_count_mismatch() {
+    // Non-transient: content-specific issue.
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM returned 2 decisions but batch has 5 articles".into());
+    assert!(!bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+// ─── is_auth_failure helper ───────────────────────────────────────────
+//
+// Auth failures (wrong key, wrong org) must be classified correctly so the
+// engine stops immediately instead of burning through all articles.
+
+#[test]
+fn is_auth_failure_classifies_plain_401() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM request failed (401 Unauthorized): Invalid API key".into());
+    assert!(bango_lib::screening::engine::is_auth_failure(&e));
+}
+
+#[test]
+fn is_auth_failure_classifies_plain_403() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM request failed (403 Forbidden): Forbidden".into());
+    assert!(bango_lib::screening::engine::is_auth_failure(&e));
+}
+
+#[test]
+fn is_auth_failure_rejects_401_transient() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import(
+        "LLM request failed (401 Unauthorized): insufficient permissions for this operation".into(),
+    );
+    // This is the Windows transient, NOT a real auth failure.
+    assert!(!bango_lib::screening::engine::is_auth_failure(&e));
+}
+
+#[test]
+fn is_auth_failure_rejects_429() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("LLM request failed (429 Too Many Requests)".into());
+    assert!(!bango_lib::screening::engine::is_auth_failure(&e));
+}
+
+#[test]
+fn is_auth_failure_rejects_non_auth_error() {
+    use bango_lib::error::AppError;
+    let e = AppError::Import("Failed to parse LLM response".into());
+    assert!(!bango_lib::screening::engine::is_auth_failure(&e));
+}
+// ─── F3: is_transient_llm_error on plain 401 (documents intentional policy) ──
+
+#[test]
+fn is_transient_llm_error_classifies_plain_401() {
+    // A plain 401 (wrong key, no Windows-transient body) is intentionally
+    // classified as transient by is_transient_llm_error so articles are NOT
+    // mass-marked as errors. The is_auth_failure() helper is the separate
+    // gate that catches this case and stops the run. Without this test, the
+    // catch-all at engine.rs could be "fixed" by a contributor who doesn't
+    // understand the two-helper design.
+    use bango_lib::error::AppError;
+    let e = AppError::Import(
+        "LLM request failed (401 Unauthorized): Incorrect API key provided".into(),
+    );
+    assert!(bango_lib::screening::engine::is_transient_llm_error(&e));
+}
+
+// ─── F2: Auto-stop state machine integration tests ──────────────────────
+//
+// These tests exercise the engine's consecutive-failure counter, auth-failure
+// immediate stop, and the deferred/errors/completed progress counters using
+// mock LLM clients that inject controlled failures.
+
+use bango_lib::db::article_repo;
+use bango_lib::db::criteria_repo;
+use bango_lib::error::AppError;
+use bango_lib::models::article::NewArticle;
+use bango_lib::models::criterion::ResearchAim;
+use bango_lib::screening::engine::ScreeningConfig;
+use bango_lib::screening::llm_client::LlmClient;
+
+/// Mock LLM client that always returns a transient error (429).
+struct Always429Mock;
+
+#[async_trait::async_trait]
+impl LlmClient for Always429Mock {
+    async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+        Err(AppError::Import("LLM request failed (429 Too Many Requests)".into()))
+    }
+}
+
+/// Mock LLM client that always returns an auth failure (plain 401).
+struct Always401Mock;
+
+#[async_trait::async_trait]
+impl LlmClient for Always401Mock {
+    async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+        Err(AppError::Import("LLM request failed (401 Unauthorized): Incorrect API key".into()))
+    }
+}
+
+/// Mock LLM client that fails the first N calls with 429, then succeeds.
+struct FailThenSucceedMock {
+    fail_count: std::sync::atomic::AtomicUsize,
+    inc_id: String,
+}
+
+#[async_trait::async_trait]
+impl LlmClient for FailThenSucceedMock {
+    async fn send(&self, _system: &str, _user: &str) -> Result<(String, usize), AppError> {
+        let n = self.fail_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if n < 2 {
+            return Err(AppError::Import("LLM request failed (429 Too Many Requests)".into()));
+        }
+        // Succeed on call 2+
+        let resp = format!(
+            r#"[{{"decision":"include","reasoning":"R","matchedInclusionCriteria":["{}"],"matchedExclusionCriteria":[],"suggestedTags":[],"confidence":0.9}}]"#,
+            self.inc_id
+        );
+        Ok((resp, 100))
+    }
+}
+
+fn setup_screening_db() -> std::sync::Mutex<rusqlite::Connection> {
+    let conn = bango_lib::db::connection::create_connection().expect("create connection");
+    bango_lib::db::migration::run_migrations(&conn).expect("migrations");
+    std::sync::Mutex::new(conn)
+}
+
+fn seed_working_articles(conn: &rusqlite::Connection, count: usize) {
+    for i in 0..count {
+        let article = NewArticle {
+            title: format!("Article {i}"),
+            abstract_text: format!("Abstract {i} about sugar taxes in children."),
+            authors: vec!["Author".to_string()],
+            publication_year: Some(2024),
+            import_source: Some("test".to_string()),
+            ..Default::default()
+        };
+        let inserted =
+            article_repo::insert_articles_batch(conn, &[article], "test").expect("insert");
+        let id = &inserted[0].id;
+        article_repo::move_articles_to_working_batch(conn, std::slice::from_ref(id))
+            .expect("move to working");
+    }
+}
+
+fn seed_screening_criteria(conn: &rusqlite::Connection) -> (Vec<Criterion>, Vec<ResearchAim>) {
+    let aim = criteria_repo::create_aim(conn, "Study sugar taxes").expect("aim");
+    let inc =
+        criteria_repo::create_criterion(conn, "inclusion", "Must be about sugar taxes", "standard")
+            .expect("inc");
+    let exc = criteria_repo::create_criterion(conn, "exclusion", "Not about children", "standard")
+        .expect("exc");
+    (vec![inc, exc], vec![aim])
+}
+
+fn abstract_config() -> ScreeningConfig {
+    ScreeningConfig::default()
+}
+
+/// After 3 consecutive 429 errors, the run should stop with a fatal_error
+/// message. Articles should be deferred (not errors, not completed).
+#[tokio::test]
+async fn auto_stop_after_3_consecutive_transient_failures() {
+    let db = setup_screening_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_working_articles(&conn, 10);
+        seed_screening_criteria(&conn)
+    };
+    let engine = ScreeningEngine::with_batch_size(1);
+    let mock = Always429Mock;
+    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let progress = engine.get_progress().await;
+    assert!(!progress.is_running, "run should have stopped");
+    assert!(progress.fatal_error.is_some(), "fatal_error should be set");
+    assert!(
+        progress.fatal_error.as_ref().unwrap().contains("3 consecutive"),
+        "fatal_error should mention 3 consecutive failures"
+    );
+    // 3 articles deferred (one per batch before stop), 0 errors, 0 completed.
+    assert_eq!(progress.deferred, 3, "3 articles should be deferred");
+    assert_eq!(progress.errors, 0, "no hard errors (transient only)");
+    assert_eq!(progress.completed, 0, "no articles screened");
+}
+
+/// Auth failure (plain 401) should stop the run immediately (threshold = 1).
+#[tokio::test]
+async fn auto_stop_immediately_on_auth_failure() {
+    let db = setup_screening_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_working_articles(&conn, 10);
+        seed_screening_criteria(&conn)
+    };
+    let engine = ScreeningEngine::with_batch_size(1);
+    let mock = Always401Mock;
+    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let progress = engine.get_progress().await;
+    assert!(!progress.is_running, "run should have stopped");
+    assert!(progress.fatal_error.is_some(), "fatal_error should be set");
+    assert!(
+        progress.fatal_error.as_ref().unwrap().contains("Authentication failed"),
+        "fatal_error should mention authentication"
+    );
+    // Only 1 article deferred (immediate stop), 0 errors, 0 completed.
+    assert_eq!(progress.deferred, 1, "1 article deferred (immediate stop)");
+    assert_eq!(progress.errors, 0);
+    assert_eq!(progress.completed, 0);
+}
+
+/// After 2 transient failures followed by a success, the counter should reset
+/// and the run should continue (no fatal_error).
+#[tokio::test]
+async fn transient_counter_resets_on_success() {
+    let db = setup_screening_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_working_articles(&conn, 5);
+        seed_screening_criteria(&conn)
+    };
+    let inc_id = criteria
+        .iter()
+        .find(|c| matches!(c.criterion_type, CriterionType::Inclusion))
+        .expect("inclusion criterion")
+        .id
+        .clone();
+    let engine = ScreeningEngine::with_batch_size(1);
+    let mock = FailThenSucceedMock { fail_count: std::sync::atomic::AtomicUsize::new(0), inc_id };
+    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let progress = engine.get_progress().await;
+    assert!(!progress.is_running, "run should have completed normally");
+    assert!(progress.fatal_error.is_none(), "no fatal_error (success reset counter)");
+    // 2 articles deferred (first 2 calls failed), then 3 succeeded.
+    assert_eq!(progress.deferred, 2, "2 articles deferred before success");
+    assert_eq!(progress.errors, 0);
+    assert_eq!(progress.completed, 3, "3 articles screened after recovery");
+}
+
+/// A single transient error (no stop) should NOT inflate errors or completed
+/// (the F1 regression: double-counting bug).
+#[tokio::test]
+async fn single_transient_does_not_double_count_progress() {
+    // This mock fails once (429) then always succeeds. With only 1 article,
+    // the single failure defers it and the run ends (no more articles).
+    let db = setup_screening_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_working_articles(&conn, 1);
+        seed_screening_criteria(&conn)
+    };
+    let engine = ScreeningEngine::with_batch_size(1);
+    let mock = Always429Mock;
+    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let progress = engine.get_progress().await;
+    // The run stops after 1 batch (only 1 article, and it fails with 429).
+    // Since consecutive_transient_failures = 1 (< 3 threshold), it doesn't
+    // auto-stop — but there are no more articles, so the loop ends naturally.
+    // The single failure should show deferred=1, errors=0, completed=0.
+    assert_eq!(progress.deferred, 1, "1 article deferred");
+    assert_eq!(progress.errors, 0, "no hard errors (F1: no double-counting)");
+    assert_eq!(progress.completed, 0, "no articles screened (F1: no phantom completed)");
+    assert!(progress.fatal_error.is_none(), "no fatal_error (below threshold)");
+}

@@ -67,14 +67,24 @@ pub fn max_article_char_len(conn: &Connection) -> Result<usize, AppError> {
 pub fn get_next_unscreened_working_batch(
     conn: &Connection,
     limit: usize,
+    after_sequence_id: Option<i64>,
 ) -> Result<Vec<Article>, AppError> {
+    // The `after_sequence_id` cursor lets the screening engine advance past
+    // articles it already attempted in the current run (e.g. a transient LLM
+    // error left them unscreened). Without it, the engine would re-fetch the
+    // same unscreened batch forever within a single run. A fresh run (new
+    // engine instance) starts with `None` so all unscreened articles are
+    // eligible again.
+    // Use a single SQL with `COALESCE` so we always bind both params (?1=limit, ?2=cursor).
+    // When `after_sequence_id` is None (fresh run), bind 0 so `sequence_id > 0` matches all.
+    let cursor = after_sequence_id.unwrap_or(0);
     let mut stmt = conn.prepare(
         "SELECT id, sequence_id, title, abstract_text, authors, publication_year, has_full_text \
          FROM articles \
-          WHERE status = 'working' AND screened_at IS NULL \
+          WHERE status = 'working' AND screened_at IS NULL AND sequence_id > ?2 \
           ORDER BY sequence_id ASC LIMIT ?1",
     )?;
-    let rows = stmt.query_map([limit], |row| {
+    let rows = stmt.query_map(rusqlite::params![limit, cursor], |row| {
         Ok(Article {
             id: row.get(0)?,
             sequence_id: row.get(1)?,

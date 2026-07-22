@@ -262,6 +262,24 @@ const isWorkingListScreened = computed((): boolean => {
           </div>
         </div>
 
+        <!-- Fatal error banner (auth failure, consecutive transient failures) -->
+        <div v-if="progress?.fatalError" class="screening-view__fatal-error">
+          <span class="material-symbols-outlined">error</span>
+          <span>{{ progress.fatalError }}</span>
+        </div>
+
+        <!-- Deferred articles notice (transient LLM errors left them unscreened) -->
+        <div
+          v-if="progress?.deferred && progress.deferred > 0"
+          class="screening-view__deferred-notice"
+        >
+          <span class="material-symbols-outlined">schedule</span>
+          <span
+            >{{ progress.deferred }} article(s) deferred (LLM was unavailable) — they'll be screened
+            on the next run.</span
+          >
+        </div>
+
         <ScreeningProgressBar
           v-if="isRunning && progress && progress.total > 0"
           :completed="progress.completed"
@@ -1030,5 +1048,44 @@ const isWorkingListScreened = computed((): boolean => {
   font-size: var(--font-size-caption);
   color: var(--color-priority-high);
   margin-top: var(--space-1);
+}
+
+/* ── Fatal Error Banner ── */
+.screening-view__fatal-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-error-container);
+  color: var(--color-error);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-body);
+}
+
+.screening-view__fatal-error .material-symbols-outlined {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ── Deferred Articles Notice ── */
+.screening-view__deferred-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-surface-container);
+  color: var(--color-on-surface-variant);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+}
+
+.screening-view__deferred-notice .material-symbols-outlined {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 </style>

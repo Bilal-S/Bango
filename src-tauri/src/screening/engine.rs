@@ -24,6 +24,9 @@ use crate::db::{
     article_repo, audit_repo, biblio_repo, chunk_repo, label_repo, tag_repo,
 };
 use crate::error::AppError;
+
+/// Consecutive transient-failure threshold for the auto-stop guard.
+const TRANSIENT_FAILURE_THRESHOLD: u32 = 3;
 use crate::llm::orchestrator::LlmRequestType;
 use crate::models::biblio::{TermSource, TermType};
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
@@ -77,6 +80,19 @@ pub struct ScreeningProgress {
     pub included: usize,
     pub rejected: usize,
     pub errors: usize,
+    /// Articles deferred due to transient LLM errors (429, 401/403 transient,
+    /// 5xx, timeout, transport). These are NOT counted in `completed` or
+    /// `errors` because they were neither screened nor hard-failed - they're
+    /// left unscreened for the next run to pick up. The frontend renders this
+    /// as a distinct muted sub-line so the user understands the difference
+    /// between "deferred" and "error".
+    #[serde(default)]
+    pub deferred: usize,
+    /// Fatal error that stopped the run (e.g. auth failure, 3 consecutive
+    /// transient failures). When set, `is_running` is false and the frontend
+    /// renders a red banner. `None` for normal completion or user-cancel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fatal_error: Option<String>,
     pub is_running: bool,
     pub current_article_titles: Vec<String>,
     pub elapsed_ms: u64,
@@ -122,6 +138,11 @@ pub struct LlmScreeningResponse {
 pub struct ScreeningEngine {
     progress: Arc<Mutex<ScreeningProgress>>,
     cancel_token: Arc<Mutex<bool>>,
+    /// One-shot notification for immediate cancellation. `notify_waiters()`
+    /// wakes any `select!` branch awaiting `notified()`, so clicking Stop
+    /// aborts the in-flight LLM call within milliseconds instead of waiting
+    /// for the orchestrator's timeout.
+    cancel_notify: Arc<tokio::sync::Notify>,
     pause_token: Arc<Mutex<bool>>,
     batch_size: usize,
 }
@@ -137,6 +158,7 @@ impl ScreeningEngine {
         Self {
             progress: Arc::new(Mutex::new(ScreeningProgress::default())),
             cancel_token: Arc::new(Mutex::new(false)),
+            cancel_notify: Arc::new(tokio::sync::Notify::new()),
             pause_token: Arc::new(Mutex::new(false)),
             batch_size: 1,
         }
@@ -147,6 +169,7 @@ impl ScreeningEngine {
         Self {
             progress: Arc::new(Mutex::new(ScreeningProgress::default())),
             cancel_token: Arc::new(Mutex::new(false)),
+            cancel_notify: Arc::new(tokio::sync::Notify::new()),
             pause_token: Arc::new(Mutex::new(false)),
             batch_size: batch_size.max(1),
         }
@@ -158,6 +181,9 @@ impl ScreeningEngine {
 
     pub async fn cancel(&self) {
         *self.cancel_token.lock().await = true;
+        // Wake any `select!` branch awaiting cancellation so the in-flight
+        // LLM call is dropped (and its reqwest request cancelled) immediately.
+        self.cancel_notify.notify_waiters();
     }
 
     pub async fn pause(&self) {
@@ -192,7 +218,9 @@ impl ScreeningEngine {
         app_handle: Option<tauri::AppHandle>,
         target_article_id: Option<String>,
     ) -> Result<(), AppError> {
-        // Reset state
+        // Reset state. Note: `Notify` does not need resetting - `notify_waiters()`
+        // only wakes CURRENT waiters; a fresh `notified()` future is created on
+        // each `select!` entry.
         *self.cancel_token.lock().await = false;
         *self.pause_token.lock().await = false;
 
@@ -300,6 +328,11 @@ impl ScreeningEngine {
         }
 
         let start = Instant::now();
+        // Cursor for `get_next_unscreened_working_batch`: advances past articles
+        // already attempted in this run so transient-error batches are not
+        // re-fetched infinitely. Reset on every new run (new engine instance).
+        let mut last_attempted_seq: Option<i64> = None;
+        let mut consecutive_transient_failures: u32 = 0;
 
         loop {
             // Check cancellation
@@ -332,12 +365,25 @@ impl ScreeningEngine {
                         None => break,
                     }
                 } else {
-                    article_repo::get_next_unscreened_working_batch(&c, self.batch_size)?
+                    article_repo::get_next_unscreened_working_batch(
+                        &c,
+                        self.batch_size,
+                        last_attempted_seq,
+                    )?
                 }
             };
 
             if batch.is_empty() {
                 break;
+            }
+
+            // Advance the sequence cursor past this batch so the next loop
+            // iteration does not re-fetch the same unscreened articles (which
+            // would happen if a transient LLM error left them unscreened). A
+            // fresh run (new engine instance) starts with `None` so all
+            // unscreened articles are eligible again.
+            if target_article_id.is_none() {
+                last_attempted_seq = batch.iter().map(|a| a.sequence_id).max();
             }
 
             // max_articles cap: if we have already processed the limit, stop.
@@ -446,20 +492,102 @@ impl ScreeningEngine {
             // + the orchestrator's concurrency semaphore. The user can also
             // increase `request_delay_ms` in LLM settings for sustained
             // rate-limit mitigation.
-            let response_data =
-                match llm.send_with_type(system_prompt, &user_prompt, request_type.clone()).await {
-                    Ok((text, tokens)) => Some((text, tokens)),
-                    Err(e) => {
-                        // Mark all articles in batch as errors
-                        let c = crate::db::connection::lock_conn(conn_mutex)?;
-                        for article in &batch {
-                            set_screening_error(&c, &article.id, &e.to_string(), None)?;
-                        }
-                        // Log system error to audit trail
-                        let _ = audit_repo::log_error(&c, &format!("LLM request failed: {}", e));
-                        None
+            // Wrap the LLM call in `tokio::select!` against the cancel notifier so
+            // clicking Stop immediately aborts the in-flight request (dropping
+            // the future cancels the underlying reqwest call) instead of
+            // waiting up to `SCREENING_TIMEOUT_SECS` for the orchestrator's
+            // timeout to fire. On cancel: emit final progress and break - no
+            // DB write, no error marking, no response processing.
+            let llm_result = {
+                let cancel_notify = self.cancel_notify.clone();
+                tokio::select! {
+                    biased;
+                    () = cancel_notify.notified(), if *self.cancel_token.lock().await => {
+                        // Cancelled: drop the response and exit the run.
+                        let mut progress = self.progress.lock().await;
+                        progress.is_running = false;
+                        progress.current_article_titles = vec![];
+                        self.emit_progress(&app_handle, &progress);
+                        return Ok(());
                     }
-                };
+                    res = llm.send_with_type(system_prompt, &user_prompt, request_type.clone()) => res,
+                }
+            };
+
+            let response_data = match llm_result {
+                Ok((text, tokens)) => {
+                    // Success: reset the consecutive-transient-failure counter.
+                    consecutive_transient_failures = 0;
+                    Some((text, tokens))
+                }
+                Err(e) => {
+                    let transient = is_transient_llm_error(&e);
+                    let auth_failure = is_auth_failure(&e);
+                    // Scope the DB connection guard so it drops before the
+                    // `progress.lock().await` calls below (MutexGuard is !Send).
+                    {
+                        let c = crate::db::connection::lock_conn(conn_mutex)?;
+                        let _ = audit_repo::log_error(
+                            &c,
+                            &format!(
+                                "LLM request failed{}: {}",
+                                if transient { " (transient)" } else { "" },
+                                e
+                            ),
+                        );
+                        if !transient {
+                            // Non-transient: mark the batch as errors.
+                            for article in &batch {
+                                set_screening_error(&c, &article.id, &e.to_string(), None)?;
+                            }
+                        }
+                    }
+                    if transient {
+                        // Transient errors leave articles UNSCREENED. Bump the
+                        // `deferred` counter (NOT `completed`/`errors`) so the
+                        // completion percentage reflects actual screening.
+                        let batch_len = batch.len();
+                        {
+                            let mut progress = self.progress.lock().await;
+                            progress.deferred += batch_len;
+                            self.emit_progress(&app_handle, &progress);
+                        }
+                        // Auto-stop guard: auth failures stop immediately;
+                        // other transients stop after TRANSIENT_FAILURE_THRESHOLD.
+                        consecutive_transient_failures += 1;
+                        let should_stop = if auth_failure {
+                            true
+                        } else {
+                            consecutive_transient_failures >= TRANSIENT_FAILURE_THRESHOLD
+                        };
+                        if should_stop {
+                            let reason = if auth_failure {
+                                format!(
+                                    "Authentication failed (401/403). Please check your API key in Settings. Last error: {e}"
+                                )
+                            } else {
+                                format!(
+                                    "LLM unavailable after {consecutive_transient_failures} consecutive failures. Last error: {e}"
+                                )
+                            };
+                            let mut progress = self.progress.lock().await;
+                            progress.is_running = false;
+                            progress.fatal_error = Some(reason);
+                            progress.current_article_titles = vec![];
+                            self.emit_progress(&app_handle, &progress);
+                            return Ok(());
+                        }
+                        // Transient but not stopping: skip the rest of this
+                        // loop iteration. Do NOT fall through to the `None`
+                        // handler below - it would double-count `errors` +
+                        // `completed` for the same articles that were already
+                        // counted as `deferred` above (F1 regression fix).
+                        sleep(Duration::from_millis(request_delay_ms)).await;
+                        continue;
+                    }
+                    None
+                }
+            };
 
             // Apply delay between requests
             sleep(Duration::from_millis(request_delay_ms)).await;
@@ -467,6 +595,10 @@ impl ScreeningEngine {
             let (response_text, total_tokens) = match response_data {
                 Some(data) => data,
                 None => {
+                    // Non-transient error path only (transient errors
+                    // `continue` above and never reach here). Bump `errors`
+                    // + `completed` for the hard-failed articles so the
+                    // completion percentage includes them.
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();
                     progress.completed += batch.len();
@@ -757,14 +889,29 @@ impl ScreeningEngine {
                                 let user_prompt = prompt::build_screening_prompt(&prompt_input);
                                 let system_prompt = prompt::SYSTEM_PROMPT;
 
-                                // Stage-2 call: categorize as EnhancedScreening.
-                                let stage2_response = llm
-                                    .send_with_type(
-                                        system_prompt,
-                                        &user_prompt,
-                                        LlmRequestType::EnhancedScreening,
-                                    )
-                                    .await;
+                                // Stage-2 call: categorize as EnhancedScreening. Wrapped in
+                                // `tokio::select!` against the cancel notifier so Stop
+                                // also aborts the in-flight stage-2 call immediately
+                                // (drops the future → reqwest cancels).
+                                let stage2_response = {
+                                    let cancel_notify = self.cancel_notify.clone();
+                                    tokio::select! {
+                                        biased;
+                                        () = cancel_notify.notified(), if *self.cancel_token.lock().await => {
+                                            // Cancelled mid-stage-2: emit final progress and exit.
+                                            let mut progress = self.progress.lock().await;
+                                            progress.is_running = false;
+                                            progress.current_article_titles = vec![];
+                                            self.emit_progress(&app_handle, &progress);
+                                            return Ok(());
+                                        }
+                                        res = llm.send_with_type(
+                                            system_prompt,
+                                            &user_prompt,
+                                            LlmRequestType::EnhancedScreening,
+                                        ) => res,
+                                    }
+                                };
                                 sleep(Duration::from_millis(request_delay_ms)).await;
 
                                 let (response_text, total_tokens) = match stage2_response {
@@ -1667,6 +1814,75 @@ pub fn build_global_criterion_numbering(
         n += 1;
     }
     map
+}
+
+/// Classify an LLM error as a permanent authentication failure (wrong/revoked
+/// API key, wrong org). These should stop the run immediately (threshold = 1)
+/// because every subsequent batch will fail identically - there is no recovery
+/// except the user fixing their credentials.
+///
+/// Checks for 401/403 WITHOUT the `"insufficient permissions for this operation"`
+/// Windows-transient body string. The transient variant (which succeeds on
+/// resubmit) is handled by `is_transient_llm_error` instead.
+#[must_use]
+pub fn is_auth_failure(e: &AppError) -> bool {
+    let msg = e.to_string().to_lowercase();
+    // Must contain 401 or 403...
+    let has_auth_status = msg.contains("401") || msg.contains("403");
+    if !has_auth_status {
+        return false;
+    }
+    // ...but NOT the Windows transient body (that one succeeds on resubmit).
+    !msg.contains("insufficient permissions for this operation")
+}
+
+/// Classify an LLM error as transient (network/rate-limit/auth-transient/timeout)
+/// vs non-transient (content-specific: malformed JSON, parse count mismatch).
+///
+/// Transient errors leave articles UNSCREENED so the next run picks them up
+/// naturally - no clunky "Reset Errors" workaround needed. Non-transient errors
+/// mark the batch as errors (existing behavior) because they are unlikely to
+/// resolve on retry.
+///
+/// The error message string is the only signal available because all LLM
+/// errors are routed through `AppError::Import(String)`. The patterns below
+/// match the error strings emitted by `client::send_with_retry` and
+/// `orchestrator::send` (status codes, "timed out", "transport error").
+#[must_use]
+pub fn is_transient_llm_error(e: &AppError) -> bool {
+    let msg = e.to_string().to_lowercase();
+    // Rate limit / server errors (status codes appear in the error string).
+    if msg.contains("429") || msg.contains("rate limit") {
+        return true;
+    }
+    // Auth transients (the Windows OpenAI/Cloudflare "insufficient permissions"
+    // 401/403 that succeeds on resubmit). Real auth failures also contain 401/
+    // 403 in the string - we treat ALL 401/403 as transient so articles are not
+    // mass-marked as errors; the next run re-attempts and either succeeds
+    // (transient) or fails again (user must fix their key, but no data loss).
+    if msg.contains("401") || msg.contains("403") {
+        return true;
+    }
+    // Server errors (500/502/503/504) and request timeout (408).
+    if msg.contains("500") || msg.contains("502") || msg.contains("503") || msg.contains("504") {
+        return true;
+    }
+    if msg.contains("408") || msg.contains("request timeout") {
+        return true;
+    }
+    // Orchestrator timeout.
+    if msg.contains("timed out") {
+        return true;
+    }
+    // Transport errors (connection reset, TLS failure, network unreachable).
+    if msg.contains("transport error")
+        || msg.contains("connection")
+        || msg.contains("network")
+        || msg.contains("tls")
+    {
+        return true;
+    }
+    false
 }
 
 /// Scan reasoning text for criterion UUIDs mentioned but missing from matched arrays,
