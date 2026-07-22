@@ -300,7 +300,6 @@ impl ScreeningEngine {
         }
 
         let start = Instant::now();
-        let max_retries: u32 = 3;
 
         loop {
             // Check cancellation
@@ -435,24 +434,21 @@ impl ScreeningEngine {
                 LlmRequestType::Screening
             };
 
-            // Send to LLM with retry on 429
-            let mut response_data = None;
-            let mut retry_count: u32 = 0;
-
-            while retry_count <= max_retries {
+            // Send to LLM (single attempt). The inner `client::send_with_retry`
+            // already handles transient 429/408/5xx + transport errors with
+            // bounded retry (3 attempts, exponential backoff 1s/2s/4s capped at
+            // 10s, honors `Retry-After`). A previous outer 429 retry loop here
+            // multiplied the 600s orchestrator cap by 4 (up to 40 min per batch)
+            // and did NOT check the cancel token, so Stop had no effect during
+            // the retry sleeps - it was removed. Any error from the orchestrator
+            // (including sustained 429) now marks the batch as errors and moves
+            // on; the next batch benefits from the `request_delay_ms` throttle
+            // + the orchestrator's concurrency semaphore. The user can also
+            // increase `request_delay_ms` in LLM settings for sustained
+            // rate-limit mitigation.
+            let response_data =
                 match llm.send_with_type(system_prompt, &user_prompt, request_type.clone()).await {
-                    Ok((text, tokens)) => {
-                        response_data = Some((text, tokens));
-                        break;
-                    }
-                    Err(e)
-                        if e.to_string().contains("429")
-                            || e.to_string().to_lowercase().contains("rate limit") =>
-                    {
-                        retry_count += 1;
-                        let delay_secs = 2u64.pow(retry_count);
-                        sleep(Duration::from_secs(delay_secs)).await;
-                    }
+                    Ok((text, tokens)) => Some((text, tokens)),
                     Err(e) => {
                         // Mark all articles in batch as errors
                         let c = crate::db::connection::lock_conn(conn_mutex)?;
@@ -461,10 +457,9 @@ impl ScreeningEngine {
                         }
                         // Log system error to audit trail
                         let _ = audit_repo::log_error(&c, &format!("LLM request failed: {}", e));
-                        break;
+                        None
                     }
-                }
-            }
+                };
 
             // Apply delay between requests
             sleep(Duration::from_millis(request_delay_ms)).await;

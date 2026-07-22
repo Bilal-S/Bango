@@ -10,7 +10,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bango_lib::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
+use bango_lib::llm::orchestrator::{timeout_for, LlmOrchestrator, LlmRequestType};
 use bango_lib::models::llm_config::{LlmConfig, LlmProvider};
 
 /// Helper: build a minimal LlmConfig pointing at a fake endpoint.
@@ -1026,4 +1026,33 @@ async fn queue_length_at_boundary_concurrency_one() {
     );
 
     mock.assert_async().await;
+}
+
+// ─── timeout_for: per-request-type timeout policy ───────────────────────
+//
+// Screening (stage-1 + stage-2) uses a tighter cap (120s) than the default
+// 600s so a hung/slow call surfaces as an error within ~2 minutes instead of
+// stalling the run for 10 minutes. All other request types use the default.
+
+#[test]
+fn timeout_for_screening_returns_120_seconds() {
+    assert_eq!(timeout_for(&LlmRequestType::Screening), Duration::from_secs(120));
+}
+
+#[test]
+fn timeout_for_enhanced_screening_returns_120_seconds() {
+    // Stage-2 (two-stage + enhanced) is also screening, so it shares the
+    // tighter cap.
+    assert_eq!(timeout_for(&LlmRequestType::EnhancedScreening), Duration::from_secs(120));
+}
+
+#[test]
+fn timeout_for_non_screening_types_return_default_600_seconds() {
+    // Spot-check a representative set of non-screening request types.
+    assert_eq!(timeout_for(&LlmRequestType::AiSummary), Duration::from_secs(600));
+    assert_eq!(timeout_for(&LlmRequestType::Chat), Duration::from_secs(600));
+    assert_eq!(timeout_for(&LlmRequestType::Translation), Duration::from_secs(600));
+    assert_eq!(timeout_for(&LlmRequestType::WikiIngest), Duration::from_secs(600));
+    assert_eq!(timeout_for(&LlmRequestType::GapAnalysis), Duration::from_secs(600));
+    assert_eq!(timeout_for(&LlmRequestType::SummaryGeneration), Duration::from_secs(600));
 }

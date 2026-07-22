@@ -152,6 +152,29 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     rules get byte-identical behavior to the historical resolver. Tested in
     `tests/resolution_test.rs` (4 `finalize_decision` tests + the 7 original `resolve_decision`
     tests, signature unchanged).
+    **Single-attempt LLM call per batch** (v8.1): the screening engine makes one
+    `send_with_type` call per batch. The previous outer 429 retry loop (3 extra
+    attempts, each bounded by the orchestrator's 600s cap, no cancel-token
+    check) was removed because (a) the inner `client::send_with_retry` already
+    handles transient 429/408/5xx with bounded retry (3 attempts, exponential
+    backoff 1s/2s/4s capped at 10s, honors `Retry-After`), and (b) the outer
+    loop multiplied the 600s cap by 4 (up to 40 min per batch) and ignored the
+    cancel token, so Stop had no effect during the retry sleeps - the user
+    observed screening stuck at "30 of 50" for >10 minutes. Any error from the
+    orchestrator (including sustained 429) now marks the batch as errors and
+    moves on; the next batch benefits from `request_delay_ms` + the
+    orchestrator's concurrency semaphore. Sustained rate limits should be
+    mitigated by raising `request_delay_ms` in LLM settings, not by an outer
+    loop that ignores cancellation.
+    **Per-request-type timeout** (v8.2): the orchestrator's per-call wall-clock
+    cap is now per-`LlmRequestType` via the pure `#[must_use]` helper
+    `llm::orchestrator::timeout_for(request_type) -> Duration`. Screening (both
+    stage-1 `Screening` and stage-2 `EnhancedScreening`) uses
+    `SCREENING_TIMEOUT_SECS = 120` (2 minutes); all other request types keep
+    the 10-minute default `LLM_TIMEOUT_SECS = 600`. Combined with the single-
+    attempt-per-batch contract above, a hung or slow screening call now surfaces
+    as an error within ~2 minutes instead of stalling the run. Tested in
+    `tests/llm_orchestrator_test.rs` (3 `timeout_for` tests).
     `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
     (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,
     `chunk_budget_per_article`, optional `max_articles` per-run cap from

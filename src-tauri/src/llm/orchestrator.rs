@@ -15,8 +15,36 @@ use crate::error::AppError;
 use crate::llm::client;
 use crate::models::llm_config::LlmConfig;
 
-/// Maximum time to wait for a single LLM response.
+/// Maximum time to wait for a single LLM response (default for all request
+/// types except screening).
 const LLM_TIMEOUT_SECS: u64 = 600;
+
+/// Maximum time to wait for a single screening LLM response (stage-1 abstract
+/// and stage-2 enhanced/two-stage). Screening is a high-volume, low-latency
+/// operation compared to AI summaries / wiki ingest / chat, and abstract
+/// screening prompts are small, so a tighter cap surfaces hung/slow calls as
+/// errors within ~2 minutes instead of stalling the run for the 10-minute
+/// default. The user can mitigate sustained slowness by lowering `batch_size`.
+const SCREENING_TIMEOUT_SECS: u64 = 120;
+
+/// Pick the per-call wall-clock timeout based on the request type.
+///
+/// Screening (both stage-1 `Screening` and stage-2 `EnhancedScreening`) uses
+/// the tighter `SCREENING_TIMEOUT_SECS` cap. All other request types
+/// (summaries, chat, wiki ingest, translation, gap analysis, etc.) use the
+/// default `LLM_TIMEOUT_SECS`.
+///
+/// Pure function so it can be unit-tested in isolation without a live
+/// orchestrator or network.
+#[must_use]
+pub fn timeout_for(request_type: &LlmRequestType) -> Duration {
+    match request_type {
+        LlmRequestType::Screening | LlmRequestType::EnhancedScreening => {
+            Duration::from_secs(SCREENING_TIMEOUT_SECS)
+        }
+        _ => Duration::from_secs(LLM_TIMEOUT_SECS),
+    }
+}
 
 /// Label for categorizing LLM request sources.
 #[derive(Debug, Clone)]
@@ -145,14 +173,16 @@ impl LlmOrchestrator {
         // 2. Rate limiting: ensure minimum delay between requests
         self.enforce_rate_limit().await;
 
-        // 3. Make the actual LLM call with a 5-minute timeout
+        // 3. Make the actual LLM call with a per-request-type timeout.
+        let timeout = timeout_for(&request_type);
+        let timeout_secs = timeout.as_secs();
         let result = tokio::time::timeout(
-            Duration::from_secs(LLM_TIMEOUT_SECS),
+            timeout,
             client::send_chat_completion(config, system_prompt, user_prompt),
         )
         .await
         .map_err(|_| {
-            AppError::Import(format!("LLM request timed out after {} seconds", LLM_TIMEOUT_SECS))
+            AppError::Import(format!("LLM request timed out after {timeout_secs} seconds"))
         })?;
 
         // 4. Log errors centrally
@@ -177,13 +207,15 @@ impl LlmOrchestrator {
         // Only enforce rate limiting, no semaphore
         self.enforce_rate_limit().await;
 
+        let timeout = timeout_for(&request_type);
+        let timeout_secs = timeout.as_secs();
         let result = tokio::time::timeout(
-            Duration::from_secs(LLM_TIMEOUT_SECS),
+            timeout,
             client::send_chat_completion(config, system_prompt, user_prompt),
         )
         .await
         .map_err(|_| {
-            AppError::Import(format!("LLM request timed out after {} seconds", LLM_TIMEOUT_SECS))
+            AppError::Import(format!("LLM request timed out after {timeout_secs} seconds"))
         })?;
 
         if let Err(ref e) = result {
