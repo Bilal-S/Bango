@@ -19,6 +19,17 @@ macro_rules! debug_log {
     };
 }
 
+/// Always-on diagnostic logging macro. Unlike `debug_log!`, this fires in
+/// release builds so production users can capture a phase/cancel/mutex trace
+/// via `Bango 2>screening.log`. Prefixes every line with `[screening:diag]`
+/// for easy `grep`. Contains NO PII — only counts, article IDs, timings, and
+/// phase labels.
+macro_rules! log_diag {
+    ($($arg:tt)*) => {
+        eprintln!("[screening:diag] {}", format_args!($($arg)*));
+    };
+}
+
 use crate::db::{
     app_settings_repo::{self, ScreeningMode},
     article_repo, audit_repo, biblio_repo, chunk_repo, label_repo, tag_repo,
@@ -27,6 +38,12 @@ use crate::error::AppError;
 
 /// Consecutive transient-failure threshold for the auto-stop guard.
 const TRANSIENT_FAILURE_THRESHOLD: u32 = 3;
+
+/// Total (non-consecutive) timeout threshold. After this many timeout errors,
+/// the run auto-stops with an actionable message. This catches the pattern where
+/// large batches time out intermittently (some succeed between failures, resetting
+/// the consecutive counter) but the overall throughput is too slow to be useful.
+const TOTAL_TIMEOUT_THRESHOLD: u32 = 3;
 use crate::llm::orchestrator::LlmRequestType;
 use crate::models::biblio::{TermSource, TermType};
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
@@ -93,6 +110,10 @@ pub struct ScreeningProgress {
     /// renders a red banner. `None` for normal completion or user-cancel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fatal_error: Option<String>,
+    /// Non-fatal warning (e.g. "LLM responding slowly"). When set, the frontend
+    /// renders a yellow banner. The run continues. Cleared on next success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     pub is_running: bool,
     pub current_article_titles: Vec<String>,
     pub elapsed_ms: u64,
@@ -106,6 +127,20 @@ pub struct ScreeningProgress {
     /// for stage 2). `None` for single-stage modes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_total: Option<usize>,
+    /// Coarse run-phase label surfaced on the progress bar sub-line so the UI
+    /// shows *which* phase is in flight, not just a frozen percentage.
+    ///
+    /// Values: `"preparing:translating"` (Phase A, only when `auto_translate`),
+    /// `"preparing:chunking"` (Phase B full-text chunk backfill), `"screening"`
+    /// (Phase C engine loop), `"stage2"` (Phase C two-stage second pass).
+    /// `None` when no run is active or between phases.
+    ///
+    /// Diagnostics-only addition; carries no behavioral contract. The frontend
+    /// renders it as the progress-bar sub-line when present (taking precedence
+    /// over `stage` during prep phases so the user can see the run is
+    /// extracting chunks, not stuck at 0%).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +215,7 @@ impl ScreeningEngine {
     }
 
     pub async fn cancel(&self) {
+        log_diag!("cancel_engine: cancel_token=true, notify_waiters()");
         *self.cancel_token.lock().await = true;
         // Wake any `select!` branch awaiting cancellation so the in-flight
         // LLM call is dropped (and its reqwest request cancelled) immediately.
@@ -381,14 +417,53 @@ impl ScreeningEngine {
             progress.rejected = 0;
             progress.errors = 0;
             progress.is_running = true;
+            // Phase C: the engine loop is the screening phase. The command
+            // layer sets `phase` to `preparing:*` before invoking `run_sync`;
+            // we flip it to `screening` on entry so the bar reflects the
+            // transition. Cleared to `None` on exit (below).
+            progress.phase = Some("screening".to_string());
+            log_diag!(
+                "phase=screening total={effective_total} batch_size={} mode={:?}",
+                self.batch_size,
+                config.mode
+            );
         }
 
         let start = Instant::now();
+
+        // Heartbeat task: emits a periodic `[screening:diag] HEARTBEAT` line
+        // every 5s while the run is active. Catches deadlocks/panics: if the
+        // heartbeat stops, the engine task is stuck or dead. Exits when the run
+        // completes (`is_running == false`) OR is cancelled (`cancel_token ==
+        // true`), so it never leaks past the run lifetime.
+        let hb_cancel = self.cancel_token.clone();
+        let hb_progress = self.progress.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let p = hb_progress.lock().await;
+                let is_running = p.is_running;
+                let completed = p.completed;
+                let total = p.total;
+                let deferred = p.deferred;
+                let errors = p.errors;
+                let phase = p.phase.clone();
+                drop(p);
+                log_diag!(
+                    "HEARTBEAT: {completed}/{total} completed, {deferred} deferred, {errors} errors, phase={:?}, is_running={is_running}",
+                    phase.unwrap_or_else(|| "none".to_string())
+                );
+                if !is_running || *hb_cancel.lock().await {
+                    break;
+                }
+            }
+        });
         // Cursor for `get_next_unscreened_working_batch`: advances past articles
         // already attempted in this run so transient-error batches are not
         // re-fetched infinitely. Reset on every new run (new engine instance).
         let mut last_attempted_seq: Option<i64> = None;
         let mut consecutive_transient_failures: u32 = 0;
+        let mut total_timeouts: u32 = 0;
 
         loop {
             // Check cancellation
@@ -463,6 +538,13 @@ impl ScreeningEngine {
             {
                 let mut progress = self.progress.lock().await;
                 progress.current_article_titles = batch.iter().map(|a| a.title.clone()).collect();
+                let completed = progress.completed;
+                let total_count = progress.total;
+                log_diag!(
+                    "batch_start: completed={completed}/{total_count}, batch_size={}, titles=[{:?}]",
+                    batch.len(),
+                    progress.current_article_titles.iter().take(3).collect::<Vec<_>>()
+                );
                 self.emit_progress(&app_handle, &progress);
             }
 
@@ -569,6 +651,7 @@ impl ScreeningEngine {
                         () = cancel_notify.notified() => {
                             if *self.cancel_token.lock().await {
                                 // Cancelled: drop the response and exit the run.
+                                log_diag!("llm_call: cancel detected during stage-1 LLM call, dropping response + returning");
                                 let mut progress = self.progress.lock().await;
                                 progress.is_running = false;
                                 progress.current_article_titles = vec![];
@@ -589,6 +672,14 @@ impl ScreeningEngine {
                 Ok((text, tokens)) => {
                     // Success: reset the consecutive-transient-failure counter.
                     consecutive_transient_failures = 0;
+                    // Clear any prior slow-LLM warning — the current batch succeeded.
+                    {
+                        let mut progress = self.progress.lock().await;
+                        if progress.warning.is_some() {
+                            progress.warning = None;
+                            self.emit_progress(&app_handle, &progress);
+                        }
+                    }
                     Some((text, tokens))
                 }
                 Err(e) => {
@@ -626,15 +717,24 @@ impl ScreeningEngine {
                         // Auto-stop guard: auth failures stop immediately;
                         // other transients stop after TRANSIENT_FAILURE_THRESHOLD.
                         consecutive_transient_failures += 1;
-                        let should_stop = if auth_failure {
-                            true
-                        } else {
-                            consecutive_transient_failures >= TRANSIENT_FAILURE_THRESHOLD
-                        };
+                        // Track total timeouts for the slow-LLM warning/auto-stop.
+                        // A timeout means the LLM couldn't process the batch within
+                        // the 120s cap — usually because batch_size is too large.
+                        let is_timeout = e.to_string().to_lowercase().contains("timed out");
+                        if is_timeout {
+                            total_timeouts += 1;
+                        }
+                        let should_stop = auth_failure
+                            || consecutive_transient_failures >= TRANSIENT_FAILURE_THRESHOLD
+                            || (is_timeout && total_timeouts >= TOTAL_TIMEOUT_THRESHOLD);
                         if should_stop {
                             let reason = if auth_failure {
                                 format!(
                                     "Authentication failed (401/403). Please check your API key in Settings. Last error: {e}"
+                                )
+                            } else if is_timeout && total_timeouts >= TOTAL_TIMEOUT_THRESHOLD {
+                                format!(
+                                    "Screening stopped: the LLM timed out {total_timeouts} times (each at the 120-second cap).                                      It cannot process batch_size within the time limit.                                      Reduce batch_size to 1-2 and restart. Already-screened articles are saved."
                                 )
                             } else {
                                 format!(
@@ -647,6 +747,15 @@ impl ScreeningEngine {
                             progress.current_article_titles = vec![];
                             self.emit_progress(&app_handle, &progress);
                             return Ok(());
+                        }
+                        // Non-fatal warning after 1st timeout: inform the user
+                        // that the LLM is slow, suggesting a batch_size reduction.
+                        if is_timeout && total_timeouts == 1 {
+                            let mut progress = self.progress.lock().await;
+                            progress.warning = Some(
+                                "The LLM is responding slowly (last batch timed out at 120s). Consider reducing batch_size or checking your LLM provider status.".to_string()
+                            );
+                            self.emit_progress(&app_handle, &progress);
                         }
                         // Transient but not stopping: skip the rest of this
                         // loop iteration. Do NOT fall through to the `None`
@@ -984,6 +1093,7 @@ impl ScreeningEngine {
                                             () = cancel_notify.notified() => {
                                                 if *self.cancel_token.lock().await {
                                                     // Cancelled mid-stage-2: emit final progress and exit.
+                                                    log_diag!("stage2_llm_call: cancel detected during stage-2 LLM call, dropping response + returning");
                                                     let mut progress = self.progress.lock().await;
                                                     progress.is_running = false;
                                                     progress.current_article_titles = vec![];

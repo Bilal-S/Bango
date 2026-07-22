@@ -386,6 +386,69 @@ pub struct RebuildChunksResult {
 ///
 /// Errors are collected, not fatal: the returned `RebuildChunksResult`
 /// reports how many succeeded/failed.
+/// Per-article progress callback for `ensure_chunks_for_full_text_articles`.
+///
+/// `done` is the number of articles processed so far (chunked + failed +
+/// skipped), `total` is the size of the missing-chunks (or all-full-text, when
+/// `force`) candidate set, `article_id` is the article just processed.
+///
+/// The callback is invoked **under the same `&Connection` lock** the caller
+/// holds — it must NOT re-enter the DB. It is purely for emitting diagnostic
+/// progress events + log lines so the UI + stderr show the chunk-backfill
+/// phase advancing instead of a silent freeze. Diagnostics-only (Phase B
+/// instrumentation); carries no behavioral contract.
+pub type ChunkProgressCb<'a> = &'a dyn Fn(usize, usize, &str);
+
+/// Inner loop shared by `ensure_chunks_for_full_text_articles` and the
+/// progress-emitting variant. Walks the candidate article-id list, resolves
+/// each on-disk PDF/TXT, parses + chunks it, and writes the chunks. Pure of
+/// progress reporting so the original (no-callback) callers stay byte-identical.
+fn ensure_chunks_inner(
+    conn: &rusqlite::Connection,
+    article_ids: &[String],
+    storage_dir: &std::path::Path,
+    progress_cb: Option<ChunkProgressCb<'_>>,
+) -> (usize, usize) {
+    let mut chunked = 0usize;
+    let mut failed = 0usize;
+    let total = article_ids.len();
+    for (idx, article_id) in article_ids.iter().enumerate() {
+        // Resolve the on-disk attachment path for this article.
+        let file_name = match article_repo::get_full_text_file_name(conn, article_id) {
+            Ok(Some(name)) => name,
+            _ => {
+                failed += 1;
+                if let Some(cb) = progress_cb {
+                    cb(idx + 1, total, article_id);
+                }
+                continue;
+            }
+        };
+        let path = storage_dir.join(&file_name);
+        if !path.exists() {
+            failed += 1;
+            if let Some(cb) = progress_cb {
+                cb(idx + 1, total, article_id);
+            }
+            continue;
+        }
+        match populate_chunks_for_attached_text(conn, article_id, &path) {
+            Ok(_) => chunked += 1,
+            Err(e) => {
+                let _ = crate::db::audit_repo::log_error(
+                    conn,
+                    &format!("ensure_chunks: failed for article {article_id}: {e}"),
+                );
+                failed += 1;
+            }
+        }
+        if let Some(cb) = progress_cb {
+            cb(idx + 1, total, article_id);
+        }
+    }
+    (chunked, failed)
+}
+
 pub fn ensure_chunks_for_full_text_articles(
     conn: &rusqlite::Connection,
     force: bool,
@@ -432,33 +495,82 @@ pub fn ensure_chunks_for_full_text_articles(
     };
 
     let total = article_ids.len();
-    let mut chunked = 0usize;
-    let mut failed = 0usize;
-    for article_id in &article_ids {
-        // Resolve the on-disk attachment path for this article.
-        let file_name = match article_repo::get_full_text_file_name(conn, article_id) {
-            Ok(Some(name)) => name,
-            _ => {
-                failed += 1;
-                continue;
-            }
-        };
-        let path = storage_dir.join(&file_name);
-        if !path.exists() {
-            failed += 1;
-            continue;
-        }
-        match populate_chunks_for_attached_text(conn, article_id, &path) {
-            Ok(_) => chunked += 1,
-            Err(e) => {
-                let _ = crate::db::audit_repo::log_error(
-                    conn,
-                    &format!("ensure_chunks: failed for article {article_id}: {e}"),
-                );
-                failed += 1;
-            }
-        }
+    let (chunked, failed) = ensure_chunks_inner(conn, &article_ids, &storage_dir, None);
+
+    RebuildChunksResult {
+        success: true,
+        chunked,
+        failed,
+        skipped: total.saturating_sub(chunked + failed),
+        message: format!("Chunked {chunked} article(s); {failed} failed"),
     }
+}
+
+/// Diagnostics-only variant: same as `ensure_chunks_for_full_text_articles` but
+/// invokes `progress_cb` after each article so the screening task can emit
+/// `screening:progress` events with `phase = "preparing:chunking"` + a
+/// `[screening:diag] chunk_progress` log line. The callback fires under the
+/// caller's lock and must not re-enter the DB.
+///
+/// **Lock contract: unchanged from `ensure_chunks_for_full_text_articles`.**
+/// This function still acquires no lock of its own; it operates on the
+/// `&Connection` the caller already holds. The screening task holds the DbState
+/// mutex for the full pass exactly as today — the per-article callback only
+/// emits events between articles, it does NOT release/re-acquire the lock.
+/// Layer 2 (deferred) will refactor the lock scope; this diagnostics-only
+/// addition intentionally preserves the current locking to measure the real
+/// production behavior first.
+pub fn ensure_chunks_for_full_text_articles_with_progress(
+    conn: &rusqlite::Connection,
+    force: bool,
+    progress_cb: ChunkProgressCb<'_>,
+) -> RebuildChunksResult {
+    let storage_dir = match compute_storage_dir(conn) {
+        Ok(d) => d,
+        Err(e) => {
+            return RebuildChunksResult {
+                success: false,
+                chunked: 0,
+                failed: 0,
+                skipped: 0,
+                message: format!("Failed to resolve storage dir: {e}"),
+            };
+        }
+    };
+
+    let article_ids = if force {
+        match chunk_repo::get_articles_with_full_text(conn) {
+            Ok(ids) => ids,
+            Err(e) => {
+                return RebuildChunksResult {
+                    success: false,
+                    chunked: 0,
+                    failed: 0,
+                    skipped: 0,
+                    message: format!("Failed to query articles with full text: {e}"),
+                };
+            }
+        }
+    } else {
+        match chunk_repo::get_articles_with_full_text_missing_chunks(conn) {
+            Ok(ids) => ids,
+            Err(e) => {
+                return RebuildChunksResult {
+                    success: false,
+                    chunked: 0,
+                    failed: 0,
+                    skipped: 0,
+                    message: format!("Failed to query articles missing chunks: {e}"),
+                };
+            }
+        }
+    };
+
+    let total = article_ids.len();
+    // Emit a start line so the log shows the phase entry even if total == 0.
+    eprintln!("[screening:diag] phase=preparing:chunking total_missing={total} force={force}");
+    let (chunked, failed) =
+        ensure_chunks_inner(conn, &article_ids, &storage_dir, Some(progress_cb));
 
     RebuildChunksResult {
         success: true,

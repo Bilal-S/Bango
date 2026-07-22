@@ -240,6 +240,26 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `progress.is_running == false` after cancel (progress-state check) and
     use a tightened `elapsed < 200ms` bound (one scheduler tick, not the
     earlier generous 1500ms).
+    **Slow-LLM warning + auto-stop** (v8.6): the `consecutive` transient-failure
+    counter alone was insufficient because some batches succeed between
+    timeouts (resetting the counter), so a slow LLM limped along without ever
+    surfacing a user-visible message. Two new mechanisms address this:
+    (a) `ScreeningProgress.warning: Option<String>` — a non-fatal yellow banner
+    set after the **1st** timeout ("The LLM is responding slowly… Consider
+    reducing batch_size"), cleared on the next successful batch; the frontend
+    renders it as `.screening-view__warning-banner` (amber, `warning` icon);
+    (b) `total_timeouts: u32` counter + `TOTAL_TIMEOUT_THRESHOLD = 3` — after 3
+    total (non-consecutive) timeouts, the run auto-stops with an actionable
+    `fatal_error`: "Screening stopped: the LLM timed out N times… Reduce
+    batch_size to 1-2 and restart. Already-screened articles are saved." This
+    catches the intermittent-timeout pattern where the consecutive counter
+    resets between failures. (The v8.6 `batch_size` clamp reduction from
+    `clamp(1, 15)` to `clamp(1, 5)` was **reverted** — the clamp silently
+    overrode the user's selection on the unproven assumption that large batches
+    cause hangs, which masked the real per-batch behavior from the diagnostics.
+    `commands/screening.rs` now honors `1..=15` verbatim, matching the frontend
+    stepper's `BATCH_MAX`; the orchestrator timeout + auto-stop guards surface
+    any genuinely slow provider without baking in a batch-size assumption.)
     `engine.rs` adds `ScreeningMode` (`Abstract`/`Enhanced`/`TwoStage`) + `ScreeningConfig`
     (mode, `enhanced_top_k`, `enhanced_sections`, `two_stage_low`/`high`,
     `chunk_budget_per_article`, optional `max_articles` per-run cap from
@@ -279,6 +299,39 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     mutex); the Settings "Rebuild text chunks" button calls the same fn with
     `force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
     `get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` commands.
+    **Diagnostics (v8.7)** — always-on screening instrumentation surfaced to
+    diagnose a "hangs with a large corpus + Stop/Pause unresponsive" report.
+    No behavioral changes; diagnostics-only. (1) `ScreeningProgress.phase:
+    Option<String>` carries the coarse run-phase (`"preparing:translating"` /
+    `"preparing:chunking"` / `"screening"` / `"stage2"`); the frontend progress
+    bar renders it as the sub-line during prep phases so the user sees
+    "Extracting full-text chunks…" instead of a silent 0% freeze. `#[serde(default)]`
+    so old payloads still deserialize. (2) `log_diag!` macro (always-on, NOT
+    gated on `cfg(debug_assertions)` like `debug_log!`) emits `[screening:diag]`
+    lines: phase transitions, per-batch `batch_start`, stage-1/stage-2 cancel
+    detection (`llm_call: cancel detected…`), `stop_screening: IPC received`,
+    orchestrator `LLM call START/END/TIMEOUT`, and a 5s `HEARTBEAT` (exits on
+    `is_running==false || cancel_token==true` so it never leaks past the run).
+    Run as `Bango 2>screening.log` and `grep screening:diag`. (3) Phase B
+    (chunk backfill) progress callback: `ensure_chunks_for_full_text_articles_with_progress`
+    invokes a `ChunkProgressCb` per article; the screening task emits a
+    `screening:progress` event + `chunk_progress: done/total` log line per
+    article. **The lock pattern is UNCHANGED** — `db.conn.lock()` is still held
+    across the whole pass exactly as today; the callback only emits events
+    between articles. Layer 2 (deferred) will release the lock per article +
+    move PDF parsing to `spawn_blocking`; this diagnostics-only addition
+    intentionally preserves the current locking to measure the real production
+    behavior first. (4) `connection.rs::lock_conn` times the acquire and emits
+    `lock_conn: SLOW acquire ({ms}ms)` when > `SLOW_LOCK_THRESHOLD_MS = 100`;
+    this is the single most valuable signal for mutex-starvation hangs (every
+    other DB-touching IPC command shows a slow acquire while the chunk pass
+    holds the mutex). (5) `translation/wait.rs` emits `translation_wait:
+    START/DONE/TIMEOUT` per article (no-op when `auto_translate=false`, the
+    opt-in default). Decision table + run instructions in `.worktrees/diagnostic1.md`
+    (merged + critiqued; see plan-mode transcript). Tested in
+    `tests/screening_engine_test.rs` (3 new tests: `screening_progress_serializes_phase_field`,
+    `screening_progress_phase_defaults_none_when_absent`,
+    `chunk_progress_callback_fires_per_article`).
     **Always-selectable mode + per-article fallback**: all three modes are
     selectable in Settings regardless of attachments/articles; Enhanced and
     Two-stage evidence retrieval is applied per article only when

@@ -247,7 +247,12 @@ const isWorkingListScreened = computed((): boolean => {
           <div>
             <h1 class="page-title">AI Screening</h1>
             <p class="screening-view__subtitle">
-              <template v-if="isRunning">
+              <template
+                v-if="isRunning && progress?.phase && progress.phase.startsWith('preparing:')"
+              >
+                Preparing: <strong>{{ progress.stage ?? 'working…' }}</strong>
+              </template>
+              <template v-else-if="isRunning">
                 Processing: <strong>{{ displayRunningCompleted }}</strong> of
                 <strong>{{ displayRunningTotal }}</strong> article(s)
               </template>
@@ -260,6 +265,15 @@ const isWorkingListScreened = computed((): boolean => {
             <span class="screening-view__percent-value">{{ percentage }}%</span>
             <span class="screening-view__percent-label">Completion</span>
           </div>
+        </div>
+
+        <!-- Non-fatal warning banner (e.g. slow LLM, first timeout) -->
+        <div
+          v-if="progress?.warning && !progress?.fatalError"
+          class="screening-view__warning-banner"
+        >
+          <span class="material-symbols-outlined">warning</span>
+          <span>{{ progress.warning }}</span>
         </div>
 
         <!-- Fatal error banner (auth failure, consecutive transient failures) -->
@@ -286,6 +300,7 @@ const isWorkingListScreened = computed((): boolean => {
           :total="progress.total"
           :percentage="percentage"
           :stage="progress.stage"
+          :phase="progress.phase"
         />
       </section>
 
@@ -1065,6 +1080,26 @@ const isWorkingListScreened = computed((): boolean => {
 }
 
 .screening-view__fatal-error .material-symbols-outlined {
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ── Warning Banner (non-fatal: slow LLM, first timeout) ── */
+.screening-view__warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-warning-container, #fef3cd);
+  color: var(--color-on-warning-container, #664d03);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-body);
+}
+
+.screening-view__warning-banner .material-symbols-outlined {
   font-size: 20px;
   flex-shrink: 0;
   margin-top: 2px;

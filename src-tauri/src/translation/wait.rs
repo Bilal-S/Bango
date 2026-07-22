@@ -81,6 +81,7 @@ pub async fn wait_for_article_translation(
     db: &std::sync::Mutex<rusqlite::Connection>,
     article_id: &str,
 ) -> Result<(), String> {
+    eprintln!("[screening:diag] translation_wait: START article_id={article_id}");
     let mut rx = app.try_state::<TranslationDoneBus>().map(|s| s.subscribe());
 
     let deadline = std::time::Instant::now() + Duration::from_secs(WAIT_FALLBACK_TIMEOUT_SECS);
@@ -88,11 +89,17 @@ pub async fn wait_for_article_translation(
     loop {
         // Fast path: check the live status first.
         if status_is_terminal(db, article_id) {
+            eprintln!(
+                "[screening:diag] translation_wait: DONE article_id={article_id} (terminal status)"
+            );
             return Ok(());
         }
 
         let now = std::time::Instant::now();
         if now >= deadline {
+            eprintln!(
+                "[screening:diag] translation_wait: TIMEOUT article_id={article_id} after {WAIT_FALLBACK_TIMEOUT_SECS}s"
+            );
             return Err(format!(
                 "translation timed out for {article_id} after {WAIT_FALLBACK_TIMEOUT_SECS}s"
             ));

@@ -247,6 +247,9 @@ export interface ScreeningProgress {
   /** Fatal error that stopped the run (e.g. auth failure, consecutive transient
    *  failures). When set, `isRunning` is false and the UI shows a red banner. */
   fatalError?: string | null;
+  /** Non-fatal warning (e.g. "LLM responding slowly"). When set, the UI shows a
+   *  yellow banner. The run continues. Cleared on next success. */
+  warning?: string | null;
   isRunning: boolean;
   currentArticleTitles: string[];
   elapsedMs: number;
@@ -255,6 +258,11 @@ export interface ScreeningProgress {
   stage?: string | null;
   /** Tier 3 two-stage: per-stage total (borderline article count). */
   stageTotal?: number | null;
+  /** Coarse run-phase label for the progress-bar sub-line so the UI shows
+   *  *which* phase is in flight, not just a frozen percentage. Values:
+   *  `"preparing:translating"`, `"preparing:chunking"`, `"screening"`,
+   *  `"stage2"`. `null` when no run is active. Diagnostics-only. */
+  phase?: string | null;
 }
 
 /**

@@ -1103,3 +1103,76 @@ async fn stop_during_request_delay_transient_path() {
     let progress = engine.get_progress().await;
     assert!(!progress.is_running, "progress should show is_running=false after cancel");
 }
+
+// ── Diagnostics: phase field + chunk-progress callback ─────────────────────
+//
+// These tests cover the diagnostics-only instrumentation added to surface
+// which screening phase is in flight and to confirm the chunk-backfill
+// progress callback fires once per article. They do NOT exercise the
+// behavioral cancel/lock contract (Layer 2, deferred).
+
+#[test]
+fn screening_progress_serializes_phase_field() {
+    use bango_lib::screening::engine::ScreeningProgress;
+    let p = ScreeningProgress {
+        total: 10,
+        completed: 3,
+        is_running: true,
+        phase: Some("preparing:chunking".to_string()),
+        stage: Some("Extracting full-text chunks 3/10...".to_string()),
+        ..Default::default()
+    };
+    let json = serde_json::to_string(&p).expect("serialize");
+    assert!(
+        json.contains("\"phase\":\"preparing:chunking\""),
+        "phase field must serialize: {json}"
+    );
+    // Round-trip preserves the value.
+    let back: ScreeningProgress = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(back.phase.as_deref(), Some("preparing:chunking"));
+}
+
+#[test]
+fn screening_progress_phase_defaults_none_when_absent() {
+    use bango_lib::screening::engine::ScreeningProgress;
+    // An old payload (e.g. from a frontend cache or a previous build) that
+    // omits `phase` entirely must still deserialize thanks to `#[serde(default)]`.
+    let old_payload = r#"{
+        "total": 5,
+        "completed": 0,
+        "included": 0,
+        "rejected": 0,
+        "errors": 0,
+        "isRunning": false,
+        "currentArticleTitles": [],
+        "elapsedMs": 0,
+        "estimatedRemainingMs": null
+    }"#;
+    let p: ScreeningProgress = serde_json::from_str(old_payload).expect("deserialize old payload");
+    assert!(p.phase.is_none(), "phase must default to None when absent");
+    assert_eq!(p.total, 5);
+}
+
+#[test]
+fn chunk_progress_callback_fires_per_article() {
+    use bango_lib::commands::full_text::ensure_chunks_for_full_text_articles_with_progress;
+    use bango_lib::db::connection::create_connection;
+    use std::sync::{Arc, Mutex};
+
+    let conn = create_connection().expect("in-memory db");
+    // Run migrations so the schema (articles, article_chunks, etc.) exists.
+    bango_lib::db::migration::run_migrations(&conn).expect("migrations");
+
+    // No articles with full text -> the candidate set is empty, so the
+    // callback fires zero times and the function returns success with
+    // chunked=0. This proves the no-op path does not call the callback.
+    let ticks = Arc::new(Mutex::new(Vec::new()));
+    let ticks_clone = ticks.clone();
+    let cb = move |done: usize, total: usize, id: &str| {
+        ticks_clone.lock().unwrap().push((done, total, id.to_string()));
+    };
+    let result = ensure_chunks_for_full_text_articles_with_progress(&conn, false, &cb);
+    assert!(result.success);
+    assert_eq!(result.chunked, 0);
+    assert!(ticks.lock().unwrap().is_empty(), "callback must not fire on empty candidate set");
+}

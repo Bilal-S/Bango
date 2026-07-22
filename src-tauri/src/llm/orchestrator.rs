@@ -176,16 +176,27 @@ impl LlmOrchestrator {
         // 3. Make the actual LLM call with a per-request-type timeout.
         let timeout = timeout_for(&request_type);
         let timeout_secs = timeout.as_secs();
+        eprintln!(
+            "[screening:diag] orchestrator: LLM call START type={request_type:?} timeout={timeout_secs}s"
+        );
+        let call_start = std::time::Instant::now();
         let result = tokio::time::timeout(
             timeout,
             client::send_chat_completion(config, system_prompt, user_prompt),
         )
         .await
         .map_err(|_| {
+            eprintln!(
+                "[screening:diag] orchestrator: TIMEOUT after {timeout_secs}s (type={request_type:?})"
+            );
             AppError::Import(format!(
                 "LLM request timed out after {timeout_secs} seconds. This is often caused by                  sustained rate limiting (429), server overload (5xx), or a slow model.                  Try reducing batch_size or increasing request_delay_ms in LLM settings."
             ))
         })?;
+        eprintln!(
+            "[screening:diag] orchestrator: LLM call END type={request_type:?} elapsed={}ms",
+            call_start.elapsed().as_millis()
+        );
 
         // 4. Log errors centrally
         if let Err(ref e) = result {

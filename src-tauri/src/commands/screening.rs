@@ -223,7 +223,21 @@ pub async fn start_screening(
         }
     };
 
-    // Create and store engine in state (clamp batch_size to 1–15)
+    // Create and store engine in state. Batch size is honored as selected
+    // (1..=15, matching the frontend stepper's BATCH_MAX): the orchestrator's
+    // per-request-type timeout (SCREENING_TIMEOUT_SECS = 120) and the
+    // screening-engine auto-stop guards (consecutive transient failures,
+    // total timeouts) already surface slow/hung LLM providers as actionable
+    // errors, so we do NOT silently override the user's selection here. A
+    // previous v8.6 change clamped this to 5 on the assumption that large
+    // batches were the root cause of screening hangs; that assumption was
+    // unproven, and the clamp masked the real per-batch behavior from the
+    // `[screening:diag]` instrumentation (it forced batch_size=5 even when
+    // the user selected 10, so `orchestrator: LLM call END elapsed=Xms`
+    // reflected a 5-article batch, not a 10-article one). The clamp is
+    // reverted (Option B) so diagnostics show the true cost of the user's
+    // selected batch size; the root cause of any hang will be surfaced by
+    // the Layer-1 instrumentation + the existing timeout/auto-stop guards.
     let effective_batch_size = batch_size.unwrap_or(1).clamp(1, 15) as usize;
     let engine = Arc::new(ScreeningEngine::with_batch_size(effective_batch_size));
     let initial_progress = {
@@ -255,10 +269,48 @@ pub async fn start_screening(
         // held only per-article during chunk write, not for the whole pass,
         // and the UI stays responsive. `force=false` so already-chunked
         // articles are skipped (the Settings "Rebuild" button uses `force=true`).
+        //
+        // DIAGNOSTICS (Phase B instrumentation): the chunk pass now emits
+        // `phase = "preparing:chunking"` progress events + `[screening:diag]`
+        // log lines per article so the UI + stderr show the backfill advancing
+        // instead of a silent 0% freeze. The lock pattern is UNCHANGED —
+        // `db.conn.lock()` is still held across the whole pass exactly as
+        // today; the callback only emits events between articles. Layer 2
+        // (deferred) will release the lock per article.
         if screening_config.mode != ScreeningMode::Abstract {
+            // Set the prep phase on the engine progress + emit, so the bar
+            // shows "Preparing: extracting full-text chunks..." before the
+            // (potentially long) PDF-parse pass starts. The engine flips
+            // `phase` to `"screening"` on `run_sync` entry below.
+            {
+                let mut prog = engine.get_progress().await;
+                prog.is_running = true;
+                prog.phase = Some("preparing:chunking".to_string());
+                // Emit a one-shot event the frontend merges; the engine's own
+                // `run_sync` will overwrite phase shortly after the chunk pass.
+                let _ = app_handle.emit("screening:progress", &prog);
+            }
             if let Ok(conn) = db.conn.lock() {
+                let app_for_cb = app_handle.clone();
+                let cb = move |done: usize, total: usize, article_id: &str| {
+                    // Emit a log line every article (low volume relative to the
+                    // PDF-parse cost) + a progress event every article so the
+                    // bar moves smoothly. Both are no-ops if no listener.
+                    eprintln!("[screening:diag] chunk_progress: {done}/{total} last={article_id}");
+                    let _ = app_for_cb.emit(
+                        "screening:progress",
+                        &crate::screening::engine::ScreeningProgress {
+                            is_running: true,
+                            phase: Some("preparing:chunking".to_string()),
+                            stage: Some(format!("Extracting full-text chunks {done}/{total}...")),
+                            ..Default::default()
+                        },
+                    );
+                };
                 let _ =
-                    crate::commands::full_text::ensure_chunks_for_full_text_articles(&conn, false);
+                    crate::commands::full_text::ensure_chunks_for_full_text_articles_with_progress(
+                        &conn, false, &cb,
+                    );
             }
         }
 
@@ -329,11 +381,13 @@ pub async fn resume_screening(screening_state: State<'_, ScreeningState>) -> Res
 
 #[tauri::command]
 pub async fn stop_screening(screening_state: State<'_, ScreeningState>) -> Result<(), AppError> {
+    eprintln!("[screening:diag] stop_screening: IPC received");
     let guard = screening_state.engine.read().await;
     if let Some(ref engine) = *guard {
         engine.cancel().await;
         Ok(())
     } else {
+        eprintln!("[screening:diag] stop_screening: no engine in state (no run active)");
         Err(AppError::Validation("No screening in progress".to_string()))
     }
 }

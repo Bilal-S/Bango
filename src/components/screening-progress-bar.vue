@@ -5,6 +5,10 @@ defineProps<{
   percentage: number;
   /** Tier 3 two-stage: optional stage sub-line (e.g. "Stage 2: 3/12 borderline"). */
   stage?: string | null;
+  /** Coarse run-phase label. During prep phases (`preparing:*`) this takes
+   *  precedence over `stage` so the user sees "Extracting full-text chunks…"
+   *  instead of a silent 0% freeze. Diagnostics-only. */
+  phase?: string | null;
 }>();
 </script>
 
@@ -16,7 +20,12 @@ defineProps<{
     <div class="progress-bar__label">
       {{ completed }} / {{ total }} articles screened ({{ percentage }}%)
     </div>
-    <div v-if="stage" class="progress-bar__stage">{{ stage }}</div>
+    <!-- Prep phases take precedence so the user sees the chunk/translation
+         sub-line instead of an empty stage slot while the bar is at 0%. -->
+    <div v-if="phase && phase.startsWith('preparing:')" class="progress-bar__stage">
+      {{ stage ?? 'Preparing…' }}
+    </div>
+    <div v-else-if="stage" class="progress-bar__stage">{{ stage }}</div>
   </div>
 </template>
 
