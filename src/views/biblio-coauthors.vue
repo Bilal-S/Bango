@@ -8,6 +8,7 @@ import { useCoAuthorNetwork } from '../composables/use-coauthor-network';
 import { useNetworkView } from '../composables/use-network-view';
 import { useNetworkLayout } from '../composables/use-network-layout';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { buildBiblioArticleQuery } from '@/utils/biblio-links';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CoAuthorNode } from '../types/biblio-network';
 
@@ -144,21 +145,13 @@ async function onResetAnalysis() {
 
 /**
  * Deep-link to the article list filtered by the selected author. The
- * co-authorship graph is scoped to included articles, so we send
- * `status: 'included'` to keep the article list consistent with the corpus
- * the graph summarized.
+ * co-authorship graph is scoped to included articles, so the filter-based
+ * deep-link routes through `buildBiblioArticleQuery`, which enforces
+ * `status: 'included'` (decision D1) in one place.
  */
 function viewAuthorArticles(): void {
   if (!selectedAuthor.value) return;
-  void router.push({
-    name: 'articles',
-    query: {
-      author: selectedAuthor.value.label,
-      status: 'included',
-      filterCollapsed: '1',
-      from: 'coauthors',
-    },
-  });
+  void router.push(buildBiblioArticleQuery('coauthors', { author: selectedAuthor.value.label }));
 }
 </script>
 

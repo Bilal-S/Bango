@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -8,10 +8,12 @@ import type { ApexOptions } from 'apexcharts';
 import { useAuthorRankings } from '@/composables/use-author-rankings';
 import type { AuthorRank } from '@/composables/use-author-rankings';
 import { useAuthorDetail } from '@/composables/use-author-detail';
-import { resolveCollaboratorAuthor } from '@/utils/biblio-links';
+import { resolveCollaboratorAuthor, buildBiblioArticleQuery } from '@/utils/biblio-links';
+import { useToast } from '@/composables/use-toast';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
 const router = useRouter();
+const toast = useToast();
 const { rankings, kpis, loading, error } = useAuthorRankings();
 const { detail, loading: detailLoading, getAuthorDetail, clear } = useAuthorDetail();
 
@@ -110,6 +112,11 @@ const filteredRankings = computed(() => {
 
 // ── Selected author for detail panel ─────────────────────────────
 const selectedAuthorId = ref<string | null>(null);
+// Ref on the scrollable ranking table container so `selectCollaborator` can
+// scroll the newly-selected row into view (Gap 2). Without this the row
+// highlights via CSS but a collaborator off-screen in a long table shows no
+// visible change.
+const tableContainerRef = ref<HTMLElement | null>(null);
 
 watch(selectedAuthorId, (id) => {
   if (id) void getAuthorDetail(id);
@@ -260,19 +267,11 @@ function scholarTooltip(displayName: string): string {
 }
 
 // ── Deep link to filtered article list ───────────────────────────
-// The author productivity view summarizes included articles only, so send
-// `status: 'included'` to keep the article list consistent with the corpus
-// the ranking summarized.
+// The author productivity view summarizes included articles only, so the
+// filter-based deep-link routes through `buildBiblioArticleQuery`, which
+// enforces `status: 'included'` (decision D1) in one place.
 function viewAuthorArticles(displayName: string): void {
-  void router.push({
-    name: 'articles',
-    query: {
-      author: displayName,
-      status: 'included',
-      filterCollapsed: '1',
-      from: 'authors',
-    },
-  });
+  void router.push(buildBiblioArticleQuery('authors', { author: displayName }));
 }
 
 /**
@@ -280,10 +279,31 @@ function viewAuthorArticles(displayName: string): void {
  * rankings. `selectAuthor` takes the whole `AuthorRank` object (not an id
  * string), so the lookup must resolve the name to the rank object first.
  * Stays on the Authors view (no routing).
+ *
+ * After selecting, scrolls the matching table row into view so the user
+ * gets visible feedback even when the row is off-screen in a long table
+ * (Gap 2). When no ranking matches (name mismatch, filtered out by
+ * current sidebar settings, or missing from the dataset), shows an
+ * informational toast instead of failing silently (Gap 3).
  */
 function selectCollaborator(name: string): void {
   const found = resolveCollaboratorAuthor(rankings.value, name);
-  if (found) selectAuthor(found);
+  if (!found) {
+    toast.show(`"${name}" is not in the current filter results.`, 'info');
+    return;
+  }
+  selectAuthor(found);
+  // Wait for the `.ranking-table__row--active` class to re-render on the
+  // matching row, then scroll it into view. `block: 'nearest'` avoids
+  // jumping when the row is already partially visible.
+  void nextTick(() => {
+    const container = tableContainerRef.value;
+    if (!container) return;
+    const activeRow = container.querySelector('.ranking-table__row--active');
+    if (activeRow instanceof HTMLElement) {
+      activeRow.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  });
 }
 
 /**
@@ -705,7 +725,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
           </div>
 
           <!-- Ranking table -->
-          <div v-if="filteredRankings.length > 0" class="table-container">
+          <div v-if="filteredRankings.length > 0" ref="tableContainerRef" class="table-container">
             <table class="ranking-table">
               <thead>
                 <tr>

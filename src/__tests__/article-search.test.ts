@@ -1187,6 +1187,85 @@ describe('useArticleSearch', () => {
       // Should remain at default
       expect(activeStatusTab.value).toBe('working');
     });
+
+    // ── resetFilters (decision D5) ──────────────────────────────────
+    // The bibliometric deep-link envelope sets `resetFilters: '1'` so the
+    // keep-alive-cached ArticleList clears any preserved filter/query state
+    // before applying the fresh deep-link filter. Without this, a prior
+    // session's filters would overlay the deep-link (e.g. landing on
+    // `author="Bob" AND yearFrom=2020` instead of `author="Bob"` alone).
+    describe('resetFilters (D5)', () => {
+      it('clears stale yearFrom/tags/labels when resetFilters: true', async () => {
+        mockSearchResults();
+        const s = useArticleSearch();
+        // Pre-populate stale filter state (simulating a prior session).
+        s.filter.yearFrom = 2020;
+        s.filter.tags = ['stale-tag'];
+        s.filter.labels = ['stale-label'];
+        s.applyFilters();
+        // Now arrive via a biblio deep-link for author="Bob".
+        await s.applyRouteParams({ author: 'Bob', resetFilters: true });
+        // `search()` issues `query_articles` then `get_article_counts`, so we
+        // assert with `toHaveBeenCalledWith` (any matching call) rather than
+        // `toHaveBeenLastCalledWith` (the last call is always
+        // `get_article_counts` after `await search()` resolves).
+        expect(tauriCommand).toHaveBeenCalledWith(
+          'query_articles',
+          expect.objectContaining({
+            query: expect.objectContaining({
+              author: 'Bob',
+              yearFrom: null,
+              tags: [],
+              labels: [],
+            }),
+          })
+        );
+      });
+
+      it('preserves existing filters when resetFilters is absent (backward-compat)', async () => {
+        mockSearchResults();
+        const s = useArticleSearch();
+        // Pre-populate filter state.
+        s.filter.yearFrom = 2020;
+        s.filter.tags = ['existing-tag'];
+        s.applyFilters();
+        // Arrive via a non-biblio deep-link (no resetFilters flag).
+        await s.applyRouteParams({ author: 'Bob' });
+        // Existing filters survive the overlay. Use `toHaveBeenCalledWith`
+        // (not `Last`) because `search()` always issues `get_article_counts`
+        // after `query_articles`.
+        expect(tauriCommand).toHaveBeenCalledWith(
+          'query_articles',
+          expect.objectContaining({
+            query: expect.objectContaining({
+              author: 'Bob',
+              yearFrom: 2020,
+              tags: ['existing-tag'],
+            }),
+          })
+        );
+      });
+
+      it('clears searchText when resetFilters: true', async () => {
+        mockSearchResults();
+        const s = useArticleSearch();
+        // Simulate a stale toolbar search from a prior session.
+        s.searchText.value = 'old query';
+        s.executeToolbarSearch();
+        await s.applyRouteParams({ author: 'Bob', resetFilters: true });
+        expect(s.searchText.value).toBe('');
+      });
+
+      it('resets to page 1 when resetFilters: true', async () => {
+        mockSearchResults();
+        const s = useArticleSearch();
+        // Simulate being on page 3 from a prior session.
+        s.goToPage(3);
+        await vi.waitFor(() => expect(s.currentPage.value).toBe(3));
+        await s.applyRouteParams({ author: 'Bob', resetFilters: true });
+        expect(s.currentPage.value).toBe(1);
+      });
+    });
   });
 
   // ── Article Mutations ──────────────────────────────────────────────

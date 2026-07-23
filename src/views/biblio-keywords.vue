@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { useTrendsQueueStore } from '../stores/trends-queue';
 import GoogleTrendsPanel from '../components/google-trends-panel.vue';
 import KeywordNetworkGraph from '../components/keyword-network-graph.vue';
@@ -8,8 +9,11 @@ import KeywordDetailPanel from '../components/keyword-detail-panel.vue';
 import { useKeywordNetwork } from '../composables/use-keyword-network';
 import { useNetworkView } from '../composables/use-network-view';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { buildBiblioArticleQuery } from '@/utils/biblio-links';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { KeywordNode } from '../types/biblio-keyword';
+
+const router = useRouter();
 
 const {
   graph,
@@ -110,6 +114,34 @@ function onNodeClick(nodeId: string | null) {
 function onNavigateToKeyword(nodeId: string) {
   onNodeClick(nodeId);
   graphRef.value?.locateNode(nodeId);
+}
+
+/**
+ * Deep-link to the article list filtered by the selected keyword (Gap 1a).
+ *
+ * Source-aware routing: the keyword network draws nodes from multiple
+ * sources (`metadata | ai_extracted | user_added | tags | labels`). Only
+ * `tags`/`labels`-sourced nodes can be matched by the existing
+ * `ArticleQuery.tags` / `ArticleQuery.labels` filters (the node label is the
+ * tag/label name). The detail panel gates the "View articles" button to
+ * those sources via `canViewArticles`, so this handler only fires for them.
+ * `metadata`/`ai_extracted`/`user_added`-sourced nodes are deferred to
+ * Gap 1b (backend `ArticleQuery.keywords` + `json_each()`).
+ *
+ * Routes through `buildBiblioArticleQuery`, which enforces
+ * `status: 'included'` (decision D1) in one place — the keyword network is
+ * scoped to included articles.
+ */
+function viewKeywordArticles(): void {
+  const keyword = selectedKeyword.value;
+  if (!keyword) return;
+  // Defensive: the detail panel gates the button to these sources, but guard
+  // here too so a future caller cannot route a deferred source through the
+  // wrong filter.
+  if (keyword.source !== 'tags' && keyword.source !== 'labels') return;
+  const filter =
+    keyword.source === 'tags' ? { tags: [keyword.label] } : { labels: [keyword.label] };
+  void router.push(buildBiblioArticleQuery('keywords', filter));
 }
 
 async function onParamsChange(params: {
@@ -300,6 +332,7 @@ watch(
         class="w-72 shrink-0"
         @close="onNodeClick(null)"
         @navigate="onNavigateToKeyword"
+        @view-articles="viewKeywordArticles"
       />
     </Transition>
   </div>

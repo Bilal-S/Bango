@@ -91,6 +91,24 @@
         </button>
       </div>
 
+      <!-- View Articles CTA (Gap 1a) -->
+      <!-- Gated to tags/labels-sourced keyword nodes: the existing
+           ArticleQuery.tags / ArticleQuery.labels filters match the node label
+           (most-frequent raw term = the tag/label name). Metadata/ai/user-
+           sourced nodes need the deferred backend ArticleQuery.keywords
+           field (Gap 1b) so the button is hidden for them rather than
+           rendering as dead. -->
+      <div v-if="canViewArticles" class="px-4 py-1.5 shrink-0">
+        <button
+          class="w-full py-1.5 px-3 rounded border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all select-none cursor-pointer bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300"
+          title="View articles tagged/labelled with this keyword"
+          @click="$emit('view-articles')"
+        >
+          <span class="material-symbols-outlined text-[15px]">article</span>
+          View articles
+        </button>
+      </div>
+
       <!-- Detail Info -->
       <div class="px-4 py-2 space-y-2">
         <div class="flex justify-between items-center text-xs">
@@ -177,6 +195,14 @@ const props = defineProps<{
 defineEmits<{
   (e: 'close'): void;
   (e: 'navigate', nodeId: string): void;
+  /**
+   * Emitted when the user clicks the "View articles" button. Only rendered
+   * for `tags`/`labels`-sourced keyword nodes because the existing
+   * `ArticleQuery.tags` / `ArticleQuery.labels` filters can match those node
+   * labels. `metadata` / `ai_extracted` / `user_added`-sourced nodes are
+   * deferred (Gap 1b) until a backend `ArticleQuery.keywords` field exists.
+   */
+  (e: 'view-articles'): void;
 }>();
 
 const trendsQueue = useTrendsQueueStore();
@@ -189,6 +215,19 @@ const isQueued = computed(() => {
 const isQueueFull = computed(() => {
   return trendsQueue.keywords.length >= 5;
 });
+
+/**
+ * Whether the "View articles" deep-link is available for this keyword node.
+ * Gated to `tags`/`labels`-sourced nodes because the existing
+ * `ArticleQuery.tags` / `ArticleQuery.labels` filters can match those node
+ * labels (the label is the most-frequent raw term — i.e. the tag/label name).
+ * `metadata` / `ai_extracted` / `user_added`-sourced nodes are sourced from
+ * `biblio_article_terms` / `articles.keywords`, which no existing filter
+ * matches; those are deferred to Gap 1b (backend `ArticleQuery.keywords`).
+ */
+const canViewArticles = computed(
+  () => props.keyword?.source === 'tags' || props.keyword?.source === 'labels'
+);
 
 function toggleQueue() {
   if (!props.keyword) return;

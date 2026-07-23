@@ -133,6 +133,13 @@ function readRouteDeepLinkParams(): {
   journal?: string;
   author?: string;
   filterCollapsed: boolean;
+  /**
+   * When true, clear any preserved filter/query state in the cached
+   * ArticleList before applying the deep-link params (decision D5). Set by
+   * the bibliometric deep-link envelope (`buildBiblioArticleQuery`) so a
+   * fresh biblio filter does not overlay stale filters.
+   */
+  resetFilters: boolean;
   articleId?: string;
   hasFilterParams: boolean;
 } {
@@ -147,6 +154,9 @@ function readRouteDeepLinkParams(): {
   const author = typeof route.query.author === 'string' ? route.query.author : undefined;
   // filterCollapsed=1 → keep the filter panel collapsed (filters still applied)
   const filterCollapsed = route.query.filterCollapsed === '1';
+  // resetFilters=1 → clear any preserved filter/query state before applying
+  // the deep-link params (decision D5; set by `buildBiblioArticleQuery`).
+  const resetFilters = route.query.resetFilters === '1';
   // articleId deep-link from the dashboard "Go to article" dot: load the All
   // articles view and select the specific article so the detail panel opens.
   const articleId = typeof route.query.articleId === 'string' ? route.query.articleId : undefined;
@@ -168,6 +178,7 @@ function readRouteDeepLinkParams(): {
     journal,
     author,
     filterCollapsed,
+    resetFilters,
     articleId,
     hasFilterParams,
   };
@@ -192,6 +203,7 @@ function applyDeepLinkParams(params: ReturnType<typeof readRouteDeepLinkParams>)
       journal: params.journal,
       author: params.author,
       filterCollapsed: params.filterCollapsed,
+      resetFilters: params.resetFilters,
     }).then(() => {
       if (articleId) void selectArticle(articleId);
     });
@@ -278,11 +290,13 @@ onActivated(() => {
   })();
 });
 
-/** Whether this article-list was opened via a deep-link from a bibliometric view. */
-const fromBiblio = computed(() => resolveBiblioReturn(route.query.from as string) !== null);
-
-/** The return-target descriptor for the current origin, or null. */
+/** The return-target descriptor for the current origin, or null.
+ * `fromBiblio` derives from this so the resolver runs once per `from`
+ * change instead of being duplicated across two computeds. */
 const biblioReturn = computed(() => resolveBiblioReturn(route.query.from as string));
+
+/** Whether this article-list was opened via a deep-link from a bibliometric view. */
+const fromBiblio = computed(() => biblioReturn.value !== null);
 
 /** Return to the originating bibliometric view. */
 function backToBiblio(): void {

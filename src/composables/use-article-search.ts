@@ -581,6 +581,17 @@ export function useArticleSearch() {
    * ("View articles from YYYY" and "View this journal's articles"). Both the
    * display `filter` and the search `query` are synced so the filter panel
    * reflects the active state.
+   *
+   * When `resetFilters` is true (decision D5), ALL existing `filter.*` +
+   * `query.*` filter fields are cleared to defaults before the incoming params
+   * are applied. This prevents the keep-alive-cached ArticleList from
+   * overlaying stale filters on top of a fresh bibliometric deep-link (e.g.
+   * landing on `author="Bob" AND yearFrom=2020` when the user clicked the
+   * Co-Authorship Papers box while a year filter was still active). The biblio
+   * metric summarized the included corpus with no extra filters, so the list
+   * must reflect exactly the deep-link's filter. Sort (`sortBy`/`sortDir`) and
+   * page-size are intentionally preserved (display preferences, not filters).
+   * Status is reset by the incoming `status` param itself.
    */
   async function applyRouteParams(params: {
     status?: string;
@@ -592,6 +603,15 @@ export function useArticleSearch() {
     author?: string;
     /** When true, keep the filter panel collapsed even though filters are applied. */
     filterCollapsed?: boolean;
+    /**
+     * When true, clear all existing `filter.*` + `query.*` filter fields to
+     * defaults before applying the incoming params (decision D5). Used by the
+     * bibliometric deep-links (`buildBiblioArticleQuery` envelope) so the
+     * cached ArticleList does not overlay stale filters on the fresh
+     * deep-link. Default `false` preserves the overlay behavior for existing
+     * callers (dashboard, tag/label deep-links, status deep-links).
+     */
+    resetFilters?: boolean;
   }): Promise<void> {
     // Compute the filter-panel visibility flag once so every branch (tags,
     // labels, year, journal, author) honors `filterCollapsed` consistently.
@@ -599,6 +619,38 @@ export function useArticleSearch() {
     // screen or Bibliometrics deep-links), the panel stays collapsed even
     // though filters are applied.
     const showPanel = !params.filterCollapsed;
+
+    // D5: optional reset-before-apply. Runs BEFORE the param-application
+    // block so the incoming params overwrite the freshly-cleared defaults.
+    // Mirrors the field list in `clearFilters` (minus the search() call,
+    // which `applyRouteParams` performs at the end) plus the toolbar
+    // `searchText` (so a stale toolbar search does not survive the reset).
+    if (params.resetFilters) {
+      filter.titleText = '';
+      filter.authorText = '';
+      filter.yearFrom = null;
+      filter.yearTo = null;
+      filter.journal = '';
+      filter.doiText = '';
+      filter.doiEmpty = false;
+      filter.tags = [];
+      filter.labels = [];
+      filter.excludedTags = [];
+      filter.excludedLabels = [];
+      query.search = null;
+      query.yearFrom = null;
+      query.yearTo = null;
+      query.author = null;
+      query.journal = null;
+      query.doi = null;
+      query.doiEmpty = false;
+      query.tags = [];
+      query.labels = [];
+      query.excludedTags = [];
+      query.excludedLabels = [];
+      searchText.value = '';
+      resetPage();
+    }
 
     if (params.status && STATUS_TABS.includes(params.status as StatusTab)) {
       activeStatusTab.value = params.status as StatusTab;

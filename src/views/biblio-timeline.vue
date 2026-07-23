@@ -7,6 +7,7 @@ import { useBibliometrics } from '@/composables/use-bibliometrics';
 import { useTimelineState } from '@/composables/use-timeline-state';
 import { useViewport } from '@/composables/use-viewport';
 import { tauriCommand } from '@/composables/use-tauri-command';
+import { buildBiblioArticleQuery } from '@/utils/biblio-links';
 import JournalInfoCard from '@/components/journal-info-card.vue';
 
 const router = useRouter();
@@ -433,22 +434,14 @@ const journalChartOptions = computed<ApexOptions>(() => ({
     events: {
       // Click a Top-Journals bar to deep-link into the article list filtered
       // by that journal. The timeline summarizes included articles only, so
-      // send `status: 'included'` to keep the article list consistent with
-      // the corpus the chart summarized.
+      // the filter-based deep-link routes through `buildBiblioArticleQuery`,
+      // which enforces `status: 'included'` (decision D1) in one place.
       dataPointSelection: (_e: unknown, _c: unknown, opts?: { dataPointIndex?: number }) => {
         const idx = opts?.dataPointIndex;
         if (idx === undefined || idx < 0 || idx >= journalTotals.value.length) return;
         const name = journalTotals.value[idx]![0];
         if (name) {
-          void router.push({
-            name: 'articles',
-            query: {
-              journal: name,
-              status: 'included',
-              filterCollapsed: '1',
-              from: 'timeline',
-            },
-          });
+          void router.push(buildBiblioArticleQuery('timeline', { journal: name }));
         }
       },
     },
@@ -597,20 +590,11 @@ function closeJournalCard(): void {
 }
 
 // ── Deep links ─────────────────────────────────────────────────
+// The timeline summarizes included articles only, so the filter-based
+// deep-link routes through `buildBiblioArticleQuery`, which enforces
+// `status: 'included'` (decision D1) in one place.
 function viewYearArticles(year: number): void {
-  void router.push({
-    name: 'articles',
-    // The timeline summarizes included articles only, so send
-    // `status: 'included'` to keep the article list consistent with the
-    // corpus the chart summarized.
-    query: {
-      yearFrom: year,
-      yearTo: year,
-      status: 'included',
-      filterCollapsed: '1',
-      from: 'timeline',
-    },
-  });
+  void router.push(buildBiblioArticleQuery('timeline', { yearFrom: year, yearTo: year }));
 }
 
 // ── Export dropdown state ──────────────────────────────────────
@@ -1598,6 +1582,16 @@ onUnmounted(() => {
 
 .chart-apex {
   width: 100%;
+}
+
+/* ApexCharts does not auto-apply `cursor: pointer` to bar elements even when
+ * a `dataPointSelection` event handler is bound. Without this, the cursor
+ * stays as the default arrow over the Top-Journals bars and users have no
+ * discoverability cue that the bars are clickable deep-links. The `:deep()`
+ * selector is required because `.apexcharts-bar-area` is generated inside the
+ * `.chart-apex` container by ApexCharts, not present in the scoped template. */
+.chart-apex :deep(.apexcharts-bar-area) {
+  cursor: pointer;
 }
 
 .chart-loading,
