@@ -44,6 +44,10 @@ CREATE TABLE audit_entries (
     FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
 );
 
+DELETE FROM audit_entries_v006_old
+WHERE article_id IS NOT NULL
+  AND article_id NOT IN (SELECT id FROM articles);
+
 INSERT INTO audit_entries (id, action, article_id, details, from_status, source, timestamp, to_status)
 SELECT id, action, article_id, details, from_status, source, timestamp, to_status
 FROM audit_entries_v006_old;
