@@ -17,7 +17,11 @@
 
       <!-- Metrics -->
       <div class="grid grid-cols-3 gap-3 p-4 pb-2">
-        <div class="bg-slate-50 rounded-lg p-3 text-center">
+        <div
+          class="bg-slate-50 rounded-lg p-3 text-center cursor-pointer transition-colors hover:bg-indigo-50"
+          title="View articles by this author"
+          @click="$emit('view-articles')"
+        >
           <p class="text-lg font-bold text-indigo-600">{{ author.weight }}</p>
           <p class="text-[10px] text-slate-500 mt-0.5">Papers</p>
         </div>
@@ -150,6 +154,7 @@ const props = defineProps<{
 defineEmits<{
   (e: 'close'): void;
   (e: 'navigate', nodeId: string): void;
+  (e: 'view-articles'): void;
 }>();
 
 const authorColor = computed(() =>

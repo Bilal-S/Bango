@@ -10,6 +10,7 @@ import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useBatchReferenceScraping } from '@/composables/use-references';
 import { useChatStore } from '@/stores/chat';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
+import { resolveBiblioReturn } from '@/utils/biblio-links';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -278,21 +279,15 @@ onActivated(() => {
 });
 
 /** Whether this article-list was opened via a deep-link from a bibliometric view. */
-const fromBiblio = computed(
-  () => route.query.from === 'timeline' || route.query.from === 'authors'
-);
+const fromBiblio = computed(() => resolveBiblioReturn(route.query.from as string) !== null);
 
-/** The biblio view name to return to ('timeline' or 'authors'). */
-const biblioReturnName = computed(() => (route.query.from === 'timeline' ? 'timeline' : 'authors'));
-
-/** The human-readable label for the back button. */
-const biblioReturnLabel = computed(() =>
-  route.query.from === 'timeline' ? 'Back to Timeline' : 'Back to Authors'
-);
+/** The return-target descriptor for the current origin, or null. */
+const biblioReturn = computed(() => resolveBiblioReturn(route.query.from as string));
 
 /** Return to the originating bibliometric view. */
 function backToBiblio(): void {
-  void router.push({ name: biblioReturnName.value });
+  const target = biblioReturn.value;
+  if (target) void router.push({ name: target.name });
 }
 
 const selectedId = computed(() => selectedArticle.value?.id ?? null);
@@ -558,7 +553,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
           @click="backToBiblio"
         >
           <span class="material-symbols-outlined text-sm">arrow_back</span>
-          {{ biblioReturnLabel }}
+          {{ biblioReturn?.label }}
         </button>
         <h1 class="page-title">Articles</h1>
       </div>

@@ -8,6 +8,7 @@ import type { ApexOptions } from 'apexcharts';
 import { useAuthorRankings } from '@/composables/use-author-rankings';
 import type { AuthorRank } from '@/composables/use-author-rankings';
 import { useAuthorDetail } from '@/composables/use-author-detail';
+import { resolveCollaboratorAuthor } from '@/utils/biblio-links';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
 const router = useRouter();
@@ -259,10 +260,40 @@ function scholarTooltip(displayName: string): string {
 }
 
 // ── Deep link to filtered article list ───────────────────────────
+// The author productivity view summarizes included articles only, so send
+// `status: 'included'` to keep the article list consistent with the corpus
+// the ranking summarized.
 function viewAuthorArticles(displayName: string): void {
   void router.push({
     name: 'articles',
-    query: { author: displayName, status: 'all', filterCollapsed: '1', from: 'authors' },
+    query: {
+      author: displayName,
+      status: 'included',
+      filterCollapsed: '1',
+      from: 'authors',
+    },
+  });
+}
+
+/**
+ * Select the author matching a Top Collaborator name, if present in the
+ * rankings. `selectAuthor` takes the whole `AuthorRank` object (not an id
+ * string), so the lookup must resolve the name to the rank object first.
+ * Stays on the Authors view (no routing).
+ */
+function selectCollaborator(name: string): void {
+  const found = resolveCollaboratorAuthor(rankings.value, name);
+  if (found) selectAuthor(found);
+}
+
+/**
+ * Open an article directly in the article list detail panel via the
+ * `articleId` deep-link (handled by `applyRouteParams`).
+ */
+function openArticle(articleId: string): void {
+  void router.push({
+    name: 'articles',
+    query: { articleId, from: 'authors' },
   });
 }
 
@@ -795,7 +826,11 @@ function onPanelKeydown(event: KeyboardEvent): void {
             </header>
             <div class="author-panel__body">
               <div class="author-panel__metrics">
-                <div class="author-panel__metric">
+                <div
+                  class="author-panel__metric author-panel__metric--clickable"
+                  title="View articles by this author"
+                  @click="viewAuthorArticles(detail.rank.displayName)"
+                >
                   <span class="author-panel__metric-value">{{ detail.rank.articleCount }}</span>
                   <span class="author-panel__metric-label">Papers</span>
                 </div>
@@ -861,7 +896,9 @@ function onPanelKeydown(event: KeyboardEvent): void {
                   <li
                     v-for="c in detail.topCollaborators"
                     :key="c.collaboratorId"
-                    class="author-panel__collab"
+                    class="author-panel__collab author-panel__collab--clickable"
+                    :title="`Select ${c.collaboratorName} in the rankings table`"
+                    @click="selectCollaborator(c.collaboratorName)"
                   >
                     <span class="author-panel__collab-name">{{ c.collaboratorName }}</span>
                     <span class="author-panel__collab-count">{{ c.sharedPapers }} shared</span>
@@ -874,9 +911,11 @@ function onPanelKeydown(event: KeyboardEvent): void {
                   <li
                     v-for="p in detail.recentPapers"
                     :key="p.articleId"
-                    class="author-panel__paper"
+                    class="author-panel__paper author-panel__paper--clickable"
+                    :title="`Open '${p.title}' in the article list`"
+                    @click="openArticle(p.articleId)"
                   >
-                    <span class="author-panel__paper-title" :title="p.title">{{ p.title }}</span>
+                    <span class="author-panel__paper-title">{{ p.title }}</span>
                     <span class="author-panel__paper-meta">
                       {{ p.publicationYear ?? '-' }} · {{ p.numCited ?? 0 }} cites
                     </span>
@@ -1581,6 +1620,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
   flex-direction: column;
   gap: 0.125rem;
 }
+/* Clickable Papers metric - deep-links to the article list filtered by author */
+.author-panel__metric--clickable {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.author-panel__metric--clickable:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface-container-low));
+}
 .author-panel__metric-value {
   font-size: 1rem;
   font-weight: 700;
@@ -1639,6 +1686,17 @@ function onPanelKeydown(event: KeyboardEvent): void {
   justify-content: space-between;
   align-items: baseline;
 }
+/* Clickable Top Collaborator row - selects the author in-place (no routing) */
+.author-panel__collab--clickable {
+  cursor: pointer;
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.375rem;
+  margin: -0.25rem -0.375rem;
+  transition: background-color 0.15s;
+}
+.author-panel__collab--clickable:hover {
+  background: var(--color-surface-container-low);
+}
 .author-panel__collab-count {
   font-size: 0.6875rem;
   color: var(--color-primary);
@@ -1652,6 +1710,20 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .author-panel__paper-meta {
   font-size: 0.6875rem;
   color: var(--color-on-surface-variant);
+}
+/* Clickable Recent Paper row - opens the article detail slide-over */
+.author-panel__paper--clickable {
+  cursor: pointer;
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.375rem;
+  margin: -0.25rem -0.375rem;
+  transition: background-color 0.15s;
+}
+.author-panel__paper--clickable:hover {
+  background: var(--color-surface-container-low);
+}
+.author-panel__paper--clickable:hover .author-panel__paper-title {
+  color: var(--color-primary);
 }
 .author-panel__view-btn {
   display: inline-flex;

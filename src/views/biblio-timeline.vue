@@ -430,6 +430,28 @@ const journalChartOptions = computed<ApexOptions>(() => ({
     animations: { enabled: false },
     fontFamily: 'inherit',
     background: 'transparent',
+    events: {
+      // Click a Top-Journals bar to deep-link into the article list filtered
+      // by that journal. The timeline summarizes included articles only, so
+      // send `status: 'included'` to keep the article list consistent with
+      // the corpus the chart summarized.
+      dataPointSelection: (_e: unknown, _c: unknown, opts?: { dataPointIndex?: number }) => {
+        const idx = opts?.dataPointIndex;
+        if (idx === undefined || idx < 0 || idx >= journalTotals.value.length) return;
+        const name = journalTotals.value[idx]![0];
+        if (name) {
+          void router.push({
+            name: 'articles',
+            query: {
+              journal: name,
+              status: 'included',
+              filterCollapsed: '1',
+              from: 'timeline',
+            },
+          });
+        }
+      },
+    },
   },
   plotOptions: {
     bar: {
@@ -578,9 +600,16 @@ function closeJournalCard(): void {
 function viewYearArticles(year: number): void {
   void router.push({
     name: 'articles',
-    // status: 'all' forces the All tab so articles are never filtered out by
-    // the default Working/Included smart-tab.
-    query: { yearFrom: year, yearTo: year, status: 'all', filterCollapsed: '1', from: 'timeline' },
+    // The timeline summarizes included articles only, so send
+    // `status: 'included'` to keep the article list consistent with the
+    // corpus the chart summarized.
+    query: {
+      yearFrom: year,
+      yearTo: year,
+      status: 'included',
+      filterCollapsed: '1',
+      from: 'timeline',
+    },
   });
 }
 

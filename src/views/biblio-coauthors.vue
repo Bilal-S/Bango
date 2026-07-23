@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import NetworkGraph from '../components/network-graph.vue';
 import NetworkControls from '../components/network-controls.vue';
 import AuthorDetailPanel from '../components/author-detail-panel.vue';
@@ -9,6 +10,8 @@ import { useNetworkLayout } from '../composables/use-network-layout';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CoAuthorNode } from '../types/biblio-network';
+
+const router = useRouter();
 
 const { graph, loading, error, nodeCount, edgeCount, countingMode, fetchNetwork, setCountingMode } =
   useCoAuthorNetwork();
@@ -138,6 +141,25 @@ async function onResetAnalysis() {
   }
   await onRecalculate();
 }
+
+/**
+ * Deep-link to the article list filtered by the selected author. The
+ * co-authorship graph is scoped to included articles, so we send
+ * `status: 'included'` to keep the article list consistent with the corpus
+ * the graph summarized.
+ */
+function viewAuthorArticles(): void {
+  if (!selectedAuthor.value) return;
+  void router.push({
+    name: 'articles',
+    query: {
+      author: selectedAuthor.value.label,
+      status: 'included',
+      filterCollapsed: '1',
+      from: 'coauthors',
+    },
+  });
+}
 </script>
 
 <template>
@@ -216,6 +238,7 @@ async function onResetAnalysis() {
       :graph="graph"
       @close="onNodeClick(null)"
       @navigate="onNavigateToAuthor"
+      @view-articles="viewAuthorArticles"
     />
   </div>
 </template>
