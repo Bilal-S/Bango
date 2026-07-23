@@ -21,6 +21,7 @@ scripts/**/target/
 .cline/
 .fallowrc.jsonc
 .claude/
+.opencode/
 
 # Environment
 .env

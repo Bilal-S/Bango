@@ -300,6 +300,8 @@ fn parse_action(s: &str) -> AuditAction {
         "reference_match" => AuditAction::ReferenceMatch,
         "translation" => AuditAction::Translation,
         "translation_error" => AuditAction::TranslationError,
+        "search_strategy" => AuditAction::SearchStrategy,
+        "metadata_edit" => AuditAction::MetadataEdit,
         _ => AuditAction::StatusChange,
     }
 }

@@ -50,6 +50,7 @@ const {
   updateTags,
   updateLabels,
   updateCriteria,
+  updateMetadata,
   moveArticle,
   attachFullText,
   deleteFullTextAttachment,
@@ -751,6 +752,7 @@ watch(searchQuery, (q) => {
         @update-tags="updateTags"
         @update-labels="updateLabels"
         @update-criteria="updateCriteria"
+        @update-metadata="updateMetadata"
         @screen-article="screenArticle"
         @move-article="moveArticle"
         @attach-full-text="handleAttachFullText"

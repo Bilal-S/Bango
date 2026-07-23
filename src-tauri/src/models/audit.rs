@@ -46,6 +46,11 @@ pub enum AuditAction {
     /// audit row (`article_id = NULL`); the `details` field records a compact
     /// summary ("Generated 8-database search strategy for N aim(s)").
     SearchStrategy,
+    /// A metadata field (Authors, Affiliation, Journal, Year, Lang, DOI,
+    /// Keywords) was edited in-place via the Article Detail "Metadata" card.
+    /// The `details` field records which field changed
+    /// (e.g. "Metadata edited: DOI").
+    MetadataEdit,
 }
 
 impl AuditAction {
@@ -72,6 +77,7 @@ impl AuditAction {
             Self::Translation => "translation",
             Self::TranslationError => "translation_error",
             Self::SearchStrategy => "search_strategy",
+            Self::MetadataEdit => "metadata_edit",
         }
     }
 }

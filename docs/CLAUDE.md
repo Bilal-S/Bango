@@ -84,6 +84,16 @@
 - Constants: `SCREAMING_SNAKE_CASE` (`MAX_ARTICLES`, `DEFAULT_BATCH_SIZE`).
 - Composables: prefixed with `use` (`useArticles.ts`, `useScreening.ts`).
 
+### Comments
+- Use **JSDoc** (`/** ... */`) for all exported functions and composables.
+  Include `@param`, `@returns`, and other relevant tags (`@throws`, `@example`).
+  This is part of the function definition, not optional decoration.
+- For multi-line explanatory comments inside function bodies or between
+  sections (more than two lines), use standard block comments (`/* ... */`),
+  NOT repeated `//` line comments.
+- Use single-line `//` comments only for short notes (one to two lines).
+- Never use the emdash character; use a plain dash (`-`) in all comments.
+
 ### File Organization
 - `src/components/` - reusable Vue components.
 - `src/views/` - page-level components.

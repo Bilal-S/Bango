@@ -9,6 +9,10 @@ export interface Article {
   publicationYear: number | null;
   doi: string | null;
   journal: string | null;
+  /** `journal_index.id` FK (resolved at import/edit time via ISSN/eISSN/title).
+   *  `null` when the journal name is not in the local index (the UI shows an
+   *  "(unrecognized)" annotation next to the Journal label in this case). */
+  journalIndexId: string | null;
   volume: string | null;
   issue: string | null;
   startPage: string | null;
@@ -203,7 +207,8 @@ export type AuditAction =
   | 'reference_match'
   | 'error'
   | 'translation'
-  | 'translation_error';
+  | 'translation_error'
+  | 'metadata_edit';
 
 export type AuditSource = 'ai' | 'user' | 'system';
 

@@ -125,7 +125,10 @@ CREATE TABLE IF NOT EXISTS audit_entries (
         'note_add', 'tag_add', 'tag_remove', 'label_add', 'label_remove',
         'criteria_match', 'ai_screen', 'ai_screen_enhanced', 'manual_override',
         'ai_summary', 'error', 'dedup_auto', 'reference_import',
-        'reference_match', 'figure_descriptions'
+        'reference_match', 'figure_descriptions',
+        'translation', 'translation_error',
+        'search_strategy',
+        'metadata_edit'
     )),
     article_id TEXT,
     details TEXT,

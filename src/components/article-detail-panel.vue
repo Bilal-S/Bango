@@ -47,6 +47,7 @@ const emit = defineEmits<{
   updateTags: [id: string, tagIds: string[]];
   updateLabels: [id: string, labelIds: string[]];
   updateCriteria: [id: string, inclusionIds: string[], exclusionIds: string[]];
+  updateMetadata: [id: string, field: string, value: string | string[]];
   navigateToArticle: [id: string];
   toggleFullScreen: [];
   attachFullText: [id: string];
@@ -327,7 +328,10 @@ const {
       <AiDecisionCard v-if="article.aiDecision" :article="article" />
 
       <!-- Metadata (Authors, Journal, Year, DOI, Keywords) -->
-      <ArticleMetadata :article="article" />
+      <ArticleMetadata
+        :article="article"
+        @update-field="(field, value) => emit('updateMetadata', article.id, field, value)"
+      />
 
       <!-- Matched Criteria -->
       <MatchedCriteria

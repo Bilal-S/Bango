@@ -63,6 +63,7 @@ const {
   updateTags,
   updateLabels,
   updateCriteria,
+  updateMetadata,
   closeDetail,
   setStatusTab,
   toggleSort,
@@ -743,6 +744,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
       @update-tags="updateTags"
       @update-labels="updateLabels"
       @update-criteria="updateCriteria"
+      @update-metadata="updateMetadata"
       @navigate-to-article="navigateToArticle"
       @toggle-full-screen="toggleDetailFullScreen"
       @attach-full-text="handleAttachFullText"

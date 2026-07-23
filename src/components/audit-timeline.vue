@@ -29,6 +29,7 @@ const actionLabels: Record<AuditAction, string> = {
   error: 'Error',
   translation: 'Translation',
   translation_error: 'Translation Failed',
+  metadata_edit: 'Metadata Edited',
 };
 
 function formatTimestamp(ts: string): string {

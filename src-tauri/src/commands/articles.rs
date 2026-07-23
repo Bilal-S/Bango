@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::db::app_settings_repo;
-use crate::db::article_repo::{self, ArticleQuery};
+use crate::db::article_repo::{self, ArticleMetaField, ArticleMetaValue, ArticleQuery};
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
@@ -178,6 +178,36 @@ pub fn update_article_criteria(
         )),
         "user",
     )?;
+    Ok(())
+}
+
+/// Update a single metadata field (Authors, Affiliation, Journal, Year, Lang,
+/// DOI, Keywords) on an article. Powers the double-click inline editing in the
+/// Article Detail "Metadata" card. The `field` enum validates the column name
+/// (no string interpolation); `value` is a serde-untagged scalar-or-array
+/// payload (arrays for Authors/Keywords, scalar string for the rest).
+#[tauri::command]
+pub fn update_article_metadata(
+    db_state: State<'_, DbState>,
+    id: String,
+    field: ArticleMetaField,
+    value: ArticleMetaValue,
+) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    article_repo::update_article_metadata_field(&conn, &id, field, value)?;
+    audit_repo::create_or_update_entry(
+        &conn,
+        &id,
+        "metadata_edit",
+        None,
+        None,
+        Some(&format!("Metadata edited: {}", field.label())),
+        "user",
+    )?;
+    // Metadata changes (authors, journal, year, language, keywords) feed both
+    // the bibliometric pipelines and the LLM Wiki knowledge base.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
     Ok(())
 }
 

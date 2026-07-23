@@ -379,6 +379,27 @@ export function useArticleSearch() {
     syncArticleToList(id);
   }
 
+  /**
+   * Update a single metadata field (Authors, Affiliation, Journal, Year, Lang,
+   * DOI, Keywords) on an article via the in-place editor in the Metadata card.
+   * Mirrors `updateNotes`: invoke -> re-fetch -> patch the table row.
+   *
+   * `field` is the snake_case DB column name (e.g. `"publication_year"`); the
+   * backend `ArticleMetaField` enum (`#[serde(rename_all = "camelCase")]`)
+   * expects `"publicationYear"` so we forward the camelCase key the editor
+   * emits. The `value` is a scalar string for the text fields, or a `string[]`
+   * for the array fields (`authors`, `keywords`).
+   */
+  async function updateMetadata(
+    id: string,
+    field: string,
+    value: string | string[]
+  ): Promise<void> {
+    await tauriCommand('update_article_metadata', { id, field, value });
+    await selectArticle(id);
+    syncArticleToList(id);
+  }
+
   async function updateTags(id: string, tagIds: string[]): Promise<void> {
     await tauriCommand('update_article_tags', { id, tagIds });
     await selectArticle(id);
@@ -628,6 +649,7 @@ export function useArticleSearch() {
     updateTags,
     updateLabels,
     updateCriteria,
+    updateMetadata,
     hasPrevious,
     hasNext,
     navigatePrev,

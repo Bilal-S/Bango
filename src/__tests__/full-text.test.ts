@@ -40,6 +40,7 @@ const mockArticle: Article = {
   publisherCity: null,
   publisherAddress: null,
   issn: null,
+  journalIndexId: null,
   referenceType: null,
   date: null,
   authorAddress: null,

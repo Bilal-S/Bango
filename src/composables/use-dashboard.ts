@@ -296,6 +296,7 @@ export function formatAuditAction(action: string): string {
     figure_descriptions: 'Figure Descriptions',
     wiki_ingest_error: 'Wiki Ingest Error',
     search_strategy: 'Search Strategy',
+    metadata_edit: 'Metadata Edited',
     error: 'Error',
   };
   return LABELS[action] ?? action;

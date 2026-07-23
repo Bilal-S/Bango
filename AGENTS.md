@@ -892,9 +892,44 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `update_article_notes`, `update_article_tags`, `update_article_labels`,
     and `update_article_criteria`. Entries with different actions, articles,
     sources, or timestamps older than the window are NOT coalesced. Tested
-    in `tests/audit_coalesce_test.rs` (5 tests: coalesce rapid same-type,
-    different actions, different articles, different sources, expired
-    window).
+     in `tests/audit_coalesce_test.rs` (5 tests: coalesce rapid same-type,
+     different actions, different articles, different sources, expired
+     window).
+  - **`src-tauri/src/db/migrations/v006_audit_metadata_edit.rs`** - Post-v005 schema
+    (VERSION 6). Extends the `audit_entries.action` CHECK constraint to include
+    `'metadata_edit'` so in-place metadata field edits (Authors, Affiliation,
+    Journal, Year, Lang, DOI, Keywords) in the Article Detail "Metadata" card
+    are correctly categorized. Same rename-create-copy-drop pattern as
+    v003/v004/v005; idempotent so `heal_partial_migrations` is not needed. v001
+    is updated so fresh DBs get `metadata_edit` in the initial CHECK constraint.
+    The `update_article_metadata` Tauri command (in `commands/articles.rs`)
+    writes audit rows with `action = 'metadata_edit'` and `details =
+    "Metadata edited: <Field>"` (e.g. "Metadata edited: DOI"), coalesced within
+    the 5-min window so rapid multi-field edits produce a single audit row.
+    Calls `mark_biblio_needs_refresh` + `mark_wiki_needs_refresh` since metadata
+    changes (authors, journal, year, keywords) feed both pipelines. Backend
+    whitelist: `ArticleMetaField` enum (`article_repo.rs`) validates the column
+    name (no string interpolation); `ArticleMetaValue` is `#[serde(untagged)]`
+    scalar-or-array (arrays for Authors/Keywords, scalars for the rest). Empty
+    strings clear to NULL; `publication_year` parses to `Option<i32>`.
+    Frontend: `article-metadata.vue` always renders all fields (empty → muted
+    `---` placeholder) and double-clicks any field to edit in place
+    (`nextTick` focus+select, `Enter`/blur commits, `Escape` cancels — same
+    pattern as `tag-label-panel.vue` v6.9). Field-specific validation: **Year**
+    requires a 4-digit integer in `[1800, 2100]` (frontend blocks invalid
+    commits with a red hint; backend range guard clears out-of-range to NULL as
+    defense-in-depth); **Journal** re-resolves `journal_index_id` on every edit
+    via `journal_repo::resolve_journal_id` so the bibliometric pipelines stay
+    in sync — when the typed name is not in the local index, `journalIndexId`
+    is `null` and the label shows an amber "(unrecognized)" annotation (the
+    entry is still accepted; "Rematch Journals" in Settings retries); **Lang**
+    is a `<select>` dropdown of ~24 common academic languages with an "Other…"
+    option that reveals a free-text input for custom values. Tested in
+    `tests/article_metadata_test.rs` (19 Rust tests: 7 field round-trips +
+    year range guard boundaries + journal re-link recognized/unrecognized +
+    empty/whitespace clear + audit row) +
+    `src/__tests__/components/article-metadata.test.ts` (15 inline-edit +
+    placeholder + validation tests).
   - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
     `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
     UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:
