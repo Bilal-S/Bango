@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { useExport } from '@/composables/use-export';
 
 const { error, exportProject, importProject, resetProject } = useExport();
-const router = useRouter();
 
 const showImportDialog = ref(false);
 const showExportDialog = ref(false);
@@ -48,10 +46,9 @@ async function doImportProject(): Promise<void> {
   await importProject(importFile.value);
   showImportDialog.value = false;
   importFile.value = null;
-  // Navigate to dashboard so all views refresh with newly imported data
-  if (!error.value) {
-    router.push('/');
-  }
+  // On success, importProject() triggers a full window.location.reload() so
+  // ALL cached view state (keep-alive + module singletons) is wiped and the
+  // app re-bootstraps against the freshly imported DB. No navigation needed.
 }
 
 async function doExportProject(): Promise<void> {
@@ -65,7 +62,9 @@ async function doDeleteProject(): Promise<void> {
   if (success) {
     showDeleteDialog.value = false;
     deleteConfirmText.value = '';
-    router.push('/');
+    // On success, resetProject() triggers a full window.location.reload() so
+    // ALL cached view state (keep-alive + module singletons) is wiped and the
+    // app re-bootstraps against the freshly reset DB. No navigation needed.
   }
 }
 </script>

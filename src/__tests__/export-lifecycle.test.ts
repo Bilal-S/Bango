@@ -5,6 +5,21 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: vi.fn(),
 }));
 
+// Mock window.location so the success paths (import/reset) can run to
+// completion in jsdom without actually reloading the test runner. `reload` and
+// `hash` are captured per-test so assertions can verify the app navigates to
+// the Dashboard (hash `#/`) before reloading (Option A: fresh-start landing).
+const reloadMock = vi.fn();
+const locationMock = { ...window.location, reload: reloadMock, hash: '' };
+beforeEach(() => {
+  reloadMock.mockReset();
+  locationMock.hash = '';
+  Object.defineProperty(window, 'location', {
+    value: locationMock,
+    writable: true,
+  });
+});
+
 // Mock tauri command
 vi.mock('@/composables/use-tauri-command', () => ({
   isTauri: () => true,
@@ -220,6 +235,20 @@ describe('useExport', () => {
       expect(error.value).toBeNull();
     });
 
+    it('reloads the app on success so all cached view state is wiped', async () => {
+      // After a successful import, all module-level singletons + keep-alive
+      // caches must be cleared. The composable triggers a full reload.
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+      const { importProject } = useExport();
+      const file = new File(['{"project":"data"}'], 'backup.bango.json');
+      await importProject(file);
+
+      expect(reloadMock).toHaveBeenCalledTimes(1);
+      // Lands on the Dashboard (fresh-start view) after the reload.
+      expect(window.location.hash).toBe('#/');
+    });
+
     it('sets error on import failure', async () => {
       vi.mocked(tauriCommand).mockRejectedValue(new Error('Invalid backup'));
 
@@ -228,6 +257,8 @@ describe('useExport', () => {
       await importProject(file);
 
       expect(error.value).toBe('Invalid backup');
+      // No reload on failure - the user stays on the page to see the error.
+      expect(reloadMock).not.toHaveBeenCalled();
     });
   });
 
@@ -356,6 +387,19 @@ describe('useExport', () => {
       expect(chatSetWikiReadyMock).toHaveBeenCalledWith(false);
     });
 
+    it('reloads the app on success so all cached view state is wiped', async () => {
+      // After a successful reset, all module-level singletons + keep-alive
+      // caches must be cleared. The composable triggers a full reload.
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+      const { resetProject } = useExport();
+      await resetProject();
+
+      expect(reloadMock).toHaveBeenCalledTimes(1);
+      // Lands on the Dashboard (fresh-start view) after the reload.
+      expect(window.location.hash).toBe('#/');
+    });
+
     it('sets error on reset failure', async () => {
       vi.mocked(tauriCommand).mockRejectedValue(new Error('Reset failed'));
 
@@ -367,6 +411,8 @@ describe('useExport', () => {
       // Wiki/chat reset is skipped when the backend reset fails.
       expect(wikiResetStateMock).not.toHaveBeenCalled();
       expect(chatSetWikiReadyMock).not.toHaveBeenCalled();
+      // No reload on failure.
+      expect(reloadMock).not.toHaveBeenCalled();
     });
   });
 });

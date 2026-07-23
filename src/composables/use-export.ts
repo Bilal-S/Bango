@@ -138,6 +138,14 @@ export function useExport() {
         await refreshAllStores();
         useSummary().clearSummary();
       });
+      // Land on the Dashboard so the user sees a clean "fresh start" view of
+      // the freshly imported project, then reload to wipe ALL cached view state
+      // (keep-alive components + module-level singletons like useArticleSearch,
+      // useBibliometrics, useDashboard, the network graphs, useReferencesSearch,
+      // etc.). The app re-bootstraps via main.ts (store pre-warm). Same-process
+      // reload keeps the Rust backend (and the just-written DB) alive.
+      window.location.hash = '#/';
+      window.location.reload();
       return true;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -162,6 +170,14 @@ export function useExport() {
       // (wiki toggle hidden, wiki view shows the first-visit gate).
       useWiki().resetState();
       useChatStore().setWikiReady(false);
+      // Land on the Dashboard so the user sees a clean "fresh start" view of
+      // the empty project, then reload to wipe ALL cached view state
+      // (keep-alive components + module-level singletons like useArticleSearch,
+      // useBibliometrics, useDashboard, the network graphs, useReferencesSearch,
+      // etc.). The app re-bootstraps via main.ts (store pre-warm). Same-process
+      // reload keeps the Rust backend (and the just-reset DB) alive.
+      window.location.hash = '#/';
+      window.location.reload();
       return true;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
