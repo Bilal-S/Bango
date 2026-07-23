@@ -361,11 +361,17 @@ pub fn get_cocitation_network_json(
     if !node_ids.is_empty() {
         let id_list: Vec<&str> = node_ids.iter().copied().collect();
         let placeholders: String = id_list.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        // LEFT JOIN articles so each node carries the status of its matched
+        // library article (e.g. "included", "rejected"). The frontend uses this
+        // to render an "In Library:Rejected" badge and to optionally hide
+        // rejected-article matches. Papers without a match get NULL.
         let sql = format!(
-            "SELECT id, title, authors, publication_year, journal, doi, \
-                    abstract_text, citation_count, match_status, matched_article_id, reference_type \
-             FROM reference_papers \
-             WHERE id IN ({placeholders})"
+            "SELECT rp.id, rp.title, rp.authors, rp.publication_year, rp.journal, rp.doi, \
+                    rp.abstract_text, rp.citation_count, rp.match_status, rp.matched_article_id, rp.reference_type, \
+                    a.status AS matched_article_status \
+             FROM reference_papers rp \
+             LEFT JOIN articles a ON a.id = rp.matched_article_id \
+             WHERE rp.id IN ({placeholders})"
         );
         let mut stmt = conn.prepare(&sql)?;
         let params = rusqlite::params_from_iter(id_list.iter());
@@ -379,6 +385,7 @@ pub fn get_cocitation_network_json(
             String,
             i64,
             String,
+            Option<String>,
             Option<String>,
             Option<String>,
         )> = stmt
@@ -395,6 +402,7 @@ pub fn get_cocitation_network_json(
                     row.get(8)?,                                 // match_status
                     row.get(9)?,                                 // matched_article_id
                     row.get(10)?,                                // reference_type
+                    row.get(11)?,                                // matched_article_status
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -412,6 +420,7 @@ pub fn get_cocitation_network_json(
             _match_status,
             matched_article_id,
             reference_type,
+            matched_article_status,
         ) in node_rows
         {
             let label = format_paper_label(&authors, year);
@@ -427,6 +436,7 @@ pub fn get_cocitation_network_json(
                 "citationCount": citation_count,
                 "coCitationCount": co_citation_total,
                 "matchedArticleId": matched_article_id,
+                "matchedArticleStatus": matched_article_status,
                 "abstract": abstract_text,
                 "referenceType": reference_type,
             }));

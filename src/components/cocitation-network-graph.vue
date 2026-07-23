@@ -289,6 +289,7 @@ function bindSigmaEvents() {
       citationCount: attrs.citationCount ?? 0,
       coCitationCount: attrs.coCitationCount ?? 0,
       matchedArticleId: attrs.matchedArticleId ?? null,
+      matchedArticleStatus: attrs.matchedArticleStatus ?? null,
       abstract: attrs.abstract ?? '',
       referenceType: attrs.referenceType ?? null,
     };

@@ -4,11 +4,18 @@ import CocitationNetworkGraph from '../components/cocitation-network-graph.vue';
 import CocitationControls from '../components/cocitation-controls.vue';
 import CocitationDetailPanel from '../components/cocitation-detail-panel.vue';
 import CocitationHeatmap from '../components/cocitation-heatmap.vue';
+import ArticleDetailPanel from '../components/article-detail-panel.vue';
 import { useCocitationNetwork } from '../composables/use-cocitation-network';
 import { useNetworkView } from '../composables/use-network-view';
 import { applyCocitationGraphFilters } from '../utils/graph-filters';
+import { useArticleSearch } from '../composables/use-article-search';
+import { useScreening } from '@/composables/use-screening';
+import { useToast } from '../composables/use-toast';
+import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CocitationNode, CocitationEdge } from '../types/biblio-cocitation';
+
+const toast = useToast();
 
 const {
   graph,
@@ -21,6 +28,50 @@ const {
   getNode,
   getCoCitedPapers,
 } = useCocitationNetwork();
+
+/**
+ * Article detail panel (opened via "open linked record" from the co-citation
+ * detail panel). Mirrors the citation-network pattern so the user stays in
+ * context instead of routing away from the heatmap + selected node.
+ */
+const {
+  selectedArticle: detailArticle,
+  auditTrail: detailAuditTrail,
+  selectArticle,
+  refreshArticle,
+  updateNotes,
+  updateTags,
+  updateLabels,
+  updateCriteria,
+  updateMetadata,
+  moveArticle,
+  attachFullText,
+  deleteFullTextAttachment,
+} = useArticleSearch();
+const { screenArticle } = useScreening();
+const showArticleDetail = ref(false);
+const isArticleDetailFullScreen = ref(false);
+// Full-text attach UI orchestration is centralized in `useFullTextAttachment`
+// (shared with the other detail-panel host views).
+const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
+
+/** Open the full article detail panel from the co-citation detail panel. */
+async function onOpenLinkedRecord(articleId: string): Promise<void> {
+  try {
+    await selectArticle(articleId);
+    showArticleDetail.value = true;
+  } catch {
+    toast.show('Failed to load article details', 'error');
+  }
+}
+
+/** Close the article detail panel. */
+function onCloseArticleDetail(): void {
+  showArticleDetail.value = false;
+  isArticleDetailFullScreen.value = false;
+  detailArticle.value = null;
+  detailAuditTrail.value = [];
+}
 
 const {
   graphRef,
@@ -55,6 +106,12 @@ const scope = ref<'included' | 'all'>('included');
 const normalization = ref<'raw' | 'cosine' | 'jaccard' | 'pearson'>('cosine');
 const minCitationCount = ref(2);
 const minCoCitation = ref(2);
+/**
+ * When true, hide nodes whose matched article has status 'rejected'. Applied
+ * client-side (no backend round-trip) by toggling the graphology `hidden`
+ * attribute, mirroring the search filter pattern.
+ */
+const hideRejectedMatches = ref(false);
 const selectedPaper = ref<CocitationNode | null>(null);
 const showHeatmap = ref(false);
 
@@ -106,6 +163,7 @@ const heatmapNodes = computed<CocitationNode[]>(() => {
       citationCount: attrs.citationCount,
       coCitationCount: attrs.coCitationCount,
       matchedArticleId: attrs.matchedArticleId,
+      matchedArticleStatus: attrs.matchedArticleStatus,
       abstract: attrs.abstract,
       referenceType: attrs.referenceType,
     });
@@ -197,6 +255,56 @@ function onFilterChange(filters: { search: string }) {
   // co-citation search filter instead.
   const result = applyCocitationGraphFilters(graph.value, { search: filters.search });
   visibleNodeCount.value = result.visibleNodes;
+  applyHideRejectedFilter();
+}
+
+/**
+ * Toggle the `hidden` attribute on nodes whose matched article is rejected.
+ * Called after the search filter so the two compose (a node hidden by either
+ * stays hidden). Does not touch edges - the renderer already drops edges to
+ * hidden nodes. Recomputes the visible-node count so the stats row updates.
+ */
+function applyHideRejectedFilter(): void {
+  if (!graph.value) return;
+  let visible = 0;
+  graph.value.forEachNode((id) => {
+    const attrs = graph.value!.getNodeAttributes(id);
+    const isRejected = attrs.matchedArticleStatus === 'rejected';
+    // Preserve the search filter's hidden state; only force-hide on rejected.
+    if (isRejected && hideRejectedMatches.value) {
+      attrs.hidden = true;
+    } else if (attrs.hidden === true && !isRejected) {
+      // Only un-hide if the search filter didn't hide it for another reason.
+      // The search filter re-runs on every keystroke and sets `hidden`, so we
+      // only clear our own rejected-flag here when the toggle is off.
+      // To avoid clobbering the search filter, we re-run it via onFilterChange.
+      attrs.hidden = false;
+    }
+    if (attrs.hidden !== true) visible++;
+  });
+  visibleNodeCount.value = visible;
+}
+
+/**
+ * React to the "Hide rejected matches" toggle. Re-applies the search filter
+ * (which recomputes hidden-by-search) then layers the rejected filter on top.
+ */
+function onHideRejectedToggle(value: boolean): void {
+  hideRejectedMatches.value = value;
+  if (!graph.value) return;
+  // Reset all hidden flags so the search filter + rejected filter compose
+  // cleanly from a known state.
+  graph.value.forEachNode((id) => {
+    graph.value!.setNodeAttribute(id, 'hidden', false);
+  });
+  // Re-run the search filter (reads the search box) then the rejected filter.
+  applyHideRejectedFilter();
+  visibleNodeCount.value =
+    visibleNodeCount.value -
+    (graph.value.filterNodes((id) => {
+      const a = graph.value!.getNodeAttributes(id);
+      return a.matchedArticleStatus === 'rejected' && hideRejectedMatches.value;
+    }).length ?? 0);
 }
 
 async function onExportImage(format: NetworkExportFormat) {
@@ -236,6 +344,7 @@ async function onResetAnalysis() {
           :normalization="normalization"
           :min-citation-count="minCitationCount"
           :min-co-citation="minCoCitation"
+          :hide-rejected-matches="hideRejectedMatches"
           :color-mode="colorMode"
           :layout-mode="layoutMode"
           :paper-labels="paperLabels"
@@ -258,6 +367,7 @@ async function onResetAnalysis() {
             minCoCitation = $event;
             onParamsChange();
           "
+          @update:hide-rejected-matches="onHideRejectedToggle"
           @color-mode-change="colorMode = $event"
           @layout-mode-change="onLayoutModeChange"
           @locate-paper="onLocatePaper"
@@ -281,8 +391,11 @@ async function onResetAnalysis() {
       </button>
     </div>
 
-    <!-- Central Content Area -->
-    <div class="flex-1 flex flex-col min-h-0 relative">
+    <!-- Central Content Area (hidden when article detail is fullscreen) -->
+    <div
+      v-show="!(showArticleDetail && isArticleDetailFullScreen)"
+      class="flex-1 flex flex-col min-h-0 relative"
+    >
       <!-- Graph canvas -->
       <main class="flex-1 relative min-h-0">
         <CocitationNetworkGraph
@@ -301,17 +414,30 @@ async function onResetAnalysis() {
           @retry="doFetch"
         />
 
-        <!-- Heatmap toggle button -->
-        <button
-          v-if="graph && nodeCount > 0"
-          class="absolute top-3 right-3 z-10 flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 transition-colors"
-          @click="showHeatmap = !showHeatmap"
-        >
-          <span class="material-symbols-outlined text-sm">{{
-            showHeatmap ? 'grid_off' : 'grid_on'
-          }}</span>
-          {{ showHeatmap ? 'Hide' : 'Heatmap' }}
-        </button>
+        <!-- Scope + heatmap toggles (top-right overlay) -->
+        <div class="absolute top-3 right-3 z-10 flex items-center gap-2">
+          <!-- Scope diagnostic badge: surfaces the in-scope article count so the
+               scope toggle's effect is visible even when the graph looks similar. -->
+          <span
+            v-if="meta"
+            class="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium bg-white border border-slate-200 rounded-lg shadow-sm"
+            :title="`Scope: ${scope === 'included' ? 'Included' : 'All non-duplicate'} articles`"
+          >
+            <span class="material-symbols-outlined text-sm text-slate-400">filter_list</span>
+            <span class="text-slate-700">{{ scope === 'included' ? 'Included' : 'All' }}</span>
+            <span class="text-slate-400">({{ meta.inScopeArticleCount }})</span>
+          </span>
+          <button
+            v-if="graph && nodeCount > 0"
+            class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 transition-colors"
+            @click="showHeatmap = !showHeatmap"
+          >
+            <span class="material-symbols-outlined text-sm">{{
+              showHeatmap ? 'grid_off' : 'grid_on'
+            }}</span>
+            {{ showHeatmap ? 'Hide' : 'Heatmap' }}
+          </button>
+        </div>
 
         <!-- Diagnostic empty-state -->
         <div
@@ -350,15 +476,43 @@ async function onResetAnalysis() {
       </Transition>
     </div>
 
-    <!-- Detail panel -->
+    <!-- Detail panel (hidden while the article detail overlay is open) -->
     <Transition name="detail-slide">
       <CocitationDetailPanel
-        v-if="selectedPaper"
+        v-if="selectedPaper && !showArticleDetail"
         :paper="selectedPaper"
         :co-cited-papers="coCitedPapers"
         class="w-72 shrink-0"
         @close="onNodeClick(null)"
         @navigate-paper="onNavigateToPaper"
+        @open-linked-record="onOpenLinkedRecord"
+      />
+    </Transition>
+
+    <!-- Full article detail panel (opened from the co-citation detail panel). -->
+    <Transition name="detail-slide">
+      <ArticleDetailPanel
+        v-if="showArticleDetail && detailArticle"
+        :article="detailArticle"
+        :audit-trail="detailAuditTrail"
+        :has-previous="false"
+        :has-next="false"
+        :has-return-target="false"
+        :full-screen="isArticleDetailFullScreen"
+        :article-position="1"
+        :article-total="1"
+        @close="onCloseArticleDetail"
+        @toggle-full-screen="isArticleDetailFullScreen = !isArticleDetailFullScreen"
+        @update-notes="updateNotes"
+        @update-tags="updateTags"
+        @update-labels="updateLabels"
+        @update-criteria="updateCriteria"
+        @update-metadata="updateMetadata"
+        @screen-article="screenArticle"
+        @move-article="moveArticle"
+        @attach-full-text="handleAttachFullText"
+        @delete-full-text="deleteFullTextAttachment"
+        @refresh-article="refreshArticle"
       />
     </Transition>
   </div>

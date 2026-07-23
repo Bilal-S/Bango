@@ -125,6 +125,17 @@
       />
     </div>
 
+    <!-- Hide rejected matches toggle -->
+    <label class="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+      <input
+        type="checkbox"
+        :checked="hideRejectedMatches"
+        class="accent-indigo-600"
+        @change="$emit('update:hideRejectedMatches', ($event.target as HTMLInputElement).checked)"
+      />
+      <span>Hide rejected-article matches</span>
+    </label>
+
     <!-- Recalculate Layout (grouped with threshold controls that trigger re-layout) -->
     <button
       class="flex items-center justify-center gap-1.5 w-full px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer transition-colors"
@@ -315,6 +326,8 @@ const props = defineProps<{
   normalization: string;
   minCitationCount: number;
   minCoCitation: number;
+  /** When true, hide nodes whose matched article has status 'rejected'. */
+  hideRejectedMatches: boolean;
   colorMode: 'cluster' | 'temporal';
   layoutMode: 'fixed' | 'dynamic';
   paperLabels: { label: string; display: string; searchText: string }[];
@@ -328,6 +341,7 @@ const emit = defineEmits<{
   (e: 'normalization-change', mode: string): void;
   (e: 'min-citation-change', val: number): void;
   (e: 'min-co-citation-change', val: number): void;
+  (e: 'update:hideRejectedMatches', value: boolean): void;
   (e: 'color-mode-change', mode: 'cluster' | 'temporal'): void;
   (e: 'layout-mode-change', mode: 'fixed' | 'dynamic'): void;
   (e: 'locate-paper', label: string): void;

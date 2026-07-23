@@ -637,4 +637,63 @@ fn cocitation_node_metadata_from_reference_papers() {
     assert_eq!(rp1["citationCount"], 42);
     assert_eq!(rp1["year"], 2015);
     assert_eq!(rp1["coCitationCount"], 2, "cited by 2 in-scope articles");
+    // Both papers are unmatched -> matchedArticleStatus is null.
+    assert_eq!(rp1["matchedArticleId"], serde_json::Value::Null);
+    assert_eq!(rp1["matchedArticleStatus"], serde_json::Value::Null);
+}
+
+#[test]
+fn cocitation_node_matched_article_status() {
+    let conn = test_db();
+    // One included + one rejected library article.
+    insert_test_article(&conn, "inc1");
+    insert_kpi_article(&conn, "rej1", "rejected", Some(2020), None, "X", None, None);
+
+    // rp1 matched to the included article; rp2 matched to the rejected article;
+    // rp3 unmatched. All three are co-cited so they appear as nodes.
+    conn.execute(
+        "INSERT INTO reference_papers (id, title, authors, match_status, matched_article_id) \
+         VALUES ('rp1', 'Included Match', '[\"A\"]', 'matched', 'inc1')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO reference_papers (id, title, authors, match_status, matched_article_id) \
+         VALUES ('rp2', 'Rejected Match', '[\"B\"]', 'matched', 'rej1')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO reference_papers (id, title, authors, match_status) \
+         VALUES ('rp3', 'Unmatched', '[\"C\"]', 'unmatched')",
+        [],
+    )
+    .unwrap();
+
+    // One article cites all three so the co-citation pairs form.
+    insert_reference_link(&conn, "inc1", "rp1");
+    insert_reference_link(&conn, "inc1", "rp2");
+    insert_reference_link(&conn, "inc1", "rp3");
+
+    let json = get_cocitation_network_json(
+        &conn,
+        CocitationScope::IncludedArticles,
+        CocitationNormalization::Raw,
+        1,
+        1,
+    )
+    .unwrap();
+
+    let nodes = json["nodes"].as_array().unwrap();
+    let rp1 = nodes.iter().find(|n| n["id"] == "rp1").unwrap();
+    assert_eq!(rp1["matchedArticleId"], "inc1");
+    assert_eq!(rp1["matchedArticleStatus"], "included");
+
+    let rp2 = nodes.iter().find(|n| n["id"] == "rp2").unwrap();
+    assert_eq!(rp2["matchedArticleId"], "rej1");
+    assert_eq!(rp2["matchedArticleStatus"], "rejected");
+
+    let rp3 = nodes.iter().find(|n| n["id"] == "rp3").unwrap();
+    assert_eq!(rp3["matchedArticleId"], serde_json::Value::Null);
+    assert_eq!(rp3["matchedArticleStatus"], serde_json::Value::Null);
 }

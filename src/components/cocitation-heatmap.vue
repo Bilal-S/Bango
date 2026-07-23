@@ -31,6 +31,7 @@ import { computed } from 'vue';
 import VueApexCharts from 'vue3-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import type { CocitationEdge, CocitationNode } from '../types/biblio-cocitation';
+import { shortPaperLabel } from '@/utils/cocitation-label';
 
 const props = defineProps<{
   nodes: CocitationNode[];
@@ -64,13 +65,9 @@ const weightLookup = computed<Map<string, number>>(() => {
   return map;
 });
 
-/** Short label for a paper: last name + year. */
+/** Short axis/category label for a paper (delegates to the pure helper). */
 function shortLabel(node: CocitationNode): string {
-  const authors = node.authors || '';
-  const firstAuthor = authors.split(';')[0]?.trim() || 'Unknown';
-  const lastName = firstAuthor.split(',')[0] || firstAuthor;
-  const yearSuffix = node.year ? ` '${String(node.year).slice(-2)}` : '';
-  return `${lastName}${yearSuffix}`;
+  return shortPaperLabel(node);
 }
 
 /** ApexCharts series (one per row = one paper). */

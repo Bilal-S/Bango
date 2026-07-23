@@ -57,6 +57,7 @@ function buildGraph(data: CocitationNetworkData): Graph {
       citationCount: node.citationCount,
       coCitationCount: node.coCitationCount,
       matchedArticleId: node.matchedArticleId,
+      matchedArticleStatus: node.matchedArticleStatus,
       abstract: node.abstract,
       referenceType: node.referenceType,
       // +4 floor so 0-co-citation papers are still visible.
@@ -140,6 +141,7 @@ export function useCocitationNetwork() {
       citationCount: attrs.citationCount,
       coCitationCount: attrs.coCitationCount,
       matchedArticleId: attrs.matchedArticleId,
+      matchedArticleStatus: attrs.matchedArticleStatus,
       abstract: attrs.abstract,
       referenceType: attrs.referenceType,
     };

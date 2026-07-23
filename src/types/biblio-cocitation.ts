@@ -22,6 +22,13 @@ export interface CocitationNode {
   coCitationCount: number;
   /** FK → articles.id when the reference paper is matched to a library article. */
   matchedArticleId: string | null;
+  /**
+   * Status of the matched library article (e.g. `'included'`, `'rejected'`,
+   * `'working'`, `'duplicate'`), or `null` when the paper is unmatched. Used
+   * by the detail panel to render an "In Library:Rejected" badge and by the
+   * "Hide rejected matches" toggle.
+   */
+  matchedArticleStatus: string | null;
   abstract: string;
   referenceType: string | null;
 }

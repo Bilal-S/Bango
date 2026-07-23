@@ -11,13 +11,9 @@
         <span
           v-if="paper"
           class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-tight shrink-0"
-          :class="
-            paper.matchedArticleId
-              ? 'bg-emerald-100 text-emerald-800'
-              : 'bg-slate-100 text-slate-600'
-          "
+          :class="statusBadge.classes"
         >
-          {{ paper.matchedArticleId ? 'In Library' : 'Reference Only' }}
+          {{ statusBadge.text }}
         </span>
       </div>
       <div class="flex items-center gap-0.5 shrink-0">
@@ -146,5 +142,32 @@ defineEmits<{
 const maxCoCiteWeight = computed(() => {
   const weights = props.coCitedPapers.map((p) => p.weight);
   return Math.max(...weights, 0.001);
+});
+
+/**
+ * Status-aware badge for the matched library article. Renders the article's
+ * status alongside "In Library" so users can see at a glance whether a matched
+ * paper is included, rejected, working, or a duplicate. Papers without a match
+ * show "Reference Only".
+ */
+const statusBadge = computed<{ text: string; classes: string }>(() => {
+  const status = props.paper?.matchedArticleStatus;
+  if (!props.paper?.matchedArticleId) {
+    return { text: 'Reference Only', classes: 'bg-slate-100 text-slate-600' };
+  }
+  // Map the article status to a badge label + color.
+  switch (status) {
+    case 'included':
+      return { text: 'In Library:Included', classes: 'bg-emerald-100 text-emerald-800' };
+    case 'rejected':
+      return { text: 'In Library:Rejected', classes: 'bg-rose-100 text-rose-800' };
+    case 'working':
+      return { text: 'In Library:Working', classes: 'bg-amber-100 text-amber-800' };
+    case 'duplicate':
+      return { text: 'In Library:Duplicate', classes: 'bg-slate-100 text-slate-600' };
+    default:
+      // matchedArticleId set but status missing (shouldn't happen) - fallback.
+      return { text: 'In Library', classes: 'bg-emerald-100 text-emerald-800' };
+  }
 });
 </script>
