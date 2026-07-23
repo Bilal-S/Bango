@@ -96,14 +96,31 @@ export function useReferencesSearch() {
     }
   }
 
-  async function promotePaper(paperId: string): Promise<string | null> {
+  /**
+   * Promote a reference paper to a Working-list article.
+   *
+   * @param paperId - The reference paper id to promote.
+   * @param options.refreshArticlesOfInterest - When `false`, skips the
+   *   `loadArticlesOfInterest()` refresh so the caller can remove the card
+   *   locally with an exit animation instead of letting the refresh yank it.
+   *   Defaults to `true` (backward compatible).
+   * @returns The new article id, or `null` on failure.
+   */
+  async function promotePaper(
+    paperId: string,
+    options: { refreshArticlesOfInterest?: boolean } = {}
+  ): Promise<string | null> {
+    const { refreshArticlesOfInterest = true } = options;
     try {
       const result = await tauriCommand<{ articleId: string; articleTitle: string }>(
         'promote_reference_to_article',
         { referencePaperId: paperId }
       );
-      // Refresh data after promotion
-      await Promise.all([loadPage(), loadArticlesOfInterest()]);
+      // Refresh the main papers list in both modes. The articles-of-interest
+      // refresh is skippable so the caller can animate the card out locally.
+      const tasks: Promise<unknown>[] = [loadPage()];
+      if (refreshArticlesOfInterest) tasks.push(loadArticlesOfInterest());
+      await Promise.all(tasks);
       return result.articleId;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);

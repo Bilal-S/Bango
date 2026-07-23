@@ -12,6 +12,12 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'article-promoted', articleId: string): void;
+  /**
+   * Non-navigating signal that a reference was quick-added to the Working list
+   * via the `(+)` icon. The parent refreshes status-tab counts but does NOT
+   * open the article detail panel.
+   */
+  (e: 'article-added', articleId: string): void;
   (e: 'navigate-to-article', articleId: string, paperId?: string): void;
   (e: 'update:active-paper-id', paperId: string | null): void;
 }>();
@@ -107,6 +113,45 @@ async function handlePromote(paper: ReferencePaperQuery): Promise<void> {
   }
 }
 
+/**
+ * Handler for the "Add to Working list" button inside the side detail panel.
+ *
+ * Non-navigating (emits `article-added`, not `article-promoted`): the parent
+ * refreshes status-tab counts but does NOT open the article detail panel.
+ * The side panel's own `handlePromote` already shows the success toast, so we
+ * don't double-toast here. The open paper row is removed locally so the
+ * TransitionGroup leave animation runs, then the side panel slides out via
+ * its `<Transition>` wrapper on `closeDetail()`.
+ */
+function handleDetailPromoted(articleId: string): void {
+  emit('article-added', articleId);
+  const paperId = selectedPaperId.value;
+  if (paperId) {
+    papers.value = papers.value.filter((p) => p.id !== paperId);
+  }
+  closeDetail();
+}
+
+/**
+ * Quick-add handler for the `(+)` icon on Articles-of-Interest cards.
+ *
+ * Unlike {@link handlePromote}, this does NOT open any detail panel: it only
+ * promotes the paper, shows a confirmation toast, removes the card locally
+ * (animated), and emits a non-navigating `article-added` event so the parent
+ * can refresh status-tab counts. The `refreshArticlesOfInterest: false`
+ * option keeps the backend from yanking the card before the leave animation
+ * finishes.
+ */
+async function handleQuickPromote(paper: ReferencePaperQuery): Promise<void> {
+  const articleId = await promotePaper(paper.id, { refreshArticlesOfInterest: false });
+  if (articleId) {
+    toast.show(`"${paper.title ?? 'Untitled'}" added to Working list`, 'success');
+    // Remove the card locally so the TransitionGroup leave animation runs.
+    articlesOfInterest.value = articlesOfInterest.value.filter((p) => p.id !== paper.id);
+    emit('article-added', articleId);
+  }
+}
+
 function handleExecuteSearch(): void {
   search(searchText.value);
 }
@@ -165,7 +210,11 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
         Articles of Interest
         <span class="text-xs font-normal text-slate-400 ml-1">(Top unmatched)</span>
       </h2>
-      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <TransitionGroup
+        tag="div"
+        name="interest-card"
+        class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+      >
         <div
           v-for="paper in articlesOfInterest"
           :key="paper.id"
@@ -196,15 +245,15 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
             </a>
             <button
               v-if="canPromote(paper)"
-              class="ml-auto material-symbols-outlined text-xs text-green-600 hover:text-green-800 cursor-pointer"
+              class="ml-auto material-symbols-outlined text-2xl leading-none text-green-600 hover:text-green-800 cursor-pointer"
               title="Add to Working list"
-              @click.stop="handlePromote(paper)"
+              @click.stop="handleQuickPromote(paper)"
             >
               add_circle
             </button>
           </div>
         </div>
-      </div>
+      </TransitionGroup>
     </section>
 
     <!-- Section B: Search & Reference Table -->
@@ -259,7 +308,11 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
       </div>
 
       <!-- Paper List -->
-      <ul v-else class="divide-y divide-slate-200 border border-slate-200 rounded-lg">
+      <TransitionGroup
+        tag="ul"
+        name="paper-row"
+        class="divide-y divide-slate-200 border border-slate-200 rounded-lg"
+      >
         <li v-for="paper in papers" :key="paper.id" class="hover:bg-slate-50 transition-colors">
           <!-- Card header (always visible) -->
           <div class="flex items-start gap-3 px-4 py-3">
@@ -438,7 +491,7 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
             </div>
           </div>
         </li>
-      </ul>
+      </TransitionGroup>
 
       <!-- Pagination -->
       <div v-if="total > 0" class="flex items-center justify-center gap-2 mt-4 pb-4">
@@ -479,22 +532,19 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
 
     <!-- Detail Panel Overlay -->
     <Teleport to="body">
-      <div v-if="selectedPaperId" class="fixed inset-0 z-[60] bg-black/20" @click="closeDetail" />
-      <ReferencePaperDetailPanel
-        v-if="selectedPaperId"
-        :paper-id="selectedPaperId"
-        :initial-data="selectedPaperData ?? undefined"
-        @close="closeDetail"
-        @promoted="
-          (id) => {
-            emit('article-promoted', id);
-            closeDetail();
-            search();
-            loadArticlesOfInterest();
-          }
-        "
-        @navigate-to-article="handleNavigateToArticle"
-      />
+      <Transition name="ref-backdrop">
+        <div v-if="selectedPaperId" class="fixed inset-0 z-[60] bg-black/20" @click="closeDetail" />
+      </Transition>
+      <Transition name="ref-panel">
+        <ReferencePaperDetailPanel
+          v-if="selectedPaperId"
+          :paper-id="selectedPaperId"
+          :initial-data="selectedPaperData ?? undefined"
+          @close="closeDetail"
+          @promoted="handleDetailPromoted"
+          @navigate-to-article="handleNavigateToArticle"
+        />
+      </Transition>
     </Teleport>
   </div>
 </template>
@@ -522,5 +572,53 @@ function handleNavigateToArticle(articleId: string, paperId?: string): void {
   line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Articles-of-Interest card removal: shrink + dissolve over ~1s. */
+.interest-card-leave-active {
+  transition:
+    opacity 1s ease,
+    transform 1s ease;
+}
+
+.interest-card-leave-to {
+  opacity: 0;
+  transform: scale(0.85);
+}
+
+/* Paper-row removal after promote-from-detail: quick shrink + fade. */
+.paper-row-leave-active {
+  transition:
+    opacity 0.4s ease,
+    transform 0.4s ease;
+}
+
+.paper-row-leave-to {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+/* Side detail panel: slide in/out from the right + backdrop fade. */
+.ref-backdrop-enter-active,
+.ref-backdrop-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.ref-backdrop-enter-from,
+.ref-backdrop-leave-to {
+  opacity: 0;
+}
+
+.ref-panel-enter-active,
+.ref-panel-leave-active {
+  transition:
+    transform 0.3s ease,
+    opacity 0.3s ease;
+}
+
+.ref-panel-enter-from,
+.ref-panel-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
 }
 </style>

@@ -396,6 +396,15 @@ async function handleArticlePromoted(articleId: string): Promise<void> {
   selectArticle(articleId);
 }
 
+/**
+ * Non-navigating handler for the quick-add `(+)` on Articles-of-Interest
+ * cards. Refreshes status-tab counts (e.g. Working) but does NOT open the
+ * article detail panel - the card animates out within the References view.
+ */
+async function handleArticleAdded(): Promise<void> {
+  await fetchCounts();
+}
+
 function handleUpdateFilter(key: keyof ArticleFilter, value: unknown): void {
   (filter as Record<string, unknown>)[key] = value;
 }
@@ -603,6 +612,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
         v-if="activeStatusTab === 'references'"
         :active-paper-id="activeReferencePaperId"
         @article-promoted="handleArticlePromoted"
+        @article-added="handleArticleAdded"
         @navigate-to-article="handleNavigateToArticleWithRef"
         @update:active-paper-id="activeReferencePaperId = $event"
       />
