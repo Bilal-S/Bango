@@ -109,7 +109,7 @@ watch(
 
 <template>
   <aside
-    class="fixed inset-y-0 right-0 w-full sm:w-[480px] z-[70] bg-white shadow-2xl border-l border-slate-200 flex flex-col"
+    class="w-[440px] shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden sticky top-0 self-start max-h-[calc(100vh-2rem)]"
   >
     <!-- Header -->
     <div class="flex items-center gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50">
@@ -150,7 +150,7 @@ watch(
         <p class="text-sm text-red-600">{{ error }}</p>
       </div>
     </div>
-    <div v-else-if="paper" class="flex-1 overflow-y-auto p-5 space-y-5">
+    <div v-else-if="paper" class="flex-1 overflow-y-auto p-5 space-y-5 min-h-0">
       <!-- Title & Authors -->
       <div>
         <h3 class="text-base font-semibold text-slate-900 leading-snug mb-1">
