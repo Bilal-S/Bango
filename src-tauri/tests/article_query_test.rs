@@ -49,6 +49,8 @@ fn test_sort_direction_lowercase_asc() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -81,6 +83,8 @@ fn test_sort_direction_uppercase_asc() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -113,6 +117,8 @@ fn test_sort_direction_desc() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -145,6 +151,8 @@ fn test_sort_direction_mixed_case() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -179,6 +187,8 @@ fn test_sort_title_case_insensitive() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -219,6 +229,8 @@ fn test_sort_publication_year_numeric() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -260,6 +272,8 @@ fn test_pagination_page_1_of_sorted_results() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: Some(2),
         offset: Some(0),
     };
@@ -298,6 +312,8 @@ fn test_pagination_page_2_of_sorted_results() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: Some(2),
         offset: Some(2), // page 2
     };
@@ -336,6 +352,8 @@ fn test_pagination_page_3_of_sorted_results() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: Some(2),
         offset: Some(4), // page 3
     };
@@ -381,6 +399,8 @@ fn test_all_view_includes_merged_duplicates() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -424,6 +444,8 @@ fn test_working_view_excludes_merged_duplicates() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -464,6 +486,8 @@ fn test_duplicate_view_shows_all_duplicates() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -497,6 +521,8 @@ fn test_default_sort_direction_is_desc() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -533,6 +559,8 @@ fn test_sort_by_sequence_id_asc() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -566,6 +594,8 @@ fn test_sort_by_sequence_id_desc() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -604,6 +634,8 @@ fn test_all_view_search_filters_by_title() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -633,6 +665,8 @@ fn test_all_view_search_no_results() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -662,6 +696,8 @@ fn test_all_view_search_case_insensitive() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -700,6 +736,8 @@ fn test_all_view_search_matches_abstract() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -737,6 +775,8 @@ fn test_all_view_search_with_pagination() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: Some(2),
         offset: Some(0),
     };
@@ -761,6 +801,8 @@ fn test_all_view_search_with_pagination() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: Some(2),
         offset: Some(2),
     };
@@ -792,6 +834,8 @@ fn test_all_view_year_filter() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -834,6 +878,8 @@ fn test_search_matches_user_notes() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -864,6 +910,8 @@ fn test_search_user_notes_null_no_crash() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -899,6 +947,8 @@ fn test_duplicate_view_search_filters_results() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -958,6 +1008,8 @@ fn test_excluded_tag_filters_out_tagged_articles() {
         labels: vec![],
         excluded_tags: vec!["ml".into()],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -992,6 +1044,8 @@ fn test_excluded_label_filters_out_labeled_articles() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec!["priority-read".into()],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -1027,6 +1081,8 @@ fn test_excluded_tag_case_insensitive() {
         labels: vec![],
         excluded_tags: vec!["machinelearning".into()],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -1072,6 +1128,8 @@ fn test_inclusion_and_exclusion_combine() {
         labels: vec![],
         excluded_tags: vec!["drop".into()],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -1103,6 +1161,8 @@ fn test_empty_excluded_arrays_match_all() {
         labels: vec![],
         excluded_tags: vec![],
         excluded_labels: vec![],
+        doi: None,
+        doi_empty: false,
         limit: None,
         offset: None,
     };
@@ -1189,4 +1249,199 @@ fn batch_fetch_offset_zero_is_equivalent_to_no_offset() {
         article_repo::get_next_unscreened_working_batch(&conn, 10, Some(0)).expect("fetch");
     assert_eq!(batch_none.len(), batch_zero.len());
     assert_eq!(batch_none.len(), 2);
+}
+
+// ─── DOI filters (partial match + empty-DOI) ──────────────────────────
+//
+// The Article list filter panel exposes a free-text DOI input plus an
+// "Only no DOI" checkbox. The text input emits a case-insensitive substring
+// match (`LOWER(doi) LIKE '%...%'`); the checkbox emits
+// `doi IS NULL OR doi = ''`. The two are mutually exclusive at the UI layer
+// (the checkbox disables the input), and the backend `doi_empty` branch wins
+// if both are somehow set so contradictory SQL is never emitted.
+
+/// Helper: insert an article, move to working, with a given DOI (or None).
+fn seed_article_with_doi(conn: &rusqlite::Connection, title: &str, doi: Option<&str>) {
+    let mut article = new_article(title, Some(2020));
+    article.doi = doi.map(|d| d.to_string());
+    let inserted = article_repo::insert_article(conn, &article).expect("insert failed");
+    article_repo::move_to_working(conn, &inserted.id).expect("move failed");
+}
+
+#[test]
+fn test_doi_partial_match_finds_substring() {
+    let conn = setup_db();
+    seed_article_with_doi(&conn, "Elsevier One", Some("10.1016/j.iref.2025.104618"));
+    seed_article_with_doi(&conn, "Springer", Some("10.1007/s10479-022-04868-0"));
+    seed_article_with_doi(&conn, "No DOI", None);
+
+    // "10.1016" matches only the Elsevier article.
+    let query = ArticleQuery {
+        status: Some("working".into()),
+        search: None,
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        excluded_tags: vec![],
+        excluded_labels: vec![],
+        doi: Some("10.1016".into()),
+        doi_empty: false,
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, vec!["Elsevier One"]);
+}
+
+#[test]
+fn test_doi_empty_only_returns_articles_without_doi() {
+    let conn = setup_db();
+    seed_article_with_doi(&conn, "Has DOI", Some("10.1007/s10479-022-04868-0"));
+    seed_article_with_doi(&conn, "No DOI", None);
+    seed_article_with_doi(&conn, "Empty String DOI", Some(""));
+
+    let query = ArticleQuery {
+        status: Some("working".into()),
+        search: None,
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        excluded_tags: vec![],
+        excluded_labels: vec![],
+        doi: None,
+        doi_empty: true,
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
+    // Both the NULL-DOI and the empty-string-DOI article pass.
+    assert_eq!(titles, vec!["Empty String DOI", "No DOI"]);
+}
+
+#[test]
+fn test_doi_empty_wins_over_text_when_both_set() {
+    // Defense-in-depth: if the UI ever sends both `doi` (text) and
+    // `doi_empty = true`, the empty-DOI branch wins so we never emit the
+    // contradictory `doi LIKE '%x%' AND doi IS NULL` (which returns zero rows).
+    let conn = setup_db();
+    seed_article_with_doi(&conn, "Has DOI", Some("10.1007/s10479-022-04868-0"));
+    seed_article_with_doi(&conn, "No DOI", None);
+
+    let query = ArticleQuery {
+        status: Some("working".into()),
+        search: None,
+        sort_by: Some("title".into()),
+        sort_dir: Some("asc".into()),
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        excluded_tags: vec![],
+        excluded_labels: vec![],
+        doi: Some("10.1007".into()), // would match "Has DOI" if respected
+        doi_empty: true,             // but this wins -> empty-DOI filter
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
+    // The empty-DOI branch won, so only "No DOI" is returned.
+    assert_eq!(titles, vec!["No DOI"]);
+}
+
+#[test]
+fn test_doi_partial_match_is_case_insensitive() {
+    let conn = setup_db();
+    seed_article_with_doi(&conn, "Upper", Some("10.1016/SCM-05-2021-0227"));
+
+    // Lowercase query must match the mixed-case DOI.
+    let query = ArticleQuery {
+        status: Some("working".into()),
+        search: None,
+        sort_by: None,
+        sort_dir: None,
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        excluded_tags: vec![],
+        excluded_labels: vec![],
+        doi: Some("scm-05".into()),
+        doi_empty: false,
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].title, "Upper");
+}
+
+#[test]
+fn test_doi_filter_combines_with_status_filter() {
+    // DOI filter should compose with the status base filter (e.g. an article
+    // with a matching DOI that is in `duplicate` status must NOT appear in the
+    // `working` view even when its DOI matches the substring).
+    let conn = setup_db();
+    let working = seed_article_with_doi(&conn, "Working", Some("10.1016/j.iref.2025.104618"));
+    let _ = working; // already moved to working by the helper
+
+    // A second article with the same DOI prefix but left in `duplicate` status.
+    let mut dup_article = new_article("Dup Status", Some(2020));
+    dup_article.doi = Some("10.1016/j.techfore.2024.123574".into());
+    let _ = article_repo::insert_article(&conn, &dup_article).expect("insert failed");
+    // Status stays 'duplicate' (the default insert status).
+
+    let query = ArticleQuery {
+        status: Some("working".into()),
+        search: None,
+        sort_by: None,
+        sort_dir: None,
+        year_from: None,
+        year_to: None,
+        manual_override_only: false,
+        screening_errors_only: false,
+        author: None,
+        journal: None,
+        tags: vec![],
+        labels: vec![],
+        excluded_tags: vec![],
+        excluded_labels: vec![],
+        doi: Some("10.1016".into()),
+        doi_empty: false,
+        limit: None,
+        offset: None,
+    };
+
+    let results = article_repo::query_articles(&conn, &query).expect("query failed");
+    let titles: Vec<&str> = results.iter().map(|a| a.title.as_str()).collect();
+    // Only the working article with the matching DOI prefix is returned.
+    assert_eq!(titles, vec!["Working"]);
 }

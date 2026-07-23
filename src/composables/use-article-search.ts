@@ -17,6 +17,14 @@ export interface ArticleFilter {
   yearFrom: number | null;
   yearTo: number | null;
   journal: string;
+  /**
+   * Case-insensitive partial-match DOI text. Empty string filters nothing.
+   * Mutually exclusive with `doiEmpty`: when `doiEmpty` is true the backend
+   * ignores this text and matches only empty/NULL DOIs.
+   */
+  doiText: string;
+  /** When true, restrict to articles with no DOI (`doi IS NULL OR doi = ''`). */
+  doiEmpty: boolean;
   tags: string[];
   labels: string[];
   /**
@@ -40,6 +48,13 @@ interface ArticleQuery {
   screeningErrorsOnly: boolean;
   author: string | null;
   journal: string | null;
+  /**
+   * Partial-match DOI text sent to the backend (`doi` field). Null/empty
+   * filters nothing. Mutually exclusive with `doiEmpty` at the UI layer.
+   */
+  doi: string | null;
+  /** When true, restrict to articles with no DOI. */
+  doiEmpty: boolean;
   tags: string[];
   labels: string[];
   excludedTags: string[];
@@ -109,6 +124,8 @@ export function useArticleSearch() {
     yearFrom: null,
     yearTo: null,
     journal: '',
+    doiText: '',
+    doiEmpty: false,
     tags: [],
     labels: [],
     excludedTags: [],
@@ -128,6 +145,8 @@ export function useArticleSearch() {
     screeningErrorsOnly: false,
     author: null,
     journal: null,
+    doi: null,
+    doiEmpty: false,
     tags: [],
     labels: [],
     excludedTags: [],
@@ -194,6 +213,8 @@ export function useArticleSearch() {
       query.search ||
       query.author ||
       query.journal ||
+      query.doi ||
+      query.doiEmpty ||
       query.tags.length > 0 ||
       query.labels.length > 0 ||
       query.excludedTags.length > 0 ||
@@ -279,6 +300,10 @@ export function useArticleSearch() {
     query.yearTo = filter.yearTo;
     query.author = filter.authorText || null;
     query.journal = filter.journal || null;
+    // DOI filter: when `doiEmpty` is checked the text is ignored (the backend
+    // `doi_empty` branch wins over `doi` to avoid contradictory SQL).
+    query.doiEmpty = filter.doiEmpty;
+    query.doi = filter.doiEmpty ? null : filter.doiText.trim() || null;
     query.tags = [...filter.tags];
     query.labels = [...filter.labels];
     query.excludedTags = [...filter.excludedTags];
@@ -294,6 +319,8 @@ export function useArticleSearch() {
     filter.yearFrom = null;
     filter.yearTo = null;
     filter.journal = '';
+    filter.doiText = '';
+    filter.doiEmpty = false;
     filter.tags = [];
     filter.labels = [];
     filter.excludedTags = [];
@@ -303,6 +330,8 @@ export function useArticleSearch() {
     query.yearTo = null;
     query.author = null;
     query.journal = null;
+    query.doi = null;
+    query.doiEmpty = false;
     query.tags = [];
     query.labels = [];
     query.excludedTags = [];

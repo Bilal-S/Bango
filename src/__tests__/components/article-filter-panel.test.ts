@@ -38,6 +38,8 @@ function makeFilter(overrides: Partial<ArticleFilter> = {}): ArticleFilter {
     yearFrom: null,
     yearTo: null,
     journal: '',
+    doiText: '',
+    doiEmpty: false,
     tags: [],
     labels: [],
     excludedTags: [],

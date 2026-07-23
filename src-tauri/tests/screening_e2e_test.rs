@@ -257,7 +257,14 @@ async fn test_cancel_mid_run() {
 
     let cancel_engine = engine_clone.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // The cancel must fire AFTER the first batch's LLM call completes
+        // (100ms latency + 10ms inter-batch delay = ~110ms) but BEFORE the
+        // second batch completes (~210ms). 150ms lands safely inside the
+        // second batch's LLM call so the first batch is recorded as completed
+        // and the cancel drops the in-flight second-batch response (v8.3
+        // cancel-during-LLM-call contract). A 50ms delay would race the
+        // first batch's 100ms LLM call and flake.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         cancel_engine.cancel().await;
     });
 
@@ -288,7 +295,10 @@ async fn test_resume_after_cancel() {
         let engine_arc = Arc::new(engine);
         let cancel_engine = engine_arc.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // See `test_cancel_mid_run`: 150ms lands inside the second
+            // batch's LLM call so the first batch completes (>= 2) and the
+            // cancel drops the in-flight second-batch response (< 6).
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             cancel_engine.cancel().await;
         });
 

@@ -687,14 +687,23 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     ...)` clauses (article must NOT have the tag/label) so the Article list filter panel can
     toggle a pill between inclusion and NOT-exclusion. All four are `#[serde(default)]` so
     old callers omitting them still deserialize. An empty exclusion vector filters nothing.
-    Comparison is `LOWER()`-based (case-insensitive) for both directions. Tested in
-    `tests/article_query_test.rs` (5 NOT-filter tests: excluded tag, excluded label,
-    case-insensitive exclusion, inclusion+exclusion combine, empty-exclusion no-op).
+    Comparison is `LOWER()`-based (case-insensitive) for both directions. It also carries
+    two DOI filter fields: `doi: Option<String>` (case-insensitive partial match, emits
+    `LOWER(doi) LIKE '%...%'`; empty/None filters nothing) and `doi_empty: bool` (when true,
+    emits `doi IS NULL OR doi = ''` for the "find articles missing a DOI" data-cleanup
+    workflow). The two are mutually exclusive: `doi_empty` wins if both are set, avoiding
+    contradictory SQL (`doi LIKE '%x%' AND doi IS NULL` would return zero rows). Both are
+    `#[serde(default)]`. Tested in `tests/article_query_test.rs` (5 NOT-filter tests:
+    excluded tag, excluded label, case-insensitive exclusion, inclusion+exclusion combine,
+    empty-exclusion no-op; + 5 DOI tests: partial match, empty-only, empty-wins-over-text,
+    case-insensitive partial, combines-with-status).
     Frontend mirror: `ArticleFilter`/`ArticleQuery` in
-    `src/composables/use-article-search.ts` carry `excludedTags`/`excludedLabels`;
+    `src/composables/use-article-search.ts` carry `excludedTags`/`excludedLabels` +
+    `doiText`/`doiEmpty`;
     `src/components/article-filter-panel.vue` renders excluded pills with a bold `NOT:`
     prefix + strike-through on the name, toggled by clicking the pill body (the `x` button
-    removes entirely via `removeExcludedTag`/`removeExcludedLabel`).
+    removes entirely via `removeExcludedTag`/`removeExcludedLabel`), and a DOI text input
+    paired with an "Only no DOI" checkbox that disables the input when checked.
   - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.

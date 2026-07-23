@@ -620,6 +620,19 @@ pub struct ArticleQuery {
     /// `labels` but emits a `NOT IN` clause.
     #[serde(default)]
     pub excluded_labels: Vec<String>,
+    /// Case-insensitive partial-match filter on `articles.doi` (emits
+    /// `LOWER(doi) LIKE '%...%'`). Empty string/None filters nothing. The
+    /// Article list filter panel exposes a free-text input for this.
+    #[serde(default)]
+    pub doi: Option<String>,
+    /// When true, restrict to articles with no DOI (`doi IS NULL OR doi = ''`).
+    /// Mutually exclusive with `doi`: the UI disables the text input when this
+    /// is checked, and this branch wins if both are somehow set (the empty-DOI
+    /// filter is the more specific intent and we avoid emitting contradictory
+    /// SQL). Powers the "Only no DOI" checkbox in the filter panel for the
+    /// data-enrichment workflow of finding articles missing DOIs.
+    #[serde(default)]
+    pub doi_empty: bool,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -680,6 +693,21 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
         sql.push_str(&format!(" AND LOWER(journal) LIKE ?{idx}"));
         let pattern = format!("%{}%", journal.to_lowercase());
         param_values.push(Box::new(pattern));
+    }
+
+    // DOI filter. Two mutually exclusive modes; the empty-DOI branch wins if
+    // both are somehow set so we never emit contradictory SQL
+    // (`doi LIKE '%x%' AND doi IS NULL` would return zero rows).
+    if query.doi_empty {
+        sql.push_str(" AND (doi IS NULL OR doi = '')");
+    } else if let Some(ref doi) = query.doi {
+        let trimmed = doi.trim();
+        if !trimmed.is_empty() {
+            let idx = param_values.len() + 1;
+            sql.push_str(&format!(" AND LOWER(doi) LIKE ?{idx}"));
+            let pattern = format!("%{}%", trimmed.to_lowercase());
+            param_values.push(Box::new(pattern));
+        }
     }
 
     for tag in &query.tags {

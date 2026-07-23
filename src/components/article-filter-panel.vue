@@ -306,6 +306,39 @@ const matchedAuthors = computed(() => {
         />
       </div>
 
+      <!-- DOI -->
+      <div class="min-w-0">
+        <label class="block text-label-caps text-slate-500 uppercase mb-2">DOI</label>
+        <div class="flex items-center gap-2 min-w-0">
+          <input
+            type="text"
+            placeholder="Filter by DOI..."
+            class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+            :value="filter.doiText"
+            :disabled="filter.doiEmpty"
+            :title="filter.doiEmpty ? 'Clear the Only-no-DOI checkbox to search by DOI text' : ''"
+            @input="updateField('doiText', ($event.target as HTMLInputElement).value)"
+          />
+          <label
+            class="flex items-center gap-1.5 shrink-0 text-xs text-slate-600 cursor-pointer select-none whitespace-nowrap"
+            title="Show only articles with no DOI (useful for data cleanup before export)"
+          >
+            <input
+              type="checkbox"
+              class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+              :checked="filter.doiEmpty"
+              @change="updateField('doiEmpty', ($event.target as HTMLInputElement).checked)"
+            />
+            Only no DOI
+          </label>
+        </div>
+      </div>
+    </div>
+    <!-- /3-column metadata grid (Title · Author · Year · Journal · DOI) -->
+
+    <!-- Tags + Labels: dedicated 2-column grid so they always sit side-by-side
+         on the same level, regardless of how the other 5 fields wrap above. -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
       <!-- Tags -->
       <div>
         <div class="flex items-baseline justify-between mb-2">
@@ -446,6 +479,7 @@ const matchedAuthors = computed(() => {
         <span v-else class="text-[11px] text-slate-400 italic">No labels available</span>
       </div>
     </div>
+    <!-- /Tags + Labels 2-column grid -->
 
     <!-- Apply button -->
     <div class="flex justify-end mt-4 pt-4 border-t border-slate-100">
