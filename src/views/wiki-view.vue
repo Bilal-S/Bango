@@ -5,6 +5,7 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 import { useWiki } from '@/composables/use-wiki';
 import { useNavHistory } from '@/composables/use-nav-history';
 import { isMacPlatform } from '@/utils/platform';
+import { classifyWikiNavigationKey } from '@/utils/wiki-keyboard-navigation';
 import { debounce } from '@/utils/debounce';
 import type { WikiPageSummary } from '@/types/wiki';
 import WikiToolbar from '@/components/wiki/wiki-toolbar.vue';
@@ -116,9 +117,13 @@ const navHistory = useNavHistory<string>();
 const selectedSlug = navHistory.current;
 const canGoBack = navHistory.canGoBack;
 const canGoForward = navHistory.canGoForward;
+// Platform detection is computed once (the OS does not change at runtime).
+// `isMac` is passed to `classifyWikiNavigationKey` so the pure helper stays
+// free of `navigator` reads and is trivially unit-testable.
+const isMac = isMacPlatform();
 // Platform-specific shortcut labels shown in the button tooltips.
-const backShortcutLabel = isMacPlatform() ? 'Cmd+[' : 'Alt+Left';
-const forwardShortcutLabel = isMacPlatform() ? 'Cmd+]' : 'Alt+Right';
+const backShortcutLabel = isMac ? 'Cmd+[' : 'Alt+Left';
+const forwardShortcutLabel = isMac ? 'Cmd+]' : 'Alt+Right';
 const mode = ref<'view' | 'edit'>('view');
 const searchQuery = ref('');
 const viewTab = ref<'pages' | 'graph'>('pages');
@@ -278,6 +283,12 @@ async function initializeAndBuild(): Promise<void> {
  * edit mode, on the Graph tab, or when there is no current page. Only calls
  * `preventDefault()` when the combo is actually handled so unrelated shortcuts
  * (e.g. Cmd+Left inside a text field) keep working.
+ *
+ * The platform/key/modifier decision matrix is delegated to the pure helper
+ * {@link classifyWikiNavigationKey} (in `utils/wiki-keyboard-navigation.ts`)
+ * which is exhaustively unit-tested without Vue or DOM dependencies. This
+ * handler owns only the component-state guards + the `preventDefault` +
+ * nav-history invocation.
  */
 function onKeyDown(e: KeyboardEvent): void {
   const t = e.target as HTMLElement | null;
@@ -286,18 +297,11 @@ function onKeyDown(e: KeyboardEvent): void {
   }
   if (viewTab.value !== 'pages' || mode.value === 'edit' || !selectedSlug.value) return;
 
-  const mac = isMacPlatform();
-  const isBack =
-    (mac && e.metaKey && (e.key === '[' || e.key === 'ArrowLeft')) ||
-    (!mac && e.altKey && e.key === 'ArrowLeft');
-  const isForward =
-    (mac && e.metaKey && (e.key === ']' || e.key === 'ArrowRight')) ||
-    (!mac && e.altKey && e.key === 'ArrowRight');
-
-  if (isBack && canGoBack.value) {
+  const direction = classifyWikiNavigationKey(e, isMac);
+  if (direction === 'back' && canGoBack.value) {
     e.preventDefault();
     navHistory.goBack();
-  } else if (isForward && canGoForward.value) {
+  } else if (direction === 'forward' && canGoForward.value) {
     e.preventDefault();
     navHistory.goForward();
   }

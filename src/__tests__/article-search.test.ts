@@ -1188,6 +1188,166 @@ describe('useArticleSearch', () => {
       expect(activeStatusTab.value).toBe('working');
     });
 
+    // ── Characterization tests for branches extracted into helpers ──
+    // These pin the behavior of each helper before the refactor so the
+    // extraction is provably behavior-identical.
+
+    it('maps status "error" to working + screeningErrorsOnly', async () => {
+      mockSearchResults();
+      const { applyRouteParams, activeStatusTab } = useArticleSearch();
+      await applyRouteParams({ status: 'error' });
+      expect(activeStatusTab.value).toBe('error');
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ status: 'working', screeningErrorsOnly: true }),
+        })
+      );
+    });
+
+    it('maps status "all" to null query.status', async () => {
+      mockSearchResults();
+      const { applyRouteParams, activeStatusTab } = useArticleSearch();
+      await applyRouteParams({ status: 'all' });
+      expect(activeStatusTab.value).toBe('all');
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ status: null, screeningErrorsOnly: false }),
+        })
+      );
+    });
+
+    it('clears screeningErrorsOnly when a non-error status is applied', async () => {
+      mockSearchResults();
+      const s = useArticleSearch();
+      // First land on the error tab.
+      await s.applyRouteParams({ status: 'error' });
+      // Then navigate to a normal tab.
+      await s.applyRouteParams({ status: 'included' });
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ status: 'included', screeningErrorsOnly: false }),
+        })
+      );
+    });
+
+    it('syncs yearFrom and yearTo to both filter and query and opens the panel', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ yearFrom: 2018, yearTo: 2023 });
+      expect(filter.yearFrom).toBe(2018);
+      expect(filter.yearTo).toBe(2023);
+      expect(showFilters.value).toBe(true);
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ yearFrom: 2018, yearTo: 2023 }),
+        })
+      );
+    });
+
+    it('syncs journal to both filter and query and opens the panel', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ journal: 'Nature' });
+      expect(filter.journal).toBe('Nature');
+      expect(showFilters.value).toBe(true);
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ journal: 'Nature' }),
+        })
+      );
+    });
+
+    it('syncs author to both filter.authorText and query.author and opens the panel', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ author: 'Alice' });
+      expect(filter.authorText).toBe('Alice');
+      expect(showFilters.value).toBe(true);
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ author: 'Alice' }),
+        })
+      );
+    });
+
+    it('filters out unknown tag IDs during resolution', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter } = useArticleSearch();
+      // t1 resolves; t999 does not exist in the mock store.
+      await applyRouteParams({ tags: ['t1', 't999'] });
+      expect(filter.tags).toEqual(['machine-learning']);
+    });
+
+    it('filters out unknown label IDs during resolution', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter } = useArticleSearch();
+      await applyRouteParams({ labels: ['l1', 'l999'] });
+      expect(filter.labels).toEqual(['priority-read']);
+    });
+
+    it('ignores empty tags and labels arrays (length-0 guard)', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ tags: [], labels: [] });
+      expect(filter.tags).toEqual([]);
+      expect(filter.labels).toEqual([]);
+      // No tags/labels/year/journal/author → panel stays closed.
+      expect(showFilters.value).toBe(false);
+    });
+
+    it('keeps showFilters false when filterCollapsed is true, even with tags', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ tags: ['t1'], filterCollapsed: true });
+      expect(filter.tags).toEqual(['machine-learning']);
+      expect(showFilters.value).toBe(false);
+    });
+
+    it('keeps showFilters false when filterCollapsed is true, even with labels', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ labels: ['l1'], filterCollapsed: true });
+      expect(filter.labels).toEqual(['priority-read']);
+      expect(showFilters.value).toBe(false);
+    });
+
+    it('keeps showFilters false when filterCollapsed is true, even with yearFrom', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ yearFrom: 2020, filterCollapsed: true });
+      expect(filter.yearFrom).toBe(2020);
+      expect(showFilters.value).toBe(false);
+    });
+
+    it('keeps showFilters false when filterCollapsed is true, even with journal', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ journal: 'Science', filterCollapsed: true });
+      expect(filter.journal).toBe('Science');
+      expect(showFilters.value).toBe(false);
+    });
+
+    it('keeps showFilters false when filterCollapsed is true, even with author', async () => {
+      mockSearchResults();
+      const { applyRouteParams, filter, showFilters } = useArticleSearch();
+      await applyRouteParams({ author: 'Bob', filterCollapsed: true });
+      expect(filter.authorText).toBe('Bob');
+      expect(showFilters.value).toBe(false);
+    });
+
+    it('runs search() even when no params are provided', async () => {
+      mockSearchResults();
+      const { applyRouteParams } = useArticleSearch();
+      await applyRouteParams({});
+      expect(tauriCommand).toHaveBeenCalledWith('query_articles', expect.any(Object));
+    });
+
     // ── resetFilters (decision D5) ──────────────────────────────────
     // The bibliometric deep-link envelope sets `resetFilters: '1'` so the
     // keep-alive-cached ArticleList clears any preserved filter/query state

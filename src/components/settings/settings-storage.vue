@@ -88,7 +88,7 @@ loadStorageInfo();
         </div>
         <div class="storage-tree__line">
           <span class="material-symbols-outlined storage-tree__icon">article</span>
-          <span class="storage-tree__label"><code>ris/</code> Citation Chaser output</span>
+          <span class="storage-tree__label"><code>ris/</code> Citations Files</span>
         </div>
         <div class="storage-tree__line">
           <span class="material-symbols-outlined storage-tree__icon">menu_book</span>

@@ -1,4 +1,4 @@
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, type Ref } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 import { useArticlePagination } from './use-article-pagination';
 import { useArticleSelection } from './use-article-selection';
@@ -77,6 +77,196 @@ const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references' | 's
 ] as const;
 
 type StatusTab = (typeof STATUS_TABS)[number];
+
+/**
+ * Route params accepted by {@link applyRouteParams}. Extracted as an
+ * interface so the helper functions below can reference a shared shape
+ * without re-declaring it inline.
+ */
+interface RouteParams {
+  status?: string;
+  tags?: string[];
+  labels?: string[];
+  yearFrom?: number;
+  yearTo?: number;
+  journal?: string;
+  author?: string;
+  /** When true, keep the filter panel collapsed even though filters are applied. */
+  filterCollapsed?: boolean;
+  /**
+   * When true, clear all existing `filter.*` + `query.*` filter fields to
+   * defaults before applying the incoming params (decision D5). Used by the
+   * bibliometric deep-links (`buildBiblioArticleQuery` envelope) so the
+   * cached ArticleList does not overlay stale filters on the fresh
+   * deep-link. Default `false` preserves the overlay behavior for existing
+   * callers (dashboard, tag/label deep-links, status deep-links).
+   */
+  resetFilters?: boolean;
+}
+
+/** Minimal structural shape the tag/label helpers need from a Pinia store. */
+interface IdNameResolver {
+  id: string;
+  name: string;
+}
+
+/**
+ * D5 reset block: clear all `filter.*` + `query.*` filter fields to their
+ * defaults, plus the toolbar `searchText`, then reset pagination. Runs
+ * BEFORE the param-application helpers so incoming params overwrite the
+ * freshly-cleared defaults. Mirrors the field list in `clearFilters`
+ * (minus the `search()` call, which `applyRouteParams` performs at the end).
+ *
+ * @param filter   - reactive display filter state
+ * @param query    - reactive search query state
+ * @param searchText - toolbar search ref (cleared so a stale search does not survive)
+ * @param resetPage - pagination reset callback
+ */
+function resetFilterState(
+  filter: ArticleFilter,
+  query: ArticleQuery,
+  searchText: Ref<string>,
+  resetPage: () => void
+): void {
+  filter.titleText = '';
+  filter.authorText = '';
+  filter.yearFrom = null;
+  filter.yearTo = null;
+  filter.journal = '';
+  filter.doiText = '';
+  filter.doiEmpty = false;
+  filter.tags = [];
+  filter.labels = [];
+  filter.excludedTags = [];
+  filter.excludedLabels = [];
+  query.search = null;
+  query.yearFrom = null;
+  query.yearTo = null;
+  query.author = null;
+  query.journal = null;
+  query.doi = null;
+  query.doiEmpty = false;
+  query.tags = [];
+  query.labels = [];
+  query.excludedTags = [];
+  query.excludedLabels = [];
+  searchText.value = '';
+  resetPage();
+}
+
+/**
+ * Apply the `status` route param: resolve the active tab and set
+ * `query.status` + `screeningErrorsOnly` accordingly. The `"error"` tab is
+ * special-cased to `status='working'` + `screeningErrorsOnly=true`; `"all"`
+ * maps to `null`; any other named status maps to itself.
+ *
+ * No-op when `status` is not a recognized {@link StatusTab} value.
+ *
+ * @param status          - the raw status param string
+ * @param activeStatusTab - ref to the active tab (mutated)
+ * @param query           - reactive search query (mutated)
+ */
+function applyStatusParam(
+  status: string,
+  activeStatusTab: Ref<StatusTab>,
+  query: ArticleQuery
+): void {
+  if (!STATUS_TABS.includes(status as StatusTab)) return;
+  activeStatusTab.value = status as StatusTab;
+  if (status === 'error') {
+    query.status = 'working';
+    query.screeningErrorsOnly = true;
+  } else {
+    query.status = status === 'all' ? null : status;
+    query.screeningErrorsOnly = false;
+  }
+}
+
+/**
+ * Apply the `tags` + `labels` route params. Each ID is resolved to its
+ * display name via the corresponding store; unresolved IDs are filtered
+ * out. Both the display `filter` and the search `query` are synced with
+ * the resolved names. When `showPanel` is true, `showFilters` is set to
+ * `true` so the filter panel expands to reveal the active filters.
+ *
+ * No-op when the tags/labels arrays are empty or absent.
+ *
+ * @param params       - route params (only `tags` + `labels` are read)
+ * @param filter       - reactive display filter state (mutated)
+ * @param query        - reactive search query state (mutated)
+ * @param tagsStore    - provides `tags: IdNameResolver[]` for ID to name resolution
+ * @param labelsStore  - provides `labels: IdNameResolver[]` for ID to name resolution
+ * @param showPanel    - when false, do not expand the filter panel
+ * @param showFilters  - ref controlling filter-panel visibility (mutated)
+ */
+function applyTagLabelParams(
+  params: Pick<RouteParams, 'tags' | 'labels'>,
+  filter: ArticleFilter,
+  query: ArticleQuery,
+  tagsStore: { tags: IdNameResolver[] },
+  labelsStore: { labels: IdNameResolver[] },
+  showPanel: boolean,
+  showFilters: Ref<boolean>
+): void {
+  if (params.tags && params.tags.length > 0) {
+    const tagNames = params.tags
+      .map((id) => tagsStore.tags.find((t) => t.id === id)?.name)
+      .filter((n): n is string => !!n);
+    filter.tags = tagNames;
+    query.tags = tagNames;
+    if (showPanel) showFilters.value = true;
+  }
+  if (params.labels && params.labels.length > 0) {
+    const labelNames = params.labels
+      .map((id) => labelsStore.labels.find((l) => l.id === id)?.name)
+      .filter((n): n is string => !!n);
+    filter.labels = labelNames;
+    query.labels = labelNames;
+    if (showPanel) showFilters.value = true;
+  }
+}
+
+/**
+ * Apply the `yearFrom`, `yearTo`, `journal`, and `author` route params.
+ * Each is synced to both the display `filter` and the search `query`.
+ * When `showPanel` is true, `showFilters` is set to `true` so the panel
+ * expands. Year params use a `Number.isFinite` guard; journal/author use
+ * truthiness (empty string is a no-op).
+ *
+ * @param params      - route params (yearFrom/yearTo/journal/author read)
+ * @param filter      - reactive display filter state (mutated)
+ * @param query       - reactive search query state (mutated)
+ * @param showPanel   - when false, do not expand the filter panel
+ * @param showFilters - ref controlling filter-panel visibility (mutated)
+ */
+function applyNumericAndTextParams(
+  params: Pick<RouteParams, 'yearFrom' | 'yearTo' | 'journal' | 'author'>,
+  filter: ArticleFilter,
+  query: ArticleQuery,
+  showPanel: boolean,
+  showFilters: Ref<boolean>
+): void {
+  if (params.yearFrom !== undefined && Number.isFinite(params.yearFrom)) {
+    filter.yearFrom = params.yearFrom;
+    query.yearFrom = params.yearFrom;
+    if (showPanel) showFilters.value = true;
+  }
+  if (params.yearTo !== undefined && Number.isFinite(params.yearTo)) {
+    filter.yearTo = params.yearTo;
+    query.yearTo = params.yearTo;
+    if (showPanel) showFilters.value = true;
+  }
+  if (params.journal) {
+    filter.journal = params.journal;
+    query.journal = params.journal;
+    if (showPanel) showFilters.value = true;
+  }
+  if (params.author) {
+    filter.authorText = params.author;
+    query.author = params.author;
+    if (showPanel) showFilters.value = true;
+  }
+}
 
 export function useArticleSearch() {
   const articlesStore = useArticlesStore();
@@ -617,119 +807,34 @@ export function useArticleSearch() {
    * are applied. This prevents the keep-alive-cached ArticleList from
    * overlaying stale filters on top of a fresh bibliometric deep-link (e.g.
    * landing on `author="Bob" AND yearFrom=2020` when the user clicked the
-   * Co-Authorship Papers box while a year filter was still active). The biblio
-   * metric summarized the included corpus with no extra filters, so the list
-   * must reflect exactly the deep-link's filter. Sort (`sortBy`/`sortDir`) and
-   * page-size are intentionally preserved (display preferences, not filters).
-   * Status is reset by the incoming `status` param itself.
+   * Co-Authorship Papers box while a year filter was still active). The
+   * bibliometric summarized the included corpus with no extra filters, so the
+   * list must reflect exactly the deep-link's filter. Sort (`sortBy`/`sortDir`)
+   * and page-size are intentionally preserved (display preferences, not
+   * filters). Status is reset by the incoming `status` param itself.
+   *
+   * Behavior is composed from module-private helpers (`resetFilterState`,
+   * `applyStatusParam`, `applyTagLabelParams`, `applyNumericAndTextParams`)
+   * to keep this orchestrator thin; see their JSDoc for per-field contracts.
    */
-  async function applyRouteParams(params: {
-    status?: string;
-    tags?: string[];
-    labels?: string[];
-    yearFrom?: number;
-    yearTo?: number;
-    journal?: string;
-    author?: string;
-    /** When true, keep the filter panel collapsed even though filters are applied. */
-    filterCollapsed?: boolean;
-    /**
-     * When true, clear all existing `filter.*` + `query.*` filter fields to
-     * defaults before applying the incoming params (decision D5). Used by the
-     * bibliometric deep-links (`buildBiblioArticleQuery` envelope) so the
-     * cached ArticleList does not overlay stale filters on the fresh
-     * deep-link. Default `false` preserves the overlay behavior for existing
-     * callers (dashboard, tag/label deep-links, status deep-links).
-     */
-    resetFilters?: boolean;
-  }): Promise<void> {
-    // Compute the filter-panel visibility flag once so every branch (tags,
-    // labels, year, journal, author) honors `filterCollapsed` consistently.
-    // When `filterCollapsed` is true (e.g. navigating from the Tags & Labels
-    // screen or Bibliometrics deep-links), the panel stays collapsed even
-    // though filters are applied.
+  async function applyRouteParams(params: RouteParams): Promise<void> {
+    // Compute the filter-panel visibility flag once so every helper honors
+    // `filterCollapsed` consistently. When `filterCollapsed` is true (e.g.
+    // navigating from the Tags & Labels screen or Bibliometrics deep-links),
+    // the panel stays collapsed even though filters are applied.
     const showPanel = !params.filterCollapsed;
 
     // D5: optional reset-before-apply. Runs BEFORE the param-application
-    // block so the incoming params overwrite the freshly-cleared defaults.
-    // Mirrors the field list in `clearFilters` (minus the search() call,
-    // which `applyRouteParams` performs at the end) plus the toolbar
-    // `searchText` (so a stale toolbar search does not survive the reset).
+    // helpers so the incoming params overwrite the freshly-cleared defaults.
     if (params.resetFilters) {
-      filter.titleText = '';
-      filter.authorText = '';
-      filter.yearFrom = null;
-      filter.yearTo = null;
-      filter.journal = '';
-      filter.doiText = '';
-      filter.doiEmpty = false;
-      filter.tags = [];
-      filter.labels = [];
-      filter.excludedTags = [];
-      filter.excludedLabels = [];
-      query.search = null;
-      query.yearFrom = null;
-      query.yearTo = null;
-      query.author = null;
-      query.journal = null;
-      query.doi = null;
-      query.doiEmpty = false;
-      query.tags = [];
-      query.labels = [];
-      query.excludedTags = [];
-      query.excludedLabels = [];
-      searchText.value = '';
-      resetPage();
+      resetFilterState(filter, query, searchText, resetPage);
     }
 
-    if (params.status && STATUS_TABS.includes(params.status as StatusTab)) {
-      activeStatusTab.value = params.status as StatusTab;
-      if (params.status === 'error') {
-        query.status = 'working';
-        query.screeningErrorsOnly = true;
-      } else {
-        query.status = params.status === 'all' ? null : params.status;
-        query.screeningErrorsOnly = false;
-      }
+    if (params.status) {
+      applyStatusParam(params.status, activeStatusTab, query);
     }
-    if (params.tags && params.tags.length > 0) {
-      // Resolve tag IDs to names for both display and query
-      const tagNames = params.tags
-        .map((id) => tagsStore.tags.find((t) => t.id === id)?.name)
-        .filter((n): n is string => !!n);
-      filter.tags = tagNames;
-      query.tags = tagNames;
-      if (showPanel) showFilters.value = true;
-    }
-    if (params.labels && params.labels.length > 0) {
-      // Resolve label IDs to names for both display and query
-      const labelNames = params.labels
-        .map((id) => labelsStore.labels.find((l) => l.id === id)?.name)
-        .filter((n): n is string => !!n);
-      filter.labels = labelNames;
-      query.labels = labelNames;
-      if (showPanel) showFilters.value = true;
-    }
-    if (params.yearFrom !== undefined && Number.isFinite(params.yearFrom)) {
-      filter.yearFrom = params.yearFrom;
-      query.yearFrom = params.yearFrom;
-      if (showPanel) showFilters.value = true;
-    }
-    if (params.yearTo !== undefined && Number.isFinite(params.yearTo)) {
-      filter.yearTo = params.yearTo;
-      query.yearTo = params.yearTo;
-      if (showPanel) showFilters.value = true;
-    }
-    if (params.journal) {
-      filter.journal = params.journal;
-      query.journal = params.journal;
-      if (showPanel) showFilters.value = true;
-    }
-    if (params.author) {
-      filter.authorText = params.author;
-      query.author = params.author;
-      if (showPanel) showFilters.value = true;
-    }
+    applyTagLabelParams(params, filter, query, tagsStore, labelsStore, showPanel, showFilters);
+    applyNumericAndTextParams(params, filter, query, showPanel, showFilters);
     await search();
   }
 

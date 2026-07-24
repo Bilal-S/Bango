@@ -255,6 +255,80 @@ describe('flattenRawReferences', () => {
     expect(result[1]!.hasFullText).toBe(false);
     expect(result[2]!.hasFullText).toBe(false);
   });
+
+  // ── Field-level contract characterization ───────────────────────
+  // Pins EVERY output field individually so any field-level regression
+  // during a refactor of `flattenRawReferences` is caught. The fixture
+  // populates all fields with non-default values; this test asserts each
+  // one survives the flatten mapping with its value intact.
+  it('flattens every field with its original value (full contract)', () => {
+    const raw = [makeRawRef()];
+    const [ref] = flattenRawReferences(raw);
+
+    // Link-level
+    expect(ref!.id).toBe('paper-1');
+    expect(ref!.referenceType).toBe('reference');
+    expect(ref!.parentId).toBe('parent-1');
+
+    // Match info
+    expect(ref!.matchStatus).toBe('matched');
+    expect(ref!.matchedArticleId).toBeNull(); // fixture omits it
+
+    // Bibliographic core
+    expect(ref!.title).toBe('A Study of Testing Patterns');
+    expect(ref!.abstractText).toBe('Abstract about testing.');
+    expect(ref!.authors).toEqual(['Alice Smith', 'Bob Jones']);
+    expect(ref!.publicationYear).toBe(2024);
+    expect(ref!.doi).toBe('10.1234/test.2024');
+    expect(ref!.journal).toBe('Journal of Software Testing');
+    expect(ref!.volume).toBe('12');
+    expect(ref!.issue).toBe('3');
+    expect(ref!.startPage).toBe('45');
+    expect(ref!.endPage).toBe('67');
+    expect(ref!.keywords).toEqual(['testing', 'patterns']);
+    expect(ref!.url).toBe('https://example.com/paper1');
+    expect(ref!.language).toBe('en');
+    expect(ref!.publisher).toBe('TestPub');
+
+    // Metrics (renamed from citationCount/referenceCount)
+    expect(ref!.numCited).toBe(42);
+    expect(ref!.numReferences).toBe(15);
+
+    // Provenance
+    expect(ref!.hasFullText).toBe(true);
+    expect(ref!.fullTextFileName).toBe('paper1.pdf');
+    expect(ref!.importSource).toBe('ris');
+    expect(ref!.importedAt).toBe('2024-01-15T10:30:00Z');
+    expect(ref!.publicationType).toBeNull(); // fixture omits paper.referenceType
+  });
+
+  it('maps paper.referenceType to publicationType when present', () => {
+    const raw = [
+      makeRawRef({
+        paper: {
+          title: 'Typed',
+          authors: [],
+          referenceType: 'journal-article',
+        },
+      }),
+    ];
+    const [ref] = flattenRawReferences(raw);
+    expect(ref!.publicationType).toBe('journal-article');
+  });
+
+  it('preserves matchedArticleId from paper when present', () => {
+    const raw = [
+      makeRawRef({
+        paper: {
+          title: 'Linked',
+          authors: [],
+          matchedArticleId: 'art-99',
+        },
+      }),
+    ];
+    const [ref] = flattenRawReferences(raw);
+    expect(ref!.matchedArticleId).toBe('art-99');
+  });
 });
 
 // ─── useReferences composable ───────────────────────────────────
