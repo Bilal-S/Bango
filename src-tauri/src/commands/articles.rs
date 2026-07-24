@@ -273,32 +273,94 @@ pub fn bulk_update_article_status(
     Ok(())
 }
 
+/// Shared helper: write one coalesced audit entry per affected article for a
+/// bulk tag/label add or remove. Uses `create_or_update_entry` so rapid repeats
+/// of the same action on the same article collapse into a single timeline row
+/// within the 5-minute coalesce window.
+fn write_bulk_tag_label_audit(
+    conn: &rusqlite::Connection,
+    affected_ids: &[String],
+    action: &str,
+    name: &str,
+) -> Result<(), AppError> {
+    let detail = format!("Bulk {action}: \"{name}\"");
+    for id in affected_ids {
+        audit_repo::create_or_update_entry(conn, id, action, None, None, Some(&detail), "user")?;
+    }
+    Ok(())
+}
+
+/// Bulk add a tag to multiple articles. Returns the number of articles that
+/// actually received the tag (articles that already had it are skipped). One
+/// coalesced `tag_add` audit entry is written per affected article so the
+/// Audit Timeline reflects the change on each article's history.
 #[tauri::command]
 pub fn bulk_add_tag_to_articles(
     db_state: State<'_, DbState>,
     article_ids: Vec<String>,
     tag_name: String,
-) -> Result<(), AppError> {
+) -> Result<usize, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    article_repo::bulk_add_tag_to_articles(&conn, &article_ids, &tag_name)?;
+    let affected = article_repo::bulk_add_tag_to_articles(&conn, &article_ids, &tag_name)?;
+    write_bulk_tag_label_audit(&conn, &affected, "tag_add", &tag_name)?;
     // Bulk tag changes feed the keyword co-occurrence network.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
     app_settings_repo::mark_wiki_needs_refresh(&conn);
-    Ok(())
+    Ok(affected.len())
 }
 
+/// Bulk add a label to multiple articles. Returns the number of articles that
+/// actually received the label. One coalesced `label_add` audit entry is
+/// written per affected article.
 #[tauri::command]
 pub fn bulk_add_label_to_articles(
     db_state: State<'_, DbState>,
     article_ids: Vec<String>,
     label_name: String,
-) -> Result<(), AppError> {
+) -> Result<usize, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    article_repo::bulk_add_label_to_articles(&conn, &article_ids, &label_name)?;
+    let affected = article_repo::bulk_add_label_to_articles(&conn, &article_ids, &label_name)?;
+    write_bulk_tag_label_audit(&conn, &affected, "label_add", &label_name)?;
     // Bulk label changes affect article metadata.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
     app_settings_repo::mark_wiki_needs_refresh(&conn);
-    Ok(())
+    Ok(affected.len())
+}
+
+/// Bulk remove a tag from multiple articles. Returns the number of articles
+/// from which the tag was actually removed (0 means the tag was not present on
+/// any selected article or the named tag does not exist at all). One coalesced
+/// `tag_remove` audit entry is written per affected article. Powers the
+/// "Remove Tag" button in the "Change Tag of N articles" dialog.
+#[tauri::command]
+pub fn bulk_remove_tag_from_articles(
+    db_state: State<'_, DbState>,
+    article_ids: Vec<String>,
+    tag_name: String,
+) -> Result<usize, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let affected = article_repo::bulk_remove_tag_from_articles(&conn, &article_ids, &tag_name)?;
+    write_bulk_tag_label_audit(&conn, &affected, "tag_remove", &tag_name)?;
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+    Ok(affected.len())
+}
+
+/// Bulk remove a label from multiple articles. Returns the number of articles
+/// from which the label was actually removed. See
+/// [`bulk_remove_tag_from_articles`] for the semantics and audit contract.
+#[tauri::command]
+pub fn bulk_remove_label_from_articles(
+    db_state: State<'_, DbState>,
+    article_ids: Vec<String>,
+    label_name: String,
+) -> Result<usize, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let affected = article_repo::bulk_remove_label_from_articles(&conn, &article_ids, &label_name)?;
+    write_bulk_tag_label_audit(&conn, &affected, "label_remove", &label_name)?;
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+    Ok(affected.len())
 }
 
 #[tauri::command]

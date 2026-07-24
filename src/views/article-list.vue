@@ -105,6 +105,8 @@ const {
   bulkUpdateStatus,
   bulkAddTag,
   bulkAddLabel,
+  bulkRemoveTag,
+  bulkRemoveLabel,
   // Full text
   attachFullText,
   deleteFullTextAttachment,
@@ -442,9 +444,44 @@ async function handleBulkAddTag(): Promise<void> {
   const name = bulkInputValue.value.trim();
   if (!name) return;
   const ids = Array.from(selectedIds.value);
-  await bulkAddTag(ids, name);
+  const affected = await bulkAddTag(ids, name);
   bulkTagDialogOpen.value = false;
-  toast.show(`Tag "${name}" added to ${ids.length} article${ids.length > 1 ? 's' : ''}`, 'success');
+  if (affected === 0) {
+    toast.show(
+      `Tag "${name}" was already on all ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'info'
+    );
+  } else {
+    toast.show(
+      `Tag "${name}" added to ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'success'
+    );
+  }
+}
+
+/**
+ * Bulk-remove handler for the "Remove Tag" button in the Change Tag dialog.
+ * Uses the real affected count (articles that actually had the tag) so the
+ * toast is accurate: warning-styled removal message, or an info no-op message
+ * when the tag was not present on any selected article.
+ */
+async function handleBulkRemoveTag(): Promise<void> {
+  const name = bulkInputValue.value.trim();
+  if (!name) return;
+  const ids = Array.from(selectedIds.value);
+  const affected = await bulkRemoveTag(ids, name);
+  bulkTagDialogOpen.value = false;
+  if (affected === 0) {
+    toast.show(
+      `Tag "${name}" was not present on any of the ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'info'
+    );
+  } else {
+    toast.show(
+      `Tag "${name}" removed from ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'warning'
+    );
+  }
 }
 
 function openBulkLabelDialog(): void {
@@ -456,12 +493,42 @@ async function handleBulkAddLabel(): Promise<void> {
   const name = bulkInputValue.value.trim();
   if (!name) return;
   const ids = Array.from(selectedIds.value);
-  await bulkAddLabel(ids, name);
+  const affected = await bulkAddLabel(ids, name);
   bulkLabelDialogOpen.value = false;
-  toast.show(
-    `Label "${name}" added to ${ids.length} article${ids.length > 1 ? 's' : ''}`,
-    'success'
-  );
+  if (affected === 0) {
+    toast.show(
+      `Label "${name}" was already on all ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'info'
+    );
+  } else {
+    toast.show(
+      `Label "${name}" added to ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'success'
+    );
+  }
+}
+
+/**
+ * Bulk-remove handler for the "Remove Label" button in the Change Label
+ * dialog. See {@link handleBulkRemoveTag} for the toast semantics.
+ */
+async function handleBulkRemoveLabel(): Promise<void> {
+  const name = bulkInputValue.value.trim();
+  if (!name) return;
+  const ids = Array.from(selectedIds.value);
+  const affected = await bulkRemoveLabel(ids, name);
+  bulkLabelDialogOpen.value = false;
+  if (affected === 0) {
+    toast.show(
+      `Label "${name}" was not present on any of the ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'info'
+    );
+  } else {
+    toast.show(
+      `Label "${name}" removed from ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
+      'warning'
+    );
+  }
 }
 
 function handleBulkAddToChat(): void {
@@ -810,7 +877,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
         @click.self="bulkTagDialogOpen = false"
       >
         <div class="bg-white rounded-xl shadow-xl p-6 w-96 max-w-full">
-          <h3 class="text-lg font-semibold mb-4">Add Tag to {{ selectedCount }} Articles</h3>
+          <h3 class="text-lg font-semibold mb-4">Change Tag of {{ selectedCount }} Articles</h3>
           <SuggestInput
             v-model="bulkInputValue"
             :suggestions="allTags"
@@ -826,8 +893,17 @@ async function handleBatchScrapeRefs(): Promise<void> {
               Cancel
             </button>
             <button
+              class="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40"
+              :disabled="!bulkInputValue.trim()"
+              title="Remove this tag from all selected articles"
+              @click="handleBulkRemoveTag"
+            >
+              Remove Tag
+            </button>
+            <button
               class="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
               :disabled="!bulkInputValue.trim()"
+              title="Add this tag to all selected articles"
               @click="handleBulkAddTag"
             >
               Add Tag
@@ -845,7 +921,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
         @click.self="bulkLabelDialogOpen = false"
       >
         <div class="bg-white rounded-xl shadow-xl p-6 w-96 max-w-full">
-          <h3 class="text-lg font-semibold mb-4">Add Label to {{ selectedCount }} Articles</h3>
+          <h3 class="text-lg font-semibold mb-4">Change Label of {{ selectedCount }} Articles</h3>
           <SuggestInput
             v-model="bulkInputValue"
             :suggestions="allLabels"
@@ -861,8 +937,17 @@ async function handleBatchScrapeRefs(): Promise<void> {
               Cancel
             </button>
             <button
+              class="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40"
+              :disabled="!bulkInputValue.trim()"
+              title="Remove this label from all selected articles"
+              @click="handleBulkRemoveLabel"
+            >
+              Remove Label
+            </button>
+            <button
               class="px-4 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-40"
               :disabled="!bulkInputValue.trim()"
+              title="Add this label to all selected articles"
               @click="handleBulkAddLabel"
             >
               Add Label

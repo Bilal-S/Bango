@@ -51,6 +51,9 @@ function getDotColor(action: AuditAction): string {
   if (action === 'import') return 'bg-slate-300';
   if (action === 'ai_screen') return 'bg-indigo-500';
   if (action === 'manual_override') return 'bg-emerald-500';
+  // Tag/label adds are constructive (emerald); removals are destructive (amber).
+  if (action === 'tag_add' || action === 'label_add') return 'bg-emerald-500';
+  if (action === 'tag_remove' || action === 'label_remove') return 'bg-amber-500';
   return 'bg-slate-300';
 }
 

@@ -825,26 +825,90 @@ describe('useArticleSearch', () => {
       expect(selectedIds.value.size).toBe(0);
     });
 
-    it('bulkAddTag calls Tauri command and refreshes', async () => {
-      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+    it('bulkAddTag calls Tauri command, refreshes, and returns the affected count', async () => {
+      // Backend returns the number of articles that actually received the tag.
+      mockSearchResults();
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'bulk_add_tag_to_articles') return Promise.resolve(1);
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        return Promise.resolve(undefined);
+      });
       const { bulkAddTag } = useArticleSearch();
-      await bulkAddTag(['a1'], 'ml');
+      const affected = await bulkAddTag(['a1'], 'ml');
       expect(tauriCommand).toHaveBeenCalledWith('bulk_add_tag_to_articles', {
         articleIds: ['a1'],
         tagName: 'ml',
       });
       expect(mockTagsStore.fetchTags).toHaveBeenCalled();
+      expect(affected).toBe(1);
     });
 
-    it('bulkAddLabel calls Tauri command and refreshes', async () => {
-      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+    it('bulkAddLabel calls Tauri command, refreshes, and returns the affected count', async () => {
+      mockSearchResults();
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'bulk_add_label_to_articles') return Promise.resolve(1);
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        return Promise.resolve(undefined);
+      });
       const { bulkAddLabel } = useArticleSearch();
-      await bulkAddLabel(['a1'], 'priority');
+      const affected = await bulkAddLabel(['a1'], 'priority');
       expect(tauriCommand).toHaveBeenCalledWith('bulk_add_label_to_articles', {
         articleIds: ['a1'],
         labelName: 'priority',
       });
       expect(mockLabelsStore.fetchLabels).toHaveBeenCalled();
+      expect(affected).toBe(1);
+    });
+
+    it('bulkRemoveTag calls Tauri command, refreshes, and returns the affected count', async () => {
+      mockSearchResults();
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'bulk_remove_tag_from_articles') return Promise.resolve(1);
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        return Promise.resolve(undefined);
+      });
+      const { bulkRemoveTag } = useArticleSearch();
+      const affected = await bulkRemoveTag(['a1'], 'ml');
+      expect(tauriCommand).toHaveBeenCalledWith('bulk_remove_tag_from_articles', {
+        articleIds: ['a1'],
+        tagName: 'ml',
+      });
+      expect(mockTagsStore.fetchTags).toHaveBeenCalled();
+      expect(affected).toBe(1);
+    });
+
+    it('bulkRemoveLabel calls Tauri command, refreshes, and returns the affected count', async () => {
+      mockSearchResults();
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'bulk_remove_label_from_articles') return Promise.resolve(1);
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        return Promise.resolve(undefined);
+      });
+      const { bulkRemoveLabel } = useArticleSearch();
+      const affected = await bulkRemoveLabel(['a1'], 'priority');
+      expect(tauriCommand).toHaveBeenCalledWith('bulk_remove_label_from_articles', {
+        articleIds: ['a1'],
+        labelName: 'priority',
+      });
+      expect(mockLabelsStore.fetchLabels).toHaveBeenCalled();
+      expect(affected).toBe(1);
+    });
+
+    it('bulkRemoveTag returns 0 when the tag was not present on any article', async () => {
+      mockSearchResults();
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'bulk_remove_tag_from_articles') return Promise.resolve(0);
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        return Promise.resolve(undefined);
+      });
+      const { bulkRemoveTag } = useArticleSearch();
+      const affected = await bulkRemoveTag(['a1'], 'absent');
+      expect(affected).toBe(0);
     });
   });
 

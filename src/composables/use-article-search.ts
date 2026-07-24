@@ -746,18 +746,71 @@ export function useArticleSearch() {
     await search();
   }
 
-  async function bulkAddTag(ids: string[], tagName: string): Promise<void> {
-    await tauriCommand('bulk_add_tag_to_articles', { articleIds: ids, tagName });
+  /**
+   * Bulk add a tag to multiple articles.
+   *
+   * @returns the number of articles that actually received the tag (articles
+   * that already had it are skipped by the backend `INSERT OR IGNORE`).
+   */
+  async function bulkAddTag(ids: string[], tagName: string): Promise<number> {
+    const affected = await tauriCommand<number>('bulk_add_tag_to_articles', {
+      articleIds: ids,
+      tagName,
+    });
     clearSelection();
     await tagsStore.fetchTags();
     await search();
+    return affected;
   }
 
-  async function bulkAddLabel(ids: string[], labelName: string): Promise<void> {
-    await tauriCommand('bulk_add_label_to_articles', { articleIds: ids, labelName });
+  /**
+   * Bulk add a label to multiple articles.
+   *
+   * @returns the number of articles that actually received the label.
+   */
+  async function bulkAddLabel(ids: string[], labelName: string): Promise<number> {
+    const affected = await tauriCommand<number>('bulk_add_label_to_articles', {
+      articleIds: ids,
+      labelName,
+    });
     clearSelection();
     await labelsStore.fetchLabels();
     await search();
+    return affected;
+  }
+
+  /**
+   * Bulk remove a tag from multiple articles.
+   *
+   * @returns the number of articles from which the tag was actually removed
+   * (0 means the tag was not present on any selected article, or the named
+   * tag does not exist at all).
+   */
+  async function bulkRemoveTag(ids: string[], tagName: string): Promise<number> {
+    const affected = await tauriCommand<number>('bulk_remove_tag_from_articles', {
+      articleIds: ids,
+      tagName,
+    });
+    clearSelection();
+    await tagsStore.fetchTags();
+    await search();
+    return affected;
+  }
+
+  /**
+   * Bulk remove a label from multiple articles.
+   *
+   * @returns the number of articles from which the label was actually removed.
+   */
+  async function bulkRemoveLabel(ids: string[], labelName: string): Promise<number> {
+    const affected = await tauriCommand<number>('bulk_remove_label_from_articles', {
+      articleIds: ids,
+      labelName,
+    });
+    clearSelection();
+    await labelsStore.fetchLabels();
+    await search();
+    return affected;
   }
 
   const hasReturnTarget = computed(
@@ -910,6 +963,8 @@ export function useArticleSearch() {
     bulkUpdateStatus,
     bulkAddTag,
     bulkAddLabel,
+    bulkRemoveTag,
+    bulkRemoveLabel,
     // Full text
     attachFullText,
     deleteFullTextAttachment,

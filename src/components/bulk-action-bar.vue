@@ -45,13 +45,13 @@ defineEmits<{
       class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 transition-colors"
       @click="$emit('bulkAddTag')"
     >
-      Add Tag
+      Change Tag
     </button>
     <button
       class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-purple-600 hover:bg-purple-700 transition-colors"
       @click="$emit('bulkAddLabel')"
     >
-      Add Label
+      Change Label
     </button>
     <button
       class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-700 transition-colors"

@@ -1347,13 +1347,21 @@ pub fn bulk_update_article_status(
 
 /// Bulk add a tag to multiple articles (by tag name).
 /// Creates the tag if it doesn't exist.
+///
+/// Returns the IDs of articles that actually received the tag. Articles that
+/// already had the tag are skipped (`INSERT OR IGNORE`), so the returned vec
+/// may be shorter than `article_ids`. Each article touched by the insert has
+/// its `changed_at` bumped so sort-by-modified and the bibliometric/wiki
+/// staleness flags reflect the change. The caller (command layer) uses the
+/// returned IDs to write per-article audit entries and to report the accurate
+/// affected count in the UI toast.
 pub fn bulk_add_tag_to_articles(
     conn: &Connection,
     article_ids: &[String],
     tag_name: &str,
-) -> Result<usize, AppError> {
+) -> Result<Vec<String>, AppError> {
     if article_ids.is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     // Ensure tag exists
     let existing_id: Option<String> =
@@ -1368,26 +1376,37 @@ pub fn bulk_add_tag_to_articles(
         )?;
         id
     };
-    let mut count = 0usize;
+    let mut affected = Vec::new();
     for article_id in article_ids {
         let rows = conn.execute(
             "INSERT OR IGNORE INTO article_tags (article_id, tag_id) VALUES (?1, ?2)",
             params![article_id, tag_id],
         )?;
-        count += rows;
+        if rows > 0 {
+            // Bump changed_at only when the tag was newly linked (matches the
+            // single-article `update_article_tags` behavior).
+            conn.execute(
+                "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
+                [article_id],
+            )?;
+            affected.push(article_id.clone());
+        }
     }
-    Ok(count)
+    Ok(affected)
 }
 
 /// Bulk add a label to multiple articles (by label name).
 /// Creates the label if it doesn't exist.
+///
+/// Returns the IDs of articles that actually received the label. See
+/// [`bulk_add_tag_to_articles`] for the partial-application semantics.
 pub fn bulk_add_label_to_articles(
     conn: &Connection,
     article_ids: &[String],
     label_name: &str,
-) -> Result<usize, AppError> {
+) -> Result<Vec<String>, AppError> {
     if article_ids.is_empty() {
-        return Ok(0);
+        return Ok(Vec::new());
     }
     // Ensure label exists
     let existing_id: Option<String> = conn
@@ -1403,15 +1422,98 @@ pub fn bulk_add_label_to_articles(
         )?;
         id
     };
-    let mut count = 0usize;
+    let mut affected = Vec::new();
     for article_id in article_ids {
         let rows = conn.execute(
             "INSERT OR IGNORE INTO article_labels (article_id, label_id) VALUES (?1, ?2)",
             params![article_id, label_id],
         )?;
-        count += rows;
+        if rows > 0 {
+            conn.execute(
+                "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
+                [article_id],
+            )?;
+            affected.push(article_id.clone());
+        }
     }
-    Ok(count)
+    Ok(affected)
+}
+
+/// Bulk remove a tag from multiple articles (by tag name).
+///
+/// Returns the IDs of articles from which the tag was actually removed.
+/// If the named tag does not exist in the `tags` table at all, returns an
+/// empty vec (nothing to remove). Each article that lost the link has its
+/// `changed_at` bumped. This is the bulk counterpart to the remove-half of
+/// the single-article `update_article_tags` flow and pairs with the
+/// `bulk_add_tag_to_articles` add action so the "Change Tag of N articles"
+/// dialog can both add and remove.
+pub fn bulk_remove_tag_from_articles(
+    conn: &Connection,
+    article_ids: &[String],
+    tag_name: &str,
+) -> Result<Vec<String>, AppError> {
+    if article_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Resolve tag id; if it doesn't exist there is nothing to remove.
+    let tag_id: Option<String> =
+        conn.query_row("SELECT id FROM tags WHERE name = ?1", [tag_name], |row| row.get(0)).ok();
+    let Some(tag_id) = tag_id else {
+        return Ok(Vec::new());
+    };
+    let mut affected = Vec::new();
+    for article_id in article_ids {
+        let rows = conn.execute(
+            "DELETE FROM article_tags WHERE article_id = ?1 AND tag_id = ?2",
+            params![article_id, tag_id],
+        )?;
+        if rows > 0 {
+            conn.execute(
+                "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
+                [article_id],
+            )?;
+            affected.push(article_id.clone());
+        }
+    }
+    Ok(affected)
+}
+
+/// Bulk remove a label from multiple articles (by label name).
+///
+/// Returns the IDs of articles from which the label was actually removed.
+/// See [`bulk_remove_tag_from_articles`] for the partial-application and
+/// missing-label semantics.
+pub fn bulk_remove_label_from_articles(
+    conn: &Connection,
+    article_ids: &[String],
+    label_name: &str,
+) -> Result<Vec<String>, AppError> {
+    if article_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Resolve label id; if it doesn't exist there is nothing to remove.
+    let label_id: Option<String> = conn
+        .query_row("SELECT id FROM labels WHERE name = ?1", [label_name], |row| row.get(0))
+        .ok();
+    let Some(label_id) = label_id else {
+        return Ok(Vec::new());
+    };
+    let mut affected = Vec::new();
+    for article_id in article_ids {
+        let rows = conn.execute(
+            "DELETE FROM article_labels WHERE article_id = ?1 AND label_id = ?2",
+            params![article_id, label_id],
+        )?;
+        if rows > 0 {
+            conn.execute(
+                "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
+                [article_id],
+            )?;
+            affected.push(article_id.clone());
+        }
+    }
+    Ok(affected)
 }
 
 /// Get the full text and title for an article (for AI summary generation).

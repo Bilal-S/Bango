@@ -725,6 +725,23 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     prefix + strike-through on the name, toggled by clicking the pill body (the `x` button
     removes entirely via `removeExcludedTag`/`removeExcludedLabel`), and a DOI text input
     paired with an "Only no DOI" checkbox that disables the input when checked.
+    **Bulk tag/label add + remove contract**: `bulk_add_tag_to_articles`,
+    `bulk_add_label_to_articles`, `bulk_remove_tag_from_articles`, and
+    `bulk_remove_label_from_articles` each return `Vec<String>` (the IDs of articles
+    actually affected), so the command layer can write one coalesced `tag_add`/`label_add`/
+    `tag_remove`/`label_remove` audit entry per affected article and the frontend toast can
+    report the accurate affected count. Articles that already had the tag/label are skipped
+    by `INSERT OR IGNORE` (add path); a missing tag/label row yields an empty vec (remove
+    path). Each touched article's `changed_at` is bumped only when a junction row is
+    inserted/deleted, matching the single-article `update_article_tags`/`update_article_labels`
+    behavior. The `tag_remove`/`label_remove` actions have been in the `audit_entries.action`
+    CHECK constraint since v001 (no migration needed). Frontend: `bulkAddTag`/`bulkAddLabel`
+    return `Promise<number>`; `bulkRemoveTag`/`bulkRemoveLabel` mirror them. The
+    "Change Tag/Label of N Articles" dialogs in `article-list.vue` carry both an "Add" and
+    a red "Remove" button; removal toasts are warning-styled and report the real affected
+    count, with an info "not present" toast when nothing matched. The bulk action bar
+    trigger buttons are labeled "Change Tag"/"Change Label". Tested in
+    `tests/bulk_tag_label_test.rs` (17 tests).
   - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match (`resolve_journal_id`,
     `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
     and refreshable via the `rematch_journals` command.

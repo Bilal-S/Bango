@@ -212,6 +212,8 @@ pub fn run() {
             commands::articles::bulk_update_article_status,
             commands::articles::bulk_add_tag_to_articles,
             commands::articles::bulk_add_label_to_articles,
+            commands::articles::bulk_remove_tag_from_articles,
+            commands::articles::bulk_remove_label_from_articles,
             commands::app_settings::get_app_flags,
             commands::app_settings::get_storage_root,
             commands::app_settings::set_storage_root,
