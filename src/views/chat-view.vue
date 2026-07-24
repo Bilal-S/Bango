@@ -12,6 +12,7 @@ import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
 import { useWiki } from '@/composables/use-wiki';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
+import { useArticleDelete } from '@/composables/use-article-delete';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
 import type { WikiSourceInfo } from '@/types/wiki';
@@ -78,10 +79,23 @@ const {
   updateCriteria,
   updateMetadata,
   moveArticle,
+  deleteArticle,
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
 const { screenArticle } = useScreening();
+
+// Article delete UI orchestration is centralized in `useArticleDelete`
+// (shared with the other detail-panel host views), mirroring
+// `useFullTextAttachment`. The composable nulls `selectedArticle` (aliased as
+// `detailArticle`), which reactively hides the panel via `v-if="detailArticle"`;
+// the `onDeleted` hook resets the fullscreen flag.
+const { handleDeleteArticle } = useArticleDelete({
+  deleteArticle,
+  onDeleted: () => {
+    isDetailFullScreen.value = false;
+  },
+});
 
 // Synchronize updates from the detail view back into the chat's article list
 watch(detailArticle, (newVal) => {
@@ -638,6 +652,7 @@ const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
         :article-position="1"
         :article-total="1"
         @close="detailArticle = null"
+        @delete-article="handleDeleteArticle"
         @toggle-full-screen="isDetailFullScreen = !isDetailFullScreen"
         @update-notes="updateNotes"
         @update-tags="updateTags"

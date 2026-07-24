@@ -393,6 +393,36 @@ export function useArticleSearch() {
     return { isLast, didNavigate };
   }
 
+  /**
+   * Permanently delete an article and all of its related records. The
+   * confirmation dialog is owned by `article-detail-panel.vue`; this function
+   * runs only after the user has confirmed. It invokes the backend
+   * `delete_article` command, removes the row from the articles list, refreshes
+   * the status-tab counts (the corpus changed), and closes the detail panel.
+   *
+   * Re-throws the backend error so the caller can surface a toast.
+   */
+  async function deleteArticle(id: string): Promise<void> {
+    await tauriCommand('delete_article', { id });
+    // Remove the deleted article from the cached list so the table redraws
+    // immediately without waiting for the search() round-trip.
+    const idx = articles.value.findIndex((a) => a.id === id);
+    if (idx >= 0) {
+      articles.value.splice(idx, 1);
+    }
+    // Close the detail panel: the selectedArticle no longer exists.
+    selectedArticle.value = null;
+    auditTrail.value = [];
+    showDetail.value = false;
+    returnToArticleId.value = null;
+    returnToReferencePaperId.value = null;
+    // Refresh counts in the background (tab badges + biblio/wiki flags).
+    void fetchCounts();
+    // Re-run the query so the page is consistent (e.g. a new article slides
+    // in to fill the vacated slot when paginating).
+    void search();
+  }
+
   /** Patch the articles list row with the latest selectedArticle data so the table redraws. */
   function syncArticleToList(id: string): void {
     if (!selectedArticle.value || selectedArticle.value.id !== id) return;
@@ -726,6 +756,7 @@ export function useArticleSearch() {
     selectArticle,
     refreshArticle,
     moveArticle,
+    deleteArticle,
     updateNotes,
     updateTags,
     updateLabels,

@@ -85,7 +85,28 @@ Top-level source directories. Child `AGENTS.md` files exist under
 describe every durable boundary so agents can locate the right area. Create a
 child `AGENTS.md` under a folder only when that folder grows its own local rules.
 
-- **`src-tauri/src/`** - Rust backend (Tauri 2.x). Article state machine (§4.2 of the spec): **moving an article back to `working` from any other status (`included`/`rejected`/`duplicate`) always resets the screening flags (`screened_at = NULL`, `screening_error = 0`)** so the article becomes eligible for re-screening on the next run. Both `update_article_status` and `bulk_update_article_status` enforce this rule. Without the reset the stale `screened_at` timestamp survives the status change and excludes the article from `get_next_unscreened_working_batch`, leaving it stuck in a "previously screened" limbo that surfaces in the Error tab even though `screening_error` is `0`. The audit entry notes "(screening flags reset for re-screening)" when the reset fires. Tested in `tests/status_transition_screening_flags_test.rs`. Owned modules: `db/` (repos +
+- **`src-tauri/src/`** - Rust backend (Tauri 2.x). Article state machine (§4.2 of the spec): **moving an article back to `working` from any other status (`included`/`rejected`/`duplicate`) always resets the screening flags (`screened_at = NULL`, `screening_error = 0`)** so the article becomes eligible for re-screening on the next run. Both `update_article_status` and `bulk_update_article_status` enforce this rule. Without the reset the stale `screened_at` timestamp survives the status change and excludes the article from `get_next_unscreened_working_batch`, leaving it stuck in a "previously screened" limbo that surfaces in the Error tab even though `screening_error` is `0`. The audit entry notes "(screening flags reset for re-screening)" when the reset fires. Tested in `tests/status_transition_screening_flags_test.rs`.
+  **Article hard-delete cascade** (`article_repo::delete_article`, surfaced via
+  the `delete_article` Tauri command + the red trashcan icon in
+  `detail-header.vue`): runs in a single transaction and cleans up ALL related
+  data. `ON DELETE CASCADE` (enabled via `PRAGMA foreign_keys=ON` on every
+  connection) auto-removes `article_tags`, `article_labels`, `audit_entries`,
+  `article_reference_links`, `article_chunks`, `article_original_content`,
+  `article_original_chunks`, `biblio_article_authors`,
+  `biblio_author_affiliations`, `biblio_article_terms`. Two FKs lack an
+  `ON DELETE` clause and are cleaned explicitly BEFORE the `DELETE`:
+  `articles.duplicate_of` (self-ref - nulled so duplicates are un-merged) and
+  `reference_papers.matched_article_id` (cleared). Shared reference papers
+  (linked to other articles) are preserved; orphaned unmatched papers (zero
+  links + `match_status = 'unmatched'`) are deleted. The `match_status` reset
+  to `'unmatched'` for previously-matched papers runs AFTER the orphan sweep
+  so a matched paper with zero links survives the sweep and goes back to the
+  unmatched pool for re-matching instead of being hard-deleted. On-disk
+  full-text files are removed (non-fatal on failure). Sets the biblio + wiki
+  staleness flags. Frontend confirmation dialog owned by
+  `article-detail-panel.vue`; `useArticleSearch().deleteArticle` invokes the
+  command and closes the detail panel. Tested in
+  `tests/article_delete_test.rs`. Owned modules: `db/` (repos +
   `migrations/`), `models/`, `commands/`, `llm/` (orchestrator pattern; has its
   own `AGENTS.md` covering the retry + shared-client + payload-normalization
   contract for the Windows intermittent "insufficient permissions" fix),
@@ -1184,6 +1205,15 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     underlying message so all four views report failures with equal detail. The
     low-level IPC + refresh logic stays in `useArticleFullText`/`useArticleSearch`; this
     composable owns only the file-dialog + toast shell).
+    `use-article-delete.ts` (shared UI orchestration for permanently deleting an
+    article after the user confirms the in-panel dialog: caller's `deleteArticle`
+    (sourced from `useArticleSearch`, which wraps the `delete_article` IPC + removes
+    the row from the cached list + refreshes counts + closes the detail panel) ->
+    "Article deleted." toast -> optional `onDeleted` hook that resets the host's local
+    fullscreen/visibility flags. Mirrors `useFullTextAttachment` (same
+    injectable-fn + onXxx-hook shape) so the two detail-panel action handlers stay
+    symmetric. The confirmation dialog itself is owned by `article-detail-panel.vue`
+    so every host gets identical UX without per-host duplication).
     `use-gap-analysis.ts` (Research Gap Analysis singleton: `gapText`/`loading`/`error`/
     `generatedAt` refs + `generate(style)`/`loadSaved`/`clearGapAnalysis`/`formatGeneratedAt`;
     mirrors `use-summary.ts` 1:1 and backs the "Research Gap Report" button in

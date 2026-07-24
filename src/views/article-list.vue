@@ -10,6 +10,7 @@ import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useBatchReferenceScraping } from '@/composables/use-references';
 import { useChatStore } from '@/stores/chat';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
+import { useArticleDelete } from '@/composables/use-article-delete';
 import { resolveBiblioReturn } from '@/utils/biblio-links';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
@@ -59,6 +60,7 @@ const {
   navigatePrev,
   navigateNext,
   moveArticle,
+  deleteArticle,
   refreshArticle,
   updateNotes,
   updateTags,
@@ -506,6 +508,19 @@ async function handleDeleteFullText(articleId: string): Promise<void> {
   }
 }
 
+// Article delete UI orchestration is centralized in `useArticleDelete`
+// (shared with the other detail-panel host views), mirroring
+// `useFullTextAttachment`. The composable owns the toast + post-delete hook;
+// `useArticleSearch.deleteArticle` owns the IPC + list/panel teardown.
+const { handleDeleteArticle } = useArticleDelete({
+  deleteArticle,
+  onDeleted: () => {
+    // The panel is gone; reset the fullscreen flag so a fresh open starts clean.
+    isDetailFullScreen.value = false;
+    localStorage.setItem('bango-detail-fullscreen', 'false');
+  },
+});
+
 async function handleReadFullText(articleId: string): Promise<string | null> {
   return await readFullTextContent(articleId);
 }
@@ -767,6 +782,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
       @navigate-to-article="navigateToArticle"
       @toggle-full-screen="toggleDetailFullScreen"
       @attach-full-text="handleAttachFullText"
+      @delete-article="handleDeleteArticle"
       @delete-full-text="handleDeleteFullText"
       @read-full-text="handleReadFullText"
       @refresh-article="refreshArticle"

@@ -36,6 +36,7 @@ const emit = defineEmits<{
   requestAiSummary: [];
   readFullText: [];
   requestTranslate: [id: string];
+  deleteArticle: [];
 }>();
 
 // Translation is in-flight when the queue reports queued/running. The status
@@ -141,6 +142,17 @@ const isTranslationPending = computed(
         </span>
       </div>
       <div class="flex items-center gap-1">
+        <!-- Delete article icon: grey at rest, turns red on hover to signal
+             the destructive action. Placed left of the fullscreen toggle so
+             the cluster reads: delete -> fullscreen -> close. The actual
+             deletion is gated by a confirmation dialog in article-detail-panel. -->
+        <button
+          class="material-symbols-outlined text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer rounded px-1"
+          title="Delete this article and all related records."
+          @click="emit('deleteArticle')"
+        >
+          delete
+        </button>
         <button
           class="material-symbols-outlined text-slate-400 hover:text-slate-900 transition-colors cursor-pointer"
           title="Toggle full screen"

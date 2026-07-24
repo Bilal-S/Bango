@@ -13,6 +13,7 @@ import { useArticleSearch } from '../composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
 import { useToast } from '../composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
+import { useArticleDelete } from '@/composables/use-article-delete';
 import { debounce } from '../utils/debounce';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CitationNode } from '../types/biblio-citation';
@@ -77,6 +78,7 @@ const {
   updateCriteria,
   updateMetadata,
   moveArticle,
+  deleteArticle,
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
@@ -84,6 +86,19 @@ const { screenArticle } = useScreening();
 
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
+
+// Article delete UI orchestration is centralized in `useArticleDelete`
+// (shared with the other detail-panel host views), mirroring
+// `useFullTextAttachment`. Mirrors `onCloseArticleDetail`: the composable's
+// `deleteArticle` nulls the selected article / audit trail, and the
+// `onDeleted` hook clears the local visibility gate + fullscreen flag.
+const { handleDeleteArticle } = useArticleDelete({
+  deleteArticle,
+  onDeleted: () => {
+    showArticleDetail.value = false;
+    isArticleDetailFullScreen.value = false;
+  },
+});
 
 const selectedPaper = ref<CitationNode | null>(null);
 
@@ -477,6 +492,7 @@ async function onResetAnalysis() {
         :article-position="1"
         :article-total="1"
         @close="onCloseArticleDetail"
+        @delete-article="handleDeleteArticle"
         @toggle-full-screen="isArticleDetailFullScreen = !isArticleDetailFullScreen"
         @update-notes="updateNotes"
         @update-tags="updateTags"

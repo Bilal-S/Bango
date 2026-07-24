@@ -57,6 +57,11 @@ const emit = defineEmits<{
   articlePromoted: [articleId: string];
   readerOpened: [];
   referencesUpdated: [];
+  /** Emitted after the user confirms the delete-article dialog. The parent
+   *  invokes the backend `delete_article` command and closes the detail
+   *  panel. The dialog itself is owned by this component so the parent does
+   *  not need to render a second confirmation. */
+  deleteArticle: [id: string];
 }>();
 
 const llmConfigStore = useLlmConfigStore();
@@ -261,6 +266,11 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
 // Translation UI orchestration (language-plan-v2 Phase 5): owns the
 // confirmation-dialog state, the enqueue invoke, the immediate toast, and the
 // global `translation:complete` listener that refreshes this article.
+// Delete-article confirmation dialog visibility. Owned here (not in the
+// parent) so the parent only needs to handle the final `deleteArticle` emit
+// after the user confirms; the parent never has to render its own dialog.
+const showDeleteDialog = ref(false);
+
 const {
   showTranslateDialog,
   translateArticleTitle,
@@ -315,6 +325,7 @@ const {
       @attach-full-text="emit('attachFullText', article.id)"
       @request-ai-summary="handleRequestAiSummary"
       @request-translate="requestTranslation(article.id, article.title)"
+      @delete-article="showDeleteDialog = true"
     />
 
     <!-- Scrollable Content.
@@ -414,6 +425,48 @@ const {
       @refresh-article="emit('refreshArticle', $event)"
       @reader-opened="emit('readerOpened')"
     />
+
+    <!-- Delete-article confirmation dialog. Mirrors the Translation dialog
+         shape (Teleported to body, `.dialog--danger` + `.dialog__danger-box`).
+         The body enumerates every related record class that will be removed so
+         the user understands the blast radius before confirming. The parent
+         closes the detail panel after the backend delete returns, so this
+         component just emits `deleteArticle` and lets the parent drive the
+         list + panel teardown. -->
+    <Teleport to="body">
+      <div v-if="showDeleteDialog" class="dialog-overlay" @click.self="showDeleteDialog = false">
+        <div class="dialog dialog--danger">
+          <h2>Delete Article</h2>
+          <div class="dialog__danger-box">
+            <span class="material-symbols-outlined">warning</span>
+            <p>
+              This will <strong>permanently delete</strong> the article and
+              <strong>all related records</strong>. The audit history, user notes, AI summary, full
+              text + extracted chunks, translation archive, and dedup links will be removed.
+              Reference links to papers that no other article uses will also be deleted. This action
+              <strong>cannot be undone</strong>.
+            </p>
+          </div>
+          <div class="dialog__desc">
+            <p>
+              Article: <code>{{ article.title }}</code>
+            </p>
+          </div>
+          <div class="dialog__actions">
+            <button class="btn btn--outline" @click="showDeleteDialog = false">Cancel</button>
+            <button
+              class="btn btn--danger"
+              @click="
+                showDeleteDialog = false;
+                emit('deleteArticle', article.id);
+              "
+            >
+              Delete Article
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Translation Confirmation Dialog (language-plan-v2 Phase 5).
          Teleported to <body> so it escapes the detail panel's transform

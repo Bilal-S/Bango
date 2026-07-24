@@ -16,6 +16,7 @@ import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
 import { useToast } from '@/composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
+import { useArticleDelete } from '@/composables/use-article-delete';
 import { openPath } from '@tauri-apps/plugin-opener';
 
 // Name the component so <keep-alive include="WikiView"> in app-shell.vue
@@ -52,6 +53,7 @@ const {
   updateCriteria,
   updateMetadata,
   moveArticle,
+  deleteArticle,
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
@@ -59,6 +61,20 @@ const { screenArticle } = useScreening();
 
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
+
+// Article delete UI orchestration is centralized in `useArticleDelete`
+// (shared with the other detail-panel host views), mirroring
+// `useFullTextAttachment`. The composable nulls `selectedArticle` (aliased as
+// `detailArticle`), which reactively hides the panel via
+// `v-if="showArticleDetail && detailArticle"`; the `onDeleted` hook resets the
+// fullscreen flag + the local `showArticleDetail` gate.
+const { handleDeleteArticle } = useArticleDelete({
+  deleteArticle,
+  onDeleted: () => {
+    showArticleDetail.value = false;
+    isArticleDetailFullScreen.value = false;
+  },
+});
 
 const checkingLlm = ref(true);
 const isLlmConfigured = ref(false);
@@ -747,6 +763,7 @@ watch(searchQuery, (q) => {
         :article-position="1"
         :article-total="1"
         @close="onCloseArticleDetail"
+        @delete-article="handleDeleteArticle"
         @toggle-full-screen="isArticleDetailFullScreen = !isArticleDetailFullScreen"
         @update-notes="updateNotes"
         @update-tags="updateTags"

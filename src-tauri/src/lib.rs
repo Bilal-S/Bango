@@ -193,6 +193,7 @@ pub fn run() {
             commands::articles::query_articles,
             commands::articles::get_article_counts,
             commands::articles::get_article,
+            commands::articles::delete_article,
             commands::articles::update_article_status,
             commands::articles::get_audit_trail,
             commands::articles::get_recent_audit_entries,

@@ -32,6 +32,19 @@ pub fn get_article(db_state: State<'_, DbState>, id: String) -> Result<Article, 
     article_repo::get_article_by_id(&conn, &id)
 }
 
+/// Permanently delete an article and all of its related data (full text,
+/// extracted chunks, AI summary, audit history, user notes, tag/label
+/// associations, translation archive, dedup links, and reference links to
+/// papers that no other article uses). The frontend MUST show a confirmation
+/// dialog before invoking this; the backend performs no second confirmation.
+///
+/// See [`article_repo::delete_article`] for the full cascade contract.
+#[tauri::command]
+pub fn delete_article(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    article_repo::delete_article(&conn, &id)
+}
+
 #[tauri::command]
 pub fn update_article_status(
     db_state: State<'_, DbState>,
