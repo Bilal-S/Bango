@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
+import { folderLabelFromPath } from '@/utils/formatters';
 
 // Storage root directory (Bango documents root; fulltext/, ris/, wiki-root/ derive from it).
 interface StorageRootInfo {
@@ -48,6 +49,14 @@ async function resetStorageDir(): Promise<void> {
   }
 }
 
+/**
+ * Display label for the storage tree root folder. Derived from the last
+ * segment of `effectivePath` so a custom directory (e.g. `/data/my-research`)
+ * shows `my-research/` instead of the hard-coded `Bango/`. Defaults to
+ * `Bango/` when storage info hasn't loaded yet or the path is root-only.
+ */
+const rootFolderLabel = computed(() => folderLabelFromPath(storageInfo.value?.effectivePath ?? ''));
+
 // Load storage info on mount.
 loadStorageInfo();
 </script>
@@ -78,7 +87,7 @@ loadStorageInfo();
       <div class="storage-tree">
         <div class="storage-tree__line storage-tree__line--root">
           <span class="material-symbols-outlined storage-tree__icon">folder</span>
-          <code>Bango/</code>
+          <code>{{ rootFolderLabel }}</code>
         </div>
         <div class="storage-tree__line">
           <span class="material-symbols-outlined storage-tree__icon">description</span>

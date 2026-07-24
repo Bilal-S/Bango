@@ -4,6 +4,7 @@ import {
   formatConfidence,
   formatPriority,
   formatArticleCount,
+  folderLabelFromPath,
   getPublicationTypeLabel,
 } from '@/utils/formatters';
 
@@ -80,5 +81,34 @@ describe('getPublicationTypeLabel', () => {
     expect(getPublicationTypeLabel(null)).toBe('Publication');
     expect(getPublicationTypeLabel(undefined)).toBe('Publication');
     expect(getPublicationTypeLabel('UNKNOWN')).toBe('Publication');
+  });
+});
+
+describe('folderLabelFromPath', () => {
+  it('returns the last segment with a trailing slash', () => {
+    expect(folderLabelFromPath('/home/user/Documents/Bango')).toBe('Bango/');
+  });
+
+  it('strips trailing separators before taking the last segment', () => {
+    expect(folderLabelFromPath('/home/user/Documents/Bango/')).toBe('Bango/');
+    expect(folderLabelFromPath('/data/my-research/')).toBe('my-research/');
+  });
+
+  it('normalizes Windows backslashes', () => {
+    expect(folderLabelFromPath('D:\\Research\\Bango Project')).toBe('Bango Project/');
+  });
+
+  it('handles a custom directory name', () => {
+    expect(folderLabelFromPath('/data/my-research')).toBe('my-research/');
+  });
+
+  it('falls back to Bango/ for empty or root-only paths', () => {
+    expect(folderLabelFromPath('')).toBe('Bango/');
+    expect(folderLabelFromPath('/')).toBe('Bango/');
+    expect(folderLabelFromPath('///')).toBe('Bango/');
+  });
+
+  it('preserves spaces in folder names', () => {
+    expect(folderLabelFromPath('/home/user/My Bango Data')).toBe('My Bango Data/');
   });
 });

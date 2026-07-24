@@ -120,3 +120,25 @@ export function getPublicationTypeLabel(type: string | null | undefined): string
   };
   return map[cleanType] || 'Publication';
 }
+
+/**
+ * Derive the display label for the storage-root folder in the Settings
+ * directory tree. Returns the last path segment plus a trailing slash so the
+ * tree root reads naturally (e.g. `/data/my-research` -> `my-research/`).
+ *
+ * Trailing separators are stripped before taking the last segment so
+ * `/home/u/Documents/Bango/` still resolves to `Bango/`. Falls back to
+ * `Bango/` when the path is empty, root-only (`/`), or has no discernible
+ * segment so the tree never shows a blank root.
+ *
+ * @param path - the effective storage root path (forward or back slashes).
+ * @returns the last segment with a trailing slash.
+ */
+export function folderLabelFromPath(path: string): string {
+  // Normalize backslashes (Windows) to forward slashes for uniform splitting,
+  // then drop trailing separators so the last split is the real folder name.
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const segments = normalized.split('/').filter((s) => s.length > 0);
+  const last = segments[segments.length - 1];
+  return last ? `${last}/` : 'Bango/';
+}
