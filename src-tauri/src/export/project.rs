@@ -101,7 +101,22 @@ pub fn export_project(conn: &Connection) -> Result<String, AppError> {
     let labels = serialize_table(conn, "SELECT * FROM labels")?;
     let article_tags = serialize_table(conn, "SELECT * FROM article_tags")?;
     let article_labels = serialize_table(conn, "SELECT * FROM article_labels")?;
-    let audit = serialize_table(conn, "SELECT * FROM audit_entries")?;
+    // Filter out genuine orphan audit entries (article_id references a
+    // non-existent article) so they don't propagate into the backup. Runtime
+    // deletes already cascade via `ON DELETE CASCADE`, so this is
+    // defense-in-depth for any orphans created while foreign_keys were OFF.
+    // System-level rows are preserved in BOTH shapes they can legitimately
+    // take: `article_id IS NULL` (the current `log_error` write path) and
+    // `article_id = ''` (historical backups / older write paths that are
+    // normalized to NULL by v006 on the next migration run). Dropping either
+    // would silently delete legitimate audit-trail history.
+    let audit = serialize_table(
+        conn,
+        "SELECT ae.* FROM audit_entries ae \
+         WHERE ae.article_id IS NULL \
+            OR ae.article_id = '' \
+            OR ae.article_id IN (SELECT id FROM articles)",
+    )?;
     let reference_papers = serialize_table(conn, "SELECT * FROM reference_papers")?;
     let article_reference_links = serialize_table(conn, "SELECT * FROM article_reference_links")?;
     // Translation originals archive (Plan-A). Serialized so a backup/restore
@@ -691,10 +706,18 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     // rusqlite maps None → SQL NULL.
     for ae in &backup.audit_entries {
         let id = get_str(ae, "id");
+        // Normalize empty-string article_id -> None -> SQL NULL. Historical
+        // backups (and the shipped demo project) carry system-level entries
+        // with `articleId: ""` instead of `null`; without this filter the
+        // restored row would violate the `FOREIGN KEY (article_id) REFERENCES
+        // articles(id)` constraint on the v006-rebuilt table and crash import.
+        // The row is preserved as a system-level entry (article_id IS NULL),
+        // never silently dropped.
         let article_id: Option<String> = ae
             .get("articleId")
             .or_else(|| ae.get("article_id"))
             .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
         let timestamp = get_str(ae, "timestamp");
         let action = get_str(ae, "action");

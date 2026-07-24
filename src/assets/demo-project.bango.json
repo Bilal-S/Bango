@@ -2928,7 +2928,7 @@
     },
     {
       "action": "error",
-      "articleId": "",
+      "articleId": null,
       "details": "Citation Chaser scrape failed for DOI 10.1016/S2468-2667(19)30156-3: Element not found: Download link #refs_ris did not become enabled within 120s",
       "fromStatus": null,
       "id": "a35a7585-da69-412c-8e6c-0768d8ed88d6",
@@ -2938,7 +2938,7 @@
     },
     {
       "action": "error",
-      "articleId": "",
+      "articleId": null,
       "details": "Citation Chaser success scrape for DOI 10.1136/jech-2019-213216: refs=true, cites=true",
       "fromStatus": null,
       "id": "24f1107f-4788-4384-8870-cbff07f3a937",
@@ -2968,7 +2968,7 @@
     },
     {
       "action": "error",
-      "articleId": "",
+      "articleId": null,
       "details": "Citation Chaser scrape failed for DOI 10.1017/S1368980020002226: Element not found: Download link #refs_ris did not become enabled within 120s",
       "fromStatus": null,
       "id": "600157f7-0e30-4759-889c-fc98b73d3d9a",
@@ -3058,7 +3058,7 @@
     },
     {
       "action": "error",
-      "articleId": "",
+      "articleId": null,
       "details": "Citation Chaser success scrape for DOI 10.1371/journal.pmed.1004160: refs=true, cites=true",
       "fromStatus": null,
       "id": "a90bcc78-a137-4a6b-bfc1-c1e6d486816e",
@@ -3088,7 +3088,7 @@
     },
     {
       "action": "error",
-      "articleId": "",
+      "articleId": null,
       "details": "Citation Chaser success scrape for DOI 10.1136/bmjopen-2023-077059: refs=true, cites=true",
       "fromStatus": null,
       "id": "e29fb752-294a-4f54-a23f-28639bacfdff",
@@ -3118,7 +3118,7 @@
     },
     {
       "action": "error",
-      "articleId": "",
+      "articleId": null,
       "details": "Citation Chaser scrape failed for DOI 10.1136/jech-2023-224371: Element not found: Download link #refs_ris did not become enabled within 120s",
       "fromStatus": null,
       "id": "a920ac73-8554-4b9e-a965-8406f202d055",
@@ -3128,7 +3128,7 @@
     },
     {
       "action": "error",
-      "articleId": "",
+      "articleId": null,
       "details": "Citation Chaser success scrape for DOI 10.1371/journal.pmed.1004371: refs=true, cites=true",
       "fromStatus": null,
       "id": "a4910110-4b2a-4654-8196-dd31015da8dc",

@@ -648,6 +648,171 @@ fn import_ignores_non_allowlisted_app_settings() {
     assert_ne!(premium.as_deref(), Some("true"), "non-allowlisted flag_premium must be ignored");
 }
 
+/// Genuine orphan audit entries (article_id references a non-existent
+/// article) must be dropped on export so they don't propagate into backups
+/// and crash the import path on FK-bound tables. Runtime deletes already
+/// cascade via ON DELETE CASCADE; this test covers the defense-in-depth case
+/// where an orphan was inserted while foreign_keys were OFF (e.g. an older
+/// non-transactional import). Covers the export filter in `export_project`.
+#[test]
+fn export_drops_genuine_orphan_audit_entry() {
+    let conn = setup_db();
+
+    // Seed one article + a bound audit entry (the legitimate case).
+    let a = article_repo::insert_article(&conn, &new_article("Survivor")).expect("insert");
+    article_repo::move_to_working(&conn, &a.id).expect("move to working");
+    audit_repo::create_entry(&conn, &a.id, "import", None, None, Some("ok"), "system")
+        .expect("create bound audit");
+
+    // Simulate an orphan: disable FK, insert a row pointing at a ghost article,
+    // then re-enable FK. This mirrors how orphans historically entered the DB
+    // (imports ran with foreign_keys=OFF before the explicit purge sequence
+    // existed; a malformed backup could insert a row referencing an absent id).
+    conn.execute("PRAGMA foreign_keys = OFF", []).expect("disable fk");
+    conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, details, source) \
+         VALUES ('orphan-1', 'ghost-article-id', '2026-01-01T00:00:00Z', 'import', 'orphan', 'system')",
+        [],
+    )
+    .expect("insert orphan");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    // Pre-condition: the orphan row exists.
+    let orphan_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM audit_entries WHERE id = 'orphan-1'", [], |row| row.get(0))
+        .expect("count orphans");
+    assert_eq!(orphan_count, 1, "pre: orphan must exist");
+
+    // Export.
+    let json = export_project(&conn).expect("export");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+
+    // The orphan must be absent from the backup JSON.
+    let orphan_in_backup = parsed["auditEntries"]
+        .as_array()
+        .expect("auditEntries array")
+        .iter()
+        .any(|e| e["id"] == "orphan-1");
+    assert!(!orphan_in_backup, "genuine orphan audit entry must be dropped on export");
+
+    // The legitimate bound entry must survive.
+    let bound_in_backup = parsed["auditEntries"]
+        .as_array()
+        .expect("auditEntries array")
+        .iter()
+        .any(|e| e["articleId"] == a.id);
+    assert!(bound_in_backup, "legitimate article-bound audit entry must survive export");
+}
+
+/// System-level audit entries (article_id IS NULL, e.g. errors, search
+/// strategies) AND historical empty-string rows (article_id = '', from older
+/// write paths) must BOTH survive export. The export filter preserves both
+/// shapes; dropping either would silently delete legitimate audit-trail
+/// history. Covers the export filter in `export_project`.
+#[test]
+fn export_preserves_null_and_empty_string_system_entries() {
+    let conn = setup_db();
+
+    // Seed an article so the table is non-empty (keeps the test realistic).
+    let a = article_repo::insert_article(&conn, &new_article("Context")).expect("insert");
+    article_repo::move_to_working(&conn, &a.id).expect("move to working");
+
+    // System-level entry written the modern way: article_id = NULL.
+    audit_repo::log_error(&conn, "modern system error").expect("log_error");
+
+    // System-level entry written the historical way: article_id = '' (the
+    // malformed shape found in old backups + the shipped demo project before
+    // this fix). Inserted with FK off to bypass the constraint.
+    conn.execute("PRAGMA foreign_keys = OFF", []).expect("disable fk");
+    conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, details, source) \
+         VALUES ('legacy-empty-1', '', '2026-01-01T00:00:00Z', 'error', 'legacy system error', 'system')",
+        [],
+    )
+    .expect("insert legacy empty-string entry");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    // Export.
+    let json = export_project(&conn).expect("export");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("parse");
+    let entries = parsed["auditEntries"].as_array().expect("auditEntries array");
+
+    // Both system entries must be present.
+    let has_null_entry = entries
+        .iter()
+        .any(|e| e["id"] != "legacy-empty-1" && e["articleId"].is_null() && e["action"] == "error");
+    assert!(has_null_entry, "NULL article_id system entry must survive export");
+
+    let has_empty_entry = entries.iter().any(|e| e["id"] == "legacy-empty-1");
+    assert!(has_empty_entry, "empty-string article_id system entry must survive export");
+}
+
+/// Historical backups (and the pre-fix demo project) carry system-level audit
+/// entries with `"articleId": ""` (empty string) instead of the correct `null`.
+/// On import, these must be normalized to SQL NULL so they don't violate the
+/// `FOREIGN KEY (article_id) REFERENCES articles(id)` constraint on the
+/// v006-rebuilt table. The row is preserved as a system-level entry, never
+/// silently dropped. Covers the import normalization in `import_project`.
+#[test]
+fn import_normalizes_empty_string_article_id_to_null() {
+    let conn = setup_db();
+
+    // Craft a minimal backup with one system-level entry carrying articleId = "".
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.5.6"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [
+            {
+                "id": "sys-empty-1",
+                "articleId": "",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "action": "error",
+                "details": "legacy system error",
+                "source": "system"
+            }
+        ],
+        "llmConfig": null
+    }"#;
+
+    import_project(&conn, backup).expect("import should succeed");
+
+    // The entry must survive (not dropped) and be normalized to NULL.
+    let row_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM audit_entries WHERE id = 'sys-empty-1'", [], |row| {
+            row.get(0)
+        })
+        .expect("count");
+    assert_eq!(row_count, 1, "system entry must be preserved (not silently dropped)");
+
+    let is_null: bool = conn
+        .query_row(
+            "SELECT article_id IS NULL FROM audit_entries WHERE id = 'sys-empty-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("check null");
+    assert!(is_null, "empty-string articleId must be normalized to NULL on import");
+
+    // The details must survive too (round-trip integrity).
+    let details: String = conn
+        .query_row("SELECT details FROM audit_entries WHERE id = 'sys-empty-1'", [], |row| {
+            row.get(0)
+        })
+        .expect("query details");
+    assert_eq!(details, "legacy system error");
+}
+
 /// Audit entries with NULL details (e.g. dedup_flag with no details) must
 /// survive a round-trip with details = NULL, not empty string.
 #[test]

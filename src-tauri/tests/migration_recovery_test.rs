@@ -122,3 +122,93 @@ fn run_migrations_on_fresh_db_has_full_translation_schema() {
     assert!(column_exists(&conn, "articles", "is_translated"));
     assert!(column_exists(&conn, "articles", "translation_status"));
 }
+
+/// v006 must heal historical malformed audit rows that have
+/// `article_id = ''` (empty string) instead of the correct `NULL`. Without
+/// the heal UPDATE that runs before the orphan DELETE, the empty-string rows
+/// would survive the orphan sweep (which only matches `article_id IS NOT
+/// NULL`) and then crash the subsequent `INSERT ... SELECT` with
+/// `FOREIGN KEY constraint failed (19)` when `PRAGMA foreign_keys=ON`.
+///
+/// This test simulates a pre-v006 DB carrying such a row: run the full chain
+/// through v005, rewind to v005, insert the malformed row with FK off, then
+/// run migrations to v006 and verify the row is preserved with
+/// `article_id IS NULL`.
+#[test]
+fn v006_heals_empty_string_article_id_to_null() {
+    let conn = create_connection().expect("connection");
+
+    // Run the full chain once so the v005 audit_entries schema exists, then
+    // rewind to v005 so v006 will run on the next `run_migrations` call.
+    run_migrations(&conn).expect("initial migrations through v006");
+    conn.pragma_update(None, "user_version", 5).expect("rewind to v5");
+
+    // Seed one article + a bound audit entry (the legitimate case).
+    conn.execute(
+        "INSERT INTO articles (id, title, abstract_text, authors, status) \
+         VALUES ('survivor-1', 'S', 'A', 'Smith', 'working')",
+        [],
+    )
+    .expect("seed article");
+    conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, details, source) \
+         VALUES ('bound-1', 'survivor-1', '2026-01-01T00:00:00Z', 'import', 'ok', 'system')",
+        [],
+    )
+    .expect("seed bound audit");
+
+    // Insert the malformed empty-string system entry. v005's audit_entries
+    // has the FK constraint, so disable FK to allow the bad row in (mirrors
+    // how it entered historical DBs: imports ran with FK off).
+    conn.execute("PRAGMA foreign_keys = OFF", []).expect("disable fk");
+    conn.execute(
+        "INSERT INTO audit_entries (id, article_id, timestamp, action, details, source) \
+         VALUES ('legacy-empty-1', '', '2026-01-01T00:00:00Z', 'error', 'legacy', 'system')",
+        [],
+    )
+    .expect("seed empty-string audit");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    // Pre-condition: the malformed row exists with article_id = ''.
+    let empty_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audit_entries WHERE id = 'legacy-empty-1' AND article_id = ''",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count empty");
+    assert_eq!(empty_count, 1, "pre: malformed empty-string row must exist");
+
+    // Run v006 (and any later migrations). Pre-heal this would crash during
+    // the `INSERT ... SELECT` rebuild with FOREIGN KEY constraint failed.
+    run_migrations(&conn).expect("v006 heal should succeed");
+
+    assert_eq!(user_version(&conn), 6);
+
+    // The malformed row must be preserved (not dropped) AND normalized to NULL.
+    let row_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM audit_entries WHERE id = 'legacy-empty-1'", [], |row| {
+            row.get(0)
+        })
+        .expect("count");
+    assert_eq!(row_count, 1, "healed row must be preserved (not dropped by orphan sweep)");
+
+    let is_null: bool = conn
+        .query_row(
+            "SELECT article_id IS NULL FROM audit_entries WHERE id = 'legacy-empty-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("check null");
+    assert!(is_null, "empty-string article_id must be healed to NULL by v006");
+
+    // The legitimate bound entry must also survive the rebuild.
+    let bound_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audit_entries WHERE id = 'bound-1' AND article_id = 'survivor-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count bound");
+    assert_eq!(bound_count, 1, "legitimate bound audit entry must survive v006 rebuild");
+}

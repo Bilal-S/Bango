@@ -779,6 +779,21 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     the biblio tables. The import code uses `INSERT OR IGNORE` + ID-remap maps for
     `reference_papers`, `biblio_authors`, `biblio_institutions`, and `biblio_terms` (all have
     UNIQUE constraints) to handle older backups that may still contain biblio data.
+    **Audit-entry `article_id` normalization contract**: (1) the export query
+    filters out genuine orphans (`article_id` references a non-existent article)
+    via `WHERE article_id IS NULL OR article_id = '' OR article_id IN (SELECT id
+    FROM articles)` so they don't propagate into backups - runtime deletes
+    already cascade via `ON DELETE CASCADE`, this is defense-in-depth for
+    orphans created while FK was off; (2) system-level rows are preserved in
+    BOTH shapes - `NULL` (modern `log_error`) and `''` (historical, normalized
+    to `NULL` by v006 on next migration); (3) the import path coerces
+    `"articleId": ""` -> `Option::None` -> SQL `NULL` via
+    `.filter(|s| !s.is_empty())` on the `Option<String>` extraction so
+    historical backups don't violate the FK constraint on the v006-rebuilt
+    `audit_entries` table. The row is preserved as a system-level entry, never
+    silently dropped. Tested in `tests/project_backup_test.rs` (3 tests) +
+    `tests/migration_recovery_test.rs::v006_heals_empty_string_article_id_to_null`;
+    inventory at `docs/test-plans/exim-tests.md`.
   - **`src-tauri/src/export/legacy_project.rs`** - reads the old single-table
     `article_references` schema and emits a current-format `ProjectBackup` JSON, deduplicating
     rows into `reference_papers` (by DOI -> title+authors+year) + `article_reference_links`.
@@ -932,6 +947,17 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     are correctly categorized. Same rename-create-copy-drop pattern as
     v003/v004/v005; idempotent so `heal_partial_migrations` is not needed. v001
     is updated so fresh DBs get `metadata_edit` in the initial CHECK constraint.
+    **Heal: empty-string `article_id` normalization** - the rebuild also runs
+    `UPDATE audit_entries_v006_old SET article_id = NULL WHERE article_id = ''`
+    BEFORE the orphan `DELETE` so historical malformed rows (system-level
+    entries written with `''` instead of `NULL` by an older `log_error`
+    implementation, found in the shipped `demo-project.bango.json`) are healed
+    rather than crashing the subsequent `INSERT ... SELECT` with
+    `FOREIGN KEY constraint failed (19)` under `PRAGMA foreign_keys=ON`. The
+    orphan sweep only matches `article_id IS NOT NULL`, so without the heal
+    running first the empty-string rows would slip past it. Order in `UP_SQL`:
+    RENAME -> CREATE -> heal UPDATE -> orphan DELETE -> INSERT...SELECT -> DROP.
+    Tested in `tests/migration_recovery_test.rs::v006_heals_empty_string_article_id_to_null`.
     The `update_article_metadata` Tauri command (in `commands/articles.rs`)
     writes audit rows with `action = 'metadata_edit'` and `details =
     "Metadata edited: <Field>"` (e.g. "Metadata edited: DOI"), coalesced within
@@ -1326,7 +1352,9 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   Current: `language-plan-v2-tests.md` (26 rows across 11 files),
   `translation-3-tests.md`, `search-strategy-tests.md` (8 rows: Search
   Strategy Builder pure helpers), `wiki-export-tests.md` (12 rows: Wiki
-  static-site export zip + markdown-tree + staticMode helpers).
+  static-site export zip + markdown-tree + staticMode helpers),
+  `exim-tests.md` (4 rows: export/import orphan-audit-entry cleanup +
+  v006 empty-string `article_id` heal).
 - **`.worktrees/`** - planning documents (`language-plan-v2.md` is the active
   translation plan; the superseded `language-plan.md` is archived in `DONOTUSE/`;
   implemented/temporary docs are archived in `DONOTUSE/`, such as the timeline plan
