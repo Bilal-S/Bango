@@ -9,13 +9,18 @@ import SuggestInput from '@/components/suggest-input.vue';
  * component's `props.modelValue` stays at the initial value and the
  * Enter / select handlers read stale state.
  */
-function mountWithVModel(initialValue = '', suggestions = ['Alpha', 'Beta', 'Gamma']) {
+function mountWithVModel(
+  initialValue = '',
+  suggestions = ['Alpha', 'Beta', 'Gamma'],
+  clearOnSelect = true
+) {
   let currentValue = initialValue;
   const wrapper = mount(SuggestInput, {
     props: {
       modelValue: currentValue,
       suggestions,
       placeholder: 'Add content tag…',
+      clearOnSelect,
     },
     attachTo: document.body,
   });
@@ -157,5 +162,55 @@ describe('suggest-input.vue', () => {
     const items = wrapper.findAll('li');
     expect(items).toHaveLength(3);
     expect(items[0]!.text()).toBe('Alpha');
+  });
+
+  // ── Single-select mode (`clearOnSelect: false`) ──────────────────
+  // Used by the bulk add-tag / add-label dialogs in `article-list.vue`,
+  // where the user picks exactly one value, sees it in the input, then
+  // confirms via a separate action button gated on `modelValue.trim()`.
+
+  it('with clearOnSelect false, selecting a suggestion populates the input and closes the dropdown', async () => {
+    const { wrapper, syncModel } = mountWithVModel('', undefined, false);
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+    await wrapper.find('input').setValue('Beta');
+    await syncModel();
+
+    await wrapper.findAll('li')[0]!.trigger('mousedown');
+    await syncModel();
+
+    // The select event should have fired with "Beta"...
+    expect(wrapper.emitted('select')).toEqual([['Beta']]);
+
+    // The input should now hold the selected value (NOT cleared)...
+    const updates = wrapper.emitted('update:modelValue');
+    expect(updates).toBeDefined();
+    const lastUpdate = updates![updates!.length - 1];
+    expect(lastUpdate).toEqual(['Beta']);
+
+    // The dropdown should be closed (0 <li> rendered).
+    await flushPromises();
+    expect(wrapper.findAll('li')).toHaveLength(0);
+  });
+
+  it('with clearOnSelect false, Enter does not clear the input', async () => {
+    const { wrapper, syncModel } = mountWithVModel('', undefined, false);
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+    await wrapper.find('input').setValue('Gamma');
+    await syncModel();
+
+    await wrapper.find('input').trigger('keydown', { key: 'Enter' });
+    await syncModel();
+
+    // The enter event should have fired with "Gamma"...
+    expect(wrapper.emitted('enter')).toEqual([['Gamma']]);
+
+    // The input should still hold "Gamma" (NOT cleared) so the parent's
+    // confirm button - typically gated on `modelValue.trim()` - stays enabled.
+    const updates = wrapper.emitted('update:modelValue');
+    expect(updates).toBeDefined();
+    const lastUpdate = updates![updates!.length - 1];
+    expect(lastUpdate).toEqual(['Gamma']);
   });
 });

@@ -814,6 +814,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
           <SuggestInput
             v-model="bulkInputValue"
             :suggestions="allTags"
+            :clear-on-select="false"
             placeholder="Select or enter tag name"
             @enter="handleBulkAddTag"
           />
@@ -848,6 +849,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
           <SuggestInput
             v-model="bulkInputValue"
             :suggestions="allLabels"
+            :clear-on-select="false"
             placeholder="Select or enter label name"
             @enter="handleBulkAddLabel"
           />

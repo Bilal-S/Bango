@@ -10,6 +10,13 @@ const showExportDialog = ref(false);
 const showDeleteDialog = ref(false);
 const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
+/** Validation error shown inline when the user picks a non-backup file type.
+ *  Distinct from `useExport().error`, which carries the backend import error. */
+const importError = ref<string | null>(null);
+/** Template ref for the hidden `<input type="file">` so the clear button can
+ *  reset its `value` (otherwise re-selecting the same file won't re-fire
+ *  `change`). */
+const importFileInput = ref<HTMLInputElement | null>(null);
 
 /** The effective Bango Documents directory path (storage root).
  * Shown in the Export dialog so the user knows what is NOT backed up. Fetched
@@ -34,10 +41,50 @@ onMounted(async () => {
   }
 });
 
+/** Accepted extensions for a Bango project backup file. The `accept` attribute
+ *  on the input is advisory only (users can override it), so the handler also
+ *  validates client-side and shows an inline error for mismatches. */
+const ACCEPTED_BACKUP_EXTENSIONS = ['.bango.json', '.json'];
+
+/** Returns true when `name` ends with one of the accepted backup extensions
+ *  (case-insensitive). `.bango.json` is checked first so a file like
+ *  `foo.bango.json` is not mis-matched on the bare `.json` branch. */
+function isAcceptedBackupFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  return ACCEPTED_BACKUP_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/** Handle a file selection from the hidden input. Resets the input's value
+ *  immediately so selecting the same file twice still fires `change` (the
+ *  browser skips the event when the value is unchanged). Validates the
+ *  extension client-side because `accept` is advisory, not enforcing.
+ *  @param event The DOM change event from the hidden `<input type="file">`. */
 function handleImportFile(event: Event): void {
   const target = event.target as HTMLInputElement;
-  if (target.files?.length) {
-    importFile.value = target.files[0] ?? null;
+  const file = target.files?.[0] ?? null;
+  // Reset regardless of outcome so a follow-up pick of the same file re-fires.
+  target.value = '';
+  if (!file) {
+    importFile.value = null;
+    importError.value = null;
+    return;
+  }
+  if (!isAcceptedBackupFile(file.name)) {
+    importFile.value = null;
+    importError.value = 'Please select a .bango.json or .json file.';
+    return;
+  }
+  importFile.value = file;
+  importError.value = null;
+}
+
+/** Clear the current file selection, the inline error, and the underlying
+ *  input element's value. Bound to the ✕ button next to the filename. */
+function clearImportFile(): void {
+  importFile.value = null;
+  importError.value = null;
+  if (importFileInput.value) {
+    importFileInput.value.value = '';
   }
 }
 
@@ -111,12 +158,34 @@ async function doDeleteProject(): Promise<void> {
         </div>
         <div class="field">
           <label class="field__label">Backup File</label>
-          <input
-            type="file"
-            accept=".bango.json,.json"
-            class="field__input"
-            @change="handleImportFile"
-          />
+          <label class="file-picker">
+            <span class="material-symbols-outlined file-picker__icon">upload_file</span>
+            <span v-if="!importFile" class="file-picker__placeholder">
+              Select a .bango.json backup file
+            </span>
+            <span v-else class="file-picker__filename" :title="importFile.name">
+              {{ importFile.name }}
+            </span>
+            <button
+              v-if="importFile"
+              type="button"
+              class="file-picker__clear"
+              aria-label="Clear selected file"
+              title="Clear selected file"
+              @click.stop.prevent="clearImportFile"
+            >
+              <span class="material-symbols-outlined">close</span>
+            </button>
+            <input
+              ref="importFileInput"
+              type="file"
+              accept=".bango.json,.json"
+              class="file-picker__input"
+              aria-label="Project backup file"
+              @change="handleImportFile"
+            />
+          </label>
+          <p v-if="importError" class="file-picker__error" role="alert">{{ importError }}</p>
         </div>
         <div class="dialog__actions">
           <button class="btn btn--outline" @click="showImportDialog = false">Cancel</button>
@@ -223,5 +292,115 @@ async function doDeleteProject(): Promise<void> {
   margin: 0;
   line-height: 18px;
   word-break: break-word;
+}
+
+/* Inline file picker styled to read as a single text input (mimics
+   `.field__input`: same border, padding, radius, bg, font) so it sits in the
+   same form family as the sibling text inputs. The whole box is a `<label>`
+   wrapping a visually-hidden `<input type="file">`, so clicking anywhere opens
+   the OS picker. The ✕ is pinned to the right edge via `margin-left: auto`. */
+.file-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background-color: var(--color-surface-container-lowest, #ffffff);
+  border: 1px solid var(--color-outline-variant, #c7c4d8);
+  border-radius: var(--radius-lg, 0.5rem);
+  padding: 0.625rem 1rem;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--color-on-surface, #1b1b24);
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.file-picker:hover {
+  border-color: var(--color-primary, #3525cd);
+}
+
+/* Focus ring mirrors `.field__input:focus`. Uses :focus-within so the hidden
+   input's keyboard focus lights up the whole box. */
+.file-picker:focus-within {
+  border-color: var(--color-primary, #3525cd);
+  box-shadow: 0 0 0 1px var(--color-primary, #3525cd);
+}
+
+.file-picker__icon {
+  font-size: 18px;
+  color: var(--color-outline, #777587);
+  flex-shrink: 0;
+}
+
+.file-picker__placeholder {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-outline, #777587);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-picker__filename {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Visually hidden but still focusable and clickable via the wrapping label.
+   Matches the `.dashboard__hidden-input` pattern. */
+.file-picker__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ✕ pinned to the right edge of the field. */
+.file-picker__clear {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-outline, #777587);
+  padding: var(--space-1);
+  border-radius: var(--radius-sm, 0.25rem);
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.file-picker__clear .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.file-picker__clear:hover {
+  background-color: #fef2f2;
+  color: var(--color-error, #dc2626);
+}
+
+.file-picker__clear:focus-visible {
+  outline: 2px solid var(--color-primary, #3525cd);
+  outline-offset: 1px;
+}
+
+.file-picker__error {
+  margin: 0;
+  font-size: var(--font-size-caption, 13px);
+  color: var(--color-error, #dc2626);
 }
 </style>
