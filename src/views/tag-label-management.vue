@@ -42,7 +42,7 @@ function onUpdateTagColor(id: string, color: string | null): void {
 function onFilterTag(tagId: string): void {
   void router.push({
     path: '/articles',
-    query: { tags: tagId, status: 'all', filterCollapsed: '1' },
+    query: { tags: tagId, status: 'all', filterCollapsed: '1', resetFilters: '1' },
   });
 }
 function onSuggestTags(): void {
@@ -65,7 +65,7 @@ function onUpdateLabelColor(id: string, color: string | null): void {
 function onFilterLabel(labelId: string): void {
   void router.push({
     path: '/articles',
-    query: { labels: labelId, status: 'all', filterCollapsed: '1' },
+    query: { labels: labelId, status: 'all', filterCollapsed: '1', resetFilters: '1' },
   });
 }
 function onSuggestLabels(): void {

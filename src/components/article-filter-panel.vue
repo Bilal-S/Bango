@@ -6,6 +6,7 @@ import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import { getColorScheme, type ColorScheme } from '@/utils/color';
 import SuggestInput from '@/components/suggest-input.vue';
+import ClearableInput from '@/components/clearable-input.vue';
 
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
@@ -15,6 +16,15 @@ const props = defineProps<{
   allAuthors: string[];
   allTags: string[];
   allLabels: string[];
+  /**
+   * Article count from the last applied query. When paired with
+   * `isFiltered`, drives the centered "Filter active: n article(s) found."
+   * notice in the action row so the user sees they are operating on a
+   * filtered list. Undefined before the first apply.
+   */
+  resultCount?: number;
+  /** True when any filter dimension is currently active. */
+  isFiltered?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -31,16 +41,92 @@ const MATCH_TYPES: { value: TitleMatchType; label: string }[] = [
   { value: 'exact', label: 'Exact' },
 ];
 
-const yearRangeInvalid = computed((): boolean => {
+/**
+ * Validation bounds for the Year-range filter. Both From and To must fall in
+ * `[YEAR_MIN, YEAR_MAX]` individually, and when both are set From must be <= To.
+ * Each year field gets its own invalid flag so the red border + hint target the
+ * specific field at fault; `yearRangeInvalid` is the union (gates Apply/Enter).
+ */
+const YEAR_MIN = 1850;
+const YEAR_MAX = 2100;
+
+/** True when the From year is individually out of range OR (both set) From > To. */
+const yearFromInvalid = computed((): boolean => {
   const from = props.filter.yearFrom;
   const to = props.filter.yearTo;
-  if (from !== null && from < 1850) return true;
-  if (to !== null && to > 2100) return true;
+  if (from !== null && (from < YEAR_MIN || from > YEAR_MAX)) return true;
   return from !== null && to !== null && from > to;
+});
+
+/** True when the To year is individually out of range OR (both set) From > To. */
+const yearToInvalid = computed((): boolean => {
+  const from = props.filter.yearFrom;
+  const to = props.filter.yearTo;
+  if (to !== null && (to < YEAR_MIN || to > YEAR_MAX)) return true;
+  return from !== null && to !== null && from > to;
+});
+
+/** Union flag: disables Apply/Enter while either year field is invalid. */
+const yearRangeInvalid = computed((): boolean => yearFromInvalid.value || yearToInvalid.value);
+
+/**
+ * Field-aware validation message. Names the specific problem so the user knows
+ * which field to fix, instead of the single generic hint that fired for any
+ * year issue.
+ */
+const yearHint = computed((): string => {
+  const from = props.filter.yearFrom;
+  const to = props.filter.yearTo;
+  const fromOutOfRange = from !== null && (from < YEAR_MIN || from > YEAR_MAX);
+  const toOutOfRange = to !== null && (to < YEAR_MIN || to > YEAR_MAX);
+  const rangeFlipped = from !== null && to !== null && from > to;
+  if (fromOutOfRange && toOutOfRange) {
+    return `Both years must be between ${YEAR_MIN}-${YEAR_MAX}.`;
+  }
+  if (fromOutOfRange) {
+    return `From year must be between ${YEAR_MIN}-${YEAR_MAX}.`;
+  }
+  if (toOutOfRange) {
+    return `To year must be between ${YEAR_MIN}-${YEAR_MAX}.`;
+  }
+  if (rangeFlipped) {
+    return 'From year must be less than or equal to To year.';
+  }
+  return '';
 });
 
 function updateField(key: keyof ArticleFilter, value: unknown): void {
   emit('update:filter', key, value);
+}
+
+/**
+ * Apply the filter on Enter. Skipped while the year range is invalid so the
+ * user sees the validation hint instead of a no-op apply. The parent (the
+ * Article list view) maps `@apply` to `applyFilters`, which runs the query.
+ *
+ * Wired onto every text input in the panel (Title, Author, Year From/To,
+ * Journal, DOI). The title match-type `<select>` is a dropdown and is
+ * intentionally excluded - selecting a new match type alone should not fire.
+ */
+function onEnterApply(): void {
+  if (yearRangeInvalid.value) return;
+  emit('apply');
+}
+
+/**
+ * Clear a single filter field and immediately re-submit the query. Used by the
+ * clearable-input "x" buttons. The `emptyValue` is field-specific: `''` for
+ * text fields, `null` for the numeric Year fields (matching their
+ * `number | null` types so the backend doesn't see an empty string).
+ */
+function clearField(key: keyof ArticleFilter, emptyValue: unknown): void {
+  emit('update:filter', key, emptyValue);
+  emit('apply');
+}
+
+/** Close the Author autocomplete dropdown (used when clearing the Author field). */
+function closeAuthorDropdown(): void {
+  showAuthorDropdown.value = false;
 }
 
 function toggleTag(tag: string): void {
@@ -170,21 +256,14 @@ const matchedAuthors = computed(() => {
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
     <div class="flex items-center justify-between mb-4">
       <h3 class="font-h2 text-h2 text-on-surface">Filters</h3>
-      <div class="flex items-center gap-2">
-        <button
-          class="text-xs text-slate-500 hover:text-indigo-600 transition-colors font-medium"
-          @click="emit('clear')"
-        >
-          Clear All
-        </button>
-        <button
-          class="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-          title="Close filters"
-          @click="emit('close')"
-        >
-          ×
-        </button>
-      </div>
+      <button
+        class="afp-close-btn flex items-center justify-center w-7 h-7 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+        title="Close filters"
+        aria-label="Close filters"
+        @click="emit('close')"
+      >
+        <span class="material-symbols-outlined text-[20px]">close</span>
+      </button>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -206,12 +285,13 @@ const matchedAuthors = computed(() => {
               {{ mt.label }}
             </option>
           </select>
-          <input
-            type="text"
+          <ClearableInput
+            :model-value="filter.titleText"
             placeholder="Filter by title..."
-            class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            :value="filter.titleText"
-            @input="updateField('titleText', ($event.target as HTMLInputElement).value)"
+            input-class="flex-1 min-w-0"
+            @update:model-value="updateField('titleText', $event)"
+            @clear="clearField('titleText', '')"
+            @enter="onEnterApply"
           />
         </div>
       </div>
@@ -220,17 +300,18 @@ const matchedAuthors = computed(() => {
       <div class="min-w-0">
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Author</label>
         <div class="relative">
-          <input
-            type="text"
+          <ClearableInput
+            :model-value="filter.authorText"
             placeholder="Filter by author..."
-            class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            :value="filter.authorText"
+            @update:model-value="updateField('authorText', $event)"
+            @input="showAuthorDropdown = true"
             @focus="showAuthorDropdown = true"
             @blur="hideAuthorDropdown()"
-            @input="
-              showAuthorDropdown = true;
-              updateField('authorText', ($event.target as HTMLInputElement).value);
+            @clear="
+              clearField('authorText', '');
+              closeAuthorDropdown();
             "
+            @enter="onEnterApply"
           />
           <div
             v-if="showAuthorDropdown && matchedAuthors.length > 0"
@@ -255,54 +336,44 @@ const matchedAuthors = computed(() => {
       <div>
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Year</label>
         <div class="flex items-center gap-2">
-          <input
+          <ClearableInput
+            :model-value="filter.yearFrom !== null ? String(filter.yearFrom) : ''"
             type="number"
             min="1850"
+            max="2100"
             placeholder="From"
-            class="no-spinner flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            :class="yearRangeInvalid ? 'border-red-300' : 'border-slate-200'"
-            :value="filter.yearFrom ?? ''"
-            @input="
-              updateField(
-                'yearFrom',
-                ($event.target as HTMLInputElement).value
-                  ? Number(($event.target as HTMLInputElement).value)
-                  : null
-              )
-            "
+            :input-class="`no-spinner flex-1 font-mono text-center ${yearFromInvalid ? 'border-red-300' : 'border-slate-200'}`"
+            @update:model-value="updateField('yearFrom', $event === '' ? null : Number($event))"
+            @clear="clearField('yearFrom', null)"
+            @enter="onEnterApply"
           />
           <span class="text-slate-400 text-sm">&ndash;</span>
-          <input
+          <ClearableInput
+            :model-value="filter.yearTo !== null ? String(filter.yearTo) : ''"
             type="number"
+            min="1850"
             max="2100"
             placeholder="To"
-            class="no-spinner flex-1 w-full bg-slate-50 border rounded-lg px-3 py-2 text-sm font-mono text-center outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            :class="yearRangeInvalid ? 'border-red-300' : 'border-slate-200'"
-            :value="filter.yearTo ?? ''"
-            @input="
-              updateField(
-                'yearTo',
-                ($event.target as HTMLInputElement).value
-                  ? Number(($event.target as HTMLInputElement).value)
-                  : null
-              )
-            "
+            :input-class="`no-spinner flex-1 font-mono text-center ${yearToInvalid ? 'border-red-300' : 'border-slate-200'}`"
+            @update:model-value="updateField('yearTo', $event === '' ? null : Number($event))"
+            @clear="clearField('yearTo', null)"
+            @enter="onEnterApply"
           />
         </div>
         <p v-if="yearRangeInvalid" class="mt-1.5 text-xs text-red-500">
-          Year must be between 1850–2100 and From ≤ To
+          {{ yearHint }}
         </p>
       </div>
 
       <!-- Journal -->
       <div>
         <label class="block text-label-caps text-slate-500 uppercase mb-2">Journal</label>
-        <input
-          type="text"
+        <ClearableInput
+          :model-value="filter.journal"
           placeholder="Filter by journal..."
-          class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          :value="filter.journal"
-          @input="updateField('journal', ($event.target as HTMLInputElement).value)"
+          @update:model-value="updateField('journal', $event)"
+          @clear="clearField('journal', '')"
+          @enter="onEnterApply"
         />
       </div>
 
@@ -310,14 +381,15 @@ const matchedAuthors = computed(() => {
       <div class="min-w-0">
         <label class="block text-label-caps text-slate-500 uppercase mb-2">DOI</label>
         <div class="flex items-center gap-2 min-w-0">
-          <input
-            type="text"
+          <ClearableInput
+            :model-value="filter.doiText"
             placeholder="Filter by DOI..."
-            class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
-            :value="filter.doiText"
+            input-class="flex-1 min-w-0"
             :disabled="filter.doiEmpty"
             :title="filter.doiEmpty ? 'Clear the Only-no-DOI checkbox to search by DOI text' : ''"
-            @input="updateField('doiText', ($event.target as HTMLInputElement).value)"
+            @update:model-value="updateField('doiText', $event)"
+            @clear="clearField('doiText', '')"
+            @enter="onEnterApply"
           />
           <label
             class="flex items-center gap-1.5 shrink-0 text-xs text-slate-600 cursor-pointer select-none whitespace-nowrap"
@@ -481,10 +553,28 @@ const matchedAuthors = computed(() => {
     </div>
     <!-- /Tags + Labels 2-column grid -->
 
-    <!-- Apply button -->
-    <div class="flex justify-end mt-4 pt-4 border-t border-slate-100">
+    <!-- Action row: Clear Filter (left) + Apply Filters (right). Sits on the
+         same level so the two complementary actions read as a pair. -->
+    <div class="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-slate-100">
       <button
-        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors active:scale-95"
+        class="afp-clear-btn inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors active:scale-95"
+        title="Clear all filters"
+        @click="emit('clear')"
+      >
+        <span class="material-symbols-outlined text-[18px]">filter_alt_off</span>
+        Clear Filter
+      </button>
+      <!-- Centered count notice: shown only while a filter is active so the
+           user sees they are operating on a filtered list. `flex-1` claims the
+           middle space so the two buttons stay pinned to the edges. -->
+      <span
+        v-if="isFiltered && resultCount !== undefined"
+        class="afp-result-count flex-1 text-center text-xs text-slate-500 font-medium px-2"
+      >
+        Filter active: {{ resultCount }} article{{ resultCount === 1 ? '' : '(s)' }} found.
+      </span>
+      <button
+        class="afp-apply-btn inline-flex shrink-0 items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors active:scale-95"
         :class="
           yearRangeInvalid
             ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
@@ -493,6 +583,7 @@ const matchedAuthors = computed(() => {
         :disabled="yearRangeInvalid"
         @click="emit('apply')"
       >
+        <span class="material-symbols-outlined text-[18px]">filter_alt</span>
         Apply Filters
       </button>
     </div>

@@ -1596,6 +1596,95 @@ describe('useArticleSearch', () => {
     });
   });
 
+  // ── Auto-select sole filter result ──────────────────────────────────
+  describe('auto-select sole filter result', () => {
+    it('applyFilters selects the article when exactly one result is returned', async () => {
+      const onlyArticle = sampleArticles[0]!;
+      const auditEntries: AuditEntry[] = [
+        {
+          id: 'au1',
+          articleId: onlyArticle.id,
+          timestamp: '2024-01-01',
+          action: 'import',
+          fromStatus: null,
+          toStatus: 'working',
+          details: 'Imported',
+          source: 'system',
+          articleTitle: onlyArticle.title,
+        },
+      ];
+      vi.mocked(tauriCommand).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === 'query_articles') return Promise.resolve([onlyArticle]);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        if (cmd === 'get_article') {
+          const id = args?.id as string;
+          return Promise.resolve({ ...onlyArticle, id });
+        }
+        if (cmd === 'get_audit_trail') return Promise.resolve(auditEntries);
+        return Promise.resolve(undefined);
+      });
+
+      const s = useArticleSearch();
+      s.filter.tags = ['rare-tag'];
+      await s.applyFilters();
+      await vi.waitFor(() => {
+        expect(s.selectedArticle.value?.id).toBe(onlyArticle.id);
+        expect(s.showDetail.value).toBe(true);
+      });
+    });
+
+    it('applyFilters does NOT select when multiple results are returned', async () => {
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        return Promise.resolve(undefined);
+      });
+
+      const s = useArticleSearch();
+      s.filter.tags = ['common-tag'];
+      await s.applyFilters();
+      // No auto-open: multiple results.
+      expect(s.showDetail.value).toBe(false);
+      expect(s.selectedArticle.value).toBeNull();
+    });
+
+    it('applyRouteParams selects the article when a tag deep-link yields one result', async () => {
+      const onlyArticle = sampleArticles[0]!;
+      vi.mocked(tauriCommand).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === 'query_articles') return Promise.resolve([onlyArticle]);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        if (cmd === 'get_article') {
+          const id = args?.id as string;
+          return Promise.resolve({ ...onlyArticle, id });
+        }
+        if (cmd === 'get_audit_trail') return Promise.resolve([]);
+        return Promise.resolve(undefined);
+      });
+
+      const s = useArticleSearch();
+      await s.applyRouteParams({ tags: ['t1'] });
+      await vi.waitFor(() => {
+        expect(s.selectedArticle.value?.id).toBe(onlyArticle.id);
+      });
+    });
+
+    it('applyRouteParams does NOT auto-select for a status-only deep-link', async () => {
+      const onlyArticle = sampleArticles[0]!;
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'query_articles') return Promise.resolve([onlyArticle]);
+        if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+        return Promise.resolve(undefined);
+      });
+
+      const s = useArticleSearch();
+      await s.applyRouteParams({ status: 'all' });
+      // Status-only deep-link must NOT surprise-open a detail even though one
+      // row came back - there is no filter dimension the user chose.
+      expect(s.showDetail.value).toBe(false);
+      expect(s.selectedArticle.value).toBeNull();
+    });
+  });
+
   // ── syncArticleToList ──────────────────────────────────────────────
   describe('syncArticleToList', () => {
     it('patches the article in the articles list', async () => {

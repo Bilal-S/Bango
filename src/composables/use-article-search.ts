@@ -484,7 +484,7 @@ export function useArticleSearch() {
     showFilters.value = !showFilters.value;
   }
 
-  function applyFilters(): void {
+  function applyFilters(): Promise<void> {
     query.search = filter.titleText || null;
     query.yearFrom = filter.yearFrom;
     query.yearTo = filter.yearTo;
@@ -499,7 +499,45 @@ export function useArticleSearch() {
     query.excludedTags = [...filter.excludedTags];
     query.excludedLabels = [...filter.excludedLabels];
     resetPage();
-    void search();
+    return search().then(autoSelectSingleResult);
+  }
+
+  /**
+   * Auto-open the detail panel when a filter application yields exactly one
+   * result. Fires for both the manual "Apply Filters" path and the
+   * route-deep-link path (e.g. clicking the filter button on a Tags & Labels
+   * entry that is assigned to a single article). No-op otherwise.
+   *
+   * Defined as a named function (not inline) so tests can assert the behavior
+   * through the public `applyFilters`/`applyRouteParams` APIs without needing
+   * direct access to the closure.
+   */
+  function autoSelectSingleResult(): Promise<void> {
+    if (articles.value.length === 1) {
+      const only = articles.value[0];
+      if (only) {
+        return selectArticle(only.id);
+      }
+    }
+    return Promise.resolve();
+  }
+
+  /**
+   * Gate for {@link autoSelectSingleResult} on the route-deep-link path.
+   * Auto-select is desirable when the user explicitly filtered by a tag/label
+   * (e.g. from the Tags & Labels screen) or by year/journal/author. It is NOT
+   * desirable for a bare status-only deep-link or an empty-params call, which
+   * should just load the list without surprising the user by opening a detail.
+   */
+  function routeHasFilterDimensions(params: RouteParams): boolean {
+    return Boolean(
+      (params.tags && params.tags.length > 0) ||
+      (params.labels && params.labels.length > 0) ||
+      (params.yearFrom !== undefined && Number.isFinite(params.yearFrom)) ||
+      (params.yearTo !== undefined && Number.isFinite(params.yearTo)) ||
+      params.journal ||
+      params.author
+    );
   }
 
   function clearFilters(): void {
@@ -889,6 +927,12 @@ export function useArticleSearch() {
     applyTagLabelParams(params, filter, query, tagsStore, labelsStore, showPanel, showFilters);
     applyNumericAndTextParams(params, filter, query, showPanel, showFilters);
     await search();
+    // Auto-open the detail panel when a deep-link with a filter dimension
+    // (tag/label/year/journal/author) yields exactly one result. Status-only
+    // deep-links and empty-params calls just load the list without surprise.
+    if (routeHasFilterDimensions(params)) {
+      await autoSelectSingleResult();
+    }
   }
 
   return {

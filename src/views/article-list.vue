@@ -749,6 +749,8 @@ async function handleBatchScrapeRefs(): Promise<void> {
         :all-authors="allAuthors"
         :all-tags="allTags"
         :all-labels="allLabels"
+        :result-count="resultCount"
+        :is-filtered="isFiltered"
         @apply="applyFilters"
         @clear="clearFilters"
         @close="toggleFilters"

@@ -725,6 +725,45 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     prefix + strike-through on the name, toggled by clicking the pill body (the `x` button
     removes entirely via `removeExcludedTag`/`removeExcludedLabel`), and a DOI text input
     paired with an "Only no DOI" checkbox that disables the input when checked.
+    **Filter UX contract** (v8.8): (a) `@keyup.enter="onEnterApply"` on every text input
+    (Title/Author/Year From+To/Journal/DOI) fires `apply` - guarded by `yearRangeInvalid`
+    so a no-op apply does not fire while the year hint is showing (the title match-type
+    `<select>` is excluded). **Year validation** (refined): each year field is
+    checked individually against the symmetric bounds
+    `[YEAR_MIN=1850, YEAR_MAX=2100]` (the old asymmetric check - From only
+    `< 1850`, To only `> 2100` - missed `From > 2100` and `To < 1850`; now
+    fixed), and when both are set From must be `<=` To. Per-field flags
+    `yearFromInvalid`/`yearToInvalid` drive the red border on the specific
+    field at fault (the old single flag turned both red); the union
+    `yearRangeInvalid` gates Apply/Enter. The hint is field-aware (`yearHint`
+    computed): "From year must be between 1850-2100.", "To year must be between
+    1850-2100.", "Both years must be between 1850-2100.", or "From year must be
+    less than or equal to To year." Native `min`/`max` on both inputs are
+    symmetric too (`1850`/`2100`). (b) The bottom action row is a Clear Filter (left) + Apply
+    Filters (right) pair: Clear Filter emits `clear` (bordered ghost button,
+    `filter_alt_off` icon, `.afp-clear-btn` class); Apply Filters carries a `filter_alt`
+    icon (`.afp-apply-btn`). The old top "Clear All" text link was removed (the new
+    Clear Filter button replaces it). (c) The header close button is a 28px Material
+    Symbols `close` icon (`.afp-close-btn`) - not the old bare `×` glyph. (d)
+    `article-toolbar.vue` renders a `filter_alt_off` icon button (`.toolbar-clear-filters`,
+    `v-if="isFiltered"`) to the left of the Filter toggle that emits `clearFilters`
+    (mapped to `clearSearch(); clearFilters();`); the Filter toggle already turns indigo
+    when `isFiltered`. (e) The panel's bottom action row carries a centered
+    `.afp-result-count` notice - "Filter active: n article(s) found." - between Clear
+    Filter and Apply Filters, shown only while `isFiltered` AND `resultCount` are both
+    set (`v-if` hides it before the first apply and after a clear). Singular form for
+    exactly 1 ("1 article found."). Both values are threaded as props from
+    `article-list.vue`, which destructures `resultCount` + `isFiltered` from
+    `useArticleSearch`. **Auto-select sole filter result**
+    (`useArticleSearch.autoSelectSingleResult`): `applyFilters` returns `Promise<void>`
+    and, after `search()`, opens the detail panel when exactly one result is returned.
+    `applyRouteParams` calls it too, gated by `routeHasFilterDimensions(params)` (tags/
+    labels/year/journal/author present) so a bare status-only deep-link or empty-params
+    call does NOT surprise-open a detail. **Tags & Labels deep-link reset**
+    (`tag-label-management.vue::onFilterTag`/`onFilterLabel`): pushes to `/articles` with
+    `resetFilters: '1'` (plus the existing `filterCollapsed: '1'`) so the D5 reset path
+    clears any prior session's filters before applying the chosen tag/label - the list
+    shows exactly that tag/label's articles instead of overlaying stale filters.
     **Bulk tag/label add + remove contract**: `bulk_add_tag_to_articles`,
     `bulk_add_label_to_articles`, `bulk_remove_tag_from_articles`, and
     `bulk_remove_label_from_articles` each return `Vec<String>` (the IDs of articles
@@ -1181,7 +1220,15 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     wrap the Tauri commands. Tested by `src/__tests__/openalex-store.test.ts` (5 tests).
   - **`src/types/openalex.ts`** - TypeScript interfaces for OpenAlex API types +
     `SORT_OPTIONS`, `PER_PAGE_OPTIONS`, `DEFAULT_OPENALEX_FILTERS` constants.
-  - **`src/components/`** - reusable components. `journal-info-card.vue` lazily loads
+  - **`src/components/`** - reusable components. `clearable-input.vue` is a reusable
+    text/number input with a built-in clear ("x") affordance pinned to the right edge
+    (Material Symbols `close` icon, `pr-8` on the input). Props: `modelValue` (v-model
+    string), `placeholder`, `inputClass` (extra classes on the inner input), `disabled`
+    (hides the "x" + native disabled styling - used by the DOI field when `doiEmpty`
+    is checked), `type` (`'text'`|`'number'`), `min`/`max`, `title`. Emits
+    `update:modelValue` (v-model, every keystroke), `clear` (ONLY when "x" is clicked),
+    `enter` (forwarded keyup.enter), `input`/`focus`/`blur` (forwarded). The canonical
+    place for the clearable-input pattern going forward. `journal-info-card.vue` lazily loads
     journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
     `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
     `src/styles/help-shared.css`. `settings/` holds the settings sub-components consumed by

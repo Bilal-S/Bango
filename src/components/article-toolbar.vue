@@ -42,6 +42,18 @@ function onPageSizeChange(event: Event): void {
     style="container-type: inline-size"
   >
     <div class="toolbar-left-group flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+      <!-- Clear-filter (only visible when a filter is active). Sits left of
+           the Filter toggle so the user sees the "filters are on" affordance
+           and can clear them in one click without expanding the panel. -->
+      <button
+        v-if="isFiltered"
+        class="toolbar-clear-filters flex items-center justify-center w-7 h-7 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer transition-colors shrink-0"
+        title="Clear filters"
+        aria-label="Clear filters"
+        @click="emit('clearFilters')"
+      >
+        <span class="material-symbols-outlined text-[18px]">filter_alt_off</span>
+      </button>
       <!-- Filter toggle -->
       <button
         class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 rounded-lg text-sm font-medium cursor-pointer transition-colors shrink-0"
