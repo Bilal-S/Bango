@@ -265,7 +265,10 @@ defineExpose({ scrollTable, canScrollLeft, canScrollRight });
               </td>
               <td class="py-5 px-2 max-w-xs">
                 <div class="flex items-center gap-1.5">
-                  <p class="text-body-main font-semibold text-slate-900 truncate">
+                  <p
+                    class="text-body-main font-medium text-slate-900 truncate"
+                    :title="article.title"
+                  >
                     {{ article.title }}
                   </p>
                   <button

@@ -169,7 +169,7 @@ const isTranslationPending = computed(
         </button>
       </div>
     </div>
-    <h2 class="font-h1 text-h1 text-on-surface leading-tight">
+    <h2 class="font-h1 text-h1 text-on-surface leading-tight font-semibold">
       {{ article.title }}
     </h2>
   </div>

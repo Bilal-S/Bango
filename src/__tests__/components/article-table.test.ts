@@ -179,3 +179,36 @@ describe('article-table.vue - exposed scroll surface', () => {
     expect(scrollEl.scrollBy).toHaveBeenCalledWith(expect.objectContaining({ left: -200 }));
   });
 });
+
+describe('article-table.vue - title cell tooltip', () => {
+  beforeEach(() => {
+    class FakeResizeObserver {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    globalThis.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+  });
+
+  it('binds the full article title to the title cell :title attribute for hover tooltip', () => {
+    const wrapper = mount(ArticleTable, {
+      props: {
+        articles: [makeArticle('a1', 1)],
+        selectedId: null,
+        sortColumn: null,
+        sortDirection: 'asc' as const,
+        selectedIds: new Set<string>(),
+        allSelected: false,
+        someSelected: false,
+      },
+      attachTo: document.body,
+    });
+    // The truncated title <p> carries the full title in its `title`
+    // attribute so the native browser tooltip reveals the full text on
+    // hover when the cell clips it. Locate it via the title cell's
+    // distinctive `max-w-xs` class + the truncate <p> inside.
+    const titleCell = wrapper.find('td.max-w-xs p.truncate');
+    expect(titleCell.exists()).toBe(true);
+    expect(titleCell.attributes('title')).toBe('Article a1');
+  });
+});
