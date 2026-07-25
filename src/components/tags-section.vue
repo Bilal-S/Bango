@@ -21,14 +21,38 @@ const sortedTags = computed(() =>
   [...props.article.tags].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 );
 
-// Suggestions from global store, excluding already-assigned values
-const tagSuggestions = computed(() => {
-  const assigned = new Set(props.article.tags.map((t) => t.toLowerCase()));
-  return tagsStore.tags
+/**
+ * All tag names from the global store, sorted alphabetically. Already-assigned
+ * tags are NOT excluded here; instead they are passed to `SuggestInput` via
+ * `disabledTagNames` so they render in the dropdown as grey + unselectable.
+ * This lets the user see that a matching tag already exists on the article
+ * (e.g. typing "learning" surfaces "machine-learning" as a disabled row)
+ * rather than the dropdown silently appearing empty.
+ */
+const tagSuggestions = computed(() =>
+  tagsStore.tags
     .map((t) => t.name)
-    .filter((name) => !assigned.has(name.toLowerCase()))
-    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-});
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+);
+
+/**
+ * Tag names already assigned to the article, passed to
+ * `SuggestInput.disabledSuggestions` so those rows render disabled. The
+ * case-insensitive matching is handled inside `SuggestInput` (it lowercases
+ * both sides), so the raw names are passed through unchanged.
+ */
+const disabledTagNames = computed(() => props.article.tags);
+
+/**
+ * True when an assigned tag's name contains the substring currently typed into
+ * the add input (case-insensitive). Drives the indigo halo on the matching
+ * chips above the input so the user can see the existing match at a glance.
+ */
+function tagMatchesQuery(name: string): boolean {
+  const q = newTag.value.trim().toLowerCase();
+  if (!q) return false;
+  return name.toLowerCase().includes(q);
+}
 
 /** Look up the color for a tag name from the global store */
 function tagColor(name: string): string | null {
@@ -62,7 +86,7 @@ async function addTag(val: string): Promise<void> {
         :key="'tag-' + tag"
         class="inline-flex items-center gap-1 group"
       >
-        <TagChip :name="tag" :color="tagColor(tag)" />
+        <TagChip :name="tag" :color="tagColor(tag)" :highlight="tagMatchesQuery(tag)" />
         <button
           class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer rounded-full hover:bg-slate-100 leading-none opacity-0 group-hover:opacity-100 transition-opacity"
           @click="removeTag(tag)"
@@ -75,6 +99,7 @@ async function addTag(val: string): Promise<void> {
       <SuggestInput
         v-model="newTag"
         :suggestions="tagSuggestions"
+        :disabled-suggestions="disabledTagNames"
         placeholder="Add content tag…"
         class="flex-1"
         @select="addTag"

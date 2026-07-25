@@ -182,4 +182,83 @@ describe('tags-section.vue', () => {
     });
     expect(wrapper.findComponent({ name: 'SuggestInput' }).exists()).toBe(true);
   });
+
+  // ── Already-assigned tags appear as disabled (not hidden) in the dropdown ─
+  // The user explicitly asked: do not hide already-matched items; disable them
+  // (grey + unselectable) so the user can see they exist. The assigned set is
+  // forwarded to SuggestInput via the `disabledSuggestions` prop.
+
+  it('forwards the assigned tags to SuggestInput as disabledSuggestions', () => {
+    const wrapper = mount(TagsSection, {
+      props: { article: makeArticle({ tags: ['machine-learning'] }) },
+      global: {
+        plugins: [createPinia()],
+        stubs: { TagChip: true },
+      },
+    });
+    const suggest = wrapper.findComponent({ name: 'SuggestInput' });
+    // The assigned tag should be present in the disabledSuggestions prop.
+    expect(suggest.props('disabledSuggestions')).toEqual(['machine-learning']);
+  });
+
+  it('includes assigned tags in the suggestions list (not excluded)', () => {
+    const wrapper = mount(TagsSection, {
+      props: { article: makeArticle({ tags: ['machine-learning'] }) },
+      global: {
+        plugins: [createPinia()],
+        stubs: { TagChip: true },
+      },
+    });
+    const suggest = wrapper.findComponent({ name: 'SuggestInput' });
+    // The previously-excluded tag now appears in suggestions (rendered disabled
+    // via the disabledSuggestions prop above).
+    expect(suggest.props('suggestions')).toContain('machine-learning');
+  });
+
+  // ── Halo on assigned chips whose name contains the typed query ──────────
+  // When the user types into the add input, assigned chips whose name
+  // contains the substring receive an indigo ring so the user sees the
+  // existing match. The `highlight` prop is threaded from `tagMatchesQuery`.
+
+  it('passes highlight=true to an assigned TagChip whose name contains the typed query', async () => {
+    const wrapper = mount(TagsSection, {
+      props: { article: makeArticle({ tags: ['machine-learning', 'clinical-trial'] }) },
+      global: {
+        plugins: [createPinia()],
+        // Use a real TagChip so we can assert on the received `highlight` prop.
+        stubs: { SuggestInput: true },
+      },
+    });
+
+    // Type a substring that matches the first assigned tag only.
+    await wrapper.findComponent({ name: 'SuggestInput' }).vm.$emit('update:modelValue', 'learning');
+    await wrapper.vm.$nextTick();
+
+    const chips = wrapper.findAllComponents({ name: 'TagChip' });
+    // machine-learning contains "learning" -> highlight=true.
+    const matching = chips.find((c) => c.props('name') === 'machine-learning');
+    expect(matching).toBeTruthy();
+    expect(matching!.props('highlight')).toBe(true);
+    // clinical-trial does not contain "learning" -> highlight=false.
+    const other = chips.find((c) => c.props('name') === 'clinical-trial');
+    expect(other).toBeTruthy();
+    expect(other!.props('highlight')).toBe(false);
+  });
+
+  it('passes highlight=false to all chips when the input is empty', () => {
+    const wrapper = mount(TagsSection, {
+      props: { article: makeArticle({ tags: ['machine-learning', 'clinical-trial'] }) },
+      global: {
+        plugins: [createPinia()],
+        stubs: { SuggestInput: true },
+      },
+    });
+
+    const chips = wrapper.findAllComponents({ name: 'TagChip' });
+    expect(chips.length).toBeGreaterThan(0);
+    // With no query typed, no chip should be highlighted.
+    for (const chip of chips) {
+      expect(chip.props('highlight')).toBe(false);
+    }
+  });
 });

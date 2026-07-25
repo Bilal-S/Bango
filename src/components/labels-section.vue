@@ -21,14 +21,36 @@ const sortedLabels = computed(() =>
   [...props.article.labels].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 );
 
-// Suggestions from global store, excluding already-assigned values
-const labelSuggestions = computed(() => {
-  const assigned = new Set(props.article.labels.map((l) => l.toLowerCase()));
-  return labelsStore.labels
+/**
+ * All label names from the global store, sorted alphabetically. Already-assigned
+ * labels are NOT excluded here; instead they are passed to `SuggestInput` via
+ * `disabledLabelNames` so they render in the dropdown as grey + unselectable.
+ * See `tags-section.vue` for the full rationale.
+ */
+const labelSuggestions = computed(() =>
+  labelsStore.labels
     .map((l) => l.name)
-    .filter((name) => !assigned.has(name.toLowerCase()))
-    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-});
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+);
+
+/**
+ * Label names already assigned to the article, passed to
+ * `SuggestInput.disabledSuggestions` so those rows render disabled. The
+ * case-insensitive matching is handled inside `SuggestInput` (it lowercases
+ * both sides), so the raw names are passed through unchanged.
+ */
+const disabledLabelNames = computed(() => props.article.labels);
+
+/**
+ * True when an assigned label's name contains the substring currently typed
+ * into the add input (case-insensitive). Drives the indigo halo on the
+ * matching chips above the input. Mirrors `tagMatchesQuery`.
+ */
+function labelMatchesQuery(name: string): boolean {
+  const q = newLabel.value.trim().toLowerCase();
+  if (!q) return false;
+  return name.toLowerCase().includes(q);
+}
 
 /** Look up the color for a label name from the global store */
 function labelColor(name: string): string | null {
@@ -62,7 +84,7 @@ async function addLabel(val: string): Promise<void> {
         :key="'label-' + label"
         class="inline-flex items-center gap-1 group"
       >
-        <LabelChip :name="label" :color="labelColor(label)" />
+        <LabelChip :name="label" :color="labelColor(label)" :highlight="labelMatchesQuery(label)" />
         <button
           class="material-symbols-outlined text-[14px] text-slate-400 hover:text-slate-700 cursor-pointer rounded-full hover:bg-slate-100 leading-none opacity-0 group-hover:opacity-100 transition-opacity"
           @click="removeLabel(label)"
@@ -75,6 +97,7 @@ async function addLabel(val: string): Promise<void> {
       <SuggestInput
         v-model="newLabel"
         :suggestions="labelSuggestions"
+        :disabled-suggestions="disabledLabelNames"
         placeholder="Add workflow label…"
         class="flex-1"
         @select="addLabel"

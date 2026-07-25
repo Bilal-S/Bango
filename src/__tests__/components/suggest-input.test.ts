@@ -12,13 +12,15 @@ import SuggestInput from '@/components/suggest-input.vue';
 function mountWithVModel(
   initialValue = '',
   suggestions = ['Alpha', 'Beta', 'Gamma'],
-  clearOnSelect = true
+  clearOnSelect = true,
+  disabledSuggestions: string[] = []
 ) {
   let currentValue = initialValue;
   const wrapper = mount(SuggestInput, {
     props: {
       modelValue: currentValue,
       suggestions,
+      disabledSuggestions,
       placeholder: 'Add content tag…',
       clearOnSelect,
     },
@@ -212,5 +214,112 @@ describe('suggest-input.vue', () => {
     expect(updates).toBeDefined();
     const lastUpdate = updates![updates!.length - 1];
     expect(lastUpdate).toEqual(['Gamma']);
+  });
+
+  // ── Matched-substring `<mark>` highlighting ────────────────────────
+  // Typing a substring wraps the matched portion of each visible suggestion
+  // in an indigo `<mark>` so the user can see *which* part of the name
+  // matched. Reinforces that matching is substring-based (any part).
+
+  it('wraps the matched substring in a <mark> element when typing', async () => {
+    const { wrapper, syncModel } = mountWithVModel();
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+    // "lph" matches inside "Alpha" (not a prefix) -> the substring feature
+    // is what we are exercising here.
+    await wrapper.find('input').setValue('lph');
+    await syncModel();
+
+    const items = wrapper.findAll('li');
+    expect(items).toHaveLength(1);
+    const mark = items[0]!.find('mark');
+    expect(mark.exists()).toBe(true);
+    expect(mark.text()).toBe('lph');
+  });
+
+  it('does not render a <mark> when there is no query', async () => {
+    const { wrapper } = mountWithVModel();
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+    // No query typed -> plain text, no <mark> anywhere.
+    expect(wrapper.findAll('mark')).toHaveLength(0);
+  });
+
+  it('highlights the match case-insensitively', async () => {
+    const { wrapper, syncModel } = mountWithVModel();
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+    // Uppercase query still matches lowercase suggestion text; the <mark>
+    // preserves the original casing of the suggestion.
+    await wrapper.find('input').setValue('BET');
+    await syncModel();
+
+    const items = wrapper.findAll('li');
+    expect(items).toHaveLength(1);
+    const mark = items[0]!.find('mark');
+    expect(mark.exists()).toBe(true);
+    // The matched span keeps the suggestion's original casing ("Bet").
+    expect(mark.text()).toBe('Bet');
+  });
+
+  // ── Disabled (already-assigned) rows ───────────────────────────────
+  // Values in `disabledSuggestions` render in the dropdown but greyed out
+  // and unselectable, so the user can see they exist without being able to
+  // re-add them.
+
+  it('renders disabled rows with the disabled styling and check icon', async () => {
+    const { wrapper } = mountWithVModel('', ['Alpha', 'Beta', 'Gamma'], true, ['Beta']);
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+
+    const items = wrapper.findAll('li');
+    expect(items).toHaveLength(3);
+    // The "Beta" row carries the disabled cursor class.
+    const betaItem = items[1]!;
+    expect(betaItem.classes()).toContain('cursor-not-allowed');
+    expect(betaItem.classes()).toContain('text-slate-400');
+    // A check icon is rendered to signal "already added".
+    expect(betaItem.find('.material-symbols-outlined').exists()).toBe(true);
+    // The non-disabled rows stay interactive.
+    expect(items[0]!.classes()).toContain('cursor-pointer');
+    expect(items[2]!.classes()).toContain('cursor-pointer');
+  });
+
+  it('does not emit select when a disabled row is clicked', async () => {
+    const { wrapper } = mountWithVModel('', ['Alpha', 'Beta', 'Gamma'], true, ['Beta']);
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+
+    const items = wrapper.findAll('li');
+    await items[1]!.trigger('mousedown');
+    await flushPromises();
+
+    // No select event should fire for the disabled row.
+    expect(wrapper.emitted('select')).toBeUndefined();
+  });
+
+  it('still emits select when a non-disabled row is clicked alongside a disabled one', async () => {
+    const { wrapper } = mountWithVModel('', ['Alpha', 'Beta', 'Gamma'], true, ['Beta']);
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+
+    const items = wrapper.findAll('li');
+    await items[0]!.trigger('mousedown');
+    await flushPromises();
+
+    expect(wrapper.emitted('select')).toEqual([['Alpha']]);
+  });
+
+  it('shows the "Already added." hint when the typed value matches a disabled row', async () => {
+    const { wrapper, syncModel } = mountWithVModel('', ['Alpha', 'Beta', 'Gamma'], true, ['Beta']);
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+    await wrapper.find('input').setValue('Beta');
+    await syncModel();
+
+    // The italic hint paragraph should now be present.
+    const hint = wrapper.find('p.italic');
+    expect(hint.exists()).toBe(true);
+    expect(hint.text()).toContain('Already added.');
   });
 });
