@@ -160,6 +160,14 @@ watch(
   () => props.articles,
   () => void nextTick(updateScrollState)
 );
+
+// Expose the horizontal-scroll controls + the availability flags so the
+// Articles view can drive them from the keyboard (ArrowLeft / ArrowRight
+// simulate clicks on the flank chevrons). The parent reads
+// `articleTableRef.value.canScrollLeft.value` and calls
+// `articleTableRef.value.scrollTable('left')`. The refs are exposed as-is
+// (readonly consumers); only this component mutates them via updateScrollState.
+defineExpose({ scrollTable, canScrollLeft, canScrollRight });
 </script>
 
 <template>

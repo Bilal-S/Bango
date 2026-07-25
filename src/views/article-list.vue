@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onActivated, ref, computed } from 'vue';
+import { onMounted, onActivated, onDeactivated, onUnmounted, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
@@ -12,6 +12,10 @@ import { useChatStore } from '@/stores/chat';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
 import { resolveBiblioReturn } from '@/utils/biblio-links';
+import {
+  classifyArticleDetailArrowKey,
+  classifyArticleTableArrowKey,
+} from '@/utils/article-keyboard-navigation';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -643,6 +647,94 @@ async function handleBatchScrapeRefs(): Promise<void> {
     await search();
   });
 }
+
+// ── Keyboard navigation ────────────────────────────────────────────
+// Context-dependent arrow-key shortcuts:
+//  - Detail panel OPEN: ArrowLeft / ArrowRight -> previous / next article
+//    (reuses the same `navigatePrev` / `navigateNext` the footer chevrons use,
+//    including cross-page behavior).
+//  - Detail panel CLOSED (table focused): ArrowUp / ArrowDown -> select the
+//    previous / next row (same navigation functions; the table auto-scrolls to
+//    keep the selected row visible); ArrowLeft / ArrowRight -> simulate clicks
+//    on the horizontal-scroll chevrons that flank the table (only when the
+//    corresponding direction is available).
+//
+// The listener is wired on `onActivated` and removed on `onDeactivated`
+// because this view is keep-alive cached: `onMounted` fires only once for the
+// component's lifetime, so a listener added there would keep firing while the
+// user is on another view (Wiki, Settings). The paired activation hooks are
+// the correct lifecycle for keep-alive components.
+const articleTableRef = ref<InstanceType<typeof ArticleTable> | null>(null);
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  return (
+    el.tagName === 'INPUT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.tagName === 'SELECT' ||
+    el.isContentEditable
+  );
+}
+
+/** True when the current tab owns an article table (not References / Search). */
+function tableIsVisible(): boolean {
+  const tab = activeStatusTab.value;
+  return tab !== 'references' && tab !== 'search';
+}
+
+function onKeyDown(e: KeyboardEvent): void {
+  // Never hijack typing in inputs / textareas / contenteditable / selects
+  // (filter panel, toolbar search, notes, tags, bulk dialogs).
+  if (isTypingTarget(e.target)) return;
+
+  // Detail-panel arrows: prev/next article.
+  if (showDetail.value && selectedArticle.value) {
+    const dir = classifyArticleDetailArrowKey(e);
+    if (dir === 'prev' && hasPrevious.value) {
+      e.preventDefault();
+      void navigatePrev();
+    } else if (dir === 'next' && hasNext.value) {
+      e.preventDefault();
+      void navigateNext();
+    }
+    return;
+  }
+
+  // Table arrows: only when the table is visible and the detail panel is closed.
+  if (!tableIsVisible() || showDetail.value) return;
+
+  const dir = classifyArticleTableArrowKey(e);
+  if (!dir) return;
+
+  if (dir === 'up' && hasPrevious.value) {
+    e.preventDefault();
+    void navigatePrev();
+  } else if (dir === 'down' && hasNext.value) {
+    e.preventDefault();
+    void navigateNext();
+  } else if (dir === 'scroll-left' && articleTableRef.value?.canScrollLeft) {
+    e.preventDefault();
+    articleTableRef.value.scrollTable('left');
+  } else if (dir === 'scroll-right' && articleTableRef.value?.canScrollRight) {
+    e.preventDefault();
+    articleTableRef.value.scrollTable('right');
+  }
+}
+
+// Activate / deactivate the listener with the keep-alive lifecycle so the
+// shortcuts only fire while the Articles view is actually active.
+onActivated(() => {
+  window.addEventListener('keydown', onKeyDown);
+});
+onDeactivated(() => {
+  window.removeEventListener('keydown', onKeyDown);
+});
+// Also guard the non-cached path: if keep-alive is ever removed, the listener
+// should still be cleaned up on unmount.
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown);
+});
 </script>
 
 <template>
@@ -762,6 +854,7 @@ async function handleBatchScrapeRefs(): Promise<void> {
         <div v-if="loading" class="text-center py-16 text-slate-400 text-sm">Loading...</div>
         <template v-else>
           <ArticleTable
+            ref="articleTableRef"
             :articles="articles"
             :selected-id="selectedId"
             :sort-column="sortColumn"
