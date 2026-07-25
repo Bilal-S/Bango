@@ -161,8 +161,17 @@ pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> 
 /// fails, the DB reset still succeeds (the error is logged to stderr). The
 /// user can delete the directory manually if needed.
 ///
+/// After the rebuild, `journal_index` is checked and reloaded from the bundled
+/// portal DB if empty (transparently heals the case where the startup auto-load
+/// silently failed on Windows). This reload is **blocking**: the schema rebuild
+/// has already committed, so a load failure does NOT undo the reset, but the
+/// error is written to the audit table and returned to the frontend so the user
+/// sees a Toast and knows journal matching is degraded.
+///
 /// Extracted from the `reset_project` command wrapper so it can be tested with
-/// a plain `&mut Connection` (no Tauri state required).
+/// a plain `&mut Connection` (no Tauri state required). The journal-index
+/// post-check is in the command wrapper because it needs the `AppHandle` to
+/// resolve the bundled resource path.
 pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppError> {
     // 1. Resolve the wiki root while `app_settings` is still available.
     //    `resolve_root` also ensures the dir exists (creating an empty one if
@@ -187,8 +196,22 @@ pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppErr
 }
 
 #[tauri::command]
-pub fn reset_project(db_state: State<'_, DbState>) -> Result<(), AppError> {
+pub fn reset_project(app: tauri::AppHandle, db_state: State<'_, DbState>) -> Result<(), AppError> {
     let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
-    reset_project_inner(&mut conn)
+    reset_project_inner(&mut conn)?;
+
+    // Post-reset: ensure the journal_index is populated. If the startup
+    // auto-load silently failed (e.g. a Windows `resource_dir()` resolution
+    // bug), `rebuild_schema` preserved an empty table. Reload it now so the
+    // user starts the fresh project with a working journal index. Blocking;
+    // a failure writes an audit error and returns Err so the frontend Toasts.
+    if let Err(e) = crate::ensure_journal_index_populated(&conn, &app) {
+        let msg = format!("Failed to reload journal index after reset: {e}");
+        eprintln!("[reset_project] {msg}");
+        let _ = crate::db::audit_repo::log_error(&conn, &msg);
+        return Err(AppError::Import(msg));
+    }
+
+    Ok(())
 }

@@ -354,6 +354,44 @@ pub(crate) fn load_journal_index_if_empty_handle(
     load_journal_index_from_path(&conn, &resource_path)
 }
 
+/// Ensure the `journal_index` table is populated. If it is empty, resolve the
+/// bundled portal DB (via `resolve_journal_resource_path`) and bulk-copy its
+/// rows. Used after `reset_project` (blocking; an error is surfaced to the
+/// frontend so the user sees a Toast) and at startup (best-effort; the caller
+/// logs the audit error and continues so the app still starts).
+///
+/// Returns `Ok(())` when the table is already populated or after a successful
+/// load. Returns `Err` when the table is still empty after the load attempt so
+/// the caller can decide whether to surface the error (reset) or just log it
+/// (startup).
+pub(crate) fn ensure_journal_index_populated(
+    conn: &rusqlite::Connection,
+    app: &tauri::AppHandle,
+) -> Result<(), crate::error::AppError> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM journal_index", [], |row| row.get(0))?;
+    if count > 0 {
+        return Ok(());
+    }
+
+    let resource_path = resolve_journal_resource_path(app.path());
+    if let Err(e) = load_journal_index_from_path(conn, &resource_path) {
+        return Err(crate::error::AppError::Import(format!(
+            "Failed to load journal index from {:?}: {e}",
+            resource_path
+        )));
+    }
+
+    let new_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM journal_index", [], |row| row.get(0))?;
+    if new_count == 0 {
+        return Err(crate::error::AppError::Import(format!(
+            "journal_index still empty after load; bundled DB not found at {:?}",
+            resource_path
+        )));
+    }
+    Ok(())
+}
+
 /// Background initialization: runs everything that does NOT need to block
 /// `.setup()` from returning. Runs on a dedicated OS thread
 /// (`std::thread::spawn`) because the work is entirely synchronous blocking
@@ -367,18 +405,26 @@ pub(crate) fn load_journal_index_if_empty_handle(
 /// Each step is independent and logs + skips on error so a failure in one
 /// does not prevent the others from running.
 fn init_background_state(handle: &tauri::AppHandle) {
-    // Journal Index auto-load.
-    let resource_path = resolve_journal_resource_path(handle.path());
+    // Journal Index auto-load (best-effort: a failure is logged to the audit
+    // table + stderr but does not stop startup; journal matching will simply
+    // be degraded until the next reset/upgrade reloads the table).
+    //
+    // Bind the lock result to a local before matching (mirroring the LLM +
+    // stranded-recovery blocks below). Inlining `match lock_conn(&db.conn)`
+    // keeps the `MutexGuard` temporary alive until after `db` is dropped,
+    // which trips E0597 under the borrow checker.
     {
         let db = handle.state::<DbState>();
         let result = db::connection::lock_conn(&db.conn);
         match result {
             Ok(conn) => {
-                if let Err(e) = load_journal_index_from_path(&conn, &resource_path) {
-                    eprintln!("warning: failed to load journal index: {e:#}");
+                if let Err(e) = ensure_journal_index_populated(&conn, handle) {
+                    let msg = format!("Startup journal index load failed: {e}");
+                    eprintln!("warning: {msg}");
+                    let _ = db::audit_repo::log_error(&conn, &msg);
                 }
             }
-            Err(e) => eprintln!("warning: failed to lock DB for journal index load: {e:#}"),
+            Err(e) => eprintln!("warning: failed to lock DB for journal index load: {e}"),
         }
     }
 
@@ -472,15 +518,40 @@ fn show_migration_failure_dialog(app: &tauri::App, app_data_dir: &std::path::Pat
 fn resolve_journal_resource_path(
     path: &tauri::path::PathResolver<tauri::Wry>,
 ) -> std::path::PathBuf {
+    // Tier 1: Tauri `resource_dir()` (canonical on most platforms).
     let prod_path = match path.resource_dir() {
         Ok(p) => p.join("journal_index.db"),
-        Err(_) => std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("journal_index.db"),
+        Err(e) => {
+            eprintln!("[journal_index] resource_dir() failed: {e}");
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("journal_index.db")
+        }
     };
     if prod_path.exists() {
         return prod_path;
     }
+
+    // Tier 2: relative to the running executable
+    // (`<exe_dir>/resources/journal_index.db`). This is the reliable fallback
+    // for Tauri 2.x NSIS/MSI/Store deployments where `resource_dir()` can
+    // resolve incorrectly (paths with spaces, sandboxed dirs, stale dirs after
+    // an update, etc.). The bundled resources ship in a `resources/`
+    // subdirectory of the main executable's directory.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let exe_relative = exe_dir.join("resources").join("journal_index.db");
+            if exe_relative.exists() {
+                eprintln!(
+                    "[journal_index] resource_dir path missing; using exe-relative path: {:?}",
+                    exe_relative
+                );
+                return exe_relative;
+            }
+        }
+    }
+
+    // Tier 3: dev-mode source-tree fallback (only exists during `cargo run`).
     let src_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resources")
         .join("journal_index.db");
@@ -488,15 +559,43 @@ fn resolve_journal_resource_path(
         eprintln!("[journal_index] dev-mode fallback: using source tree path {:?}", src_path);
         return src_path;
     }
-    // Neither found: return prod_path so the caller emits the "not found" warning.
+
+    // None found. Return prod_path so the caller has a concrete path to report;
+    // log every path tried so Windows diagnostics show what was searched.
+    eprintln!(
+        "[journal_index] bundled portal DB not found. Tried: resource_dir={:?}, exe-relative, source-tree={:?}",
+        prod_path, src_path
+    );
     prod_path
 }
 
-/// Core loader: ATTACH the portal DB and bulk-copy records if the table is empty.
+/// Core loader: copy records from the bundled portal DB into the target's
+/// empty `journal_index` table using **two separate connections**.
 ///
 /// IMPORTANT: journal_index is system-distributed reference data. It must
 /// survive project reset/upgrade and must not be exported/imported via backups.
-fn load_journal_index_from_path(
+///
+/// # Why two connections instead of `ATTACH DATABASE`
+///
+/// The previous implementation used `ATTACH DATABASE 'source' AS portal` on the
+/// target connection and then ran `INSERT INTO journal_index ... SELECT FROM
+/// portal.journal_index` inside a transaction. On Windows this fails when the
+/// bundled source DB is in WAL mode: SQLite cannot acquire the right
+/// cross-database lock within the target's transaction context, surfacing as an
+/// `ATTACH DATABASE` / `SQLITE_BUSY` / lock-acquisition error during a scripted
+/// first-run setup.
+///
+/// The robust fix is to open a **separate, read-only** connection to the source
+/// and stream rows into the target via its own transaction. Each connection
+/// holds an independent lock against an independent file, so there is no
+/// cross-database lock acquisition inside the target's transaction. The source
+/// is opened `SQLITE_OPEN_READ_ONLY`, so SQLite never needs a write lock on the
+/// bundled file. This is the canonical SQLite recommendation for copying data
+/// between databases.
+///
+/// `pub` so integration tests in `tests/` can drive the loader directly
+/// (per the project convention: helpers tested externally are `pub`).
+pub fn load_journal_index_from_path(
     conn: &rusqlite::Connection,
     resource_path: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -516,24 +615,64 @@ fn load_journal_index_from_path(
 
     eprintln!("[journal_index] loading from bundled portal DB: {:?}", resource_path);
 
-    let portal_path = resource_path.to_string_lossy().to_string();
-    conn.execute_batch(&format!(
-        "ATTACH DATABASE '{}' AS portal;",
-        portal_path.replace('\'', "''")
-    ))?;
+    // Open a READ-ONLY connection to the source DB. `READ_ONLY` guarantees the
+    // bundled file is never modified even if a stale `-wal`/`-shm` sidecar is
+    // present; SQLite's read-only WAL path reads the WAL'd data correctly.
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | rusqlite::OpenFlags::SQLITE_OPEN_URI;
+    let source = rusqlite::Connection::open_with_flags(resource_path, flags)?;
+    // Defensive busy_timeout so a stray writer on the source (shouldn't happen,
+    // but possible if two app instances race) returns SQLITE_BUSY_SNAPSHOT
+    // instead of an immediate error.
+    source.busy_timeout(std::time::Duration::from_secs(5))?;
 
-    conn.execute_batch(
-        "INSERT INTO journal_index
-            (id, journal_title, issn, eissn, publisher_name,
-             publisher_address, languages, web_of_science_categories,
-             is_system, source_file, created_at, updated_at)
-         SELECT
-            id, journal_title, issn, eissn, publisher_name,
-            publisher_address, languages, web_of_science_categories,
-            1, source_file, created_at, updated_at
-         FROM portal.journal_index;
-         DETACH DATABASE portal;",
-    )?;
+    // Stream rows from source -> target. CRITICAL: the SELECT is prepared on
+    // the SOURCE connection and the INSERT on the TARGET transaction. Both
+    // borrow their respective connections immutably; the borrows are
+    // independent so they can coexist in the same scope.
+    //
+    // `unchecked_transaction` matches the existing shared-ref signature and is
+    // correct here because we never mix it with `execute_batch`.
+    let tx = conn.unchecked_transaction()?;
+
+    {
+        let mut insert = tx.prepare(
+            "INSERT OR IGNORE INTO journal_index
+                (id, journal_title, issn, eissn, publisher_name,
+                 publisher_address, languages, web_of_science_categories,
+                 is_system, source_file, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9, ?10, ?11)",
+        )?;
+        let mut select = source.prepare(
+            "SELECT id, journal_title, issn, eissn, publisher_name,
+                    publisher_address, languages, web_of_science_categories,
+                    source_file, created_at, updated_at
+             FROM journal_index",
+        )?;
+        let mut rows = select.query([])?;
+
+        let mut copied: i64 = 0;
+        while let Some(row) = rows.next()? {
+            insert.execute(rusqlite::params![
+                row.get::<_, String>(0)?,         // id
+                row.get::<_, String>(1)?,         // journal_title
+                row.get::<_, Option<String>>(2)?, // issn
+                row.get::<_, Option<String>>(3)?, // eissn
+                row.get::<_, Option<String>>(4)?, // publisher_name
+                row.get::<_, Option<String>>(5)?, // publisher_address
+                row.get::<_, Option<String>>(6)?, // languages
+                row.get::<_, Option<String>>(7)?, // web_of_science_categories
+                row.get::<_, Option<String>>(8)?, // source_file
+                row.get::<_, String>(9)?,         // created_at
+                row.get::<_, String>(10)?,        // updated_at
+            ])?;
+            copied += 1;
+        }
+        eprintln!("[journal_index] streamed {} records from source", copied);
+    }
+
+    tx.commit()?;
 
     let new_count: i64 =
         conn.query_row("SELECT COUNT(*) FROM journal_index", [], |row| row.get(0))?;

@@ -129,6 +129,19 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   `run_migrations` fails in `.setup()` - the message names the resolved
   `app_data_dir` path and the three database files (`bango.db`,
   `bango.db-wal`, `bango.db-shm`) to back up or delete before restarting.
+  **Journal-index loader** (`lib.rs::load_journal_index_from_path`, `pub` so
+  `tests/journal_index_load_test.rs` can drive it directly): copies the bundled
+  portal DB rows into the empty target `journal_index` using **two separate
+  connections** — a `SQLITE_OPEN_READ_ONLY` source and the target's own
+  `unchecked_transaction` — NOT `ATTACH DATABASE`. The previous `ATTACH` +
+  `INSERT...SELECT FROM portal` implementation failed on Windows when the
+  bundled source was WAL-mode (SQLite could not acquire the cross-database
+  lock inside the target's transaction). Resource resolution is 3-tier
+  (`resource_dir()` → `<exe_dir>/resources/` → `CARGO_MANIFEST_DIR/resources/`);
+  the loader is invoked at startup (best-effort, audit-error on failure) and
+  after `reset_project` (blocking, `Err` on failure so the frontend Toasts).
+  Tested in `tests/journal_index_load_test.rs` (7 tests incl. the WAL-mode
+  regression + read-only-source guarantee).
   Platform DB paths (`BonCode.Bango` identifier): Windows
   `%APPDATA%\BonCode.Bango\bango.db`, macOS
   `~/Library/Application Support/BonCode.Bango/bango.db`, Linux
