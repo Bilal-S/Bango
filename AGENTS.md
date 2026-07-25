@@ -781,9 +781,42 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     count, with an info "not present" toast when nothing matched. The bulk action bar
     trigger buttons are labeled "Change Tag"/"Change Label". Tested in
     `tests/bulk_tag_label_test.rs` (17 tests).
-  - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match (`resolve_journal_id`,
-    `match_journal`, `get_journal_info`). `articles.journal_index_id` is populated on import
-    and refreshable via the `rematch_journals` command.
+  - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match. The
+    **single automatic matching function** `match_journal`
+    (`resolve_journal_id` wraps it; `get_journal_info` is the metadata+
+    aggregates reader) is the sole entry point for import, project restore,
+    the "Rematch Journals" command, and the frontend journal edit, so
+    hardening it fixes every path at once. Two pure `#[must_use]` helpers
+    drive the tiers: `normalize_issn` (strips EBSCO `(ISSN)` suffixes,
+    inserts the hyphen in unhyphenated 8-digit values, canonicalizes the
+    trailing X check digit to uppercase, rejects ISBN-length garbage via a
+    `^\d{4}-[\dXx]$` guard) and `normalize_journal_name` (lowercase, strip
+    parenthetical ISSN/edition suffixes, `&` -> `and`, `:`/`-` -> space,
+    collapse whitespace - symbol-insensitive *equality* comparison).
+    **Automatic matching is normalized-equality-only; there is intentionally
+    no LIKE/substring tier** because silent auto-linking during import must
+    not pick the wrong journal among similar names ("Journal of Health
+    Economics" vs "Journal of Health Economics and Policy"). Tier order:
+    `issn` col = `normalize_issn(article.issn)`, then `eissn` col with the
+    same value (cross-check, fixes the column-mismatch bug), then both
+    columns against `normalize_issn(article.eissn)`, then
+    `normalize_journal_name` equality on the title. The RIS parser
+    (`SN`/`EI`), BibTeX converter (`clean_issn` delegates here), and OpenAlex
+    mapping (`extract_issn_l`/`extract_eissn`) all normalize at parse time so
+    newly imported data is clean from the start; `rematch_journals` heals
+    legacy dirty data. `search_journal_index` (+ `JournalIndexMatch` struct)
+    is the **interactive** counterpart for the article-metadata journal
+    autocomplete: it DOES use LIKE substring (safe because the user reviews
+    candidates), gated on a 4-char minimum. `articles.journal_index_id` is
+    populated on import and refreshable via the `rematch_journals` command;
+    it is intentionally NOT round-tripped through project backup/restore
+    (the INSERT omits it; the post-import `rematch_all_journals` re-derives
+    it against the restoring machine's `journal_index`, so a backup restored
+    against a newer database benefits from matching improvements
+    automatically). Tested in `tests/journal_repo_test.rs` (31 tests:
+    original 11 + 6 `normalize_issn` + 3 `normalize_journal_name` + 2
+    cross-check + 1 dirty-ISSN + 1 symbol-safe-name + 1 no-substring-fallback
+    + 4 `search_journal_index`).
   - **`src-tauri/src/db/connection.rs`** - holds `DbState` (`conn: Mutex<Connection>`) and the
     shared `lock_conn(conn_mutex) -> Result<MutexGuard<'_, Connection>, AppError>` helper that
     maps `Mutex::lock()` poison failures to `AppError::LockPoisoned` (not `AppError::Database`).
@@ -1030,18 +1063,33 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     pattern as `tag-label-panel.vue` v6.9). Field-specific validation: **Year**
     requires a 4-digit integer in `[1800, 2100]` (frontend blocks invalid
     commits with a red hint; backend range guard clears out-of-range to NULL as
-    defense-in-depth); **Journal** re-resolves `journal_index_id` on every edit
-    via `journal_repo::resolve_journal_id` so the bibliometric pipelines stay
-    in sync — when the typed name is not in the local index, `journalIndexId`
-    is `null` and the label shows an amber "(unrecognized)" annotation (the
-    entry is still accepted; "Rematch Journals" in Settings retries); **Lang**
-    is a `<select>` dropdown of ~24 common academic languages with an "Other…"
-    option that reveals a free-text input for custom values. Tested in
+    defense-in-depth); **Journal** uses the reusable `suggest-input.vue`
+    combobox (structured-options mode) backed by the `search_journal_index`
+    command (200ms debounced): each candidate row shows the title (bold),
+    publisher (muted sublabel), and an ISSN badge; selecting a row commits the
+    canonical title via `update_article_metadata` AND links the article via the
+    dedicated `link_article_to_journal_index` command (which also backfills
+    ISSN/eISSN via COALESCE + sets the biblio/wiki staleness flags). Free-text
+    Enter commits the raw text and the backend's hardened `match_journal`
+    resolves the link if it can. When the typed/committed name is not in the
+    local index, `journalIndexId` is `null` and the label shows an amber
+    "(unrecognized)" annotation (the entry is still accepted; "Rematch
+    Journals" in Settings retries). **Lang** is a `<select>` dropdown of ~24
+    common academic languages with an "Other…" option that reveals a free-text
+    input for custom values. The `suggest-input.vue` combobox gained a
+    structured-options mode (`options: SuggestOption[]` prop, takes precedence
+    over the legacy `suggestions: string[]`) that emits the selected
+    `SuggestOption` object as the second `select` argument so the parent can
+    read the `id`; it also emits `escape` (bubbled from the internal Escape
+    handler) so single-select parents can cancel the edit. `SuggestOption` +
+    `JournalIndexMatch` types live in `src/types/index.ts`. Tested in
     `tests/article_metadata_test.rs` (19 Rust tests: 7 field round-trips +
     year range guard boundaries + journal re-link recognized/unrecognized +
     empty/whitespace clear + audit row) +
-    `src/__tests__/components/article-metadata.test.ts` (15 inline-edit +
-    placeholder + validation tests).
+    `src/__tests__/components/article-metadata.test.ts` (33 inline-edit +
+    placeholder + validation tests, incl. journal autocomplete Enter/Escape
+    paths) + `src/__tests__/components/suggest-input.test.ts` (22 tests incl.
+    structured-options mode).
   - **`src-tauri/src/wiki/fts.rs`** (T1.2 update) - chunk-aware FTS5 schema:
     `ensure_table` now creates `chunk_index UNINDEXED, section UNINDEXED, parent_slug
     UNINDEXED` columns. `PageRow` carries `chunk_index: Option<i32>`, `section:

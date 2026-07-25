@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, nextTick, computed, watch } from 'vue';
-import type { Article } from '@/types';
+import { invoke } from '@tauri-apps/api/core';
+import type { Article, JournalIndexMatch, SuggestOption } from '@/types';
 import { useToast } from '@/composables/use-toast';
+import SuggestInput from '@/components/suggest-input.vue';
 
 const props = defineProps<{
   article: Article;
@@ -236,6 +238,97 @@ const journalUnrecognized = computed(
     !!props.article.journal && props.article.journal.trim() !== '' && !props.article.journalIndexId
 );
 
+// ── Journal autocomplete ───────────────────────────────────────────────
+// When editing the Journal field, a `SuggestInput` (options mode) debounces
+// the typed query through the `search_journal_index` IPC and renders
+// candidate rows (title, publisher, ISSN badge). Selecting a row commits the
+// canonical title AND links the article to the journal_index row; free-text
+// Enter commits the raw text and lets the backend's hardened `match_journal`
+// resolve it if possible.
+const journalOptions = ref<SuggestOption[]>([]);
+let journalSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Build the structured option list from backend `JournalIndexMatch` rows. */
+function toOptions(matches: JournalIndexMatch[]): SuggestOption[] {
+  return matches.map((m) => ({
+    id: m.id,
+    label: m.journalTitle,
+    sublabel: m.publisherName ?? undefined,
+    badge: m.issn ?? m.eissn ?? undefined,
+  }));
+}
+
+/**
+ * Debounced journal search. Fires 200ms after the last keystroke when editing
+ * the journal field. Queries shorter than 2 characters clear the list.
+ */
+function runJournalSearch(query: string): void {
+  if (journalSearchTimer) clearTimeout(journalSearchTimer);
+  const trimmed = query.trim();
+  if (trimmed.length < 2) {
+    journalOptions.value = [];
+    return;
+  }
+  journalSearchTimer = setTimeout(() => {
+    invoke<JournalIndexMatch[]>('search_journal_index', { query: trimmed })
+      .then((matches) => {
+        journalOptions.value = toOptions(matches);
+      })
+      .catch(() => {
+        // Non-fatal: the user can still free-text commit on Enter.
+        journalOptions.value = [];
+      });
+  }, 200);
+}
+
+/**
+ * Commit a journal autocomplete selection. Emits the canonical title to the
+ * parent (so `update_article_metadata` stores it) AND links the article to the
+ * chosen `journal_index` row via the dedicated IPC, which also backfills
+ * ISSN/eISSN and marks the biblio + wiki staleness flags.
+ */
+function onJournalSelect(_name: string, option?: SuggestOption): void {
+  if (!option) return;
+  emit('updateField', 'journal', option.label);
+  invoke('link_article_to_journal_index', {
+    articleId: props.article.id,
+    journalIndexId: option.id,
+  }).catch((e: unknown) => {
+    toast.show(`Failed to link journal: ${String(e)}`, 'error');
+  });
+  editingField.value = null;
+  editingValue.value = '';
+  journalOptions.value = [];
+}
+
+/**
+ * Free-text journal commit (Enter with no row selected). Emits the raw text so
+ * the backend's hardened `match_journal` resolves the link if it can.
+ */
+function commitJournalText(text: string): void {
+  const trimmed = text.trim();
+  if (trimmed === readField('journal')) {
+    editingField.value = null;
+    editingValue.value = '';
+    journalOptions.value = [];
+    return;
+  }
+  emit('updateField', 'journal', trimmed);
+  editingField.value = null;
+  editingValue.value = '';
+  journalOptions.value = [];
+}
+
+// Clear the option list whenever the journal edit closes.
+watch(editingField, (f) => {
+  if (f !== 'journal') journalOptions.value = [];
+});
+
+// Trigger the debounced journal search on each keystroke while editing journal.
+watch(editingValue, (v) => {
+  if (editingField.value === 'journal') runJournalSearch(v);
+});
+
 /** Live year validation error for the input hint (null when valid/empty). */
 const yearInputError = computed<string | null>(() => {
   if (editingField.value !== 'publicationYear') return null;
@@ -368,14 +461,16 @@ watch(
                 (unrecognized)
               </span>
             </span>
-            <input
+            <SuggestInput
               v-if="editingField === 'journal'"
               v-model="editingValue"
-              class="meta-edit-input px-2 py-1 bg-white border border-primary rounded font-body-sm text-on-surface transition-all focus:ring-1 focus:border-primary focus:ring-primary"
-              placeholder="Journal name"
-              @keyup.enter="commitEdit"
-              @keyup.escape="cancelEdit"
-              @blur="commitEdit"
+              :options="journalOptions"
+              :clear-on-select="false"
+              :placeholder="'Journal name'"
+              class="meta-edit-input"
+              @select="onJournalSelect"
+              @enter="commitJournalText"
+              @escape="cancelEdit"
             />
             <span
               v-else

@@ -63,10 +63,15 @@ pub fn split_pages(pages: &str) -> (Option<String>, Option<String>) {
     (Some(pages.to_string()), None)
 }
 
-/// Cleans an ISSN/ISBN string by stripping format suffixes like "; Print" or "; Electronic".
+/// Cleans an ISSN/ISBN string for storage. Delegates to the shared
+/// `journal_repo::normalize_issn` so BibTeX and RIS imports use identical
+/// normalization rules (strips `; Print`/`(ISSN)` suffixes, inserts the hyphen
+/// in unhyphenated 8-digit values, rejects invalid ISBN-length garbage).
+/// Returns the cleaned ISSN or an empty string when the input is not a valid
+/// ISSN; callers store the result only when non-empty.
 #[must_use]
 pub fn clean_issn(issn: &str) -> String {
-    issn.split(';').next().unwrap_or(issn).trim().to_string()
+    crate::db::journal_repo::normalize_issn(issn)
 }
 
 /// Converts a parsed BibTeX entry into an RisRecord for use with the
@@ -113,11 +118,17 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
 
     record.notes = field_map.get("note").map(|v| (*v).to_string());
 
-    // ISSN (clean suffixes like "; Print" or "; Electronic")
-    record.issn = field_map.get("issn").or_else(|| field_map.get("isbn")).map(|v| clean_issn(v));
+    // ISSN (clean suffixes like "; Print" or "; Electronic"). `clean_issn`
+    // returns "" for invalid input, so filter empties to `None` rather than
+    // storing a sentinel empty string.
+    record.issn = field_map
+        .get("issn")
+        .or_else(|| field_map.get("isbn"))
+        .map(|v| clean_issn(v))
+        .filter(|s| !s.is_empty());
 
-    // Electronic ISSN
-    record.eissn = field_map.get("eissn").map(|v| clean_issn(v));
+    // Electronic ISSN (same empty-filter treatment).
+    record.eissn = field_map.get("eissn").map(|v| clean_issn(v)).filter(|s| !s.is_empty());
 
     // Year
     record.publication_year = field_map.get("year").and_then(|y| y.trim().parse::<i32>().ok());

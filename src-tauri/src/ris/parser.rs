@@ -358,17 +358,24 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
             }
         }
         "SN" => {
-            // First SN → issn (print), second SN → eissn (electronic)
-            if record.issn.is_none() {
-                record.issn = Some(value.to_string());
-            } else if record.eissn.is_none() {
-                record.eissn = Some(value.to_string());
+            // First SN -> issn (print), second SN -> eissn (electronic).
+            // Route through `normalize_issn` so dirty EBSCO exports like
+            // `"13665545 (ISSN)"` or unhyphenated `"13665545"` are cleaned at
+            // parse time. Empty (invalid) results are skipped.
+            let norm = crate::db::journal_repo::normalize_issn(value);
+            if !norm.is_empty() {
+                if record.issn.is_none() {
+                    record.issn = Some(norm);
+                } else if record.eissn.is_none() {
+                    record.eissn = Some(norm);
+                }
             }
         }
         "EI" => {
-            // EI = Electronic ISSN
-            if record.eissn.is_none() {
-                record.eissn = Some(value.to_string());
+            // EI = Electronic ISSN. Same normalization as SN.
+            let norm = crate::db::journal_repo::normalize_issn(value);
+            if !norm.is_empty() && record.eissn.is_none() {
+                record.eissn = Some(norm);
             }
         }
         "M3" => {

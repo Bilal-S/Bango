@@ -857,3 +857,58 @@ fn export_import_preserves_null_audit_details() {
         .expect("check details null after import");
     assert!(is_null, "post: details must remain NULL after round-trip");
 }
+
+/// Import re-matches journals using the hardened `match_journal`, so a backup
+/// whose article has `journal_index_id = NULL` (the backup never round-trips
+/// that FK) and a symbol-variant journal name (`&` vs `and`) gets linked on
+/// restore. This proves the Phase 1 symbol-folding fix flows through the
+/// project-import path automatically.
+#[test]
+fn import_project_rematches_journals_with_symbol_variants() {
+    let conn = setup_db();
+
+    // Add a journal_index row using the "and" spelling.
+    conn.execute(
+        "INSERT INTO journal_index (id, journal_title, issn, eissn, is_system, source_file)
+         VALUES ('j-pom', 'Production and Operations Management', '1059-1478', NULL, 1, 'test.csv')",
+        [],
+    )
+    .expect("seed journal_index");
+
+    // Insert an article whose journal uses the `&` spelling and has no link.
+    let a = article_repo::insert_article(
+        &conn,
+        &NewArticle {
+            title: "Supply Chain Resilience".to_string(),
+            journal: Some("Production & Operations Management".to_string()),
+            reference_type: Some("JOUR".to_string()),
+            ..Default::default()
+        },
+    )
+    .expect("insert article");
+    article_repo::move_to_working(&conn, &a.id).expect("move to working");
+
+    // Export (journal_index_id is NOT exported; it is derived on import).
+    let json = export_project(&conn).expect("export");
+
+    // Import into a fresh DB that also has the same journal_index row (simulating
+    // the restoring machine's local reference data).
+    let conn2 = setup_db();
+    conn2
+        .execute(
+            "INSERT INTO journal_index (id, journal_title, issn, eissn, is_system, source_file)
+             VALUES ('j-pom', 'Production and Operations Management', '1059-1478', NULL, 1, 'test.csv')",
+            [],
+        )
+        .expect("seed journal_index on target");
+    import_project(&conn2, &json).expect("import");
+
+    // The post-import rematch must have linked the article via the symbol-safe
+    // name tier (`&` -> `and`).
+    let linked_id: Option<String> = conn2
+        .query_row("SELECT journal_index_id FROM articles WHERE id = ?1", params![a.id], |row| {
+            row.get(0)
+        })
+        .expect("query journal_index_id");
+    assert_eq!(linked_id.as_deref(), Some("j-pom"), "import must re-link symbol-variant journal");
+}

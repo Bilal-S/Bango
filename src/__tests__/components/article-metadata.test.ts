@@ -245,27 +245,29 @@ describe('article-metadata.vue', () => {
 
   it('shows an edit input on double-click of the Journal value', async () => {
     const wrapper = mount(ArticleMetadata, { props: { article: makeArticle() } });
-    // No input before edit.
+    // No journal editor before edit.
     expect(wrapper.find('.meta-edit-input').exists()).toBe(false);
     // Find the Journal value span (has the @dblclick handler).
     const journalSpans = wrapper.findAll('span.cursor-text');
     const journalSpan = journalSpans.find((s) => s.text() === 'Nature');
     expect(journalSpan).toBeTruthy();
     await journalSpan!.trigger('dblclick');
-    // Input should now be visible.
-    const input = wrapper.find('.meta-edit-input');
+    // The journal editor is a SuggestInput whose root carries `.meta-edit-input`;
+    // the actual <input> is nested inside.
+    const input = wrapper.find('.meta-edit-input input');
     expect(input.exists()).toBe(true);
     expect((input.element as HTMLInputElement).value).toBe('Nature');
   });
 
-  it('emits updateField with field + value when committing a Journal edit', async () => {
+  it('emits updateField with field + value when committing a Journal edit on Enter', async () => {
     const wrapper = mount(ArticleMetadata, { props: { article: makeArticle() } });
     const journalSpans = wrapper.findAll('span.cursor-text');
     const journalSpan = journalSpans.find((s) => s.text() === 'Nature');
     await journalSpan!.trigger('dblclick');
-    const input = wrapper.find('.meta-edit-input');
+    const input = wrapper.find('.meta-edit-input input');
     await input.setValue('Science');
-    await input.trigger('blur');
+    // Journal commits via Enter (free-text path -> commitJournalText), not blur.
+    await input.trigger('keydown', { key: 'Enter' });
     const emitted = wrapper.emitted('updateField');
     expect(emitted).toBeTruthy();
     expect(emitted![0]![0]).toBe('journal');
@@ -286,35 +288,38 @@ describe('article-metadata.vue', () => {
     expect(emitted![0]![1]).toEqual(['Doe A', 'Roe B']);
   });
 
-  it('does NOT emit updateField when the value is unchanged', async () => {
+  it('does NOT emit updateField when the Journal value is unchanged on Enter', async () => {
     const wrapper = mount(ArticleMetadata, { props: { article: makeArticle() } });
     const journalSpans = wrapper.findAll('span.cursor-text');
     const journalSpan = journalSpans.find((s) => s.text() === 'Nature');
     await journalSpan!.trigger('dblclick');
-    const input = wrapper.find('.meta-edit-input');
-    // Value is pre-seeded with the current value.
-    await input.trigger('blur');
+    const input = wrapper.find('.meta-edit-input input');
+    // Value is pre-seeded with the current value; Enter commits the unchanged text.
+    await input.trigger('keydown', { key: 'Enter' });
     expect(wrapper.emitted('updateField')).toBeFalsy();
   });
 
-  it('cancels the edit on Escape without emitting', async () => {
+  it('cancels the Journal edit on Escape without emitting', async () => {
     const wrapper = mount(ArticleMetadata, { props: { article: makeArticle() } });
     const journalSpans = wrapper.findAll('span.cursor-text');
     const journalSpan = journalSpans.find((s) => s.text() === 'Nature');
     await journalSpan!.trigger('dblclick');
-    const input = wrapper.find('.meta-edit-input');
+    const input = wrapper.find('.meta-edit-input input');
     await input.setValue('Changed');
-    await input.trigger('keyup.escape');
+    await input.trigger('keydown', { key: 'Escape' });
     expect(wrapper.emitted('updateField')).toBeFalsy();
-    // Input is gone; value span is back.
+    // Journal editor is gone; value span is back.
     expect(wrapper.find('.meta-edit-input').exists()).toBe(false);
   });
 
   it('clears the field when committing an empty value (scalar)', async () => {
+    // Uses the DOI field (a plain <input> with blur-commit) rather than the
+    // Journal field (now a SuggestInput that commits on Enter) so the scalar
+    // clear-on-empty behavior is exercised on a standard blur-commit input.
     const wrapper = mount(ArticleMetadata, { props: { article: makeArticle() } });
-    const journalSpans = wrapper.findAll('span.cursor-text');
-    const journalSpan = journalSpans.find((s) => s.text() === 'Nature');
-    await journalSpan!.trigger('dblclick');
+    // The DOI edit affordance is reached via the pencil icon button.
+    const editBtn = wrapper.find('button[title="Edit DOI"]');
+    await editBtn.trigger('click');
     const input = wrapper.find('.meta-edit-input');
     await input.setValue('   ');
     await input.trigger('blur');

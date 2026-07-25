@@ -1,10 +1,21 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import type { SuggestOption } from '@/types';
 
 const props = withDefaults(
   defineProps<{
     modelValue: string;
-    suggestions: string[];
+    /**
+     * Legacy flat-string suggestions. Ignored when `options` is provided.
+     * Optional now so options-only consumers (e.g. the journal autocomplete)
+     * can omit it.
+     */
+    suggestions?: string[];
+    /**
+     * Structured suggestions. When provided, takes precedence over
+     * `suggestions`. Powers the article-metadata journal autocomplete.
+     */
+    options?: SuggestOption[];
     placeholder: string;
     /**
      * Controls post-selection behavior.
@@ -15,8 +26,8 @@ const props = withDefaults(
      *   whose `@select` handler applies each pick right away.
      * - `false`: the selected value populates the input and the dropdown
      *   closes. Intended for single-select consumers (e.g. the bulk
-     *   add-tag/add-label dialogs in `article-list.vue`) where the user picks
-     *   exactly one value and then confirms via a separate action button.
+     *   add-tag/add-label dialogs in `article-list.vue`, and the journal
+     *   autocomplete) where the user picks exactly one value.
      */
     clearOnSelect?: boolean;
     /**
@@ -24,24 +35,54 @@ const props = withDefaults(
      * article-detail tag/label sections to surface already-assigned items as
      * disabled (instead of hiding them) so the user can see they exist while
      * typing. Selecting a disabled row is a no-op (no `select` emit). The
-     * values are still subject to the normal substring filter.
+     * values are still subject to the normal substring filter. Compared by
+     * label (case-insensitive).
      */
     disabledSuggestions?: string[];
   }>(),
-  { clearOnSelect: true, disabledSuggestions: () => [] }
+  { clearOnSelect: true, suggestions: () => [], options: () => [], disabledSuggestions: () => [] }
 );
 
 const emit = defineEmits<{
   'update:modelValue': [value: string];
-  select: [name: string];
+  /**
+   * Emitted on row click/Enter. The first argument is always the label string
+   * (backward-compatible with string-mode consumers). When `options` is in
+   * use, the matching `SuggestOption` object is emitted as the second argument
+   * so the parent can read the `id` (e.g. to link an article to a journal).
+   */
+  select: [name: string, option?: SuggestOption];
   enter: [text: string];
+  /**
+   * Emitted on Escape. The component closes its own dropdown, then bubbles the
+   * Escape so a single-select parent (e.g. the journal autocomplete in
+   * `article-metadata.vue`) can cancel the whole edit. Without this the parent
+   * has no way to react to Escape because the keystroke is consumed here.
+   */
+  escape: [];
 }>();
 
 const isOpen = ref(false);
 const containerRef = ref<HTMLDivElement | null>(null);
 
-const filteredSuggestions = computed(() => {
+/** True when the structured `options` mode is active (takes precedence). */
+const useOptions = computed((): boolean => props.options.length > 0);
+
+/**
+ * Unified filtered list. In string mode, filters `suggestions` by substring on
+ * the trimmed query. In options mode, filters `options` by substring on label
+ * or sublabel. An empty query returns the full list (same as string mode).
+ */
+const filteredSuggestions = computed<(string | SuggestOption)[]>(() => {
   const query = props.modelValue.trim().toLowerCase();
+  if (useOptions.value) {
+    if (!query) return props.options;
+    return props.options.filter(
+      (o) =>
+        o.label.toLowerCase().includes(query) ||
+        (o.sublabel ? o.sublabel.toLowerCase().includes(query) : false)
+    );
+  }
   if (!query) return props.suggestions;
   return props.suggestions.filter((s) => s.toLowerCase().includes(query));
 });
@@ -58,6 +99,16 @@ const disabledSet = computed(
 /** True when this row value is already assigned and must render grey + unselectable. */
 function isDisabled(suggestion: string): boolean {
   return disabledSet.value.has(suggestion.toLowerCase());
+}
+
+/** Extract the display label from either a string or a `SuggestOption` row. */
+function rowLabel(row: string | SuggestOption): string {
+  return typeof row === 'string' ? row : row.label;
+}
+
+/** Stable Vue `:key` for either row shape (string label or option id). */
+function rowKey(row: string | SuggestOption): string {
+  return typeof row === 'string' ? row : row.id;
 }
 
 /**
@@ -101,13 +152,16 @@ function onFocus(): void {
   isOpen.value = true;
 }
 
-function selectSuggestion(name: string): void {
+function selectSuggestion(row: string | SuggestOption): void {
+  const name = rowLabel(row);
   // Disabled rows are visually present but must never fire a selection. The
   // `@mousedown` handler in the template guards the call site too, but this
   // is the authoritative gate (defense-in-depth if a future caller invokes
   // the method directly).
   if (isDisabled(name)) return;
-  emit('select', name);
+  // In options mode, pass the full object so the parent can read the id.
+  const option = typeof row === 'string' ? undefined : row;
+  emit('select', name, option);
   if (props.clearOnSelect) {
     // Clear the input and keep the dropdown open so the user can immediately
     // add another entry. The parent's @select handler updates the article +
@@ -144,6 +198,11 @@ function onKeydown(event: KeyboardEvent): void {
     }
   } else if (event.key === 'Escape') {
     isOpen.value = false;
+    // Bubble the Escape so a single-select parent can cancel the edit. The
+    // dropdown is already closed above; the emit lets the parent decide
+    // whether to also exit edit mode (string-mode multi-add consumers ignore
+    // this since they keep the dropdown open across selections).
+    emit('escape');
   }
 }
 
@@ -179,29 +238,55 @@ onUnmounted(() => {
       class="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto"
     >
       <li
-        v-for="suggestion in filteredSuggestions"
-        :key="suggestion"
+        v-for="row in filteredSuggestions"
+        :key="rowKey(row)"
         class="flex items-center justify-between gap-2 px-3 py-1.5 text-xs transition-colors"
         :class="
-          isDisabled(suggestion)
+          isDisabled(rowLabel(row))
             ? 'text-slate-400 cursor-not-allowed bg-slate-50'
             : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 cursor-pointer'
         "
-        :title="isDisabled(suggestion) ? 'Already added' : ''"
-        @mousedown.prevent="!isDisabled(suggestion) && selectSuggestion(suggestion)"
+        :title="isDisabled(rowLabel(row)) ? 'Already added' : ''"
+        @mousedown.prevent="!isDisabled(rowLabel(row)) && selectSuggestion(row)"
       >
-        <span>
-          <template v-if="highlightParts(suggestion, trimmedQuery)">
-            {{ highlightParts(suggestion, trimmedQuery)![0]
-            }}<mark class="bg-indigo-200 text-indigo-900 rounded px-0.5">{{
-              highlightParts(suggestion, trimmedQuery)![1]
-            }}</mark
-            >{{ highlightParts(suggestion, trimmedQuery)![2] }}
-          </template>
-          <template v-else>{{ suggestion }}</template>
-        </span>
+        <!-- Structured-options mode: label + optional publisher sublabel + ISSN badge -->
+        <template v-if="typeof row !== 'string'">
+          <span class="flex flex-col min-w-0">
+            <span class="truncate font-medium">
+              <template v-if="highlightParts(row.label, trimmedQuery)">
+                {{ highlightParts(row.label, trimmedQuery)![0]
+                }}<mark class="bg-indigo-200 text-indigo-900 rounded px-0.5">{{
+                  highlightParts(row.label, trimmedQuery)![1]
+                }}</mark
+                >{{ highlightParts(row.label, trimmedQuery)![2] }}
+              </template>
+              <template v-else>{{ row.label }}</template>
+            </span>
+            <span v-if="row.sublabel" class="truncate text-[10px] text-slate-400">{{
+              row.sublabel
+            }}</span>
+          </span>
+          <span
+            v-if="row.badge"
+            class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-500"
+            >{{ row.badge }}</span
+          >
+        </template>
+        <!-- Legacy string mode -->
+        <template v-else>
+          <span>
+            <template v-if="highlightParts(row, trimmedQuery)">
+              {{ highlightParts(row, trimmedQuery)![0]
+              }}<mark class="bg-indigo-200 text-indigo-900 rounded px-0.5">{{
+                highlightParts(row, trimmedQuery)![1]
+              }}</mark
+              >{{ highlightParts(row, trimmedQuery)![2] }}
+            </template>
+            <template v-else>{{ row }}</template>
+          </span>
+        </template>
         <span
-          v-if="isDisabled(suggestion)"
+          v-if="isDisabled(rowLabel(row))"
           class="material-symbols-outlined text-[14px] text-slate-400 leading-none"
           >check</span
         >

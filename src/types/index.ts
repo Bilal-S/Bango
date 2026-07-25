@@ -346,3 +346,30 @@ export interface BatchRefScrapingProgress {
   /** Title of the currently processing article */
   currentArticleTitle: string;
 }
+
+/**
+ * A single `journal_index` hit returned by the `search_journal_index` command.
+ * Powers the article-metadata journal autocomplete. Distinct from any
+ * bibliometric aggregate type.
+ */
+export interface JournalIndexMatch {
+  id: string;
+  journalTitle: string;
+  issn: string | null;
+  eissn: string | null;
+  publisherName: string | null;
+}
+
+/**
+ * A structured suggestion row consumed by `suggest-input.vue` in its
+ * `options` mode. When provided, the component renders `label` (bold) +
+ * optional `sublabel` (muted) + optional `badge` (mono pill), and emits the
+ * full object as the second `select` argument so the parent can read the
+ * `id`. Used by the journal autocomplete.
+ */
+export interface SuggestOption {
+  id: string;
+  label: string;
+  sublabel?: string;
+  badge?: string;
+}

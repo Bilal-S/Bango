@@ -446,6 +446,13 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         };
         let translation_error = get_str_field(a, "translationError", "translation_error");
         let translated_at = get_str_field(a, "translatedAt", "translated_at");
+        // NOTE: `journal_index_id` is intentionally NOT in this INSERT. It is
+        // a derived FK into the local `journal_index` table (system-distributed
+        // reference data that never travels with a backup). The post-commit
+        // rematch below re-derives it against the restoring machine's
+        // `journal_index`, so a backup restored against a newer database
+        // benefits from matching improvements (symbol folding, ISSN cross-check)
+        // automatically.
         tx.execute(
             "INSERT INTO articles (
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,

@@ -82,8 +82,17 @@ pub fn map_work_type_to_reference_type(work_type: &Option<String>) -> Option<Str
     })
 }
 
-/// Extract the eissn: the first ISSN in the array that differs from `issn_l`.
-/// Returns `None` if no such ISSN exists.
+/// Extract the ISSN-L (linking ISSN) from an OpenAlex source, normalized to the
+/// canonical `dddd-ddddX` form via `normalize_issn`. Returns `None` if absent
+/// or invalid.
+#[must_use]
+pub fn extract_issn_l(source: &super::OpenAlexSource) -> Option<String> {
+    source.issn_l.as_deref().map(crate::db::journal_repo::normalize_issn).filter(|s| !s.is_empty())
+}
+
+/// Extract the eISSN: the first ISSN in the array that differs from `issn_l`,
+/// normalized to the canonical form via `normalize_issn`. Returns `None` if no
+/// such ISSN exists.
 #[must_use]
 pub fn extract_eissn(source: &super::OpenAlexSource) -> Option<String> {
     let issn_l = source.issn_l.as_deref();
@@ -91,6 +100,8 @@ pub fn extract_eissn(source: &super::OpenAlexSource) -> Option<String> {
         .issn
         .as_ref()
         .and_then(|issns| issns.iter().find(|issn| Some(issn.as_str()) != issn_l).cloned())
+        .map(|s| crate::db::journal_repo::normalize_issn(&s))
+        .filter(|s| !s.is_empty())
 }
 
 /// Extract the author display names from the authorships array.
@@ -122,7 +133,7 @@ pub fn map_work_to_new_article(work: &OpenAlexWork) -> NewArticle {
             let url = loc.landing_page_url.clone();
             let (issn, eissn) = match &loc.source {
                 Some(source) => {
-                    let issn = source.issn_l.clone();
+                    let issn = extract_issn_l(source);
                     let eissn = extract_eissn(source);
                     (issn, eissn)
                 }
@@ -214,7 +225,7 @@ pub fn map_work_to_reference_paper(
             let url = loc.landing_page_url.clone();
             let (issn, eissn) = match &loc.source {
                 Some(source) => {
-                    let issn = source.issn_l.clone();
+                    let issn = extract_issn_l(source);
                     let eissn = extract_eissn(source);
                     (issn, eissn)
                 }

@@ -209,6 +209,8 @@ pub fn run() {
             commands::articles::clear_generic_audit,
             commands::articles::rematch_journals,
             commands::articles::biblio_get_journal_info,
+            commands::articles::search_journal_index,
+            commands::articles::link_article_to_journal_index,
             commands::articles::bulk_update_article_status,
             commands::articles::bulk_add_tag_to_articles,
             commands::articles::bulk_add_label_to_articles,

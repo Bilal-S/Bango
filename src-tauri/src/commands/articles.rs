@@ -4,6 +4,7 @@ use crate::db::app_settings_repo;
 use crate::db::article_repo::{self, ArticleMetaField, ArticleMetaValue, ArticleQuery};
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
+use crate::db::journal_repo::JournalIndexMatch;
 use crate::error::AppError;
 use crate::models::article::Article;
 use crate::models::audit::{ActivityFeedEntry, AuditEntry, ImportActivity};
@@ -394,4 +395,66 @@ pub fn biblio_get_journal_info(
 ) -> Result<Option<JournalInfo>, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     crate::db::journal_repo::get_journal_info(&conn, &journal_index_id)
+}
+
+/// Interactive journal search for the article-metadata autocomplete. Returns
+/// candidate `journal_index` rows ranked by ISSN, exact name, then LIKE
+/// substring (shortest title first). Unlike the automatic `match_journal`,
+/// substring matching is safe here because the user reviews the candidates.
+#[tauri::command]
+pub fn search_journal_index(
+    db_state: State<'_, DbState>,
+    query: String,
+) -> Result<Vec<JournalIndexMatch>, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    crate::db::journal_repo::search_journal_index(&conn, &query, None)
+}
+
+/// Link an article to a `journal_index` row chosen by the user from the
+/// autocomplete. Sets `articles.journal_index_id`, backfills `issn`/`eissn`
+/// from the matched row (COALESCE - never overwrites existing values), writes
+/// a coalesced `metadata_edit` audit row, and marks the biblio + wiki
+/// staleness flags so dependent pipelines re-derive.
+#[tauri::command]
+pub fn link_article_to_journal_index(
+    db_state: State<'_, DbState>,
+    article_id: String,
+    journal_index_id: String,
+) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+
+    // Fetch the matched journal row for title (audit) + ISSN backfill.
+    let (title, issn, eissn): (String, Option<String>, Option<String>) = conn.query_row(
+        "SELECT journal_title, issn, eissn FROM journal_index WHERE id = ?1",
+        [&journal_index_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+
+    // 1. Set the link + backfill ISSNs (COALESCE preserves existing values).
+    conn.execute(
+        "UPDATE articles
+         SET journal_index_id = ?1,
+             issn = COALESCE(NULLIF(issn, ''), ?2),
+             eissn = COALESCE(NULLIF(eissn, ''), ?3)
+         WHERE id = ?4",
+        rusqlite::params![journal_index_id, issn, eissn, article_id],
+    )?;
+
+    // 2. Coalesced audit row (5-min window groups rapid journal edits).
+    let details = format!("Journal linked: {title}");
+    let _ = audit_repo::create_or_update_entry(
+        &conn,
+        &article_id,
+        "metadata_edit",
+        None,
+        None,
+        Some(&details),
+        "user",
+    );
+
+    // 3. Staleness flags: journal_index_id feeds bibliometrics + the LLM Wiki.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+
+    Ok(())
 }

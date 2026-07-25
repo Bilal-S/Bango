@@ -79,8 +79,9 @@ describe('suggest-input.vue', () => {
     await wrapper.findAll('li')[0]!.trigger('mousedown');
     await syncModel();
 
-    // The select event should have fired with "Beta"...
-    expect(wrapper.emitted('select')).toEqual([['Beta']]);
+    // The select event should have fired with "Beta" (string mode emits
+    // `[name, undefined]`; the second arg is the structured option, absent here).
+    expect(wrapper.emitted('select')).toEqual([['Beta', undefined]]);
 
     // The input should be cleared (last update:modelValue is '')...
     const updates = wrapper.emitted('update:modelValue');
@@ -181,8 +182,8 @@ describe('suggest-input.vue', () => {
     await wrapper.findAll('li')[0]!.trigger('mousedown');
     await syncModel();
 
-    // The select event should have fired with "Beta"...
-    expect(wrapper.emitted('select')).toEqual([['Beta']]);
+    // The select event should have fired with "Beta" (string mode: second arg undefined).
+    expect(wrapper.emitted('select')).toEqual([['Beta', undefined]]);
 
     // The input should now hold the selected value (NOT cleared)...
     const updates = wrapper.emitted('update:modelValue');
@@ -307,7 +308,7 @@ describe('suggest-input.vue', () => {
     await items[0]!.trigger('mousedown');
     await flushPromises();
 
-    expect(wrapper.emitted('select')).toEqual([['Alpha']]);
+    expect(wrapper.emitted('select')).toEqual([['Alpha', undefined]]);
   });
 
   it('shows the "Already added." hint when the typed value matches a disabled row', async () => {
@@ -321,5 +322,96 @@ describe('suggest-input.vue', () => {
     const hint = wrapper.find('p.italic');
     expect(hint.exists()).toBe(true);
     expect(hint.text()).toContain('Already added.');
+  });
+});
+
+/**
+ * Structured-options mode (`options` prop) - used by the journal autocomplete.
+ * Renders richer rows (label + sublabel + badge) and emits the full
+ * `SuggestOption` object as the second `select` argument so the parent can
+ * read the `id`.
+ */
+describe('suggest-input.vue (structured options mode)', () => {
+  const journalOptions = [
+    { id: 'j1', label: 'Nature', sublabel: 'Springer', badge: '1234-5678' },
+    { id: 'j2', label: 'Nature Methods', sublabel: 'Nature Portfolio', badge: '1548-1404' },
+  ];
+
+  function mountWithOptions(initialValue = '', clearOnSelect = false) {
+    let currentValue = initialValue;
+    const wrapper = mount(SuggestInput, {
+      props: {
+        modelValue: currentValue,
+        options: journalOptions,
+        placeholder: 'Journal name',
+        clearOnSelect,
+      },
+      attachTo: document.body,
+    });
+    return {
+      wrapper,
+      async syncModel() {
+        const emitted = wrapper.emitted('update:modelValue');
+        if (emitted && emitted.length > 0) {
+          const last = emitted[emitted.length - 1];
+          if (last && typeof last[0] === 'string') {
+            currentValue = last[0];
+            await wrapper.setProps({ modelValue: currentValue });
+          }
+        }
+      },
+    };
+  }
+
+  it('renders the structured rows with label, sublabel, and badge', async () => {
+    const { wrapper } = mountWithOptions();
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+
+    const items = wrapper.findAll('li');
+    expect(items).toHaveLength(2);
+    // First row: Nature / Springer / 1234-5678
+    expect(items[0]!.text()).toContain('Nature');
+    expect(items[0]!.text()).toContain('Springer');
+    expect(items[0]!.text()).toContain('1234-5678');
+  });
+
+  it('emits the full option object (with id) as the second select argument', async () => {
+    const { wrapper } = mountWithOptions();
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+
+    const items = wrapper.findAll('li');
+    await items[0]!.trigger('mousedown');
+    await flushPromises();
+
+    const selectEvents = wrapper.emitted('select');
+    expect(selectEvents).toBeDefined();
+    expect(selectEvents).toHaveLength(1);
+    // First arg: label string; second arg: the option object.
+    expect(selectEvents![0]![0]).toBe('Nature');
+    expect(selectEvents![0]![1]).toMatchObject({ id: 'j1', label: 'Nature' });
+  });
+
+  it('filters options by label substring', async () => {
+    const { wrapper, syncModel } = mountWithOptions();
+    await wrapper.find('input').trigger('focus');
+    await wrapper.find('input').setValue('Methods');
+    await syncModel();
+    await flushPromises();
+
+    const items = wrapper.findAll('li');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.text()).toContain('Nature Methods');
+  });
+
+  it('returns an empty list when no option matches the query', async () => {
+    const { wrapper, syncModel } = mountWithOptions();
+    await wrapper.find('input').trigger('focus');
+    await wrapper.find('input').setValue('Quantum');
+    await syncModel();
+    await flushPromises();
+
+    expect(wrapper.findAll('li')).toHaveLength(0);
   });
 });
