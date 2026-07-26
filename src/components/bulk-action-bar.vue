@@ -10,6 +10,7 @@ defineEmits<{
   bulkAddTag: [];
   bulkAddLabel: [];
   bulkAddToChat: [];
+  bulkExport: [];
   clearSelection: [];
 }>();
 </script>
@@ -17,11 +18,9 @@ defineEmits<{
 <template>
   <div
     v-if="selectedCount > 0"
-    class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[var(--color-sidebar)] text-[var(--color-sidebar-text)] rounded-xl shadow-lg px-5 py-3"
+    class="bulk-bar fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-2 max-w-[calc(100vw-2rem)] bg-[var(--color-sidebar)] text-[var(--color-sidebar-text)] rounded-xl shadow-lg px-4 py-3"
   >
-    <span class="text-sm font-medium">
-      {{ selectedCount }} article{{ selectedCount !== 1 ? 's' : '' }} selected
-    </span>
+    <span class="text-sm font-medium whitespace-nowrap"> {{ selectedCount }} selected </span>
     <div class="w-px h-5 bg-[var(--color-sidebar-hover)]" />
     <button
       class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 transition-colors"
@@ -39,7 +38,7 @@ defineEmits<{
       class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 transition-colors"
       @click="$emit('bulkMoveToWorking')"
     >
-      Move to Working
+      Working
     </button>
     <button
       class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 transition-colors"
@@ -58,6 +57,14 @@ defineEmits<{
       @click="$emit('bulkAddToChat')"
     >
       Add to Chat
+    </button>
+    <button
+      class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-teal-600 hover:bg-teal-700 transition-colors inline-flex items-center gap-1"
+      title="Export selected articles to RIS"
+      @click="$emit('bulkExport')"
+    >
+      <span class="material-symbols-outlined text-[16px]">download</span>
+      Export
     </button>
     <div class="w-px h-5 bg-[var(--color-sidebar-hover)]" />
     <button

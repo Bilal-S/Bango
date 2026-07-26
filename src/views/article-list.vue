@@ -11,6 +11,7 @@ import { useBatchReferenceScraping } from '@/composables/use-references';
 import { useChatStore } from '@/stores/chat';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
+import { useExport } from '@/composables/use-export';
 import { resolveBiblioReturn } from '@/utils/biblio-links';
 import {
   classifyArticleDetailArrowKey,
@@ -546,6 +547,27 @@ function handleBulkAddToChat(): void {
   void router.push('/chat');
 }
 
+// ── Bulk export ────────────────────────────────────────────────────
+// Sole entry point for "export selected": opens the OS save dialog and writes
+// the RIS for exactly the checked articles (not the whole tab/status). The
+// toolbar Export button + ExportDialog keep their tab/included behavior, so
+// the two export surfaces are cleanly separated: toolbar = tab/status, bulk
+// bar = selected rows only.
+const { exportRisForIds, error: exportError } = useExport();
+
+async function handleBulkExport(): Promise<void> {
+  const ids = Array.from(selectedIds.value);
+  if (ids.length === 0) return;
+  const ok = await exportRisForIds(ids);
+  if (ok) {
+    toast.show(`Exported ${ids.length} article${ids.length > 1 ? 's' : ''} to RIS`, 'success');
+  } else if (exportError.value) {
+    // A real failure surfaces via the composable's error ref. Cancel (user
+    // dismissed the save dialog) leaves error null and stays silent.
+    toast.show(`Export failed: ${exportError.value}`, 'error');
+  }
+}
+
 // ── Full text handlers ────────────────────────────────────────────
 // UI orchestration (file dialog + toasts) is centralized in
 // `useFullTextAttachment`; the auto-summarize branch is preserved via the
@@ -961,6 +983,7 @@ onUnmounted(() => {
       @bulk-add-tag="openBulkTagDialog"
       @bulk-add-label="openBulkLabelDialog"
       @bulk-add-to-chat="handleBulkAddToChat"
+      @bulk-export="handleBulkExport"
       @clear-selection="clearSelection"
     />
 

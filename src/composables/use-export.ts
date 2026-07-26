@@ -102,6 +102,33 @@ export function useExport() {
     }
   }
 
+  /** Export a specific set of articles (by UUID) to an RIS file. The sole
+   *  entry point for the "Export Selected" bulk action in the Article list
+   *  bulk action bar — distinct from the toolbar Export, which exports by
+   *  tab/status. Mirrors `exportRisForTab` (save dialog -> IPC -> error/loading
+   *  handling). The RIS bytes are produced by the same backend pipeline as the
+   *  tab export, so the output is byte-identical for the same article set. */
+  async function exportRisForIds(ids: string[]): Promise<boolean> {
+    exporting.value = true;
+    error.value = null;
+    try {
+      const filePath = await save({
+        defaultPath: 'selected-articles.ris',
+        filters: [{ name: 'RIS File', extensions: ['ris'] }],
+      });
+      if (filePath) {
+        await tauriCommand('export_ris_for_ids_to_file', { path: filePath, ids });
+        return true;
+      }
+      return false;
+    } catch (e: unknown) {
+      error.value = e instanceof Error ? e.message : String(e);
+      return false;
+    } finally {
+      exporting.value = false;
+    }
+  }
+
   async function exportProject(): Promise<boolean> {
     exporting.value = true;
     error.value = null;
@@ -254,6 +281,7 @@ export function useExport() {
     error,
     exportRis,
     exportRisForTab,
+    exportRisForIds,
     exportProject,
     importProject,
     resetProject,

@@ -263,6 +263,7 @@ pub fn run() {
             commands::export_cmd::export_ris,
             commands::export_cmd::export_ris_to_file,
             commands::export_cmd::export_ris_for_tab_to_file,
+            commands::export_cmd::export_ris_for_ids_to_file,
             commands::export_cmd::export_project_backup,
             commands::export_cmd::export_project_to_file,
             commands::export_cmd::import_project_backup,

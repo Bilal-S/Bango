@@ -860,6 +860,14 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     count, with an info "not present" toast when nothing matched. The bulk action bar
     trigger buttons are labeled "Change Tag"/"Change Label". Tested in
     `tests/bulk_tag_label_test.rs` (17 tests).
+    **Bulk-export-by-ids fetcher**: `get_articles_by_ids(conn, ids)` composes
+    `ARTICLE_SELECT_BASE` with a parameterized `id IN (?,…)` clause (one `?`
+    per id; no string interpolation) — the sole backend read path for the
+    Article-list bulk action bar "Export" button, distinct from
+    `get_articles_for_export` (tab/status-scoped). Returns empty vec on empty
+    input (avoids invalid `IN ()` SQL); unknown ids are silently absent. Tested
+    in `tests/article_get_by_ids_test.rs` (4 tests: exact-set, empty-input,
+    unknown-id-absent, single-id placeholder edge).
   - **`src-tauri/src/db/journal_repo.rs`** - journal_index lookup/match. The
     **single automatic matching function** `match_journal`
     (`resolve_journal_id` wraps it; `get_journal_info` is the metadata+
@@ -1347,7 +1355,20 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     wrap the Tauri commands. Tested by `src/__tests__/openalex-store.test.ts` (5 tests).
   - **`src/types/openalex.ts`** - TypeScript interfaces for OpenAlex API types +
     `SORT_OPTIONS`, `PER_PAGE_OPTIONS`, `DEFAULT_OPENALEX_FILTERS` constants.
-  - **`src/components/`** - reusable components. `clearable-input.vue` is a reusable
+  - **`src/components/`** - reusable components. `bulk-action-bar.vue`
+    (`<BulkActionBar>`) is the fixed bottom-center multi-select action bar
+    shown when ≥1 article row is checked. Compact + responsive: the selection
+    label reads `N selected` (not `N articles selected`); the status-reset
+    button reads `Working` (not `Move to Working`); the container uses
+    `flex flex-wrap items-center justify-center gap-2 max-w-[calc(100vw-2rem)]`
+    so buttons wrap to a second row on narrow viewports. Emits
+    `bulkInclude`/`bulkReject`/`bulkMoveToWorking`/`bulkAddTag`/`bulkAddLabel`/
+    `bulkAddToChat`/`bulkExport`/`clearSelection`. The `bulkExport` emit is the
+    **sole entry point for "export selected"**: `article-list.vue::handleBulkExport`
+    snapshots `Array.from(selectedIds.value)` and calls `useExport().exportRisForIds`,
+    which opens the OS save dialog (`selected-articles.ris`) and writes RIS for
+    exactly the checked articles — distinct from the toolbar Export button +
+    `ExportDialog`, which export by tab/status (unchanged). `clearable-input.vue` is a reusable
     text/number input with a built-in clear ("x") affordance pinned to the right edge
     (Material Symbols `close` icon, `pr-8` on the input). Props: `modelValue` (v-model
     string), `placeholder`, `inputClass` (extra classes on the inner input), `disabled`

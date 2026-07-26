@@ -362,6 +362,78 @@ describe('useExport', () => {
     });
   });
 
+  describe('exportRisForIds', () => {
+    it('calls save dialog with "selected-articles.ris" default path and sends flat args', async () => {
+      vi.mocked(save).mockResolvedValue('/path/to/selected-articles.ris');
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+      const { exportRisForIds } = useExport();
+      const ids = ['art-1', 'art-2', 'art-3'];
+      const result = await exportRisForIds(ids);
+
+      expect(result).toBe(true);
+      expect(save).toHaveBeenCalledWith({
+        defaultPath: 'selected-articles.ris',
+        filters: [{ name: 'RIS File', extensions: ['ris'] }],
+      });
+      // Flat args - no `request` wrapper; `ids` passed verbatim.
+      expect(tauriCommand).toHaveBeenCalledWith('export_ris_for_ids_to_file', {
+        path: '/path/to/selected-articles.ris',
+        ids,
+      });
+    });
+
+    it('returns false when user cancels save dialog', async () => {
+      vi.mocked(save).mockResolvedValue(null);
+
+      const { exportRisForIds } = useExport();
+      const result = await exportRisForIds(['art-1']);
+
+      expect(result).toBe(false);
+      expect(tauriCommand).not.toHaveBeenCalled();
+    });
+
+    it('sets error on tauri command failure', async () => {
+      vi.mocked(save).mockResolvedValue('/path/to/selected.ris');
+      vi.mocked(tauriCommand).mockRejectedValue(new Error('Ids export failed'));
+
+      const { exportRisForIds, error, exporting } = useExport();
+      const result = await exportRisForIds(['art-1']);
+
+      expect(result).toBe(false);
+      expect(error.value).toBe('Ids export failed');
+      expect(exporting.value).toBe(false);
+    });
+
+    it('handles non-Error exceptions', async () => {
+      vi.mocked(save).mockResolvedValue('/path.ris');
+      vi.mocked(tauriCommand).mockRejectedValue('string failure');
+
+      const { exportRisForIds, error } = useExport();
+      await exportRisForIds(['art-1']);
+
+      expect(error.value).toBe('string failure');
+    });
+
+    it('sets exporting=true during operation', async () => {
+      let resolveCmd: () => void;
+      const cmdPromise = new Promise<void>((r) => {
+        resolveCmd = r;
+      });
+      vi.mocked(save).mockResolvedValue('/path.ris');
+      vi.mocked(tauriCommand).mockReturnValue(cmdPromise);
+
+      const { exportRisForIds, exporting } = useExport();
+      const promise = exportRisForIds(['art-1', 'art-2']);
+
+      expect(exporting.value).toBe(true);
+      resolveCmd!();
+      await promise;
+
+      expect(exporting.value).toBe(false);
+    });
+  });
+
   describe('resetProject', () => {
     it('calls reset command and invalidates stores', async () => {
       vi.mocked(tauriCommand).mockResolvedValue(undefined);

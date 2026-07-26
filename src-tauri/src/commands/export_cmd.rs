@@ -88,6 +88,30 @@ pub fn export_ris_for_tab_to_file(
     std::fs::write(&path, content).map_err(AppError::Io)
 }
 
+/// Export a specific set of articles (by UUID) to an RIS file at the given
+/// path. The sole entry point for the "Export Selected" bulk action in the
+/// Article list bulk action bar — distinct from the toolbar Export, which
+/// exports by tab/status. The RIS bytes are byte-identical to what
+/// `export_ris_for_tab_to_file` would produce for the same article set (same
+/// `articles_to_ris_export` pipeline), so downstream reference managers see no
+/// difference between a tab export and a selected export of the same rows.
+///
+/// `ids` comes directly from the frontend's `Set<string>` of checked rows.
+/// Empty `ids` is a no-op success (the bar is only visible when at least one
+/// row is selected, so this is defense-in-depth).
+#[tauri::command]
+pub fn export_ris_for_ids_to_file(
+    db_state: State<'_, DbState>,
+    path: String,
+    ids: Vec<String>,
+) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let articles = article_repo::get_articles_by_ids(&conn, &ids)?;
+    let criteria_map = build_criteria_map(&conn)?;
+    let content = articles_to_ris_export(&articles, &criteria_map);
+    std::fs::write(&path, content).map_err(AppError::Io)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportProjectRequest {}

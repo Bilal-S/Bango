@@ -537,6 +537,30 @@ pub fn get_articles_for_export(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Fetch a specific set of articles by their UUIDs, for the "Export Selected"
+/// bulk action. Composes `ARTICLE_SELECT_BASE` with a parameterized `IN (?,…)`
+/// clause — one `?` placeholder per id (no string interpolation, per CLAUDE.md
+/// SQL rules). Returns an empty vec when `ids` is empty (avoids emitting
+/// invalid `IN ()` SQL). Unknown ids are silently absent from the result (the
+/// `filter_map` drops row-decode errors, matching the other read fns).
+///
+/// Note: SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` is 999 (32766 in newer
+/// builds). Realistic bulk-export selections are far below this; if it ever
+/// becomes a concern, chunk the ids and union the results.
+pub fn get_articles_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<Article>, AppError> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = (0..ids.len()).map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql =
+        format!("{ARTICLE_SELECT_BASE} WHERE id IN ({placeholders}) ORDER BY imported_at DESC");
+    let params: Vec<&dyn rusqlite::types::ToSql> =
+        ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params.as_slice(), row_to_article)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn get_duplicate_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     let sql = format!(
         "{ARTICLE_SELECT_BASE} WHERE status = 'duplicate' AND duplicate_of IS NULL ORDER BY imported_at DESC"
