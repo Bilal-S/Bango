@@ -927,6 +927,22 @@ onUnmounted(() => {
           </div>
         </template>
       </template>
+
+      <!-- Bulk Action Bar: lives INSIDE the article content div so it centers
+           within the article table column. Uses sticky positioning to float
+           at the bottom of the scrollable area. When the detail panel narrows
+           the column, the bar re-centers automatically and wraps if needed. -->
+      <BulkActionBar
+        :selected-count="selectedCount"
+        @bulk-include="handleBulkInclude"
+        @bulk-reject="handleBulkReject"
+        @bulk-move-to-working="handleBulkMoveToWorking"
+        @bulk-add-tag="openBulkTagDialog"
+        @bulk-add-label="openBulkLabelDialog"
+        @bulk-add-to-chat="handleBulkAddToChat"
+        @bulk-export="handleBulkExport"
+        @clear-selection="clearSelection"
+      />
     </div>
 
     <!-- Export Dialog -->
@@ -972,19 +988,6 @@ onUnmounted(() => {
       @refresh-article="refreshArticle"
       @article-promoted="handleArticlePromoted"
       @references-updated="handleReferencesUpdated"
-    />
-
-    <!-- Bulk Action Bar -->
-    <BulkActionBar
-      :selected-count="selectedCount"
-      @bulk-include="handleBulkInclude"
-      @bulk-reject="handleBulkReject"
-      @bulk-move-to-working="handleBulkMoveToWorking"
-      @bulk-add-tag="openBulkTagDialog"
-      @bulk-add-label="openBulkLabelDialog"
-      @bulk-add-to-chat="handleBulkAddToChat"
-      @bulk-export="handleBulkExport"
-      @clear-selection="clearSelection"
     />
 
     <!-- Bulk Tag Dialog -->

@@ -18,7 +18,7 @@ defineEmits<{
 <template>
   <div
     v-if="selectedCount > 0"
-    class="bulk-bar fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-2 max-w-[calc(100vw-2rem)] bg-[var(--color-sidebar)] text-[var(--color-sidebar-text)] rounded-xl shadow-lg px-4 py-3"
+    class="bulk-bar sticky bottom-6 z-50 mx-auto w-max flex flex-wrap items-center justify-center gap-2 max-w-full bg-[var(--color-sidebar)] text-[var(--color-sidebar-text)] rounded-xl shadow-lg px-4 py-3"
   >
     <span class="text-sm font-medium whitespace-nowrap"> {{ selectedCount }} selected </span>
     <div class="w-px h-5 bg-[var(--color-sidebar-hover)]" />
