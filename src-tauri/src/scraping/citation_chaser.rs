@@ -2,10 +2,34 @@
 //!
 //! Given a DOI, automates the Citation Chaser Shiny app to download RIS files
 //! containing the article's **references** and/or **citations**.
+//!
+//! # Cancellation, empty-result detection, and the download contract
+//!
+//! See `.worktrees/scrapefix2.md` for the full design. Summary:
+//!
+//! - **Cancellation**: every poll loop routes its sleeps through
+//!   [`sleep_or_cancel`], which checks the [`CancelToken`] before and after
+//!   sleeping. When the user clicks Cancel, the in-flight scrape returns
+//!   [`ScrapeError::Cancelled`] within one `POLL_INTERVAL_MS` tick (~1s), the
+//!   browser is closed, and any partially-written RIS file is removed.
+//! - **Empty-result detection**: a Shiny session that resolves to "0
+//!   references" or "no recorded citations" either disconnects the websocket
+//!   (references) or serves a 0-byte RIS file (citations). The post-Search
+//!   [`detect_empty_or_disconnect`] poll catches both before the 120s
+//!   `wait_for_download_enabled` poll can hang, and returns
+//!   [`ScrapeError::NoData`]. The [`validate_ris_nonempty`] guard catches the
+//!   0-byte-file case as defense-in-depth.
+//! - **Download**: [`download_file`] tries [`download_with_reqwest`] first
+//!   (consistent TLS stack across platforms, no process-spawn delay) and falls
+//!   back to [`download_with_curl`] if reqwest fails. `reqwest::blocking` is
+//!   safe here because the scrape runs via `spawn_blocking` (tokio's blocking
+//!   pool, NOT an async worker thread).
 
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -42,8 +66,25 @@ pub enum ScrapeError {
     #[error("Click failed: {0}")]
     ClickFailed(String),
 
-    #[error("Download timeout: {0}")]
-    DownloadTimeout(String),
+    /// The article has no references/citations on record in Lens.org, so there
+    /// is nothing to download. Distinct from [`ScrapeError::ElementNotFound`]
+    /// (a UI timing failure) and [`ScrapeError::Download`] (a transport
+    /// failure): the scrape completed successfully and determined the result
+    /// set is empty. The frontend routes this as a **skip**, not an error.
+    #[error("No data: {0}")]
+    NoData(String),
+
+    /// The user cancelled the scrape. The browser is closed and no partial RIS
+    /// file is left on disk.
+    #[error("Cancelled")]
+    Cancelled,
+
+    /// A download transport failure (TLS handshake, HTTP non-2xx, reqwest/curl
+    /// error). Named `Download` rather than `DownloadTimeout` because curl
+    /// exit 35 is a TLS handshake error, not a timeout, and the previous name
+    /// produced misleading user-facing messages.
+    #[error("Download failed: {0}")]
+    Download(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -89,6 +130,135 @@ const ELEMENT_TIMEOUT_SECS: u64 = 120;
 /// Poll interval when waiting for downloads or elements (milliseconds).
 const POLL_INTERVAL_MS: u64 = 1000;
 
+/// How long to wait after clicking Search for an empty-result / disconnect
+/// signal before falling back to [`wait_for_download_enabled`]. Lens resolves
+/// empty results quickly (under ~10s live); 20s gives comfortable margin
+/// without the 120s hang the zero-reference case used to cause.
+const EMPTY_RESULT_TIMEOUT_SECS: u64 = 20;
+
+/// Browser-like `User-Agent` for the reqwest download path. Matches the
+/// `openalex::client::download_pdf` pattern so shinyapps.io's CDN treats the
+/// request like a desktop browser.
+const BROWSER_UA: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
+     Chrome/120.0.0.0 Safari/537.36";
+
+// ---------------------------------------------------------------------------
+// Cancel token
+// ---------------------------------------------------------------------------
+
+/// Shared cancellation flag for a scrape run. Cloned cheaply into helpers.
+///
+/// When `true`, poll loops exit promptly with [`ScrapeError::Cancelled`] via
+/// [`sleep_or_cancel`]. The Tauri command layer stores the active token in
+/// [`crate::commands::scraping::ScrapingState`] so the frontend's
+/// `cancel_scraping` command can signal it.
+#[derive(Clone, Default)]
+pub struct CancelToken(Arc<AtomicBool>);
+
+impl CancelToken {
+    /// Create a fresh, uncancelled token.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `true` once [`CancelToken::cancel`] has been called.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    /// Signal cancellation. All poll loops polling this token will exit at
+    /// their next tick (within `POLL_INTERVAL_MS`).
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Sleep for `dur`, but return early with `true` if the token fires.
+///
+/// Checks the token *before* sleeping (so a cancel during the previous
+/// iteration is caught immediately) and *after* sleeping (so a cancel during
+/// the sleep is caught within one `POLL_INTERVAL_MS` tick).
+fn sleep_or_cancel(cancel: &CancelToken, dur: Duration) -> bool {
+    if cancel.is_cancelled() {
+        return true;
+    }
+    thread::sleep(dur);
+    cancel.is_cancelled()
+}
+
+// ---------------------------------------------------------------------------
+// ScrapeKind + empty-result detection
+// ---------------------------------------------------------------------------
+
+/// Which Citation Chaser flow is running. Drives the empty-result signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScrapeKind {
+    References,
+    Citations,
+}
+
+impl ScrapeKind {
+    /// The HTML id of the "Search ..." trigger button.
+    const fn find_btn_id(self) -> &'static str {
+        match self {
+            Self::References => "find_refs",
+            Self::Citations => "find_cits",
+        }
+    }
+
+    /// The HTML id of the download link.
+    const fn download_link_id(self) -> &'static str {
+        match self {
+            Self::References => "refs_ris",
+            Self::Citations => "cits_ris",
+        }
+    }
+
+    /// The filename suffix for the cleaned DOI.
+    const fn filename_suffix(self) -> &'static str {
+        match self {
+            Self::References => "_references.ris",
+            Self::Citations => "_citations.ris",
+        }
+    }
+
+    /// The button's user-facing label (used in log messages).
+    const fn search_label(self) -> &'static str {
+        match self {
+            Self::References => "Search for all referenced articles in Lens.org",
+            Self::Citations => "Search for all citing articles in Lens.org",
+        }
+    }
+}
+
+/// Signatures that indicate the result set is empty or the Shiny session died.
+///
+/// `body_text` is `document.body.innerText` read via `tab.evaluate(...)`. The
+/// strings come from the live Citation Chaser app (validated via Chrome
+/// DevTools — see `.worktrees/scrapefix2.md` §3). They live in anonymous
+/// `container-fluid` divs with no stable element IDs, so a body-text scan is
+/// the robust detection strategy.
+///
+/// Returns the matched reason so the caller can build a precise user-facing
+/// message. Pure `#[must_use]`; trivially unit-testable.
+#[must_use]
+fn detect_empty_or_disconnect(body_text: &str, kind: ScrapeKind) -> Option<&'static str> {
+    if body_text.contains("Disconnected from the server") {
+        return Some("Citation Chaser session disconnected");
+    }
+    match kind {
+        ScrapeKind::References if body_text.contains("had 0 references") => {
+            Some("Article has 0 references in Lens.org")
+        }
+        ScrapeKind::Citations if body_text.contains("no recorded citations in the Lens.org") => {
+            Some("Article has 0 recorded citations in Lens.org")
+        }
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -108,11 +278,14 @@ pub fn clean_doi_filename(doi: &str) -> String {
 }
 
 /// Randomized delay between 500 ms and 2500 ms to mimic human behaviour.
-fn human_delay() {
+///
+/// Returns `true` if the cancel token fired during the sleep (caller should
+/// bail with [`ScrapeError::Cancelled`]).
+fn human_delay(cancel: &CancelToken) -> bool {
     let mut rng = rand::rng();
     let delay_ms = rng.random_range(500..=2500);
     eprintln!("  ⏳ Waiting {delay_ms}ms (human-like delay)…");
-    thread::sleep(Duration::from_millis(delay_ms));
+    sleep_or_cancel(cancel, Duration::from_millis(delay_ms))
 }
 
 /// Extract the `href` attribute from an element found by its HTML id.
@@ -130,28 +303,40 @@ fn get_element_href(tab: &Tab, element_id: &str) -> Result<String, ScrapeError> 
     Ok(href)
 }
 
-/// Download a file from `url` to `output_dir` using `curl`.
+/// Read `document.body.innerText` via `tab.evaluate`. Used by the empty-result
+/// detector.
+fn get_body_text(tab: &Tab) -> Result<String, ScrapeError> {
+    let text = tab
+        .evaluate("document.body.innerText", false)
+        .map_err(|e| ScrapeError::ElementNotFound(format!("Failed to read body text: {e}")))?
+        .value
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    Ok(text)
+}
+
+/// Download a file from `url` to `output_dir` using `curl` (fallback path).
+///
+/// Kept as the secondary downloader so systems where reqwest's TLS backend has
+/// its own quirks still have an escape hatch.
 fn download_with_curl(
     url: &str,
     output_dir: &Path,
     filename: &str,
 ) -> Result<PathBuf, ScrapeError> {
     let output_path = output_dir.join(filename);
-    eprintln!("  📥 Downloading via curl: {url}");
+    eprintln!("  📥 Downloading via curl (fallback): {url}");
     eprintln!("  📁 Saving to: {}", output_path.display());
 
     let status = std::process::Command::new("curl")
-        .args([
-            "-sL", // silent, follow redirects
-            "-o",
-        ])
+        .args(["-sL", "-o"])
         .arg(&output_path)
         .arg(url)
         .status()
         .map_err(|e| ScrapeError::Io(std::io::Error::other(format!("Failed to run curl: {e}"))))?;
 
     if !status.success() {
-        return Err(ScrapeError::DownloadTimeout(format!(
+        return Err(ScrapeError::Download(format!(
             "curl exited with status {:?} for {url}",
             status.code()
         )));
@@ -163,13 +348,115 @@ fn download_with_curl(
     Ok(output_path)
 }
 
+/// Download `url` to `output_dir/filename` using `reqwest::blocking` (primary
+/// path).
+///
+/// # Why blocking is safe here
+///
+/// This function is invoked from [`scrape_citation_chaser`], which runs inside
+/// `tauri::async_runtime::spawn_blocking(...)`. That executes on tokio's
+/// blocking thread pool, *not* on an async worker thread, so
+/// `reqwest::blocking::Client` will not panic. Do NOT call this from an async
+/// context — `reqwest::blocking` panics if polled from a tokio async worker.
+fn download_with_reqwest(
+    url: &str,
+    output_dir: &Path,
+    filename: &str,
+) -> Result<PathBuf, ScrapeError> {
+    let output_path = output_dir.join(filename);
+    eprintln!("  📥 Downloading via reqwest: {url}");
+
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| ScrapeError::Download(format!("reqwest client build failed: {e}")))?;
+
+    let response = client
+        .get(url)
+        .header("User-Agent", BROWSER_UA)
+        .header("Accept", "*/*")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("Referer", BASE_URL)
+        .send()
+        .map_err(|e| ScrapeError::Download(format!("reqwest request failed for {url}: {e}")))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(ScrapeError::Download(format!("HTTP {status} for {url}")));
+    }
+
+    let bytes = response
+        .bytes()
+        .map_err(|e| ScrapeError::Download(format!("reqwest body read failed for {url}: {e}")))?;
+
+    fs::write(&output_path, &bytes)?;
+    eprintln!("  ✅ Downloaded: {} ({} bytes)", output_path.display(), bytes.len());
+
+    Ok(output_path)
+}
+
+/// Download `url` to `output_dir/filename`.
+///
+/// Tries `reqwest::blocking` first (no process-spawn delay, consistent TLS
+/// stack across platforms). Falls back to spawning `curl` if reqwest fails, so
+/// a transient reqwest error or a TLS-backend quirk does not block the
+/// download entirely. The reqwest error is preferred for surfacing to the
+/// user (it carries an HTTP status when available); the curl error is only
+/// surfaced if both paths fail.
+fn download_file(url: &str, output_dir: &Path, filename: &str) -> Result<PathBuf, ScrapeError> {
+    match download_with_reqwest(url, output_dir, filename) {
+        Ok(path) => Ok(path),
+        Err(reqwest_err) => match download_with_curl(url, output_dir, filename) {
+            Ok(path) => Ok(path),
+            Err(curl_err) => Err(ScrapeError::Download(format!(
+                "{reqwest_err}; curl fallback also failed: {curl_err}"
+            ))),
+        },
+    }
+}
+
+/// Validate that a downloaded RIS file is non-empty and contains at least one
+/// `TY  -` tag.
+///
+/// The zero-citations case (§2.3 of scrapefix2.md) serves a 0-byte file with a
+/// valid session href, so the download succeeds but the file is useless and
+/// would be cached forever by the existence-shortcut. This guard catches that
+/// case: on an empty/invalid file it removes the file (so the shortcut does
+/// not cache it) and returns [`ScrapeError::NoData`].
+fn validate_ris_nonempty(path: &Path) -> Result<(), ScrapeError> {
+    let bytes = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if bytes == 0 {
+        let _ = fs::remove_file(path);
+        return Err(ScrapeError::NoData("Downloaded RIS is empty".to_string()));
+    }
+    let text = fs::read_to_string(path)?;
+    if !text.contains("TY  -") {
+        let _ = fs::remove_file(path);
+        return Err(ScrapeError::NoData("Downloaded RIS has no TY records".to_string()));
+    }
+    Ok(())
+}
+
 /// Poll until an XPath element is found, clicking it once it appears.
-fn click_xpath_with_retry(tab: &Tab, xpath: &str, description: &str) -> Result<(), ScrapeError> {
+///
+/// Checks the cancel token at every iteration; returns [`ScrapeError::Cancelled`]
+/// immediately when the token fires.
+fn click_xpath_with_retry(
+    tab: &Tab,
+    cancel: &CancelToken,
+    xpath: &str,
+    description: &str,
+) -> Result<(), ScrapeError> {
     eprintln!("  🔍 Looking for element: {description}");
     let deadline = Instant::now() + Duration::from_secs(ELEMENT_TIMEOUT_SECS);
     let mut logged_at: u64 = 0;
 
     while Instant::now() < deadline {
+        if cancel.is_cancelled() {
+            return Err(ScrapeError::Cancelled);
+        }
         match tab.find_element_by_xpath(xpath) {
             Ok(element) => {
                 eprintln!("  ✅ Found element, clicking: {description}");
@@ -186,7 +473,9 @@ fn click_xpath_with_retry(tab: &Tab, xpath: &str, description: &str) -> Result<(
                     eprintln!("  ⏳ Still looking for '{description}'… {elapsed}s elapsed");
                     logged_at = elapsed;
                 }
-                thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+                if sleep_or_cancel(cancel, Duration::from_millis(POLL_INTERVAL_MS)) {
+                    return Err(ScrapeError::Cancelled);
+                }
             }
         }
     }
@@ -197,12 +486,23 @@ fn click_xpath_with_retry(tab: &Tab, xpath: &str, description: &str) -> Result<(
 }
 
 /// Wait for an element to appear (without clicking it).
-fn wait_for_element(tab: &Tab, xpath: &str, description: &str) -> Result<(), ScrapeError> {
+///
+/// Checks the cancel token at every iteration; returns [`ScrapeError::Cancelled`]
+/// immediately when the token fires.
+fn wait_for_element(
+    tab: &Tab,
+    cancel: &CancelToken,
+    xpath: &str,
+    description: &str,
+) -> Result<(), ScrapeError> {
     eprintln!("  🔍 Waiting for element: {description}");
     let deadline = Instant::now() + Duration::from_secs(ELEMENT_TIMEOUT_SECS);
     let mut logged_at: u64 = 0;
 
     while Instant::now() < deadline {
+        if cancel.is_cancelled() {
+            return Err(ScrapeError::Cancelled);
+        }
         match tab.find_element_by_xpath(xpath) {
             Ok(_) => {
                 eprintln!("  ✅ Found element: {description}");
@@ -216,7 +516,9 @@ fn wait_for_element(tab: &Tab, xpath: &str, description: &str) -> Result<(), Scr
                     eprintln!("  ⏳ Still waiting for '{description}'… {elapsed}s elapsed");
                     logged_at = elapsed;
                 }
-                thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+                if sleep_or_cancel(cancel, Duration::from_millis(POLL_INTERVAL_MS)) {
+                    return Err(ScrapeError::Cancelled);
+                }
             }
         }
     }
@@ -231,13 +533,23 @@ fn wait_for_element(tab: &Tab, xpath: &str, description: &str) -> Result<(), Scr
 /// Citation Chaser uses `<a id="refs_ris">` and `<a id="cits_ris">` download links that
 /// start with a `disabled` class. Once data is fetched, the class is removed and the
 /// `href` is updated with a real download URL.
-fn wait_for_download_enabled(tab: &Tab, element_id: &str) -> Result<(), ScrapeError> {
+///
+/// Checks the cancel token at every iteration; returns [`ScrapeError::Cancelled`]
+/// immediately when the token fires.
+fn wait_for_download_enabled(
+    tab: &Tab,
+    cancel: &CancelToken,
+    element_id: &str,
+) -> Result<(), ScrapeError> {
     eprintln!("  📊 Waiting for download link #{element_id} to become enabled…");
     let deadline = Instant::now() + Duration::from_secs(ELEMENT_TIMEOUT_SECS);
     let mut logged_at: u64 = 0;
     let xpath = format!("//*[@id='{element_id}']");
 
     while Instant::now() < deadline {
+        if cancel.is_cancelled() {
+            return Err(ScrapeError::Cancelled);
+        }
         match tab.find_element_by_xpath(&xpath) {
             Ok(element) => {
                 // Check if the element still has the "disabled" class.
@@ -265,12 +577,49 @@ fn wait_for_download_enabled(tab: &Tab, element_id: &str) -> Result<(), ScrapeEr
                 }
             }
         }
-        thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+        if sleep_or_cancel(cancel, Duration::from_millis(POLL_INTERVAL_MS)) {
+            return Err(ScrapeError::Cancelled);
+        }
     }
 
     Err(ScrapeError::ElementNotFound(format!(
         "Download link #{element_id} did not become enabled within {ELEMENT_TIMEOUT_SECS}s"
     )))
+}
+
+/// After clicking Search, poll `document.body.innerText` for the empty-result
+/// / disconnect signatures. Returns [`ScrapeError::NoData`] on match, or
+/// `Ok(())` if the deadline elapses without a match (in which case the caller
+/// proceeds to [`wait_for_download_enabled`] as the normal path).
+///
+/// This is the fix for the zero-references 120s hang (§2.2 of scrapefix2.md):
+/// Lens resolves empty results in well under 20s, so the empty case returns
+/// promptly instead of polling `#refs_ris` for two minutes.
+fn wait_for_empty_or_disconnect(
+    tab: &Tab,
+    cancel: &CancelToken,
+    kind: ScrapeKind,
+) -> Result<(), ScrapeError> {
+    eprintln!("  🔎 Watching for empty-result / disconnect signals…");
+    let deadline = Instant::now() + Duration::from_secs(EMPTY_RESULT_TIMEOUT_SECS);
+
+    while Instant::now() < deadline {
+        if cancel.is_cancelled() {
+            return Err(ScrapeError::Cancelled);
+        }
+        if let Ok(body_text) = get_body_text(tab) {
+            if let Some(reason) = detect_empty_or_disconnect(&body_text, kind) {
+                eprintln!("  ⚠️  Empty-result signal: {reason}");
+                return Err(ScrapeError::NoData(reason.to_string()));
+            }
+        }
+        if sleep_or_cancel(cancel, Duration::from_millis(POLL_INTERVAL_MS)) {
+            return Err(ScrapeError::Cancelled);
+        }
+    }
+
+    eprintln!("  ✅ No empty-result signal within {EMPTY_RESULT_TIMEOUT_SECS}s; proceeding");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +629,8 @@ fn wait_for_download_enabled(tab: &Tab, element_id: &str) -> Result<(), ScrapeEr
 /// Scrape Citation Chaser for the given DOI.
 ///
 /// ```text
-/// let result = scrape_citation_chaser("10.1234/example", &output_dir, &ScrapeOptions::default())?;
+/// let cancel = CancelToken::new();
+/// let result = scrape_citation_chaser("10.1234/example", &output_dir, &ScrapeOptions::default(), &cancel)?;
 /// println!("References: {:?}", result.references_ris);
 /// println!("Citations:  {:?}", result.citations_ris);
 /// ```
@@ -289,10 +639,13 @@ fn wait_for_download_enabled(tab: &Tab, element_id: &str) -> Result<(), ScrapeEr
 ///
 /// Returns [`ScrapeError::Browser`] if Chrome/Chromium is not installed.
 /// Returns [`ScrapeError::Validation`] if both `get_citations` and `get_references` are `false`.
+/// Returns [`ScrapeError::NoData`] if the article has no references/citations on record.
+/// Returns [`ScrapeError::Cancelled`] if the cancel token fires mid-scrape.
 pub fn scrape_citation_chaser(
     doi: &str,
     output_dir: &Path,
     options: &ScrapeOptions,
+    cancel: &CancelToken,
 ) -> Result<ScrapeResult, ScrapeError> {
     // ── Validate options ───────────────────────────────────────────────
     if !options.get_citations && !options.get_references {
@@ -321,6 +674,41 @@ pub fn scrape_citation_chaser(
     })
     .map_err(|e| ScrapeError::Launch(format!("Failed to launch browser: {e}")))?;
 
+    let result = run_scrape(&browser, doi, output_dir, options, cancel);
+
+    // Always close the browser, even on error/cancel.
+    eprintln!("🧹 Closing browser…");
+    if let Ok(tab) = browser.new_tab() {
+        let _ = tab.close(true);
+    }
+
+    // On cancel, remove any partial RIS files so the existence-shortcut does
+    // not cache a truncated file. Only relevant if the cancel fired during
+    // the download; the poll helpers return before writing.
+    if matches!(result, Err(ScrapeError::Cancelled)) {
+        let safe_doi = clean_doi_filename(doi);
+        if options.get_references {
+            let p = output_dir.join(format!("{safe_doi}_references.ris"));
+            let _ = fs::remove_file(p);
+        }
+        if options.get_citations {
+            let p = output_dir.join(format!("{safe_doi}_citations.ris"));
+            let _ = fs::remove_file(p);
+        }
+    }
+
+    result
+}
+
+/// Inner scrape loop, separated so the outer function can always close the
+/// browser even on early-return.
+fn run_scrape(
+    browser: &Browser,
+    doi: &str,
+    output_dir: &Path,
+    options: &ScrapeOptions,
+    cancel: &CancelToken,
+) -> Result<ScrapeResult, ScrapeError> {
     let tab =
         browser.new_tab().map_err(|e| ScrapeError::Launch(format!("Failed to create tab: {e}")))?;
     eprintln!("✅ Browser tab created");
@@ -345,7 +733,7 @@ pub fn scrape_citation_chaser(
     eprintln!("✅ Page loaded");
 
     // Wait for the Shiny app to fully render (watch for nav tabs).
-    wait_for_element(&tab, "//a[contains(text(), 'References')]", "Shiny app nav tabs")?;
+    wait_for_element(&tab, cancel, "//a[contains(text(), 'References')]", "Shiny app nav tabs")?;
     eprintln!("✅ Shiny app is ready");
 
     let mut references_ris: Option<PathBuf> = None;
@@ -356,78 +744,249 @@ pub fn scrape_citation_chaser(
         eprintln!("═══════════════════════════════════════");
         eprintln!("📥 Starting REFERENCES flow");
         eprintln!("═══════════════════════════════════════");
-        references_ris = Some(scrape_references(&tab, doi, output_dir)?);
+        references_ris = Some(scrape_flow(&tab, cancel, doi, output_dir, ScrapeKind::References)?);
         if let Some(ref path) = references_ris {
             eprintln!("✅ References RIS saved: {}", path.display());
         }
-        human_delay();
+        if human_delay(cancel) {
+            // Treat as cancel only if we're aborting mid-run; the references
+            // file may have succeeded, so fall through and return what we have.
+            eprintln!("  ⚠️  Cancel detected after references flow");
+        }
     }
 
     // ── Citations flow ─────────────────────────────────────────────────
     if options.get_citations {
+        // If references cancelled, don't start citations.
+        if cancel.is_cancelled() {
+            return Err(ScrapeError::Cancelled);
+        }
         eprintln!("═══════════════════════════════════════");
         eprintln!("📥 Starting CITATIONS flow");
         eprintln!("═══════════════════════════════════════");
-        citations_ris = Some(scrape_citations(&tab, doi, output_dir)?);
+        citations_ris = Some(scrape_flow(&tab, cancel, doi, output_dir, ScrapeKind::Citations)?);
         if let Some(ref path) = citations_ris {
             eprintln!("✅ Citations RIS saved: {}", path.display());
         }
     }
 
-    // ── Clean up browser ───────────────────────────────────────────────
-    eprintln!("🧹 Closing browser…");
-    let _ = tab.close(true);
-    eprintln!("✅ Done!");
-
     Ok(ScrapeResult { references_ris, citations_ris })
 }
 
-/// Run the "References" flow: click tab → search → wait for download enabled → fetch via curl.
-fn scrape_references(tab: &Tab, doi: &str, output_dir: &Path) -> Result<PathBuf, ScrapeError> {
-    // 1. Click the "References" tab.
-    click_xpath_with_retry(tab, "//a[contains(text(), 'References')]", "Click References tab")?;
-    human_delay();
+/// Run one Citation Chaser flow (references OR citations).
+///
+/// Shared by both because the two flows are structurally identical:
+///   1. Click the tab (`References` / `Citations`)
+///   2. Click the Search button (`#find_refs` / `#find_cits`)
+///   3. Watch for the empty-result / disconnect signal (the fix for the 120s hang)
+///   4. Wait for the download link to become enabled (the normal path)
+///   5. Extract the href, download via `download_file`, validate non-empty
+fn scrape_flow(
+    tab: &Tab,
+    cancel: &CancelToken,
+    doi: &str,
+    output_dir: &Path,
+    kind: ScrapeKind,
+) -> Result<PathBuf, ScrapeError> {
+    let tab_label = match kind {
+        ScrapeKind::References => "References",
+        ScrapeKind::Citations => "Citations",
+    };
 
-    // 2. Click the search trigger button (id="find_refs").
+    // 1. Click the tab.
     click_xpath_with_retry(
         tab,
-        "//*[@id='find_refs']",
-        "Click 'Search for all referenced articles in Lens.org' button",
+        cancel,
+        &format!("//a[contains(text(), '{tab_label}')]"),
+        &format!("Click {tab_label} tab"),
+    )?;
+    if human_delay(cancel) {
+        return Err(ScrapeError::Cancelled);
+    }
+
+    // 2. Click the search trigger button.
+    click_xpath_with_retry(
+        tab,
+        cancel,
+        &format!("//*[@id='{}']", kind.find_btn_id()),
+        &format!("Click '{}' button", kind.search_label()),
     )?;
 
-    // 3. Wait for the download link (#refs_ris) to become enabled (disabled class removed).
-    wait_for_download_enabled(tab, "refs_ris")?;
+    // 3. Watch for the empty-result / disconnect signal. If Lens reports the
+    //    result set is empty (or the session dies), short-circuit with NoData
+    //    instead of polling the download link for 120s.
+    wait_for_empty_or_disconnect(tab, cancel, kind)?;
 
-    // 4. Extract the download URL from the href attribute.
-    let href = get_element_href(tab, "refs_ris")?;
+    // 4. Wait for the download link to become enabled (disabled class removed).
+    wait_for_download_enabled(tab, cancel, kind.download_link_id())?;
+
+    // 5. Extract the download URL from the href attribute.
+    let href = get_element_href(tab, kind.download_link_id())?;
     eprintln!("  🔗 Download URL: {href}");
 
-    let filename = format!("{}_references.ris", clean_doi_filename(doi));
-    // 5. Download the file via curl.
-    download_with_curl(&href, output_dir, &filename)
+    let filename = format!("{}{}", clean_doi_filename(doi), kind.filename_suffix());
+
+    // Check cancel right before the (non-interruptible) download call.
+    if cancel.is_cancelled() {
+        return Err(ScrapeError::Cancelled);
+    }
+    let path = download_file(&href, output_dir, &filename)?;
+
+    // 6. Defense-in-depth: the zero-citations case serves a 0-byte file with a
+    //    valid href. Catch it here so the existence-shortcut doesn't cache it.
+    validate_ris_nonempty(&path)?;
+
+    Ok(path)
 }
 
-/// Run the "Citations" flow: click tab → search → wait for download enabled → fetch via curl.
-fn scrape_citations(tab: &Tab, doi: &str, output_dir: &Path) -> Result<PathBuf, ScrapeError> {
-    // 1. Click the "Citations" tab.
-    click_xpath_with_retry(tab, "//a[contains(text(), 'Citations')]", "Click Citations tab")?;
-    human_delay();
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
-    // 2. Click the search trigger button (id="find_cits").
-    click_xpath_with_retry(
-        tab,
-        "//*[@id='find_cits']",
-        "Click 'Search for all citing articles in Lens.org' button",
-    )?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // 3. Wait for the download link (#cits_ris) to become enabled (disabled class removed).
-    wait_for_download_enabled(tab, "cits_ris")?;
+    #[test]
+    fn clean_doi_filename_replaces_invalid_chars() {
+        assert_eq!(clean_doi_filename("10.1016/j.jaad.2023.01.013"), "10.1016_j.jaad.2023.01.013");
+        assert_eq!(clean_doi_filename("10.1002/csr.70574"), "10.1002_csr.70574");
+        // Already-clean DOIs are unchanged.
+        assert_eq!(
+            clean_doi_filename("10.1371_journal.pmed.1004371"),
+            "10.1371_journal.pmed.1004371"
+        );
+    }
 
-    // 4. Extract the download URL from the href attribute.
-    let href = get_element_href(tab, "cits_ris")?;
-    eprintln!("  🔗 Download URL: {href}");
+    #[test]
+    fn detect_empty_or_disconnect_zero_references() {
+        let body = "...\nYour input article(s) had 0 references and unique records after deduplication\n...";
+        assert_eq!(
+            detect_empty_or_disconnect(body, ScrapeKind::References),
+            Some("Article has 0 references in Lens.org")
+        );
+        // Citations kind must NOT match the references signature.
+        assert_eq!(detect_empty_or_disconnect(body, ScrapeKind::Citations), None);
+    }
 
-    let filename = format!("{}_citations.ris", clean_doi_filename(doi));
-    // 5. Download the file via curl.
-    download_with_curl(&href, output_dir, &filename)
+    #[test]
+    fn detect_empty_or_disconnect_zero_citations() {
+        let body = "...\nWarning: Your input articles have no recorded citations in the Lens.org database\n...";
+        assert_eq!(
+            detect_empty_or_disconnect(body, ScrapeKind::Citations),
+            Some("Article has 0 recorded citations in Lens.org")
+        );
+        // References kind must NOT match the citations signature.
+        assert_eq!(detect_empty_or_disconnect(body, ScrapeKind::References), None);
+    }
+
+    #[test]
+    fn detect_empty_or_disconnect_disconnected_wins_on_both_kinds() {
+        let body = "Disconnected from the server. Reload";
+        assert_eq!(
+            detect_empty_or_disconnect(body, ScrapeKind::References),
+            Some("Citation Chaser session disconnected")
+        );
+        assert_eq!(
+            detect_empty_or_disconnect(body, ScrapeKind::Citations),
+            Some("Citation Chaser session disconnected")
+        );
+    }
+
+    #[test]
+    fn detect_empty_or_disconnect_normal_body_is_none() {
+        let body = "Once you have loaded your input articles, you can search for all referenced articles across them.";
+        assert_eq!(detect_empty_or_disconnect(body, ScrapeKind::References), None);
+        assert_eq!(detect_empty_or_disconnect(body, ScrapeKind::Citations), None);
+    }
+
+    #[test]
+    fn detect_empty_or_disconnect_empty_body_is_none() {
+        assert_eq!(detect_empty_or_disconnect("", ScrapeKind::References), None);
+        assert_eq!(detect_empty_or_disconnect("", ScrapeKind::Citations), None);
+    }
+
+    #[test]
+    fn cancel_token_initial_state_is_false() {
+        let t = CancelToken::new();
+        assert!(!t.is_cancelled());
+    }
+
+    #[test]
+    fn cancel_token_cancel_flips_flag() {
+        let t = CancelToken::new();
+        assert!(!t.is_cancelled());
+        t.cancel();
+        assert!(t.is_cancelled());
+    }
+
+    #[test]
+    fn cancel_token_clone_shares_state() {
+        let t = CancelToken::new();
+        let t2 = t.clone();
+        assert!(!t2.is_cancelled());
+        t.cancel();
+        assert!(t2.is_cancelled(), "clone must reflect the cancel signal");
+    }
+
+    #[test]
+    fn sleep_or_cancel_returns_true_when_already_cancelled() {
+        let t = CancelToken::new();
+        t.cancel();
+        // Should return immediately (true) without sleeping.
+        let start = Instant::now();
+        let fired = sleep_or_cancel(&t, Duration::from_millis(50));
+        assert!(fired);
+        assert!(start.elapsed() < Duration::from_millis(50));
+    }
+
+    #[test]
+    fn validate_ris_nonempty_rejects_empty_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("empty.ris");
+        std::fs::write(&path, b"").expect("write");
+        let err = validate_ris_nonempty(&path).unwrap_err();
+        assert!(matches!(err, ScrapeError::NoData(_)));
+        assert!(!path.exists(), "empty RIS should be removed");
+    }
+
+    #[test]
+    fn validate_ris_nonempty_rejects_no_ty_tag() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("notris.ris");
+        std::fs::write(&path, b"this is not an RIS file").expect("write");
+        let err = validate_ris_nonempty(&path).unwrap_err();
+        assert!(matches!(err, ScrapeError::NoData(_)));
+        assert!(!path.exists(), "invalid RIS should be removed");
+    }
+
+    #[test]
+    fn validate_ris_nonempty_accepts_valid_ris() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("valid.ris");
+        let body = "TY  - JOUR\nTI  - Test\nER  -\n";
+        std::fs::write(&path, body).expect("write");
+        validate_ris_nonempty(&path).expect("valid RIS should pass");
+        assert!(path.exists(), "valid RIS should be kept");
+    }
+
+    #[test]
+    fn scrape_kind_helpers_are_consistent() {
+        assert_eq!(ScrapeKind::References.find_btn_id(), "find_refs");
+        assert_eq!(ScrapeKind::Citations.find_btn_id(), "find_cits");
+        assert_eq!(ScrapeKind::References.download_link_id(), "refs_ris");
+        assert_eq!(ScrapeKind::Citations.download_link_id(), "cits_ris");
+        assert_eq!(ScrapeKind::References.filename_suffix(), "_references.ris");
+        assert_eq!(ScrapeKind::Citations.filename_suffix(), "_citations.ris");
+    }
+
+    #[test]
+    fn validation_error_when_both_false() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let options = ScrapeOptions { get_citations: false, get_references: false };
+        let cancel = CancelToken::new();
+        let result = scrape_citation_chaser("10.1234/anything", dir.path(), &options, &cancel);
+        let err = result.unwrap_err();
+        assert!(matches!(err, ScrapeError::Validation(_)));
+    }
 }

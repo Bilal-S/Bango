@@ -1,17 +1,30 @@
 //! Tauri commands for the Citation Chaser scraping feature.
 //!
-//! These commands wrap the pure scraping logic with audit logging.
+//! These commands wrap the pure scraping logic with audit logging and the
+//! cancellation-token plumbing.
+//!
+//! # Cancellation contract
+//!
+//! [`scrape_citation_chaser_cmd`] creates a fresh [`CancelToken`] per call,
+//! stores it in the managed [`ScrapingState`] for the duration of the
+//! `spawn_blocking` call, and clears the slot in a `finally`-shaped guard. The
+//! frontend's [`cancel_scraping`] command signals the active token; the
+//! in-flight scrape returns [`crate::scraping::citation_chaser::ScrapeError::Cancelled`]
+//! within ~1s (one `POLL_INTERVAL_MS` tick).
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use crate::db::app_settings_repo;
 use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
-use crate::scraping::citation_chaser::{clean_doi_filename, scrape_citation_chaser, ScrapeOptions};
+use crate::scraping::citation_chaser::{
+    clean_doi_filename, scrape_citation_chaser, CancelToken, ScrapeOptions,
+};
 
 /// Serializable result returned to the frontend.
 #[derive(Debug, Serialize)]
@@ -19,6 +32,46 @@ use crate::scraping::citation_chaser::{clean_doi_filename, scrape_citation_chase
 pub struct ScrapeResultDto {
     pub references_ris: Option<PathBuf>,
     pub citations_ris: Option<PathBuf>,
+}
+
+/// Managed state holding the currently-active scrape's [`CancelToken`], if any.
+///
+/// `Some` while a scrape is in flight; the frontend's [`cancel_scraping`]
+/// command calls `.cancel()` on it. The slot is cleared when the scrape
+/// returns (success, error, or cancel).
+#[derive(Default)]
+pub struct ScrapingState {
+    active: Mutex<Option<CancelToken>>,
+}
+
+impl ScrapingState {
+    /// Lock the active-token slot, recovering from poison by taking the inner
+    /// guard. A poisoned mutex here means a panic occurred while a prior
+    /// `set_active`/`clear_active`/`cancel_active` held the lock; the slot is
+    /// still readable/writable, and the cancel contract is best-effort anyway
+    /// (the frontend's between-articles flag is the authoritative stop signal),
+    /// so we recover rather than propagate.
+    fn lock_active(&self) -> std::sync::MutexGuard<'_, Option<CancelToken>> {
+        self.active.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Install `token` as the active scrape token. Returns the previously
+    /// active token (if any) so the caller could, in principle, chain them.
+    fn set_active(&self, token: CancelToken) -> Option<CancelToken> {
+        self.lock_active().replace(token)
+    }
+
+    /// Clear the active token slot. Called when the scrape returns.
+    fn clear_active(&self) {
+        *self.lock_active() = None;
+    }
+
+    /// Signal cancellation to the active token, if one is present.
+    fn cancel_active(&self) {
+        if let Some(token) = self.lock_active().as_ref() {
+            token.cancel();
+        }
+    }
 }
 
 /// The RIS subdirectory name under the storage root.
@@ -44,6 +97,17 @@ fn resolve_ris_dir(conn: &rusqlite::Connection) -> PathBuf {
     // remains unwritable.
     let _ = std::fs::create_dir_all(&ris);
     ris
+}
+
+/// Classify a rendered `ScrapeError` string as a "skip" (NoData / Cancelled)
+/// rather than a true error. The frontend uses the same prefix check to route
+/// the toast into the batch's `skipped` counter and show an info (not error)
+/// toast.
+///
+/// Kept in sync with the `#[error("...")]` formats on `ScrapeError::NoData`
+/// ("No data: ...") and `ScrapeError::Cancelled` ("Cancelled").
+fn is_skip_message(err_str: &str) -> bool {
+    err_str.starts_with("No data:") || err_str == "Cancelled"
 }
 
 /// Scrape Citation Chaser for references and/or citations of a given DOI.
@@ -94,14 +158,26 @@ pub async fn scrape_citation_chaser_cmd(
         });
     }
 
+    // ── Install the cancel token for the duration of the scrape ──
+    let cancel = CancelToken::new();
+    if let Some(state) = app.try_state::<ScrapingState>() {
+        state.set_active(cancel.clone());
+    }
+
     // ── Scrape on a blocking thread to keep the UI responsive ──
     let options = ScrapeOptions { get_citations: get_cits, get_references: get_refs };
     let doi_clone = doi.clone();
+    let cancel_clone = cancel.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        scrape_citation_chaser(&doi_clone, &output_path, &options)
+        scrape_citation_chaser(&doi_clone, &output_path, &options, &cancel_clone)
     })
     .await
     .map_err(|e| AppError::Scraping(format!("Scraping task panicked: {e}")))?;
+
+    // Always clear the active token slot, regardless of outcome.
+    if let Some(state) = app.try_state::<ScrapingState>() {
+        state.clear_active();
+    }
 
     match result {
         Ok(scrape_result) => {
@@ -122,14 +198,28 @@ pub async fn scrape_citation_chaser_cmd(
             })
         }
         Err(err) => {
-            // Log error to audit table (best-effort; the real error is returned).
+            let err_str = err.to_string();
+            // Log to audit table (best-effort; the real error is returned).
+            // Skip-classified outcomes (NoData/Cancelled) are logged so they
+            // appear in the Audit Timeline / Diagnostics, but the frontend
+            // routes them as info toasts rather than errors.
             if let Some(db_state) = app.try_state::<DbState>() {
-                audit_repo::log_error_best_effort(
-                    &db_state.conn,
-                    &format!("Citation Chaser scrape failed for DOI {doi}: {err}"),
-                );
+                let label = if is_skip_message(&err_str) { "skipped" } else { "failed" };
+                let details = format!("Citation Chaser {label} for DOI {doi}: {err_str}",);
+                audit_repo::log_error_best_effort(&db_state.conn, &details);
             }
-            Err(AppError::Scraping(err.to_string()))
+            Err(AppError::Scraping(err_str))
         }
     }
+}
+
+/// Cancel any in-flight Citation Chaser scrape.
+///
+/// Signals the active [`CancelToken`] (if any) so the `spawn_blocking` scrape
+/// returns [`ScrapeError::Cancelled`] within ~1s. Safe to call when no scrape
+/// is running (no-op).
+#[tauri::command]
+pub fn cancel_scraping(state: State<'_, ScrapingState>) -> Result<(), AppError> {
+    state.cancel_active();
+    Ok(())
 }

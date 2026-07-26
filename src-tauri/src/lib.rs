@@ -32,6 +32,7 @@ pub mod translation;
 pub mod utils;
 pub mod wiki;
 
+use commands::scraping::ScrapingState;
 use commands::screening::ScreeningState;
 use commands::startup::StartupStatus;
 use db::connection::DbState;
@@ -146,6 +147,7 @@ pub fn run() {
         })
         .manage(ScreeningState { engine: tokio::sync::RwLock::new(None) })
         .manage(batch_import::BatchImportState::default())
+        .manage(ScrapingState::default())
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::startup::get_startup_status,
@@ -283,6 +285,7 @@ pub fn run() {
             batch_import::cancel_batch_import,
             batch_import::get_batch_import_progress,
             commands::scraping::scrape_citation_chaser_cmd,
+            commands::scraping::cancel_scraping,
             commands::biblio_cmd::biblio_normalize,
             commands::biblio_cmd::biblio_get_needs_refresh,
             commands::biblio_cmd::biblio_get_status,

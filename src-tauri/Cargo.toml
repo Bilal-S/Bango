@@ -26,7 +26,12 @@ aes-gcm = "0.10"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 sha2 = "0.10"
 base64 = "0.22"
-reqwest = { version = "0.12", features = ["json"] }
+# The `blocking` feature is required by the Citation Chaser RIS download path
+# (`scraping::citation_chaser::download_with_reqwest`), which runs on the
+# `spawn_blocking` pool. See `.worktrees/scrapefix2.md` §5.3 for the contract;
+# `reqwest::blocking` is safe there because the scrape is NOT on a tokio async
+# worker thread.
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 async-trait = "0.1"
 futures = "0.3"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros", "rt-multi-thread"] }
