@@ -170,6 +170,20 @@ pub fn override_ai_decision(
     Ok(())
 }
 
+/// Clear the AI decision, reasoning text, and confidence for a single article.
+/// Powers the trashcan icon in the AI Decision card's expanded header. The
+/// `ai_decision` + `ai_reasoning` + `ai_confidence` are all nulled so the
+/// entire card unmounts; the user's own Include/Exclude choice lives on the
+/// separate `status` field, which stays intact. `screened_at` is preserved so
+/// the screening history survives. Writes an `ai_screen_clear` audit entry so
+/// the action appears in the Audit Timeline.
+#[tauri::command]
+pub fn clear_ai_reasoning(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    article_repo::clear_ai_reasoning(&conn, &id)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn update_article_criteria(
     db_state: State<'_, DbState>,

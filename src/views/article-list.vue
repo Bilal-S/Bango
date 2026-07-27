@@ -11,6 +11,7 @@ import { useBatchReferenceScraping } from '@/composables/use-references';
 import { useChatStore } from '@/stores/chat';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
+import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import { useExport } from '@/composables/use-export';
 import { resolveBiblioReturn } from '@/utils/biblio-links';
 import {
@@ -66,6 +67,7 @@ const {
   navigateNext,
   moveArticle,
   deleteArticle,
+  clearAiReasoning,
   refreshArticle,
   updateNotes,
   updateTags,
@@ -614,6 +616,11 @@ const { handleDeleteArticle } = useArticleDelete({
   },
 });
 
+// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
+// (shared with the other detail-panel host views). The composable owns the
+// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
+
 async function handleReadFullText(articleId: string): Promise<string | null> {
   return await readFullTextContent(articleId);
 }
@@ -983,6 +990,7 @@ onUnmounted(() => {
       @toggle-full-screen="toggleDetailFullScreen"
       @attach-full-text="handleAttachFullText"
       @delete-article="handleDeleteArticle"
+      @clear-ai-reasoning="handleClearAiReasoning"
       @delete-full-text="handleDeleteFullText"
       @read-full-text="handleReadFullText"
       @refresh-article="refreshArticle"

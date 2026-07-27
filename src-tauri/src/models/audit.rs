@@ -51,6 +51,12 @@ pub enum AuditAction {
     /// The `details` field records which field changed
     /// (e.g. "Metadata edited: DOI").
     MetadataEdit,
+    /// The user cleared the AI reasoning text + confidence from an article
+    /// via the trashcan icon in the AI Decision card's expanded header. Only
+    /// `ai_reasoning` + `ai_confidence` are nulled; `ai_decision`, `status`,
+    /// `screened_at`, and `manual_override` are preserved so the decision
+    /// and screening history stay intact.
+    AiScreenClear,
 }
 
 impl AuditAction {
@@ -78,6 +84,7 @@ impl AuditAction {
             Self::TranslationError => "translation_error",
             Self::SearchStrategy => "search_strategy",
             Self::MetadataEdit => "metadata_edit",
+            Self::AiScreenClear => "ai_screen_clear",
         }
     }
 }

@@ -208,6 +208,7 @@ export type AuditAction =
   | 'error'
   | 'translation'
   | 'translation_error'
+  | 'ai_screen_clear'
   | 'metadata_edit';
 
 export type AuditSource = 'ai' | 'user' | 'system';

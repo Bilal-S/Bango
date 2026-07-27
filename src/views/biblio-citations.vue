@@ -14,6 +14,7 @@ import { useScreening } from '@/composables/use-screening';
 import { useToast } from '../composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
+import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import { debounce } from '../utils/debounce';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CitationNode } from '../types/biblio-citation';
@@ -79,6 +80,7 @@ const {
   updateMetadata,
   moveArticle,
   deleteArticle,
+  clearAiReasoning,
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
@@ -259,6 +261,11 @@ function onCloseArticleDetail() {
 // Full-text attach UI orchestration is centralized in
 // `useFullTextAttachment` (shared with the other detail-panel host views).
 const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
+
+// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
+// (shared with the other detail-panel host views). The composable owns the
+// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 
 function onFilterChange(filters: {
   minCitations: number;
@@ -493,6 +500,7 @@ async function onResetAnalysis() {
         :article-total="1"
         @close="onCloseArticleDetail"
         @delete-article="handleDeleteArticle"
+        @clear-ai-reasoning="handleClearAiReasoning"
         @toggle-full-screen="isArticleDetailFullScreen = !isArticleDetailFullScreen"
         @update-notes="updateNotes"
         @update-tags="updateTags"

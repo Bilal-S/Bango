@@ -711,6 +711,23 @@ export function useArticleSearch() {
     syncArticleToList(id);
   }
 
+  /**
+   * Clear the AI reasoning text + confidence for an article via the
+   * `clear_ai_reasoning` backend command. Only `ai_reasoning` + `ai_confidence`
+   * are nulled; `ai_decision`, `status`, `screened_at`, and `manual_override`
+   * are preserved. After the IPC call, re-fetch the article so the card
+   * updates live (reasoning paragraph disappears, confidence pill flips to
+   * `---`) and patch the table row. Mirrors `updateNotes` /
+   * `updateMetadata`: invoke -> re-fetch -> patch the list.
+   *
+   * Re-throws the backend error so the caller can surface a toast.
+   */
+  async function clearAiReasoning(id: string): Promise<void> {
+    await tauriCommand('clear_ai_reasoning', { id });
+    await selectArticle(id);
+    syncArticleToList(id);
+  }
+
   // ── Full text (extracted composable) ─────────────────────────────
   const { attachFullText, deleteFullTextAttachment, readFullTextContent, getFullTextFilePath } =
     useArticleFullText({ selectArticle, syncArticleToList, fetchCounts });
@@ -964,6 +981,7 @@ export function useArticleSearch() {
     updateLabels,
     updateCriteria,
     updateMetadata,
+    clearAiReasoning,
     hasPrevious,
     hasNext,
     navigatePrev,

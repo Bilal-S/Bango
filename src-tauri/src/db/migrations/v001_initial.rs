@@ -128,7 +128,8 @@ CREATE TABLE IF NOT EXISTS audit_entries (
         'reference_match', 'figure_descriptions',
         'translation', 'translation_error',
         'search_strategy',
-        'metadata_edit'
+        'metadata_edit',
+        'ai_screen_clear'
     )),
     article_id TEXT,
     details TEXT,

@@ -203,6 +203,7 @@ pub fn run() {
             commands::articles::update_article_tags,
             commands::articles::update_article_labels,
             commands::articles::override_ai_decision,
+            commands::articles::clear_ai_reasoning,
             commands::articles::update_article_criteria,
             commands::articles::update_article_metadata,
             commands::articles::get_import_activities,

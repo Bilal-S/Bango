@@ -302,6 +302,7 @@ fn parse_action(s: &str) -> AuditAction {
         "translation_error" => AuditAction::TranslationError,
         "search_strategy" => AuditAction::SearchStrategy,
         "metadata_edit" => AuditAction::MetadataEdit,
+        "ai_screen_clear" => AuditAction::AiScreenClear,
         _ => AuditAction::StatusChange,
     }
 }

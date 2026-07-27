@@ -18,6 +18,7 @@ import { useScreening } from '@/composables/use-screening';
 import { useToast } from '@/composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
+import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import { openPath } from '@tauri-apps/plugin-opener';
 
 // Name the component so <keep-alive include="WikiView"> in app-shell.vue
@@ -55,6 +56,7 @@ const {
   updateMetadata,
   moveArticle,
   deleteArticle,
+  clearAiReasoning,
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
@@ -425,6 +427,11 @@ function onCloseArticleDetail(): void {
 // `useFullTextAttachment` (shared with the other detail-panel host views).
 const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
 
+// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
+// (shared with the other detail-panel host views). The composable owns the
+// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
+
 async function onIngested(): Promise<void> {
   await refreshStatus();
   navHistory.clear();
@@ -768,6 +775,7 @@ watch(searchQuery, (q) => {
         :article-total="1"
         @close="onCloseArticleDetail"
         @delete-article="handleDeleteArticle"
+        @clear-ai-reasoning="handleClearAiReasoning"
         @toggle-full-screen="isArticleDetailFullScreen = !isArticleDetailFullScreen"
         @update-notes="updateNotes"
         @update-tags="updateTags"

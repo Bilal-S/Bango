@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { Article } from '@/types';
 import { useCriteriaStore } from '@/stores/criteria';
 
 const props = defineProps<{
   article: Article;
+}>();
+
+const emit = defineEmits<{
+  /** Fired when the user clicks the trashcan icon in the expanded header.
+   *  The parent owns the confirmation dialog + IPC call. */
+  clearReasoning: [id: string];
 }>();
 
 const criteriaStore = useCriteriaStore();
@@ -46,7 +52,7 @@ const criterionIndexMap = computed(() => criteriaStore.criterionIndexMap);
 
 /**
  * Replace criterion UUIDs in reasoning text with global numbered references `[n]`.
- * Also collapses double brackets `[[n]]` → `[n]` from LLM echoing prompt format.
+ * Also collapses double brackets `[[n]]` to `[n]` from LLM echoing prompt format.
  */
 const displayReasoning = computed(() => {
   const raw = props.article.aiReasoning;
@@ -68,42 +74,93 @@ const displayReasoning = computed(() => {
 
   return result;
 });
+
+// Collapse state persisted across sessions. Mirrors the
+// `bango-metadata-expanded` key used by `article-metadata.vue`.
+const reasoningExpanded = ref(localStorage.getItem('bango-ai-reasoning-expanded') !== 'false');
+
+function toggleExpanded(): void {
+  reasoningExpanded.value = !reasoningExpanded.value;
+  localStorage.setItem('bango-ai-reasoning-expanded', String(reasoningExpanded.value));
+}
+
+/** Stop click propagation so the trash icon does not toggle the header. */
+function onDeleteClick(event: MouseEvent): void {
+  event.stopPropagation();
+  emit('clearReasoning', props.article.id);
+}
 </script>
 
 <template>
   <section v-if="aiDecisionLabel && aiDecisionColors">
-    <div class="rounded-xl p-4 border" :class="[aiDecisionColors.bg, aiDecisionColors.border]">
-      <div class="flex items-center justify-between mb-2">
-        <div class="flex items-center gap-2">
-          <span class="material-symbols-outlined" :class="aiDecisionColors.icon">
+    <div
+      class="rounded-xl border overflow-hidden"
+      :class="[aiDecisionColors.bg, aiDecisionColors.border]"
+    >
+      <!-- Collapsible header. Clicking anywhere toggles; the trash icon
+           stops propagation so it does not toggle. -->
+      <button
+        type="button"
+        class="w-full grid grid-cols-3 items-center px-4 py-3 cursor-pointer transition-colors hover:bg-black/[0.03]"
+        @click="toggleExpanded"
+      >
+        <!-- Left: decision icon + label -->
+        <span class="flex items-center gap-2 justify-self-start min-w-0">
+          <span class="material-symbols-outlined shrink-0" :class="aiDecisionColors.icon">
             {{ article.aiDecision === 'include' ? 'verified' : 'cancel' }}
           </span>
-          <span class="font-bold" :class="aiDecisionColors.label">
+          <span class="font-bold truncate" :class="aiDecisionColors.label">
             {{ aiDecisionLabel }}
           </span>
-        </div>
+        </span>
+        <!-- Center: confidence pill (truly centered in its grid column) -->
         <span
-          class="text-[11px] font-bold bg-white px-2 py-0.5 rounded-full shadow-sm"
+          class="justify-self-center text-[11px] font-bold bg-white px-2 py-0.5 rounded-full shadow-sm"
           :class="aiDecisionColors.label"
         >
           {{ confidencePercentage }} Confidence
         </span>
+        <!-- Right: delete icon (expanded only) + caret -->
+        <span class="flex items-center gap-0.5 justify-self-end shrink-0">
+          <span
+            v-if="reasoningExpanded"
+            role="button"
+            tabindex="0"
+            class="material-symbols-outlined text-[18px] text-slate-400 hover:text-rose-600 cursor-pointer transition-colors"
+            title="Delete AI reasoning and confidence"
+            @click="onDeleteClick"
+            @keydown.enter.prevent="onDeleteClick($event as unknown as MouseEvent)"
+            @keydown.space.prevent="onDeleteClick($event as unknown as MouseEvent)"
+          >
+            delete
+          </span>
+          <span
+            class="material-symbols-outlined text-[18px] transition-transform duration-200"
+            :class="[aiDecisionColors.icon, { 'rotate-180': reasoningExpanded }]"
+          >
+            expand_more
+          </span>
+        </span>
+      </button>
+      <!-- Expanded body: confidence bar + reasoning paragraph.
+           Hidden in collapsed state so the header stays compact. -->
+      <div v-show="reasoningExpanded" class="px-4 pb-4">
+        <!-- Confidence bar -->
+        <div class="w-full bg-white/50 h-2 rounded-full overflow-hidden mb-3">
+          <div
+            class="h-full rounded-full transition-all duration-500"
+            :class="article.aiDecision === 'include' ? 'bg-emerald-500' : 'bg-rose-400'"
+            :style="{ width: confidenceBarWidth }"
+          />
+        </div>
+        <p
+          v-if="article.aiReasoning"
+          class="text-body-sm leading-relaxed"
+          :class="aiDecisionColors.text"
+        >
+          <span class="font-semibold">Reasoning:</span> {{ displayReasoning }}
+        </p>
       </div>
-      <!-- Confidence bar -->
-      <div class="w-full bg-white/50 h-2 rounded-full overflow-hidden mb-3">
-        <div
-          class="h-full rounded-full transition-all duration-500"
-          :class="article.aiDecision === 'include' ? 'bg-emerald-500' : 'bg-rose-400'"
-          :style="{ width: confidenceBarWidth }"
-        />
-      </div>
-      <p
-        v-if="article.aiReasoning"
-        class="text-body-sm leading-relaxed"
-        :class="aiDecisionColors.text"
-      >
-        <span class="font-semibold">Reasoning:</span> {{ displayReasoning }}
-      </p>
     </div>
   </section>
 </template>

@@ -59,7 +59,7 @@ fn run_migrations_recovers_from_partial_v003_state() {
 
     // Version is now 6 - v003 was NOT re-run (heal advanced to 3), then v004
     // + v005 + v006 ran normally on top.
-    assert_eq!(user_version(&conn), 6);
+    assert_eq!(user_version(&conn), 7);
 
     // All v003 schema artifacts are present and usable.
     assert!(column_exists(&conn, "articles", "is_translated"));
@@ -118,7 +118,7 @@ fn run_migrations_on_fresh_db_has_full_translation_schema() {
     let conn = create_connection().expect("connection");
     run_migrations(&conn).expect("migrations");
     // Fresh DB runs the full chain through v006.
-    assert_eq!(user_version(&conn), 6);
+    assert_eq!(user_version(&conn), 7);
     assert!(column_exists(&conn, "articles", "is_translated"));
     assert!(column_exists(&conn, "articles", "translation_status"));
 }
@@ -183,7 +183,7 @@ fn v006_heals_empty_string_article_id_to_null() {
     // the `INSERT ... SELECT` rebuild with FOREIGN KEY constraint failed.
     run_migrations(&conn).expect("v006 heal should succeed");
 
-    assert_eq!(user_version(&conn), 6);
+    assert_eq!(user_version(&conn), 7);
 
     // The malformed row must be preserved (not dropped) AND normalized to NULL.
     let row_count: i64 = conn

@@ -13,6 +13,7 @@ import { useScreening } from '@/composables/use-screening';
 import { useWiki } from '@/composables/use-wiki';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
+import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
 import type { WikiSourceInfo } from '@/types/wiki';
@@ -80,6 +81,7 @@ const {
   updateMetadata,
   moveArticle,
   deleteArticle,
+  clearAiReasoning,
   attachFullText,
   deleteFullTextAttachment,
 } = useArticleSearch();
@@ -340,6 +342,11 @@ async function openArticleDetail(articleId: string) {
 // Full-text attach UI orchestration is centralized in
 // `useFullTextAttachment` (shared with the other detail-panel host views).
 const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
+
+// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
+// (shared with the other detail-panel host views). The composable owns the
+// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 </script>
 
 <template>
@@ -653,6 +660,7 @@ const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
         :article-total="1"
         @close="detailArticle = null"
         @delete-article="handleDeleteArticle"
+        @clear-ai-reasoning="handleClearAiReasoning"
         @toggle-full-screen="isDetailFullScreen = !isDetailFullScreen"
         @update-notes="updateNotes"
         @update-tags="updateTags"

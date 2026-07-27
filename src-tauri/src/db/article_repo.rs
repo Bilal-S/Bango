@@ -1161,6 +1161,38 @@ pub fn override_ai_decision(
     Ok(())
 }
 
+/// Clear the AI decision, reasoning text, and confidence from an article
+/// while preserving the status, screening timestamp, and manual-override flag.
+///
+/// Powers the trashcan icon in the AI Decision card's expanded header. The
+/// `ai_decision` + `ai_reasoning` + `ai_confidence` are all nulled so the
+/// entire card unmounts (the card renders only when `ai_decision` is set);
+/// the user's own Include/Exclude choice lives on the separate `status` field,
+/// which stays intact. `screened_at` is preserved so the screening history
+/// (audit trail) survives the clear and the article is NOT re-enqueued for
+/// screening. Restoring the AI assessment requires re-screening the article
+/// (LLM token cost).
+///
+/// Writes an `ai_screen_clear` audit entry so the action is visible in the
+/// Audit Timeline.
+pub fn clear_ai_reasoning(conn: &Connection, article_id: &str) -> Result<(), AppError> {
+    conn.execute(
+        "UPDATE articles SET ai_decision = NULL, ai_reasoning = NULL, ai_confidence = NULL, \
+         changed_at = datetime('now') WHERE id = ?1",
+        [article_id],
+    )?;
+    crate::db::audit_repo::create_entry(
+        conn,
+        article_id,
+        "ai_screen_clear",
+        None,
+        None,
+        Some("AI reasoning and confidence cleared"),
+        "user",
+    )?;
+    Ok(())
+}
+
 pub fn get_article_field_count(conn: &Connection, id: &str) -> Result<usize, AppError> {
     let article = get_article_by_id(conn, id)?;
     let mut count = 0;

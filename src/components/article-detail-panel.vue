@@ -62,6 +62,10 @@ const emit = defineEmits<{
    *  panel. The dialog itself is owned by this component so the parent does
    *  not need to render a second confirmation. */
   deleteArticle: [id: string];
+  /** Emitted after the user confirms the clear-AI-reasoning dialog. The
+   *  parent invokes the backend `clear_ai_reasoning` command and refreshes
+   *  the article. The dialog itself is owned by this component. */
+  clearAiReasoning: [id: string];
 }>();
 
 const llmConfigStore = useLlmConfigStore();
@@ -271,6 +275,12 @@ const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
 // after the user confirms; the parent never has to render its own dialog.
 const showDeleteDialog = ref(false);
 
+// Clear-AI-reasoning confirmation dialog visibility. Owned here (mirrors the
+// delete-article pattern): the AiDecisionCard emits `clearReasoning`, this
+// component shows the confirmation, and on user confirmation it emits
+// `clearAiReasoning` for the parent to invoke the backend command + refresh.
+const showClearReasoningDialog = ref(false);
+
 const {
   showTranslateDialog,
   translateArticleTitle,
@@ -336,8 +346,18 @@ const {
       class="flex-1 overflow-y-auto p-6 space-y-8"
       :class="fullScreen ? 'max-w-[1100px] mx-auto' : ''"
     >
-      <!-- AI Decision Card -->
-      <AiDecisionCard v-if="article.aiDecision" :article="article" />
+      <!-- AI Decision Card. Wrapped in a <Transition> so clearing the AI
+           decision (trashcan -> confirm -> backend nulls `ai_decision`)
+           animates the card shrinking + fading out instead of vanishing
+           instantly. The enter transition (re-screening produces a new
+           decision) mirrors the leave for visual symmetry. -->
+      <Transition name="ai-card">
+        <AiDecisionCard
+          v-if="article.aiDecision"
+          :article="article"
+          @clear-reasoning="showClearReasoningDialog = true"
+        />
+      </Transition>
 
       <!-- Metadata (Authors, Journal, Year, DOI, Keywords) -->
       <ArticleMetadata
@@ -503,6 +523,54 @@ const {
       </div>
     </Teleport>
 
+    <!-- Clear-AI-reasoning confirmation dialog. Mirrors the delete-article +
+         translation dialog shape (Teleported to body) but uses an info style
+         rather than danger: the action is destructive only for the reasoning
+         text + confidence; the decision, status, and screening history stay
+         intact. Restoring the reasoning requires re-screening (LLM token
+         cost), which is the warning the body emphasizes. -->
+    <Teleport to="body">
+      <div
+        v-if="showClearReasoningDialog"
+        class="dialog-overlay"
+        @click.self="showClearReasoningDialog = false"
+      >
+        <div class="dialog">
+          <h2>Delete AI Reasoning</h2>
+          <div class="dialog__desc">
+            <p>
+              This will remove the AI <strong>decision</strong>, <strong>reasoning text</strong>,
+              and <strong>confidence score</strong>
+              from this article. The AI Decision card will be hidden.
+            </p>
+            <p class="mt-2">
+              Your own Include / Exclude choice (the article's status) is
+              <strong>not affected</strong>. Restoring the AI assessment requires
+              <strong>re-screening</strong> the article, which has an LLM token cost. This action
+              <strong>cannot be undone</strong>.
+            </p>
+            <p class="mt-3">
+              Article: <code>{{ article.title }}</code>
+            </p>
+          </div>
+          <div class="dialog__actions">
+            <button class="btn btn--outline" @click="showClearReasoningDialog = false">
+              Cancel
+            </button>
+            <button
+              class="btn btn--danger"
+              @click="
+                showClearReasoningDialog = false;
+                emit('clearAiReasoning', article.id);
+              "
+            >
+              Delete AI Decision
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Footer Actions -->
     <div class="p-4 border-t border-slate-100 flex gap-3 bg-slate-50/50 items-center">
       <!-- Left: Navigation -->
@@ -638,5 +706,53 @@ const {
 }
 .decision-toast-leave-to {
   opacity: 0;
+}
+
+/* AI Decision card enter/leave transition.
+   - Leave (the primary path you asked for): the card shrinks (max-height +
+     margin + padding to 0) and fades out over 250ms, producing the
+     "shrink and vanish" effect when `ai_decision` is cleared. Using
+     `max-height` (with a generous cap) avoids measuring the element's
+     natural height. `overflow: hidden` during the transition prevents the
+     collapsing content from overflowing the parent's `space-y-8` gap.
+   - Enter (re-screening produces a new decision): the reverse - fade +
+     expand from 0 so a freshly-screened decision does not pop in. Mirrors
+     the leave for visual symmetry. */
+.ai-card-enter-active {
+  transition:
+    max-height 0.25s ease-out,
+    opacity 0.25s ease-out,
+    margin 0.25s ease-out;
+  overflow: hidden;
+}
+.ai-card-leave-active {
+  transition:
+    max-height 0.25s ease-in,
+    opacity 0.25s ease-in,
+    margin 0.25s ease-in,
+    padding 0.25s ease-in;
+  overflow: hidden;
+}
+.ai-card-enter-from {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.ai-card-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+/* Generous max-height cap for the expanded state so the collapse animation
+   runs smoothly without needing the exact rendered height. The AI Decision
+   card is well under this cap in practice. */
+.ai-card-enter-to,
+.ai-card-leave-from {
+  max-height: 800px;
+  opacity: 1;
 }
 </style>

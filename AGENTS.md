@@ -1289,6 +1289,37 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     end-to-end; the pre-flight LLM gate is unit-tested via the pure
     `check_llm_configured_or_skip` helper, and the `generate_article_ai_summary_inner`
     core is tested via the existing `summary_engine_test.rs` mock-LLM path.
+- **`src-tauri/src/db/migrations/v007_audit_ai_screen_clear.rs`** - Post-v006
+  schema (VERSION 7). Extends `audit_entries.action` CHECK with
+  `'ai_screen_clear'` (rename-create-copy-drop, same pattern as v003-v006;
+  preserves the v006 empty-string `article_id` heal). Powers the
+  `clear_ai_reasoning` command + the trashcan icon in the AI Decision card's
+  expanded header. v001 is updated so fresh DBs get `ai_screen_clear` in the
+  initial CHECK directly. Idempotent (no `heal_partial_migrations` marker
+  needed). Tested via `tests/migration_recovery_test.rs` (final
+  `user_version = 7`).
+  **AI reasoning clear** (`article_repo::clear_ai_reasoning`, surfaced via the
+  `clear_ai_reasoning` Tauri command): nulls `ai_decision` + `ai_reasoning` +
+  `ai_confidence` so the entire AI Decision card unmounts (the card renders
+  only when `ai_decision` is set). The user's own Include/Exclude choice lives
+  on the separate `status` field, which stays intact. `screened_at` is
+  preserved so the screening history survives and the article is NOT
+  re-enqueued. Writes an `ai_screen_clear` audit entry. Frontend: the
+  `AiDecisionCard` emits `clearReasoning`, `article-detail-panel.vue` shows a
+  confirmation dialog, and `useClearAiReasoning` (shared composable, mirrors
+  `useArticleDelete`) owns the toast. `useArticleSearch().clearAiReasoning`
+  does the IPC + re-fetch + list patch. Wired in all 4 host views
+  (`article-list`, `biblio-citations`, `chat-view`, `wiki-view`).
+  **Collapsible AI Reasoning card** (`ai-decision-card.vue`): mirrors the
+  METADATA collapse pattern. Collapsed header (3-column grid): decision label
+  + icon (left), centered confidence pill (center), trashcan + caret (right).
+  The trashcan is grey (`text-slate-400`) by default and turns red
+  (`hover:text-rose-600`) on hover; it only renders in the expanded state so
+  the collapsed header stays clean. No confidence bar in collapsed state.
+  Expanded state adds the confidence bar + reasoning paragraph. State persists
+  in `localStorage` key `bango-ai-reasoning-expanded` (default expanded).
+  Tested in `src/__tests__/components/ai-decision-card.test.ts` (collapse
+  behavior + delete emit + stopPropagation assertion).
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).
