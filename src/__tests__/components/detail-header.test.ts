@@ -174,3 +174,63 @@ describe('detail-header.vue', () => {
     expect(wrapper.text()).toContain('progress_activity');
   });
 });
+
+// ─── Inline title editing (double-click) ─────────────────────────────
+
+describe('DetailHeader – inline title edit', () => {
+  it('enters edit mode on double-click', async () => {
+    const wrapper = mount(DetailHeader, { props: baseProps });
+    const title = wrapper.find('h2');
+    expect(title.exists()).toBe(true);
+    await title.trigger('dblclick');
+    // The textarea replaces the h2 in edit mode.
+    expect(wrapper.find('textarea').exists()).toBe(true);
+  });
+
+  it('commits the trimmed value on Enter (emits updateTitle)', async () => {
+    const wrapper = mount(DetailHeader, { props: baseProps });
+    await wrapper.find('h2').trigger('dblclick');
+    const textarea = wrapper.find('textarea');
+    await textarea.setValue('  A New Title  ');
+    await textarea.trigger('keyup.enter');
+    const events = wrapper.emitted('updateTitle');
+    expect(events).toBeTruthy();
+    expect(events![0]).toEqual(['A New Title']);
+    // Editor closes after commit.
+    expect(wrapper.find('textarea').exists()).toBe(false);
+  });
+
+  it('does not emit updateTitle on Escape (cancel)', async () => {
+    const wrapper = mount(DetailHeader, { props: baseProps });
+    await wrapper.find('h2').trigger('dblclick');
+    const textarea = wrapper.find('textarea');
+    await textarea.setValue('Discarded');
+    await textarea.trigger('keyup.escape');
+    expect(wrapper.emitted('updateTitle')).toBeFalsy();
+    // Editor closes, h2 re-renders with the original title.
+    expect(wrapper.find('textarea').exists()).toBe(false);
+    expect(wrapper.find('h2').text()).toContain('Test Article');
+  });
+
+  it('blocks empty/whitespace drafts (no emit, stays open, shows error)', async () => {
+    const wrapper = mount(DetailHeader, { props: baseProps });
+    await wrapper.find('h2').trigger('dblclick');
+    const textarea = wrapper.find('textarea');
+    await textarea.setValue('   ');
+    await textarea.trigger('keyup.enter');
+    expect(wrapper.emitted('updateTitle')).toBeFalsy();
+    // Editor stays open + shows the error hint.
+    expect(wrapper.find('textarea').exists()).toBe(true);
+    expect(wrapper.text()).toContain('Title cannot be empty');
+  });
+
+  it('short-circuits without emitting when the draft is unchanged', async () => {
+    const wrapper = mount(DetailHeader, { props: baseProps });
+    await wrapper.find('h2').trigger('dblclick');
+    const textarea = wrapper.find('textarea');
+    // Leave the draft as the original title.
+    await textarea.trigger('keyup.enter');
+    expect(wrapper.emitted('updateTitle')).toBeFalsy();
+    expect(wrapper.find('textarea').exists()).toBe(false);
+  });
+});

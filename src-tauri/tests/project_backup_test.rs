@@ -38,11 +38,16 @@ fn seed_core_data(conn: &rusqlite::Connection) {
         [],
     ).expect("seed criterion");
 
-    // Tags & labels
-    conn.execute("INSERT INTO tags (id, name, source) VALUES ('tag-1', 'ml', 'ai_suggested')", [])
-        .expect("seed tag");
+    // Tags & labels (with user-chosen colors so the round-trip test exercises
+    // the `color` column — the bug this test guards against is the import path
+    // omitting `color` from the INSERT, which silently drops it to NULL).
     conn.execute(
-        "INSERT INTO labels (id, name, source) VALUES ('lbl-1', 'priority', 'ai_generated')",
+        "INSERT INTO tags (id, name, source, color) VALUES ('tag-1', 'ml', 'ai_suggested', '#ff0000')",
+        [],
+    )
+    .expect("seed tag");
+    conn.execute(
+        "INSERT INTO labels (id, name, source, color) VALUES ('lbl-1', 'priority', 'ai_generated', '#00ff00')",
         [],
     )
     .expect("seed label");
@@ -237,6 +242,18 @@ fn test_export_import_round_trip_all_tables() {
         let post_count = count_rows(&conn2, table);
         assert_eq!(post_count, 1, "Post-import: {} should have 1 row, got {}", table, post_count);
     }
+
+    // Tag + label colors must survive the round-trip (regression for the bug
+    // where the import INSERT omitted the `color` column, silently dropping
+    // the user's chosen color to NULL on restore).
+    let tag_color: Option<String> = conn2
+        .query_row("SELECT color FROM tags WHERE id = 'tag-1'", [], |row| row.get(0))
+        .expect("query tag color");
+    assert_eq!(tag_color.as_deref(), Some("#ff0000"), "tag color must round-trip");
+    let label_color: Option<String> = conn2
+        .query_row("SELECT color FROM labels WHERE id = 'lbl-1'", [], |row| row.get(0))
+        .expect("query label color");
+    assert_eq!(label_color.as_deref(), Some("#00ff00"), "label color must round-trip");
 
     // Biblio tables are dynamically generated - they should be empty after import.
     let biblio_tables = [

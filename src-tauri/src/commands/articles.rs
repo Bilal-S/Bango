@@ -195,11 +195,19 @@ pub fn update_article_criteria(
     Ok(())
 }
 
-/// Update a single metadata field (Authors, Affiliation, Journal, Year, Lang,
-/// DOI, Keywords) on an article. Powers the double-click inline editing in the
-/// Article Detail "Metadata" card. The `field` enum validates the column name
-/// (no string interpolation); `value` is a serde-untagged scalar-or-array
-/// payload (arrays for Authors/Keywords, scalar string for the rest).
+/// Update a single metadata field (Title, Authors, Affiliation, Journal, Year,
+/// Lang, DOI, Keywords) on an article. Powers the double-click inline editing
+/// in the Article Detail header (Title) and the "Metadata" card (the rest).
+/// The `field` enum validates the column name (no string interpolation);
+/// `value` is a serde-untagged scalar-or-array payload (arrays for
+/// Authors/Keywords, scalar string for the rest).
+///
+/// Audit detail string:
+/// - For `Title`: captures the old → new transition
+///   (`"Title changed: \"<old>\" → \"<new>\""`, each side truncated to ~80
+///   chars) so the Audit Timeline shows what the title was changed from/to.
+/// - For all other fields: the generic `"Metadata edited: <Label>"` string
+///   (unchanged from the pre-Title behavior).
 #[tauri::command]
 pub fn update_article_metadata(
     db_state: State<'_, DbState>,
@@ -208,6 +216,38 @@ pub fn update_article_metadata(
     value: ArticleMetaValue,
 ) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+
+    // For Title edits, capture the old title BEFORE the update so the audit
+    // detail can record the from → to transition. Title is the only metadata
+    // field where recording the actual values is useful (the others are
+    // adequately described by "Metadata edited: <Label>").
+    let audit_detail: String = if field == ArticleMetaField::Title {
+        // Extract the new title from the payload (mirrors the repo's trim +
+        // empty-reject so the detail string matches what will be persisted).
+        let new_title = match &value {
+            ArticleMetaValue::Scalar(Some(s)) => s.trim(),
+            _ => "",
+        };
+        if new_title.is_empty() {
+            // The repo layer will reject this with AppError::Validation; no
+            // point building a detail string for a doomed update. Use the
+            // generic label so the audit shape stays consistent if the call
+            // ever relaxes the empty gate.
+            format!("Metadata edited: {}", field.label())
+        } else {
+            let old_title: String = conn
+                .query_row("SELECT title FROM articles WHERE id = ?1", [&id], |row| row.get(0))
+                .unwrap_or_default();
+            format!(
+                "Title changed: \"{}\" → \"{}\"",
+                truncate_for_audit(&old_title),
+                truncate_for_audit(new_title)
+            )
+        }
+    } else {
+        format!("Metadata edited: {}", field.label())
+    };
+
     article_repo::update_article_metadata_field(&conn, &id, field, value)?;
     audit_repo::create_or_update_entry(
         &conn,
@@ -215,14 +255,28 @@ pub fn update_article_metadata(
         "metadata_edit",
         None,
         None,
-        Some(&format!("Metadata edited: {}", field.label())),
+        Some(&audit_detail),
         "user",
     )?;
-    // Metadata changes (authors, journal, year, language, keywords) feed both
-    // the bibliometric pipelines and the LLM Wiki knowledge base.
+    // Metadata changes (title, authors, journal, year, language, keywords) feed
+    // both the bibliometric pipelines and the LLM Wiki knowledge base.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
     app_settings_repo::mark_wiki_needs_refresh(&conn);
     Ok(())
+}
+
+/// Truncate a string for the audit detail field to keep the row readable.
+/// Caps at ~80 chars with an ellipsis to avoid flooding the Audit Timeline
+/// with long titles. Pure helper used only by `update_article_metadata`.
+#[must_use]
+fn truncate_for_audit(s: &str) -> String {
+    const MAX: usize = 80;
+    if s.chars().count() <= MAX {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(MAX).collect();
+    out.push('…');
+    out
 }
 
 #[tauri::command]

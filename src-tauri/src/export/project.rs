@@ -318,7 +318,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
     }
 
-    // Restore tags
+    // Restore tags (including the user-chosen color, which is nullable).
     for t in &backup.tags {
         let id = get_str(t, "id");
         let name = get_str(t, "name");
@@ -330,13 +330,14 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 s
             }
         };
+        let color = get_str_field(t, "color", "color");
         tx.execute(
-            "INSERT INTO tags (id, name, source) VALUES (?1, ?2, ?3)",
-            rusqlite::params![id, name, source],
+            "INSERT INTO tags (id, name, source, color) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, name, source, color],
         )?;
     }
 
-    // Restore labels
+    // Restore labels (including the user-chosen color, which is nullable).
     for l in &backup.labels {
         let id = get_str(l, "id");
         let name = get_str(l, "name");
@@ -348,9 +349,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
                 s
             }
         };
+        let color = get_str_field(l, "color", "color");
         tx.execute(
-            "INSERT INTO labels (id, name, source) VALUES (?1, ?2, ?3)",
-            rusqlite::params![id, name, source],
+            "INSERT INTO labels (id, name, source, color) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, name, source, color],
         )?;
     }
 

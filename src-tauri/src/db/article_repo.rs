@@ -940,14 +940,20 @@ pub fn update_user_notes(conn: &Connection, article_id: &str, notes: &str) -> Re
 /// validated `articles` column so SQLite column names are **never** derived
 /// from user input (per CLAUDE.md "Never interpolate user input into SQL").
 ///
-/// Variants cover the seven fields surfaced in the Article Detail "Metadata"
-/// card: Authors, Affiliation, Journal, Year, Lang, DOI, Keywords. Adding a
-/// new editable metadata field means adding a variant here AND extending
+/// Variants cover the Title (edited in the detail header via double-click)
+/// plus the seven fields surfaced in the Article Detail "Metadata" card:
+/// Authors, Affiliation, Journal, Year, Lang, DOI, Keywords. Adding a new
+/// editable metadata field means adding a variant here AND extending
 /// [`ArticleMetaField::column`] + the value-binding arm in
 /// [`update_article_metadata_field`].
+///
+/// Note: `Title` is the only field whose `articles` column is `TEXT NOT NULL`,
+/// so its binding arm rejects empty/whitespace input with [`AppError`] instead
+/// of clearing to NULL like the other scalar fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ArticleMetaField {
+    Title,
     Authors,
     Affiliation,
     Journal,
@@ -962,6 +968,7 @@ impl ArticleMetaField {
     #[must_use]
     pub fn column(self) -> &'static str {
         match self {
+            Self::Title => "title",
             Self::Authors => "authors",
             Self::Affiliation => "affiliation",
             Self::Journal => "journal",
@@ -976,6 +983,7 @@ impl ArticleMetaField {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
+            Self::Title => "Title",
             Self::Authors => "Authors",
             Self::Affiliation => "Affiliation",
             Self::Journal => "Journal",
@@ -1027,6 +1035,20 @@ pub fn update_article_metadata_field(
     let sql = format!("UPDATE articles SET {col} = ?1, changed_at = datetime('now') WHERE id = ?2");
 
     match (field, value) {
+        (ArticleMetaField::Title, ArticleMetaValue::Scalar(s)) => {
+            // `title` is `TEXT NOT NULL`, so unlike the other scalar fields
+            // an empty/whitespace-only value is rejected (not cleared to
+            // NULL). The frontend inline editor also blocks empty commits
+            // with a visible error; this is defense-in-depth.
+            let owned = s.unwrap_or_default();
+            let trimmed = owned.trim();
+            if trimmed.is_empty() {
+                return Err(AppError::Validation(
+                    "Title cannot be empty (articles.title is NOT NULL).".to_string(),
+                ));
+            }
+            conn.execute(&sql, params![trimmed, article_id])?;
+        }
         (ArticleMetaField::Authors, ArticleMetaValue::Array(arr)) => {
             let json = serde_json::to_string(&arr)?;
             conn.execute(&sql, params![json, article_id])?;

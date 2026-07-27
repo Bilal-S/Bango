@@ -955,6 +955,15 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     the biblio tables. The import code uses `INSERT OR IGNORE` + ID-remap maps for
     `reference_papers`, `biblio_authors`, `biblio_institutions`, and `biblio_terms` (all have
     UNIQUE constraints) to handle older backups that may still contain biblio data.
+    **Tag/label color preservation**: the `tags` + `labels` import INSERTs include the
+    nullable `color` column (extracted via `get_str_field(v, "color", "color") ->
+    `Option<String>`, so absent colors in old backups bind `None` -> SQL `NULL`,
+    matching the pre-feature default). The export side already serialized `color` via
+    `SELECT * FROM tags/labels`; the bug was that the import INSERT only named
+    `id, name, source`, silently dropping the user's chosen color to `NULL` on
+    restore. Tested in
+    `tests/project_backup_test.rs::test_export_import_round_trip_all_tables`
+    (seed now carries colors + explicit round-trip assertions on both tables).
     **Audit-entry `article_id` normalization contract**: (1) the export query
     filters out genuine orphans (`article_id` references a non-existent article)
     via `WHERE article_id IS NULL OR article_id = '' OR article_id IN (SELECT id
@@ -1118,11 +1127,12 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
      window).
   - **`src-tauri/src/db/migrations/v006_audit_metadata_edit.rs`** - Post-v005 schema
     (VERSION 6). Extends the `audit_entries.action` CHECK constraint to include
-    `'metadata_edit'` so in-place metadata field edits (Authors, Affiliation,
-    Journal, Year, Lang, DOI, Keywords) in the Article Detail "Metadata" card
-    are correctly categorized. Same rename-create-copy-drop pattern as
-    v003/v004/v005; idempotent so `heal_partial_migrations` is not needed. v001
-    is updated so fresh DBs get `metadata_edit` in the initial CHECK constraint.
+    `'metadata_edit'` so in-place metadata field edits (Title, Authors,
+    Affiliation, Journal, Year, Lang, DOI, Keywords) in the Article Detail
+    header (Title) and "Metadata" card (the rest) are correctly categorized.
+    Same rename-create-copy-drop pattern as v003/v004/v005; idempotent so
+    `heal_partial_migrations` is not needed. v001 is updated so fresh DBs get
+    `metadata_edit` in the initial CHECK constraint.
     **Heal: empty-string `article_id` normalization** - the rebuild also runs
     `UPDATE audit_entries_v006_old SET article_id = NULL WHERE article_id = ''`
     BEFORE the orphan `DELETE` so historical malformed rows (system-level
@@ -1135,17 +1145,35 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     RENAME -> CREATE -> heal UPDATE -> orphan DELETE -> INSERT...SELECT -> DROP.
     Tested in `tests/migration_recovery_test.rs::v006_heals_empty_string_article_id_to_null`.
     The `update_article_metadata` Tauri command (in `commands/articles.rs`)
-    writes audit rows with `action = 'metadata_edit'` and `details =
-    "Metadata edited: <Field>"` (e.g. "Metadata edited: DOI"), coalesced within
-    the 5-min window so rapid multi-field edits produce a single audit row.
-    Calls `mark_biblio_needs_refresh` + `mark_wiki_needs_refresh` since metadata
-    changes (authors, journal, year, keywords) feed both pipelines. Backend
-    whitelist: `ArticleMetaField` enum (`article_repo.rs`) validates the column
-    name (no string interpolation); `ArticleMetaValue` is `#[serde(untagged)]`
-    scalar-or-array (arrays for Authors/Keywords, scalars for the rest). Empty
-    strings clear to NULL; `publication_year` parses to `Option<i32>`.
-    Frontend: `article-metadata.vue` always renders all fields (empty → muted
-    `---` placeholder) and double-clicks any field to edit in place
+    writes audit rows with `action = 'metadata_edit'`, coalesced within the
+    5-min window so rapid multi-field edits produce a single audit row. The
+    `details` string is field-aware: for `Title` it captures the old → new
+    transition (`"Title changed: \"<old>\" → \"<new>\""`, each side truncated
+    to ~80 chars with `…` via the private `truncate_for_audit` helper) so the
+    Audit Timeline shows what the title was changed from/to; for all other
+    fields it is the generic `"Metadata edited: <Field>"` (e.g. "Metadata
+    edited: DOI"). Calls `mark_biblio_needs_refresh` +
+    `mark_wiki_needs_refresh` since metadata changes (title, authors, journal,
+    year, keywords) feed both pipelines. Backend whitelist: `ArticleMetaField`
+    enum (`article_repo.rs`) validates the column name (no string
+    interpolation); `ArticleMetaValue` is `#[serde(untagged)]` scalar-or-array
+    (arrays for Authors/Keywords, scalars for the rest, including Title).
+    Empty strings clear to NULL; `publication_year` parses to `Option<i32>`.
+    **Title is `TEXT NOT NULL`**, so unlike the other scalar fields its
+    binding arm rejects empty/whitespace-only input with `AppError::Validation`
+    instead of clearing to NULL (the frontend inline editor also blocks empty
+    commits with a visible error — defense-in-depth). Tested in
+    `tests/article_metadata_test.rs` (`test_update_title` +
+    `test_update_title_empty_rejected`).
+    Frontend: **Title** is edited via double-click directly in the detail
+    header (`detail-header.vue` `<h2>` — no edit icon; the hover affordance +
+    `title="Double-click to edit"` tooltip communicate editability, matching
+    the Metadata card spans); `@update-title` is re-emitted by
+    `article-detail-panel.vue` as `updateMetadata(id, 'title', value)` so it
+    reuses the existing `useArticleSearch().updateMetadata` path with zero
+    changes to the 5 host views or the composable. `article-metadata.vue`
+    always renders all 7 Metadata-card fields (empty → muted `---`
+    placeholder) and double-clicks any field to edit in place
     (`nextTick` focus+select, `Enter`/blur commits, `Escape` cancels — same
     pattern as `tag-label-panel.vue` v6.9). Field-specific validation: **Year**
     requires a 4-digit integer in `[1800, 2100]` (frontend blocks invalid

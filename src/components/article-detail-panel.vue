@@ -326,6 +326,7 @@ const {
       @request-ai-summary="handleRequestAiSummary"
       @request-translate="requestTranslation(article.id, article.title)"
       @delete-article="showDeleteDialog = true"
+      @update-title="(title) => emit('updateMetadata', article.id, 'title', title)"
     />
 
     <!-- Scrollable Content.

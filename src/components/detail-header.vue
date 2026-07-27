@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
 import { getPublicationTypeLabel } from '@/utils/formatters';
@@ -37,6 +37,10 @@ const emit = defineEmits<{
   readFullText: [];
   requestTranslate: [id: string];
   deleteArticle: [];
+  /** Emitted when the user commits an inline title edit (Enter or blur).
+   *  The parent routes this to the `update_article_metadata` IPC with
+   *  `field = 'title'`. Empty/whitespace drafts are blocked before emit. */
+  updateTitle: [title: string];
 }>();
 
 // Translation is in-flight when the queue reports queued/running. The status
@@ -45,6 +49,55 @@ const isTranslationPending = computed(
   () =>
     props.article.translationStatus === 'queued' || props.article.translationStatus === 'running'
 );
+
+// ── Inline title editing (double-click) ────────────────────────────────
+// Mirrors the proven pattern in `article-metadata.vue` (v6.9): at most one
+// field edited at a time, `nextTick` focus + select on edit-start, Enter
+// commits, Escape cancels, blur commits. Title is `TEXT NOT NULL` so empty
+// drafts are blocked with a red hint (matches the Year validation gate).
+const isEditingTitle = ref(false);
+const titleDraft = ref('');
+const titleError = ref<string | null>(null);
+const titleTextareaRef = ref<HTMLTextAreaElement | null>(null);
+
+function startEditTitle(): void {
+  isEditingTitle.value = true;
+  titleDraft.value = props.article.title;
+  titleError.value = null;
+  void nextTick(() => {
+    const el = titleTextareaRef.value;
+    el?.focus();
+    el?.select();
+  });
+}
+
+function commitTitle(): void {
+  const trimmed = titleDraft.value.trim();
+  if (trimmed === '') {
+    titleError.value = 'Title cannot be empty';
+    void nextTick(() => {
+      titleTextareaRef.value?.focus();
+    });
+    return;
+  }
+  // No-op if unchanged: close the editor without an IPC round-trip.
+  if (trimmed === props.article.title) {
+    isEditingTitle.value = false;
+    titleDraft.value = '';
+    titleError.value = null;
+    return;
+  }
+  emit('updateTitle', trimmed);
+  isEditingTitle.value = false;
+  titleDraft.value = '';
+  titleError.value = null;
+}
+
+function cancelTitle(): void {
+  isEditingTitle.value = false;
+  titleDraft.value = '';
+  titleError.value = null;
+}
 </script>
 
 <template>
@@ -169,7 +222,35 @@ const isTranslationPending = computed(
         </button>
       </div>
     </div>
-    <h2 class="font-h1 text-h1 text-on-surface leading-tight font-semibold">
+    <!-- Title: double-click to edit in place (no edit icon; the hover affordance
+         + tooltip communicate editability, matching the Metadata card spans).
+         Title is `TEXT NOT NULL` so empty drafts are blocked with a red hint. -->
+    <div v-if="isEditingTitle" class="flex flex-col gap-1">
+      <textarea
+        ref="titleTextareaRef"
+        v-model="titleDraft"
+        rows="2"
+        class="font-h1 text-h1 text-on-surface leading-tight font-semibold w-full px-2 py-1 bg-white border rounded transition-all focus:ring-1 resize-none"
+        :class="
+          titleError
+            ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-500'
+            : 'border-primary focus:border-primary focus:ring-primary'
+        "
+        placeholder="Article title"
+        @keyup.enter="commitTitle"
+        @keyup.escape="cancelTitle"
+        @blur="commitTitle"
+      ></textarea>
+      <span v-if="titleError" class="text-[11px] text-rose-600 leading-tight">{{
+        titleError
+      }}</span>
+    </div>
+    <h2
+      v-else
+      class="font-h1 text-h1 text-on-surface leading-tight font-semibold cursor-text hover:bg-slate-50 rounded px-1 -mx-1 transition-colors"
+      title="Double-click to edit"
+      @dblclick="startEditTitle"
+    >
       {{ article.title }}
     </h2>
   </div>

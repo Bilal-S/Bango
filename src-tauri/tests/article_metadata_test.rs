@@ -415,3 +415,70 @@ fn test_metadata_edit_writes_audit_row() {
         "audit detail should mention the field label"
     );
 }
+
+// ─── Title tests (TEXT NOT NULL field) ─────────────────────────────
+
+#[test]
+fn test_update_title() {
+    let conn = setup_db();
+    let id = seed_article(&conn);
+
+    article_repo::update_article_metadata_field(
+        &conn,
+        &id,
+        ArticleMetaField::Title,
+        ArticleMetaValue::Scalar(Some("A New Title".to_string())),
+    )
+    .expect("update title failed");
+
+    let article = article_repo::get_article_by_id(&conn, &id).expect("get failed");
+    assert_eq!(article.title, "A New Title");
+}
+
+#[test]
+fn test_update_title_empty_rejected() {
+    let conn = setup_db();
+    let id = seed_article(&conn);
+
+    // Empty string must be rejected (title is NOT NULL).
+    let result = article_repo::update_article_metadata_field(
+        &conn,
+        &id,
+        ArticleMetaField::Title,
+        ArticleMetaValue::Scalar(Some(String::new())),
+    );
+    assert!(result.is_err(), "empty title should be rejected");
+
+    // Whitespace-only must also be rejected.
+    let result = article_repo::update_article_metadata_field(
+        &conn,
+        &id,
+        ArticleMetaField::Title,
+        ArticleMetaValue::Scalar(Some("   ".to_string())),
+    );
+    assert!(result.is_err(), "whitespace-only title should be rejected");
+
+    // None payload must also be rejected.
+    let result = article_repo::update_article_metadata_field(
+        &conn,
+        &id,
+        ArticleMetaField::Title,
+        ArticleMetaValue::Scalar(None),
+    );
+    assert!(result.is_err(), "None title payload should be rejected");
+
+    // Original title is preserved after the rejected updates.
+    let article = article_repo::get_article_by_id(&conn, &id).expect("get failed");
+    assert_eq!(article.title, "Test Article");
+
+    // A valid non-empty title still works after the rejected attempts.
+    article_repo::update_article_metadata_field(
+        &conn,
+        &id,
+        ArticleMetaField::Title,
+        ArticleMetaValue::Scalar(Some("Valid Replacement".to_string())),
+    )
+    .expect("valid title update failed");
+    let article = article_repo::get_article_by_id(&conn, &id).expect("get failed");
+    assert_eq!(article.title, "Valid Replacement");
+}
