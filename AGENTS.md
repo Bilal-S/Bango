@@ -827,7 +827,12 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `article-toolbar.vue` renders a `filter_alt_off` icon button (`.toolbar-clear-filters`,
     `v-if="isFiltered"`) to the left of the Filter toggle that emits `clearFilters`
     (mapped to `clearSearch(); clearFilters();`); the Filter toggle already turns indigo
-    when `isFiltered`. (e) The panel's bottom action row carries a centered
+    when `isFiltered`. The `.toolbar-clear-filters` icon itself turns red
+    (`bg-red-500`/`hover:bg-red-600`, white icon) specifically when filters are engaged
+    but the panel is collapsed (`isFiltered && !showFilters`) as a stronger "filters are
+    silently active" cue; it stays neutral (slate border/text) when the panel is expanded
+    since the user can already see the active filters. The Filter toggle button's own
+    styling is unchanged. (e) The panel's bottom action row carries a centered
     `.afp-result-count` notice - "Filter active: n article(s) found." - between Clear
     Filter and Apply Filters, shown only while `isFiltered` AND `resultCount` are both
     set (`v-if` hides it before the first apply and after a clear). Singular form for

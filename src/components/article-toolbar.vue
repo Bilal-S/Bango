@@ -44,11 +44,20 @@ function onPageSizeChange(event: Event): void {
     <div class="toolbar-left-group flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
       <!-- Clear-filter (only visible when a filter is active). Sits left of
            the Filter toggle so the user sees the "filters are on" affordance
-           and can clear them in one click without expanding the panel. -->
+           and can clear them in one click without expanding the panel.
+           Turns red when filters are engaged but the panel is collapsed
+           (isFiltered && !showFilters) as a stronger "filters are silently
+           active" cue; stays neutral when the panel is expanded since the
+           user can already see the active filters. -->
       <button
         v-if="isFiltered"
-        class="toolbar-clear-filters flex items-center justify-center w-7 h-7 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer transition-colors shrink-0"
-        title="Clear filters"
+        class="toolbar-clear-filters flex items-center justify-center w-7 h-7 rounded-lg border cursor-pointer transition-colors shrink-0"
+        :class="
+          !showFilters
+            ? 'bg-red-500 border-red-500 text-white hover:bg-red-600 hover:border-red-600'
+            : 'border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+        "
+        :title="showFilters ? 'Clear filters' : 'Filters active (collapsed) — click to clear'"
         aria-label="Clear filters"
         @click="emit('clearFilters')"
       >
