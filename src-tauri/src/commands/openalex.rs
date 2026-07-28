@@ -289,9 +289,15 @@ pub async fn import_openalex_articles(
                 let attach_result = {
                     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
                     let storage_dir = crate::commands::full_text::compute_storage_dir(&conn)?;
+                    // Read the article's DOI so the destination filename uses
+                    // the DOI-aware naming convention (Concern 2). The article
+                    // row is loaded here under the same lock as the storage
+                    // dir resolution, so no extra DB round-trip.
+                    let article = article_repo::get_article_by_id(&conn, article_id)?;
                     crate::commands::full_text::attach_full_text_inner(
                         &conn,
                         article_id,
+                        article.doi.as_deref(),
                         &temp_file,
                         &storage_dir,
                     )
@@ -490,9 +496,14 @@ pub async fn download_and_attach_openalex_pdf(
     let attach_result = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let storage_dir = crate::commands::full_text::compute_storage_dir(&conn)?;
+        // Read the article's DOI so the destination filename uses the
+        // DOI-aware naming convention (Concern 2). The article row is loaded
+        // here under the same lock as the storage dir resolution.
+        let article = article_repo::get_article_by_id(&conn, &article_id)?;
         crate::commands::full_text::attach_full_text_inner(
             &conn,
             &article_id,
+            article.doi.as_deref(),
             &temp_file,
             &storage_dir,
         )

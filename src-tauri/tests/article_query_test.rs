@@ -1410,8 +1410,7 @@ fn test_doi_filter_combines_with_status_filter() {
     // with a matching DOI that is in `duplicate` status must NOT appear in the
     // `working` view even when its DOI matches the substring).
     let conn = setup_db();
-    let working = seed_article_with_doi(&conn, "Working", Some("10.1016/j.iref.2025.104618"));
-    let _ = working; // already moved to working by the helper
+    seed_article_with_doi(&conn, "Working", Some("10.1016/j.iref.2025.104618"));
 
     // A second article with the same DOI prefix but left in `duplicate` status.
     let mut dup_article = new_article("Dup Status", Some(2020));

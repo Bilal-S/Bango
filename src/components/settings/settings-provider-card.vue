@@ -2,22 +2,27 @@
 import { watch, ref, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
+import { useScreeningStore } from '@/stores/screening';
 import { formatLlmError } from '@/utils/llm-error';
 
 const router = useRouter();
+const screeningStore = useScreeningStore();
 
 const {
   config,
+  saving,
   testing,
   testResult,
   showApiKey,
   fetchingModels,
   fetchedModels,
+  lastSavedAt,
   testConnection,
   revert,
   isLocalProvider,
   fetchModels,
   resetFetchedModels,
+  scheduleParamSave,
 } = useLlmConfig();
 
 const showRawError = ref(false);
@@ -218,6 +223,54 @@ watch(
     }
   }
 );
+
+// ── Debounced auto-save for the Parameters fields ─────────────────────────
+//
+// The Parameters card has no Save button. Without this watcher, editing
+// Concurrency / Context Tokens / Request Delay / Temperature mutates only the
+// in-memory Pinia store: the change never reaches `save_llm_config`, so the
+// orchestrator's `update_settings` is never called and the next LLM call uses
+// stale concurrency/delay. The watcher debounces `save()` (600ms trailing) so
+// dragging the Context Tokens slider fires one save per pause, not one per
+// tick. It is gated on `!testing` (Test Connection already saves) and skips
+// the very first run so loading the config from the DB doesn't trigger a
+// spurious re-save. After a successful save the cached screening-readiness
+// estimate (which depends on `contextWindowTokens`) is invalidated so the
+// progress bar reflects the new value on the next screening-view visit.
+let paramSaveStarted = false;
+watch(
+  () => [
+    config.value.maxConcurrentRequests,
+    config.value.requestDelayMs,
+    config.value.contextWindowTokens,
+    config.value.temperature,
+  ],
+  () => {
+    // Skip the initial propagation that fires when the config is first loaded
+    // from the DB into the store (avoid an immediate no-op save round-trip).
+    if (!paramSaveStarted) {
+      paramSaveStarted = true;
+      return;
+    }
+    // Don't schedule a debounced save while Test Connection is running: that
+    // path saves explicitly + re-fetches, and a concurrent debounced save
+    // could race with the re-fetch.
+    if (testing.value) return;
+    scheduleParamSave();
+  }
+);
+
+// Invalidate the cached screening-readiness estimate whenever a save lands.
+// `readiness` includes a token estimate derived from `contextWindowTokens`
+// (via `worst_case_per_article_tokens`); without this invalidation the
+// Articles-view progress bar keeps showing the old context window until the
+// user navigates away and back (which triggers `fetchIfNeeded`). Reactive on
+// `lastSavedAt` so it only fires after a successful save, not on every edit.
+watch(lastSavedAt, (ts) => {
+  if (ts > 0) {
+    screeningStore.invalidate();
+  }
+});
 </script>
 
 <template>
@@ -513,12 +566,16 @@ watch(
     <!-- Action row: NO horizontal divider line above (spacing-only separation) -->
     <div class="provider-card__actions-row">
       <div class="provider-card__status">
+        <span v-if="saving" class="material-symbols-outlined provider-card__status-spinner"
+          >progress_activity</span
+        >
         <span
+          v-else
           class="provider-card__status-dot"
           :class="testResult?.success ? 'provider-card__status-dot--ok' : ''"
         ></span>
         <span class="provider-card__status-label">
-          {{ testResult?.success ? 'Connection Succeeded' : 'Not Tested' }}
+          {{ saving ? 'Saving…' : testResult?.success ? 'Connection Succeeded' : 'Not Tested' }}
         </span>
       </div>
       <div class="provider-card__actions">
@@ -673,6 +730,18 @@ watch(
 
 .provider-card__status-dot--ok {
   background-color: #16a34a;
+}
+
+.provider-card__status-spinner {
+  font-size: 14px;
+  color: var(--color-primary, #4f46e5);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .provider-card__status-label {

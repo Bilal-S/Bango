@@ -70,7 +70,7 @@ fn attach_sets_has_figures_or_tables_true_when_caption_present() {
     let text = "Introduction.\n\nFigure 1. Study design overview showing the flow of participants.\n\nResults were significant.";
     let path = write_txt(tmp.path(), "captioned.txt", text);
 
-    attach_full_text_inner(&conn, &id, &path, &storage_dir).expect("attach");
+    attach_full_text_inner(&conn, &id, None, &path, &storage_dir).expect("attach");
 
     let article = article_repo::get_article_by_id(&conn, &id).unwrap();
     assert!(article.has_full_text, "article should have full text");
@@ -90,7 +90,7 @@ fn attach_sets_has_figures_or_tables_false_for_plain_prose() {
     let text = "This study examined the effect of a sugar tax on beverage purchases.\n\nWe used a difference-in-differences design.";
     let path = write_txt(tmp.path(), "plain.txt", text);
 
-    attach_full_text_inner(&conn, &id, &path, &storage_dir).expect("attach");
+    attach_full_text_inner(&conn, &id, None, &path, &storage_dir).expect("attach");
 
     let article = article_repo::get_article_by_id(&conn, &id).unwrap();
     assert!(article.has_full_text, "article should have full text");
@@ -113,7 +113,7 @@ fn attach_sets_flag_true_for_table_caption() {
     let text = "Methods.\n\nTable 1. Baseline characteristics of study participants by group.\n\nGroup A had 200 participants.";
     let path = write_txt(tmp.path(), "table.txt", text);
 
-    attach_full_text_inner(&conn, &id, &path, &storage_dir).expect("attach");
+    attach_full_text_inner(&conn, &id, None, &path, &storage_dir).expect("attach");
 
     let article = article_repo::get_article_by_id(&conn, &id).unwrap();
     assert!(article.has_figures_or_tables, "flag should be true when a table caption is present");
@@ -131,7 +131,7 @@ fn clear_full_text_resets_has_figures_or_tables() {
     // Attach with a caption so the flag goes true.
     let text = "Figure 1. Overview.";
     let path = write_txt(tmp.path(), "captioned.txt", text);
-    attach_full_text_inner(&conn, &id, &path, &storage_dir).expect("attach");
+    attach_full_text_inner(&conn, &id, None, &path, &storage_dir).expect("attach");
     let article = article_repo::get_article_by_id(&conn, &id).unwrap();
     assert!(article.has_figures_or_tables, "flag should be true after attach");
 
@@ -167,7 +167,7 @@ fn unsupported_extension_is_a_hard_error() {
     let id = seed_article(&conn);
 
     let path = write_bytes(tmp.path(), "doc.docx", b"not a real docx");
-    let err = match attach_full_text_inner(&conn, &id, &path, &storage_dir) {
+    let err = match attach_full_text_inner(&conn, &id, None, &path, &storage_dir) {
         Ok(_) => panic!("expected unsupported-extension attach to be a hard error"),
         Err(e) => e,
     };
@@ -193,8 +193,8 @@ fn invalid_pdf_attaches_with_empty_text_and_error_audit() {
     // 0-byte PDF: pdf_extract fails on the empty stream. This mirrors the
     // real-world corrupt-asset failure mode recorded in import-fix.md.
     let path = write_bytes(tmp.path(), "empty.pdf", b"");
-    let result =
-        attach_full_text_inner(&conn, &id, &path, &storage_dir).expect("attach should succeed");
+    let result = attach_full_text_inner(&conn, &id, None, &path, &storage_dir)
+        .expect("attach should succeed");
 
     assert!(result.success, "result.success should be true");
     assert!(result.extraction_failed, "extraction_failed flag must be set");
@@ -236,7 +236,7 @@ fn invalid_pdf_does_not_appear_in_missing_chunks_after_attach() {
     let id = seed_article(&conn);
 
     let path = write_bytes(tmp.path(), "empty.pdf", b"");
-    attach_full_text_inner(&conn, &id, &path, &storage_dir).expect("attach should succeed");
+    attach_full_text_inner(&conn, &id, None, &path, &storage_dir).expect("attach should succeed");
 
     let missing = chunk_repo::get_articles_with_full_text_missing_chunks(&conn).unwrap();
     assert!(
@@ -247,7 +247,7 @@ fn invalid_pdf_does_not_appear_in_missing_chunks_after_attach() {
     // Sanity: a non-empty-TXT-attached article with no chunks IS returned.
     let id2 = seed_article(&conn);
     let txt = write_txt(tmp.path(), "plain2.txt", "Body text with content.");
-    attach_full_text_inner(&conn, &id2, &txt, &storage_dir).expect("attach");
+    attach_full_text_inner(&conn, &id2, None, &txt, &storage_dir).expect("attach");
     // The TXT attach path also populates chunks via extract_sections, so clear
     // them to simulate the "missing chunks" precondition.
     chunk_repo::delete_chunks_for_article(&conn, &id2).unwrap();

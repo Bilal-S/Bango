@@ -27,6 +27,20 @@
 //! listens and updates a progress bar. The user can cancel at any point via
 //! [`cancel_batch_import`]; the runner checks the cancel token between items
 //! (an in-flight LLM request completes naturally).
+//!
+//! # Lock scope (Concern 3)
+//!
+//! Phases 1 and 2 previously ran inside a `spawn_blocking` that locked the
+//! `DbState` mutex ONCE at the top and held the guard across every per-article
+//! PDF parse. That froze every other DB-touching IPC command for the whole
+//! phase. Both phases are now `async` and lock the mutex in short bursts:
+//! one brief burst for discovery, then one short burst per article for the DB
+//! write only. The CPU-bound PDF parse + text extraction runs on
+//! `spawn_blocking` via `commands::full_text::attach_full_text_split`
+//! (Phase 1) with **no DB lock held**; only the DB-write portion
+//! (`commit_full_text_to_db`: update row + chunk insert + audit entries +
+//! staleness flags) runs under the short burst. See
+//! `full_text_phase.rs` for the per-article lock contract.
 use crate::db::app_settings_repo;
 use crate::db::article_repo::{self, ArticleDoiInfo};
 use crate::db::connection::DbState;
@@ -335,73 +349,55 @@ pub async fn start_batch_import(
         };
 
         // ═══════════════════════════════════════════════════════════════════
-        //  Phase 1: Full Text (runs on spawn_blocking to avoid UI hang)
+        //  Phase 1: Full Text (async, short DB lock bursts - Concern 3)
         // ═══════════════════════════════════════════════════════════════════
+        //
+        // The DB mutex is held only for the brief initial discovery and for
+        // the short per-article write burst inside the phase. The previous
+        // shape locked the connection ONCE at the top of a `spawn_blocking`
+        // and held the guard across every per-article PDF parse, which froze
+        // every other DB-touching IPC command for the duration of the phase.
         let p1_cancel = Arc::clone(&cancel_for_task);
         let p1_progress = Arc::clone(&progress);
         let p1_app = app_handle_clone.clone();
-        let p1_db = app_handle_clone.clone();
-        let phase1_result = tokio::task::spawn_blocking(move || {
-            let db = p1_db.state::<DbState>();
-            let conn = match db.conn.lock() {
-                Ok(c) => c,
-                Err(e) => {
-                    return (
-                        BatchImportPhaseResult::default(),
-                        vec![],
-                        Some(format!("DB lock error: {e}")),
-                    );
-                }
-            };
-            let is_cancelled = || {
-                let guard = p1_cancel.try_lock();
-                matches!(guard, Ok(g) if *g)
-            };
-            let mut on_progress = |processed: usize, total: usize, msg: &str| {
-                let overall = percent(processed, total) / 4;
-                emit_progress(
-                    &p1_app,
-                    &p1_progress,
-                    BatchImportPhase::FullText,
-                    processed,
-                    total,
-                    overall,
-                    msg,
-                    true,
-                    false,
-                    None,
-                    None,
-                    None,
-                    None,
-                );
-            };
-            match full_text_phase::run_full_text_phase(&conn, &is_cancelled, &mut on_progress) {
-                Ok((result, ids)) => (result, ids, None),
-                Err(e) => (
-                    BatchImportPhaseResult {
-                        total: 0,
-                        processed: 0,
-                        succeeded: 0,
-                        failed: 0,
-                        errors: vec![format!("Phase 1 error: {e}")],
-                    },
-                    vec![],
-                    None,
-                ),
-            }
-        })
-        .await
-        .unwrap_or_else(|e| {
-            (
+        let is_cancelled = move || {
+            let guard = p1_cancel.try_lock();
+            matches!(guard, Ok(g) if *g)
+        };
+        let mut on_progress = move |processed: usize, total: usize, msg: &str| {
+            let overall = percent(processed, total) / 4;
+            emit_progress(
+                &p1_app,
+                &p1_progress,
+                BatchImportPhase::FullText,
+                processed,
+                total,
+                overall,
+                msg,
+                true,
+                false,
+                None,
+                None,
+                None,
+                None,
+            );
+        };
+        let phase1_outcome =
+            full_text_phase::run_full_text_phase(&db.conn, &is_cancelled, &mut on_progress).await;
+        let (ft_result, newly_attached, ft_lock_err) = match phase1_outcome {
+            Ok((result, ids)) => (result, ids, None),
+            Err(e) => (
                 BatchImportPhaseResult {
-                    errors: vec![format!("Phase 1 thread panic: {e}")],
-                    ..Default::default()
+                    total: 0,
+                    processed: 0,
+                    succeeded: 0,
+                    failed: 0,
+                    errors: vec![format!("Phase 1 error: {e}")],
                 },
                 vec![],
-                None,
-            )
-        });
-        let (ft_result, newly_attached, ft_lock_err) = phase1_result;
+                Some(format!("Phase 1 error: {e}")),
+            ),
+        };
 
         // Handle deferred lock error.
         if let Some(msg) = ft_lock_err {
@@ -467,47 +463,38 @@ pub async fn start_batch_import(
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        //  Phase 2: Citations (runs on spawn_blocking to avoid UI hang)
+        //  Phase 2: Citations (async, short DB lock bursts - Concern 3)
         // ═══════════════════════════════════════════════════════════════════
         let p2_cancel = Arc::clone(&cancel_for_task);
         let p2_progress = Arc::clone(&progress);
         let p2_app = app_handle_clone.clone();
-        let p2_db = app_handle_clone.clone();
         let p2_ft = ft_result.clone();
-        let cit_result = tokio::task::spawn_blocking(move || {
-            let db = p2_db.state::<DbState>();
-            let conn = match db.conn.lock() {
-                Ok(c) => c,
-                Err(e) => {
-                    return BatchImportPhaseResult {
-                        errors: vec![format!("DB lock error: {e}")],
-                        ..Default::default()
-                    };
-                }
-            };
-            let is_cancelled = || {
-                let guard = p2_cancel.try_lock();
-                matches!(guard, Ok(g) if *g)
-            };
-            let mut on_progress = |processed: usize, total: usize, msg: &str| {
-                let overall = 25 + percent(processed, total) / 4;
-                emit_progress(
-                    &p2_app,
-                    &p2_progress,
-                    BatchImportPhase::Citations,
-                    processed,
-                    total,
-                    overall,
-                    msg,
-                    true,
-                    false,
-                    Some(p2_ft.clone()),
-                    None,
-                    None,
-                    None,
-                );
-            };
-            match citations_phase::run_citations_phase(&conn, &is_cancelled, &mut on_progress) {
+        let is_cancelled = move || {
+            let guard = p2_cancel.try_lock();
+            matches!(guard, Ok(g) if *g)
+        };
+        let mut on_progress = move |processed: usize, total: usize, msg: &str| {
+            let overall = 25 + percent(processed, total) / 4;
+            emit_progress(
+                &p2_app,
+                &p2_progress,
+                BatchImportPhase::Citations,
+                processed,
+                total,
+                overall,
+                msg,
+                true,
+                false,
+                Some(p2_ft.clone()),
+                None,
+                None,
+                None,
+            );
+        };
+        let cit_result =
+            match citations_phase::run_citations_phase(&db.conn, &is_cancelled, &mut on_progress)
+                .await
+            {
                 Ok(result) => result,
                 Err(e) => BatchImportPhaseResult {
                     total: 0,
@@ -516,13 +503,7 @@ pub async fn start_batch_import(
                     failed: 0,
                     errors: vec![format!("Phase 2 error: {e}")],
                 },
-            }
-        })
-        .await
-        .unwrap_or_else(|e| BatchImportPhaseResult {
-            errors: vec![format!("Phase 2 thread panic: {e}")],
-            ..Default::default()
-        });
+            };
 
         // Phase 2 complete summary.
         let cit_percent = percent(cit_result.processed, cit_result.total);
@@ -660,7 +641,7 @@ pub async fn start_batch_import(
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        //  Phase 4: AI Summaries (optional)
+        //  Phase 4: AI Summaries (optional, parallel - Concern 1)
         // ═══════════════════════════════════════════════════════════════════
         let sum_result = if auto_sum {
             let to_summarize: Vec<String> = {

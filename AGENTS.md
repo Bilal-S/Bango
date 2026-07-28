@@ -1228,7 +1228,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     includes `(§Methods)` in the header when `hit.section` is present so the model can cite
     the passage. 3 new tests: section-label-in-header, dedupe-chunks-of-same-page,
     distinct-pages-not-deduped.
-  - **`src-tauri/src/batch_import/`** - 3-phase batch import processor. Scans the
+  - **`src-tauri/src/batch_import/`** - 4-phase batch import processor. Scans the
     Bango Documents directory for files produced by external tools and imports
     them into the article database by DOI match. Files keyed on
     `clean_doi_filename(normalized_doi)`, consistent with Citation Chaser RIS
@@ -1239,7 +1239,8 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     stays responsive and the user can navigate away; cancel token checked
     between items; emits `batch-import:progress` events), `full_text_phase.rs`
     (Phase 1: scan `fulltext/` for `{cleaned_doi}.pdf` / `.txt`, attach via
-    extracted `commands::full_text::attach_full_text_inner`; skips articles
+    the split pipeline `commands::full_text::attach_full_text_split` so the
+    CPU-bound PDF parse runs on `spawn_blocking` with no DB lock held; skips articles
     with `has_full_text=true`; returns newly-attached IDs for Phase 3;
     text-extraction failures are handled inside `attach_full_text_inner` as
     soft-fallback attaches with empty `full_text` + a `log_error` audit row,
@@ -1266,6 +1267,41 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `include_section_summaries` flag; **pre-flight LLM-configured guard**
     (`llm_configured_with_audit`) short-circuits the phase with the same
     `"Skipped: LLM not configured"` message + system-level audit record).
+    **Three coupled improvements** (see `.worktrees/import_plan.md`):
+    (1) **Parallel Phase 4** (`summary_phase.rs`): the sequential `for` loop
+    was replaced by a `tokio::task::JoinSet` so all article summaries are
+    dispatched concurrently; the orchestrator's `max_concurrent_requests`
+    semaphore bounds real LLM concurrency (same pattern as
+    `wiki::ingest::batching::run_chunked_ingest`). Cancellation aborts
+    remaining tasks via `abort_all`. (2) **DOI-aware attach filename**
+    (`commands::full_text::attach_full_text_inner` now takes
+    `article_doi: Option<&str>`): when the article has a DOI, the destination
+    filename is `{clean_doi}.{ext}` (matches the on-disk batch-import
+    convention, no UUID suffix); no-DOI articles keep the
+    `{stem}_{article_id}.{ext}` fallback. A same-file short-circuit
+    (`place_file_in_storage`) skips the copy when source == destination
+    (common in batch import where the file is already in `fulltext/` with the
+    correct name), preferring a zero-copy `hard_link` with a byte-copy
+    fallback. Applies to new attaches only (no retroactive rename). Pure
+    helper `compute_dest_filename` + 9 inline tests in `full_text.rs`.
+    (3) **Short DB lock bursts in Phases 1 + 2** (Concern 3 root cause):
+    `run_full_text_phase` and `run_citations_phase` are now `async` and take
+    `&Mutex<Connection>`; they lock briefly for the initial discovery
+    (resolve storage dir + build the DOI match map via the pure
+    `discover(conn)` helper), release, then take one short lock burst per
+    article for the DB write. Phase 1 uses the split
+    `commands::full_text::attach_full_text_split` pipeline so the CPU-bound
+    PDF parse + text extraction runs on `spawn_blocking` with NO DB lock
+    held; only the DB-write portion (`commit_full_text_to_db`: update row +
+    chunk insert + audit entries + staleness flags) runs under the short
+    burst. The pure extract helper `extract_full_text_data` + the DB-write
+    helper `commit_full_text_to_db` are also reusable directly by callers
+    that already hold a `&Connection` (manual `attach_full_text` command,
+    OpenAlex import). The previous shape locked the connection ONCE at the
+    top of a `spawn_blocking` and held the guard across every per-article
+    PDF parse, freezing every other DB-touching IPC command for the whole
+    phase. `tokio::task::yield_now()` between articles lets the runtime
+    flush progress events + give other commands a turn.
     `db::article_repo::get_articles_with_doi_info` loads all articles with a
     non-null DOI + the `has_full_text` / `has_reference_details` /
     `has_citation_details` / `has_ai_summary` flags in a single query to build
@@ -1276,15 +1312,22 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     per-phase summary lines surface skip messages - e.g.
     "Skipped: LLM not configured" - with a warning style via
     `phaseSkipMessage(phase)` so the user understands why a phase did nothing;
-    listens to `batch-import:progress` events so it survives navigation). 8
+    listens to `batch-import:progress` events so it survives navigation). 10
     inline tests in `full_text_phase.rs` (DOI match map normalization +
-    collision + empty skip) + `citations_phase.rs` (skip-when-has-details,
+    collision + empty skip + secondary `article_id → DOI` index for the
+    O(n) per-article lookup) + `citations_phase.rs` (skip-when-has-details,
     find-references, find-citations-independently, generic-ris-fallback,
     generic-bib-fallback). End-to-end integration tests live in
-    `tests/batch_import_test.rs` (12 tests: Phase 1 attach + skip-already-attached +
+    `tests/batch_import_test.rs` (13 tests: Phase 1 attach + skip-already-attached +
     no-matching-DOI + no-DOI-article; Phase 2 refs + citations + independent +
     skip-already-has-details; full-pipeline idempotency; multiple articles with
-    mixed files; Phase 3 pre-flight skip + audit + proceed). Phase 3 (live
+    mixed files; Phase 3 pre-flight skip + audit + proceed) +
+    `tests/full_text_split_test.rs` (12 tests: isolated coverage of the split
+    pipeline `extract_full_text_data` + `commit_full_text_to_db` +
+    `attach_full_text_split` — figures-flag true/false, soft-fallback on invalid
+    PDF, DOI-aware destination filename, chunk write, extraction-failure audit,
+    end-to-end composition; the monolithic `attach_full_text_inner` path is
+    covered by `tests/figures_flag_test.rs`). Phase 3 (live
     translation) + Phase 4 (AI summaries) require a live LLM and are not covered
     end-to-end; the pre-flight LLM gate is unit-tested via the pure
     `check_llm_configured_or_skip` helper, and the `generate_article_ai_summary_inner`
@@ -1446,7 +1489,21 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `src/styles/help-shared.css`. `settings/` holds the settings sub-components consumed by
     `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
     connection details + parameters + Revert/Get Models/Test Connection + test-result/error
-    feedback in one bordered `<section>`), `settings-ai-summaries.vue` (3 toggles:
+    feedback in one bordered `<section>`;
+    **Parameters auto-save** (debounced 600ms via `useLlmConfig().scheduleParamSave`):
+    editing Concurrency / Max Context Tokens / Request Delay / Temperature
+    triggers a trailing-edge `save_llm_config` so the orchestrator's
+    `update_settings` (concurrency semaphore + rate-limit delay) takes effect
+    for the next LLM call without a manual Save button. The watcher is gated
+    on `!testing` (Test Connection already saves) and skips the initial
+    propagation so loading config from the DB doesn't fire a spurious re-save.
+    On every successful save, `lastSavedAt` bumps and the card invalidates the
+    cached `screeningStore.readiness` (which carries a token estimate derived
+    from `contextWindowTokens`) so the screening-view progress bar reflects
+    the new context window on the next visit without navigating away-and-back.
+    A "Saving…" spinner replaces the status dot while a save is in flight.
+    Revert cancels any pending debounced save before re-fetching.),
+    `settings-ai-summaries.vue` (3 toggles:
     auto-generate-summaries [localStorage key `bango-full-text-summaries`:
     auto-fire whole-paper summary on attach], section-summaries [localStorage key
     `bango-section-summaries`; manual `auto_awesome` button always works regardless],
@@ -1630,7 +1687,9 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   Strategy Builder pure helpers), `wiki-export-tests.md` (12 rows: Wiki
   static-site export zip + markdown-tree + staticMode helpers),
   `exim-tests.md` (4 rows: export/import orphan-audit-entry cleanup +
-  v006 empty-string `article_id` heal).
+  v006 empty-string `article_id` heal),
+  `import-plan-tests.md` (37 rows: batch-import Concern 1-3 + split-pipeline
+  direct tests + Phase 1/2 lock-scope discovery helpers + end-to-end).
 - **`.worktrees/`** - planning documents (`language-plan-v2.md` is the active
   translation plan; the superseded `language-plan.md` is archived in `DONOTUSE/`;
   implemented/temporary docs are archived in `DONOTUSE/`, such as the timeline plan

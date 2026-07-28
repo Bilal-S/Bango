@@ -5,7 +5,8 @@ use crate::db::article_repo;
 use crate::db::chunk_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
-use crate::utils::chunking::{chunk_sections, DEFAULT_CHUNK_WORDS};
+use crate::scraping::citation_chaser::clean_doi_filename;
+use crate::utils::chunking::{chunk_sections, Chunk, DEFAULT_CHUNK_WORDS};
 use crate::utils::pdf_extract;
 use crate::utils::sections::{extract_captions, extract_sections};
 
@@ -49,21 +50,346 @@ pub fn compute_storage_dir(conn: &rusqlite::Connection) -> Result<PathBuf, AppEr
     Ok(PathBuf::from(fulltext))
 }
 
-/// Attach a full-text file (PDF or TXT) to an article.
-/// Extracts text content, stores in DB, and copies file to storage directory.
+/// Compute the destination filename for a full-text attachment.
 ///
-/// This is the reusable core extracted from the Tauri command so the batch
-/// import runner can attach files per-article without re-acquiring the
-/// `DbState` mutex (the caller already holds a `&Connection`).
+/// - When the article has a DOI, the destination is
+///   `{clean_doi_filename(doi)}.{ext}`. This matches the on-disk batch-import
+///   naming convention (`{clean_doi}.pdf` / `.txt`) and the Citation Chaser
+///   RIS convention (`{clean_doi}_references.ris`), so batch import no longer
+///   produces a redundant `{clean_doi}_{uuid}.{ext}` duplicate of an already
+///   uniquely-named file.
+/// - When the article has NO DOI (or an empty/whitespace DOI), the destination
+///   falls back to `{stem}_{article_id}.{ext}` so the UUID disambiguates files
+///   that would otherwise collide (manual uploads, OpenAlex imports of
+///   no-DOI works, etc.).
+///
+/// Pure `#[must_use]` so the naming decision is unit-testable in isolation.
+#[must_use]
+pub fn compute_dest_filename(
+    article_doi: Option<&str>,
+    source_stem: &str,
+    ext: &str,
+    article_id: &str,
+) -> String {
+    let clean = article_doi.map(|d| d.trim()).filter(|d| !d.is_empty()).map(clean_doi_filename);
+    match (clean, ext.is_empty()) {
+        (Some(doi), true) => doi,
+        (Some(doi), false) => format!("{doi}.{ext}"),
+        (None, true) => format!("{source_stem}_{article_id}"),
+        (None, false) => format!("{source_stem}_{article_id}.{ext}"),
+    }
+}
+
+/// Resolve `source_path` to `dest_path` inside `storage_dir`, performing a
+/// zero-copy hard link when possible and falling back to a byte copy when the
+/// hard link fails (cross-device, unsupported filesystem, or already-linked).
+///
+/// When `source_path` and `dest_path` resolve to the same canonical file
+/// (common in batch import where the file is already in `fulltext/` with the
+/// correct DOI-based name), this is a no-op: no copy and no link, so the
+/// original file is left in place and no duplicate is created.
+fn place_file_in_storage(source_path: &Path, dest_path: &Path) -> Result<(), AppError> {
+    // Same-file short-circuit: canonicalize both paths and compare. If they
+    // resolve to the same inode, the file is already in storage (batch import
+    // feeds files already named `{clean_doi}.pdf` living inside `fulltext/`),
+    // so there is nothing to copy. This avoids `std::fs::copy` self-copy
+    // errors and the redundant duplicate the old `{stem}_{uuid}.{ext}` logic
+    // produced.
+    let same = match (source_path.canonicalize(), dest_path.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        // If canonicalize fails (e.g. dest does not exist yet, which is the
+        // common case), fall through to the link/copy path.
+        _ => false,
+    };
+    if same {
+        return Ok(());
+    }
+    // Prefer a hard link (zero-copy, both names point at the same inode). This
+    // is the common case inside a single storage root. Fall back to a byte
+    // copy when hard_link fails (cross-device, unsupported FS, or the link
+    // already exists from a prior attach).
+    match std::fs::hard_link(source_path, dest_path) {
+        Ok(()) => Ok(()),
+        Err(_) => std::fs::copy(source_path, dest_path)
+            .map(|_| ())
+            .map_err(|e| AppError::Import(format!("Failed to copy file to storage: {e}"))),
+    }
+}
+
+/// The CPU-bound extraction results from a full-text source file, produced
+/// with NO DB lock held. The companion [`commit_full_text_to_db`] consumes
+/// this under a short DB lock burst to perform only the writes (update row,
+/// insert chunks, audit entries, staleness flags). Splitting the two phases
+/// lets batch-import Phase 1 run the CPU-bound parse on `spawn_blocking`
+/// without freezing every other DB-touching IPC command.
+#[derive(Debug, Clone)]
+pub struct ExtractedFullText {
+    /// The extracted full text (empty string on extraction failure - soft
+    /// fallback so the file still attaches).
+    pub full_text: String,
+    /// Word count of `full_text` (cached so the DB-write phase doesn't
+    /// recompute it).
+    pub word_count: usize,
+    /// `true` when figure/table captions were detected (drives the persisted
+    /// `has_figures_or_tables` flag).
+    pub has_figures_or_tables: bool,
+    /// Pre-computed chunks (Tier 3 screening evidence). Empty on extraction
+    /// failure or when section extraction fails.
+    pub chunks: Vec<Chunk>,
+    /// The destination filename (DOI-aware via `compute_dest_filename`).
+    pub dest_filename: String,
+    /// The original source file name (for audit messages).
+    pub original_name: String,
+    /// Extraction error message, when extraction failed (soft fallback). The
+    /// file still attaches with an empty `full_text`; this is surfaced in the
+    /// audit trail so the user knows text-based features are unavailable.
+    pub extraction_error: Option<String>,
+}
+
+/// Extract all CPU-bound data from a full-text source file with NO DB access.
+///
+/// This is the lock-free half of the split attach pipeline (Concern 3 gap
+/// fix): it does the PDF/TXT parse, caption detection, section/chunk
+/// extraction, filename computation, and file placement. The companion
+/// [`commit_full_text_to_db`] takes the returned [`ExtractedFullText`] and
+/// performs only the DB writes under a short lock burst.
+///
+/// Pure of DB state; safe to call inside `spawn_blocking`. Returns a hard
+/// `Err` only for an unsupported extension or a missing source file - the
+/// soft-fallback path (extraction failure -> empty `full_text`) returns
+/// `Ok(ExtractedFullText { extraction_error: Some(..), .. })` so the caller
+/// can still persist the attachment.
+pub fn extract_full_text_data(
+    source_path: &Path,
+    article_doi: Option<&str>,
+    article_id: &str,
+    storage_dir: &Path,
+) -> Result<ExtractedFullText, AppError> {
+    if !source_path.exists() {
+        return Err(AppError::Import(format!("File not found: {}", source_path.display())));
+    }
+
+    let extension = source_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    // Extract text. On failure, fall back to an empty string (soft fallback).
+    let (full_text, extraction_error): (String, Option<String>) = match extension.as_str() {
+        "pdf" => match pdf_extract::extract_pdf_text(source_path) {
+            Ok(text) => (text, None),
+            Err(e) => (String::new(), Some(format!("PDF text extraction failed: {e}"))),
+        },
+        "txt" => match std::fs::read_to_string(source_path) {
+            Ok(content) => (pdf_extract::extract_txt_text(&content), None),
+            Err(e) => (String::new(), Some(format!("Failed to read .txt file: {e}"))),
+        },
+        other => {
+            return Err(AppError::Import(format!(
+                "Unsupported file type: .{other}. Only .pdf and .txt files are supported."
+            )));
+        }
+    };
+
+    let word_count = full_text.split_whitespace().count();
+    let has_figures_or_tables = !extract_captions(&full_text).is_empty();
+
+    // Section/chunk extraction for Tier 3 screening evidence. This is the
+    // second CPU-bound parse; it re-reads the source file via
+    // `extract_sections`. On failure, chunks are empty (non-fatal).
+    let chunks = match extract_sections(source_path) {
+        Ok(sections) => chunk_sections(&sections, DEFAULT_CHUNK_WORDS),
+        Err(_) => Vec::new(),
+    };
+
+    let original_name =
+        source_path.file_name().and_then(|n| n.to_str()).unwrap_or("document").to_string();
+    let stem = source_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
+    let ext = source_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let dest_filename = compute_dest_filename(article_doi, stem, ext, article_id);
+    let dest_path = storage_dir.join(&dest_filename);
+
+    // Place the file in storage (hard-link / copy / same-file no-op).
+    place_file_in_storage(source_path, &dest_path)?;
+
+    Ok(ExtractedFullText {
+        full_text,
+        word_count,
+        has_figures_or_tables,
+        chunks,
+        dest_filename,
+        original_name,
+        extraction_error,
+    })
+}
+
+/// Commit an already-extracted full-text attachment to the database. This is
+/// the lock-bound half of the split attach pipeline (Concern 3 gap fix): it
+/// performs only the writes (`update_full_text`, chunk insert, audit entries,
+/// staleness flags) and is fast (millisecond-scale), so the caller can hold
+/// the DB lock for just this portion and run the CPU-bound extraction via
+/// [`extract_full_text_data`] outside the lock.
+///
+/// The `article_id` is threaded separately (not embedded in
+/// [`ExtractedFullText`]) so the pure extraction helper stays free of any
+/// per-article DB state.
+pub fn commit_full_text_to_db(
+    conn: &rusqlite::Connection,
+    article_id: &str,
+    extracted: &ExtractedFullText,
+) -> Result<FullTextAttachResult, AppError> {
+    let ExtractedFullText {
+        full_text,
+        word_count,
+        has_figures_or_tables,
+        chunks,
+        dest_filename,
+        original_name,
+        extraction_error,
+    } = extracted;
+
+    // 1. Update the article row (full_text, has_full_text, file name, flag).
+    article_repo::update_full_text(
+        conn,
+        article_id,
+        full_text,
+        dest_filename,
+        *has_figures_or_tables,
+    )?;
+
+    // 2. Insert the pre-computed chunks (Tier 3). Non-fatal on failure.
+    if !chunks.is_empty() {
+        if let Err(e) = chunk_repo::replace_chunks_for_article(conn, article_id, chunks) {
+            let _ = crate::db::audit_repo::log_error(
+                conn,
+                &format!("Chunk extraction failed for article {article_id}: {e}"),
+            );
+        }
+    }
+
+    // 3. Staleness flags.
+    app_settings_repo::mark_wiki_needs_refresh(conn);
+    app_settings_repo::mark_biblio_needs_refresh(conn);
+
+    // 4. Extraction-failure audit entry (soft fallback).
+    if let Some(ref msg) = extraction_error {
+        let _ = crate::db::audit_repo::log_error(
+            conn,
+            &format!(
+                "Full text attached to article {article_id} but {msg} (file: {original_name}). \
+                 The file is stored; text-based features (screening evidence, AI summary, wiki) \
+                 will be unavailable until a valid source file is provided."
+            ),
+        );
+    }
+
+    // 5. Success audit entry (non-fatal on write failure).
+    let attach_detail = format!(
+        "Full text attached: {original_name}{}",
+        extraction_error.as_ref().map(|_| " (text extraction failed)").unwrap_or("")
+    );
+    if let Err(audit_e) = crate::db::audit_repo::create_entry(
+        conn,
+        article_id,
+        "import",
+        None,
+        None,
+        Some(&attach_detail),
+        "user",
+    ) {
+        let _ = crate::db::audit_repo::log_error(
+            conn,
+            &format!("Failed to write success audit for article {article_id}: {audit_e}"),
+        );
+    }
+
+    let extraction_failed = extraction_error.is_some();
+    Ok(FullTextAttachResult {
+        success: true,
+        message: if extraction_failed {
+            "Full text attached (text extraction failed)".to_string()
+        } else {
+            format!("Full text extracted ({word_count} words)")
+        },
+        word_count: *word_count,
+        extraction_failed,
+    })
+}
+
+/// Split attach pipeline for batch import: runs the CPU-bound extraction on
+/// `spawn_blocking` (NO DB lock held), then takes a short lock burst for the
+/// DB writes only. Resolves both Concern 3 gaps (PDF parse inside the lock +
+/// blocking a tokio worker).
+///
+/// Callers that already hold a `&Connection` (manual `attach_full_text`
+/// command, OpenAlex import) should call [`extract_full_text_data`] +
+/// [`commit_full_text_to_db`] directly instead. This async helper is for the
+/// batch-import Phase 1 runner, which owns a `&Mutex<Connection>` and must
+/// not hold it across the parse.
+pub async fn attach_full_text_split(
+    conn_mutex: &std::sync::Mutex<rusqlite::Connection>,
+    article_id: &str,
+    article_doi: Option<&str>,
+    source_path: &Path,
+    storage_dir: &Path,
+) -> Result<FullTextAttachResult, AppError> {
+    // Phase 1: lock-free CPU-bound extraction on the blocking pool.
+    let source_owned = source_path.to_path_buf();
+    let storage_owned = storage_dir.to_path_buf();
+    let article_id_owned = article_id.to_string();
+    let doi_owned = article_doi.map(str::to_string);
+    let extracted = tokio::task::spawn_blocking(move || {
+        extract_full_text_data(
+            &source_owned,
+            doi_owned.as_deref(),
+            &article_id_owned,
+            &storage_owned,
+        )
+    })
+    .await
+    .map_err(|e| AppError::Import(format!("Extraction task panicked: {e}")))??;
+
+    // Phase 2: short DB lock burst for the writes only.
+    let conn = crate::db::connection::lock_conn(conn_mutex)?;
+    commit_full_text_to_db(&conn, article_id, &extracted)
+}
+
+/// Attach a full-text file (PDF or TXT) to an article (monolithic path).
+///
+/// This is the legacy single-call API retained for the manual
+/// `attach_full_text` Tauri command and the OpenAlex import paths, which
+/// already hold a `&Connection`. The batch-import Phase 1 runner uses the
+/// split [`attach_full_text_split`] pipeline instead so the CPU-bound PDF
+/// parse runs on `spawn_blocking` without holding the DB lock.
+///
+/// # Destination filename contract (Concern 2)
+///
+/// - When `article_doi` is `Some(non-empty)`, the destination filename is
+///   `{clean_doi_filename(doi)}.{ext}`. This matches the on-disk batch-import
+///   convention so batch import no longer produces a redundant
+///   `{clean_doi}_{uuid}.{ext}` duplicate of an already uniquely-named file.
+/// - When `article_doi` is `None` (or empty/whitespace), the destination falls
+///   back to `{stem}_{article_id}.{ext}` so the UUID disambiguates files that
+///   would otherwise collide (manual uploads, OpenAlex imports of no-DOI
+///   works).
+/// - When `source_path` already resolves to the destination (same canonical
+///   file - common in batch import where the file is already in `fulltext/`
+///   with the correct DOI-based name), no copy/link is performed.
 ///
 /// # Arguments
 /// * `conn` - A locked SQLite connection.
 /// * `article_id` - The article to attach the full text to.
+/// * `article_doi` - The article's DOI, if known. When `Some`, drives the
+///   DOI-aware destination filename. Callers that already have the DOI in
+///   hand (batch import, OpenAlex) pass it directly; the Tauri command
+///   wrapper reads it from the DB.
 /// * `source_path` - Path to the source PDF/TXT file on disk.
 /// * `storage_dir` - The fulltext storage directory (from `compute_storage_dir`).
 pub fn attach_full_text_inner(
     conn: &rusqlite::Connection,
     article_id: &str,
+    article_doi: Option<&str>,
     source_path: &Path,
     storage_dir: &Path,
 ) -> Result<FullTextAttachResult, AppError> {
@@ -111,20 +437,17 @@ pub fn attach_full_text_inner(
     // On extraction failure `full_text` is empty, so this safely yields false.
     let has_figures_or_tables = !extract_captions(&full_text).is_empty();
 
-    // Build destination filename: {original_stem}_{article_id}.{ext}
+    // Build destination filename via the DOI-aware helper (Concern 2).
     let original_name = source_path.file_name().and_then(|n| n.to_str()).unwrap_or("document");
     let stem = source_path.file_stem().and_then(|s| s.to_str()).unwrap_or("document");
     let ext = source_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let dest_filename = if ext.is_empty() {
-        format!("{stem}_{article_id}")
-    } else {
-        format!("{stem}_{article_id}.{ext}")
-    };
+    let dest_filename = compute_dest_filename(article_doi, stem, ext, article_id);
     let dest_path = storage_dir.join(&dest_filename);
 
-    // Copy file to storage directory
-    std::fs::copy(source_path, &dest_path)
-        .map_err(|e| AppError::Import(format!("Failed to copy file to storage: {e}")))?;
+    // Place the file in storage: zero-copy hard link when possible, byte-copy
+    // fallback, and a no-op when source == destination (common in batch import
+    // where the file is already in `fulltext/` with the correct DOI name).
+    place_file_in_storage(source_path, &dest_path)?;
 
     // Update database
     article_repo::update_full_text(
@@ -218,8 +541,18 @@ pub fn attach_full_text(
     let result = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let storage_dir = compute_storage_dir(&conn)?;
+        // Read the article's DOI so the DOI-aware destination filename is used
+        // (Concern 2). The article row is already loaded here under the same
+        // lock that computes the storage dir, so no extra DB round-trip.
+        let article = article_repo::get_article_by_id(&conn, &article_id)?;
         let source_path = PathBuf::from(&file_path);
-        attach_full_text_inner(&conn, &article_id, &source_path, &storage_dir)
+        attach_full_text_inner(
+            &conn,
+            &article_id,
+            article.doi.as_deref(),
+            &source_path,
+            &storage_dir,
+        )
     };
 
     // Fire-and-forget translation enqueue on successful attach. The enqueue
@@ -602,4 +935,99 @@ pub fn rebuild_article_chunks(
 pub fn count_articles_with_full_text(db_state: tauri::State<'_, DbState>) -> Result<i64, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     chunk_repo::count_articles_with_full_text(&conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dest_filename_uses_clean_doi_when_present() {
+        // DOI present -> destination is `{clean_doi}.{ext}` with no UUID.
+        assert_eq!(
+            compute_dest_filename(
+                Some("10.1016/j.jand.2021.06.013"),
+                "ignored-stem",
+                "pdf",
+                "art-uuid"
+            ),
+            "10.1016_j.jand.2021.06.013.pdf"
+        );
+    }
+
+    #[test]
+    fn dest_filename_uses_clean_doi_with_no_extension() {
+        assert_eq!(
+            compute_dest_filename(Some("10.1001/foo"), "stem", "", "art-uuid"),
+            "10.1001_foo"
+        );
+    }
+
+    #[test]
+    fn dest_filename_trims_whitespace_in_doi() {
+        assert_eq!(
+            compute_dest_filename(Some("  10.1001/foo  "), "stem", "pdf", "art-uuid"),
+            "10.1001_foo.pdf"
+        );
+    }
+
+    #[test]
+    fn dest_filename_falls_back_to_uuid_when_doi_absent() {
+        assert_eq!(
+            compute_dest_filename(None, "my-paper", "pdf", "art-uuid"),
+            "my-paper_art-uuid.pdf"
+        );
+    }
+
+    #[test]
+    fn dest_filename_falls_back_to_uuid_when_doi_empty() {
+        // Empty / whitespace-only DOI is treated as absent.
+        assert_eq!(
+            compute_dest_filename(Some("   "), "my-paper", "pdf", "art-uuid"),
+            "my-paper_art-uuid.pdf"
+        );
+        assert_eq!(
+            compute_dest_filename(Some(""), "my-paper", "pdf", "art-uuid"),
+            "my-paper_art-uuid.pdf"
+        );
+    }
+
+    #[test]
+    fn dest_filename_uuid_fallback_without_extension() {
+        assert_eq!(compute_dest_filename(None, "stem", "", "art-uuid"), "stem_art-uuid");
+    }
+
+    #[test]
+    fn place_file_no_op_when_source_equals_dest() {
+        // Same canonical path: the helper must short-circuit and not attempt
+        // a self-copy (which would truncate the file on some platforms).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("paper.pdf");
+        std::fs::write(&path, b"hello").expect("write");
+        place_file_in_storage(&path, &path).expect("same-file is a no-op");
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello", "content must be unchanged");
+    }
+
+    #[test]
+    fn place_file_hard_links_or_copies_to_new_dest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = dir.path().join("src.pdf");
+        let dest = dir.path().join("dest.pdf");
+        std::fs::write(&src, b"hello").expect("write");
+        place_file_in_storage(&src, &dest).expect("place succeeds");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"hello", "dest must have the content");
+    }
+
+    #[test]
+    fn place_file_copy_fallback_overwrites_existing_dest() {
+        // A prior attach may have created the destination already; the copy
+        // fallback must overwrite it rather than fail.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let src = dir.path().join("src.pdf");
+        let dest = dir.path().join("dest.pdf");
+        std::fs::write(&src, b"new").expect("write src");
+        std::fs::write(&dest, b"old").expect("write dest");
+        place_file_in_storage(&src, &dest).expect("place succeeds via copy fallback");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new", "dest must be overwritten");
+    }
 }

@@ -11,8 +11,16 @@
 //!
 //! Files are parsed via [`crate::commands::references::import_references_inner`]
 //! which auto-detects RIS vs BibTeX by extension.
+//!
+//! # Lock scope (Concern 3)
+//!
+//! The DB mutex is held only for the brief initial discovery (build the match
+//! map + resolve the `ris/` dir) and for the short per-file import burst.
+//! RIS parsing is fast but the same short-lock principle applies so other IPC
+//! commands stay responsive during a large import.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::commands::references::import_references_inner;
 use crate::db::article_repo;
@@ -95,12 +103,30 @@ fn discover_importable_files(ris_dir: &Path, match_map: &DoiMatchMap) -> Vec<Pen
     importable
 }
 
+/// Discovery payload returned by the brief initial lock burst.
+pub(crate) struct CitationsDiscovery {
+    importable: Vec<PendingImport>,
+}
+
+/// Brief initial lock burst: resolve the `ris/` dir, build the DOI match map,
+/// discover importable files. The lock is released before this function
+/// returns, so the per-file import loop runs WITHOUT holding the mutex.
+pub(crate) fn discover(conn: &rusqlite::Connection) -> Result<CitationsDiscovery, AppError> {
+    let ris_dir = resolve_ris_dir(conn)?;
+    let articles = article_repo::get_articles_with_doi_info(conn)?;
+    let match_map = build_fulltext_match_map(&articles);
+    let importable = discover_importable_files(&ris_dir, &match_map);
+    Ok(CitationsDiscovery { importable })
+}
+
 /// Run Phase 2: import each discovered citation/reference file.
 ///
-/// Calls [`import_references_inner`] per file. The caller's `is_cancelled`
-/// closure is checked before each file so the runner can abort mid-phase.
-pub fn run_citations_phase<F, P>(
-    conn: &rusqlite::Connection,
+/// Calls [`import_references_inner`] per file under a short DB lock burst
+/// (released between files so other IPC commands stay responsive). The
+/// caller's `is_cancelled` closure is checked before each file so the runner
+/// can abort mid-phase.
+pub async fn run_citations_phase<F, P>(
+    conn_mutex: &Mutex<rusqlite::Connection>,
     is_cancelled: &F,
     on_progress: &mut P,
 ) -> Result<BatchImportPhaseResult, AppError>
@@ -108,10 +134,12 @@ where
     F: Fn() -> bool,
     P: FnMut(usize, usize, &str),
 {
-    let ris_dir = resolve_ris_dir(conn)?;
-    let articles = article_repo::get_articles_with_doi_info(conn)?;
-    let match_map = build_fulltext_match_map(&articles);
-    let importable = discover_importable_files(&ris_dir, &match_map);
+    // Brief initial lock: discover + build the match map, then release.
+    let discovery = {
+        let conn = crate::db::connection::lock_conn(conn_mutex)?;
+        discover(&conn)?
+    };
+    let CitationsDiscovery { importable } = discovery;
 
     let total = importable.len();
     let mut processed = 0usize;
@@ -135,7 +163,14 @@ where
 
         processed += 1;
         let path_str = item.path.to_string_lossy().to_string();
-        match import_references_inner(conn, &item.article_id, &path_str, item.ref_type) {
+        // Short lock burst per file: parse + insert. `import_references_inner`
+        // is synchronous; the lock is released immediately after.
+        let import_outcome = {
+            let conn = crate::db::connection::lock_conn(conn_mutex)?;
+            import_references_inner(&conn, &item.article_id, &path_str, item.ref_type)
+        };
+
+        match import_outcome {
             Ok(result) => {
                 // Consider it succeeded if at least one link was created.
                 if result.links_created > 0 || result.papers_created > 0 {
@@ -143,20 +178,18 @@ where
                 }
                 // Surface non-fatal parse/insert errors from the inner function.
                 for e in &result.errors {
-                    errors.push(format!(
-                        "{}: {e}",
-                        item.path.file_name().and_then(|n| n.to_str()).unwrap_or("?")
-                    ));
+                    errors.push(format!("{fname}: {e}"));
                 }
             }
             Err(e) => {
                 failed += 1;
-                errors.push(format!(
-                    "Failed to import '{}': {e}",
-                    item.path.file_name().and_then(|n| n.to_str()).unwrap_or("?")
-                ));
+                errors.push(format!("Failed to import '{fname}': {e}"));
             }
         }
+
+        // Yield between files so the async runtime can flush progress events
+        // and other IPC commands get a turn.
+        tokio::task::yield_now().await;
     }
 
     Ok(BatchImportPhaseResult { total, processed, succeeded, failed, errors })
@@ -180,6 +213,12 @@ mod tests {
         }
     }
 
+    /// Build a `DoiMatchMap` from the given articles (thin wrapper so the test
+    /// helper stays consistent with the production builder).
+    fn map_of(articles: &[ArticleDoiInfo]) -> DoiMatchMap {
+        build_fulltext_match_map(articles)
+    }
+
     #[test]
     fn discover_skips_when_article_already_has_reference_details() {
         let tmp = tempfile::tempdir().unwrap();
@@ -191,7 +230,7 @@ mod tests {
 
         // Article already has reference details -> should be skipped.
         let articles = vec![art("a1", "10.1001/foo", true, false)];
-        let map = build_fulltext_match_map(&articles);
+        let map = map_of(&articles);
         let importable = discover_importable_files(tmp.path(), &map);
         assert!(importable.is_empty(), "should skip when has_reference_details is true");
     }
@@ -205,7 +244,7 @@ mod tests {
         writeln!(f, "TY  - JOUR\nTI  - Test\nER  -").unwrap();
 
         let articles = vec![art("a1", "10.1001/foo", false, false)];
-        let map = build_fulltext_match_map(&articles);
+        let map = map_of(&articles);
         let importable = discover_importable_files(tmp.path(), &map);
         assert_eq!(importable.len(), 1);
         assert_eq!(importable[0].ref_type, "reference");
@@ -221,7 +260,7 @@ mod tests {
         writeln!(f, "TY  - JOUR\nTI  - Citing\nER  -").unwrap();
 
         let articles = vec![art("a1", "10.1001/foo", true, false)];
-        let map = build_fulltext_match_map(&articles);
+        let map = map_of(&articles);
         let importable = discover_importable_files(tmp.path(), &map);
         // references are skipped (has_reference_details=true), but citations found.
         assert_eq!(importable.len(), 1);
@@ -237,7 +276,7 @@ mod tests {
         writeln!(f, "TY  - JOUR\nTI  - Generic\nER  -").unwrap();
 
         let articles = vec![art("a1", "10.1001/foo", false, false)];
-        let map = build_fulltext_match_map(&articles);
+        let map = map_of(&articles);
         let importable = discover_importable_files(tmp.path(), &map);
         assert_eq!(importable.len(), 1);
         assert_eq!(importable[0].ref_type, "reference");
@@ -252,7 +291,7 @@ mod tests {
         writeln!(f, "@article{{foo, title={{Generic}}}}").unwrap();
 
         let articles = vec![art("a1", "10.1001/foo", false, false)];
-        let map = build_fulltext_match_map(&articles);
+        let map = map_of(&articles);
         let importable = discover_importable_files(tmp.path(), &map);
         assert_eq!(importable.len(), 1);
     }

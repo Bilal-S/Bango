@@ -4,8 +4,13 @@
 //! real in-memory SQLite database + tempdir fixture files. Phase 3 (AI
 //! summaries) requires a live LLM and is not covered here; see
 //! `summary_engine_test.rs` for the LLM-mocked summary path.
+//!
+//! Phases 1 and 2 are now `async` and lock the DB mutex in short bursts
+//! (Concern 3). The tests wrap the in-memory `Connection` in a `Mutex` and
+//! drive the async phase functions via `#[tokio::test]`.
 
 use std::io::Write;
+use std::sync::Mutex;
 
 use bango_lib::batch_import::{citations_phase, full_text_phase, translations_phase};
 use bango_lib::db::app_settings_repo::{set_setting, STORAGE_ROOT_KEY};
@@ -90,8 +95,8 @@ fn noop_progress() -> impl FnMut(usize, usize, &str) {
 
 // ── Phase 1: Full Text ──────────────────────────────────────────────────────
 
-#[test]
-fn phase1_attaches_full_text_to_matching_articles() {
+#[tokio::test]
+async fn phase1_attaches_full_text_to_matching_articles() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -104,8 +109,10 @@ fn phase1_attaches_full_text_to_matching_articles() {
     write_fulltext_txt(tmp.path(), doi_a, "This is the full text of Article A.");
     write_fulltext_txt(tmp.path(), doi_b, "This is the full text of Article B.");
 
+    let conn_mutex = Mutex::new(conn);
     let (result, newly_attached) =
-        full_text_phase::run_full_text_phase(&conn, &never_cancel(), &mut noop_progress())
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
             .expect("phase 1");
 
     assert_eq!(result.total, 2, "should discover 2 files");
@@ -113,14 +120,15 @@ fn phase1_attaches_full_text_to_matching_articles() {
     assert_eq!(newly_attached.len(), 2, "should return 2 newly-attached IDs");
 
     // Verify the DB flags are set.
+    let conn = conn_mutex.into_inner().unwrap();
     let articles = get_articles_with_doi_info(&conn).unwrap();
     for a in &articles {
         assert!(a.has_full_text, "article {} should have full text", a.id);
     }
 }
 
-#[test]
-fn phase1_skips_articles_that_already_have_full_text() {
+#[tokio::test]
+async fn phase1_skips_articles_that_already_have_full_text() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -133,16 +141,18 @@ fn phase1_skips_articles_that_already_have_full_text() {
 
     write_fulltext_txt(tmp.path(), doi, "This should NOT be attached.");
 
+    let conn_mutex = Mutex::new(conn);
     let (result, newly_attached) =
-        full_text_phase::run_full_text_phase(&conn, &never_cancel(), &mut noop_progress())
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
             .expect("phase 1");
 
     assert_eq!(result.total, 0, "should discover 0 importable files (already attached)");
     assert!(newly_attached.is_empty(), "no newly-attached IDs");
 }
 
-#[test]
-fn phase1_ignores_files_with_no_matching_doi() {
+#[tokio::test]
+async fn phase1_ignores_files_with_no_matching_doi() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -151,19 +161,21 @@ fn phase1_ignores_files_with_no_matching_doi() {
     let _id = insert_article_with_doi(&conn, "10.1001/matched", "Matched");
 
     // Write a file with a non-matching stem.
-    let path = tmp.path().join("fulltext").join("10.9999/unmatched.txt");
+    let path = tmp.path().join("fulltext").join("10.9999_unmatched.txt");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "unmatched content").unwrap();
 
+    let conn_mutex = Mutex::new(conn);
     let (result, _) =
-        full_text_phase::run_full_text_phase(&conn, &never_cancel(), &mut noop_progress())
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
             .expect("phase 1");
 
     assert_eq!(result.total, 0, "no files should match");
 }
 
-#[test]
-fn phase1_skips_article_without_doi() {
+#[tokio::test]
+async fn phase1_skips_article_without_doi() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -176,17 +188,49 @@ fn phase1_skips_article_without_doi() {
     // Write a file that exists but has no matching article.
     write_fulltext_txt(tmp.path(), "10.1001/orphan", "orphan text");
 
+    let conn_mutex = Mutex::new(conn);
     let (result, _) =
-        full_text_phase::run_full_text_phase(&conn, &never_cancel(), &mut noop_progress())
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
             .expect("phase 1");
 
     assert_eq!(result.total, 0, "no files should match (article has no DOI)");
 }
 
+#[tokio::test]
+async fn phase1_uses_doi_filename_when_article_has_doi() {
+    // Concern 2: when the article has a DOI, the destination filename must be
+    // `{clean_doi}.txt` (no UUID suffix), and the source file is already in
+    // `fulltext/` with that exact name so no copy should occur (hard-link /
+    // same-file short-circuit). After attach, the stored `full_text_file_name`
+    // equals `{clean_doi}.txt`.
+    let tmp = TempDir::new().unwrap();
+    let conn = test_db();
+    configure_storage_root(&conn, tmp.path());
+
+    let doi = "10.1001/doi-name";
+    let id = insert_article_with_doi(&conn, doi, "Named by DOI");
+
+    write_fulltext_txt(tmp.path(), doi, "Full text content for DOI-named file.");
+
+    let conn_mutex = Mutex::new(conn);
+    let (result, _newly_attached) =
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 1");
+    assert_eq!(result.succeeded, 1, "should attach the file");
+
+    let conn = conn_mutex.into_inner().unwrap();
+    let stored_name =
+        article_repo::get_full_text_file_name(&conn, &id).unwrap().expect("file name");
+    let expected = format!("{}.txt", clean_doi_filename(doi));
+    assert_eq!(stored_name, expected, "destination filename must be DOI-based, not UUID-based");
+}
+
 // ── Phase 2: Citations ──────────────────────────────────────────────────────
 
-#[test]
-fn phase2_imports_references_from_ris_files() {
+#[tokio::test]
+async fn phase2_imports_references_from_ris_files() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -196,13 +240,17 @@ fn phase2_imports_references_from_ris_files() {
 
     write_references_ris(tmp.path(), doi, &["Reference Paper 1", "Reference Paper 2"]);
 
-    let result = citations_phase::run_citations_phase(&conn, &never_cancel(), &mut noop_progress())
-        .expect("phase 2");
+    let conn_mutex = Mutex::new(conn);
+    let result =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2");
 
     assert_eq!(result.total, 1, "should discover 1 references file");
     assert_eq!(result.succeeded, 1, "should import it");
     assert!(result.errors.is_empty(), "no errors");
 
+    let conn = conn_mutex.into_inner().unwrap();
     // Verify reference papers were created.
     let paper_count: i64 =
         conn.query_row("SELECT COUNT(*) FROM reference_papers", [], |row| row.get(0)).unwrap();
@@ -213,8 +261,8 @@ fn phase2_imports_references_from_ris_files() {
     assert!(articles[0].has_reference_details, "article should have reference details");
 }
 
-#[test]
-fn phase2_imports_citations_from_ris_files() {
+#[tokio::test]
+async fn phase2_imports_citations_from_ris_files() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -224,18 +272,22 @@ fn phase2_imports_citations_from_ris_files() {
 
     write_citations_ris(tmp.path(), doi, &["Citing Paper 1"]);
 
-    let result = citations_phase::run_citations_phase(&conn, &never_cancel(), &mut noop_progress())
-        .expect("phase 2");
+    let conn_mutex = Mutex::new(conn);
+    let result =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2");
 
     assert_eq!(result.total, 1, "should discover 1 citations file");
     assert_eq!(result.succeeded, 1, "should import it");
 
+    let conn = conn_mutex.into_inner().unwrap();
     let articles = get_articles_with_doi_info(&conn).unwrap();
     assert!(articles[0].has_citation_details, "article should have citation details");
 }
 
-#[test]
-fn phase2_imports_references_and_citations_independently() {
+#[tokio::test]
+async fn phase2_imports_references_and_citations_independently() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -246,20 +298,24 @@ fn phase2_imports_references_and_citations_independently() {
     write_references_ris(tmp.path(), doi, &["Ref A", "Ref B"]);
     write_citations_ris(tmp.path(), doi, &["Citing C"]);
 
-    let result = citations_phase::run_citations_phase(&conn, &never_cancel(), &mut noop_progress())
-        .expect("phase 2");
+    let conn_mutex = Mutex::new(conn);
+    let result =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2");
 
     // Both files should be discovered and imported.
     assert_eq!(result.total, 2, "should discover 2 files (refs + cits)");
     assert_eq!(result.succeeded, 2, "should import both");
 
+    let conn = conn_mutex.into_inner().unwrap();
     let articles = get_articles_with_doi_info(&conn).unwrap();
     assert!(articles[0].has_reference_details, "should have reference details");
     assert!(articles[0].has_citation_details, "should have citation details");
 }
 
-#[test]
-fn phase2_skips_articles_that_already_have_reference_details() {
+#[tokio::test]
+async fn phase2_skips_articles_that_already_have_reference_details() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -283,8 +339,11 @@ fn phase2_skips_articles_that_already_have_reference_details() {
     )
     .unwrap();
 
-    let result = citations_phase::run_citations_phase(&conn, &never_cancel(), &mut noop_progress())
-        .expect("phase 2");
+    let conn_mutex = Mutex::new(conn);
+    let result =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2");
 
     // The references file should be skipped because the article already has refs.
     assert_eq!(result.total, 0, "should discover 0 files (refs already present)");
@@ -292,8 +351,8 @@ fn phase2_skips_articles_that_already_have_reference_details() {
 
 // ── Idempotency ─────────────────────────────────────────────────────────────
 
-#[test]
-fn full_pipeline_is_idempotent_on_second_run() {
+#[tokio::test]
+async fn full_pipeline_is_idempotent_on_second_run() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -304,33 +363,41 @@ fn full_pipeline_is_idempotent_on_second_run() {
     write_fulltext_txt(tmp.path(), doi, "Full text content.");
     write_references_ris(tmp.path(), doi, &["Ref 1", "Ref 2"]);
 
+    let conn_mutex = Mutex::new(conn);
+
     // First run: should attach + import.
     let (ft1, attached1) =
-        full_text_phase::run_full_text_phase(&conn, &never_cancel(), &mut noop_progress())
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
             .expect("phase 1 run 1");
     assert_eq!(ft1.succeeded, 1, "first run should attach 1 file");
     assert_eq!(attached1.len(), 1);
 
-    let cit1 = citations_phase::run_citations_phase(&conn, &never_cancel(), &mut noop_progress())
-        .expect("phase 2 run 1");
+    let cit1 =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2 run 1");
     assert_eq!(cit1.succeeded, 1, "first run should import 1 refs file");
 
     // Second run: should find nothing to do (all flags set).
     let (ft2, attached2) =
-        full_text_phase::run_full_text_phase(&conn, &never_cancel(), &mut noop_progress())
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
             .expect("phase 1 run 2");
     assert_eq!(ft2.total, 0, "second run should find 0 files to attach");
     assert!(attached2.is_empty());
 
-    let cit2 = citations_phase::run_citations_phase(&conn, &never_cancel(), &mut noop_progress())
-        .expect("phase 2 run 2");
+    let cit2 =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2 run 2");
     assert_eq!(cit2.total, 0, "second run should find 0 refs to import");
 }
 
 // ── Multiple articles ───────────────────────────────────────────────────────
 
-#[test]
-fn pipeline_handles_multiple_articles_with_mixed_files() {
+#[tokio::test]
+async fn pipeline_handles_multiple_articles_with_mixed_files() {
     let tmp = TempDir::new().unwrap();
     let conn = test_db();
     configure_storage_root(&conn, tmp.path());
@@ -351,19 +418,25 @@ fn pipeline_handles_multiple_articles_with_mixed_files() {
     write_fulltext_txt(tmp.path(), doi_c, "Full text C.");
     write_references_ris(tmp.path(), doi_c, &["C Ref 1", "C Ref 2"]);
 
+    let conn_mutex = Mutex::new(conn);
+
     // Phase 1: should attach A and C (2 files), skip B (no fulltext file).
     let (ft, attached) =
-        full_text_phase::run_full_text_phase(&conn, &never_cancel(), &mut noop_progress())
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
             .expect("phase 1");
     assert_eq!(ft.succeeded, 2, "should attach 2 files (A and C)");
     assert_eq!(attached.len(), 2);
 
     // Phase 2: should import refs for B and C (2 files), skip A (no refs file).
-    let cit = citations_phase::run_citations_phase(&conn, &never_cancel(), &mut noop_progress())
-        .expect("phase 2");
+    let cit =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2");
     assert_eq!(cit.succeeded, 2, "should import 2 refs files (B and C)");
 
     // Verify per-article state.
+    let conn = conn_mutex.into_inner().unwrap();
     let articles = get_articles_with_doi_info(&conn).unwrap();
     let by_doi: std::collections::HashMap<&str, &_> =
         articles.iter().map(|a| (a.doi.as_str(), a)).collect();

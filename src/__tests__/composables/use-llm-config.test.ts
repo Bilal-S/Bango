@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useLlmConfig } from '@/composables/use-llm-config';
 
@@ -135,5 +135,47 @@ describe('useLlmConfig', () => {
     c.fetchedModels.value = ['x'];
     c.revert();
     expect(c.fetchedModels.value).toBeNull();
+  });
+
+  describe('debounced parameter auto-save', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('scheduleParamSave debounces save by default delay', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+      const c = useLlmConfig();
+      c.scheduleParamSave();
+      // Not called immediately.
+      expect(tauriCommand).not.toHaveBeenCalled();
+      // Fast-forward past the debounce window (600ms).
+      await vi.advanceTimersByTimeAsync(600);
+      expect(tauriCommand).toHaveBeenCalledWith('save_llm_config', expect.any(Object));
+      expect(c.lastSavedAt.value).toBeGreaterThan(0);
+    });
+
+    it('cancelScheduledParamSave drops a pending save', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+      const c = useLlmConfig();
+      c.scheduleParamSave();
+      c.cancelScheduledParamSave();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(tauriCommand).not.toHaveBeenCalled();
+    });
+
+    it('scheduling again resets the timer (only the last save fires)', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+      const c = useLlmConfig();
+      c.scheduleParamSave();
+      await vi.advanceTimersByTimeAsync(400); // before the 600ms window
+      c.scheduleParamSave();
+      await vi.advanceTimersByTimeAsync(400); // would have fired if not reset
+      expect(tauriCommand).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(200); // 600ms since the second schedule
+      expect(tauriCommand).toHaveBeenCalledTimes(1);
+    });
   });
 });

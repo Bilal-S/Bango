@@ -54,9 +54,44 @@ export function useLlmConfig() {
     saving.value = true;
     try {
       await tauriCommand('save_llm_config', { config: store.config });
+      lastSavedAt.value = Date.now();
     } finally {
       saving.value = false;
     }
+  }
+
+  // ── Debounced auto-save for the Parameters fields ───────────────────────
+  //
+  // The Parameters card (concurrency / context tokens / request delay /
+  // temperature) has no Save button. Without auto-save, edits live only in
+  // the in-memory Pinia store: they never reach `save_llm_config` (so the
+  // orchestrator's `update_settings` is never called and the next LLM call
+  // uses stale concurrency/delay) and are lost on navigation (the next view
+  // triggers a fresh `fetch()` that overwrites them).
+  //
+  // `scheduleParamSave` debounces `save()` by `delayMs` (default 600ms) so
+  // dragging the Context Tokens slider (which fires many intermediate values)
+  // only produces one save per pause. `cancelScheduledParamSave` lets callers
+  // (Revert, Test Connection) drop a pending save so it doesn't fight with
+  // their own save/fetch. `lastSavedAt` bumps on every successful save so the
+  // UI can react (e.g. invalidate the cached screening-readiness estimate).
+  const paramSaveTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedAt = ref(0);
+  const PARAM_SAVE_DELAY_MS = 600;
+
+  function cancelScheduledParamSave(): void {
+    if (paramSaveTimer.value !== null) {
+      clearTimeout(paramSaveTimer.value);
+      paramSaveTimer.value = null;
+    }
+  }
+
+  function scheduleParamSave(delayMs: number = PARAM_SAVE_DELAY_MS): void {
+    cancelScheduledParamSave();
+    paramSaveTimer.value = setTimeout(() => {
+      paramSaveTimer.value = null;
+      void save();
+    }, delayMs);
   }
 
   async function testConnection(): Promise<void> {
@@ -67,6 +102,9 @@ export function useLlmConfig() {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     );
     try {
+      // Drop any pending debounced save so it doesn't race with this explicit
+      // save (the test path saves then immediately tests).
+      cancelScheduledParamSave();
       await save();
       const result = await tauriCommand<TestResult>('test_llm_connection');
       // Refresh config BEFORE setting testResult so the watch on config
@@ -84,6 +122,9 @@ export function useLlmConfig() {
   }
 
   function revert(): void {
+    // Drop any pending debounced save so it can't overwrite the reverted
+    // (re-fetched) config a moment later.
+    cancelScheduledParamSave();
     store.invalidate();
     void store.fetch();
     store.clearTestResult();
@@ -130,8 +171,11 @@ export function useLlmConfig() {
     showApiKey,
     fetchingModels,
     fetchedModels,
+    lastSavedAt,
     loadConfig,
     save,
+    scheduleParamSave,
+    cancelScheduledParamSave,
     testConnection,
     revert,
     isLocalProvider,
