@@ -186,7 +186,7 @@ Rules:
     );
 
     let result = orchestrator
-        .send(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
+        .send_json(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
         .await;
     if let Err(ref e) = result {
         let err_msg = e.to_string();
@@ -197,14 +197,8 @@ Rules:
     }
     let (response, _) = result?;
 
-    let json_str = response
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-
-    let parsed: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+    // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+    let parsed: serde_json::Value = serde_json::from_str(&response).map_err(|e| {
         AppError::Import(format!("Failed to parse criteria generation response: {}", e))
     })?;
 

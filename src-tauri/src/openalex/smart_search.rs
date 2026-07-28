@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::criteria_repo;
 use crate::error::AppError;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
-use crate::summary::prompt::strip_code_fences;
+use crate::utils::json_repair::prepare_llm_json;
 
 /// The LLM's parsed response: an OpenAlex Boolean query + suggested filters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,8 +104,8 @@ Return ONLY a JSON object matching this schema (no prose, no markdown fences):
 
 /// Pure: parse + lightly validate the LLM JSON response.
 pub fn parse_smart_search_response(raw: &str) -> Result<SmartSearchQuery, AppError> {
-    let cleaned = strip_code_fences(raw);
-    let parsed: SmartSearchQuery = serde_json::from_str(&cleaned)
+    let prepared = prepare_llm_json(raw);
+    let parsed: SmartSearchQuery = serde_json::from_str(&prepared)
         .map_err(|e| AppError::Import(format!("Failed to parse smart search response: {e}")))?;
     Ok(parsed)
 }

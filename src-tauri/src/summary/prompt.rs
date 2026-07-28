@@ -74,46 +74,14 @@ pub const ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT: &str =
     include_str!("ai_article_summary_markdown_fallback_prompt.md");
 
 use crate::error::AppError;
-
-/// Strip markdown code fences (```` ```json ```` / ```` ``` ````) from an LLM
-/// response and trim whitespace.
-///
-/// **Why this exists (not `screening_engine::extract_json`):** `extract_json`
-/// was written for the screening prompt, whose schema is a top-level JSON
-/// **array**. Its Strategy 3 (`extract_array_from_object`) actively unwraps the
-/// first nested array-of-objects it finds inside a JSON object. The article
-/// summary schema is a top-level JSON **object** that legitimately contains
-/// arrays-of-objects (e.g. `section_summaries`, figure descriptions). Feeding a
-/// valid summary object through `extract_json` silently corrupts it into just
-/// the `section_summaries` array, which then fails the substantive-content
-/// check and triggers a spurious markdown-fallback retry.
-///
-/// This helper does ONE thing: strip code fences. It does not attempt any
-/// array/object shape normalization. The caller's `serde_json::from_str` is the
-/// single source of truth for JSON validity.
-///
-/// Pure function: no I/O.
-#[must_use]
-pub fn strip_code_fences(raw: &str) -> String {
-    let trimmed = raw.trim();
-    // Strip ```json or ``` prefix.
-    let after_open = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .map(|rest| rest.trim_start());
-    let Some(rest) = after_open else {
-        // No code fence - return as-is (already trimmed).
-        return trimmed.to_string();
-    };
-    // Strip the trailing ``` if present.
-    if let Some(body) = rest.strip_suffix("```") {
-        body.trim().to_string()
-    } else {
-        // Opening fence with no closing fence (truncated response). Return the
-        // remainder so the caller's JSON parser can report a clean error.
-        rest.to_string()
-    }
-}
+// `strip_code_fences`, `escape_control_chars_in_json`, and the combined
+// `prepare_llm_json` live in `utils::json_repair` so the orchestrator's
+// `send_json` can use them without taking a summary-module dependency. They are
+// re-exported here for backward compatibility with existing callers that import
+// them from `summary::prompt`.
+pub use crate::utils::json_repair::{
+    escape_control_chars_in_json, prepare_llm_json, strip_code_fences,
+};
 
 /// One LLM-described figure/table caption (Tier 2 Phase 4).
 ///
@@ -191,12 +159,11 @@ pub fn build_figure_description_prompt(
 pub fn parse_figure_descriptions_response(
     response: &str,
 ) -> Result<Vec<FigureDescription>, AppError> {
-    // The figure-description prompt returns a bare JSON array. We only need
-    // code-fence stripping here, not the screening `extract_json` array-unwrap
-    // heuristic (which corrupts object-shaped responses - see
-    // `strip_code_fences` docs).
-    let cleaned = strip_code_fences(response);
-    let value: serde_json::Value = serde_json::from_str(&cleaned)
+    // `prepare_llm_json` chains strip_code_fences + escape_control_chars_in_json.
+    // Not `screening_engine::extract_json` (that helper corrupts object-shaped
+    // responses — see `utils::json_repair::strip_code_fences` docs).
+    let prepared = prepare_llm_json(response);
+    let value: serde_json::Value = serde_json::from_str(&prepared)
         .map_err(|e| AppError::Import(format!("Invalid JSON for figure descriptions: {e}")))?;
     let arr = value.as_array().ok_or_else(|| {
         AppError::Import("Figure descriptions response is not a JSON array".to_string())

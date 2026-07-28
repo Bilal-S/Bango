@@ -35,6 +35,7 @@ use crate::db::{
     article_repo, audit_repo, biblio_repo, chunk_repo, label_repo, tag_repo,
 };
 use crate::error::AppError;
+use crate::utils::json_repair::escape_control_chars_in_json;
 
 /// Consecutive transient-failure threshold for the auto-stop guard.
 const TRANSIENT_FAILURE_THRESHOLD: u32 = 3;
@@ -1512,7 +1513,12 @@ pub fn repair_truncated_json_array(json: &str) -> Option<String> {
 }
 
 pub fn extract_json(raw: &str) -> String {
-    let trimmed = raw.trim();
+    // Sanitize raw control chars (literal newlines/tabs/NULs) the LLM may
+    // have placed inside JSON string values BEFORE running the array/object
+    // extraction strategies. See `utils::json_repair` for why we escape
+    // rather than strip (data-fidelity preservation in user-facing content).
+    let sanitized = escape_control_chars_in_json(raw);
+    let trimmed = sanitized.trim();
 
     // Strategy 1: Code-fence stripping
     if trimmed.starts_with("```") {

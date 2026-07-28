@@ -122,7 +122,9 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   control-char signature and re-decodes the bytes to correct Unicode before
   header/footer stripping; tested in `tests/pdf_mojibake_test.rs`),
   `sections.rs`, `chunking.rs`, `text_tokens.rs` [Tier 3 shared
-  tokenizer for FTS5 BM25 + screening chunk scoring]). App entry
+  tokenizer for FTS5 BM25 + screening chunk scoring], `json_repair.rs`
+  [LLM JSON control-character pre-parser + `prepare_llm_json` combined helper
+  used by `LlmOrchestrator::send_json`; see detailed entry below]). App entry
   is `lib.rs` (`run()`), which registers all `#[tauri::command]` handlers in one
   `invoke_handler!` list, auto-loads the bundled `journal_index.db` on first
   startup, and shows a native modal dialog (via `tauri-plugin-dialog`) if
@@ -1066,6 +1068,47 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     Property-based tests (`proptest`) in `src-tauri/tests/chunking_test.rs` verify the
     word-count bound (excluding atomic Table/Figure) + contiguous `chunk_index` for any
     input.
+  - **`src-tauri/src/utils/json_repair.rs`** - LLM JSON pre-parser (the fix for the
+    recurring "AI summary failed: Invalid JSON response from LLM: control character
+    (\u0000-\u001F) found while parsing a string" error). LLMs occasionally place
+    raw control chars (most commonly `0x0A` newlines, also tabs / form-feeds /
+    NULs) inside JSON string values instead of escaping them as `\n` / `\t`.
+    The outer OpenAI envelope is well-formed, so `llm::client` decodes
+    `choices[0].message.content` into a Rust `String`; but the inner summary/schema
+    JSON, when re-parsed by `serde_json::from_str`, fails because RFC 8259 forbids
+    literal control bytes inside JSON string literals. Three exported helpers:
+    (1) `escape_control_chars_in_json(raw)` (pure, `#[must_use]`) walks the document
+    tracking `in_string` + `escape_next` (same pattern as `balance_braces`), and
+    re-emits any raw char in `0x00..=0x1F` found *inside* a string literal as its
+    JSON escape (`\n`, `\t`, `\r`, `\b`, `\f`, or `\u00XX` for the rest).
+    Structural whitespace between tokens is preserved unchanged. **Why escape, not
+    strip**: stripping would collapse paragraph breaks in `summary_150_250_words`,
+    run together multi-line `reasoning`, and damage `key_insights` bullets — silent
+    content corruption in user-facing text. Idempotent: a clean JSON document passes
+    through byte-identical. (2) `strip_code_fences(raw)` strips ```` ```json ```` /
+    ```` ``` ```` fences; moved here from `summary/prompt.rs` and re-exported from
+    there for backward compat. (3) `prepare_llm_json(raw)` chains `strip_code_fences`
+    + `escape_control_chars_in_json` in the correct order (fence-strip MUST run
+    first). `prepare_llm_json` is the single pre-parser used by
+    **`LlmOrchestrator::send_json`** — the recommended entry point for any caller
+    that feeds the LLM response into `serde_json::from_str`. `send_json` is a thin
+    wrapper over `send` that runs `prepare_llm_json` on the result; callers that
+    expect Markdown / plain text (chat, wiki chat, literature review, wiki ingest,
+    markdown-fallback retry) MUST use `send` instead (the JSON pre-parser would
+    corrupt quoted spans in prose). The 4 LLM system prompts
+    (`ai_article_summary_prompt.md`, `ai_article_summary_with_sections_prompt.md`,
+    `figure_description_prompt.md`, `screening/prompt.rs::SYSTEM_PROMPT`) carry a
+    one-line defense-in-depth note instructing the model to escape line breaks as
+    `\n` inside JSON string values. JSON-returning call sites migrated to
+    `send_json`: `commands/summary.rs` (article summary, monolithic fallback,
+    section-aware, synthesis, figure descriptions ×2), `commands/openalex.rs`
+    (smart search), `commands/criteria.rs` (criteria generation). The screening
+    path keeps its sanitizer as the first step inside
+    `screening::engine::extract_json` (idempotent; screening-specific shape repair
+    follows). 10 inline tests + `tests/json_repair_test.rs` (5 integration tests
+    incl. the exact bug-report payload, the screening `reasoning`-with-newline
+    regression, the no-op-for-valid-JSON guard, and the `prepare_llm_json` chain
+    + no-op).
   - **`src-tauri/src/db/migrations/v002_wiki_manifest.rs`** - Post-v001 schema
     (VERSION 2, deployed). Contains only `CREATE TABLE wiki_index_manifest` (per-file
     content hashes for the Wiki external-edit drift detection). The FTS5 drop,

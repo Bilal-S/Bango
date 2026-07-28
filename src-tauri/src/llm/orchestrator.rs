@@ -14,6 +14,7 @@ use tokio::sync::Semaphore;
 use crate::error::AppError;
 use crate::llm::client;
 use crate::models::llm_config::LlmConfig;
+use crate::utils::json_repair::prepare_llm_json;
 
 /// Maximum time to wait for a single LLM response (default for all request
 /// types except screening).
@@ -204,6 +205,35 @@ impl LlmOrchestrator {
         }
 
         result
+    }
+
+    /// Send a chat completion whose response is expected to be JSON, and run the
+    /// shared JSON pre-parser on the result.
+    ///
+    /// This is the recommended entry point for any caller that will feed the
+    /// LLM response into `serde_json::from_str`. It chains:
+    /// 1. [`send`](Self::send) (concurrency + rate limit + timeout).
+    /// 2. [`utils::json_repair::prepare_llm_json`] — strips markdown code fences
+    ///    and escapes raw control characters (`0x00`–`0x1F`) that the LLM may
+    ///    have placed inside JSON string values, so `serde_json` accepts the
+    ///    payload. Non-destructive: a clean JSON response passes through
+    ///    byte-identical.
+    ///
+    /// Callers that expect Markdown / plain text (chat, wiki chat, literature
+    /// review, wiki ingest, markdown-fallback retry) MUST use [`send`](Self::send)
+    /// instead — running the JSON pre-parser on prose would corrupt quoted spans.
+    ///
+    /// The returned `String` is the prepared JSON (ready for `serde_json::from_str`).
+    /// The `usize` is the prompt+completion token total (unchanged from `send`).
+    pub async fn send_json(
+        &self,
+        config: &LlmConfig,
+        system_prompt: &str,
+        user_prompt: &str,
+        request_type: LlmRequestType,
+    ) -> Result<(String, usize), AppError> {
+        let (raw, tokens) = self.send(config, system_prompt, user_prompt, request_type).await?;
+        Ok((prepare_llm_json(&raw), tokens))
     }
 
     /// Send a chat completion without acquiring the semaphore.

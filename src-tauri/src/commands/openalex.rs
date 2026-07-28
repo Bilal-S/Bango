@@ -539,7 +539,7 @@ pub async fn smart_search_openalex(
         smart_search::build_smart_search_prompt(&aims, &inclusion, &exclusion);
 
     let result = orchestrator
-        .send(&config, &system_prompt, &user_prompt, LlmRequestType::OpenAlexSmartSearch)
+        .send_json(&config, &system_prompt, &user_prompt, LlmRequestType::OpenAlexSmartSearch)
         .await;
     if let Err(ref e) = result {
         audit_repo::log_error_best_effort(

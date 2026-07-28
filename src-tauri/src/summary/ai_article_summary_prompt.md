@@ -76,6 +76,8 @@ Provide **at most 10** bullet-style insights. Show important data points in the 
 Provide **5-7** keywords. 
 
 ## OUTPUT FORMAT (JSON ONLY)
+**JSON string escaping (important):** Inside any JSON string value, represent line breaks, tabs, and other control characters as their two-character JSON escapes (`\n`, `\t`, `\r`), never as literal newline/tab/control bytes. Literal control bytes inside string values make the JSON unparseable.
+
 
 ```json
 {

@@ -105,6 +105,8 @@ For the **Results** section, also include:
 If a delimited section is present in the input but contains no substantive content, still include an entry with an empty summary and empty key_points array. If no section delimiters are present in the input, return an empty `section_summaries` array.
 
 ## OUTPUT FORMAT (JSON ONLY)
+**JSON string escaping (important):** Inside any JSON string value, represent line breaks, tabs, and other control characters as their two-character JSON escapes (`\n`, `\t`, `\r`), never as literal newline/tab/control bytes. Literal control bytes inside string values make the JSON unparseable.
+
 
 ```json
 {

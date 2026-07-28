@@ -23,6 +23,7 @@ exclusion continues at N+1..N+M, so every number is unique across both lists).
 - Do NOT prefix tags with \"inclusion:\" or \"exclusion:\" - those prefixes are for labels, not tags. \
 - Tags should be short, meaningful, and reusable across articles.
 
+Inside any JSON string value, represent line breaks, tabs, and other control characters as their two-character JSON escapes (\\n, \\t, \\r), never as literal newline/tab/control bytes. Literal control bytes inside string values make the JSON unparseable. \
 Return a JSON array matching this schema, one object per article, in the same order as submitted:
 [
   {

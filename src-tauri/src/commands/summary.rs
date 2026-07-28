@@ -19,7 +19,7 @@ use crate::summary::prompt::{
     build_figure_description_prompt, build_section_context, build_synthesis_prompt,
     ensure_schema_version_v2, filter_high_value_sections, merge_figure_descriptions_into_blob,
     merge_summary_into_blob, merge_unified_blob, parse_figure_descriptions_response,
-    strip_code_fences, ArticleSummary, FigureDescription, ScreeningData, TableDescription,
+    ArticleSummary, FigureDescription, ScreeningData, TableDescription,
     ARTICLE_SUMMARY_SYSTEM_PROMPT, ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
     FIGURE_DESCRIPTION_SYSTEM_PROMPT,
 };
@@ -263,7 +263,8 @@ pub async fn generate_article_ai_summary_inner(
     } else {
         LlmRequestType::ArticleSummary
     };
-    let llm_result = orchestrator.send(&config, system_prompt, &user_prompt, request_type).await;
+    let llm_result =
+        orchestrator.send_json(&config, system_prompt, &user_prompt, request_type).await;
 
     let (response_text, _tokens) = match llm_result {
         Ok(v) => v,
@@ -290,8 +291,8 @@ pub async fn generate_article_ai_summary_inner(
     //    first nested array-of-objects out of a JSON object - which corrupts a
     //    valid summary object (whose `section_summaries` is an array-of-objects)
     //    into just that array, breaking all top-level field access downstream.
-    let cleaned = strip_code_fences(&response_text);
-    let mut parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
+    // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+    let mut parsed: serde_json::Value = match serde_json::from_str(&response_text) {
         Ok(v) => v,
         Err(e) => {
             let err_msg = format!("Invalid JSON response from LLM: {e}");
@@ -470,7 +471,7 @@ pub async fn generate_figure_descriptions(
     // 4. Call the orchestrator with the grounded caption-parser prompt.
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>();
     let llm_result = orchestrator
-        .send(
+        .send_json(
             &config,
             FIGURE_DESCRIPTION_SYSTEM_PROMPT,
             &user_prompt,
@@ -624,7 +625,7 @@ pub async fn generate_unified_summary(
             if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
         let user_prompt = format!("## Article Title\n{title}\n\n## Full Text\n{truncated}");
         let llm_result = orchestrator
-            .send(
+            .send_json(
                 &config,
                 ARTICLE_SUMMARY_SYSTEM_PROMPT,
                 &user_prompt,
@@ -652,8 +653,8 @@ pub async fn generate_unified_summary(
         // figures/tables survive the monolithic regen. Use `strip_code_fences`
         // (NOT `screening_engine::extract_json`) - see the legacy command for
         // why the screening helper corrupts object-shaped summary responses.
-        let cleaned = strip_code_fences(&response_text);
-        let parsed: serde_json::Value = serde_json::from_str(&cleaned)
+        // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+        let parsed: serde_json::Value = serde_json::from_str(&response_text)
             .map_err(|e| AppError::Import(format!("Invalid JSON response from LLM: {e}")))?;
         let fresh_json = parsed.to_string();
         let merged = merge_summary_into_blob(existing_blob.as_deref(), &fresh_json, false);
@@ -693,7 +694,7 @@ pub async fn generate_unified_summary(
         "## Article Title\n{title}\n\n## Full Text\n{truncated}\n\n## Detected Sections\n\n{section_context}"
     );
     let section_response = orchestrator
-        .send(
+        .send_json(
             &config,
             ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT,
             &section_user_prompt,
@@ -720,8 +721,8 @@ pub async fn generate_unified_summary(
     // `strip_code_fences` (NOT `screening_engine::extract_json`) - see the
     // legacy command for why the screening helper corrupts object-shaped
     // summary responses (it would discard everything except `section_summaries`).
-    let cleaned_section = strip_code_fences(&section_text);
-    let mut section_value: serde_json::Value = serde_json::from_str(&cleaned_section)
+    // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+    let mut section_value: serde_json::Value = serde_json::from_str(&section_text)
         .map_err(|e| AppError::Import(format!("Invalid section response JSON: {e}")))?;
     ensure_schema_version_v2(&mut section_value);
     let field =
@@ -748,7 +749,7 @@ pub async fn generate_unified_summary(
     } else {
         let fig_prompt = build_figure_description_prompt(&title, &captions);
         let fig_response = orchestrator
-            .send(
+            .send_json(
                 &config,
                 FIGURE_DESCRIPTION_SYSTEM_PROMPT,
                 &fig_prompt,
@@ -814,7 +815,7 @@ pub async fn generate_unified_summary(
     // 5. Synthesis call: produce the upgraded digest from the section summaries.
     let synthesis_prompt = build_synthesis_prompt(&title, &field, &section_summaries_json);
     let synthesis_response = orchestrator
-        .send(
+        .send_json(
             &config,
             ARTICLE_SUMMARY_SYSTEM_PROMPT,
             &synthesis_prompt,
@@ -823,8 +824,8 @@ pub async fn generate_unified_summary(
         .await;
     let synthesis_digest_json = match synthesis_response {
         Ok((syn_text, _syn_tokens)) => {
-            let cleaned_syn = strip_code_fences(&syn_text);
-            serde_json::from_str::<serde_json::Value>(&cleaned_syn)
+            // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+            serde_json::from_str::<serde_json::Value>(&syn_text)
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| {
                     // Malformed synthesis: fall back to the section call's digest.
