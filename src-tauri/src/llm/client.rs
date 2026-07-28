@@ -206,6 +206,24 @@ const LLM_MAX_RETRIES: u32 = 3;
 const LLM_INITIAL_BACKOFF_MS: u64 = 1000;
 const LLM_MAX_BACKOFF_MS: u64 = 10_000;
 
+/// Side-channel metadata returned by [`send_chat_completion`].
+///
+/// `temperature_was_rejected` is set to `true` when the provider rejected the
+/// request because of a non-default `temperature` value (HTTP 400 with a body
+/// matching [`is_temperature_error`]), and the client recovered by re-issuing
+/// the request with `temperature` omitted. The orchestrator inspects this flag
+/// to persist `skip_temperature = true` so future calls skip the wasteful
+/// first-attempt failure.
+///
+/// On the normal success path (no rejection), this is
+/// `CallMeta::default()` (`temperature_was_rejected = false`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CallMeta {
+    /// `true` iff the call recovered from a temperature-rejection 400 by
+    /// omitting the `temperature` parameter on retry.
+    pub temperature_was_rejected: bool,
+}
+
 /// Lazily-built shared HTTP client. Reusing one `reqwest::Client` enables
 /// HTTP keep-alive so repeated LLM calls reuse a single TLS session instead of
 /// performing a fresh handshake on every request. This matters on Windows
@@ -267,6 +285,38 @@ fn is_retryable_response(status: reqwest::StatusCode, body: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Decide whether an error string reflects a provider's rejection of a
+/// non-default `temperature` value. Models that only support the default
+/// temperature (typically `1`) return HTTP 400 with a body whose `message`
+/// mentions `temperature` plus a synonym of "unsupported" / "not supported".
+///
+/// Mirrors the inline check in `test_llm_connection`
+/// (`commands/llm_config.rs`), extracted as a pure helper so both the
+/// client-recovery path and the test-connection path share the same
+/// definition.
+///
+/// Examples matched:
+/// - OpenAI: `"Unsupported value: 'temperature' does not support 0.2 with
+///   this model. Only the default (1) value is supported."`
+/// - Google: `"temperature does not support ... not supported"`.
+///
+/// Examples rejected:
+/// - `"Invalid model"` (no `temperature` token).
+/// - `"max_tokens is not supported"` (no `temperature` token).
+/// - `"temperature parameter is invalid"` (out-of-range, NOT an unsupported
+///   feature - retrying without temperature would mask a genuine parameter
+///   error).
+#[must_use]
+pub fn is_temperature_error(err_msg: &str) -> bool {
+    let lower = err_msg.to_lowercase();
+    if !lower.contains("temperature") {
+        return false;
+    }
+    lower.contains("unsupported")
+        || lower.contains("does not support")
+        || lower.contains("not supported")
 }
 
 /// Exponential backoff with jitter, mirroring `openalex::client::calculate_backoff`:
@@ -505,11 +555,25 @@ pub async fn list_models(
     }
 }
 
+/// Send a chat completion request, returning the response text, the
+/// prompt+completion token total, and side-channel [`CallMeta`] indicating
+/// whether the call recovered from a temperature-rejection 400.
+///
+/// This is the single entry point used by `LlmOrchestrator::send`. The
+/// orchestrator inspects `CallMeta.temperature_was_rejected` to persist
+/// `skip_temperature = true` so future calls skip the wasteful first-attempt
+/// failure.
+///
+/// Temperature-rejection recovery runs INSIDE this function (one extra
+/// `send_with_retry` call), so it is bounded by the orchestrator's single
+/// outer `tokio::time::timeout` wrapper. There is no doubling of the timeout
+/// budget relative to a pre-retry implementation: the recovery call shares
+/// whatever time remains in the orchestrator's envelope.
 pub async fn send_chat_completion(
     config: &LlmConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<(String, usize), AppError> {
+) -> Result<(String, usize, CallMeta), AppError> {
     match config.provider {
         LlmProvider::Google => send_google(config, system_prompt, user_prompt).await,
         _ => send_openai_compatible(config, system_prompt, user_prompt).await,
@@ -522,25 +586,16 @@ async fn send_google(
     config: &LlmConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<(String, usize), AppError> {
+) -> Result<(String, usize, CallMeta), AppError> {
     let system_prompt = normalize_llm_text(system_prompt);
     let user_prompt = normalize_llm_text(user_prompt);
     let client = shared_client();
-    let temp = if config.skip_temperature { None } else { Some(config.temperature) };
-    let request = GoogleRequest {
-        system_instruction: GoogleSystemInstruction {
-            parts: GoogleSystemPart { text: system_prompt.to_string() },
-        },
-        contents: vec![GoogleContent {
-            role: "user".to_string(),
-            parts: vec![GooglePart { text: user_prompt.to_string() }],
-        }],
-        generation_config: GoogleGenerationConfig { temperature: temp },
-    };
 
+    // Owned `String` so the retry closure (`Fn`, up to 2 calls) can clone it
+    // into each attempt without moving out of the captured environment.
     let api_key = config
         .api_key_encrypted
-        .as_deref()
+        .clone()
         .ok_or_else(|| AppError::Import("API key required for Google".to_string()))?;
 
     let base_url = config.endpoint_url.trim_end_matches('/');
@@ -550,26 +605,55 @@ async fn send_google(
         format!("{}/models/{}:generateContent", base_url, config.model_name)
     };
 
-    let builder = client
-        .post(&endpoint)
-        .header("Content-Type", "application/json")
-        .header("X-goog-api-key", api_key)
-        .json(&request);
+    // Convert the normalized `Cow<str>` prompts to owned `String`s so the
+    // retry closure (an `Fn`, callable up to twice) can cheaply clone them
+    // into each attempt's `async move` block without moving out of the
+    // captured environment.
+    let system_text = system_prompt.into_owned();
+    let user_text = user_prompt.into_owned();
 
-    let body_text = send_with_retry(&builder, "Google").await?;
-
-    let google_response: GoogleResponse = serde_json::from_str(&body_text)
-        .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
-
-    let content = google_response
-        .candidates
-        .first()
-        .and_then(|c| c.content.parts.first())
-        .map(|p| p.text.clone())
-        .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
-
-    let total_tokens = google_response.usage_metadata.map(|u| u.total_token_count).unwrap_or(0);
-    Ok((content, total_tokens))
+    // Build + send, then recover from a temperature-rejection 400 by rebuilding
+    // with `temp = None`. When `config.skip_temperature` is already `true`, the
+    // first attempt omits temperature and there is nothing to recover from, so
+    // the closure returns immediately without a second attempt.
+    send_with_temperature_recovery(config.skip_temperature, config.temperature, move |temp| {
+        // Clone per-call: the outer closure is `Fn` (up to 2 calls), so each
+        // invocation must produce its own owned prompt strings.
+        let system_text = system_text.clone();
+        let user_text = user_text.clone();
+        let api_key = api_key.clone();
+        let endpoint = endpoint.clone();
+        async move {
+            let request = GoogleRequest {
+                system_instruction: GoogleSystemInstruction {
+                    parts: GoogleSystemPart { text: system_text },
+                },
+                contents: vec![GoogleContent {
+                    role: "user".to_string(),
+                    parts: vec![GooglePart { text: user_text }],
+                }],
+                generation_config: GoogleGenerationConfig { temperature: temp },
+            };
+            let builder = client
+                .post(&endpoint)
+                .header("Content-Type", "application/json")
+                .header("X-goog-api-key", api_key)
+                .json(&request);
+            let body_text = send_with_retry(&builder, "Google").await?;
+            let google_response: GoogleResponse = serde_json::from_str(&body_text)
+                .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
+            let content = google_response
+                .candidates
+                .first()
+                .and_then(|c| c.content.parts.first())
+                .map(|p| p.text.clone())
+                .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
+            let total_tokens =
+                google_response.usage_metadata.map(|u| u.total_token_count).unwrap_or(0);
+            Ok((content, total_tokens))
+        }
+    })
+    .await
 }
 
 // ── OpenAI-compatible path ───────────────────────────────────────────
@@ -578,11 +662,10 @@ async fn send_openai_compatible(
     config: &LlmConfig,
     system_prompt: &str,
     user_prompt: &str,
-) -> Result<(String, usize), AppError> {
+) -> Result<(String, usize, CallMeta), AppError> {
     let system_prompt = normalize_llm_text(system_prompt);
     let user_prompt = normalize_llm_text(user_prompt);
     let client = shared_client();
-    let temp = if config.skip_temperature { None } else { Some(config.temperature) };
     // Note: `max_tokens` is intentionally NOT sent. Some newer OpenAI-compatible
     // models (e.g. o-series reasoning models) reject `max_tokens` with a 400
     // "Unsupported parameter" error and require `max_completion_tokens` instead.
@@ -590,16 +673,8 @@ async fn send_openai_compatible(
     // own model-specific output budget. The summary command's markdown-fallback
     // retry handles the empty-content failure mode that reasoning models can
     // produce when their thinking phase exhausts a server-side budget.
-    let request = ChatRequest {
-        model: config.model_name.clone(),
-        messages: vec![
-            ChatMessage { role: "system".to_string(), content: system_prompt.to_string() },
-            ChatMessage { role: "user".to_string(), content: user_prompt.to_string() },
-        ],
-        temperature: temp,
-    };
 
-    let api_key = config.api_key_encrypted.as_deref().unwrap_or("");
+    let api_key = config.api_key_encrypted.as_deref().unwrap_or("").to_string();
 
     let base_url = config.endpoint_url.trim_end_matches('/');
     let endpoint = match config.provider {
@@ -626,52 +701,129 @@ async fn send_openai_compatible(
         _ => base_url.to_string(),
     };
 
-    let builder = client
-        .post(&endpoint)
-        .header("Content-Type", "application/json")
-        .bearer_auth(api_key)
-        .json(&request);
+    let model_name = config.model_name.clone();
+    let system_text = system_prompt.to_string();
+    let user_text = user_prompt.to_string();
 
-    // `send_with_retry` owns transient retry (429 / 408 / 5xx + transport
-    // errors + the OpenAI "insufficient permissions" 401/403 transient) and
-    // captures `x-request-id` / `CF-Ray` into the error string for diagnostics.
-    let body_text = send_with_retry(&builder, "OpenAI-compatible").await?;
+    // Build + send, then recover from a temperature-rejection 400 by rebuilding
+    // with `temp = None`. Same envelope as `send_google`; the closure captures
+    // the OpenAI-compatible request shape + response parsing.
+    send_with_temperature_recovery(config.skip_temperature, config.temperature, move |temp| {
+        // Clone per-call: the outer closure is `Fn` (up to 2 calls), so each
+        // invocation must produce its own owned prompt + api_key strings.
+        let model_name = model_name.clone();
+        let system_text = system_text.clone();
+        let user_text = user_text.clone();
+        let api_key = api_key.clone();
+        let endpoint = endpoint.clone();
+        async move {
+            let request = ChatRequest {
+                model: model_name,
+                messages: vec![
+                    ChatMessage { role: "system".to_string(), content: system_text },
+                    ChatMessage { role: "user".to_string(), content: user_text },
+                ],
+                temperature: temp,
+            };
+            let builder = client
+                .post(&endpoint)
+                .header("Content-Type", "application/json")
+                .bearer_auth(&api_key)
+                .json(&request);
+            // `send_with_retry` owns transient retry (429 / 408 / 5xx + transport
+            // errors + the OpenAI "insufficient permissions" 401/403 transient) and
+            // captures `x-request-id` / `CF-Ray` into the error string for
+            // diagnostics.
+            let body_text = send_with_retry(&builder, "OpenAI-compatible").await?;
 
-    // Strategy 1: Try standard ChatResponse (OpenAI format)
-    if let Ok(chat_response) = serde_json::from_str::<ChatResponse>(&body_text) {
-        let choice = chat_response
-            .choices
-            .into_iter()
-            .next()
-            .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
-        // Surface reasoning-model truncation: "length" means the server hit its
-        // output-token budget before the model finished, so the content may be
-        // a cut-off mid-sentence. This is the diagnostic the `Choice` doc-comment
-        // promises; without it, truncation is silently swallowed.
-        if choice.finish_reason.as_deref() == Some("length") {
-            eprintln!(
-                "[LlmClient] response truncated by output-token limit (finish_reason=length); \
-                 content may be incomplete"
-            );
+            // Strategy 1: Try standard ChatResponse (OpenAI format)
+            if let Ok(chat_response) = serde_json::from_str::<ChatResponse>(&body_text) {
+                let choice = chat_response
+                    .choices
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
+                // Surface reasoning-model truncation: "length" means the server hit
+                // its output-token budget before the model finished, so the content
+                // may be a cut-off mid-sentence. This is the diagnostic the `Choice`
+                // doc-comment promises; without it, truncation is silently swallowed.
+                if choice.finish_reason.as_deref() == Some("length") {
+                    eprintln!(
+                    "[LlmClient] response truncated by output-token limit (finish_reason=length); \
+                     content may be incomplete"
+                );
+                }
+                let total_tokens = chat_response.usage.and_then(|u| u.total_tokens).unwrap_or(0);
+                return Ok((choice.message.content, total_tokens));
+            }
+
+            // Strategy 2: Fallback - extract content from arbitrary JSON envelope
+            let value: serde_json::Value = serde_json::from_str(&body_text).map_err(|e| {
+                AppError::Import(format!("Failed to parse LLM response as JSON: {e}"))
+            })?;
+
+            let content = extract_content_from_response(&value).ok_or_else(|| {
+                AppError::Import(format!(
+                    "Could not extract content from LLM response. Raw body (first 500 chars): {}",
+                    &body_text[..body_text.len().min(500)]
+                ))
+            })?;
+
+            let total_tokens = extract_total_tokens(&value);
+            Ok((content, total_tokens))
         }
-        let total_tokens = chat_response.usage.and_then(|u| u.total_tokens).unwrap_or(0);
-        return Ok((choice.message.content, total_tokens));
+    })
+    .await
+}
+
+/// Run `make_request(temp)` once. If it fails with a temperature-rejection 400
+/// (`is_temperature_error`), retry once with `temp = None` and report
+/// `temperature_was_rejected = true` via [`CallMeta`] on success.
+///
+/// Recovery is skipped entirely when `skip_temperature` is already `true`:
+/// the first attempt already omits `temperature`, so a 400 cannot be a
+/// temperature rejection, and retrying would just repeat the same failure.
+///
+/// On the second-attempt failure, the ORIGINAL first-attempt error is returned
+/// so the caller sees the temperature-specific message (which is the actionable
+/// one) rather than a generic "model not found" from a fluky second attempt.
+/// On the first-attempt success, returns `(content, tokens, CallMeta::default())`.
+///
+/// The recovery happens INSIDE this function, so when the orchestrator wraps
+/// the outer `send_chat_completion` in a single `tokio::time::timeout`, the
+/// retry shares whatever time remains in that envelope rather than doubling the
+/// wall-clock budget.
+async fn send_with_temperature_recovery<F, Fut>(
+    skip_temperature: bool,
+    temperature: f64,
+    make_request: F,
+) -> Result<(String, usize, CallMeta), AppError>
+where
+    F: Fn(Option<f64>) -> Fut,
+    Fut: std::future::Future<Output = Result<(String, usize), AppError>>,
+{
+    let first_temp = if skip_temperature { None } else { Some(temperature) };
+
+    match make_request(first_temp).await {
+        Ok(tuple) => Ok((tuple.0, tuple.1, CallMeta::default())),
+        Err(e) => {
+            // Only retry if the first attempt actually SENT a temperature. If
+            // skip_temperature was already true, there is nothing to recover
+            // from; surface the error immediately.
+            if skip_temperature || !is_temperature_error(&format!("{e}")) {
+                return Err(e);
+            }
+            eprintln!(
+                "[LlmClient] temperature rejected by model; retrying without temperature parameter"
+            );
+            match make_request(None).await {
+                Ok(tuple) => Ok((tuple.0, tuple.1, CallMeta { temperature_was_rejected: true })),
+                // Surface the ORIGINAL (temperature) error: it carries the
+                // actionable diagnostic. The second failure is likely unrelated.
+                Err(_) => Err(e),
+            }
+        }
     }
-
-    // Strategy 2: Fallback - extract content from arbitrary JSON envelope
-    let value: serde_json::Value = serde_json::from_str(&body_text)
-        .map_err(|e| AppError::Import(format!("Failed to parse LLM response as JSON: {e}")))?;
-
-    let content = extract_content_from_response(&value).ok_or_else(|| {
-        AppError::Import(format!(
-            "Could not extract content from LLM response. Raw body (first 500 chars): {}",
-            &body_text[..body_text.len().min(500)]
-        ))
-    })?;
-
-    // Try to get token count from the envelope
-    let total_tokens = extract_total_tokens(&value);
-    Ok((content, total_tokens))
 }
 
 /// Attempt to extract text content from an arbitrary LLM response JSON value.
@@ -858,5 +1010,52 @@ mod tests {
         // Large attempt must still be capped at LLM_MAX_BACKOFF_MS + jitter.
         let backoff = calculate_backoff(20);
         assert!((LLM_MAX_BACKOFF_MS..=LLM_MAX_BACKOFF_MS + 500).contains(&backoff));
+    }
+
+    // ── is_temperature_error ─────────────────────────────────────────
+
+    #[test]
+    fn is_temperature_error_matches_openai_unsupported_value_body() {
+        // The exact body from the bug report.
+        let msg = "LLM request failed (400 Bad Request): {\"error\":{\"message\":\
+                   \"Unsupported value: 'temperature' does not support 0.2 with this model. \
+                   Only the default (1) value is supported.\",\"type\":\"invalid_request_error\",\
+                   \"param\":\"temperature\",\"code\":\"unsupported_value\"}}";
+        assert!(is_temperature_error(msg));
+    }
+
+    #[test]
+    fn is_temperature_error_matches_google_does_not_support_body() {
+        let msg = "LLM request failed (400 Bad Request): temperature does not support 0.2 with \
+                   this model. Only the default is supported.";
+        assert!(is_temperature_error(msg));
+    }
+
+    #[test]
+    fn is_temperature_error_matches_not_supported_phrasing() {
+        assert!(is_temperature_error("Invalid temperature: not supported by this model"));
+        assert!(is_temperature_error("temperature not supported"));
+    }
+
+    #[test]
+    fn is_temperature_error_rejects_non_temperature_errors() {
+        // No `temperature` token => never a temperature error.
+        assert!(!is_temperature_error("Invalid model"));
+        assert!(!is_temperature_error("max_tokens is not supported"));
+        assert!(!is_temperature_error("model not found"));
+        assert!(!is_temperature_error(""));
+    }
+
+    #[test]
+    fn is_temperature_error_rejects_temperature_without_unsupported_marker() {
+        // Mentions temperature but not as an unsupported-value error.
+        assert!(!is_temperature_error("temperature set to 0.2"));
+        assert!(!is_temperature_error("warning: temperature is low"));
+        // Out-of-range / invalid-value errors must NOT trigger retry-without-
+        // temperature: doing so would mask a genuine parameter error. These
+        // are distinct from "unsupported feature" errors (which the helper
+        // does match).
+        assert!(!is_temperature_error("temperature parameter is invalid"));
+        assert!(!is_temperature_error("Invalid temperature value"));
     }
 }

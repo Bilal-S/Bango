@@ -143,7 +143,7 @@ async fn test_openai_standard_response() {
     let result = client::send_chat_completion(&config, "system", "user").await;
 
     mock.assert_async().await;
-    let (content, tokens) = result.expect("should succeed");
+    let (content, tokens, _) = result.expect("should succeed");
     assert_eq!(content, "Hello, world!");
     assert_eq!(tokens, 42);
 }
@@ -160,7 +160,7 @@ async fn test_openai_no_usage_returns_zero_tokens() {
         .await;
 
     let config = openai_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "hi");
@@ -244,7 +244,7 @@ async fn test_openai_insufficient_permissions_403_is_retried_then_succeeds() {
         .await;
 
     let config = openai_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     transient.assert_async().await;
     success.assert_async().await;
@@ -357,7 +357,7 @@ async fn test_openai_truncated_response_still_returns_content() {
         .await;
 
     let config = openai_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "truncated mid sent", "truncated content must still be returned");
@@ -385,7 +385,7 @@ async fn test_openai_normal_finish_reason_returns_content() {
         .await;
 
     let config = openai_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "complete answer");
@@ -415,7 +415,7 @@ async fn test_openai_zai_array_content_response() {
         .await;
 
     let config = openai_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "Hello world!");
@@ -460,7 +460,7 @@ async fn test_openai_nested_content_extraction() {
         .await;
 
     let config = openai_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "extracted from nested");
@@ -481,7 +481,7 @@ async fn test_google_standard_response() {
         .await;
 
     let config = google_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "sys", "usr").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "sys", "usr").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "Google response");
@@ -525,7 +525,7 @@ async fn test_google_endpoint_already_has_generate_content() {
     let mut config = google_config(&server.url());
     config.endpoint_url = format!("{}/v1/models/gemini:generateContent", server.url());
 
-    let (content, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, _, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
     mock.assert_async().await;
     assert_eq!(content, "direct endpoint");
 }
@@ -583,7 +583,7 @@ async fn test_anthropic_uses_messages_endpoint() {
         .await;
 
     let config = anthropic_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "Anthropic reply");
@@ -620,7 +620,7 @@ async fn test_ollama_no_api_key() {
         .await;
 
     let config = ollama_config(&server.url());
-    let (content, tokens) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
 
     mock.assert_async().await;
     assert_eq!(content, "Ollama response");
@@ -904,7 +904,7 @@ async fn test_empty_api_key_still_sends_request() {
     let mut config = openai_config(&server.url());
     config.api_key_encrypted = Some(String::new());
 
-    let (content, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    let (content, _, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
     mock.assert_async().await;
     assert_eq!(content, "empty auth");
 }
@@ -943,4 +943,136 @@ async fn test_endpoint_url_trailing_slash_stripped() {
 
     let _ = client::send_chat_completion(&config, "s", "u").await.unwrap();
     mock.assert_async().await;
+}
+
+// ─── Temperature-rejection recovery (client-level retry) ───────────────
+//
+// When a model rejects a non-default `temperature` (HTTP 400 with a body
+// matching `is_temperature_error`), the client rebuilds the request with
+// `temperature` omitted and retries once. `CallMeta.temperature_was_rejected`
+// is set to `true` on the recovery path so the orchestrator can persist
+// `skip_temperature = true`. Recovery is skipped when `skip_temperature` is
+// already `true` (nothing to recover from).
+
+use bango_lib::llm::client::CallMeta;
+
+#[tokio::test]
+async fn test_openai_temperature_400_retries_without_temperature() {
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"error":{"message":"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}"#;
+
+    // First attempt: 400 with the temperature-rejection body. The request
+    // body MUST contain "temperature" (the config has skip_temperature=false
+    // + temperature=0.2 from openai_config).
+    let first = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({"temperature": 0.2})))
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Second attempt: 200. The request body MUST NOT contain "temperature"
+    // (the recovery rebuilds with temp=None, which serde skips).
+    let second = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::JsonString(
+            serde_json::json!({
+                "model": "gpt-4o",
+                "messages": [
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "u"},
+                ],
+            })
+            .to_string(),
+        ))
+        .with_status(200)
+        .with_body(openai_chat_response("recovered", 7))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let config = openai_config(&server.url());
+    let result = client::send_chat_completion(&config, "s", "u").await;
+
+    first.assert_async().await;
+    second.assert_async().await;
+    let (content, _tokens, meta) = result.expect("should recover and succeed");
+    assert_eq!(content, "recovered");
+    assert!(
+        meta.temperature_was_rejected,
+        "CallMeta.temperature_was_rejected must be true after a recovery"
+    );
+}
+
+#[tokio::test]
+async fn test_openai_temperature_400_with_skip_temperature_true_does_not_retry() {
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"error":{"message":"Unsupported value: 'temperature' does not support 0.2.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}"#;
+
+    // Only one request expected: skip_temperature=true means temperature is
+    // already omitted, so a 400 cannot be a temperature rejection and there
+    // is nothing to retry.
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mut config = openai_config(&server.url());
+    config.skip_temperature = true;
+    let result = client::send_chat_completion(&config, "s", "u").await;
+
+    mock.assert_async().await;
+    assert!(result.is_err(), "should fail without retry when skip_temperature is already true");
+}
+
+#[tokio::test]
+async fn test_openai_nontemperature_400_does_not_retry() {
+    let mut server = mockito::Server::new_async().await;
+
+    // 400 with a body that does NOT match the temperature pattern. The client
+    // must surface the error immediately (no second attempt).
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(400)
+        .with_body(r#"{"error":{"message":"Invalid model","type":"invalid_request_error"}}"#)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let config = openai_config(&server.url());
+    let result = client::send_chat_completion(&config, "s", "u").await;
+
+    mock.assert_async().await;
+    assert!(result.is_err(), "non-temperature 400 must surface immediately");
+}
+
+#[tokio::test]
+async fn test_openai_success_returns_default_callmeta() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(openai_chat_response("ok", 3))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let config = openai_config(&server.url());
+    let (content, _tokens, meta) =
+        client::send_chat_completion(&config, "s", "u").await.expect("should succeed");
+
+    mock.assert_async().await;
+    assert_eq!(content, "ok");
+    assert_eq!(
+        meta,
+        CallMeta::default(),
+        "normal success must return CallMeta::default (no rejection)"
+    );
 }

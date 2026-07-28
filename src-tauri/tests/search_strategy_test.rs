@@ -187,9 +187,21 @@ fn parse_response_returns_error_on_missing_database_field() {
 
 #[test]
 fn parse_response_tolerates_code_fences() {
+    // After the `send_json` migration, fence-stripping moved upstream into
+    // `prepare_llm_json` (orchestrator layer). `parse_search_strategy_response`
+    // now receives already-cleaned JSON. To keep this test meaningful under
+    // the new architecture, we simulate the post-`prepare_llm_json` input by
+    // stripping the fences the same way `prepare_llm_json` does, then assert
+    // the parse fn handles the cleaned payload. This documents the contract
+    // split: the parse fn does NOT strip fences itself; it trusts its caller.
     let fenced = format!("```json\n{VALID_FIXTURE}\n```");
-    let parsed = parse_search_strategy_response(&fenced)
-        .expect("fenced fixture must parse identically to unfenced");
+    let cleaned = bango_lib::utils::json_repair::prepare_llm_json(&fenced);
+    assert!(
+        !cleaned.starts_with("```"),
+        "prepare_llm_json must strip fences before parse_search_strategy_response sees the input"
+    );
+    let parsed = parse_search_strategy_response(&cleaned)
+        .expect("cleaned fixture must parse identically to raw");
     assert_eq!(parsed.pico_breakdown.population.as_ref().expect("population").concept, "children");
     assert!(!parsed.strategies.arxiv.one_line.is_empty());
 }

@@ -45,6 +45,67 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   line fires when the transient-body gate matches, so users can confirm the
   workaround is engaging in production diagnostics.
 
+### Temperature-rejection recovery (`client.rs` + `orchestrator.rs`)
+
+- Models that only support the default `temperature` (typically `1`) reject a
+  non-default value with HTTP 400 + a body whose `message` mentions
+  `temperature` plus `unsupported` / `does not support` / `not supported`. The
+  pure `#[must_use]` helper `client::is_temperature_error(msg)` classifies
+  these. It deliberately does NOT match the bare word `invalid` (which appears
+  in out-of-range errors like `"temperature parameter is invalid"` that should
+  NOT trigger retry-without-temperature). 6 inline unit tests in
+  `client::tests` cover the OpenAI + Google shapes plus negative cases.
+- **Client-level retry inside the timeout envelope**: both provider paths
+  (`send_openai_compatible`, `send_google`) wrap their request-build + send +
+  parse logic in `send_with_temperature_recovery(skip_temperature, temperature,
+  make_request)`. On a temperature-rejection 400, it rebuilds the request with
+  `temperature = None` and calls `make_request` once more. The retry happens
+  INSIDE the client, so it shares the orchestrator's single outer
+  `tokio::time::timeout` envelope - there is NO doubling of the wall-clock
+  budget (the recovery call consumes whatever time remains). This is why the
+  recovery lives in the client, not the orchestrator (where a naive retry
+  would start a fresh timeout).
+- **Recovery skipped when already skipping**: if `config.skip_temperature` is
+  `true`, the first attempt already omits `temperature`, so a 400 cannot be a
+  temperature rejection - the error surfaces immediately.
+- **Original error preserved on second-attempt failure**: if the recovery call
+  also fails, the ORIGINAL (temperature-specific) error is returned so the
+  caller sees the actionable diagnostic.
+- **`CallMeta` side-channel**: `send_chat_completion` returns
+  `(String, usize, CallMeta)` where `CallMeta.temperature_was_rejected` is
+  `true` iff the call recovered from a temperature 400. The orchestrator
+  inspects this flag and persists the flag; callers see only `(String, usize)`.
+- **Orchestrator post-call persistence**: `LlmOrchestrator::send` calls
+  `maybe_persist_skip_temperature(meta)` after a successful call. If the flag
+  is set, it spawns a detached `tokio::task::spawn_blocking` that invokes the
+  wired `TemperatureFlagPersister`. The trait decouples the LLM layer from
+  `tauri::AppHandle` + `DbState`; the production impl
+  (`AppHandleTemperaturePersister` in `lib.rs`) runs the targeted
+  `llm_config_repo::set_skip_temperature` `UPDATE` (NOT `save_config`, which
+  would `DELETE`+`INSERT` the whole row and race with concurrent UI saves).
+  Best-effort: errors are logged and swallowed so a DB hiccup never fails a
+  successful LLM call.
+- **Deadlock-free invariant**: the persistence lock is acquired AFTER the LLM
+  call returns, never before or during. Every orchestrator caller releases its
+  DB lock before invoking `orchestrator.send` (spec §8.1 "lock-release-call-
+  lock" worker pattern + the same discipline enforced across all command
+  handlers). So the persister's lock acquisition cannot deadlock with a caller.
+- **`send_unthrottled` + `test_connection` do NOT persist**: the sole
+  unthrottled caller is `test_llm_connection`, which owns its own
+  temperature-recovery + persistence (so it can show the "temperature not
+  supported - auto-adjusted" toast). Persisting in the unthrottled path would
+  double-handle.
+- **Test ergonomics**: `LlmOrchestrator::new(max_conc, delay_ms)` is unchanged
+  (2 params). The persister is wired via a separate
+  `set_temperature_persister(Arc<dyn TemperatureFlagPersister>)` setter, so the
+  ~40 existing test call sites need zero edits. `NoOpTemperaturePersister` is
+  the test/default impl (no-op). Tests inject a `RecordingPersister` fake to
+  assert the persistence signal fires.
+- Tested in `tests/llm_client_test.rs` (4 temperature tests: recovery retry,
+  skip-when-already-skipping, no-retry-non-temperature, default-CallMeta-on-
+  success) + `tests/llm_orchestrator_test.rs` (2 persistence tests: fires-on-
+  recovery, does-not-fire-on-normal-success).
+
 ### Shared HTTP client (`client.rs`)
 
 - `shared_client()` returns a lazily-built, app-lifetime `reqwest::Client`
@@ -77,6 +138,14 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
 - Each retry attempt logs `[LlmClient] {label} attempt {n}/{N} failed (<status>)[trace]; retrying in {ms}ms`
   to stderr so the fix can be confirmed engaging in production logs.
 
+### `send_json` + JSON pre-parser (`orchestrator.rs` + `utils/json_repair.rs`)
+
+- `LlmOrchestrator::send_json` is the canonical entry point for any caller that feeds the LLM response into `serde_json::from_str`. It chains `send` (concurrency + rate limit + timeout + temperature recovery) with `utils::json_repair::prepare_llm_json`, which strips markdown code fences and escapes raw control characters (`0x00`-`0x1F`) that the LLM may place inside JSON string values.
+- **Contract**: JSON-returning LLM consumers (article summary, section summary, figure descriptions, criteria generation, OpenAlex smart search, search strategy, unified summary) MUST use `send_json`. The response `String` is ready for `serde_json::from_str` without any further cleanup.
+- **Prose callers** (chat, wiki chat, literature review, wiki ingest, markdown-fallback retry, translation) MUST use `send` instead - running the JSON pre-parser on prose would corrupt quoted spans.
+- **Screening** uses `send` (not `send_json`) because its `extract_json` does array-specific shape repair that the generic pre-parser cannot handle; the screening path runs `prepare_llm_json` as the first step inside `screening::engine::extract_json` instead.
+- Manual `strip_code_fences` calls in JSON-returning command handlers are deprecated; `send_json` handles fence-stripping centrally. The sole remaining direct `strip_code_fences` caller is the summary command's markdown-fallback retry path (prose-shaped, not JSON).
+
 ### `RequestBuilder` cloning
 
 - `RequestBuilder` does not implement `Clone` (the body may be non-cloneable)
@@ -100,16 +169,23 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
 
 ## Verification
 
-- `cargo test --lib llm::client::tests` - 11 inline unit tests covering
-  `normalize_llm_text`, `is_retryable_response`, and `calculate_backoff`.
-- `cargo test --test llm_client_test` - 40 integration tests against a mockito
+- `cargo test --lib llm::client::tests` - 16 inline unit tests covering
+  `normalize_llm_text`, `is_retryable_response`, `calculate_backoff`, and
+  `is_temperature_error`.
+- `cargo test --test llm_client_test` - 44 integration tests against a mockito
   HTTP server, including:
   - `test_openai_insufficient_permissions_403_is_retried_then_succeeds`
     (regression for the Windows-only intermittent gateway error),
   - `test_openai_real_auth_401_is_not_retried` (plain 401 fails fast),
   - updated `test_*_rate_limit_429` / `test_*_server_error` cases asserting
-    4 attempts (1 + 3 retries) per the retry contract.
-- `npm run check:all` runs clippy with `-D warnings` over this module.
+    4 attempts (1 + 3 retries) per the retry contract,
+  - 4 temperature-recovery tests (`test_openai_temperature_400_retries_without_temperature`,
+    `test_openai_temperature_400_with_skip_temperature_true_does_not_retry`,
+    `test_openai_nontemperature_400_does_not_retry`,
+    `test_openai_success_returns_default_callmeta`).
+- `cargo test --test llm_orchestrator_test` - 38 orchestrator tests including 2
+  temperature-persistence tests (`temperature_persister_fires_on_recovery`,
+  `temperature_persister_does_not_fire_on_normal_success`).
 
 ## Child DOX Index
 

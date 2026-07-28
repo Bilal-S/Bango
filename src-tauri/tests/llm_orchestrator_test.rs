@@ -1056,3 +1056,108 @@ fn timeout_for_non_screening_types_return_default_600_seconds() {
     assert_eq!(timeout_for(&LlmRequestType::GapAnalysis), Duration::from_secs(600));
     assert_eq!(timeout_for(&LlmRequestType::SummaryGeneration), Duration::from_secs(600));
 }
+
+// ─── Temperature-flag persistence signal ───────────────────────────────
+//
+// When the client recovers from a temperature-rejection 400, the orchestrator
+// must call the wired `TemperatureFlagPersister` so the flag is persisted and
+// future calls skip the first-attempt failure. This test injects a recording
+// fake persister and verifies `persist(true)` fires exactly once after a
+// recovery, and not at all on a normal success.
+
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use bango_lib::llm::orchestrator::TemperatureFlagPersister;
+
+/// Recording fake: counts `persist(true)` invocations.
+struct RecordingPersister {
+    persist_true_calls: Arc<AtomicU32>,
+}
+
+impl TemperatureFlagPersister for RecordingPersister {
+    fn persist(&self, skip: bool) {
+        if skip {
+            self.persist_true_calls.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+}
+
+#[tokio::test]
+async fn temperature_persister_fires_on_recovery() {
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"error":{"message":"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}"#;
+
+    // First attempt: 400 temperature rejection.
+    let first = server
+        .mock("POST", "/chat/completions")
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+    // Second attempt: 200 (recovered without temperature).
+    let second = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(openai_chat_response("recovered", 5))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let orch = Arc::new(LlmOrchestrator::new(2, 0));
+    let counter = Arc::new(AtomicU32::new(0));
+    orch.set_temperature_persister(Arc::new(RecordingPersister {
+        persist_true_calls: counter.clone(),
+    }));
+
+    let config = mock_openai_config(&server.url());
+    let result = orch.send(&config, "sys", "usr", LlmRequestType::AiSummary).await;
+
+    first.assert_async().await;
+    second.assert_async().await;
+    assert!(result.is_ok(), "orchestrator should recover from temperature 400");
+
+    // The persister is invoked from a detached `tokio::task::spawn`, so poll
+    // briefly until the counter advances (or time out at 2s - the persistence
+    // task is best-effort + async).
+    let persisted = tokio::time::timeout(Duration::from_secs(2), async {
+        while counter.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(persisted.is_ok(), "persist(true) should fire after a temperature recovery");
+    assert_eq!(counter.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn temperature_persister_does_not_fire_on_normal_success() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(openai_chat_response("ok", 5))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let orch = Arc::new(LlmOrchestrator::new(2, 0));
+    let counter = Arc::new(AtomicU32::new(0));
+    orch.set_temperature_persister(Arc::new(RecordingPersister {
+        persist_true_calls: counter.clone(),
+    }));
+
+    let config = mock_openai_config(&server.url());
+    let result = orch.send(&config, "sys", "usr", LlmRequestType::AiSummary).await;
+    assert!(result.is_ok());
+
+    mock.assert_async().await;
+    // Give the (non-existent) persistence task a moment to prove it did NOT fire.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        0,
+        "persist(true) must NOT fire when the call succeeds without a temperature rejection"
+    );
+}

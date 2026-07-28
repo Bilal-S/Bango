@@ -5,6 +5,9 @@
 //! - Concurrency limits (`max_concurrent_requests`)
 //! - Rate limiting (`request_delay_ms`)
 //! - Unified error logging
+//! - Post-call persistence of the `skip_temperature` flag when the client
+//!   recovers from a temperature-rejection 400 (so the next call skips the
+//!   wasteful first-attempt failure)
 
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -15,6 +18,24 @@ use crate::error::AppError;
 use crate::llm::client;
 use crate::models::llm_config::LlmConfig;
 use crate::utils::json_repair::prepare_llm_json;
+
+/// Best-effort callback used by the orchestrator to persist the
+/// `skip_temperature` flag when the client recovered from a temperature-rejection 400.
+///
+/// Implementations acquire the DB lock, run `llm_config_repo::set_skip_temperature`, and drop the
+/// lock. The implementation MUST NOT be invoked while any caller holds the DB lock: every
+/// orchestrator call site releases its DB lock before calling `orchestrator.send` (per spec §8.1
+/// "lock-release-call-lock" worker pattern + the same discipline enforced across all command
+/// handlers), so the post-call lock acquisition here is provably deadlock-free.
+///
+/// The trait exists so the orchestrator stays decoupled from `tauri::AppHandle` + `DbState`
+/// (testable without the Tauri runtime) and so tests can inject a fake that records invocations
+/// without a live SQLite connection.
+pub trait TemperatureFlagPersister: Send + Sync {
+    /// Persist `skip_temperature = skip`. Best-effort: implementations log and
+    /// swallow errors so a DB failure never fails a successful LLM call.
+    fn persist(&self, skip: bool);
+}
 
 /// Maximum time to wait for a single LLM response (default for all request
 /// types except screening).
@@ -116,10 +137,35 @@ pub struct LlmOrchestrator {
     semaphore: RwLock<Arc<Semaphore>>,
     last_request: Arc<tokio::sync::Mutex<Instant>>,
     request_delay_ms: Arc<tokio::sync::Mutex<u64>>,
+    /// Best-effort `skip_temperature` persister. `None` in tests (no-op); `Some`
+    /// in production, wired in `init_background_state` after the orchestrator is
+    /// constructed. Kept optional + set via a separate setter so the existing
+    /// 2-param [`new`](Self::new) constructor stays unchanged - the ~40 test
+    /// call sites need zero edits.
+    temp_persister: RwLock<Option<Arc<dyn TemperatureFlagPersister>>>,
+}
+
+/// No-op persister used when no DB is available (tests, or production before
+/// `set_temperature_persister` is wired). Drops the flag silently; the next
+/// call simply retries temperature-recovery again if the model still rejects
+/// `temperature`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoOpTemperaturePersister;
+
+impl TemperatureFlagPersister for NoOpTemperaturePersister {
+    fn persist(&self, _skip: bool) {
+        // Intentionally no-op.
+    }
 }
 
 impl LlmOrchestrator {
     /// Create a new orchestrator with the given concurrency limit and delay.
+    ///
+    /// The temperature-flag persister starts as `None`; production wires it via
+    /// [`set_temperature_persister`](Self::set_temperature_persister) after the
+    /// orchestrator is registered as managed state. Keeping it out of the
+    /// constructor signature means the ~40 existing test call sites (`new(...)`)
+    /// need zero edits.
     pub fn new(max_concurrent: usize, request_delay_ms: u64) -> Self {
         Self {
             semaphore: RwLock::new(Arc::new(Semaphore::new(max_concurrent.max(1)))),
@@ -127,7 +173,50 @@ impl LlmOrchestrator {
                 Instant::now() - Duration::from_millis(request_delay_ms.max(1)),
             )),
             request_delay_ms: Arc::new(tokio::sync::Mutex::new(request_delay_ms)),
+            temp_persister: RwLock::new(None),
         }
+    }
+
+    /// Wire the best-effort `skip_temperature` persister (production only).
+    ///
+    /// Must be called once during startup (`init_background_state`) after the
+    /// `DbState` is available. When unset, temperature-recovery still WORKS
+    /// (the client retries without `temperature`), but the flag is not
+    /// persisted, so the next call repeats the wasteful first-attempt failure.
+    pub fn set_temperature_persister(&self, persister: Arc<dyn TemperatureFlagPersister>) {
+        *self.temp_persister.write().unwrap_or_else(|p| p.into_inner()) = Some(persister);
+    }
+
+    /// Best-effort: if the client set `CallMeta.temperature_was_rejected`,
+    /// spawn a detached task to persist `skip_temperature = true`. Failures are
+    /// logged and swallowed so a DB hiccup never fails a successful LLM call.
+    ///
+    /// INVARIANT: this MUST run AFTER the LLM call returns, never before or
+    /// during. Every caller of [`send`](Self::send) releases its DB lock before
+    /// invoking the orchestrator (spec §8.1 "lock-release-call-lock" worker
+    /// pattern + the same discipline enforced across all command handlers), so
+    /// the persister's lock acquisition here cannot deadlock with a caller.
+    fn maybe_persist_skip_temperature(&self, meta: client::CallMeta) {
+        if !meta.temperature_was_rejected {
+            return;
+        }
+        let persister = self.temp_persister.read().unwrap_or_else(|p| p.into_inner()).clone();
+        let Some(persister) = persister else {
+            // No persister wired (tests, or pre-`set_temperature_persister`):
+            // log and move on. The next call will retry recovery.
+            eprintln!(
+                "[LlmOrchestrator] temperature rejected by model but no persister wired; \
+                 skip_temperature NOT persisted"
+            );
+            return;
+        };
+        // Detached: persistence must not block the response hand-off to the
+        // caller (screening batches, chat UX, etc.). The persister impl is
+        // expected to be cheap (one `UPDATE` under a short-lived DB lock).
+        // `spawn_blocking` runs the synchronous SQLite write on the blocking
+        // thread pool (not the async executor) and is itself detached, so no
+        // outer `tokio::task::spawn` wrapper is needed.
+        tokio::task::spawn_blocking(move || persister.persist(true));
     }
 
     /// Update concurrency/delay settings when LLM config changes.
@@ -199,7 +288,16 @@ impl LlmOrchestrator {
             call_start.elapsed().as_millis()
         );
 
-        // 4. Log errors centrally
+        // 4. Unpack the 3-tuple (content, tokens, CallMeta), persist the
+        //    temperature flag if the client recovered from a rejection, and
+        //    log errors centrally. Persistence is best-effort + detached; see
+        //    `maybe_persist_skip_temperature`.
+        let result = result.map(|(content, tokens, meta)| {
+            self.maybe_persist_skip_temperature(meta);
+            (content, tokens)
+        });
+
+        // 5. Log errors centrally
         if let Err(ref e) = result {
             eprintln!("[LlmOrchestrator] {:?} request failed: {}", request_type, e);
         }
@@ -263,6 +361,13 @@ impl LlmOrchestrator {
             ))
         })?;
 
+        // Unpack the 3-tuple; the unthrottled path intentionally does NOT
+        // persist the temperature flag - the sole unthrottled caller is
+        // `test_connection`, which is driven by `test_llm_connection` and that
+        // command already owns its own temperature-recovery + persistence
+        // (`commands/llm_config.rs`). Persisting here would double-handle.
+        let result = result.map(|(content, tokens, _meta)| (content, tokens));
+
         if let Err(ref e) = result {
             eprintln!("[LlmOrchestrator] {:?} request failed: {}", request_type, e);
         }
@@ -287,15 +392,21 @@ impl LlmOrchestrator {
 
     /// Test an LLM connection using a simple "hello" prompt.
     /// Does NOT go through the semaphore (not a real request).
+    ///
+    /// Temperature-recovery still applies (the client retries without
+    /// `temperature` on a rejection 400), but the flag is NOT persisted here -
+    /// the caller (`test_llm_connection` command) owns its own persistence so it
+    /// can show the user the "temperature not supported - auto-adjusted" toast.
     pub async fn test_connection(&self, config: &LlmConfig) -> Result<(String, usize), AppError> {
-        tokio::time::timeout(
+        let (content, tokens, _meta) = tokio::time::timeout(
             Duration::from_secs(30), // shorter timeout for connection test
             crate::llm::client::send_chat_completion(config, "You are a test.", "Say hello."),
         )
         .await
         .map_err(|_| {
             AppError::Import("LLM connection test timed out after 30 seconds".to_string())
-        })?
+        })??;
+        Ok((content, tokens))
     }
 
     /// List available models for a provider's discovery endpoint.

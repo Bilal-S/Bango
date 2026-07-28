@@ -347,6 +347,51 @@ pub fn run() {
     }
 }
 
+/// Production [`llm::orchestrator::TemperatureFlagPersister`] backed by the
+/// Tauri `AppHandle`.
+///
+/// `persist(skip)` locks `DbState` and runs the targeted
+/// `llm_config_repo::set_skip_temperature` `UPDATE`. Best-effort: errors are
+/// logged to stderr and swallowed so a DB hiccup never fails a successful LLM
+/// call (the next call will simply retry temperature-recovery again).
+///
+/// This struct is the single concrete bridge from the LLM layer to the DB layer
+/// for temperature-flag persistence. It deliberately does NOT use `save_config`
+/// (which `DELETE`s + `INSERT`s the whole row and would race with concurrent
+/// `save_llm_config` calls from the UI); the targeted `UPDATE` touches only
+/// `skip_temperature`.
+///
+/// The `AppHandle` is `Clone`-cheap (internally an `Arc`), so holding a copy
+/// here for the lifetime of the orchestrator is free.
+struct AppHandleTemperaturePersister {
+    handle: tauri::AppHandle,
+}
+
+impl llm::orchestrator::TemperatureFlagPersister for AppHandleTemperaturePersister {
+    fn persist(&self, skip: bool) {
+        // Bind the lock result to a local before matching, mirroring the
+        // established pattern in `init_background_state`: inlining
+        // `match lock_conn(&db.conn)` keeps the `MutexGuard` temporary alive
+        // until after `db` is dropped, tripping E0597 under the borrow checker.
+        let db = self.handle.state::<DbState>();
+        let result = db::connection::lock_conn(&db.conn);
+        match result {
+            Ok(conn) => {
+                if let Err(e) = db::llm_config_repo::set_skip_temperature(&conn, skip) {
+                    eprintln!(
+                        "[LlmOrchestrator] best-effort skip_temperature persistence failed: {e}"
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[LlmOrchestrator] best-effort skip_temperature persistence failed to lock DB: {e}"
+                );
+            }
+        }
+    }
+}
+
 /// `AppHandle`-based loader used by the legacy upgrade command after it
 /// rebuilds the schema. Looks up the bundled journal_index DB via the handle's
 /// resource path and bulk-copies records if the (newly recreated) table is empty.
@@ -450,7 +495,19 @@ fn init_background_state(handle: &tauri::AppHandle) {
             }
         }
     };
-    handle.manage(std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms)));
+    let orchestrator = std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms));
+
+    // Wire the best-effort `skip_temperature` persister so that when the LLM
+    // client recovers from a temperature-rejection 400 (models that only
+    // support the default temperature), the flag is persisted once and future
+    // calls skip the wasteful first-attempt failure. The persister holds its
+    // own clone of the `AppHandle` so it can reach `DbState` from the detached
+    // persistence task without borrowing the orchestrator.
+    orchestrator.set_temperature_persister(std::sync::Arc::new(AppHandleTemperaturePersister {
+        handle: handle.clone(),
+    }));
+
+    handle.manage(orchestrator);
 
     // Tier 1e: the in-process broadcast bus the worker emits on after each
     // job. Managed BEFORE the worker spawns so the worker's first job can

@@ -25,7 +25,6 @@ use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
 use crate::models::search_strategy::SearchStrategyResult;
-use crate::summary::prompt::strip_code_fences;
 
 /// One-shot Tauri command. Reads aims + criteria + LLM config in a short-lived
 /// DB lock, releases the lock for the orchestrator call, then re-locks to
@@ -64,9 +63,12 @@ pub async fn suggest_search_strategy(
     // 2. Build the prompt pair.
     let (system_prompt, user_prompt) = build_search_strategy_prompt(&aims, &inclusion, &exclusion);
 
-    // 3. LLM call via the orchestrator.
+    // 3. LLM call via the orchestrator. Uses `send_json` so the response runs
+    //    through `prepare_llm_json` (strips markdown code fences + escapes raw
+    //    control chars) before reaching the parser. This is the canonical entry
+    //    point for all JSON-returning LLM consumers; see `llm/AGENTS.md`.
     let result = orchestrator
-        .send(&config, &system_prompt, &user_prompt, LlmRequestType::SearchStrategy)
+        .send_json(&config, &system_prompt, &user_prompt, LlmRequestType::SearchStrategy)
         .await;
     if let Err(ref e) = result {
         let err_msg = e.to_string();
@@ -203,13 +205,13 @@ Omit any PICO arm that does not apply. All 8 database fields are required."#,
 
 /// Pure: parse + lightly validate the LLM JSON response.
 ///
-/// Strips markdown code fences (reusing the shared `summary::prompt::strip_code_fences`
-/// helper so the behavior matches every other JSON-producing command), then
-/// deserializes into `SearchStrategyResult`. Returns `AppError` on malformed
-/// input (never panics).
+/// The caller (`suggest_search_strategy`) routes the LLM response through
+/// `orchestrator.send_json`, which runs `prepare_llm_json` (strips markdown
+/// code fences + escapes raw control chars) before this fn sees it. So `raw`
+/// is already clean JSON; this fn only deserializes + validates. Returns
+/// `AppError` on malformed input (never panics).
 pub fn parse_search_strategy_response(raw: &str) -> Result<SearchStrategyResult, AppError> {
-    let cleaned = strip_code_fences(raw);
-    let parsed: SearchStrategyResult = serde_json::from_str(&cleaned)
+    let parsed: SearchStrategyResult = serde_json::from_str(raw)
         .map_err(|e| AppError::Import(format!("Failed to parse search strategy response: {e}")))?;
     Ok(parsed)
 }

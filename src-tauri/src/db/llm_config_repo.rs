@@ -99,6 +99,26 @@ pub fn has_config(conn: &Connection) -> Result<bool, AppError> {
     }
 }
 
+/// Flip just the `skip_temperature` flag on the saved config row (id = 1).
+///
+/// This is the targeted-write counterpart to [`save_config`]: instead of
+/// `DELETE` + `INSERT` (which clobbers the whole row and races with concurrent
+/// `save_config` calls from the UI), it runs a single `UPDATE` that touches
+/// only `skip_temperature`. Used by the orchestrator's post-call persistence
+/// when the client recovers from a temperature-rejection 400 - the LLM layer
+/// must not rewrite the entire config (concurrency, delay, endpoint, key) just
+/// to record that the model does not support `temperature`.
+///
+/// Returns `Ok(())` even when no row exists (`id = 1` absent) because the
+/// recovery is best-effort: the in-memory `config` passed to the next call
+/// already has `skip_temperature` set by the caller if it observed the
+/// rejection, so persistence is an optimization (skip the first-attempt
+/// failure on the next call), not a correctness requirement.
+pub fn set_skip_temperature(conn: &Connection, skip: bool) -> Result<(), AppError> {
+    conn.execute("UPDATE llm_config SET skip_temperature = ?1 WHERE id = 1", params![skip as i32])?;
+    Ok(())
+}
+
 pub fn save_config(conn: &Connection, config: &LlmConfig) -> Result<(), AppError> {
     let key = aes_gcm::derive_key_from_machine();
     let encrypted_api_key = config
