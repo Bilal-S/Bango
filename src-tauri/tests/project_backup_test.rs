@@ -929,3 +929,165 @@ fn import_project_rematches_journals_with_symbol_variants() {
         .expect("query journal_index_id");
     assert_eq!(linked_id.as_deref(), Some("j-pom"), "import must re-link symbol-variant journal");
 }
+
+/// ID-remap dedup for `reference_papers`: two backup rows sharing a DOI must
+/// collapse to one row, with the second row's id written into `paper_id_map`
+/// so downstream `article_reference_links` resolve to the surviving id.
+/// Hand-edited JSON because the source DB enforces UNIQUE at INSERT time, so
+/// the dedup can only be exercised via the JSON import path.
+#[test]
+fn import_reference_papers_dedup_via_doi() {
+    let conn = setup_db();
+
+    // Two reference papers sharing DOI "10.1234/dup" but different ids. The
+    // first (`rp-survivor`) wins; the second (`rp-dupe`) must remap to it.
+    // One article reference link points at the duplicate id; after import it
+    // must resolve to the survivor.
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.5.6"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "referencePapers": [
+            {
+                "id": "rp-survivor",
+                "title": "Original Paper",
+                "authors": "[\"Smith, J.\"]",
+                "abstractText": "First abstract",
+                "doi": "10.1234/dup",
+                "matchStatus": "unmatched",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z"
+            },
+            {
+                "id": "rp-dupe",
+                "title": "Duplicate Paper",
+                "authors": "[\"Jones, K.\"]",
+                "abstractText": "Second abstract",
+                "doi": "10.1234/dup",
+                "matchStatus": "unmatched",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z"
+            }
+        ],
+        "articleReferenceLinks": [
+            {
+                "id": "rl-1",
+                "parentArticleId": "ghost-article",
+                "referencePaperId": "rp-dupe",
+                "type": 0,
+                "createdAt": "2026-01-01T00:00:00Z"
+            }
+        ],
+        "llmConfig": null
+    }"#;
+
+    // Disable FK so the ghost-article link doesn't trip the constraint during
+    // the import's article_reference_links phase (no articles in this backup).
+    conn.execute("PRAGMA foreign_keys = OFF", []).expect("disable fk");
+    import_project(&conn, backup).expect("import should succeed");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    // Only ONE reference_paper row survives (the duplicate was deduped).
+    assert_eq!(count_rows(&conn, "reference_papers"), 1, "duplicate DOI must collapse to 1 row");
+
+    // The survivor is the first-inserted row (rp-survivor).
+    let survivor_id: String = conn
+        .query_row("SELECT id FROM reference_papers WHERE doi = '10.1234/dup'", [], |row| {
+            row.get(0)
+        })
+        .expect("query survivor");
+    assert_eq!(survivor_id, "rp-survivor", "first-inserted row must win the dedup");
+
+    // The article_reference_link that pointed at `rp-dupe` must now point at
+    // `rp-survivor` (the remap fired).
+    let linked_paper_id: String = conn
+        .query_row(
+            "SELECT reference_paper_id FROM article_reference_links WHERE id = 'rl-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query link");
+    assert_eq!(
+        linked_paper_id, "rp-survivor",
+        "downstream link must resolve to the surviving paper id via paper_id_map"
+    );
+}
+
+/// ID-remap dedup for `biblio_terms`: two backup rows sharing the same
+/// `normalized_term` but differing `term_type` must BOTH survive (the UNIQUE
+/// constraint is composite: `(normalized_term, term_type)`). This locks down
+/// the composite-key lookup strategy so it is not accidentally collapsed into
+/// the single-column strategy used for authors/institutions.
+#[test]
+fn import_biblio_terms_dedup_composite_key() {
+    let conn = setup_db();
+
+    // Two terms sharing normalized_term "machine learning" but with different
+    // term_type values. Both must survive because the UNIQUE constraint is on
+    // (normalized_term, term_type), not normalized_term alone.
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.5.6"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "biblioTerms": [
+            {
+                "id": "bt-keyword",
+                "normalizedTerm": "machine learning",
+                "rawTerm": "Machine Learning",
+                "termType": "keyword",
+                "articleCount": 1,
+                "createdAt": "2026-01-01T00:00:00Z"
+            },
+            {
+                "id": "bt-noun",
+                "normalizedTerm": "machine learning",
+                "rawTerm": "machine learning",
+                "termType": "noun_phrase",
+                "articleCount": 2,
+                "createdAt": "2026-01-01T00:00:00Z"
+            }
+        ],
+        "llmConfig": null
+    }"#;
+
+    import_project(&conn, backup).expect("import should succeed");
+
+    // BOTH rows must survive (composite key, not single-column).
+    assert_eq!(
+        count_rows(&conn, "biblio_terms"),
+        2,
+        "composite-key dedup: same normalized_term, different term_type must both survive"
+    );
+
+    // Verify both rows are distinct on term_type.
+    let types: Vec<String> = conn
+        .prepare("SELECT term_type FROM biblio_terms WHERE normalized_term = 'machine learning' ORDER BY term_type")
+        .expect("prepare")
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query_map")
+        .filter_map(|r| r.ok())
+        .collect();
+    assert_eq!(types, vec!["keyword", "noun_phrase"], "both term_type variants must be present");
+}

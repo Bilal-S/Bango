@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Serialize};
 
 use crate::db::app_settings_repo;
@@ -221,11 +221,76 @@ fn to_camel_case(s: &str) -> String {
     result
 }
 
+// ── Import ──────────────────────────────────────────────────────────────────
+
+/// Reverse-dependency DELETE order. Extracted as a const so the order is
+/// visually obvious and reviewable as a single unit. Order is load-bearing:
+/// child tables before parent tables; derived tables (`article_chunks`,
+/// `article_original_*`, `summary`, `gap_analysis`) explicitly purged because
+/// `foreign_keys=OFF` during import prevents `ON DELETE CASCADE` from firing.
+const DELETE_STATEMENTS: &[&str] = &[
+    "DELETE FROM biblio_network_edges",
+    "DELETE FROM biblio_network_nodes",
+    "DELETE FROM biblio_network_meta",
+    "DELETE FROM biblio_article_terms",
+    "DELETE FROM biblio_terms",
+    "DELETE FROM biblio_author_affiliations",
+    "DELETE FROM biblio_article_authors",
+    "DELETE FROM biblio_institutions",
+    "DELETE FROM biblio_authors",
+    "DELETE FROM article_reference_links",
+    "DELETE FROM reference_papers",
+    "DELETE FROM audit_entries",
+    "DELETE FROM article_tags",
+    "DELETE FROM article_labels",
+    "DELETE FROM article_chunks",
+    "DELETE FROM article_original_chunks",
+    "DELETE FROM article_original_content",
+    "DELETE FROM articles",
+    "DELETE FROM criteria",
+    "DELETE FROM research_aims",
+    "DELETE FROM tags",
+    "DELETE FROM labels",
+    "DELETE FROM llm_config",
+    "DELETE FROM summary",
+    "DELETE FROM gap_analysis",
+];
+
+/// Threads the 4 ID-remap maps through the per-table import fns.
+/// Filled by the 4 UNIQUE-constrained table importers (`reference_papers`,
+/// `biblio_authors`, `biblio_institutions`, `biblio_terms`); read by their
+/// dependent junction-table importers.
+#[derive(Default)]
+struct ImportMaps {
+    paper: HashMap<String, String>,
+    author: HashMap<String, String>,
+    institution: HashMap<String, String>,
+    term: HashMap<String, String>,
+}
+
+/// Single-column UNIQUE lookup for `biblio_authors` / `biblio_institutions`.
+/// On `INSERT OR IGNORE` skip, find the existing row by its unique column.
+///
+/// # Security
+///
+/// `table` + `unique_col` MUST be compile-time-constant string literals
+/// (never user input). The callers pass `"biblio_authors"` /
+/// `"normalized_name"`, etc., so this is safe under the
+/// `docs/CLAUDE.md` §Database "no interpolation of user input" rule.
+fn lookup_existing_id_by_unique_col(
+    tx: &Transaction,
+    table: &str,
+    unique_col: &str,
+    key: &str,
+) -> Option<String> {
+    let sql = format!("SELECT id FROM {table} WHERE {unique_col} = ?1 LIMIT 1");
+    tx.query_row(&sql, [key], |row| row.get::<_, String>(0)).ok()
+}
+
 pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError> {
     let backup: ProjectBackup = serde_json::from_str(json_str)
         .map_err(|e| AppError::Import(format!("Invalid backup file: {}", e)))?;
 
-    // Check spec version
     let version: i32 =
         backup.metadata.spec_version.split('.').next().and_then(|s| s.parse().ok()).unwrap_or(0);
     if version > 3 {
@@ -235,57 +300,55 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )));
     }
 
-    // Disable foreign key checks during import.
-    // PRAGMA cannot be changed inside a transaction, so set it before starting one.
-    // This is safe because we delete all data first, then insert in dependency order.
+    // PRAGMA cannot be changed inside a transaction, so set it before starting
+    // one. Safe because we delete all data first, then insert in dependency order.
     conn.execute("PRAGMA foreign_keys = OFF", [])?;
-
-    // Wrap entire import in a transaction for atomicity.
-    // If any INSERT fails mid-way, all changes are rolled back so we don't
-    // leave the database in a partially-imported state.
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| AppError::Import(format!("Failed to start import transaction: {}", e)))?;
 
-    // NOTE: journal_index is NOT cleared during import - it is system-distributed
-    // reference data that survives project reset and backup/restore cycles.
+    // journal_index is NOT cleared - it is system-distributed reference data
+    // that survives project reset and backup/restore cycles.
+    for stmt in DELETE_STATEMENTS {
+        tx.execute(stmt, [])?;
+    }
 
-    // Clear existing data (reverse dependency order)
-    tx.execute("DELETE FROM biblio_network_edges", [])?;
-    tx.execute("DELETE FROM biblio_network_nodes", [])?;
-    tx.execute("DELETE FROM biblio_network_meta", [])?;
-    tx.execute("DELETE FROM biblio_article_terms", [])?;
-    tx.execute("DELETE FROM biblio_terms", [])?;
-    tx.execute("DELETE FROM biblio_author_affiliations", [])?;
-    tx.execute("DELETE FROM biblio_article_authors", [])?;
-    tx.execute("DELETE FROM biblio_institutions", [])?;
-    tx.execute("DELETE FROM biblio_authors", [])?;
-    tx.execute("DELETE FROM article_reference_links", [])?;
-    tx.execute("DELETE FROM reference_papers", [])?;
-    tx.execute("DELETE FROM audit_entries", [])?;
-    tx.execute("DELETE FROM article_tags", [])?;
-    tx.execute("DELETE FROM article_labels", [])?;
-    // Tier 3: article_chunks references articles(id) ON DELETE CASCADE, but
-    // foreign_keys are OFF during import so the cascade does not fire. Explicit
-    // purge prevents orphaned chunk rows surviving the article-table wipe.
-    tx.execute("DELETE FROM article_chunks", [])?;
-    // Translation originals (Plan-A permanent rewrite). Same precedence rule as
-    // article_chunks: foreign_keys are OFF during import, so explicit purge is
-    // needed before the articles table is wiped.
-    tx.execute("DELETE FROM article_original_chunks", [])?;
-    tx.execute("DELETE FROM article_original_content", [])?;
-    tx.execute("DELETE FROM articles", [])?;
-    tx.execute("DELETE FROM criteria", [])?;
-    tx.execute("DELETE FROM research_aims", [])?;
-    tx.execute("DELETE FROM tags", [])?;
-    tx.execute("DELETE FROM labels", [])?;
-    tx.execute("DELETE FROM llm_config", [])?;
-    // Clear any previously generated summary (it was for different articles)
-    tx.execute("DELETE FROM summary", [])?;
-    // Clear any previously generated gap analysis (same rationale as summary).
-    tx.execute("DELETE FROM gap_analysis", [])?;
+    let mut maps = ImportMaps::default();
 
-    // Restore research aims
+    import_research_aims(&tx, &backup)?;
+    import_criteria(&tx, &backup)?;
+    import_tags(&tx, &backup)?;
+    import_labels(&tx, &backup)?;
+    import_articles(&tx, &backup)?;
+    import_article_tags(&tx, &backup)?;
+    import_article_labels(&tx, &backup)?;
+    import_reference_papers(&tx, &backup, &mut maps.paper)?;
+    import_article_reference_links(&tx, &backup, &maps.paper)?;
+    import_translation_originals(&tx, &backup)?;
+    import_audit_entries(&tx, &backup)?;
+    import_biblio_authors(&tx, &backup, &mut maps.author)?;
+    import_biblio_institutions(&tx, &backup, &mut maps.institution)?;
+    import_biblio_article_authors(&tx, &backup, &maps.author)?;
+    import_biblio_author_affiliations(&tx, &backup, &maps.author, &maps.institution)?;
+    import_biblio_terms(&tx, &backup, &mut maps.term)?;
+    import_biblio_article_terms(&tx, &backup, &maps.term)?;
+    import_biblio_networks(&tx, &backup)?;
+    import_llm_config(&tx, &backup)?;
+    import_app_settings(&tx, &backup)?;
+
+    tx.commit()
+        .map_err(|e| AppError::Import(format!("Failed to commit import transaction: {}", e)))?;
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+    // Post-import: resolve journal links. Backup files don't store
+    // journal_index_id (it's derived from ISSN/eISSN/journal name), so rematch
+    // against the journal_index table on the restoring machine.
+    let _ = crate::db::article_repo::rematch_all_journals(conn);
+    let _ = crate::db::reference_repo::rematch_all_journals(conn);
+    Ok(())
+}
+
+fn import_research_aims(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for aim in &backup.research_aims {
         let id = get_str(aim, "id");
         let text = get_str(aim, "text");
@@ -295,8 +358,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, text, created_at],
         )?;
     }
+    Ok(())
+}
 
-    // Restore criteria
+fn import_criteria(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for c in &backup.criteria {
         let id = get_str(c, "id");
         let ctype = get_str_field(c, "criterionType", "type")
@@ -317,8 +382,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, ctype, text, priority, created_at],
         )?;
     }
+    Ok(())
+}
 
-    // Restore tags (including the user-chosen color, which is nullable).
+fn import_tags(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for t in &backup.tags {
         let id = get_str(t, "id");
         let name = get_str(t, "name");
@@ -336,8 +403,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, name, source, color],
         )?;
     }
+    Ok(())
+}
 
-    // Restore labels (including the user-chosen color, which is nullable).
+fn import_labels(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for l in &backup.labels {
         let id = get_str(l, "id");
         let name = get_str(l, "name");
@@ -355,8 +424,11 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, name, source, color],
         )?;
     }
+    Ok(())
+}
 
-    // Restore articles
+#[allow(clippy::too_many_lines)]
+fn import_articles(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for (i, a) in backup.articles.iter().enumerate() {
         let id = get_str(a, "id");
         let status = get_str(a, "status");
@@ -416,11 +488,9 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let changed_at =
             get_str_field(a, "changedAt", "changed_at").unwrap_or_else(|| imported_at.clone());
         let screened_at = get_str_field(a, "screenedAt", "screened_at");
-        // Preserve sequence_id from backup; old backups lack it, so assign 1-based index
-        let sequence_id = a.get("sequenceId").and_then(|v| v.as_i64()).unwrap_or_else(|| {
-            // Old backup - assign based on import order
-            (i as i64) + 1
-        });
+        // Old backups lack sequence_id; assign 1-based index.
+        let sequence_id =
+            a.get("sequenceId").and_then(|v| v.as_i64()).unwrap_or_else(|| (i as i64) + 1);
         let full_text = get_str_field(a, "fullText", "full_text");
         let full_text_ai_summary = get_str_field(a, "fullTextAiSummary", "full_text_ai_summary");
         let data_length = a.get("dataLength").and_then(|v| v.as_i64());
@@ -433,9 +503,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             a.get("hasReferenceDetails").and_then(|v| v.as_i64()).unwrap_or(0);
         let has_full_text = a.get("hasFullText").and_then(|v| v.as_i64()).unwrap_or(0);
         let full_text_file_name = get_str_field(a, "fullTextFileName", "full_text_file_name");
-        // Translation status columns travel with the article row. On backup
-        // restore, reset in-flight states to 'none' so the in-memory translation
-        // queue starts clean on the target machine.
+        // Reset in-flight translation states so the queue starts clean.
         let is_translated = a.get("isTranslated").and_then(|v| v.as_i64()).unwrap_or(0);
         let translation_status_raw = a
             .get("translationStatus")
@@ -448,13 +516,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         };
         let translation_error = get_str_field(a, "translationError", "translation_error");
         let translated_at = get_str_field(a, "translatedAt", "translated_at");
-        // NOTE: `journal_index_id` is intentionally NOT in this INSERT. It is
-        // a derived FK into the local `journal_index` table (system-distributed
-        // reference data that never travels with a backup). The post-commit
-        // rematch below re-derives it against the restoring machine's
-        // `journal_index`, so a backup restored against a newer database
-        // benefits from matching improvements (symbol folding, ISSN cross-check)
-        // automatically.
+        // NOTE: journal_index_id intentionally NOT inserted - derived post-commit.
         tx.execute(
             "INSERT INTO articles (
                 id, sequence_id, status, screening_error, title, abstract_text, authors, publication_year, doi, journal,
@@ -487,11 +549,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             ],
         )?;
     }
+    Ok(())
+}
 
-    // next_sequence_id() uses SELECT MAX(sequence_id) FROM articles,
-    // so it will naturally return the correct value after import - no extra work needed.
-
-    // Restore article_tags
+fn import_article_tags(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for at in &backup.article_tags {
         let article_id = get_str(at, "articleId");
         let tag_id = get_str(at, "tagId");
@@ -500,8 +561,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![article_id, tag_id],
         )?;
     }
+    Ok(())
+}
 
-    // Restore article_labels
+fn import_article_labels(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for al in &backup.article_labels {
         let article_id = get_str(al, "articleId");
         let label_id = get_str(al, "labelId");
@@ -510,11 +573,15 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![article_id, label_id],
         )?;
     }
+    Ok(())
+}
 
-    // Restore reference papers (after articles, before links)
-    // Build ID mapping for constraint-violation dedup: backup_id → actual_id
-    let mut paper_id_map: HashMap<String, String> = HashMap::new();
-
+/// INSERT OR IGNORE + multi-field dedup via `find_existing_paper_id`.
+fn import_reference_papers(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    paper_id_map: &mut HashMap<String, String>,
+) -> Result<(), AppError> {
     for rp in &backup.reference_papers {
         let id = get_str(rp, "id");
         let title = get_str(rp, "title");
@@ -523,7 +590,6 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             serde_json::to_string(&rp.get("authors").cloned().unwrap_or(serde_json::json!([])))
                 .unwrap_or_default();
         let publication_year = rp.get("publicationYear").and_then(|v| v.as_i64());
-        // Normalize DOI: empty string → None (matches unique constraint)
         let doi: Option<String> =
             get_str_field(rp, "doi", "doi").and_then(|d| if d.is_empty() { None } else { Some(d) });
         let journal = get_str_field(rp, "journal", "journal");
@@ -570,7 +636,6 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         let updated_at = get_str_field(rp, "updatedAt", "updated_at")
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
-        // Try INSERT; on unique constraint violation, find existing record
         let inserted = tx.execute(
             "INSERT OR IGNORE INTO reference_papers (
                 id, title, abstract_text, authors, publication_year, doi, journal,
@@ -617,24 +682,27 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
 
         if inserted == 0 {
-            // Constraint violation - find existing record and map IDs
             let existing_id =
-                find_existing_paper_id(&tx, doi.as_deref(), &title, &authors, publication_year);
+                find_existing_paper_id(tx, doi.as_deref(), &title, &authors, publication_year);
             if let Some(eid) = existing_id {
                 paper_id_map.insert(id, eid);
             }
         }
     }
+    Ok(())
+}
 
-    // Restore article reference links (after both articles and reference_papers)
-    // Uses paper_id_map to remap deduplicated reference paper IDs
+fn import_article_reference_links(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    paper_id_map: &HashMap<String, String>,
+) -> Result<(), AppError> {
     for rl in &backup.article_reference_links {
         let id = get_str(rl, "id");
         let parent_article_id =
             get_str_field(rl, "parentArticleId", "parent_article_id").unwrap_or_default();
         let original_paper_id =
             get_str_field(rl, "referencePaperId", "reference_paper_id").unwrap_or_default();
-        // Remap to actual paper ID if it was deduplicated
         let reference_paper_id =
             paper_id_map.get(&original_paper_id).map(|s| s.as_str()).unwrap_or(&original_paper_id);
         let ref_type = rl
@@ -651,9 +719,11 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, parent_article_id, reference_paper_id, ref_type, created_at],
         )?;
     }
+    Ok(())
+}
 
-    // Restore translation originals (article_original_content).
-    // These hold the original-language text captured before Plan-A rewrite.
+/// Translation originals: `article_original_content` + `article_original_chunks`.
+fn import_translation_originals(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for aoc in &backup.article_original_content {
         let article_id = get_str(aoc, "articleId");
         let original_title = get_str_field(aoc, "originalTitle", "original_title");
@@ -678,8 +748,6 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
     }
 
-    // Restore translation original chunks (article_original_chunks).
-    // These hold the pre-translation chunk coordinate space.
     for aoc_chunk in &backup.article_original_chunks {
         let id: i64 = aoc_chunk
             .get("id")
@@ -705,23 +773,16 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, article_id, chunk_index, section, content, word_count],
         )?;
     }
+    Ok(())
+}
 
-    // Restore audit entries.
-    //
-    // `article_id` and `details` are nullable columns: system-level entries
-    // (errors, wiki warnings, search strategies) store NULL. The export path
-    // serializes NULL as JSON null; `get_str` would return "" for those,
-    // corrupting the round-trip. We use Option<String> extraction here so
-    // rusqlite maps None → SQL NULL.
+/// Audit entries. `article_id` and `details` are nullable: system-level
+/// entries store NULL. Empty-string `articleId` is normalized to NULL
+/// (historical backups carry `""` for system rows; without this filter the
+/// restored row would violate the FK constraint on the v006-rebuilt table).
+fn import_audit_entries(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for ae in &backup.audit_entries {
         let id = get_str(ae, "id");
-        // Normalize empty-string article_id -> None -> SQL NULL. Historical
-        // backups (and the shipped demo project) carry system-level entries
-        // with `articleId: ""` instead of `null`; without this filter the
-        // restored row would violate the `FOREIGN KEY (article_id) REFERENCES
-        // articles(id)` constraint on the v006-rebuilt table and crash import.
-        // The row is preserved as a system-level entry (article_id IS NULL),
-        // never silently dropped.
         let article_id: Option<String> = ae
             .get("articleId")
             .or_else(|| ae.get("article_id"))
@@ -741,12 +802,15 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, article_id, timestamp, action, from_status, to_status, details, source],
         )?;
     }
+    Ok(())
+}
 
-    // Restore biblio_authors (INSERT OR IGNORE + ID remap for dedup)
-    // The UNIQUE constraint on normalized_name means backups with duplicate
-    // normalized names (different IDs) must be deduplicated.
-    let mut author_id_map: HashMap<String, String> = HashMap::new();
-
+/// INSERT OR IGNORE + single-column UNIQUE dedup via `lookup_existing_id_by_unique_col`.
+fn import_biblio_authors(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    author_id_map: &mut HashMap<String, String>,
+) -> Result<(), AppError> {
     for ba in &backup.biblio_authors {
         let id = get_str(ba, "id");
         let normalized_name =
@@ -769,23 +833,25 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, normalized_name, display_name, first_author_count, article_count, created_at],
         )?;
         if inserted == 0 && !normalized_name.is_empty() {
-            // Constraint violation - find existing record and map IDs
-            let existing_id: Option<String> = tx
-                .query_row(
-                    "SELECT id FROM biblio_authors WHERE normalized_name = ?1 LIMIT 1",
-                    [&normalized_name],
-                    |row| row.get(0),
-                )
-                .ok();
-            if let Some(eid) = existing_id {
+            if let Some(eid) = lookup_existing_id_by_unique_col(
+                tx,
+                "biblio_authors",
+                "normalized_name",
+                &normalized_name,
+            ) {
                 author_id_map.insert(id, eid);
             }
         }
     }
+    Ok(())
+}
 
-    // Restore biblio_institutions (INSERT OR IGNORE + ID remap for dedup)
-    let mut institution_id_map: HashMap<String, String> = HashMap::new();
-
+/// INSERT OR IGNORE + single-column UNIQUE dedup via `lookup_existing_id_by_unique_col`.
+fn import_biblio_institutions(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    institution_id_map: &mut HashMap<String, String>,
+) -> Result<(), AppError> {
     for bi in &backup.biblio_institutions {
         let id = get_str(bi, "id");
         let normalized_name =
@@ -797,25 +863,28 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, normalized_name, country, city],
         )?;
         if inserted == 0 && !normalized_name.is_empty() {
-            let existing_id: Option<String> = tx
-                .query_row(
-                    "SELECT id FROM biblio_institutions WHERE normalized_name = ?1 LIMIT 1",
-                    [&normalized_name],
-                    |row| row.get(0),
-                )
-                .ok();
-            if let Some(eid) = existing_id {
+            if let Some(eid) = lookup_existing_id_by_unique_col(
+                tx,
+                "biblio_institutions",
+                "normalized_name",
+                &normalized_name,
+            ) {
                 institution_id_map.insert(id, eid);
             }
         }
     }
+    Ok(())
+}
 
-    // Restore biblio_article_authors (uses author_id_map for dedup)
+fn import_biblio_article_authors(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    author_id_map: &HashMap<String, String>,
+) -> Result<(), AppError> {
     for baa in &backup.biblio_article_authors {
         let id = get_str(baa, "id");
         let article_id = get_str_field(baa, "articleId", "article_id").unwrap_or_default();
         let original_author_id = get_str_field(baa, "authorId", "author_id").unwrap_or_default();
-        // Remap to actual author ID if it was deduplicated
         let author_id = author_id_map
             .get(&original_author_id)
             .map(|s| s.as_str())
@@ -832,8 +901,15 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, article_id, author_id, author_order, raw_name, raw_affiliation],
         )?;
     }
+    Ok(())
+}
 
-    // Restore biblio_author_affiliations (uses author_id_map + institution_id_map)
+fn import_biblio_author_affiliations(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    author_id_map: &HashMap<String, String>,
+    institution_id_map: &HashMap<String, String>,
+) -> Result<(), AppError> {
     for baf in &backup.biblio_author_affiliations {
         let id = get_str(baf, "id");
         let original_author_id = get_str_field(baf, "authorId", "author_id").unwrap_or_default();
@@ -853,12 +929,17 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, author_id, institution_id, article_id],
         )?;
     }
+    Ok(())
+}
 
-    // Restore biblio_terms (INSERT OR IGNORE + ID remap for dedup)
-    // The UNIQUE constraint on (normalized_term, term_type) means backups with
-    // duplicate normalized terms (different IDs) must be deduplicated.
-    let mut term_id_map: HashMap<String, String> = HashMap::new();
-
+/// INSERT OR IGNORE + composite-key dedup `(normalized_term, term_type)`.
+/// The lookup is composite so it stays inline (unlike the single-column
+/// author/institution case that delegates to `lookup_existing_id_by_unique_col`).
+fn import_biblio_terms(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    term_id_map: &mut HashMap<String, String>,
+) -> Result<(), AppError> {
     for bt in &backup.biblio_terms {
         let id = get_str(bt, "id");
         let normalized_term =
@@ -878,7 +959,6 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, normalized_term, raw_term, term_type, article_count, created_at],
         )?;
         if inserted == 0 && !normalized_term.is_empty() {
-            // Constraint violation - find existing record and map IDs
             let existing_id: Option<String> = tx
                 .query_row(
                     "SELECT id FROM biblio_terms WHERE normalized_term = ?1 AND term_type = ?2 LIMIT 1",
@@ -891,13 +971,18 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             }
         }
     }
+    Ok(())
+}
 
-    // Restore biblio_article_terms (uses term_id_map for dedup)
+fn import_biblio_article_terms(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    term_id_map: &HashMap<String, String>,
+) -> Result<(), AppError> {
     for bat in &backup.biblio_article_terms {
         let id = get_str(bat, "id");
         let article_id = get_str_field(bat, "articleId", "article_id").unwrap_or_default();
         let original_term_id = get_str_field(bat, "termId", "term_id").unwrap_or_default();
-        // Remap to actual term ID if it was deduplicated
         let term_id =
             term_id_map.get(&original_term_id).map(|s| s.as_str()).unwrap_or(&original_term_id);
         let frequency = bat.get("frequency").and_then(|v| v.as_i64()).unwrap_or(1);
@@ -906,8 +991,11 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, article_id, term_id, frequency],
         )?;
     }
+    Ok(())
+}
 
-    // Restore biblio_network_meta
+/// `biblio_network_meta` + `biblio_network_nodes` + `biblio_network_edges`.
+fn import_biblio_networks(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for bnm in &backup.biblio_network_meta {
         let id = get_str(bnm, "id");
         let network_type = get_str_field(bnm, "networkType", "network_type").unwrap_or_default();
@@ -932,7 +1020,6 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
     }
 
-    // Restore biblio_network_nodes
     for bnn in &backup.biblio_network_nodes {
         let id = get_str(bnn, "id");
         let network_id = get_str_field(bnn, "networkId", "network_id").unwrap_or_default();
@@ -948,7 +1035,6 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
         )?;
     }
 
-    // Restore biblio_network_edges
     for bne in &backup.biblio_network_edges {
         let id = get_str(bne, "id");
         let network_id = get_str_field(bne, "networkId", "network_id").unwrap_or_default();
@@ -960,8 +1046,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![id, network_id, source_id, target_id, weight],
         )?;
     }
+    Ok(())
+}
 
-    // Restore LLM config (without keys)
+fn import_llm_config(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     if let Some(ref llm_backup) = backup.llm_config {
         tx.execute(
             "INSERT INTO llm_config (id, provider, endpoint_url, model_name, \
@@ -970,12 +1058,13 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![llm_backup.provider, llm_backup.endpoint_url, llm_backup.model_name],
         )?;
     }
+    Ok(())
+}
 
-    // Restore project-portable app_settings (screening rules, summary mode,
-    // auto-translate, screening-mode params). Only allowlisted keys from the
-    // backup are applied; absent keys leave the target machine's value
-    // untouched. The `is_project_portable` guard is defense-in-depth: even if
-    // a hand-edited backup adds a non-allowlisted key, it is ignored.
+/// Project-portable `app_settings`. Only allowlisted keys are applied
+/// (defense-in-depth via `is_project_portable`); absent keys leave the target
+/// machine's value untouched.
+fn import_app_settings(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
     for setting in &backup.app_settings {
         if !app_settings_repo::is_project_portable(&setting.key) {
             continue;
@@ -986,21 +1075,10 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
             rusqlite::params![setting.key, setting.value],
         )?;
     }
-
-    tx.commit()
-        .map_err(|e| AppError::Import(format!("Failed to commit import transaction: {}", e)))?;
-
-    // Re-enable foreign key checks after import
-    conn.execute("PRAGMA foreign_keys = ON", [])?;
-
-    // Post-import: resolve journal links for imported articles & reference papers.
-    // Backup files don't store journal_index_id (it's derived from ISSN/eISSN/journal name),
-    // so we rematch against the journal_index table.
-    let _ = crate::db::article_repo::rematch_all_journals(conn);
-    let _ = crate::db::reference_repo::rematch_all_journals(conn);
-
     Ok(())
 }
+
+// ── Shared helpers ──────────────────────────────────────────────────────────
 
 fn get_str(v: &serde_json::Value, key: &str) -> String {
     v.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string()
@@ -1019,7 +1097,6 @@ fn find_existing_paper_id(
     authors: &str,
     publication_year: Option<i64>,
 ) -> Option<String> {
-    // Try DOI first
     if let Some(doi) = doi {
         let result: Option<String> = conn
             .query_row("SELECT id FROM reference_papers WHERE doi = ?1 LIMIT 1", [doi], |row| {
@@ -1030,7 +1107,6 @@ fn find_existing_paper_id(
             return Some(id);
         }
     }
-    // Then title + authors + year
     match publication_year {
         Some(y) => conn.query_row(
             "SELECT id FROM reference_papers WHERE LOWER(title) = LOWER(?1) AND authors = ?2 AND publication_year = ?3 LIMIT 1",

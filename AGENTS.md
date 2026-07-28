@@ -990,6 +990,17 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     the biblio tables. The import code uses `INSERT OR IGNORE` + ID-remap maps for
     `reference_papers`, `biblio_authors`, `biblio_institutions`, and `biblio_terms` (all have
     UNIQUE constraints) to handle older backups that may still contain biblio data.
+    **`import_project` decomposition** (refactor v5, see `.worktrees/refactor5.md` +
+    `docs/test-plans/refactor5-tests.md`): the 780-line monolith is now ~75 lines of
+    orchestration calling 20 per-table `import_*` fns (one per table, dependency-ordered).
+    `ImportMaps` threads the 4 ID-remap HashMaps (paper/author/institution/term).
+    `lookup_existing_id_by_unique_col` (single-column UNIQUE dedup for
+    `biblio_authors`/`biblio_institutions`) + `find_existing_paper_id` (multi-field paper
+    dedup) + inline composite-key lookup for `biblio_terms` `(normalized_term, term_type)`.
+    `DELETE_STATEMENTS` const array holds the 25 reverse-dependency DELETEs. Each
+    `import_*` fn takes `&Transaction`; only `import_project` owns the tx lifecycle. 2 new
+    dedup-path tests (`import_reference_papers_dedup_via_doi`,
+    `import_biblio_terms_dedup_composite_key`) cover the ID-remap paths. 16 total tests pass.
     **Tag/label color preservation**: the `tags` + `labels` import INSERTs include the
     nullable `color` column (extracted via `get_str_field(v, "color", "color") ->
     `Option<String>`, so absent colors in old backups bind `None` -> SQL `NULL`,
@@ -1760,7 +1771,10 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   `exim-tests.md` (4 rows: export/import orphan-audit-entry cleanup +
   v006 empty-string `article_id` heal),
   `import-plan-tests.md` (37 rows: batch-import Concern 1-3 + split-pipeline
-  direct tests + Phase 1/2 lock-scope discovery helpers + end-to-end).
+  direct tests + Phase 1/2 lock-scope discovery helpers + end-to-end),
+  `refactor3-tests.md` (screening engine decomposition: decision/error_classify/
+  json_parse/article_writer pure-fn tests + post-landing gap coverage),
+  `refactor5-tests.md` (2 rows: `import_project` ID-remap dedup paths).
 - **`.worktrees/`** - planning documents (`language-plan-v2.md` is the active
   translation plan; the superseded `language-plan.md` is archived in `DONOTUSE/`;
   implemented/temporary docs are archived in `DONOTUSE/`, such as the timeline plan
