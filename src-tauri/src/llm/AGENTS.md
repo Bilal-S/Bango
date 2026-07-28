@@ -77,8 +77,15 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   inspects this flag and persists the flag; callers see only `(String, usize)`.
 - **Orchestrator post-call persistence**: `LlmOrchestrator::send` calls
   `maybe_persist_skip_temperature(meta)` after a successful call. If the flag
-  is set, it spawns a detached `tokio::task::spawn_blocking` that invokes the
-  wired `TemperatureFlagPersister`. The trait decouples the LLM layer from
+  is set, it (a) latches an in-session `AtomicBool`
+  (`temperature_rejected_in_session`) so every subsequent call in this process
+  omits `temperature` from the start (no wasteful first-attempt 400 + retry),
+  and (b) spawns a detached `tokio::task::spawn_blocking` that invokes the
+  wired `TemperatureFlagPersister` to persist the flag to the DB for future
+  process restarts. The in-session latch is the fix for the "every screening
+  batch retries temperature" bug: long-running consumers (screening engine)
+  cache `LlmConfig` in memory and never re-read the DB row mid-run, so DB
+  persistence alone cannot reach them. The trait decouples the LLM layer from
   `tauri::AppHandle` + `DbState`; the production impl
   (`AppHandleTemperaturePersister` in `lib.rs`) runs the targeted
   `llm_config_repo::set_skip_temperature` `UPDATE` (NOT `save_config`, which
@@ -90,11 +97,14 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   DB lock before invoking `orchestrator.send` (spec §8.1 "lock-release-call-
   lock" worker pattern + the same discipline enforced across all command
   handlers). So the persister's lock acquisition cannot deadlock with a caller.
-- **`send_unthrottled` + `test_connection` do NOT persist**: the sole
-  unthrottled caller is `test_llm_connection`, which owns its own
-  temperature-recovery + persistence (so it can show the "temperature not
-  supported - auto-adjusted" toast). Persisting in the unthrottled path would
-  double-handle.
+- **`send_unthrottled` does NOT persist**: it is used only for legacy edge
+  cases and intentionally does not touch the temperature flag. `test_connection`
+  DOES participate: it returns `(String, usize, CallMeta)` and flips the
+  in-session latch on recovery, so `test_llm_connection` can detect the
+  recovery (`Ok` + `temperature_was_rejected`) and persist
+  `skip_temperature = true` to the DB. This closes the regression where the
+  client-level recovery made the 400 silent, causing `test_llm_connection` to
+  report success without persisting the flag.
 - **Test ergonomics**: `LlmOrchestrator::new(max_conc, delay_ms)` is unchanged
   (2 params). The persister is wired via a separate
   `set_temperature_persister(Arc<dyn TemperatureFlagPersister>)` setter, so the
@@ -183,9 +193,12 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
     `test_openai_temperature_400_with_skip_temperature_true_does_not_retry`,
     `test_openai_nontemperature_400_does_not_retry`,
     `test_openai_success_returns_default_callmeta`).
-- `cargo test --test llm_orchestrator_test` - 38 orchestrator tests including 2
+- `cargo test --test llm_orchestrator_test` - 40 orchestrator tests including 2
   temperature-persistence tests (`temperature_persister_fires_on_recovery`,
-  `temperature_persister_does_not_fire_on_normal_success`).
+  `temperature_persister_does_not_fire_on_normal_success`), 1 in-session
+  latch test (`session_latch_skips_temperature_on_second_call_after_first_rejection`),
+  and 1 Test Connection regression test
+  (`test_connection_surfaces_temperature_recovery_and_latches`).
 
 ## Child DOX Index
 

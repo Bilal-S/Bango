@@ -9,6 +9,7 @@
 //!   recovers from a temperature-rejection 400 (so the next call skips the
 //!   wasteful first-attempt failure)
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -143,6 +144,14 @@ pub struct LlmOrchestrator {
     /// 2-param [`new`](Self::new) constructor stays unchanged - the ~40 test
     /// call sites need zero edits.
     temp_persister: RwLock<Option<Arc<dyn TemperatureFlagPersister>>>,
+    /// In-session latch: once any call in this process recovers from a
+    /// temperature-rejection 400, this flips to `true` so every subsequent call
+    /// omits `temperature` from the start (no wasteful first-attempt 400 + retry).
+    /// Lock-free (`AtomicBool`) because it is written once (the first rejection)
+    /// and read on every call. Complements the DB persistence (which covers
+    /// future process restarts but cannot reach the in-memory `LlmConfig`
+    /// cached by long-running consumers like the screening engine).
+    temperature_rejected_in_session: AtomicBool,
 }
 
 /// No-op persister used when no DB is available (tests, or production before
@@ -174,6 +183,7 @@ impl LlmOrchestrator {
             )),
             request_delay_ms: Arc::new(tokio::sync::Mutex::new(request_delay_ms)),
             temp_persister: RwLock::new(None),
+            temperature_rejected_in_session: AtomicBool::new(false),
         }
     }
 
@@ -200,6 +210,12 @@ impl LlmOrchestrator {
         if !meta.temperature_was_rejected {
             return;
         }
+        // Latch the in-session flag FIRST so concurrent + immediately-following
+        // calls skip temperature without waiting for the detached DB write. This
+        // is the fix for the "every batch retries temperature" bug: long-running
+        // consumers (screening engine) cache `LlmConfig` and never re-read the
+        // DB row, so the DB persistence alone cannot reach them mid-run.
+        self.temperature_rejected_in_session.store(true, Ordering::Relaxed);
         let persister = self.temp_persister.read().unwrap_or_else(|p| p.into_inner()).clone();
         let Some(persister) = persister else {
             // No persister wired (tests, or pre-`set_temperature_persister`):
@@ -263,7 +279,29 @@ impl LlmOrchestrator {
         // 2. Rate limiting: ensure minimum delay between requests
         self.enforce_rate_limit().await;
 
-        // 3. Make the actual LLM call with a per-request-type timeout.
+        // 3. If a prior call in this session already discovered the model
+        //    rejects `temperature`, clone the caller's config with
+        //    `skip_temperature = true` so this call omits the parameter from
+        //    the start (no wasteful first-attempt 400 + retry). The session
+        //    latch complements DB persistence: the DB flag covers future
+        //    process restarts, but cannot reach the in-memory `LlmConfig`
+        //    cached by long-running consumers (e.g. the screening engine's
+        //    `HttpLlmClient.config`).
+        let effective_config: LlmConfig;
+        let config_ref = if self.temperature_rejected_in_session.load(Ordering::Relaxed)
+            && !config.skip_temperature
+        {
+            effective_config = {
+                let mut c = config.clone();
+                c.skip_temperature = true;
+                c
+            };
+            &effective_config
+        } else {
+            config
+        };
+
+        // 4. Make the actual LLM call with a per-request-type timeout.
         let timeout = timeout_for(&request_type);
         let timeout_secs = timeout.as_secs();
         eprintln!(
@@ -272,7 +310,7 @@ impl LlmOrchestrator {
         let call_start = std::time::Instant::now();
         let result = tokio::time::timeout(
             timeout,
-            client::send_chat_completion(config, system_prompt, user_prompt),
+            client::send_chat_completion(config_ref, system_prompt, user_prompt),
         )
         .await
         .map_err(|_| {
@@ -397,8 +435,11 @@ impl LlmOrchestrator {
     /// `temperature` on a rejection 400), but the flag is NOT persisted here -
     /// the caller (`test_llm_connection` command) owns its own persistence so it
     /// can show the user the "temperature not supported - auto-adjusted" toast.
-    pub async fn test_connection(&self, config: &LlmConfig) -> Result<(String, usize), AppError> {
-        let (content, tokens, _meta) = tokio::time::timeout(
+    pub async fn test_connection(
+        &self,
+        config: &LlmConfig,
+    ) -> Result<(String, usize, client::CallMeta), AppError> {
+        let (content, tokens, meta) = tokio::time::timeout(
             Duration::from_secs(30), // shorter timeout for connection test
             crate::llm::client::send_chat_completion(config, "You are a test.", "Say hello."),
         )
@@ -406,7 +447,19 @@ impl LlmOrchestrator {
         .map_err(|_| {
             AppError::Import("LLM connection test timed out after 30 seconds".to_string())
         })??;
-        Ok((content, tokens))
+        // Latch the in-session flag when Test Connection discovers a temperature
+        // rejection, so the very first screening/chat/summary call in the same
+        // session skips temperature from the start. Without this, the client
+        // recovery would silently swallow the 400 (returning Ok), and
+        // `test_llm_connection` would report success without persisting the
+        // flag - leaving screening batch 1 to rediscover the rejection.
+        // The DB persistence is owned by `test_llm_connection` (it saves the
+        // full config row so it can show the auto-adjusted toast); here we only
+        // flip the orchestrator's in-memory latch.
+        if meta.temperature_was_rejected {
+            self.temperature_rejected_in_session.store(true, Ordering::Relaxed);
+        }
+        Ok((content, tokens, meta))
     }
 
     /// List available models for a provider's discovery endpoint.

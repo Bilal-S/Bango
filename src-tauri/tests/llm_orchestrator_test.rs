@@ -1161,3 +1161,147 @@ async fn temperature_persister_does_not_fire_on_normal_success() {
         "persist(true) must NOT fire when the call succeeds without a temperature rejection"
     );
 }
+
+// ─── In-session temperature latch ─────────────────────────────────────
+//
+// After the FIRST call in a session recovers from a temperature-rejection 400,
+// the orchestrator latches an in-session flag so every subsequent call omits
+// `temperature` from the start (no wasteful first-attempt 400 + retry). This
+// is the fix for the "every screening batch retries temperature" bug: long-
+// running consumers (screening engine) cache `LlmConfig` and never re-read the
+// DB row, so DB persistence alone cannot reach them mid-run.
+
+#[tokio::test]
+async fn session_latch_skips_temperature_on_second_call_after_first_rejection() {
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"error":{"message":"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}"#;
+
+    // Call 1: first attempt sends temperature (400), retry omits it (200).
+    // Total: 2 hits on the server for call 1.
+    let first_400 = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({"temperature": 0.2})))
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+    let first_200 = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(openai_chat_response("first-recovered", 5))
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Call 2: the in-session latch is now set, so the orchestrator must clone
+    // the config with skip_temperature=true. The request body must NOT contain
+    // "temperature" (only one hit, no retry).
+    let second_200 = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::JsonString(
+            serde_json::json!({
+                "model": "gpt-4o",
+                "messages": [
+                    {"role": "system", "content": "sys"},
+                    {"role": "user", "content": "usr"},
+                ],
+            })
+            .to_string(),
+        ))
+        .with_status(200)
+        .with_body(openai_chat_response("second-direct", 5))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let orch = Arc::new(LlmOrchestrator::new(2, 0));
+    // No persister needed: the in-session latch works even without a persister.
+    let config = mock_openai_config(&server.url());
+
+    // Call 1: recovers from temperature rejection.
+    let r1 = orch.send(&config, "sys", "usr", LlmRequestType::AiSummary).await;
+    assert!(r1.is_ok(), "first call should recover");
+    assert_eq!(r1.unwrap().0, "first-recovered");
+
+    // Call 2: must go through with NO temperature (single hit, no retry).
+    let r2 = orch.send(&config, "sys", "usr", LlmRequestType::AiSummary).await;
+    assert!(r2.is_ok(), "second call should succeed directly");
+    assert_eq!(r2.unwrap().0, "second-direct");
+
+    // Assert the exact hit counts: call 1 = 2 (400 + 200), call 2 = 1 (200 only).
+    first_400.assert_async().await;
+    first_200.assert_async().await;
+    second_200.assert_async().await;
+}
+
+// ─── Test Connection temperature-recovery regression ──────────────────
+//
+// Regression: the client-level `send_with_temperature_recovery` made
+// `send_chat_completion` return Ok on a temperature 400 (transparent retry).
+// `test_connection` returned Ok too, so `test_llm_connection` reported success
+// WITHOUT persisting `skip_temperature=true`. Screening batch 1 then
+// rediscovered the rejection. This test asserts `test_connection` surfaces the
+// recovery via `CallMeta.temperature_was_rejected` AND flips the in-session
+// latch so the very next `send()` omits temperature.
+
+#[tokio::test]
+async fn test_connection_surfaces_temperature_recovery_and_latches() {
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"error":{"message":"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}"#;
+
+    // test_connection call: 400 (with temperature) then 200 (without).
+    let first = server
+        .mock("POST", "/chat/completions")
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+    let second = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(openai_chat_response("hello", 5))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let orch = Arc::new(LlmOrchestrator::new(2, 0));
+    let config = mock_openai_config(&server.url());
+
+    // test_connection must return Ok (recovered) with temperature_was_rejected.
+    let result = orch.test_connection(&config).await;
+    first.assert_async().await;
+    second.assert_async().await;
+    let (_content, _tokens, meta) = result.expect("test_connection should recover");
+    assert!(
+        meta.temperature_was_rejected,
+        "test_connection must surface temperature_was_rejected so test_llm_connection can persist"
+    );
+
+    // The latch must now be flipped: a subsequent send() must NOT send
+    // temperature (single hit, body without "temperature").
+    let third = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::JsonString(
+            serde_json::json!({
+                "model": "gpt-4o",
+                "messages": [
+                    {"role": "system", "content": "sys"},
+                    {"role": "user", "content": "usr"},
+                ],
+            })
+            .to_string(),
+        ))
+        .with_status(200)
+        .with_body(openai_chat_response("ok", 3))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let r = orch.send(&config, "sys", "usr", LlmRequestType::AiSummary).await;
+    assert!(r.is_ok());
+    third.assert_async().await;
+}

@@ -51,16 +51,42 @@ pub async fn test_llm_connection(
             .ok_or_else(|| AppError::Validation("No LLM config found".to_string()))?
     };
 
-    // First attempt: use config as-is (temperature included unless already skipped)
+    // First attempt: use config as-is (temperature included unless already
+    // skipped). The client-level recovery (`send_with_temperature_recovery`)
+    // may transparently retry without temperature and return Ok with
+    // `CallMeta.temperature_was_rejected = true`. We detect that here so we
+    // can persist the flag + show the auto-adjusted toast - without this,
+    // the recovery would be silent and screening batch 1 would rediscover
+    // the rejection (the regression fixed in this change).
     match orchestrator.test_connection(&config).await {
-        Ok(_) => Ok(TestConnectionResult {
-            success: true,
-            message: "Connection successful!".to_string(),
-        }),
+        Ok((_, _, meta)) => {
+            if meta.temperature_was_rejected && !config.skip_temperature {
+                // The client recovered from a temperature-rejection 400. Persist
+                // `skip_temperature = true` so future calls (screening, chat,
+                // summaries) skip the wasteful first-attempt failure. The
+                // orchestrator's in-session latch is already flipped inside
+                // `test_connection`.
+                let mut retry_config = config.clone();
+                retry_config.skip_temperature = true;
+                let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+                llm_config_repo::save_config(&conn, &retry_config)?;
+                Ok(TestConnectionResult {
+                    success: true,
+                    message: "Connection successful! (temperature not supported by this model - auto-adjusted)".to_string(),
+                })
+            } else {
+                Ok(TestConnectionResult {
+                    success: true,
+                    message: "Connection successful!".to_string(),
+                })
+            }
+        }
         Err(e) => {
             let err_msg = format!("{e}");
 
-            // Check if the error is temperature-related
+            // Check if the error is temperature-related (pre-client-recovery
+            // fallback: some providers may still surface the 400 as an error
+            // if the retry-without-temperature path also fails).
             if err_msg.contains("temperature") && !config.skip_temperature {
                 // Retry without temperature
                 let mut retry_config = config.clone();
