@@ -1,0 +1,101 @@
+//! Wiki Tauri commands: status, init, raw files, page CRUD, search/lint,
+//! chat, ingest pipeline, and static-site export.
+//!
+//! Directory module split (refactor v6, see `.worktrees/refactor6.md`):
+//! - `mod.rs` (this file) — shared progress helpers (`pub(super)`),
+//!   module declarations, and `pub use` re-exports so every historical
+//!   `crate::commands::wiki_cmd::*` import path keeps resolving (including
+//!   the `lib.rs` invoke-handler list + the `generate_export_inner` /
+//!   `SiteExportBundle` test entry points).
+//! - `status.rs` — drift check, status/root/init commands + result structs.
+//! - `raw_files.rs` — raw-file add/list/export commands.
+//! - `pages.rs` — page CRUD + page/source listings.
+//! - `search_lint.rs` — search, lint, graph.
+//! - `chat.rs` — wiki_chat delegate.
+//! - `ingest.rs` — ingest / rebuild / export-and-ingest + batch builder.
+//! - `site_export.rs` — static-site generate / zip / file helpers.
+//!
+//! Public API unchanged: `bango_lib::commands::wiki_cmd::*` import paths work
+//! identically to the pre-split single-file module.
+
+mod chat;
+mod ingest;
+mod pages;
+mod raw_files;
+mod search_lint;
+mod site_export;
+mod status;
+
+// Re-export every public symbol so callers + the lib.rs invoke-handler list
+// keep using `commands::wiki_cmd::<name>` without caring about the split.
+//
+// Glob re-exports are required (not explicit `pub use` lists) because the
+// `#[tauri::command]` proc macro generates `__tauri_command_name_*` consts
+// alongside each command fn; the `invoke_handler!` macro in `lib.rs`
+// references them via `commands::wiki_cmd::__tauri_command_name_*`. Glob
+// re-exports surface these macro-generated items automatically. Only `pub`
+// items are re-exported; `pub(super)` helpers (emit_wiki_progress,
+// log_wiki_ingest_warnings) stay module-private.
+pub use chat::*;
+pub use ingest::*;
+pub use pages::*;
+pub use raw_files::*;
+pub use search_lint::*;
+pub use site_export::*;
+pub use status::*;
+
+use serde::Serialize;
+use tauri::Emitter;
+
+/// Total steps in the wiki rebuild pipeline (for the progress bar).
+///
+/// Marked `pub` because `wiki::ingest::batching` and `wiki::ingest::mod`
+/// reference it when emitting their own `wiki:progress` events during the
+/// chunked ingest. The submodules of `wiki_cmd` access it via `super::`.
+pub const WIKI_PIPELINE_TOTAL_STEPS: usize = 100;
+
+/// Progress payload emitted via the `wiki:progress` event.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiProgress {
+    pub step: usize,
+    pub total_steps: usize,
+    pub message: String,
+}
+
+/// Emit a `wiki:progress` event. Shared by the ingest/rebuild/export-and-ingest
+/// commands in `ingest.rs` and `site_export.rs`.
+pub(super) fn emit_wiki_progress(app_handle: &tauri::AppHandle, step: usize, message: &str) {
+    let _ = app_handle.emit(
+        "wiki:progress",
+        WikiProgress { step, total_steps: WIKI_PIPELINE_TOTAL_STEPS, message: message.to_string() },
+    );
+}
+
+/// Log non-fatal ingest warnings (e.g. ungrounded pages, batch failures) to the
+/// audit table so they surface in Settings > Diagnostics and Notification
+/// History. Called after a successful ingest when `report.errors` is non-empty.
+/// Without this, the user sees only the toast count ("1 errors") with no way to
+/// find out what the error was.
+///
+/// Uses the canonical `audit_repo::log_error` (action = 'error', article_id =
+/// NULL, source = 'system') which is in the `audit_entries.action` CHECK
+/// allowlist. The previous `log_wiki_error` helper used action =
+/// 'wiki_ingest_error' which is NOT in the CHECK constraint, so SQLite silently
+/// rejected every insert and wiki errors never reached Diagnostics.
+pub(super) fn log_wiki_ingest_warnings(
+    conn: &rusqlite::Connection,
+    report: &crate::wiki::ingest::IngestReport,
+) {
+    if report.errors.is_empty() {
+        return;
+    }
+    let summary = format!(
+        "Wiki ingest completed with {} warning(s): {}",
+        report.errors.len(),
+        report.errors.join("; ")
+    );
+    if let Err(e) = crate::db::audit_repo::log_error(conn, &summary) {
+        eprintln!("[wiki] failed to log ingest warnings to audit table: {e}");
+    }
+}

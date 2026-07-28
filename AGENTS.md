@@ -570,7 +570,8 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     all sources at once and produces a self-consistent page set, so the manifest,
     pre-seed, dedup, and link rewrite are zero-cost no-ops.
     **Deterministic 5-layer pre-seed matrix** (`build_batches_with_manifest` in
-    `commands/wiki_cmd.rs`, runs unconditionally before the LLM on every
+    `commands/wiki_cmd/ingest.rs` (the `wiki_cmd` module is a directory since
+    refactor v6), runs unconditionally before the LLM on every
     single-batch AND multi-batch run): (1) `preseed_authors` writes rich author
     pages from `biblio_authors` (metrics, publications, research areas,
     collaborators); (2) `preseed_synthesis_from_ai_summaries` writes one
@@ -621,7 +622,13 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     maximal determinism should set it to `0` in Settings and rely on
     `skip_temperature` for incompatible models (the orchestrator + `client.rs`
     own the `skip_temperature` gate + retry-without-temperature path).
-    `commands/wiki_cmd.rs` exposes
+    `commands/wiki_cmd/` (directory module since refactor v6: `mod.rs` +
+    `status.rs`, `raw_files.rs`, `pages.rs`, `search_lint.rs`, `chat.rs`,
+    `ingest.rs`, `site_export.rs`; `pub use` re-exports in `mod.rs` keep all
+    `crate::commands::wiki_cmd::*` import paths identical, and glob re-exports
+    surface the `#[tauri::command]` macro-generated
+    `__tauri_command_name_*` consts the `lib.rs` `invoke_handler!` references)
+    exposes
     all Tauri commands: `wiki_get_status`, `wiki_init`, `wiki_export_raw`,
     `wiki_add_raw_file`, `wiki_list_raw_files`, `wiki_search`, `wiki_lint`,
     `wiki_get_page`, `wiki_update_page`, `wiki_delete_page`, `wiki_delete_wiki`,
@@ -808,8 +815,18 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     (keyword co-occurrence), and `cocitation.rs` (on-demand co-citation computation with 4
     normalization modes: Raw, Cosine, Jaccard, Pearson; `CocitationScope` = included/all
     articles). `mod.rs` re-exports the public API unchanged.
-  - **`src-tauri/src/db/article_repo.rs`** - article CRUD + the `ArticleQuery` filter
-    contract used by `query_articles` (the `query_articles` Tauri command feeds the Article
+  - **`src-tauri/src/db/article_repo/`** - article CRUD + queries + mutations for the
+    `articles` table. **Directory module** (refactor v6): split from the former
+    2,270-line `article_repo.rs` into `mod.rs` (shared constants + row mapper +
+    `pub use` re-exports) + 10 submodules (`screening_queries`, `insert`, `query`,
+    `mutations`, `metadata`, `bulk_ops`, `full_text`, `translation`, `doi_journal`,
+    `delete`). Public API unchanged: `crate::db::article_repo::*` import paths
+    resolve identically via the `mod.rs` re-exports (mirrors the `biblio_repo/`
+    and `screening/engine/` directory-module precedents). Tested by ~25 external
+    test files in `src-tauri/tests/` (article_* + bulk_tag_label + screening +
+    batch_import + project_backup + wiki_full_text_refresh + the dedicated
+    `article_repo_coverage_test.rs` gap-fillers added by refactor v6).
+    **`ArticleQuery` contract** (the `query_articles` Tauri command feeds the Article
     list table). `ArticleQuery` carries four tag/label filter vectors: `tags` +
     `excluded_tags`, `labels` + `excluded_labels`. The inclusion vectors (`tags`/`labels`)
     emit `articles.id IN (SELECT ...)` clauses (article must have the tag/label); the
@@ -945,7 +962,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     Every command handler and engine that locks `DbState.conn` MUST route through `lock_conn`
     instead of inlining `.lock().map_err(...)` so poison errors stay correctly categorized as
     application-state errors and the error-mapping boilerplate is not duplicated. The private
-    `lock_conn` in `commands/wiki_cmd.rs` and `lock_db` in `translation/engine.rs` were removed
+    `lock_conn` in `commands/wiki_cmd` (now a directory module since refactor v6) and `lock_db` in `translation/engine.rs` were removed
     in favor of this shared helper. Tested in `tests/lock_poison_test.rs`.
   - **`src-tauri/src/db/schema_check.rs`** + **`rebuild.rs`** - startup legacy-DB detection
     and schema rebuild. `check_schema` classifies a live DB as `Current` / `Legacy` / `FreshDb`
