@@ -12,7 +12,7 @@ use bango_lib::error::AppError;
 use bango_lib::models::article::NewArticle;
 use bango_lib::models::criterion::{Criterion, CriterionType, ResearchAim};
 use bango_lib::screening::chunk_retrieval::{rank_chunks_by_criteria, DEFAULT_MAX_CHUNK_WORDS};
-use bango_lib::screening::engine::{ScreeningConfig, ScreeningEngine};
+use bango_lib::screening::engine::{RunSyncContext, ScreeningConfig, ScreeningEngine};
 use bango_lib::screening::llm_client::LlmClient;
 use bango_lib::utils::chunking::Chunk;
 
@@ -171,7 +171,14 @@ async fn two_stage_skips_clear_cut_include() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
     assert_eq!(
@@ -195,7 +202,14 @@ async fn two_stage_skips_clear_cut_exclude() {
     let mock = CountingMock::new(response("exclude", 0.2, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
     assert_eq!(
@@ -220,7 +234,14 @@ async fn two_stage_triggers_on_borderline() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
     assert_eq!(
@@ -249,7 +270,14 @@ async fn two_stage_logs_both_passes_to_audit() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
     let conn = db.lock().unwrap();
@@ -282,7 +310,14 @@ async fn enhanced_mode_always_sends_evidence() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            enhanced_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
     let evidence_seen = mock.evidence_seen.lock().unwrap().clone();
@@ -341,7 +376,14 @@ async fn two_stage_progress_updates_when_evidence_filtered_out() {
     );
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -375,7 +417,14 @@ async fn two_stage_accumulates_actual_tokens() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -406,7 +455,14 @@ async fn enhanced_audit_label_names_matched_section_only() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            enhanced_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -447,7 +503,14 @@ async fn enhanced_mode_falls_back_to_abstract_when_no_full_text() {
     let mock = CountingMock::new(response("include", 0.95, &inc_id), String::new());
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, enhanced_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            enhanced_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -477,7 +540,14 @@ async fn two_stage_mode_falls_back_to_abstract_when_no_full_text() {
         CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
     let engine = ScreeningEngine::with_batch_size(1);
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, two_stage_config(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -575,7 +645,14 @@ async fn stop_during_request_delay_stage2_path() {
     let run_db = db.clone();
     let run_handle = tokio::spawn(async move {
         let _ = run_engine
-            .run_sync(&run_db, &mock, 2000, criteria, aims, two_stage_config(), None, None)
+            .run_sync(
+                &run_db,
+                &mock,
+                criteria,
+                aims,
+                two_stage_config(),
+                &RunSyncContext { request_delay_ms: 2000, ..Default::default() },
+            )
             .await;
     });
     // Wait long enough for stage 1 + stage 2 mock + stage-2 LLM select!
@@ -615,5 +692,64 @@ async fn stop_during_request_delay_stage2_path() {
     assert_eq!(
         status, "rejected",
         "stage-1 decision (exclude) must be preserved when stage-2 is cancelled"
+    );
+}
+
+// ─── update_progress contract (refactor3 post-landing gap) ──────────────────
+//
+// The private `ScreeningEngine::update_progress` method (engine.rs) is a
+// 3-line closure-based lock-mutate-emit helper. It cannot be called directly
+// from an integration test (private), so this test exercises its contract
+// through the public API: the `stage` + `stage_total` progress fields are set
+// EXCLUSIVELY via `update_progress` calls (initial two-stage setup in run_sync
+// + the per-borderline-article updates in run_stage2_borderline). Asserting
+// those fields land correctly proves the closure mutation + emit path works.
+
+#[tokio::test]
+async fn update_progress_populates_stage_fields_in_two_stage_mode() {
+    let db = setup_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        let id = seed_article_with_full_text(&conn, "Borderline Progress");
+        seed_chunks(&conn, &id, &[("Methods", "sugar tax study design rct children")]);
+        seed_criteria(&conn)
+    };
+    let inc_id = inclusion_id(&criteria);
+    // Stage 1: borderline confidence 0.55 -> triggers stage 2.
+    // Stage 2: override to include @ 0.9.
+    let mock =
+        CountingMock::new(response("exclude", 0.55, &inc_id), response("include", 0.9, &inc_id));
+    let engine = ScreeningEngine::with_batch_size(1);
+    engine
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            two_stage_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
+        .await
+        .expect("run_sync");
+
+    let progress = engine.get_progress().await;
+    // After the run, stage-2 has completed: `stage` must be populated with the
+    // final "Stage 2: N/N borderline (full text)" line (set via update_progress).
+    assert!(
+        progress.stage.is_some(),
+        "update_progress must populate the `stage` field for two-stage runs"
+    );
+    let stage = progress.stage.as_ref().expect("stage");
+    assert!(stage.starts_with("Stage 2:"), "stage must reflect stage-2 completion, got: {stage}");
+    assert!(
+        stage.contains("1/1"),
+        "stage must show 1/1 borderline completed (set via update_progress), got: {stage}"
+    );
+    // `stage_total` is set to the borderline count via update_progress on
+    // stage-2 entry. Must be Some(1) after the run.
+    assert_eq!(
+        progress.stage_total,
+        Some(1),
+        "update_progress must set `stage_total` to the borderline article count"
     );
 }

@@ -11,7 +11,9 @@ use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::LlmOrchestrator;
-use crate::screening::engine::{ScreeningConfig, ScreeningEngine, ScreeningProgress};
+use crate::screening::engine::{
+    RunSyncContext, ScreeningConfig, ScreeningEngine, ScreeningProgress,
+};
 use crate::screening::llm_client::HttpLlmClient;
 use crate::screening::token_estimation;
 
@@ -318,12 +320,15 @@ pub async fn start_screening(
             .run_sync(
                 &db.conn,
                 &llm,
-                delay_ms,
                 criteria,
                 aims,
                 screening_config,
-                Some(app_handle.clone()),
-                None, // batch-screening mode: no targeted article ID
+                &RunSyncContext {
+                    request_delay_ms: delay_ms,
+                    app_handle: Some(app_handle.clone()),
+                    // batch-screening mode: no targeted article ID
+                    target_article_id: None,
+                },
             )
             .await;
 
@@ -622,12 +627,14 @@ pub async fn screen_article(
             .run_sync(
                 &db.conn,
                 &llm,
-                delay_ms,
                 criteria,
                 aims,
                 screening_config,
-                Some(app_handle.clone()),
-                Some(article_id),
+                &RunSyncContext {
+                    request_delay_ms: delay_ms,
+                    app_handle: Some(app_handle.clone()),
+                    target_article_id: Some(article_id),
+                },
             )
             .await;
 

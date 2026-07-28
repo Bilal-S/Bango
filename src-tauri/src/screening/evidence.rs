@@ -21,7 +21,12 @@
 //! The chunks-only path is byte-identical to the Tier 3 `format_chunks_as_evidence`
 //! output so abstract-mode + chunks-only-mode prompts stay stable.
 
-use crate::screening::chunk_retrieval::ScoredChunk;
+use crate::db::chunk_repo;
+use crate::screening::chunk_retrieval::{
+    rank_chunks_by_criteria, ScoredChunk, DEFAULT_MAX_CHUNK_WORDS,
+};
+use crate::screening::engine::ScreeningConfig;
+use rusqlite::Connection;
 
 /// The resolved evidence for one article, in complementarity order.
 #[derive(Debug, Clone)]
@@ -255,3 +260,71 @@ fn build_chunks_sections_label(chunks: &[ScoredChunk]) -> String {
 // integration test file `src-tauri/tests/evidence_test.rs` (extracted per
 // CLAUDE.md lines 147-148: "Avoid large inline unit tests in library source
 // files... instead, move them into standalone integration test files").
+
+/// The evidence body string plus the deduped section labels that survived
+/// ranking (e.g. `"§Methods, §Results"`), for the audit trail.
+#[derive(Debug, Clone)]
+pub(crate) struct ArticleEvidence {
+    /// The formatted `[§Methods] ...` block (the `full_text_evidence` value).
+    pub text: String,
+    /// Section labels actually present in the retrieved chunks, joined for the
+    /// audit detail (e.g. `"§Methods, §Results"`). Stable order: deduped,
+    /// preserved in retrieval (highest-ranked-first) order.
+    pub sections_label: String,
+}
+
+/// Rank the given chunks against the criteria text, returning the top-K
+/// scored chunks (no DB, no formatting). Pure helper.
+pub(crate) fn rank_evidence_chunks(
+    chunks: Vec<crate::utils::chunking::Chunk>,
+    inclusion_texts: &[String],
+    exclusion_texts: &[String],
+    config: &ScreeningConfig,
+) -> Vec<ScoredChunk> {
+    let allow = &config.enhanced_sections;
+    let filtered: Vec<_> = chunks
+        .into_iter()
+        .filter(|c| match c.section.as_deref() {
+            Some(s) => allow.iter().any(|a| a.eq_ignore_ascii_case(s)),
+            None => true,
+        })
+        .collect();
+    if filtered.is_empty() {
+        return Vec::new();
+    }
+    rank_chunks_by_criteria(
+        &filtered,
+        inclusion_texts,
+        exclusion_texts,
+        config.enhanced_top_k,
+        DEFAULT_MAX_CHUNK_WORDS,
+        config.chunk_budget_per_article,
+    )
+}
+
+/// Tier 3 + Tier 4.1: retrieve + rank + resolve the supporting evidence for one
+/// article. Reads the AI-summary blob AND chunks from `article_chunks`,
+/// ranks the chunks, then delegates to `resolve_evidence`.
+pub(crate) fn retrieve_evidence_for_article(
+    conn: &Connection,
+    article_id: &str,
+    inclusion_texts: &[String],
+    exclusion_texts: &[String],
+    config: &ScreeningConfig,
+) -> Option<ArticleEvidence> {
+    let ai_summary_json: Option<String> = conn
+        .query_row(
+            "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+            rusqlite::params![article_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten();
+    let chunks = chunk_repo::list_chunks_for_article(conn, article_id).ok()?;
+    let scored = rank_evidence_chunks(chunks, inclusion_texts, exclusion_texts, config);
+    let evidence = resolve_evidence(ai_summary_json.as_deref(), &scored);
+    if evidence.source_type == EvidenceSource::None {
+        return None;
+    }
+    Some(ArticleEvidence { text: evidence.text, sections_label: evidence.sections_label })
+}

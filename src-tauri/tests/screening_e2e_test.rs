@@ -17,7 +17,7 @@ use bango_lib::db::migration::run_migrations;
 use bango_lib::error::AppError;
 use bango_lib::models::article::NewArticle;
 use bango_lib::models::criterion::{Criterion, ResearchAim};
-use bango_lib::screening::engine::{ScreeningConfig, ScreeningEngine};
+use bango_lib::screening::engine::{RunSyncContext, ScreeningConfig, ScreeningEngine};
 use bango_lib::screening::llm_client::LlmClient;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -175,7 +175,14 @@ async fn test_happy_path_bare_array_batch2() {
     let engine = ScreeningEngine::with_batch_size(2);
 
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            ScreeningConfig::default(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -204,7 +211,14 @@ async fn test_envelope_format() {
     let engine = ScreeningEngine::with_batch_size(2);
 
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            ScreeningConfig::default(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -230,7 +244,14 @@ async fn test_partial_error_one_batch_malformed() {
     let engine = ScreeningEngine::with_batch_size(2);
 
     engine
-        .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            ScreeningConfig::default(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -270,7 +291,14 @@ async fn test_cancel_mid_run() {
 
     let mock = CancelAwareMock::new(6, 2, 100);
     engine_clone
-        .run_sync(&db, &mock, 10, criteria, aims, ScreeningConfig::default(), None, None)
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            ScreeningConfig::default(),
+            &RunSyncContext { request_delay_ms: 10, ..Default::default() },
+        )
         .await
         .expect("run_sync");
 
@@ -307,12 +335,14 @@ async fn test_resume_after_cancel() {
             .run_sync(
                 &db,
                 &mock,
-                10,
                 criteria.clone(),
                 aims.clone(),
                 ScreeningConfig::default(),
-                None,
-                None, // batch-screening mode: no targeted article ID
+                &RunSyncContext {
+                    request_delay_ms: 10,
+                    // batch-screening mode: no targeted article ID
+                    ..Default::default()
+                },
             )
             .await
             .expect("run 1");
@@ -342,7 +372,14 @@ async fn test_resume_after_cancel() {
         let engine = ScreeningEngine::with_batch_size(2);
 
         engine
-            .run_sync(&db, &mock, 0, criteria, aims, ScreeningConfig::default(), None, None)
+            .run_sync(
+                &db,
+                &mock,
+                criteria,
+                aims,
+                ScreeningConfig::default(),
+                &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+            )
             .await
             .expect("run 2");
 
@@ -354,4 +391,173 @@ async fn test_resume_after_cancel() {
     let conn = db.lock().unwrap();
     let unscreened = article_repo::count_unscreened_working(&conn).unwrap();
     assert_eq!(unscreened, 0, "No unscreened articles remain");
+}
+
+// ─── target_article_id tests (per-article "Screen" button path) ─────────────
+//
+// These cover the `RunSyncContext.target_article_id` branch of `run_sync`
+// (engine.rs): when `Some(id)` is set, the engine fetches that specific
+// article by UUID via `get_unscreened_working_article_by_id` instead of the
+// next-by-`sequence_id` batch. The article must be in `working` status and
+// unscreened; otherwise the lookup returns `None` and the engine exits
+// immediately with `Ok(())` (no-op, not an error).
+
+#[tokio::test]
+async fn test_target_article_id_screens_only_that_article() {
+    let db = setup_db();
+    let (criteria, aims, ids) = {
+        let conn = db.lock().unwrap();
+        let ids = seed_articles(&conn, 4);
+        let (criteria, aims) = seed_criteria(&conn);
+        (criteria, aims, ids)
+    };
+
+    // Target the second article specifically (per-article "Screen" button).
+    let target_id = ids[1].clone();
+    let responses = vec![make_batch_response(1, 0)];
+    let mock = MockLlmClient::new(responses);
+    let engine = ScreeningEngine::with_batch_size(2);
+
+    engine
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            ScreeningConfig::default(),
+            &RunSyncContext {
+                request_delay_ms: 0,
+                target_article_id: Some(target_id),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("run_sync");
+
+    let progress = engine.get_progress().await;
+    assert_eq!(progress.completed, 1, "Only the targeted article should be screened");
+    assert_eq!(progress.errors, 0);
+    assert!(!progress.is_running);
+
+    // The other 3 articles should remain unscreened.
+    let conn = db.lock().unwrap();
+    let unscreened = article_repo::count_unscreened_working(&conn).unwrap();
+    assert_eq!(unscreened, 3, "Other articles should remain unscreened");
+}
+
+#[tokio::test]
+async fn test_target_article_id_nonexistent_is_noop() {
+    let db = setup_db();
+    let (criteria, aims) = {
+        let conn = db.lock().unwrap();
+        seed_articles(&conn, 4);
+        seed_criteria(&conn)
+    };
+
+    // A random UUID that does not match any article.
+    let mock = MockLlmClient::new(Vec::new());
+    let engine = ScreeningEngine::with_batch_size(2);
+
+    let result = engine
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            ScreeningConfig::default(),
+            &RunSyncContext {
+                request_delay_ms: 0,
+                target_article_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(result.is_ok(), "Nonexistent target should be a clean no-op, not an error");
+
+    let progress = engine.get_progress().await;
+    assert_eq!(progress.completed, 0, "No articles should be screened");
+    assert!(!progress.is_running);
+
+    // No LLM call should have been made.
+    assert_eq!(mock.call_count.load(Ordering::SeqCst), 0, "No LLM call for nonexistent target");
+
+    // All 4 articles remain unscreened.
+    let conn = db.lock().unwrap();
+    let unscreened = article_repo::count_unscreened_working(&conn).unwrap();
+    assert_eq!(unscreened, 4);
+}
+
+#[tokio::test]
+async fn test_target_article_id_already_screened_is_noop() {
+    let db = setup_db();
+    let (criteria, aims, ids) = {
+        let conn = db.lock().unwrap();
+        let ids = seed_articles(&conn, 4);
+        let (criteria, aims) = seed_criteria(&conn);
+        (criteria, aims, ids)
+    };
+
+    let target_id = ids[0].clone();
+
+    // Run 1: screen the target article normally via targeted screening.
+    {
+        let mock = MockLlmClient::new(vec![make_batch_response(1, 0)]);
+        let engine = ScreeningEngine::with_batch_size(2);
+        engine
+            .run_sync(
+                &db,
+                &mock,
+                criteria.clone(),
+                aims.clone(),
+                ScreeningConfig::default(),
+                &RunSyncContext {
+                    request_delay_ms: 0,
+                    target_article_id: Some(target_id.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("run 1");
+
+        let progress = engine.get_progress().await;
+        assert_eq!(progress.completed, 1, "First run screens the target");
+    }
+
+    // Run 2: target the same article again — it's already screened, so the
+    // lookup returns `None` and the engine exits immediately.
+    {
+        let mock = MockLlmClient::new(Vec::new());
+        let engine = ScreeningEngine::with_batch_size(2);
+        let result = engine
+            .run_sync(
+                &db,
+                &mock,
+                criteria,
+                aims,
+                ScreeningConfig::default(),
+                &RunSyncContext {
+                    request_delay_ms: 0,
+                    target_article_id: Some(target_id),
+                    ..Default::default()
+                },
+            )
+            .await;
+
+        assert!(result.is_ok(), "Already-screened target should be a clean no-op");
+
+        let progress = engine.get_progress().await;
+        assert_eq!(progress.completed, 0, "Already-screened article should not be re-screened");
+        assert!(!progress.is_running);
+        assert_eq!(
+            mock.call_count.load(Ordering::SeqCst),
+            0,
+            "No LLM call for already-screened target"
+        );
+    }
+
+    // The other 3 articles should still be unscreened.
+    let conn = db.lock().unwrap();
+    let unscreened = article_repo::count_unscreened_working(&conn).unwrap();
+    assert_eq!(unscreened, 3, "Other articles should remain unscreened");
 }

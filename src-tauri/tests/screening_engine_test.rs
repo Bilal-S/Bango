@@ -4,7 +4,7 @@ use bango_lib::models::criterion::{Criterion, CriterionType, Priority};
 use bango_lib::screening::engine::{
     augment_matched_from_reasoning, balance_braces, build_global_criterion_numbering,
     create_or_match_label, create_or_match_tag, extract_json, process_screening_responses,
-    sanitize_tag_or_label_name, truncate_at_word_boundary, ScreeningEngine,
+    sanitize_tag_or_label_name, truncate_at_word_boundary, RunSyncContext, ScreeningEngine,
 };
 use rusqlite::Connection;
 
@@ -862,7 +862,16 @@ async fn auto_stop_after_3_consecutive_transient_failures() {
     };
     let engine = ScreeningEngine::with_batch_size(1);
     let mock = Always429Mock;
-    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let _ = engine
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            abstract_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
+        .await;
     let progress = engine.get_progress().await;
     assert!(!progress.is_running, "run should have stopped");
     assert!(progress.fatal_error.is_some(), "fatal_error should be set");
@@ -887,7 +896,16 @@ async fn auto_stop_immediately_on_auth_failure() {
     };
     let engine = ScreeningEngine::with_batch_size(1);
     let mock = Always401Mock;
-    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let _ = engine
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            abstract_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
+        .await;
     let progress = engine.get_progress().await;
     assert!(!progress.is_running, "run should have stopped");
     assert!(progress.fatal_error.is_some(), "fatal_error should be set");
@@ -919,7 +937,16 @@ async fn transient_counter_resets_on_success() {
         .clone();
     let engine = ScreeningEngine::with_batch_size(1);
     let mock = FailThenSucceedMock { fail_count: std::sync::atomic::AtomicUsize::new(0), inc_id };
-    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let _ = engine
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            abstract_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
+        .await;
     let progress = engine.get_progress().await;
     assert!(!progress.is_running, "run should have completed normally");
     assert!(progress.fatal_error.is_none(), "no fatal_error (success reset counter)");
@@ -943,7 +970,16 @@ async fn single_transient_does_not_double_count_progress() {
     };
     let engine = ScreeningEngine::with_batch_size(1);
     let mock = Always429Mock;
-    let _ = engine.run_sync(&db, &mock, 0, criteria, aims, abstract_config(), None, None).await;
+    let _ = engine
+        .run_sync(
+            &db,
+            &mock,
+            criteria,
+            aims,
+            abstract_config(),
+            &RunSyncContext { request_delay_ms: 0, ..Default::default() },
+        )
+        .await;
     let progress = engine.get_progress().await;
     // The run stops after 1 batch (only 1 article, and it fails with 429).
     // Since consecutive_transient_failures = 1 (< 3 threshold), it doesn't
@@ -1024,7 +1060,14 @@ async fn stop_during_request_delay_success_path() {
     let run_engine = engine.clone();
     let run_handle = tokio::spawn(async move {
         let _ = run_engine
-            .run_sync(&db, &mock, 3000, criteria, aims, abstract_config(), None, None)
+            .run_sync(
+                &db,
+                &mock,
+                criteria,
+                aims,
+                abstract_config(),
+                &RunSyncContext { request_delay_ms: 3000, ..Default::default() },
+            )
             .await;
     });
 
@@ -1075,7 +1118,14 @@ async fn stop_during_request_delay_transient_path() {
     let run_engine = engine.clone();
     let run_handle = tokio::spawn(async move {
         let _ = run_engine
-            .run_sync(&db, &mock, 3000, criteria, aims, abstract_config(), None, None)
+            .run_sync(
+                &db,
+                &mock,
+                criteria,
+                aims,
+                abstract_config(),
+                &RunSyncContext { request_delay_ms: 3000, ..Default::default() },
+            )
             .await;
     });
 

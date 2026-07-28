@@ -174,6 +174,34 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     Constants: `DEFAULT_TOP_K=2`, `DEFAULT_MAX_CHUNK_WORDS=600`, `METHODS_BOOST=0.25`,
     `DEFAULT_CHUNK_BUDGET_PER_ARTICLE=2400`. 11 inline tests + the §T3.7 inventory.
   - **`src-tauri/src/screening/` Tier 3 Phases C/D/E (enhanced + two_stage modes)** -
+    **Engine decomposition** (refactor v3, see `.worktrees/refactor3.md` +
+    `docs/test-plans/refactor3-tests.md`): `engine` is a **directory module**
+    (`engine/mod.rs` + `engine/{types,prompt_parts,stage2}.rs`) holding the
+    `ScreeningEngine` struct + `run_sync`; the 285-line stage-2 borderline loop
+    lives in `engine/stage2.rs` (`run_stage2_borderline(&Stage2Context)`,
+    returns `Ok(true)` on cancel / `Ok(false)` on completion, `tokio::select!`
+    cancel wrappers inline — timing-sensitive contract). Types
+    (`ScreeningConfig`, `RunSyncContext`, `ScreeningProgress`,
+    `LlmScreeningResponse`) live in `engine/types.rs`; shared prompt
+    construction (`ScreeningPromptParts` + `Stage2Context`) lives in
+    `engine/prompt_parts.rs`. Each submodule carries dedicated inline unit
+    tests (types serde, prompt-parts cloning, `is_borderline` predicate).
+    Sibling modules hold extracted free functions: `decision.rs`
+    (`resolve_article_decision` pure pipeline + `ArticleDecision`),
+    `error_classify.rs` (`classify_llm_error` + `LlmErrorOutcome`/`FatalReason`
+    + leaf classifiers), `json_parse.rs` (`process_screening_responses` +
+    repair helpers), `tags_labels.rs` (sanitize + create/match),
+    `article_writer.rs` (DB writes + `mark_batch_screening_error`),
+    `evidence.rs` (Tier 4.1 complementarity + retrieval).
+    `ScreeningEngine::run_sync` takes a `RunSyncContext` struct (bundles
+    `request_delay_ms` + `app_handle` + `target_article_id` so the signature
+    stays under `clippy::too_many_arguments`). Both stages build prompts via
+    `ScreeningPromptParts::build_prompt_input` (single source of truth).
+    Moved symbols stay re-exported from `engine` (`pub use`) so external test
+    import paths keep working. Tested in `tests/decision_test.rs`,
+    `tests/error_classify_test.rs`, `tests/json_parse_test.rs`,
+    `tests/article_writer_test.rs`, `tests/screening_e2e_test.rs`,
+    `tests/screening_two_stage_test.rs`, `tests/screening_engine_test.rs`.
     **Custom-logic governance contract** (v8.1): when `app_settings.screening_custom_logic`
     is present and non-empty (same trim + non-empty gate as the prompt's `## Custom Screening
     Instructions` emitter), the LLM's `decision` is final and the generic §4.1 priority
