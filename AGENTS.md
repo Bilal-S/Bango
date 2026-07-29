@@ -579,9 +579,20 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `full_text_ai_summary` JSON blob - slug = article UUID (so `[[uuid]]` links
     resolve), body = `summary_150_250_words` digest + `key_insights` bullets,
     `tags` = keyword-derived `[[concept-slug]]` candidates; (3)
-    `preseed_concept_hubs` writes top-25 `wiki/concepts/{term-slug}.md` hub
-    pages from `biblio_terms`, each linking to its articles (`[[uuid]]`) +
-    co-occurring concepts; (4) **`preseed_methods`** writes top-25
+    `preseed_concept_hubs` writes `wiki/concepts/{slug}.md` hub pages from
+    **two sources, slug-merged so tags win on collisions**: (a) top-40
+    user-curated tags by included-article count (the highest-signal source;
+    multi-word domain concepts like `supply-chain-management` that the
+    unigram-only `biblio_terms` extraction cannot produce; display name via
+    the pure `tag_to_display_name` helper), then (b) top-25 `biblio_terms` by
+    frequency (backfill for concepts the user hasn't tagged). When a tag and a
+    term normalize to the same slug, the term's articles + co-occurring
+    concepts are UNIONED into the tag's page (lossless). `fetch_top_tags` +
+    `fetch_top_terms` are separate fns so `methods::fetch_methods_from_terms`
+    (the abstracts-only fallback) still calls the terms-only path unchanged.
+    Each concept page links to its articles (`[[uuid]]`) + co-occurring
+    concepts. Tested in `tests/wiki_concepts_tags_test.rs` (11 tests);
+    (4) **`preseed_methods`** writes top-25
     `wiki/methods/{method-slug}.md` hub pages from AI-summary `study_design`
     (when present) with a `biblio_terms` fallback for abstracts-only corpora;
     a curated study-design lexicon (`STUDY_DESIGN_LEXICON` in

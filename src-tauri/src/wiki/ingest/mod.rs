@@ -26,7 +26,9 @@
 //!   (multi-batch only).
 //! - [`authors`]: Phase 1 author manifest + pre-seed.
 //! - [`synthesis`]: Phase 2 synthesis pre-seed from AI summaries.
-//! - [`concepts`]: Phase 3 concept hub pre-seed from `biblio_terms`.
+//! - [`concepts`]: Phase 3 concept hub pre-seed from top user-curated tags
+//!   (top-40 by included-article count) + `biblio_terms` (top-N by frequency),
+//!   slug-deduped so tags win on collisions.
 //! - [`methods`]: Phase 4 method hub pre-seed from AI-summary `study_design`
 //!   with a `biblio_terms` fallback (abstracts-only corpora).
 //! - [`sources`]: Layer 1 external-document source page pre-seed.
@@ -59,7 +61,7 @@ pub use batching::{
     build_ingest_prompt_batches, load_raw_sources, run_chunked_ingest, IngestBatch,
     IngestLlmSender, OrchestratorIngestSender, RawSource, INGEST_SYSTEM_PROMPT,
 };
-pub use concepts::preseed_concept_hubs;
+pub use concepts::{preseed_concept_hubs, tag_to_display_name, TAG_CONCEPT_LIMIT};
 pub use consolidation::{consolidate_pages, rewrite_page_links};
 pub use methods::preseed_methods;
 pub use sources::preseed_document_source_pages;
