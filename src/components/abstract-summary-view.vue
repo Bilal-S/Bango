@@ -3,6 +3,8 @@ import { ref, computed, watch } from 'vue';
 import type { Article } from '@/types';
 import {
   parseAiSummary,
+  requestArticleAiSummary,
+  pendingSummaries,
   requestFigureDescriptions,
   pendingFigureDescriptions,
 } from '@/composables/use-ai-summary';
@@ -15,6 +17,12 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ refreshArticle: [articleId: string] }>();
+
+/** True when an AI-summary LLM call is in flight for this article (covers both
+ *  initial generation and regeneration). Reuses the same `pendingSummaries`
+ *  singleton the detail header uses, so the spinner state stays in sync across
+ *  every entry point. */
+const isGeneratingSummary = computed(() => pendingSummaries.value.has(props.article.id));
 
 /** True when a figure-description LLM call is in flight for this article. */
 const isGeneratingFigures = computed(() => pendingFigureDescriptions.value.has(props.article.id));
@@ -35,6 +43,20 @@ const hasExistingFigureDescriptions = computed(
  *  and the new `figures`/`tables` keys render. */
 async function onGenerateFigureDescriptions(): Promise<void> {
   await requestFigureDescriptions(props.article.id, props.article.title, async (id) => {
+    emit('refreshArticle', id);
+  });
+}
+
+/** Regenerate the AI summary for this article. The backend
+ *  `generate_article_ai_summary` command merges the fresh summary into the
+ *  existing blob (preserving `figures`/`tables`), so regeneration is
+ *  non-destructive: the summary fields are overwritten in place while the
+ *  figure/table descriptions survive. Emits `refreshArticle` on completion so
+ *  the parent re-fetches the article and the new summary renders. The
+ *  `includeSections` param is left unset so the user's persisted
+ *  `bango-section-summaries` preference is respected. */
+async function onRegenerateSummary(): Promise<void> {
+  await requestArticleAiSummary(props.article.id, props.article.title, async (id) => {
     emit('refreshArticle', id);
   });
 }
@@ -168,12 +190,32 @@ watch(
     </p>
     <!-- AI Summary content -->
     <div v-else-if="abstractTab === 'aiSummary' && aiSummaryData" class="space-y-4">
-      <div class="flex items-center gap-2 text-xs text-slate-500">
-        <span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded font-semibold capitalize">
-          {{ aiSummaryData.field.replace(/_/g, ' ') }}
-        </span>
-        <span class="text-slate-400">·</span>
-        <span class="italic">{{ aiSummaryData.subfield }}</span>
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 text-xs text-slate-500 min-w-0">
+          <span class="bg-violet-100 text-violet-700 px-2 py-0.5 rounded font-semibold capitalize">
+            {{ aiSummaryData.field.replace(/_/g, ' ') }}
+          </span>
+          <span class="text-slate-400">·</span>
+          <span class="italic truncate">{{ aiSummaryData.subfield }}</span>
+        </div>
+        <!-- Regenerate button. Non-destructive: the backend merges the fresh
+             summary into the existing blob, preserving figures/tables. Mirrors
+             the figures Regenerate button below (same violet styling + spinner
+             gate). Disabled while a summary LLM call is in flight. -->
+        <button
+          class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+          :disabled="isGeneratingSummary"
+          title="Regenerate the AI summary from the full text"
+          @click="onRegenerateSummary"
+        >
+          <span
+            v-if="isGeneratingSummary"
+            class="material-symbols-outlined text-[14px] animate-spin"
+            >progress_activity</span
+          >
+          <span v-else class="material-symbols-outlined text-[14px]">refresh</span>
+          Regenerate
+        </button>
       </div>
       <!-- Summary (150-250 words) -->
       <div v-if="aiSummaryData.summary_150_250_words">
