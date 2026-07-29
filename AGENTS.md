@@ -1774,8 +1774,10 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
 - **`docs/CLAUDE.md`** - project coding rules (Rust/TS error handling, naming, LLM
   orchestrator pattern, DB rules, testing conventions).
 - **`docs/test-coverage-report.md`** - coverage baseline + under-coverage analysis for
-  Rust (`cargo-llvm-cov`, ~52% lines) and Vue/TS (`@vitest/coverage-v8`, ~18% lines).
-  Lists 0%-covered modules/components/composables/stores and ranks highest-value gaps.
+  Rust (`cargo-llvm-cov`, 64.53% lines as of 2026-07-29) and Vue/TS
+  (`@vitest/coverage-v8`, 40.37% lines). Lists 0%-covered modules/components/composables/
+  stores and ranks highest-value gaps (dominant Rust gap: 28 `commands/*.rs` shims at 0%,
+  6,703 lines; dominant Vue/TS gap: 15 views + 34 graph/presentational components at 0%).
 - **`docs/design-reference/00-design-patterns.md`** - design tokens (Material 3 inspired).
 - **`docs/test-plans/`** - binding test inventory files consumed by
   `scripts/check-test-inventory.sh` (wired into `npm run check:all`). Each plan that
