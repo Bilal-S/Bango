@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use tauri::Manager;
+
 use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::chunk_repo;
@@ -923,10 +925,47 @@ pub fn ensure_chunks_for_full_text_articles_with_progress(
 #[tauri::command]
 pub fn rebuild_article_chunks(
     db_state: tauri::State<'_, DbState>,
-    _app_handle: tauri::AppHandle,
+    app_handle: tauri::AppHandle,
 ) -> Result<RebuildChunksResult, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    Ok(ensure_chunks_for_full_text_articles(&conn, true))
+    let result = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        ensure_chunks_for_full_text_articles(&conn, true)
+    };
+    // Cascade: re-chunking changes the chunk body text, which invalidates the
+    // `input_hash` for every chunk row in `article_embeddings`. Fire-and-forget
+    // an embedding regeneration pass (`force=true` so every row is re-embedded
+    // regardless of the stale hash). Non-blocking: the rebuild result is
+    // returned immediately, and the embedding runs on a detached task that
+    // respects the orchestrator's concurrency + rate limits. Embeddings are
+    // best-effort here: a failure is logged inside the runner and never
+    // surfaces to the rebuild caller.
+    if result.success && result.chunked > 0 {
+        let handle = app_handle.clone();
+        tokio::task::spawn(async move {
+            let db = handle.state::<crate::db::connection::DbState>();
+            let orch = handle.state::<std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>();
+            // Wrap the orchestrator into the v2 HttpEmbeddingBatchSender.
+            let sender: std::sync::Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
+                std::sync::Arc::new(crate::embedding::runner::HttpEmbeddingBatchSender::new(
+                    std::sync::Arc::clone(&orch),
+                ));
+            let scope = crate::embedding::director::EmbeddingScope {
+                article_ids: None,
+                status_filter: Some("included".to_string()),
+                force: true,
+            };
+            let _ = crate::embedding::runner::generate_embeddings_inner(
+                &db,
+                sender,
+                scope,
+                Some(&handle),
+                false,
+                None,
+            )
+            .await;
+        });
+    }
+    Ok(result)
 }
 
 /// Count articles with full text attached (drives the "Rebuild text chunks"

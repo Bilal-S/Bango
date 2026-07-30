@@ -401,6 +401,70 @@ from project backups), `openalex_mailto` (polite-pool email, portable),
 `openalex_retrieve_references` (reference + citation harvest toggle, default
 false, portable).
 
+### 8.6 Embedding-Based Semantic Article Search
+
+The embedding pipeline generates per-article, per-chunk embedding vectors that
+power a bounded cosine-recall semantic search, intended for a future
+citation-finding feature. It is **transparent**: there is no settings card, no
+audit action, and no automatic backfill on upgrade. Feedback is toast-only via
+the Test Connection probe.
+
+#### 8.6.1 Capability probe + triple-state flag
+
+A **triple-state flag** in `app_settings` records the provider's embedding
+capability: `embedding_status` (`unknown` default | `enabled` | `disabled`),
+`embedding_model`, `embedding_dimensions`. The probe
+(`probe_embedding_support`) runs during **Test Connection** (after the chat
+test succeeds) and on the first `generate_embeddings` call when status is
+`unknown`. Resolution order: (1) Anthropic → `disabled` immediately; (2) try
+the provider-default embedding model (e.g. `text-embedding-3-small` for
+OpenAI); (3) on failure, retry with the configured chat model (some local
+servers serve embeddings from the loaded model); (4) both fail → `disabled`.
+On success the probe persists the model + dimensions. `save_llm_config`
+resets `embedding_status` to `unknown` so a provider/endpoint/model switch
+re-evaluates. The Test Connection response carries `embeddingStatus` +
+`embeddingModel` so the toast can report the outcome.
+
+#### 8.6.2 Generation
+
+`generate_embeddings(article_ids?, status_filter?, force?)` is the primary
+entry point. Default corpus is `included`. For each article the director
+computes the expected rows: a `chunk_index = -1` title+abstract row, plus one
+row per `article_chunks` row when `has_full_text = 1`. Per-row staleness is
+tracked by an `input_hash` (SHA-256 of the embedded text); the director skips
+rows whose hash matches, re-embeds on mismatch, and `force` re-embeds
+everything. The runner uses an outer `tokio::task::JoinSet` (one task per
+article), each calling the orchestrator's `send_embedding_batch_parallel`
+free function (per-text split → sub-batch bin-pack respecting per-provider
+`EmbeddingLimits` → parallel HTTP → token-weighted mean-pool). The DB mutex is
+never held across an `.await` (three brief lock bursts). Cancellation is via
+`JoinSet::abort_all`. Triggers: post-AI-summary fire-and-forget, rebuild-text-
+chunks cascade, batch-import Phase 5 (after summaries), and the standalone
+`generate_embeddings` command. Embeddings are categorized as
+`LlmRequestType::Embedding` with a 30s timeout.
+
+#### 8.6.3 Recall
+
+`recall_articles(query, top_k?, status_filter?)` embeds the query, loads all
+same-dimension rows matching the status filter (default `included`), max-pools
+cosine similarity per article, and returns the top-`top_k` (default 30)
+`{ articleId, score }` hits. Gates on `embedding_status == enabled` AND
+`dimensions > 0`; returns an empty vec (caller falls back) otherwise. Rows
+whose dimensions mismatch the query vector are excluded (defense-in-depth
+against a provider switch leaving stale-dimension rows).
+
+#### 8.6.4 Storage + backup contract
+
+The `article_embeddings` table (migration v007) is keyed on
+`(article_id, chunk_index)` with `-1` as the title+abstract sentinel. Vectors
+are little-endian `f32` streams. `ON DELETE CASCADE` removes rows on article
+hard-delete. It is a **regenerable derived artifact**: deliberately excluded
+from `ProjectBackup` (like `article_chunks`); `rebuild::DROP_TABLES` wipes it
+on `reset_project`; the import purge sequence `DELETE FROM article_embeddings`
+runs alongside `article_chunks` because `PRAGMA foreign_keys=OFF` during
+import suppresses the cascade. No `audit_entries` action records embeddings
+(toast-only feedback).
+
 ## 9. UI Layout & Design System
 
 The application design is based on the **"Scholarly Precision"** style, utilizing a dense, minimalist Notion-like aesthetic.
@@ -451,6 +515,7 @@ The following features remain explicitly **out of scope**:
 ## Change Log
 
 | Version | Date | Key Improvements |
+| **v8.8** | 2026-07-30 | **Embedding pipeline hardening (gap closure)**. (1) **Dimension-persistence fix** (`commands/llm_config.rs`): the Test Connection probe path previously hardcoded `dimensions = 0` when persisting the probe outcome, dropping the real `ProbeOutcome.dimensions` value. This left `recall` gated off (`dimensions <= 0`) until the first `generate_embeddings` call populated it. The fix threads `dimensions` through `probe_embeddings_sync` → `persist_embedding_probe` → `set_embedding_status`. The extracted DB-write core `persist_embedding_probe_to_conn` is `pub` so the contract is regression-tested in `tests/embedding_probe_persist_test.rs` (4 tests). The standalone `probe_embeddings` command was already correct; only the Test Connection path lost the value. (2) **Embedding DOX + spec** (§8.6): added the `embedding/` module to the root `AGENTS.md` Owned-modules index; added an "Embeddings" section to `src-tauri/src/llm/AGENTS.md` (provider probe, triple-state flag, `send_embedding` routing, lock discipline, dimension guard) + corrected its Child DOX Index to list `embedding.rs`; added §8.6 to the v4 spec documenting the flow, triple-state flag, `recall` command, and backup-exclusion contract. No schema, migration, or backup-format changes. |
 | **v8.7** | 2026-07-22 | **Screening hang diagnostics + batch-size clamp revert** (diagnostics-only; no behavioral changes to cancellation, timeouts, or locking). Always-on instrumentation surfaced to diagnose a "hangs with a large corpus + Stop/Pause unresponsive" report: (1) `ScreeningProgress.phase: Option<String>` carries the coarse run-phase (`preparing:translating` / `preparing:chunking` / `screening` / `stage2`); the frontend progress bar renders it as the sub-line during prep phases so the user sees "Extracting full-text chunks..." instead of a silent 0% freeze. `#[serde(default)]` for backward-compat. (2) `log_diag!` macro (always-on, NOT gated on `cfg(debug_assertions)` like `debug_log!`) emits `[screening:diag]` lines for phase transitions, per-batch `batch_start`, stage-1/stage-2 cancel detection, `stop_screening: IPC received`, orchestrator `LLM call START/END/TIMEOUT`, and a 5s `HEARTBEAT` (exits on `is_running==false || cancel_token==true` so it never leaks past the run). (3) Phase B (chunk backfill) progress callback: `ensure_chunks_for_full_text_articles_with_progress` invokes a `ChunkProgressCb` per article; the screening task emits a `screening:progress` event + `chunk_progress: done/total` log line per article. The lock pattern is UNCHANGED — `db.conn.lock()` is still held across the whole pass; the callback only emits events between articles. (4) `connection.rs::lock_conn` times the acquire and emits `lock_conn: SLOW acquire ({ms}ms)` when > 100ms — the single most valuable signal for mutex-starvation hangs. (5) `translation/wait.rs` emits `translation_wait: START/DONE/TIMEOUT` per article (no-op when `auto_translate=false`). **Batch-size clamp reverted (Option B)**: `commands/screening.rs` now honors `1..=15` verbatim (matching the frontend stepper's `BATCH_MAX`); a previous v8.6 reduction to `clamp(1, 5)` silently overrode the user's selection on the unproven assumption that large batches cause hangs, masking the real per-batch behavior from the diagnostics. The orchestrator timeout + auto-stop guards surface any genuinely slow provider without baking in a batch-size assumption. **Outcome**: a re-run on the same 590-article corpus + Abstract mode that previously hung completed cleanly (590/590, 16-28s per 10-article batch, no slow locks, no timeouts, no Phase B), confirming the hang was transient and the v8.1-v8.6 fixes (single-attempt-per-batch, per-request-type timeout, transient-defer, auto-stop, cancellable delay) are the likely resolution. The diagnostics remain in place as standing observability. Run as `Bango 2>screening.log` and `grep '[screening:diag]'`; `scripts/bango-screen-w-proxy.sh` is a one-shot launcher (proxy + log capture). 3 new tests in `tests/screening_engine_test.rs`. No DB migration or backup-format changes. |
 | **v8.4** | 2026-07-22 | Three screening-engine improvements addressing the critique in `.worktrees/llmscreen2.md` (Tier 1 batch). (1) **Consecutive-failure auto-stop**: a wrong API key or sustained LLM outage no longer silently burns through all unscreened articles. Auth failures (401/403 without the Windows transient body) stop the run immediately (threshold = 1) with a `fatalError` message. Other transient errors (429/5xx/timeout/transport) stop after 3 consecutive failures. New pure `#[must_use]` helper `screening::engine::is_auth_failure(e) -> bool` distinguishes real auth failures from the Windows transient. (2) **Fixed phantom progress**: transient-deferred articles no longer inflate `progress.completed` or `progress.errors`. New `progress.deferred` counter tracks articles left unscreened due to transient errors; the frontend renders a distinct muted "N article(s) deferred" notice. Non-transient errors (malformed JSON, parse mismatch) still bump `completed`+`errors`. (3) **Actionable timeout messages**: the orchestrator's timeout error now includes guidance ("This is often caused by sustained rate limiting (429), server overload (5xx), or a slow model. Try reducing batch_size or increasing request_delay_ms") instead of the opaque "timed out after N seconds." No DB migration or backup-format changes. 5 new `is_auth_failure` unit tests. |
 | **v8.3** | 2026-07-22 | Three screening-engine improvements addressing the critique in `.worktrees/llmscreen.md`. (1) **Immediate Stop with response drop**: the engine now wraps both stage-1 and stage-2 LLM calls in `tokio::select!` against a `tokio::sync::Notify` cancel signal. Clicking Stop drops the in-flight LLM future (cancelling the underlying `reqwest` request) within milliseconds instead of waiting up to 2 minutes for the orchestrator timeout; the response is dropped - no DB write, no error marking. (2) **Transient errors leave articles unscreened**: when the LLM call fails with a transient error (429, 401/403 Windows transient, 5xx, timeout, transport/network), the engine leaves articles UNSCREENED (no `screening_error`, no `screened_at`) so the next run picks them up naturally - no manual "Reset Errors" workaround needed. New `after_sequence_id` cursor parameter on `get_next_unscreened_working_batch` + per-run `last_attempted_seq` tracking ensures the current run advances past failed batches instead of re-fetching infinitely. New pure `#[must_use]` helper `screening::engine::is_transient_llm_error(e) -> bool` classifies errors by inspecting the message string. Non-transient errors (malformed JSON, parse mismatch) keep the existing batch-error-marking behavior. (3) **Documented the Windows 401/403 retry rationale**: the `is_retryable_response` doc-comment in `client.rs` now explicitly documents the 4-layer retry policy (always-retry 429/408/5xx; conditionally-retry 401/403 with `insufficient permissions for this operation` body; never-retry plain 401/403; outer bounds) and why the transient-body gate exists. A distinct `eprintln!` log line fires when the gate matches so users can confirm the workaround engages. No frontend, DB migration, or backup-format changes. 8 new `is_transient_llm_error` unit tests + 5 new `batch_fetch_offset_*` repo tests. |

@@ -417,6 +417,42 @@ pub async fn generate_article_ai_summary_inner(
         serde_json::json!({ "articleId": article_id, "title": title }),
     );
 
+    // 7. Fire-and-forget embedding regeneration for this article. The summary
+    //    may have enriched the title/abstract signal; the director's
+    //    `input_hash` staleness check ensures only genuinely-changed rows
+    //    trigger a new embedding call. This hook is non-blocking: the summary
+    //    result is returned immediately, and the embedding runs on a detached
+    //    task that respects the orchestrator's concurrency + rate limits.
+    //    Embeddings are best-effort here: a failure is logged inside the
+    //    runner and never surfaces to the summary caller.
+    {
+        let handle = app_handle.clone();
+        let article_id_owned = article_id.to_string();
+        tokio::task::spawn(async move {
+            let db = handle.state::<crate::db::connection::DbState>();
+            let orch = handle.state::<std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>();
+            // Wrap the orchestrator into the v2 HttpEmbeddingBatchSender.
+            let sender: std::sync::Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
+                std::sync::Arc::new(crate::embedding::runner::HttpEmbeddingBatchSender::new(
+                    std::sync::Arc::clone(&orch),
+                ));
+            let scope = crate::embedding::director::EmbeddingScope {
+                article_ids: Some(vec![article_id_owned]),
+                status_filter: None,
+                force: false,
+            };
+            let _ = crate::embedding::runner::generate_embeddings_inner(
+                &db,
+                sender,
+                scope,
+                Some(&handle),
+                false,
+                None,
+            )
+            .await;
+        });
+    }
+
     // Return the merged blob so the frontend gets the preserved figures/tables.
     Ok(preserved_json)
 }

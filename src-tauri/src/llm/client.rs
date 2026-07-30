@@ -234,7 +234,7 @@ pub struct CallMeta {
 /// Only connect/pool timeouts are set here; the per-request wall-clock cap is
 /// owned by the orchestrator's `tokio::time::timeout` (600s) wrapper, which now
 /// also bounds the full retry sequence.
-fn shared_client() -> &'static reqwest::Client {
+pub(crate) fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
@@ -364,7 +364,7 @@ fn extract_trace_ids(resp: &reqwest::Response) -> String {
 /// body text on success. Each retry logs a trace with the request/cf-ray IDs so
 /// a Windows user can confirm the fix is engaging and paste `req_...` /
 /// `cf-ray=...` into an OpenAI support ticket.
-async fn send_with_retry(
+pub(crate) async fn send_with_retry(
     builder: &reqwest::RequestBuilder,
     label: &str,
 ) -> Result<String, AppError> {

@@ -11,10 +11,14 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
 
 - Owns: `client.rs` (HTTP + retry + payload normalization + response parsing),
   `orchestrator.rs` (concurrency semaphore + rate limiting + `LlmRequestType`
-  categorization), `mod.rs`.
+  categorization + `send_embedding` + `send_batch_parallel` + `send_embedding_batch_parallel`),
+  `embedding.rs` (per-provider embedding HTTP client + capability probe + per-provider limits),
+  `mod.rs`.
 - Consumed by every feature that makes LLM calls: screening, summaries, tags,
   labels, criteria, chat, wiki ingest/chat, translation, gap analysis, search
-  strategy, OpenAlex smart search, figure descriptions.
+  strategy, OpenAlex smart search, figure descriptions, and embedding generation
+  (the `embedding/` module calls `send_embedding` / `send_embedding_batch_parallel`
+  through the orchestrator, never `client::embed_texts` directly).
 
 ## Local Contracts
 
@@ -148,6 +152,76 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
 - Each retry attempt logs `[LlmClient] {label} attempt {n}/{N} failed (<status>)[trace]; retrying in {ms}ms`
   to stderr so the fix can be confirmed engaging in production logs.
 
+### Embeddings (`embedding.rs` + `orchestrator.rs`)
+
+- **Provider embedding client** (`embedding.rs`): per-provider HTTP shapes for
+  the `/embeddings` endpoint. OpenAI-compatible providers (OpenAI, Mistral, LM
+  Studio, llama.cpp, Custom, Z.AI tried at runtime) send `{"model","input":[…]}`
+  and parse `data[*].embedding`; Ollama loops one `/api/embeddings` call per
+  text (`{"model","prompt"}`); Google uses `models/{model}:embedContent`. Routes
+  through `client::shared_client()` for HTTP keep-alive but does NOT go through
+  `send_chat_completion` (different endpoint + response shape).
+- **Per-provider limits** (`EmbeddingLimits`): `{max_inputs_per_batch,
+  max_tokens_per_input, max_tokens_per_batch}`. All three caps are respected
+  simultaneously when bin-packing sub-batches. Drives
+  `embedding::text::split_text_by_token_budget` (per-input) and
+  `embedding::batching::group_into_embedding_batches` (sub-batch grouping). Pure
+  `#[must_use]` `embedding_limits(provider, model)` is unit-tested in
+  `tests/embedding_provider_test.rs`.
+- **Triple-state capability flag** (`app_settings` keys `embedding_status`
+  [`unknown` default | `enabled` | `disabled`], `embedding_model`,
+  `embedding_dimensions`): records the outcome of the last probe so
+  `generate_embeddings` / `recall` can short-circuit without re-probing.
+  `save_llm_config` resets `embedding_status` to `unknown` (keeps model + dims
+  for the Settings UI) so a provider/endpoint/model switch re-evaluates.
+- **Capability probe** (`probe_embedding_support(config) -> ProbeOutcome`):
+  resolution order — (1) Anthropic → `disabled` immediately; (2) try the
+  provider-default embedding model with the word `"probe"`; (3) on failure,
+  retry with the configured chat model (some local servers serve embeddings
+  from the loaded model); (4) both fail → `disabled`. Returns
+  `{status, model, dimensions, reason}`. Runs during `Test Connection`
+  (`commands::llm_config::test_llm_connection` calls `probe_embeddings_sync`
+  inline so the result + model land in the response payload + toast) and on the
+  first `generate_embeddings` call when `embedding_status == unknown`.
+- **Dimension-forwarding contract** (regression-tested in
+  `tests/embedding_probe_persist_test.rs`): the Test Connection path MUST
+  forward `ProbeOutcome.dimensions` through `probe_embeddings_sync` →
+  `persist_embedding_probe` → `set_embedding_status`. The prior shape hardcoded
+  `dimensions = 0`, which left `recall` gated off (`dimensions <= 0` at
+  `embedding/recall.rs:59`) until the first `generate_embeddings` call. The
+  extracted DB-write core `persist_embedding_probe_to_conn` is `pub` so
+  integration tests can exercise the contract without a Tauri `State<DbState>`.
+- **Routing through the orchestrator**: `LlmOrchestrator::send_embedding`
+  acquires the semaphore + rate limit + 30s `LlmRequestType::Embedding` timeout,
+  then delegates to `llm::embedding::embed_texts`. The free functions
+  `send_batch_parallel` (generic, order-preserving JoinSet with panic isolation)
+  and `send_embedding_batch_parallel` (embedding-specific: per-text split →
+  sub-batch group → parallel HTTP → token-weighted mean-pool) are FREE
+  functions (not `&self` methods) because `JoinSet::spawn` requires `'static`
+  futures; callers wrap the orchestrator into `HttpEmbeddingBatchSender` at the
+  call site. The runner takes `Arc<dyn EmbeddingBatchSender>` (injectable trait,
+  mirrors `IngestLlmSender`) so its parallel + cancel behavior is unit-testable
+  without a live provider.
+- **Lock discipline** (the runner): DB mutex is NEVER held across an `.await`.
+  Three brief lock bursts — (1) read work list + config + status, (2) persist
+  probe outcome if `unknown`, (3) per-completed-article `INSERT OR REPLACE` —
+  with the embedding HTTP calls happening lock-free between bursts.
+- **Per-row dimension guard**: `resolve_effective_dim(probe_dim, returned_dim)`
+  trusts the provider on drift (keeps probe when returned is 0);
+  `vector_matches_dim(vector, effective_dim)` skips + counts as error any vector
+  whose length mismatches so a truncated/mismatched vector never stores a wrong
+  `dimensions` column. Drift is persisted back to `app_settings`. Both are pure
+  `#[must_use]`, unit-tested in `tests/embedding_runner_test.rs`.
+- **Categorization**: `LlmRequestType::Embedding`; `timeout_for(Embedding) =
+  30s`. Embeddings do NOT participate in the `skip_temperature` machinery (no
+  temperature parameter).
+- Tested in `tests/embedding_provider_test.rs` (19: model resolution,
+  OpenAI-batch parse, Ollama single-prompt, Google embedContent, probe outcomes),
+  `tests/llm_orchestrator_batch_test.rs` (17: `send_batch_parallel` order/mixed/
+  panic/empty + `send_embedding_batch_parallel` mockito dispatch + per-provider
+  limits table), `tests/embedding_probe_persist_test.rs` (4: dimension-forwarding
+  regression).
+
 ### `send_json` + JSON pre-parser (`orchestrator.rs` + `utils/json_repair.rs`)
 
 - `LlmOrchestrator::send_json` is the canonical entry point for any caller that feeds the LLM response into `serde_json::from_str`. It chains `send` (concurrency + rate limit + timeout + temperature recovery) with `utils::json_repair::prepare_llm_json`, which strips markdown code fences and escapes raw control characters (`0x00`-`0x1F`) that the LLM may place inside JSON string values.
@@ -202,5 +276,8 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
 
 ## Child DOX Index
 
-No child `AGENTS.md` files. This module owns three files (`mod.rs`,
-`client.rs`, `orchestrator.rs`) with no further durable boundaries.
+No child `AGENTS.md` files. This module owns four files (`mod.rs`,
+`client.rs`, `orchestrator.rs`, `embedding.rs`) with no further durable
+boundaries. The consumer-facing `embedding/` module (director, runner, recall,
+text, batching) lives at `src-tauri/src/embedding/` and is documented in the
+root `AGENTS.md` Child DOX Index.

@@ -4,6 +4,7 @@ pub mod biblio_cmd;
 pub mod chat;
 pub mod criteria;
 pub mod dedup;
+pub mod embedding;
 pub mod export_cmd;
 pub mod full_text;
 pub mod import;

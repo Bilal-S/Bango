@@ -18,6 +18,7 @@ pub mod commands;
 pub mod crypto;
 pub mod db;
 pub mod dedup;
+pub mod embedding;
 pub mod error;
 pub mod export;
 pub mod llm;
@@ -336,6 +337,10 @@ pub fn run() {
             commands::openalex::set_openalex_settings,
             commands::openalex::smart_search_openalex,
             commands::openalex::download_and_attach_openalex_pdf,
+            commands::embedding::generate_embeddings,
+            commands::embedding::recall_articles,
+            commands::embedding::get_embedding_status,
+            commands::embedding::probe_embeddings,
         ]);
 
     #[cfg(debug_assertions)]

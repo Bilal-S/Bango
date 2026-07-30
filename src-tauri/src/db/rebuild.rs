@@ -35,6 +35,10 @@ const DROP_TABLES: &[&str] = &[
     "app_settings",
     // Article chunk storage (T1.2/T3.1)
     "article_chunks",
+    // Article embedding storage for semantic search (regenerable derived
+    // artifact, like `article_chunks`). Cleared by reset_project and rebuilt
+    // by the embedding runner.
+    "article_embeddings",
     // Translation originals (Plan-A permanent rewrite)
     "article_original_chunks",
     "article_original_content",
@@ -93,6 +97,8 @@ const DROP_INDEXES: &[&str] = &[
     "idx_bne_network",
     // Article chunk storage (T1.2/T3.1)
     "idx_article_chunks_article",
+    // Article embedding storage for semantic search.
+    "idx_article_embeddings_article",
     // Translation originals (Plan-A permanent rewrite)
     "idx_article_original_chunks_article",
     // Legacy v1 indexes

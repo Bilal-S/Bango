@@ -51,6 +51,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 
 pub mod citations_phase;
+pub mod embeddings_phase;
 pub mod full_text_phase;
 pub mod summary_phase;
 pub mod translations_phase;
@@ -109,6 +110,7 @@ pub enum BatchImportPhase {
     Citations = 2,
     Translations = 3,
     Summaries = 4,
+    Embeddings = 5,
 }
 
 impl BatchImportPhase {
@@ -120,6 +122,7 @@ impl BatchImportPhase {
             Self::Citations => "Citations",
             Self::Translations => "Translations",
             Self::Summaries => "AI Summaries",
+            Self::Embeddings => "Embeddings",
         }
     }
 }
@@ -731,13 +734,52 @@ pub async fn start_batch_import(
             Some(sum_result.clone()),
         );
 
+        // ═══════════════════════════════════════════════════════════════════
+        //  Phase 5: Embeddings (always runs - idempotent via director staleness)
+        // ═══════════════════════════════════════════════════════════════════
+        //
+        // Embeds the `included` corpus so semantic search (citation finding)
+        // has a candidate pool immediately after a batch import. Idempotent:
+        // the director's `input_hash` staleness check skips articles whose
+        // embeddings are already fresh, so a repeat import with no content
+        // changes is a no-op (cheap). Gated on LLM configured + embeddings
+        // not disabled; otherwise skips with a clear message.
+        let emb_result = embeddings_phase::run_embeddings_phase(
+            &db,
+            &app_handle_clone,
+            Arc::clone(&cancel_for_task),
+        )
+        .await;
+
+        // Phase 5 complete summary.
+        emit_progress(
+            &app_handle_clone,
+            &progress,
+            BatchImportPhase::Embeddings,
+            emb_result.processed,
+            emb_result.total,
+            80,
+            &format!(
+                "Phase 5 (Embeddings): {} generated, {} skipped, {} failed",
+                emb_result.succeeded,
+                emb_result.processed.saturating_sub(emb_result.succeeded),
+                emb_result.failed
+            ),
+            true,
+            false,
+            Some(ft_result.clone()),
+            Some(cit_result.clone()),
+            Some(trn_result.clone()),
+            Some(sum_result.clone()),
+        );
+
         // Final state.
         emit_progress(
             &app_handle_clone,
             &progress,
-            BatchImportPhase::Summaries,
-            sum_result.processed,
-            sum_result.total,
+            BatchImportPhase::Embeddings,
+            emb_result.processed,
+            emb_result.total,
             100,
             "Batch import complete",
             false,

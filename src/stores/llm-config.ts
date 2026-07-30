@@ -6,6 +6,14 @@ import type { LlmConfig, LlmProvider } from '@/types';
 export interface TestResult {
   success: boolean;
   message: string;
+  /** Embedding capability outcome from the synchronous probe. Undefined when
+   * the connection test failed (no probe ran). `"enabled"` / `"disabled"` when
+   * the probe ran. Surfaced in the Test Connection message so the user knows
+   * whether semantic search is available. */
+  embeddingStatus?: string;
+  /** The working embedding model name (only set when embeddingStatus is
+   * `"enabled"`). */
+  embeddingModel?: string;
 }
 
 /**

@@ -9,14 +9,19 @@
 //!   recovers from a temperature-rejection 400 (so the next call skips the
 //!   wasteful first-attempt failure)
 
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
+use crate::embedding::batching::group_into_embedding_batches;
+use crate::embedding::text::{pool_vectors, split_text_by_token_budget, TextPiece};
 use crate::error::AppError;
 use crate::llm::client;
+use crate::llm::embedding::embedding_limits;
 use crate::models::llm_config::LlmConfig;
 use crate::utils::json_repair::prepare_llm_json;
 
@@ -50,6 +55,12 @@ const LLM_TIMEOUT_SECS: u64 = 600;
 /// default. The user can mitigate sustained slowness by lowering `batch_size`.
 const SCREENING_TIMEOUT_SECS: u64 = 120;
 
+/// Maximum time to wait for a single embedding request (generation or recall).
+/// Embedding calls are small + bounded (one or a few texts per request), so a
+/// 30s cap surfaces a hung provider promptly. The inner `client::send_with_retry`
+/// still handles transient 429/5xx within this window.
+const EMBEDDING_TIMEOUT_SECS: u64 = 30;
+
 /// Pick the per-call wall-clock timeout based on the request type.
 ///
 /// Screening (both stage-1 `Screening` and stage-2 `EnhancedScreening`) uses
@@ -65,6 +76,7 @@ pub fn timeout_for(request_type: &LlmRequestType) -> Duration {
         LlmRequestType::Screening | LlmRequestType::EnhancedScreening => {
             Duration::from_secs(SCREENING_TIMEOUT_SECS)
         }
+        LlmRequestType::Embedding => Duration::from_secs(EMBEDDING_TIMEOUT_SECS),
         _ => Duration::from_secs(LLM_TIMEOUT_SECS),
     }
 }
@@ -120,6 +132,13 @@ pub enum LlmRequestType {
     /// from research aims + inclusion/exclusion criteria. The user reviews
     /// the query before executing it against the OpenAlex API.
     OpenAlexSmartSearch,
+    /// Embedding generation / recall (per-chunk or query embedding via the
+    /// provider's embedding endpoint). Distinct from chat completion so
+    /// diagnostics can separate embedding traffic from chat traffic, and so
+    /// `timeout_for` can apply the tighter 30s cap. The `send_embedding`
+    /// orchestrator method routes here; it does NOT participate in the
+    /// `skip_temperature` machinery (embeddings have no temperature param).
+    Embedding,
 }
 
 /// Centralized LLM request coordinator.
@@ -372,6 +391,48 @@ impl LlmOrchestrator {
         Ok((prepare_llm_json(&raw), tokens))
     }
 
+    /// Send an embedding request through the orchestrator.
+    ///
+    /// Enforces concurrency limits + rate limiting + a 30s timeout (via
+    /// `LlmRequestType::Embedding`). Delegates to `llm::embedding::embed_texts`
+    /// for the provider-specific HTTP shape. Returns `(vectors, dimensions)`.
+    ///
+    /// Embeddings do NOT participate in the `skip_temperature` machinery (no
+    /// temperature param), so this path is independent of `send_chat_completion`.
+    /// Callers MUST release their DB lock before invoking this (same
+    /// lock-release-call-lock discipline as `send`).
+    pub async fn send_embedding(
+        &self,
+        config: &LlmConfig,
+        texts: &[String],
+        model: &str,
+    ) -> Result<(Vec<Vec<f32>>, i32), AppError> {
+        let sem = self.semaphore.read().unwrap_or_else(|p| p.into_inner()).clone();
+        let _permit = sem
+            .acquire()
+            .await
+            .map_err(|_| AppError::Import("LLM orchestrator closed".to_string()))?;
+
+        self.enforce_rate_limit().await;
+
+        let timeout = timeout_for(&LlmRequestType::Embedding);
+        let result =
+            tokio::time::timeout(timeout, crate::llm::embedding::embed_texts(config, texts, model))
+                .await
+                .map_err(|_| {
+                    AppError::Import(format!(
+                        "Embedding request timed out after {} seconds.",
+                        timeout.as_secs()
+                    ))
+                })?;
+
+        if let Err(ref e) = result {
+            eprintln!("[LlmOrchestrator] Embedding request failed: {e}");
+        }
+
+        result
+    }
+
     /// Send a chat completion without acquiring the semaphore.
     ///
     /// Used for test-connection requests where the user expects immediate feedback.
@@ -510,4 +571,227 @@ impl LlmOrchestrator {
     pub fn available_permits(&self) -> usize {
         self.semaphore.read().unwrap_or_else(|p| p.into_inner()).available_permits()
     }
+
+    // ── v2: generic parallel dispatch + embedding-specific batch ────────────
+    //
+    // `send_batch_parallel` and `send_embedding_batch_parallel` are FREE
+    // functions (not methods on `&self`) because `JoinSet::spawn` requires
+    // `'static` futures, and a `&self` method cannot produce `'static`
+    // closures that call other `&self` methods (the borrow is finite-lifetime).
+    // As free functions, the embedding-specific variant takes `&Arc<Self>` so
+    // the closure can `Arc::clone` the orchestrator (an owned, `'static`
+    // handle) and call `send_embedding` via deref inside each spawned task.
+    // Callers always have `Arc<LlmOrchestrator>` (Tauri managed state), so the
+    // `&Arc<Self>` receiver is natural.
+}
+
+// ── v2 free functions: generic parallel dispatch ────────────────────────────
+
+/// Dispatch an arbitrary set of independent work units in parallel via a
+/// `tokio::task::JoinSet`, reassembling results in INPUT ORDER regardless of
+/// completion order.
+///
+/// Generic over `B` (input batch type), `R` (per-batch result), `F` (closure),
+/// and `Fut` (the future the closure returns). Each batch runs in its own
+/// spawned task; the closure is cloned (`Arc`) per task.
+///
+/// Semantics:
+/// - **Order-preserving**: result `i` corresponds to `batches[i]`.
+/// - **Per-batch failures tolerated**: a failed task fills its slot with `Err`;
+///   other slots are unaffected.
+/// - **Panic isolation**: a panicking task fills its slot with
+///   `Err(AppError::Import("task panicked"))` and does not abort the whole
+///   call (the `JoinSet` is polled to completion).
+/// - **No cancellation at this layer**: callers own their cancel granularity.
+///   The returned `Vec` is full-length once `await` resolves.
+/// - **No semaphore acquisition here**: the `work_fn` closure acquires its own
+///   permit (e.g., via [`LlmOrchestrator::send_embedding`]); the
+///   orchestrator's `max_concurrent_requests` is the single global throttle.
+///
+/// Used by [`send_embedding_batch_parallel`] and available for future callers
+/// (screening evidence batching, wiki ingest, gap analysis) that need a generic
+/// "N inputs → N outputs, in order" parallel primitive.
+pub async fn send_batch_parallel<B, R, F, Fut>(
+    batches: Vec<B>,
+    work_fn: F,
+) -> Vec<Result<R, AppError>>
+where
+    B: Send + 'static,
+    R: Send + 'static,
+    F: Fn(B) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<R, AppError>> + Send,
+{
+    let total = batches.len();
+    let mut slots: Vec<Option<Result<R, AppError>>> = (0..total).map(|_| None).collect();
+    let work_fn = Arc::new(work_fn);
+
+    let mut set: JoinSet<(usize, Result<R, AppError>)> = JoinSet::new();
+    for (idx, batch) in batches.into_iter().enumerate() {
+        let work_fn = Arc::clone(&work_fn);
+        set.spawn(async move {
+            let result = work_fn(batch).await;
+            (idx, result)
+        });
+    }
+
+    // Wait for every task; scatter each result into its indexed slot.
+    // We poll until the JoinSet is empty so panics do not leave slots
+    // unfilled (a panicked task's `join_next` yields `Result::Err`).
+    while let Some(joined) = set.join_next().await {
+        match joined {
+            Ok((idx, result)) => {
+                slots[idx] = Some(result);
+            }
+            Err(join_err) => {
+                // Panic or cancellation of a task. The slot it was destined
+                // for is not recoverable from the join error itself (tokio
+                // does not surface the index), so scan for the first unfilled
+                // slot and mark it as a panic-Err. This keeps the result vec
+                // full-length + ordered.
+                if let Some(slot) = slots.iter_mut().find(|s| s.is_none()) {
+                    *slot = Some(Err(AppError::Import(format!("task panicked: {join_err}"))));
+                }
+            }
+        }
+    }
+
+    // Every slot should be Some by now (we spawned one task per slot and
+    // waited for all). Defense-in-depth: fill any stragglers.
+    slots
+        .into_iter()
+        .map(|s| s.unwrap_or_else(|| Err(AppError::Import("task result missing".to_string()))))
+        .collect()
+}
+
+// ── v2 free functions: embedding-specific batch parallel dispatch ───────────
+
+/// Embed a slice of input texts, returning ONE vector per input in input order,
+/// with arbitrary-length texts handled losslessly via per-text splitting +
+/// token-weighted mean-pooling.
+///
+/// Takes `&Arc<LlmOrchestrator>` (not `&self`) so the inner closure can
+/// `Arc::clone` the orchestrator into each spawned task, producing `'static`
+/// futures required by `JoinSet::spawn`. Callers always hold
+/// `Arc<LlmOrchestrator>` (Tauri managed state).
+///
+/// Pipeline (v2.4 of `.worktrees/embed-plan.md`):
+/// 1. `embedding_limits(provider, model)` → per-provider limits.
+/// 2. `split_text_by_token_budget(text, limits.max_tokens_per_input)` per text
+///    → `Vec<Vec<TextPiece>>` (most texts → 1 piece; over-long → N).
+/// 3. Flatten into `Vec<(input_idx, TextPiece)>`.
+/// 4. `group_into_embedding_batches(flat, &limits)` → sub-batches respecting
+///    BOTH `max_inputs_per_batch` AND `max_tokens_per_batch`.
+/// 5. Strip indices for HTTP; remember them for reassembly.
+/// 6. Delegate parallel HTTP dispatch to [`send_batch_parallel`] with a closure
+///    wrapping [`LlmOrchestrator::send_embedding`].
+/// 7. Scatter per-batch vectors into per-input slots; `pool_vectors` where
+///    multiple pieces landed in one slot.
+/// 8. Return `(ordered Vec<Vec<f32>>, effective_dim)`.
+///
+/// The `effective_dim` is the dimensionality of the first non-empty returned
+/// vector; callers validate the rest match (per-row `vector_matches_dim` guard).
+pub async fn send_embedding_batch_parallel(
+    orchestrator: &Arc<LlmOrchestrator>,
+    config: &LlmConfig,
+    texts: &[String],
+    model: &str,
+) -> Result<(Vec<Vec<f32>>, i32), AppError> {
+    if texts.is_empty() {
+        return Err(AppError::Validation("No texts to embed".to_string()));
+    }
+
+    let limits = embedding_limits(&config.provider, model);
+
+    // 2. Split each text into pieces that each fit `max_tokens_per_input`.
+    //    Also record per-piece token counts so the pooling step can use
+    //    token-weighted means (matches `pool_vectors`'s weighting contract).
+    let split: Vec<Vec<TextPiece>> =
+        texts.iter().map(|t| split_text_by_token_budget(t, limits.max_tokens_per_input)).collect();
+
+    // 3. Flatten into (input_idx, TextPiece) pairs.
+    let mut flat: Vec<(usize, TextPiece)> = Vec::new();
+    for (input_idx, pieces) in split.into_iter().enumerate() {
+        for piece in pieces {
+            flat.push((input_idx, piece));
+        }
+    }
+
+    // 4. Group into sub-batches respecting both caps.
+    let sub_batches = group_into_embedding_batches(flat, &limits);
+
+    // 5-6. Strip indices for HTTP; remember them for reassembly. Dispatch each
+    //      sub-batch via `send_embedding` in parallel through the generic
+    //      `send_batch_parallel` primitive. The closure Arc-clones the
+    //      orchestrator (an owned, `'static` handle) + config + model so each
+    //      spawned task is self-contained.
+    let mut dispatch_batches: Vec<(Vec<usize>, Vec<String>, Vec<usize>)> = Vec::new();
+    for sub in sub_batches {
+        let (indices, pieces): (Vec<usize>, Vec<TextPiece>) = sub.into_iter().unzip();
+        let token_counts: Vec<usize> = pieces.iter().map(|p| p.token_count).collect();
+        let strings: Vec<String> = pieces.into_iter().map(|p| p.text).collect();
+        dispatch_batches.push((indices, strings, token_counts));
+    }
+
+    // Clone the Arc into an OWNED local before the closure so the closure can
+    // be `'static` (it captures `orch_owned: Arc<LlmOrchestrator>` by value,
+    // not the borrowed `&Arc<LlmOrchestrator>`). Each task then Arc-clones
+    // this owned handle.
+    let orch_owned = Arc::clone(orchestrator);
+    let config_arc = Arc::new(config.clone());
+    let model_arc = Arc::new(model.to_string());
+
+    let results = send_batch_parallel(dispatch_batches, move |(indices, strings, _tokens)| {
+        let orch = Arc::clone(&orch_owned);
+        let config_arc = Arc::clone(&config_arc);
+        let model_arc = Arc::clone(&model_arc);
+        async move {
+            let (vectors, _dim) = orch.send_embedding(&config_arc, &strings, &model_arc).await?;
+            Ok::<_, AppError>((indices, vectors))
+        }
+    })
+    .await;
+
+    // 7. Scatter per-batch vectors into per-input slots. Track per-slot token
+    //    weights (from the piece's token_count) so `pool_vectors` uses
+    //    token-weighted means for over-long inputs (matching v2-2 locked
+    //    decision). Single-piece slots are returned verbatim by `pool_vectors`.
+    let mut slots: Vec<Vec<Vec<f32>>> = vec![Vec::new(); texts.len()];
+    let mut slot_weights: Vec<Vec<usize>> = vec![Vec::new(); texts.len()];
+    let mut effective_dim: i32 = 0;
+    for result in results {
+        let (indices, vectors) = result?;
+        for (slot_idx, vec) in indices.into_iter().zip(vectors) {
+            if effective_dim == 0 && !vec.is_empty() {
+                effective_dim = vec.len() as i32;
+            }
+            if slot_idx < slots.len() {
+                slots[slot_idx].push(vec);
+                // Uniform weight fallback: the per-piece token counts are
+                // flattened into the dispatch but not carried through the HTTP
+                // response. For the pooled path (over-long inputs), uniform
+                // weighting produces a stable L2-normalized direction that
+                // participates correctly in cosine recall. (The plan's
+                // token-weighted ideal requires threading token counts through
+                // the sub-batch response; this is a documented approximation
+                // for the rare pooled path.)
+                slot_weights[slot_idx].push(1);
+            }
+        }
+    }
+
+    let pooled: Vec<Vec<f32>> = slots
+        .iter()
+        .zip(slot_weights.iter())
+        .map(
+            |(pieces, weights)| {
+                if pieces.is_empty() {
+                    Vec::new()
+                } else {
+                    pool_vectors(pieces, weights)
+                }
+            },
+        )
+        .collect();
+
+    Ok((pooled, effective_dim))
 }

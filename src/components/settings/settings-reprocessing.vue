@@ -60,6 +60,7 @@ interface BatchImportProgress {
   citations: BatchImportPhaseResult | null;
   translations: BatchImportPhaseResult | null;
   summaries: BatchImportPhaseResult | null;
+  embeddings: BatchImportPhaseResult | null;
 }
 
 const showBatchDialog = ref(false);
@@ -253,6 +254,14 @@ onUnmounted(() => {
             - {{ phaseSkipMessage(batchProgress.summaries) }}
           </span>
         </div>
+        <div v-if="batchProgress.embeddings" class="batch-progress__summary">
+          Phase 5 (Embeddings): {{ batchProgress.embeddings.succeeded }} generated,
+          {{ batchProgress.embeddings.processed - batchProgress.embeddings.succeeded }} skipped,
+          {{ batchProgress.embeddings.failed }} failed
+          <span v-if="phaseSkipMessage(batchProgress.embeddings)" class="batch-progress__skip">
+            - {{ phaseSkipMessage(batchProgress.embeddings) }}
+          </span>
+        </div>
 
         <!-- Cancel button -->
         <button
@@ -276,7 +285,7 @@ onUnmounted(() => {
         <h2>Batch Import</h2>
         <p class="dialog__desc">
           This will scan your Bango Documents directory and import files that match your articles by
-          DOI. The pipeline runs in four phases:
+          DOI. The pipeline runs in five phases:
         </p>
         <ol class="dialog__list">
           <li>
@@ -299,6 +308,10 @@ onUnmounted(() => {
             <span v-else class="dialog__note"
               >- skipped (auto-summarize is disabled in Settings).</span
             >
+          </li>
+          <li>
+            <strong>Embeddings</strong> - generates semantic search vectors for the included corpus
+            (skips articles already embedded).
           </li>
         </ol>
 

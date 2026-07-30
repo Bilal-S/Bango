@@ -381,6 +381,95 @@ pub fn set_screening_custom_logic(conn: &Connection, value: &str) -> Result<(), 
     set_setting(conn, SCREENING_CUSTOM_LOGIC_KEY, Some(value.trim()))
 }
 
+// ── Embedding settings (triple-state capability flag) ───────────────────────
+
+/// The `app_settings` key recording the embedding capability state.
+/// Values: `"unknown"` (default) | `"enabled"` | `"disabled"`. Set by the
+/// `probe_embedding_support` flow during `Test Connection` or the first
+/// embedding call. Reset to `"unknown"` whenever LLM config changes.
+pub const EMBEDDING_STATUS_KEY: &str = "embedding_status";
+/// The `app_settings` key recording the working embedding model name once the
+/// probe succeeds (e.g. `"text-embedding-3-small"`).
+pub const EMBEDDING_MODEL_KEY: &str = "embedding_model";
+/// The `app_settings` key recording the embedding vector dimensionality once
+/// the probe succeeds (e.g. `1536`). Used by recall to filter rows whose
+/// dimensions don't match the current model.
+pub const EMBEDDING_DIMENSIONS_KEY: &str = "embedding_dimensions";
+
+/// The triple-state embedding capability. `Unknown` (default) means the probe
+/// has not run yet; `Enabled` means a working model was found; `Disabled` means
+/// the provider has no embedding-capable model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddingStatus {
+    #[default]
+    Unknown,
+    Enabled,
+    Disabled,
+}
+
+impl EmbeddingStatus {
+    /// Parse from the stored string value. Unknown/absent/garbage -> `Unknown`.
+    #[must_use]
+    pub fn from_str_lossy(s: Option<&str>) -> Self {
+        match s.map(str::to_ascii_lowercase).as_deref() {
+            Some("enabled") => Self::Enabled,
+            Some("disabled") => Self::Disabled,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// Serialize to the stored string value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+/// Read the embedding capability state. Absent key = `Unknown` (default).
+pub fn get_embedding_status(conn: &Connection) -> Result<EmbeddingStatus, AppError> {
+    Ok(EmbeddingStatus::from_str_lossy(get_setting(conn, EMBEDDING_STATUS_KEY)?.as_deref()))
+}
+
+/// Persist the embedding capability state + the working model + dimensions.
+pub fn set_embedding_status(
+    conn: &Connection,
+    status: EmbeddingStatus,
+    model: &str,
+    dimensions: i32,
+) -> Result<(), AppError> {
+    set_setting(conn, EMBEDDING_STATUS_KEY, Some(status.as_str()))?;
+    set_setting(conn, EMBEDDING_MODEL_KEY, if model.is_empty() { None } else { Some(model) })?;
+    set_setting(conn, EMBEDDING_DIMENSIONS_KEY, Some(&dimensions.to_string()))?;
+    Ok(())
+}
+
+/// Read the working embedding model name (set by the probe).
+pub fn get_embedding_model(conn: &Connection) -> Result<Option<String>, AppError> {
+    Ok(get_setting(conn, EMBEDDING_MODEL_KEY)?
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty()))
+}
+
+/// Read the embedding dimensions (set by the probe). 0 when unknown.
+pub fn get_embedding_dimensions(conn: &Connection) -> Result<i32, AppError> {
+    Ok(get_setting(conn, EMBEDDING_DIMENSIONS_KEY)?
+        .and_then(|v| v.parse::<i32>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(0))
+}
+
+/// Reset the embedding capability state to `unknown` (e.g. when the LLM config
+/// changes, the probe must re-evaluate against the new provider/endpoint/model).
+/// Keeps the model/dimensions so the user can see what was last working.
+pub fn reset_embedding_status(conn: &Connection) -> Result<(), AppError> {
+    set_setting(conn, EMBEDDING_STATUS_KEY, Some(EmbeddingStatus::Unknown.as_str()))
+}
+
 // ── Project-portable settings (export/import) ───────────────────────────────
 //
 // `app_settings` mixes project-level intent (screening rules, summary mode,

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import { useFeatureFlags } from '@/composables/use-feature-flags';
 import SettingsProviderCard from '@/components/settings/settings-provider-card.vue';
 import SettingsAiSummaries from '@/components/settings/settings-ai-summaries.vue';
 import SettingsScreeningPreferences from '@/components/settings/settings-screening-preferences.vue';
@@ -8,13 +10,22 @@ import SettingsProjectManagement from '@/components/settings/settings-project-ma
 import SettingsOpenAlex from '@/components/settings/settings-openalex.vue';
 import SettingsNotificationHistory from '@/components/settings/settings-notification-history.vue';
 import SettingsDiagnostics from '@/components/settings/settings-diagnostics.vue';
+
+const appVersion = __APP_VERSION__;
+const { dbVersion, dbMaxVersion } = useFeatureFlags();
+const showVersion = computed(() => dbMaxVersion.value > 0);
 </script>
 
 <template>
   <div class="settings-view">
     <!-- Header -->
     <div class="settings-view__header">
-      <h1 class="page-title">Settings</h1>
+      <h1 class="page-title">
+        Settings
+        <span v-if="showVersion" class="settings-view__version">
+          (v{{ appVersion }} / {{ dbVersion }}-{{ dbMaxVersion }})
+        </span>
+      </h1>
       <p class="settings-view__subtitle">
         Configure AI provider parameters (note: AI models can make mistakes!), set preferences,
         manage backups.
@@ -60,6 +71,13 @@ import SettingsDiagnostics from '@/components/settings/settings-diagnostics.vue'
   line-height: 20px;
   color: var(--color-on-surface-variant, #464555);
   margin-top: 0.5rem;
+}
+
+.settings-view__version {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--color-on-surface-variant);
+  white-space: nowrap;
 }
 
 .settings-view__cards {

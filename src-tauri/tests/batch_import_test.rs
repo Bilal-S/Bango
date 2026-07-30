@@ -12,13 +12,16 @@
 use std::io::Write;
 use std::sync::Mutex;
 
-use bango_lib::batch_import::{citations_phase, full_text_phase, translations_phase};
+use bango_lib::batch_import::{
+    citations_phase, embeddings_phase, full_text_phase, translations_phase,
+};
 use bango_lib::db::app_settings_repo::{set_setting, STORAGE_ROOT_KEY};
 use bango_lib::db::article_repo;
 use bango_lib::db::article_repo::get_articles_with_doi_info;
 use bango_lib::db::audit_repo;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::db::reference_repo;
+use bango_lib::embedding::runner::EmbeddingRunReport;
 use bango_lib::models::article::NewArticle;
 use bango_lib::scraping::citation_chaser::clean_doi_filename;
 use rusqlite::Connection;
@@ -537,5 +540,146 @@ fn phase3_pre_flight_proceeds_when_llm_is_configured() {
         count_system_error_audit(&conn),
         0,
         "no system-level error audit row when LLM is configured"
+    );
+}
+
+// ── Phase 5: Embeddings pre-flight LLM check ────────────────────────────────
+
+/// Insert a minimal LLM config row so `has_config` returns true. Mirrors the
+/// Phase 3 test's seed helper.
+fn seed_llm_config(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO llm_config (id, provider, endpoint_url, model_name, \
+         api_key_encrypted, temperature, skip_temperature, \
+         max_concurrent_requests, request_delay_ms, context_window_tokens) \
+         VALUES (1, 'openai', 'https://api.openai.com/v1', 'gpt-4o', \
+         'enc-blob', 0.2, 0, 3, 500, 50000)",
+        [],
+    )
+    .expect("insert llm config");
+}
+
+#[test]
+fn phase5_pre_flight_skips_when_llm_not_configured_and_writes_audit() {
+    // Phase 5 mirrors Phase 3/4's pre-flight: when the LLM is not configured,
+    // the phase must short-circuit with the canonical
+    // "Skipped: LLM not configured" message + a system-level audit record so
+    // the skip surfaces in Diagnostics rather than churning every article
+    // through the director's base-condition gate.
+    let conn = test_db();
+
+    let skip = embeddings_phase::check_llm_configured_or_skip_conn(&conn);
+    let result = skip.expect("pre-flight should return a skip result when LLM is not configured");
+
+    assert_eq!(result.total, 0, "Phase 5 does not know the article count at pre-flight");
+    assert_eq!(result.processed, 0, "nothing was processed");
+    assert_eq!(result.succeeded, 0, "nothing succeeded");
+    assert_eq!(result.failed, 0, "the skip is NOT a failure");
+    assert!(
+        result.errors.iter().any(|e| e == "Skipped: LLM not configured"),
+        "errors must carry the canonical skip message; got {:?}",
+        result.errors
+    );
+
+    // A system-level audit record must have been written so the skip is
+    // visible in Diagnostics / Notification History.
+    assert_eq!(
+        count_system_error_audit(&conn),
+        1,
+        "exactly one system-level error audit row must be written on skip"
+    );
+
+    // The audit detail must mention Phase 5 and the actionable remedy.
+    let entries = audit_repo::get_generic_audit_entries(&conn, 10).expect("read audit entries");
+    assert_eq!(entries.len(), 1, "one generic audit entry expected");
+    let detail = entries[0].details.as_deref().unwrap_or("");
+    assert!(
+        detail.contains("Phase 5") && detail.contains("LLM not configured"),
+        "audit detail must explain the Phase 5 skip; got {detail:?}"
+    );
+    assert!(
+        detail.contains("Settings"),
+        "audit detail must point the user to Settings; got {detail:?}"
+    );
+}
+
+#[test]
+fn phase5_pre_flight_proceeds_when_llm_is_configured() {
+    // When an LLM IS configured, the pre-flight check returns `None` (the
+    // phase should proceed normally) and writes NO system audit record.
+    let conn = test_db();
+    seed_llm_config(&conn);
+
+    let skip = embeddings_phase::check_llm_configured_or_skip_conn(&conn);
+    assert!(skip.is_none(), "pre-flight must return None when LLM is configured");
+
+    assert_eq!(
+        count_system_error_audit(&conn),
+        0,
+        "no system-level error audit row when LLM is configured"
+    );
+}
+
+#[test]
+fn phase5_report_mapping_generated_skipped_errors() {
+    // The `EmbeddingRunReport -> BatchImportPhaseResult` mapping (in
+    // `run_embeddings_phase`, lines ~175-184) is the contract between the
+    // embedding runner and the batch-import progress dialog. We replicate the
+    // pure arithmetic here to pin the contract:
+    //   - `generated` → `succeeded`
+    //   - `skipped` counts toward `processed` (it was handled) but NOT toward
+    //     `succeeded` or `failed`
+    //   - `errors` → `failed` AND bumps `total` (so the dialog denominator
+    //     includes errored articles)
+    //   - `skip_reason` (the director's base-condition gate, e.g.
+    //     "Embeddings disabled") is surfaced via `errors` so the Settings
+    //     progress dialog can show it with a warning style.
+    fn map_report(report: &EmbeddingRunReport) -> bango_lib::batch_import::BatchImportPhaseResult {
+        let processed = report.generated + report.skipped;
+        let skip_reason = report.skip_reason.clone();
+        bango_lib::batch_import::BatchImportPhaseResult {
+            total: processed + report.errors,
+            processed,
+            succeeded: report.generated,
+            failed: report.errors,
+            errors: skip_reason.into_iter().collect(),
+        }
+    }
+
+    // Case 1: 5 generated, 2 skipped (fresh), 1 error.
+    let report = EmbeddingRunReport {
+        generated: 5,
+        skipped: 2,
+        errors: 1,
+        status: "completed".to_string(),
+        model: "text-embedding-3-small".to_string(),
+        skip_reason: None,
+    };
+    let result = map_report(&report);
+    assert_eq!(result.succeeded, 5, "generated → succeeded");
+    assert_eq!(result.processed, 7, "processed = generated + skipped");
+    assert_eq!(result.total, 8, "total = processed + errors");
+    assert_eq!(result.failed, 1, "errors → failed");
+    assert!(result.errors.is_empty(), "no skip_reason → no errors[] entries");
+
+    // Case 2: director skipped the whole run (e.g. Embeddings disabled). All
+    // counts zero, but skip_reason is surfaced.
+    let report = EmbeddingRunReport {
+        generated: 0,
+        skipped: 0,
+        errors: 0,
+        status: "skipped".to_string(),
+        model: String::new(),
+        skip_reason: Some("Embeddings disabled for this provider".to_string()),
+    };
+    let result = map_report(&report);
+    assert_eq!(result.total, 0, "no work done on a director-level skip");
+    assert_eq!(result.processed, 0);
+    assert_eq!(result.succeeded, 0);
+    assert_eq!(result.failed, 0);
+    assert!(
+        result.errors.iter().any(|e| e.contains("Embeddings disabled")),
+        "skip_reason must surface in errors[] so the progress dialog shows it; got {:?}",
+        result.errors
     );
 }

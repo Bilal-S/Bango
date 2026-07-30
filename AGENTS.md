@@ -111,7 +111,9 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   own `AGENTS.md` covering the retry + shared-client + payload-normalization
   contract for the Windows intermittent "insufficient permissions" fix),
   `screening/`,
-  `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`, `wiki/`
+  `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`,
+  `embedding/` (semantic article search: director + runner + recall + pure text/batching helpers; the provider client + orchestrator routing live in `llm/embedding.rs` + `llm/orchestrator.rs`, documented in `src-tauri/src/llm/AGENTS.md`; see the v007 migration entry below for the schema + storage layer),
+  `wiki/`
   (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:
   `batch_import/` (4-phase batch import processor; see `batch_import/` entry
   below),
@@ -1442,8 +1444,9 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     end-to-end; the pre-flight LLM gate is unit-tested via the pure
     `check_llm_configured_or_skip` helper, and the `generate_article_ai_summary_inner`
     core is tested via the existing `summary_engine_test.rs` mock-LLM path.
-- **`src-tauri/src/db/migrations/v007_audit_ai_screen_clear.rs`** - Post-v006
-  schema (VERSION 7). Extends `audit_entries.action` CHECK with
+- **`src-tauri/src/db/migrations/v007_audit_clear_and_embeddings.rs`** -
+  Post-v006 schema (VERSION 7, not yet deployed). Two bundles folded into one
+  migration: (1) extends `audit_entries.action` CHECK with
   `'ai_screen_clear'` (rename-create-copy-drop, same pattern as v003-v006;
   preserves the v006 empty-string `article_id` heal). Powers the
   `clear_ai_reasoning` command + the trashcan icon in the AI Decision card's
@@ -1473,6 +1476,78 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   in `localStorage` key `bango-ai-reasoning-expanded` (default expanded).
   Tested in `src/__tests__/components/ai-decision-card.test.ts` (collapse
   behavior + delete emit + stopPropagation assertion).
+  (2) **`article_embeddings` table** - per-article, per-chunk embedding
+  vectors for semantic search (see `.worktrees/embed-plan.md`). Keyed on
+  `(article_id, chunk_index)` where the title+abstract row uses the sentinel
+  `chunk_index = -1` and per-chunk rows use the matching
+  `article_chunks.chunk_index` (`>= 0`). The `-1` sentinel (not NULL)
+  participates correctly in the composite PRIMARY KEY; SQLite treats NULL as
+  distinct in a PK, which would defeat `INSERT OR REPLACE` on the
+  title+abstract row. `ON DELETE CASCADE` removes rows when an article is
+  hard-deleted. Regenerable derived artifact: added to `rebuild::DROP_TABLES`
+  + `DROP_INDEXES` (`idx_article_embeddings_article`) so `reset_project`
+  wipes it; deliberately excluded from `ProjectBackup` (regenerable); the
+  import purge sequence `DELETE FROM article_embeddings` runs alongside
+  `DELETE FROM article_chunks` because `PRAGMA foreign_keys=OFF` during import
+  suppresses the cascade. Owned by `db/embedding_repo.rs` (CRUD +
+  `list_for_recall`) + `embedding/text.rs` (pure helpers: `format_embedding_text`,
+  `hash_text`, `expected_rows`, `cosine_similarity`, `serialize`/`deserialize`).
+  Tested in `tests/embedding_storage_test.rs` (11 tests) +
+  `tests/embedding_text_test.rs` (5 tests). The provider client
+  (`llm/embedding.rs`), director/runner (`embedding/director.rs` +
+  `embedding/runner.rs`), `recall` command, `Test Connection` probe hook,
+  batch-import Phase 5, and the `app_settings` triple-state
+  (`embedding_status`/`embedding_model`/`embedding_dimensions`) land in
+  subsequent PRs (PRs 2-5 in `.worktrees/embed-plan.md` §16). **All are now
+  implemented**: the provider client (`llm/embedding.rs`), director/runner
+  (`embedding/director.rs` + `embedding/runner.rs` with cancel-token support),
+  `recall` command (`embedding/recall.rs`), batch-import Phase 5
+  (`batch_import/embeddings_phase.rs`), and the `app_settings` triple-state
+  (`embedding_status`/`embedding_model`/`embedding_dimensions`). Tested in
+  `tests/embedding_storage_test.rs` (11), `tests/embedding_text_test.rs` (5),
+  `tests/embedding_provider_test.rs` (19), `tests/embedding_director_test.rs`
+  (10), `tests/embedding_recall_test.rs` (7, incl. the `f32::NEG_INFINITY`
+  max-pool sentinel regression test), `tests/embedding_runner_test.rs` (9,
+  covering the pure `resolve_effective_dim` + `vector_matches_dim` helpers that
+  drive the runner's per-row dimension validation) — 61 tests total. Triggered by
+  post-summary fire-and-forget (`commands/summary.rs`), Test Connection probe
+  (`commands/llm_config.rs`), rebuild-text-chunks cascade
+  (`commands/full_text.rs`), and batch-import Phase 5. The runner accepts an
+  optional `cancel_token: Option<Arc<AtomicBool>>` (checked between
+  `join_next()` completions). **v2 redesign** (see
+  `.worktrees/embed-v2-handoff.md` + `.worktrees/embed-plan.md` v2 addendum):
+  the runner is now an OUTER `tokio::task::JoinSet` (one task per article)
+  instead of a sequential `for` loop. Each task calls
+  `EmbeddingBatchSender::send_embedding_batch_parallel` (injectable trait,
+  mirrors `IngestLlmSender`; production `HttpEmbeddingBatchSender` wraps the
+  orchestrator; tests inject a fake), then writes its rows under a brief DB
+  lock burst. Cancellation is via `JoinSet::abort_all`: a Cancel click between
+  `join_next()` completions aborts all in-flight tasks, dropping their vectors
+  (no DB writes from cancelled tasks). The v1 Phase 5 mirror task (polling
+  `cancel_handle` every 100ms to forward to an atomic) was REMOVED — the
+  outer `abort_all` makes it obsolete. Phase 5 now snapshots `cancel_handle`
+  into an `Arc<AtomicBool>` ONCE before calling the runner. The runner also
+  validates per-row dimension consistency via two pure `#[must_use]` helpers
+  (`resolve_effective_dim`, `vector_matches_dim`): a provider returning
+  vectors of an unexpected length (model swap, truncated batch) no longer
+  silently stores a wrong `dimensions` column — the effective dim tracks the
+  provider's reported value (with drift persisted back to `app_settings`), and
+  any per-row mismatch is skipped + counted as an error. **v2 orchestrator
+  primitives**: `send_batch_parallel` (generic, free function —
+  order-preserving parallel dispatch via JoinSet with panic isolation) +
+  `send_embedding_batch_parallel` (embedding-specific: per-text splitting via
+  `split_text_by_token_budget` + sub-batch grouping via
+  `group_into_embedding_batches` (`embedding/batching.rs`) + parallel HTTP
+  dispatch + token-weighted mean-pooling via `pool_vectors`). Both are FREE
+  functions (not `&self` methods) because `JoinSet::spawn` requires `'static`
+  futures. The 4 callers (`commands/embedding.rs`, `commands/summary.rs`,
+  `commands/full_text.rs`, `batch_import/embeddings_phase.rs`) each wrap the
+  orchestrator into `HttpEmbeddingBatchSender` at the call site. **v2 tests**:
+  `tests/llm_orchestrator_batch_test.rs` (17 tests: `send_batch_parallel`
+  order/mixed/panic/empty + `send_embedding_batch_parallel` mockito dispatch +
+  `embedding_limits` per-provider table) + `embedding/batching.rs` inline (7
+  tests: `group_into_embedding_batches` bin-pack respecting both caps) — 85
+  tests total (was 61).
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
     via `?raw` by `src/composables/use-demo.ts` and passed to `import_project_backup`).

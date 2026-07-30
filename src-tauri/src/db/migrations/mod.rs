@@ -4,7 +4,7 @@ pub mod v003_articles_translations;
 pub mod v004_gap_analysis;
 pub mod v005_audit_note_add;
 pub mod v006_audit_metadata_edit;
-pub mod v007_audit_ai_screen_clear;
+pub mod v007_audit_clear_and_embeddings;
 
 pub struct Migration {
     pub version: i32,
@@ -26,8 +26,8 @@ pub fn get_migrations() -> Vec<Migration> {
             up_sql: v006_audit_metadata_edit::UP_SQL,
         },
         Migration {
-            version: v007_audit_ai_screen_clear::VERSION,
-            up_sql: v007_audit_ai_screen_clear::UP_SQL,
+            version: v007_audit_clear_and_embeddings::VERSION,
+            up_sql: v007_audit_clear_and_embeddings::UP_SQL,
         },
     ]
 }

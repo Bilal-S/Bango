@@ -244,6 +244,7 @@ const DELETE_STATEMENTS: &[&str] = &[
     "DELETE FROM article_tags",
     "DELETE FROM article_labels",
     "DELETE FROM article_chunks",
+    "DELETE FROM article_embeddings",
     "DELETE FROM article_original_chunks",
     "DELETE FROM article_original_content",
     "DELETE FROM articles",

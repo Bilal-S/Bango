@@ -7,12 +7,31 @@ use crate::error::AppError;
 #[serde(rename_all = "camelCase")]
 pub struct AppFlagsResponse {
     pub premium: bool,
+    pub db_version: i32,
+    pub db_max_version: i32,
 }
 
-/// Read the current application feature flags.
+/// Read the current application feature flags, including DB version info.
 #[tauri::command]
-pub fn get_app_flags(flags: tauri::State<'_, crate::AppFlags>) -> AppFlagsResponse {
-    AppFlagsResponse { premium: flags.premium }
+pub fn get_app_flags(
+    flags: tauri::State<'_, crate::AppFlags>,
+    db_state: tauri::State<'_, DbState>,
+) -> AppFlagsResponse {
+    let (db_version, db_max_version) = read_db_versions(&db_state);
+    AppFlagsResponse { premium: flags.premium, db_version, db_max_version }
+}
+
+fn read_db_versions(db_state: &DbState) -> (i32, i32) {
+    let max = crate::db::migrations::get_migrations().last().map(|m| m.version).unwrap_or(0);
+
+    let applied = match crate::db::connection::lock_conn(&db_state.conn) {
+        Ok(conn) => {
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i32>(0)).unwrap_or(0)
+        }
+        Err(_) => 0,
+    };
+
+    (applied, max)
 }
 
 #[derive(serde::Serialize)]
