@@ -337,8 +337,11 @@ pub fn render_author_page(entry: &AuthorManifestEntry) -> (Frontmatter, String) 
     fm.set("content_source", "metadata");
 
     // Body.
+    // NOTE: do NOT emit `# {title}` as the first body line. The page title
+    // lives in frontmatter and is rendered separately by the wiki viewer's
+    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
+    // show the title twice on the rendered page.
     let mut body = String::new();
-    body.push_str(&format!("# {}\n\n", entry.display_name));
 
     // Metrics line (only include metrics that have meaningful values).
     let mut stats: Vec<String> = Vec::new();

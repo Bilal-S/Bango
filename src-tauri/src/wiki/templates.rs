@@ -50,13 +50,11 @@ status: draft\n\
 source_articles: [\"<article-uuid>\"]\n\
 tags: []\n\
 links: [\"[[related-concept]]\"]\n\
-content_source: <full_text|ai_summary|abstract>\n\
-llm_model: <model-id>\n\
----\n\
-\n\
-# <Concept Name>\n\
-\n\
-<Opening paragraph defining the concept and why it matters to the review.>\n\
+ content_source: <full_text|ai_summary|abstract>\n\
+ llm_model: <model-id>\n\
+ ---\n\
+ \n\
+ <Opening paragraph defining the concept and why it matters to the review.>\n\
 \n\
 ## Evidence\n\
 \n\
@@ -84,13 +82,11 @@ status: draft\n\
 source_articles: [\"<article-uuid>\"]\n\
 tags: []\n\
 links: [\"[[related-method]]\"]\n\
-content_source: metadata\n\
-llm_model: <model-id>\n\
----\n\
-\n\
-# <Method Name>\n\
-\n\
-<Opening paragraph describing the method and its relevance to the review.>\n\
+ content_source: metadata\n\
+ llm_model: <model-id>\n\
+ ---\n\
+ \n\
+ <Opening paragraph describing the method and its relevance to the review.>\n\
 \n\
 ## Relevant Studies\n\
 \n\
@@ -117,13 +113,11 @@ status: draft\n\
 source_articles: [\"<article-uuid>\"]\n\
 tags: []\n\
 links: [\"[[concept]]\", \"[[method]]\"]\n\
-content_source: <full_text|ai_summary|abstract>\n\
-llm_model: <model-id>\n\
----\n\
-\n\
-# <Synthesis Title>\n\
-\n\
-<Opening paragraph framing the cross-cutting theme, study aspect, or section\n\
+ content_source: <full_text|ai_summary|abstract>\n\
+ llm_model: <model-id>\n\
+ ---\n\
+ \n\
+ <Opening paragraph framing the cross-cutting theme, study aspect, or section\n\
 that connects multiple sources.>\n\
 \n\
 ## Summary\n\
@@ -156,13 +150,11 @@ status: draft\n\
 source_articles: [\"<article-uuid>\"]\n\
 tags: []\n\
 links: [\"[[co-author]]\", \"[[concept]]\"]\n\
-content_source: metadata\n\
-llm_model: <model-id>\n\
----\n\
-\n\
-# <Author Display Name>\n\
-\n\
-<Affiliation and role. Derived from biblio_authors + article affiliations.>\n\
+ content_source: metadata\n\
+ llm_model: <model-id>\n\
+ ---\n\
+ \n\
+ <Affiliation and role. Derived from biblio_authors + article affiliations.>\n\
 \n\
 ## Contributions\n\
 \n\
@@ -194,13 +186,11 @@ keywords: []\n\
 tags: []\n\
 labels: []\n\
 links: [\"[[concept]]\"]\n\
-content_source: <full_text|ai_summary|abstract>\n\
-llm_model: <model-id>\n\
----\n\
-\n\
-# <Article Title>\n\
-\n\
-Authors: <Author A; Author B>  |  Year: <YYYY>  |  Journal: <Journal>\n\
+ content_source: <full_text|ai_summary|abstract>\n\
+ llm_model: <model-id>\n\
+ ---\n\
+ \n\
+ Authors: <Author A; Author B>  |  Year: <YYYY>  |  Journal: <Journal>\n\
 \n\
 ## Abstract / Summary\n\
 \n\

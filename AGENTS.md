@@ -650,6 +650,20 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     source) that exists before the LLM runs, so the wiki is never missing
     author/synthesis/concept/method/source pages regardless of which LLM model
     is used. Tested in `wiki_deterministic_test.rs` + `wiki_methods_preseed_test.rs`.
+    **No title in body contract**: the 5 pre-seed renderers (`render_concept_hub`,
+    `render_author_page`, `render_method_hub`, `render_synthesis_page`,
+    `render_document_source_page`) + the 5 seed templates (`templates.rs`) + the
+    LLM batch prompt (`batching.rs` "Do NOT start the Markdown body with a
+    `# <Title>` heading" instruction) + the wiki `AGENTS.md` contract
+    (`agents_contract.rs` `## Rules` section) ALL omit the `# {title}` heading
+    from the Markdown body. The page title lives in the `title:` frontmatter
+    field and is rendered separately by the wiki viewer's header
+    (`wiki-page-viewer.vue` `<h1>{{ page.title }}</h1>`); repeating it in the
+    body would display the title twice on the rendered page. The static-site
+    exporter (`wiki-site-export.ts::wrapPageHtml`) emits its own `<h1>{title}</h1>`
+    so exported pages still have a visible heading now that the body no longer
+    carries one. Existing user-edited pages (`status: reviewed`) are preserved by
+    the pre-seed; only draft pages get regenerated on the next wiki ingest.
     Design + phases 4-5 (LLM prompt narrowing, `concepts` field in AI summary
     schema) in `.worktrees/DONOTUSE/wiki-improvement-plan.md`; external-document
     ingestion + linking design in `.worktrees/DONOTUSE/wiki-improvement-plan2.md`;

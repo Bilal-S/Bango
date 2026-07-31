@@ -335,8 +335,11 @@ fn render_concept_hub(term: &TermRow, slug: &str) -> (Frontmatter, String) {
         term.co_terms.iter().map(|t| format!("\"[[{}]]\"", concept_slug(t))).collect();
     fm.set("links", &format!("[{}]", co_links.join(", ")));
 
+    // NOTE: do NOT emit `# {title}` as the first body line. The page title
+    // lives in frontmatter and is rendered separately by the wiki viewer's
+    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
+    // show the title twice on the rendered page.
     let mut body = String::new();
-    body.push_str(&format!("# {}\n\n", term.raw_term));
     body.push_str(&format!(
         "Found in {} included articles (total frequency: {}).\n",
         term.article_ids.len(),

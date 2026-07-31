@@ -93,8 +93,11 @@ fn render_document_source_page(doc: &UserDocRow) -> (Frontmatter, String) {
     }
     fm.set("links", "[]");
 
+    // NOTE: do NOT emit `# {title}` as the first body line. The page title
+    // lives in frontmatter and is rendered separately by the wiki viewer's
+    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
+    // show the title twice on the rendered page.
     let mut body = String::new();
-    body.push_str(&format!("# {}\n\n", doc.title));
     body.push_str("Imported document added via Add Documents. ");
     body.push_str("The extracted text lives in the corresponding `raw/` companion `.md` ");
     body.push_str("and is available to the wiki as a citable source.\n");

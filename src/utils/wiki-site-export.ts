@@ -412,6 +412,7 @@ export function wrapPageHtml(
 <body>
 ${breadcrumb}
   <article class="wiki-page page-type--${escapeHtml(pageType)}">
+    <h1>${escapeHtml(title)}</h1>
     <div class="markdown-content">
       ${bodyHtml}
     </div>

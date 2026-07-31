@@ -253,8 +253,11 @@ fn render_synthesis_page(
         fm.set("subfield", subfield);
     }
 
+    // NOTE: do NOT emit `# {title}` as the first body line. The page title
+    // lives in frontmatter and is rendered separately by the wiki viewer's
+    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
+    // show the title twice on the rendered page.
     let mut body = String::new();
-    body.push_str(&format!("# {}\n\n", article.title));
     let year_str = article.year.map(|y| format!(" ({})", y)).unwrap_or_default();
     body.push_str(&format!("## Summary\n\n{}{}\n", digest, year_str));
     if !parsed.key_insights.is_empty() {

@@ -68,6 +68,9 @@ pub fn agents_md_content() -> &'static str {
        status: stale and log a conflict instead.\n\
      - Use kebab-case filenames. No spaces, no unicode in slugs.\n\
      - Frontmatter is mandatory; pages without it are lint errors.\n\
+     - Do NOT start the Markdown body with a `# <Title>` heading. The title\n\
+       from the `title:` frontmatter field is rendered separately as the page\n\
+       heading; repeating it in the body would display the title twice.\n\
      - Em dashes are forbidden in generated prose (project rule).\n"
 }
 

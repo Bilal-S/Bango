@@ -218,8 +218,11 @@ fn render_method_hub(method: &MethodRow) -> (Frontmatter, String) {
         method.co_methods.iter().map(|s| format!("\"[[{}]]\"", s)).collect();
     fm.set("links", &format!("[{}]", co_links.join(", ")));
 
+    // NOTE: do NOT emit `# {title}` as the first body line. The page title
+    // lives in frontmatter and is rendered separately by the wiki viewer's
+    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
+    // show the title twice on the rendered page.
     let mut body = String::new();
-    body.push_str(&format!("# {}\n\n", method.label));
     body.push_str(&format!("Used in {} included articles.\n", method.article_ids.len()));
     body.push_str("\n## Relevant Studies\n\n");
     for id in &method.article_ids {

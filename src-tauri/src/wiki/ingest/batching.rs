@@ -197,6 +197,11 @@ fn build_batch_prompt(
          links: []\n\
          ---\n\
          <Markdown body with [[wikilinks]] to other pages>\n\n\
+         IMPORTANT: Do NOT start the Markdown body with a `# <Title>` heading. \
+         The title from the `title:` frontmatter field is rendered separately as \
+         the page heading; repeating it as the first body line would display the \
+         title twice on the rendered page. Start the body directly with the \
+         opening prose or a `## Section` heading.\n\n\
          IMPORTANT: Author pages, synthesis pages, AND concept pages have \
          ALREADY been pre-seeded deterministically. Do NOT create duplicate \
          pages for them. Link to the existing pages instead using the slugs \
