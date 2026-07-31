@@ -31,9 +31,16 @@ pub struct EmbeddingHit {
 ///
 /// - Embeds the query via the orchestrator (one call).
 /// - Loads all same-dimension rows from `article_embeddings` (optionally
-///   filtered by article status, default `"included"`).
+///   filtered by article status; empty slice = all statuses).
 /// - Max-pools cosine similarity per article (best chunk wins).
 /// - Returns the top-K sorted by score descending.
+///
+/// `status_filter` is a slice of status strings. When non-empty, the candidate
+/// pool is scoped to articles in any of those statuses. When empty, no filter
+/// is applied. The previous single-status `Option<&str>` signature was
+/// extended to a slice for the Citation Finder, which needs `working +
+/// included` while excluding `duplicate`/`rejected`. Pass `&["included"
+/// .to_string()]` for the historical single-status behavior.
 ///
 /// Returns an empty vec when embeddings are disabled, the table is empty, or
 /// the query embedding fails (caller falls back to LIKE).
@@ -42,7 +49,7 @@ pub async fn recall(
     orchestrator: &Arc<LlmOrchestrator>,
     query: &str,
     top_k: usize,
-    status_filter: Option<&str>,
+    status_filter: &[String],
 ) -> Result<Vec<EmbeddingHit>, AppError> {
     let top_k = if top_k == 0 { 30 } else { top_k };
 

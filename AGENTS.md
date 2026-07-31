@@ -113,6 +113,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   `screening/`,
   `dedup/`, `ris/`, `bibtex/`, `prisma/`, `export/`, `scraping/`, `crypto/`,
   `embedding/` (semantic article search: director + runner + recall + pure text/batching helpers; the provider client + orchestrator routing live in `llm/embedding.rs` + `llm/orchestrator.rs`, documented in `src-tauri/src/llm/AGENTS.md`; see the v007 migration entry below for the schema + storage layer),
+  `citation_finder/` (paste-prose-to-citations matching: three-layer pipeline = embedding prefilter REUSES `embedding::recall::recall` → token-Jaccard passage extraction → LLM classify; has its own `AGENTS.md` covering the one-button Phase A→B→C flow, the `misrepresents_source` field (`#[serde(alias = "fairlyParaphrased")]` for backward compat), the multi-status prefilter extension, and the `CitationLlmSender` trait; **highlighted sentences + progressive disclosure** (the system prompt asks the LLM for 1-3 EXACT verbatim `justifying_sentences`; `prompt::ground_quotes` filters them through a normalized-substring gate so paraphrases/hallucinations are dropped; the card collapses to the grounded snippets by default + expands to the full passage with inline `<mark>` highlights); pure-helper unit tests live in external `src-tauri/tests/citation_finder_*_test.rs` files per `docs/CLAUDE.md` §Testing, only the private-internals `search.rs` pipeline tests stay inline; `.worktrees/cf2.md` is the design spec + `.worktrees/cf-fixes1.md` is the audit),
   `wiki/`
   (LLM knowledge base; see `wiki/` entry below), `utils/` (pure helpers:
   `batch_import/` (4-phase batch import processor; see `batch_import/` entry
@@ -1509,7 +1510,12 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   (10), `tests/embedding_recall_test.rs` (7, incl. the `f32::NEG_INFINITY`
   max-pool sentinel regression test), `tests/embedding_runner_test.rs` (9,
   covering the pure `resolve_effective_dim` + `vector_matches_dim` helpers that
-  drive the runner's per-row dimension validation) — 61 tests total. Triggered by
+  drive the runner's per-row dimension validation), `tests/embedding_probe_persist_test.rs`
+  (13, covering the Test Connection probe dimension-forwarding contract + the
+  `save_llm_config` conditional-reset contract — `embedding_relevant_changed`
+  — which ensures a parameters-only save does NOT wipe a known-good
+  `embedding_status = enabled`, preventing the redundant Phase B probe on the
+  next Citation Finder run) — 74 tests total. Triggered by
   post-summary fire-and-forget (`commands/summary.rs`), Test Connection probe
   (`commands/llm_config.rs`), rebuild-text-chunks cascade
   (`commands/full_text.rs`), and batch-import Phase 5. The runner accepts an
@@ -1682,6 +1688,12 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     for the next LLM call without a manual Save button. The watcher is gated
     on `!testing` (Test Connection already saves) and skips the initial
     propagation so loading config from the DB doesn't fire a spurious re-save.
+    The parameters-only save path is now safe with respect to the embedding
+    capability: `save_llm_config` guards `reset_embedding_status` behind
+    `embedding_relevant_changed` (provider/endpoint/model/api-key comparison)
+    so a parameters-only save preserves a known-good `embedding_status`
+    instead of wiping it to `unknown` (which previously forced Citation Finder
+    Phase B to re-probe on every run).
     On every successful save, `lastSavedAt` bumps and the card invalidates the
     cached `screeningStore.readiness` (which carries a token estimate derived
     from `contextWindowTokens`) so the screening-view progress bar reflects
@@ -1879,7 +1891,11 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   direct tests + Phase 1/2 lock-scope discovery helpers + end-to-end),
   `refactor3-tests.md` (screening engine decomposition: decision/error_classify/
   json_parse/article_writer pure-fn tests + post-landing gap coverage),
-  `refactor5-tests.md` (2 rows: `import_project` ID-remap dedup paths).
+  `refactor5-tests.md` (2 rows: `import_project` ID-remap dedup paths),
+  `citation-finder-tests.md` (Citation Finder: similarity/prompt/claim_splitter/readiness/mod
+  pure-helper tests in external `tests/citation_finder_*_test.rs` files + the multi-status
+  `embedding_recall_multistatus_test` + the frontend store/composable/component/view tests
+  listed in cf2.md §9.2; only the private-internals `search.rs` pipeline tests stay inline).
 - **`.worktrees/`** - planning documents (`language-plan-v2.md` is the active
   translation plan; the superseded `language-plan.md` is archived in `DONOTUSE/`;
   implemented/temporary docs are archived in `DONOTUSE/`, such as the timeline plan

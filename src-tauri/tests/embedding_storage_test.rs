@@ -163,9 +163,9 @@ fn list_for_recall_filters_by_dimension() {
     insert(&conn, "a1", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4], 4, "h4");
     insert(&conn, "a1", 0, &[0.1; 8], 8, "h8");
 
-    let rows4 = embedding_repo::list_for_recall(&conn, 4, None).unwrap();
+    let rows4 = embedding_repo::list_for_recall(&conn, 4, &[]).unwrap();
     assert_eq!(rows4.len(), 1, "only the 4-dim row matches dim=4");
-    let rows8 = embedding_repo::list_for_recall(&conn, 8, None).unwrap();
+    let rows8 = embedding_repo::list_for_recall(&conn, 8, &[]).unwrap();
     assert_eq!(rows8.len(), 1, "only the 8-dim row matches dim=8");
 }
 
@@ -179,11 +179,11 @@ fn list_for_recall_filters_by_status() {
     insert(&conn, "inc", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4], 4, "h");
     insert(&conn, "wk", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4], 4, "h");
 
-    let incl = embedding_repo::list_for_recall(&conn, 4, Some("included")).unwrap();
+    let incl = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
     assert_eq!(incl.len(), 1);
     assert_eq!(incl[0].article_id, "inc");
 
-    let all = embedding_repo::list_for_recall(&conn, 4, None).unwrap();
+    let all = embedding_repo::list_for_recall(&conn, 4, &[]).unwrap();
     assert_eq!(all.len(), 2);
 }
 
@@ -196,7 +196,7 @@ fn list_for_recall_decodes_embedding_blob() {
     let original = vec![0.1, -0.2, 0.3, 0.4];
     insert(&conn, "a1", TITLE_ABSTRACT_CHUNK_INDEX, &original, 4, "h");
 
-    let rows = embedding_repo::list_for_recall(&conn, 4, None).unwrap();
+    let rows = embedding_repo::list_for_recall(&conn, 4, &[]).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].embedding.len(), 4);
     for (a, b) in original.iter().zip(rows[0].embedding.iter()) {
@@ -209,7 +209,7 @@ fn empty_table_count_is_zero() {
     let conn = create_connection().expect("conn");
     run_migrations(&conn).expect("migrations");
     assert_eq!(embedding_repo::count_embeddings(&conn).unwrap(), 0);
-    assert!(embedding_repo::list_for_recall(&conn, 8, None).unwrap().is_empty());
+    assert!(embedding_repo::list_for_recall(&conn, 8, &[]).unwrap().is_empty());
 }
 
 #[test]

@@ -465,6 +465,70 @@ runs alongside `article_chunks` because `PRAGMA foreign_keys=OFF` during
 import suppresses the cascade. No `audit_entries` action records embeddings
 (toast-only feedback).
 
+### 8.7 Citation Finder
+
+Paste-prose-to-citations matching over the user's article library, accessed
+as a third toggle (`quick_reference_all` Material icon) in the Chat view
+alongside Articles and Wiki. Two modes: **whole-block** (one embedding, one
+result set) and **per-statement** (LLM splits prose into ≤5 claims; each
+claim is embedded + matched independently; results grouped by claim).
+
+**Three-layer pipeline** (cf2.md): embedding prefilter (reuses
+`recall_articles`, extended to multi-status) → token-Jaccard passage
+extraction (pure `similarity::find_best_passage`) → LLM classification
+(validating/opposing + `misrepresents_source` + cosine confidence). The
+candidate pool is scoped by a status filter (Working + Included checked by
+default; Duplicates always excluded).
+
+**One-button flow** (cf2.md §2): `find_citations` is the single entry point.
+It runs Phase A (readiness) → Phase B (auto-prepare embeddings if coverage
+<100%, reusing `generate_embeddings_inner` with the same cancel token) →
+Phase C (the search pipeline). No separate "Prepare Embeddings" button. The
+toggle is visible whenever the provider supports embeddings
+(`embedding_status != Disabled`); it is hidden on known-unsupported providers
+(Anthropic, Z.AI).
+
+**Cancel + background**: `find_citations` spawns a `tokio::task` and emits
+`citation:progress` / `citation:done` / `citation:error` events. The
+`CitationFinderState` managed state (mirrors `BatchImportState`) holds an
+`Arc<AtomicBool>` cancel token + a `Mutex<CitationFinderProgress>` snapshot.
+One Cancel button covers both Phase B + Phase C (same token).
+
+**Citation style**: reuses the existing 5-style LLM-hint list
+(`APA/MLA/Chicago/IEEE/AMA`) from `use-summary.ts`. No `@citation-js`
+dependency; the Copy button builds a plain-text citation via a pure TS
+helper. Zero new npm deps.
+
+**Data contract**: `misrepresents_source` (renamed from cf2's self-
+contradictory `fairly_paraphrased`, which itself reframed cf1's circular
+`quote_verified`; `true` = passage taken out of context; the
+`CitationLlmOutput` serde field carries `#[serde(alias =
+"fairlyParaphrased")]` for backward-compat), `confidence` = cosine (semantic)
+normalized from `[-1, 1]` to `[0, 1]`, `section_origin: Option<String>` (None
+for `SectionKind::Text`-derived chunks; the UI omits the `§…` badge). The
+`ChatMessage` type extends with `citations?: CitationResult[]` +
+`citationStyle?: CitationStyle` so structured results render in the chat
+history bubble. The Citation Style `<select>` lives only in the citation-
+finder input area; the active style is captured at submit time + frozen per-
+bubble so each bubble renders all its cards with the style that was selected
+when the search ran (IEEE `[N]` numbering is per-bubble, derived from the
+flattened card order). The `normalize_claim_key` pure helper (trim + collapse
+whitespace + lowercase) drives the `(article_id, claim)` cosine-score lookup
+in `merge_outputs` so cosmetic claim drift between the splitter and the
+classifier does not silently drop the real cosine to the 0.5 neutral
+fallback. `ArticleBest::cosine` seeds at `f32::NEG_INFINITY` (mirroring
+`embedding::recall::recall`) so a true negative cosine surfaces as `0.0`
+(opposite direction) instead of `0.5`.
+
+**New `LlmRequestType` variants**: `CitationFinder` (120s main classify) +
+`CitationFinderSplit` (60s claim-split). Neither participates in
+`skip_temperature` machinery.
+
+Commands: `find_citations`, `cancel_citation_search`,
+`get_citation_finder_readiness`. Test inventory in
+`docs/test-plans/citation-finder-tests.md`. Design spec: `.worktrees/cf2.md`.
+Child DOX: `src-tauri/src/citation_finder/AGENTS.md`.
+
 ## 9. UI Layout & Design System
 
 The application design is based on the **"Scholarly Precision"** style, utilizing a dense, minimalist Notion-like aesthetic.
@@ -515,6 +579,7 @@ The following features remain explicitly **out of scope**:
 ## Change Log
 
 | Version | Date | Key Improvements |
+| **v8.9** | 2026-07-30 | **Citation Finder** (§8.7) — backend + frontend complete. Paste-prose-to-citations matching over the user's article library, accessed as a third toggle (`quick_reference_all`) in the Chat view. Three-layer pipeline: embedding prefilter (reuses `embedding::recall::recall`, extended to multi-status `&[String]` → token-Jaccard passage extraction (pure `similarity::find_best_passage`) → LLM classification (validating/opposing + `misrepresents_source` + cosine confidence). Two modes: whole-block + per-statement (LLM splits ≤5 claims). One-button flow: `find_citations` runs Phase A (readiness) → Phase B (auto-prepare embeddings if coverage <100%, reusing `generate_embeddings_inner`) → Phase C (search) under one `Arc<AtomicBool>` cancel token; emits `citation:progress`/`citation:done`/`citation:error` events. `CitationFinderState` managed state mirrors `BatchImportState`. No separate Prepare button. Citation style reuses the existing 5-style LLM-hint list (no `@citation-js` dependency; pure-TS `formatCitation` helper); the `<select>` lives only in the citation-finder input area and the active style is captured at submit time + frozen per-bubble (`ChatMessage.citationStyle`), so each bubble renders all its cards with the style that was selected when the search ran (IEEE `[N]` numbering is per-bubble, flattened across claims). New `LlmRequestType::CitationFinder` (120s) + `CitationFinderSplit` (60s). `ChatMessage` extends with `citations?: CitationResult[]` + `citationStyle?: CitationStyle`. Renamed cf2's self-contradictory `fairly_paraphrased` → `misrepresents_source` (`true` = passage taken out of context; `#[serde(alias = "fairlyParaphrased")]` keeps deserialization backward-compatible), which itself reframed cf1's circular `quote_verified`. Three backend correctness fixes landed alongside the rename: (a) `normalize_claim_key` (pure) drives the `(article_id, claim)` cosine-score lookup so cosmetic claim drift between the splitter and the classifier (whitespace, case) does not silently drop the real cosine to the 0.5 neutral fallback; the grouping filter is normalized on both sides too; (b) `ArticleBest::cosine` seeds at `f32::NEG_INFINITY` (mirroring `embedding::recall::recall`) so a true negative cosine surfaces as `0.0` instead of `0.5`; (c) `build_claim_work` is `async` + takes a brief `lock_conn` burst per candidate (releasing between articles, with `tokio::task::yield_now()`) so the `DbState` mutex is never held across up-to-150 chunk reads. Cosine is the user-facing "match %" (normalized `[-1,1]`→`[0,1]`); Jaccard is internal-only; `section_origin: Option<String>` (None omits the `§…` badge). 3 commands (`find_citations`, `cancel_citation_search`, `get_citation_finder_readiness`). Frontend: `src/types/citation-finder.ts`, `src/composables/use-citation-finder.ts` (`findCitations` + `cancelSearch` + `getReadiness` + `formatCitation`/`firstAuthor` pure helpers), `src/components/citation-result-card.vue`, `src/stores/chat.ts` (3rd `'citation-finder'` source + per-bubble style), `src/views/chat-view.vue` (3rd toggle, prose textarea, mode toggle, status checkboxes, progress + Cancel, card-rendering branch). DOX: new `src-tauri/src/citation_finder/AGENTS.md` + root index entry + spec §8.7 + test inventory `docs/test-plans/citation-finder-tests.md` (now machine-enforced: added to `scripts/check-test-inventory.sh` `PLAN_DOCS`; rows use the `path::fn` format). Design spec: `.worktrees/cf2.md`; audit + final dispositions: `.worktrees/cf-fixes1.md`. 69 Rust tests (16 inline `search.rs` pipeline tests covering private `merge_outputs`/`pool_finalists`/`normalize_claim_key` + 53 external across `citation_finder_{similarity,prompt,claim_split,readiness,mod,search}_test.rs` — pure-helper tests extracted from inline `#[cfg(test)]` blocks per `docs/CLAUDE.md` §Testing) + 8 multi-status `embedding_recall_multistatus_test` + 30 frontend tests (12 formatCitation/firstAuthor + 7 card + 11 store incl. 3 citation-finder). clippy + fmt + type-check + eslint + prettier clean. |
 | **v8.8** | 2026-07-30 | **Embedding pipeline hardening (gap closure)**. (1) **Dimension-persistence fix** (`commands/llm_config.rs`): the Test Connection probe path previously hardcoded `dimensions = 0` when persisting the probe outcome, dropping the real `ProbeOutcome.dimensions` value. This left `recall` gated off (`dimensions <= 0`) until the first `generate_embeddings` call populated it. The fix threads `dimensions` through `probe_embeddings_sync` → `persist_embedding_probe` → `set_embedding_status`. The extracted DB-write core `persist_embedding_probe_to_conn` is `pub` so the contract is regression-tested in `tests/embedding_probe_persist_test.rs` (4 tests). The standalone `probe_embeddings` command was already correct; only the Test Connection path lost the value. (2) **Embedding DOX + spec** (§8.6): added the `embedding/` module to the root `AGENTS.md` Owned-modules index; added an "Embeddings" section to `src-tauri/src/llm/AGENTS.md` (provider probe, triple-state flag, `send_embedding` routing, lock discipline, dimension guard) + corrected its Child DOX Index to list `embedding.rs`; added §8.6 to the v4 spec documenting the flow, triple-state flag, `recall` command, and backup-exclusion contract. No schema, migration, or backup-format changes. |
 | **v8.7** | 2026-07-22 | **Screening hang diagnostics + batch-size clamp revert** (diagnostics-only; no behavioral changes to cancellation, timeouts, or locking). Always-on instrumentation surfaced to diagnose a "hangs with a large corpus + Stop/Pause unresponsive" report: (1) `ScreeningProgress.phase: Option<String>` carries the coarse run-phase (`preparing:translating` / `preparing:chunking` / `screening` / `stage2`); the frontend progress bar renders it as the sub-line during prep phases so the user sees "Extracting full-text chunks..." instead of a silent 0% freeze. `#[serde(default)]` for backward-compat. (2) `log_diag!` macro (always-on, NOT gated on `cfg(debug_assertions)` like `debug_log!`) emits `[screening:diag]` lines for phase transitions, per-batch `batch_start`, stage-1/stage-2 cancel detection, `stop_screening: IPC received`, orchestrator `LLM call START/END/TIMEOUT`, and a 5s `HEARTBEAT` (exits on `is_running==false || cancel_token==true` so it never leaks past the run). (3) Phase B (chunk backfill) progress callback: `ensure_chunks_for_full_text_articles_with_progress` invokes a `ChunkProgressCb` per article; the screening task emits a `screening:progress` event + `chunk_progress: done/total` log line per article. The lock pattern is UNCHANGED — `db.conn.lock()` is still held across the whole pass; the callback only emits events between articles. (4) `connection.rs::lock_conn` times the acquire and emits `lock_conn: SLOW acquire ({ms}ms)` when > 100ms — the single most valuable signal for mutex-starvation hangs. (5) `translation/wait.rs` emits `translation_wait: START/DONE/TIMEOUT` per article (no-op when `auto_translate=false`). **Batch-size clamp reverted (Option B)**: `commands/screening.rs` now honors `1..=15` verbatim (matching the frontend stepper's `BATCH_MAX`); a previous v8.6 reduction to `clamp(1, 5)` silently overrode the user's selection on the unproven assumption that large batches cause hangs, masking the real per-batch behavior from the diagnostics. The orchestrator timeout + auto-stop guards surface any genuinely slow provider without baking in a batch-size assumption. **Outcome**: a re-run on the same 590-article corpus + Abstract mode that previously hung completed cleanly (590/590, 16-28s per 10-article batch, no slow locks, no timeouts, no Phase B), confirming the hang was transient and the v8.1-v8.6 fixes (single-attempt-per-batch, per-request-type timeout, transient-defer, auto-stop, cancellable delay) are the likely resolution. The diagnostics remain in place as standing observability. Run as `Bango 2>screening.log` and `grep '[screening:diag]'`; `scripts/bango-screen-w-proxy.sh` is a one-shot launcher (proxy + log capture). 3 new tests in `tests/screening_engine_test.rs`. No DB migration or backup-format changes. |
 | **v8.4** | 2026-07-22 | Three screening-engine improvements addressing the critique in `.worktrees/llmscreen2.md` (Tier 1 batch). (1) **Consecutive-failure auto-stop**: a wrong API key or sustained LLM outage no longer silently burns through all unscreened articles. Auth failures (401/403 without the Windows transient body) stop the run immediately (threshold = 1) with a `fatalError` message. Other transient errors (429/5xx/timeout/transport) stop after 3 consecutive failures. New pure `#[must_use]` helper `screening::engine::is_auth_failure(e) -> bool` distinguishes real auth failures from the Windows transient. (2) **Fixed phantom progress**: transient-deferred articles no longer inflate `progress.completed` or `progress.errors`. New `progress.deferred` counter tracks articles left unscreened due to transient errors; the frontend renders a distinct muted "N article(s) deferred" notice. Non-transient errors (malformed JSON, parse mismatch) still bump `completed`+`errors`. (3) **Actionable timeout messages**: the orchestrator's timeout error now includes guidance ("This is often caused by sustained rate limiting (429), server overload (5xx), or a slow model. Try reducing batch_size or increasing request_delay_ms") instead of the opaque "timed out after N seconds." No DB migration or backup-format changes. 5 new `is_auth_failure` unit tests. |

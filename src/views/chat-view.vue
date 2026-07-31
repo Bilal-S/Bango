@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useChatStore } from '@/stores/chat';
 import { useToast } from '@/composables/use-toast';
 import type { Article } from '@/types';
 import type { WikiStatus } from '@/types/wiki';
+import type { CitationResult, CitationStyle } from '@/types/citation-finder';
 import { marked } from 'marked';
 import { renderWikiMarkdown } from '@/utils/wiki-markdown';
 import { useArticleSearch } from '@/composables/use-article-search';
@@ -14,9 +15,12 @@ import { useWiki } from '@/composables/use-wiki';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
 import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
+import { getReadiness, stopCitationListeners } from '@/composables/use-citation-finder';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
+import CitationResultCard from '@/components/citation-result-card.vue';
 import type { WikiSourceInfo } from '@/types/wiki';
+import type { CitationFinderMode } from '@/types/citation-finder';
 
 const router = useRouter();
 const toast = useToast();
@@ -111,12 +115,133 @@ watch(detailArticle, (newVal) => {
   }
 });
 
+/** Citation-finder prose textarea (replaces the single-line `<input>` used by
+ *  chat/wiki modes). Multi-line; submits on Ctrl/Cmd+Enter. */
+const citationProse = ref('');
+
+/** Citation-finder status-filter checkboxes state. Working + Included default
+ *  ON, Rejected default OFF, Duplicate always excluded (hidden). */
+const citationStatuses = ref({
+  working: true,
+  included: true,
+  rejected: false,
+});
+
+/** Computed status filter array passed to the backend. Mirrors the checkbox
+ *  state; duplicates are never included. */
+const citationStatusFilter = computed(() => {
+  const out: string[] = [];
+  if (citationStatuses.value.working) out.push('working');
+  if (citationStatuses.value.included) out.push('included');
+  if (citationStatuses.value.rejected) out.push('rejected');
+  return out;
+});
+
+/** Whether the citation-finder input area is shown (source === 'citation-
+ *  finder'). Drives the v-if that swaps the article-context pills for the
+ *  citation toolbar + prose textarea. */
+const isCitationMode = computed(() => chatStore.source === 'citation-finder');
+
+/** Citation-finder readiness check. Populates `chatStore.citationFinderReady`
+ *  (drives the 3rd toggle visibility). Runs on mount + when the view is
+ *  re-activated after navigation. */
+async function checkCitationFinderReadiness() {
+  try {
+    const r = await getReadiness(citationStatusFilter.value);
+    chatStore.setCitationFinderReady(r.providerSupportsEmbeddings);
+  } catch {
+    // Provider not configured / embeddings disabled → hide the toggle.
+    chatStore.setCitationFinderReady(false);
+  }
+}
+
+/** Citation-style <select> options (the shared 5-style list). */
+const citationStyleOptions: CitationStyle[] = ['APA', 'MLA', 'Chicago', 'IEEE', 'AMA'];
+
+/** Mode toggle handler (segmented button). */
+function onSetCitationMode(mode: CitationFinderMode) {
+  chatStore.setCitationFinderMode(mode);
+}
+
+/** Flip the citation-finder source on. Mutually exclusive with wiki (entering
+ *  citation mode drops back from wiki if it was on). */
+function onToggleCitationFinder() {
+  if (chatStore.source === 'citation-finder') {
+    chatStore.setSource('articles');
+  } else {
+    chatStore.setSource('citation-finder');
+  }
+}
+
+/** Submit the citation search. Driven by the prose textarea + the Find
+ *  Citations button + Ctrl/Cmd+Enter. Threads the live status-filter
+ *  checkboxes (NEW-4) to the store's dedicated `sendCitationSearch`, which
+ *  forwards them to the backend. The backend filters against the whitelist
+ *  and applies NO default — an empty array (all checkboxes unchecked)
+ *  returns the "No articles match the selected filters." empty result. */
+async function handleCitationSend() {
+  // The Find button is `:disabled` when the prose is empty, but Ctrl/Cmd+Enter
+  // bypasses the disabled button, so we must guard here + show the toast
+  // (NEW-7: the old second guard was unreachable because the first returned).
+  if (!citationProse.value.trim()) {
+    toast.show('Please paste text to search.', 'info');
+    return;
+  }
+  if (chatStore.loading) return;
+  const text = citationProse.value;
+  citationProse.value = '';
+  // Pass the live checkbox state; the store owns the message list + the
+  // citation-finder branch. The backend's `filter_valid_statuses` whitelists
+  // `['working','included','rejected']` and drops everything else.
+  await chatStore.sendCitationSearch(text, citationStatusFilter.value);
+  scrollToBottom();
+}
+
+/** Copy a citation string to the clipboard + toast. */
+async function handleCopyCitation(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.show('Citation copied to clipboard.', 'success');
+  } catch {
+    toast.show('Failed to copy citation.', 'error');
+  }
+}
+
+/** Flatten a `CitationResult[]` into a single card list for IEEE `[N]`
+ *  numbering across the whole bubble (per-bubble numbering). Returns the
+ *  matches + their 1-based index in display order. */
+function flattenForIeee(results: CitationResult[]): Array<{
+  match: CitationResult['matches'][number];
+  ieeeIndex: number;
+  claim: string | null;
+}> {
+  const out: Array<{
+    match: CitationResult['matches'][number];
+    ieeeIndex: number;
+    claim: string | null;
+  }> = [];
+  let idx = 1;
+  for (const group of results) {
+    for (const match of group.matches) {
+      out.push({ match, ieeeIndex: idx, claim: group.claim });
+      idx += 1;
+    }
+  }
+  return out;
+}
+
 onMounted(async () => {
   await checkLlmConfig();
   if (isLlmConfigured.value) {
-    await Promise.all([loadArticles(), checkWikiStatus()]);
+    await Promise.all([loadArticles(), checkWikiStatus(), checkCitationFinderReadiness()]);
     scrollToBottom();
   }
+});
+
+// Tear down citation:* listeners on unmount so navigating away from Chat
+// does not leave dangling event subscriptions.
+onUnmounted(() => {
+  stopCitationListeners();
 });
 
 async function checkLlmConfig() {
@@ -454,6 +579,12 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
                   title="Answer grounded by FTS5 search over your wiki pages"
                   >wiki</span
                 >
+                <span
+                  v-else-if="msg.source === 'citation-finder'"
+                  class="citation-badge"
+                  title="Citation Finder result"
+                  >citation</span
+                >
               </span>
               <!-- Bubble -->
               <div
@@ -467,6 +598,56 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
                 <template v-if="msg.role === 'user'">
                   <div style="white-space: pre-wrap">{{ msg.content }}</div>
                 </template>
+                <!-- Citation Finder results: render the card stack instead of
+                     the Markdown body. Per-bubble style frozen at submit time;
+                     IEEE [N] numbering is the flattened card order across the
+                     whole bubble (per-statement groups render claim headings). -->
+                <template v-else-if="msg.citations">
+                  <div class="citation-bubble">
+                    <p v-if="msg.content" class="citation-bubble__summary">{{ msg.content }}</p>
+                    <template v-if="msg.citations.some((g) => g.claim !== null)">
+                      <!-- Per-statement: group cards under claim headings.
+                           The predicate is "any group carries a non-null
+                           claim", NOT `length > 1`: per-statement mode that
+                           produces exactly 1 claim still has `claim: Some`,
+                           and the claim heading must render (whole-block
+                           always has `claim: null`). -->
+                      <div
+                        v-for="group in msg.citations"
+                        :key="group.claim ?? 'whole'"
+                        class="citation-bubble__group"
+                      >
+                        <h4 v-if="group.claim" class="citation-bubble__claim-heading">
+                          {{ group.claim }}
+                        </h4>
+                        <CitationResultCard
+                          v-for="card in flattenForIeee(msg.citations).filter(
+                            (c) => c.claim === group.claim
+                          )"
+                          :key="card.match.articleId + '-' + card.ieeeIndex"
+                          :match="card.match"
+                          :style="msg.citationStyle ?? 'APA'"
+                          :ieee-index="card.ieeeIndex"
+                          @copy="handleCopyCitation"
+                          @view="openArticleDetail"
+                        />
+                      </div>
+                    </template>
+                    <template v-else>
+                      <!-- Whole-block: flat card list (every group has
+                           `claim: null`). -->
+                      <CitationResultCard
+                        v-for="card in flattenForIeee(msg.citations)"
+                        :key="card.match.articleId + '-' + card.ieeeIndex"
+                        :match="card.match"
+                        :style="msg.citationStyle ?? 'APA'"
+                        :ieee-index="card.ieeeIndex"
+                        @copy="handleCopyCitation"
+                        @view="openArticleDetail"
+                      />
+                    </template>
+                  </div>
+                </template>
                 <template v-else>
                   <div @click="handleBubbleClick">
                     <!-- eslint-disable-next-line vue/no-v-html -- trusted LLM output; wiki links sanitized to data attributes -->
@@ -477,9 +658,14 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
             </div>
           </template>
 
-          <!-- Loading / Thinking indicator -->
+          <!-- Loading / Thinking indicator.
+               HIDDEN in citation-finder mode: the citation-progress bar above
+               the input area already communicates Phase B/C status (with a
+               Cancel button + per-phase message), so the generic "Analyzing
+               article context..." text would be stale, misleading, and
+               redundant. Wiki + article modes keep the thinking dots. -->
           <div
-            v-if="chatStore.loading"
+            v-if="chatStore.loading && !isCitationMode"
             class="flex flex-col items-start max-w-[80%] self-start animate-pulse"
           >
             <span class="text-[11px] text-slate-400 mb-1 font-medium px-1 flex items-center gap-1">
@@ -518,6 +704,159 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
               >
                 Open Wiki
               </button>
+            </div>
+          </div>
+
+          <!-- Citation Finder input area (replaces article-context pills +
+               single-line input). Holds the style <select>, mode toggle,
+               status checkboxes, prose textarea, Find Citations button, and
+               the live progress + Cancel UI. -->
+          <div v-else-if="isCitationMode" class="citation-input-area">
+            <!-- Single control row: Citation Style dropdown → status
+                 checkboxes → Mode segmented toggle → close (X). Everything is
+                 at the same level so there's no extra whitespace; the close
+                 button is pushed to the right edge with margin-left:auto. -->
+            <div class="citation-input-area__row">
+              <label class="citation-input-area__field">
+                <span class="citation-input-area__label">Citation Style</span>
+                <select
+                  :value="chatStore.citationStyle"
+                  class="citation-input-area__select"
+                  @change="
+                    chatStore.setCitationStyle(
+                      ($event.target as HTMLSelectElement).value as CitationStyle
+                    )
+                  "
+                >
+                  <option v-for="s in citationStyleOptions" :key="s" :value="s">{{ s }}</option>
+                </select>
+              </label>
+
+              <!-- Status checkboxes with a "ARTICLES TO SEARCH" header matching
+                   the Citation Style header. Duplicate is always excluded. -->
+              <div class="citation-input-area__field" role="group" aria-label="Status filter">
+                <span class="citation-input-area__label">Articles to Search</span>
+                <div class="citation-input-area__statuses">
+                  <label class="citation-input-area__checkbox">
+                    <input v-model="citationStatuses.working" type="checkbox" />
+                    <span>Working</span>
+                  </label>
+                  <label class="citation-input-area__checkbox">
+                    <input v-model="citationStatuses.included" type="checkbox" />
+                    <span>Included</span>
+                  </label>
+                  <label class="citation-input-area__checkbox">
+                    <input v-model="citationStatuses.rejected" type="checkbox" />
+                    <span>Rejected</span>
+                  </label>
+                </div>
+                <span class="citation-input-area__statuses-hint">Duplicates always excluded</span>
+              </div>
+
+              <!-- Mode toggle with a "SCOPE" header matching Citation Style. -->
+              <div
+                class="citation-input-area__field"
+                role="group"
+                aria-label="Citation Finder mode"
+              >
+                <span class="citation-input-area__label">Scope</span>
+                <div class="citation-input-area__mode">
+                  <button
+                    type="button"
+                    class="citation-input-area__mode-btn"
+                    :class="{
+                      'citation-input-area__mode-btn--active':
+                        chatStore.citationFinderMode === 'whole_block',
+                    }"
+                    @click="onSetCitationMode('whole_block')"
+                  >
+                    Whole Block
+                  </button>
+                  <button
+                    type="button"
+                    class="citation-input-area__mode-btn"
+                    :class="{
+                      'citation-input-area__mode-btn--active':
+                        chatStore.citationFinderMode === 'per_statement',
+                    }"
+                    @click="onSetCitationMode('per_statement')"
+                  >
+                    Per Statement
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="citation-input-area__close"
+                title="Close Citation Finder"
+                @click="onToggleCitationFinder"
+              >
+                <span class="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <!-- Row 3: Prose textarea + (Find Citations button OR live
+                 progress). While a search is running, the progress indicator
+                 replaces the Find Citations button in place — the textarea
+                 stays visible so the user can draft the next search. -->
+            <div class="citation-input-area__prose-row">
+              <textarea
+                v-model="citationProse"
+                class="citation-input-area__textarea"
+                placeholder="Paste the text you want to find citations for..."
+                rows="4"
+                @keydown.enter.ctrl="handleCitationSend"
+                @keydown.enter.meta="handleCitationSend"
+              ></textarea>
+
+              <!-- Idle: Find Citations button -->
+              <button
+                v-if="!chatStore.citationProgress"
+                type="button"
+                class="citation-input-area__find-btn"
+                :disabled="!citationProse.trim() || chatStore.loading"
+                @click="handleCitationSend"
+              >
+                <span class="material-symbols-outlined text-[18px]">search</span>
+                Find Citations
+              </button>
+
+              <!-- Running: compact progress replaces the button -->
+              <div v-else class="citation-progress citation-progress--inline">
+                <div class="citation-progress__header">
+                  <span class="citation-progress__message">{{
+                    chatStore.citationProgress.message
+                  }}</span>
+                  <button
+                    type="button"
+                    class="citation-progress__cancel"
+                    :disabled="chatStore.cancelling"
+                    @click="chatStore.cancelCitationSearch()"
+                  >
+                    <span
+                      v-if="chatStore.cancelling"
+                      class="citation-progress__cancel-spinner"
+                    ></span>
+                    <span v-else class="material-symbols-outlined text-[14px]">cancel</span>
+                    {{ chatStore.cancelling ? 'Cancelling…' : 'Cancel' }}
+                  </button>
+                </div>
+                <div class="citation-progress__bar-track">
+                  <div
+                    class="citation-progress__bar-fill"
+                    :style="{
+                      width:
+                        (chatStore.citationProgress.phase === 'preparing_embeddings'
+                          ? chatStore.citationProgress.overallPercent
+                          : 100) + '%',
+                    }"
+                    :class="{
+                      'citation-progress__bar-fill--indeterminate':
+                        chatStore.citationProgress.phase === 'searching',
+                    }"
+                  ></div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -589,8 +928,13 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
             </div>
           </div>
 
-          <!-- Chat bar input container -->
-          <div class="flex items-center gap-3">
+          <!-- Chat bar input container.
+               HIDDEN in citation-finder mode: the citation input area above
+               owns the active input (prose textarea + Find/progress), and the
+               mode toggles here are redundant (the citation area has its own
+               close button + the toggle is not how the user exits). Wiki +
+               article modes keep the full chat bar. -->
+          <div v-if="!isCitationMode" class="flex items-center gap-3">
             <!-- Plus button (article mode only; hidden in wiki mode) -->
             <button
               v-if="chatStore.source === 'articles'"
@@ -615,6 +959,24 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
               @click="onToggleWiki"
             >
               <span class="material-symbols-outlined text-[24px]">local_library</span>
+            </button>
+
+            <!-- Citation Finder toggle button (3rd toggle). Visible only when
+                 the provider supports embeddings. Same chrome as the wiki
+                 toggle (.citation-toggle mirrors .wiki-toggle). -->
+            <button
+              v-if="chatStore.citationFinderReady"
+              class="citation-toggle"
+              :class="{ 'citation-toggle--active': isCitationMode }"
+              :title="
+                isCitationMode
+                  ? 'Citation Finder active. Click to return to article context.'
+                  : 'Find citations for text you are writing (semantic search over your library)'
+              "
+              :aria-pressed="isCitationMode"
+              @click="onToggleCitationFinder"
+            >
+              <span class="material-symbols-outlined text-[24px]">quick_reference_all</span>
             </button>
 
             <!-- Input field -->
@@ -976,6 +1338,365 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* Small "citation" badge on citation-finder assistant bubble timestamps.
+   Mirrors .wiki-badge but in teal so the two sources are visually distinct. */
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 9999px;
+  background-color: rgb(204 251 241); /* teal-100 */
+  color: rgb(15 118 110); /* teal-800 */
+  font-size: 0.55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Citation Finder toggle button (3rd toggle, mirrors .wiki-toggle). */
+.citation-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(203 213 225); /* slate-300 */
+  background-color: #fff;
+  color: rgb(99 102 241); /* indigo-600 */
+  flex-shrink: 0;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s,
+    border-color 0.15s;
+}
+
+.citation-toggle:hover:not(.citation-toggle--active) {
+  background-color: rgb(238 242 255); /* indigo-50 */
+  border-color: rgb(165 180 252); /* indigo-300 */
+}
+
+.citation-toggle--active {
+  background-color: rgb(99 102 241); /* indigo-600 */
+  border-color: rgb(79 70 229); /* indigo-700 */
+  color: #fff;
+  box-shadow:
+    0 0 0 3px rgb(199 210 254 / 0.9),
+    0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+/* Citation Finder input area (replaces article-context pills + single-line
+ * input when isCitationMode is true). */
+.citation-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Close (X) button — exits citation mode. Sits at the same level as the
+   Citation Style dropdown (inside Row 1) and is pushed to the right edge with
+   margin-left:auto so it introduces no extra top whitespace. Mirrors the
+   wiki-reader close button's muted slate styling. Aligned to center so it
+   lines up with the row's other controls regardless of label height. */
+.citation-input-area__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-left: auto;
+  align-self: center;
+  border-radius: 0.375rem;
+  border: none;
+  background: transparent;
+  color: rgb(100 116 139); /* slate-500 */
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.citation-input-area__close:hover {
+  background-color: rgb(241 245 249); /* slate-100 */
+  color: rgb(15 23 42); /* slate-900 */
+}
+
+/* Inline variant of the progress block: constrains the width so it occupies
+   the Find Citations button's column (instead of spanning the full row). */
+.citation-progress--inline {
+  flex-shrink: 0;
+  min-width: 9rem;
+  max-width: 12rem;
+  justify-content: center;
+}
+
+.citation-input-area__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.citation-input-area__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.citation-input-area__label {
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgb(100 116 139); /* slate-500 */
+}
+
+.citation-input-area__select {
+  padding: 0.3125rem 0.5rem;
+  border: 1px solid rgb(203 213 225); /* slate-300 */
+  border-radius: 0.375rem;
+  background: #fff;
+  font-size: 0.75rem;
+  color: rgb(15 23 42); /* slate-900 */
+  cursor: pointer;
+}
+
+.citation-input-area__mode {
+  display: inline-flex;
+  border: 1px solid rgb(203 213 225);
+  border-radius: 0.375rem;
+  overflow: hidden;
+}
+
+.citation-input-area__mode-btn {
+  padding: 0.3125rem 0.625rem;
+  border: none;
+  background: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: rgb(71 85 105); /* slate-600 */
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+.citation-input-area__mode-btn:not(.citation-input-area__mode-btn--active):hover {
+  background: rgb(241 245 249); /* slate-100 */
+}
+
+.citation-input-area__mode-btn--active {
+  background: rgb(99 102 241); /* indigo-600 */
+  color: #fff;
+}
+
+.citation-input-area__statuses {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.citation-input-area__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  color: rgb(71 85 105); /* slate-600 */
+  cursor: pointer;
+}
+
+.citation-input-area__checkbox input {
+  accent-color: rgb(99 102 241); /* indigo-600 */
+}
+
+.citation-input-area__statuses-hint {
+  font-size: 0.625rem;
+  color: rgb(148 163 184); /* slate-400 */
+  font-style: italic;
+}
+
+.citation-input-area__prose-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.citation-input-area__textarea {
+  flex: 1;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid rgb(203 213 225); /* slate-300 */
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: rgb(15 23 42);
+  resize: vertical;
+  min-height: 4.5rem;
+  font-family: inherit;
+}
+
+.citation-input-area__textarea:focus {
+  outline: none;
+  border-color: rgb(99 102 241); /* indigo-600 */
+  box-shadow: 0 0 0 2px rgb(99 102 241 / 0.2);
+}
+
+.citation-input-area__find-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.875rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: rgb(99 102 241); /* indigo-600 */
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  flex-shrink: 0;
+}
+
+.citation-input-area__find-btn:hover:not(:disabled) {
+  background: rgb(79 70 229); /* indigo-700 */
+}
+
+.citation-input-area__find-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Live progress bar + Cancel button. */
+.citation-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+  padding: 0.5rem 0.625rem;
+  background: rgb(248 250 252); /* slate-50 */
+  border: 1px solid rgb(226 232 240); /* slate-200 */
+  border-radius: 0.375rem;
+}
+
+.citation-progress__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.citation-progress__message {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: rgb(71 85 105); /* slate-600 */
+}
+
+.citation-progress__cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  padding: 0.1875rem 0.4375rem;
+  border: 1px solid rgb(254 202 202); /* red-200 */
+  border-radius: 0.25rem;
+  background: #fff;
+  color: rgb(220 38 38); /* red-600 */
+  font-size: 0.625rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.citation-progress__cancel:hover:not(:disabled) {
+  background: rgb(254 226 226); /* red-100 */
+}
+
+.citation-progress__cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Small spinner shown next to "Cancelling…" while the backend drains the
+ * in-flight LLM call + emits the terminal `citation:error`. */
+.citation-progress__cancel-spinner {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1.5px solid rgb(220 38 38 / 0.3); /* red-600 @ 30% */
+  border-top-color: rgb(220 38 38); /* red-600 */
+  border-radius: 9999px;
+  animation: citation-cancel-spin 0.7s linear infinite;
+}
+
+@keyframes citation-cancel-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.citation-progress__bar-track {
+  width: 100%;
+  height: 0.25rem;
+  background: rgb(226 232 240); /* slate-200 */
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.citation-progress__bar-fill {
+  height: 100%;
+  background: rgb(99 102 241); /* indigo-600 */
+  border-radius: 9999px;
+  transition: width 0.2s ease;
+}
+
+.citation-progress__bar-fill--indeterminate {
+  animation: citation-progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes citation-progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Citation results bubble: stacks CitationResultCard components. */
+.citation-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.citation-bubble__summary {
+  font-size: 0.75rem;
+  color: rgb(100 116 139); /* slate-500 */
+  margin: 0 0 0.25rem 0;
+}
+
+.citation-bubble__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.citation-bubble__claim-heading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: rgb(67 56 202); /* indigo-800 */
+  background: rgb(238 242 255); /* indigo-50 */
+  padding: 0.1875rem 0.375rem;
+  border-radius: 0.25rem;
+  margin: 0.25rem 0 0 0;
 }
 
 /* Wiki-mode banner (replaces the article context picker). */

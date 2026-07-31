@@ -14,7 +14,7 @@ pub struct LlmConfig {
     pub context_window_tokens: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum LlmProvider {
     Openai,

@@ -153,35 +153,55 @@ pub fn count_embeddings_for_article(conn: &Connection, article_id: &str) -> Resu
 /// vectors into the same cosine scoring pass. The user rebuilds to clear the
 /// stale-dimension rows.
 ///
-/// The `status_filter` (e.g. `Some("included")`) scopes the candidate pool so
-/// recall is bounded by the active corpus rather than the whole DB.
+/// `status_filter` is a slice of status strings (e.g. `&["included".to_string(),
+/// "working".to_string()]`). When non-empty, the candidate pool is scoped to
+/// articles in any of those statuses (SQL `status IN (?, ?, ?)`) so recall is
+/// bounded by the active corpus rather than the whole DB. When empty, no
+/// status filter is applied (all articles regardless of status).
+///
+/// The multi-status shape (extended for the Citation Finder, which needs
+/// `working + included` while excluding `duplicate`/`rejected`) replaces the
+/// former `Option<&str>` single-status signature. The previous single-status
+/// behavior is preserved by passing a one-element slice.
 pub fn list_for_recall(
     conn: &Connection,
     dimensions: i32,
-    status_filter: Option<&str>,
+    status_filter: &[String],
 ) -> Result<Vec<EmbeddingRow>, AppError> {
-    let sql = match status_filter {
-        Some(_) => {
+    let mut out = Vec::new();
+    if status_filter.is_empty() {
+        // No status filter: scan article_embeddings directly (no JOIN needed).
+        let sql = "SELECT article_id, chunk_index, embedding, dimensions, \
+             input_hash, model_name, provider FROM article_embeddings WHERE dimensions = ?1";
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params![dimensions], row_to_embedding)?;
+        for row in rows {
+            out.push(row?);
+        }
+    } else {
+        // Build `status IN (?, ?, ?)` with one placeholder per status. No
+        // string interpolation — every status is bound as a parameter, so
+        // arbitrary status strings cannot inject SQL.
+        let placeholders: Vec<&str> = (0..status_filter.len()).map(|_| "?").collect();
+        let in_clause = placeholders.join(", ");
+        let sql = format!(
             "SELECT e.article_id, e.chunk_index, e.embedding, e.dimensions, \
              e.input_hash, e.model_name, e.provider \
              FROM article_embeddings e JOIN articles a ON a.id = e.article_id \
-             WHERE e.dimensions = ?1 AND a.status = ?2"
+             WHERE e.dimensions = ?1 AND a.status IN ({in_clause})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        // Bind dimensions first (?1), then each status in order (?2..=?N).
+        // rusqlite's `params_from_iter` handles the variable-length tail.
+        let dim_string_pairs: Vec<&dyn rusqlite::ToSql> =
+            std::iter::once(&dimensions as &dyn rusqlite::ToSql)
+                .chain(status_filter.iter().map(|s| s as &dyn rusqlite::ToSql))
+                .collect();
+        let rows =
+            stmt.query_map(rusqlite::params_from_iter(dim_string_pairs.iter()), row_to_embedding)?;
+        for row in rows {
+            out.push(row?);
         }
-        None => {
-            "SELECT article_id, chunk_index, embedding, dimensions, input_hash, \
-             model_name, provider FROM article_embeddings WHERE dimensions = ?1"
-        }
-    };
-    let mut stmt = conn.prepare(sql)?;
-    // The status value is bound as ?2 in the filtered SQL above. Both arms
-    // return rows of the same shape, so a single mapper covers them.
-    let rows = match status_filter {
-        Some(status) => stmt.query_map(params![dimensions, status], row_to_embedding)?,
-        None => stmt.query_map(params![dimensions], row_to_embedding)?,
-    };
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
     }
     Ok(out)
 }

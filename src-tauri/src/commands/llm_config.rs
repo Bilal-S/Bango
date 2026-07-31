@@ -15,6 +15,30 @@ pub fn get_llm_config(db_state: State<'_, DbState>) -> Result<Option<LlmConfig>,
     llm_config_repo::get_config(&conn)
 }
 
+/// The fields of `LlmConfig` that the embedding capability depends on. A
+/// change in any of these means the previously-probed
+/// `embedding_status`/`model`/`dimensions` may no longer be accurate, so the
+/// triple-state flag must be reset to `unknown` for re-evaluation.
+///
+/// Parameters-only edits (concurrency / request delay / context window /
+/// temperature) are intentionally NOT in this list: they do not affect
+/// embedding capability, so resetting the flag on a parameters-only save
+/// would discard a known-good `enabled`/`disabled` state and force the next
+/// embedding call (e.g. Citation Finder Phase B) to re-probe redundantly.
+/// This was the root cause of the "probe fires on first Citation Finder
+/// call" bug: the Settings parameters auto-save watcher fired
+/// `save_llm_config` after Test Connection, which unconditionally reset the
+/// status the probe had just set to `enabled`.
+///
+/// Pure `#[must_use]` so the field-set is unit-testable in isolation.
+#[must_use]
+pub fn embedding_relevant_changed(prev: &LlmConfig, next: &LlmConfig) -> bool {
+    prev.provider != next.provider
+        || prev.endpoint_url != next.endpoint_url
+        || prev.model_name != next.model_name
+        || prev.api_key_encrypted != next.api_key_encrypted
+}
+
 #[tauri::command]
 pub async fn save_llm_config(
     db_state: State<'_, DbState>,
@@ -23,13 +47,25 @@ pub async fn save_llm_config(
 ) -> Result<(), AppError> {
     {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        // Only reset the embedding capability when a field it depends on
+        // (`provider` / `endpoint_url` / `model_name` / `api_key_encrypted`)
+        // actually changed. A parameters-only edit (concurrency / delay /
+        // context window / temperature) does NOT affect embedding capability,
+        // so resetting here would discard a known-good `enabled`/`disabled`
+        // state (e.g. one just set by `test_llm_connection`) and force the
+        // next embedding call to re-probe redundantly. See
+        // `embedding_relevant_changed` for the bug context.
+        let prev = llm_config_repo::get_config(&conn)?;
+        let needs_reset = prev.as_ref().is_none_or(|p| embedding_relevant_changed(p, &config));
         llm_config_repo::save_config(&conn, &config)?;
-        // When the LLM config changes, the embedding capability must be
-        // re-evaluated against the new provider/endpoint/model. Reset the
-        // triple-state flag to `unknown` so the next `generate_embeddings` or
-        // `probe_embeddings` call re-probes. Keeps the model/dimensions so the
-        // Settings UI can still show what was last working.
-        let _ = crate::db::app_settings_repo::reset_embedding_status(&conn);
+        if needs_reset {
+            // Reset the triple-state flag to `unknown` so the next
+            // `generate_embeddings` or `probe_embeddings` call re-probes
+            // against the new provider/endpoint/model. Keeps the
+            // model/dimensions so the Settings UI can still show what was
+            // last working.
+            let _ = crate::db::app_settings_repo::reset_embedding_status(&conn);
+        }
     } // conn dropped here
 
     // Update the in-memory orchestrator with new concurrency/delay settings

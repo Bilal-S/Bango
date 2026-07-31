@@ -80,6 +80,12 @@ pub async fn generate_embeddings(
 
 /// Recall the top-K articles semantically related to `query`.
 ///
+/// `status_filter` is a vec of status strings. When non-empty, the candidate
+/// pool is scoped to articles in any of those statuses. When empty (or
+/// omitted), no filter is applied. The previous `Option<String>` signature was
+/// extended to `Vec<String>` for the Citation Finder, which needs `working +
+/// included` while excluding `duplicate`/`rejected`.
+///
 /// Returns an empty vec when embeddings are disabled or the table is empty
 /// (the citation-feature caller falls back).
 #[tauri::command]
@@ -88,7 +94,7 @@ pub async fn recall_articles(
     app_handle: tauri::AppHandle,
     query: String,
     top_k: Option<usize>,
-    status_filter: Option<String>,
+    status_filter: Vec<String>,
 ) -> Result<Vec<EmbeddingHit>, AppError> {
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
     crate::embedding::recall::recall(
@@ -96,7 +102,7 @@ pub async fn recall_articles(
         &orchestrator,
         &query,
         top_k.unwrap_or(30),
-        status_filter.as_deref(),
+        &status_filter,
     )
     .await
 }

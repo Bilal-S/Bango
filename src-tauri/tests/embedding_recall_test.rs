@@ -50,7 +50,7 @@ fn recall_max_pool_picks_best_chunk_per_article() {
     insert_vec(&conn, "a1", TITLE_ABSTRACT_CHUNK_INDEX, &[0.9, 0.1, 0.0, 0.0]); // high sim
     insert_vec(&conn, "a1", 0, &[0.0, 1.0, 0.0, 0.0]); // orthogonal (sim ~ 0)
 
-    let rows = embedding_repo::list_for_recall(&conn, 4, Some("included")).unwrap();
+    let rows = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
     assert_eq!(rows.len(), 2);
 
     // Max-pool: the best chunk's score should win. Use NEG_INFINITY (the same
@@ -71,9 +71,9 @@ fn recall_dimension_exclusion_filters_mismatched_rows() {
     insert_vec(&conn, "a1", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]); // 4-dim
     insert_vec(&conn, "a1", 0, &[0.1; 8]); // 8-dim (different model)
 
-    let rows_4 = embedding_repo::list_for_recall(&conn, 4, None).unwrap();
+    let rows_4 = embedding_repo::list_for_recall(&conn, 4, &[]).unwrap();
     assert_eq!(rows_4.len(), 1, "only the 4-dim row matches dim=4");
-    let rows_8 = embedding_repo::list_for_recall(&conn, 8, None).unwrap();
+    let rows_8 = embedding_repo::list_for_recall(&conn, 8, &[]).unwrap();
     assert_eq!(rows_8.len(), 1, "only the 8-dim row matches dim=8");
 }
 
@@ -82,7 +82,7 @@ fn recall_empty_table_returns_empty() {
     let conn = create_connection().unwrap();
     run_migrations(&conn).unwrap();
     // No articles, no embeddings.
-    let rows = embedding_repo::list_for_recall(&conn, 4, Some("included")).unwrap();
+    let rows = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
     assert!(rows.is_empty());
 }
 
@@ -96,11 +96,11 @@ fn recall_status_filter_excludes_non_included() {
     insert_vec(&conn, "inc", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
     insert_vec(&conn, "rej", TITLE_ABSTRACT_CHUNK_INDEX, &[0.1; 4]);
 
-    let incl = embedding_repo::list_for_recall(&conn, 4, Some("included")).unwrap();
+    let incl = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
     assert_eq!(incl.len(), 1);
     assert_eq!(incl[0].article_id, "inc");
 
-    let all = embedding_repo::list_for_recall(&conn, 4, None).unwrap();
+    let all = embedding_repo::list_for_recall(&conn, 4, &[]).unwrap();
     assert_eq!(all.len(), 2);
 }
 
@@ -114,7 +114,7 @@ fn recall_top_k_truncates_results() {
         insert_vec(&conn, &id, TITLE_ABSTRACT_CHUNK_INDEX, &[0.1 * i as f32; 4]);
     }
 
-    let rows = embedding_repo::list_for_recall(&conn, 4, Some("included")).unwrap();
+    let rows = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
     assert_eq!(rows.len(), 5, "all 5 articles have embeddings");
 
     // Simulate top_k=2: sort by cosine sim to a query, take top 2.
@@ -167,7 +167,7 @@ fn recall_max_pool_seed_handles_negative_similarity() {
     let query = vec![1.0, 0.0];
     insert_vec(&conn, "a1", TITLE_ABSTRACT_CHUNK_INDEX, &[-1.0, 0.0]);
 
-    let rows = embedding_repo::list_for_recall(&conn, 2, Some("included")).unwrap();
+    let rows = embedding_repo::list_for_recall(&conn, 2, &["included".to_string()]).unwrap();
     assert_eq!(rows.len(), 1);
 
     // Replicate the recall max-pool with the production NEG_INFINITY seed.

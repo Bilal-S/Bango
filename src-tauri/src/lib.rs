@@ -14,6 +14,7 @@
 pub mod batch_import;
 pub mod biblio;
 pub mod bibtex;
+pub mod citation_finder;
 pub mod commands;
 pub mod crypto;
 pub mod db;
@@ -33,6 +34,7 @@ pub mod translation;
 pub mod utils;
 pub mod wiki;
 
+use commands::citation_finder::CitationFinderState;
 use commands::scraping::ScrapingState;
 use commands::screening::ScreeningState;
 use commands::startup::StartupStatus;
@@ -149,6 +151,7 @@ pub fn run() {
         .manage(ScreeningState { engine: tokio::sync::RwLock::new(None) })
         .manage(batch_import::BatchImportState::default())
         .manage(ScrapingState::default())
+        .manage(CitationFinderState::default())
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::startup::get_startup_status,
@@ -341,6 +344,9 @@ pub fn run() {
             commands::embedding::recall_articles,
             commands::embedding::get_embedding_status,
             commands::embedding::probe_embeddings,
+            commands::citation_finder::find_citations,
+            commands::citation_finder::cancel_citation_search,
+            commands::citation_finder::get_citation_finder_readiness,
         ]);
 
     #[cfg(debug_assertions)]

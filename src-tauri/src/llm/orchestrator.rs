@@ -61,6 +61,18 @@ const SCREENING_TIMEOUT_SECS: u64 = 120;
 /// still handles transient 429/5xx within this window.
 const EMBEDDING_TIMEOUT_SECS: u64 = 30;
 
+/// Maximum time to wait for the Citation Finder's main classification call
+/// (`citation_finder/AGENTS.md`). The prompt carries up to 15 candidates + matched passages,
+/// so the LLM has more work than a screening batch but far less than a wiki
+/// ingest. 120s surfaces a hung provider while leaving room for slow local
+/// models.
+const CITATION_FINDER_TIMEOUT_SECS: u64 = 120;
+
+/// Maximum time to wait for the Citation Finder's claim-split call
+/// (per-statement mode). Small prompt, but local LLMs can be slow on the
+/// first call (model load), so 60s is safer than cf1's 30s.
+const CITATION_FINDER_SPLIT_TIMEOUT_SECS: u64 = 60;
+
 /// Pick the per-call wall-clock timeout based on the request type.
 ///
 /// Screening (both stage-1 `Screening` and stage-2 `EnhancedScreening`) uses
@@ -77,6 +89,10 @@ pub fn timeout_for(request_type: &LlmRequestType) -> Duration {
             Duration::from_secs(SCREENING_TIMEOUT_SECS)
         }
         LlmRequestType::Embedding => Duration::from_secs(EMBEDDING_TIMEOUT_SECS),
+        LlmRequestType::CitationFinder => Duration::from_secs(CITATION_FINDER_TIMEOUT_SECS),
+        LlmRequestType::CitationFinderSplit => {
+            Duration::from_secs(CITATION_FINDER_SPLIT_TIMEOUT_SECS)
+        }
         _ => Duration::from_secs(LLM_TIMEOUT_SECS),
     }
 }
@@ -139,6 +155,15 @@ pub enum LlmRequestType {
     /// orchestrator method routes here; it does NOT participate in the
     /// `skip_temperature` machinery (embeddings have no temperature param).
     Embedding,
+    /// Citation Finder main classification call: rank + classify + explain
+    /// (`citation_finder/AGENTS.md`). Carries up to 15 candidates + matched passages, so the
+    /// 120s cap is tighter than the 10-minute default but generous enough for
+    /// local LLMs.
+    CitationFinder,
+    /// Citation Finder claim-split call (per-statement mode): split the pasted
+    /// prose into ≤5 distinct claims. Small prompt, but local LLMs can be slow
+    /// on the first call, so the cap is 60s.
+    CitationFinderSplit,
 }
 
 /// Centralized LLM request coordinator.
