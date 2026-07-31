@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * CitationResultCard — renders one `CitationMatch` from the Citation Finder
+ * CitationResultCard - renders one `CitationMatch` from the Citation Finder
  * (spec §8.7).
  *
  * Layout: metadata line (authors, year, journal, DOI) + Copy/View buttons +

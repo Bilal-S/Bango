@@ -163,7 +163,7 @@ describe('useChatStore', () => {
     store.setSource('citation-finder');
     expect(store.source).toBe('citation-finder');
 
-    // Snake_case wire token — matches the Rust enum's
+    // Snake_case wire token - matches the Rust enum's
     // `#[serde(rename_all = "snake_case")]`.
     store.setCitationFinderMode('per_statement');
     expect(store.citationFinderMode).toBe('per_statement');
@@ -256,7 +256,7 @@ describe('useChatStore', () => {
       isCancelled: false,
     });
 
-    // The view passes the live checkbox state — only Rejected checked here.
+    // The view passes the live checkbox state - only Rejected checked here.
     await store.sendCitationSearch('Sugar taxes reduce obesity.', ['rejected']);
 
     expect(tauriCommand).toHaveBeenCalledWith('find_citations', {
@@ -295,7 +295,7 @@ describe('useChatStore', () => {
 
   it('sendMessage_in_citation_mode_forwards_empty_filter', async () => {
     // `sendMessage` (the legacy entry) forwards to `sendCitationSearch` with
-    // an empty filter when the source is citation-finder — the view should
+    // an empty filter when the source is citation-finder - the view should
     // call `sendCitationSearch` directly, but `sendMessage` must still be safe.
     const store = useChatStore();
     store.setSource('citation-finder');
@@ -335,7 +335,7 @@ describe('useChatStore', () => {
     // path by capturing it. We mock tauriCommand to resolve the initial
     // snapshot, then manually drive the onDone callback via the
     // findCitations composable's listener. Since the listener is internal,
-    // the simplest assertion is the message logic itself — extract it via
+    // the simplest assertion is the message logic itself - extract it via
     // a results-shape the store would receive.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (tauriCommand as any).mockResolvedValue({

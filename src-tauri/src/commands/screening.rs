@@ -275,7 +275,7 @@ pub async fn start_screening(
         // DIAGNOSTICS (Phase B instrumentation): the chunk pass now emits
         // `phase = "preparing:chunking"` progress events + `[screening:diag]`
         // log lines per article so the UI + stderr show the backfill advancing
-        // instead of a silent 0% freeze. The lock pattern is UNCHANGED —
+        // instead of a silent 0% freeze. The lock pattern is UNCHANGED -
         // `db.conn.lock()` is still held across the whole pass exactly as
         // today; the callback only emits events between articles. Layer 2
         // (deferred) will release the lock per article.

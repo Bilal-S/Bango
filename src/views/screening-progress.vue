@@ -289,7 +289,7 @@ const isWorkingListScreened = computed((): boolean => {
         >
           <span class="material-symbols-outlined">schedule</span>
           <span
-            >{{ progress.deferred }} article(s) deferred (LLM was unavailable) — they'll be screened
+            >{{ progress.deferred }} article(s) deferred (LLM was unavailable) - they'll be screened
             on the next run.</span
           >
         </div>

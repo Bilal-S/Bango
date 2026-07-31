@@ -30,7 +30,7 @@ use crate::citation_finder::search::{
 
 /// Managed state: cancel token + progress snapshot. The cancel token uses
 /// `AtomicBool` (not `Mutex<bool>`) to match the embedding runner's contract
-/// — `generate_embeddings_inner` takes `Option<Arc<AtomicBool>>` and the same
+/// - `generate_embeddings_inner` takes `Option<Arc<AtomicBool>>` and the same
 /// token must cover both Phase B and Phase C.
 pub struct CitationFinderState {
     cancel_token: Arc<AtomicBool>,
@@ -64,7 +64,7 @@ impl CitationFinderState {
 /// task; the frontend tracks progress via events.
 ///
 /// The command serializes `CitationFinderMode` from the frontend's
-/// `'whole_block' | 'per_statement'` (snake_case via serde rename — the
+/// `'whole_block' | 'per_statement'` (snake_case via serde rename - the
 /// frontend `CitationFinderMode` type mirrors these exact tokens).
 #[tauri::command]
 pub async fn find_citations(
@@ -80,7 +80,7 @@ pub async fn find_citations(
     // same lock acquire. The previous shape released the lock between them,
     // so two rapid `find_citations` calls could both pass the guard before
     // either spawned task set `is_running` (TOCTOU race). Setting the flag
-    // here — before the lock is released and before the task is spawned —
+    // here - before the lock is released and before the task is spawned -
     // closes the window entirely.
     let cancel_handle = cf_state.cancel_handle();
     cancel_handle.store(false, Ordering::Relaxed);
@@ -194,7 +194,7 @@ pub async fn cancel_citation_search(
 }
 
 /// Read the readiness payload (toggle visibility + tooltip hint). Does NOT
-/// gate the action — `find_citations` runs its own Phase A check internally.
+/// gate the action - `find_citations` runs its own Phase A check internally.
 #[tauri::command]
 pub async fn get_citation_finder_readiness(
     db_state: State<'_, DbState>,

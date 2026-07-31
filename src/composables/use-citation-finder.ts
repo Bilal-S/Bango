@@ -1,5 +1,5 @@
 /**
- * Citation Finder composable — IPC + event plumbing for the paste-prose-to-
+ * Citation Finder composable - IPC + event plumbing for the paste-prose-to-
  * citations matcher (spec §8.7).
  *
  * The Chat view owns the message list; this composable owns the 3 Tauri
@@ -50,12 +50,12 @@ export function stopCitationListeners(): void {
  * @param args.text      The pasted prose to find citations for.
  * @param args.mode      `'whole_block'` (one embedding) or `'per_statement'`
  *                       (LLM splits into ≤5 claims, each embedded separately).
- *                       Snake_case wire token — matches the Rust enum's
+ *                       Snake_case wire token - matches the Rust enum's
  *                       `#[serde(rename_all = "snake_case")]`.
  * @param args.statusFilter  Article statuses to include in the candidate pool.
  * @param args.onProgress   Optional callback for `citation:progress` payloads
  *                          (the Chat view uses it to drive the progress bar).
- * @param args.onDone       Callback for `citation:done` — receives the result
+ * @param args.onDone       Callback for `citation:done` - receives the result
  *                          groups + the captured style (the store pushes the
  *                          assistant bubble here).
  * @param args.onError      Callback for `citation:error`.
@@ -151,7 +151,7 @@ export async function cancelSearch(): Promise<void> {
 /**
  * Read the readiness payload (toggle visibility + tooltip hint). The toggle
  * is hidden when `providerSupportsEmbeddings === false` (e.g. Anthropic).
- * Does NOT gate the action — `find_citations` runs its own Phase A check.
+ * Does NOT gate the action - `find_citations` runs its own Phase A check.
  */
 export async function getReadiness(
   statusFilter: CitationStatusFilter

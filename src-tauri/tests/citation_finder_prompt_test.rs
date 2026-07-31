@@ -100,7 +100,7 @@ fn whole_block_prompt_renders_candidate_metadata() {
 #[test]
 fn whole_block_prompt_omits_metadata_lines_when_article_absent_from_map() {
     // An article_id in `passages` but not in `metadata` renders no metadata
-    // lines (graceful degradation — shouldn't happen in practice since
+    // lines (graceful degradation - shouldn't happen in practice since
     // `load_metadata` covers all finalists, but the prompt builder stays
     // robust).
     let passages = vec![passage("ghost", None, "passage", None)];
@@ -199,7 +199,7 @@ fn llm_output_defaults_misrepresents_to_false_when_absent() {
 //
 // The system prompt (`CITATION_FINDER_SYSTEM_PROMPT`) instructs the LLM to
 // emit snake_case field names (`article_id`, `relevance_explanation`,
-// `misrepresents_source`). These tests pin that contract — they were the
+// `misrepresents_source`). These tests pin that contract - they were the
 // missing regression pin that let the camelCase-only struct + the
 // snake_case prompt drift apart and produce the
 // `missing field articleId` bug report.
@@ -282,7 +282,7 @@ fn parse_outputs_bare_camel_case_array() {
 #[test]
 fn parse_outputs_empty_array_returns_empty_vec() {
     // A genuine empty array (`[]`) is the LLM obeying the prompt + finding
-    // no candidates — returns Ok(empty), NOT an error.
+    // no candidates - returns Ok(empty), NOT an error.
     let outputs = parse_citation_outputs("[]").expect("parse");
     assert!(outputs.is_empty());
 }
@@ -435,7 +435,7 @@ fn ground_quotes_hallucinated_sentence_dropped() {
 fn ground_quotes_partial_fragment_dropped() {
     // A fragment ("sugar tax") is technically a substring but it is NOT a
     // full sentence from the passage. The gate accepts it because it IS a
-    // verbatim substring — the grounding gate only checks that the quote
+    // verbatim substring - the grounding gate only checks that the quote
     // appears in the source, not that it is a complete sentence. The prompt
     // asks for full sentences; the gate trusts the prompt. (A stricter gate
     // would require sentence-boundary detection, which is out of scope.)

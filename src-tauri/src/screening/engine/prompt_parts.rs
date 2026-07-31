@@ -22,7 +22,7 @@ pub(crate) struct ScreeningPromptParts {
     existing_label_names: Vec<String>,
     custom_logic: Option<String>,
     /// Consumed by `run_sync` (enhanced-mode evidence retrieval) + stage-2
-    /// (borderline evidence retrieval) — hence `pub(crate)`.
+    /// (borderline evidence retrieval) - hence `pub(crate)`.
     pub(crate) inclusion_texts: Vec<String>,
     pub(crate) exclusion_texts: Vec<String>,
 }

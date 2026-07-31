@@ -220,7 +220,7 @@ const isQueueFull = computed(() => {
  * Whether the "View articles" deep-link is available for this keyword node.
  * Gated to `tags`/`labels`-sourced nodes because the existing
  * `ArticleQuery.tags` / `ArticleQuery.labels` filters can match those node
- * labels (the label is the most-frequent raw term — i.e. the tag/label name).
+ * labels (the label is the most-frequent raw term - i.e. the tag/label name).
  * `metadata` / `ai_extracted` / `user_added`-sourced nodes are sourced from
  * `biblio_article_terms` / `articles.keywords`, which no existing filter
  * matches; those are deferred to Gap 1b (backend `ArticleQuery.keywords`).

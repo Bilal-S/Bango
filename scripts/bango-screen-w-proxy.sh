@@ -2,7 +2,7 @@
 #
 # Start Bango in dev mode with:
 #   1. HTTP/HTTPS proxy on 127.0.0.1:8080 (for network-traffic inspection in
-#      mitmproxy / Charles / Burp — useful for diagnosing slow LLM calls).
+#      mitmproxy / Charles / Burp - useful for diagnosing slow LLM calls).
 #   2. Screening diagnostics captured to a timestamped log file so the
 #      `[screening:diag]` lines (phase transitions, heartbeat, cancel tracing,
 #      slow-lock warnings, orchestrator timeouts) can be reviewed after a hang.

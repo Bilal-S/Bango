@@ -220,6 +220,14 @@ watch(
           </button>
           <button
             class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-citation-finder' }"
+            @click="selectRefSection('ref-citation-finder')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">quick_reference_all</span>
+            Citation Finder
+          </button>
+          <button
+            class="ref-nav__link"
             :class="{ 'ref-nav__link--active': activeRefSection === 'ref-gap-report' }"
             @click="selectRefSection('ref-gap-report')"
           >
@@ -1028,11 +1036,15 @@ ER  - </pre
                 referenced papers. Clicking a badge opens the corresponding article details panel.
               </li>
               <li>
-                <strong>Two retrieval modes:</strong> the default <strong>Article Chat</strong>
-                (dumps selected article summaries into the prompt) and the token-optimized
+                <strong>Three retrieval modes:</strong> the default <strong>Article Chat</strong>
+                (dumps selected article summaries into the prompt), the token-optimized
                 <strong>Wiki Chat</strong> (BM25 retrieval over the wiki index - see the
                 <a href="#" @click.prevent="selectRefSection('ref-wiki')">Wiki section</a> for why
-                this scales to hundreds of pages).
+                this scales to hundreds of pages), and <strong>Citation Finder</strong> (paste text
+                you are writing and get matching citations from your library - see the
+                <a href="#" @click.prevent="selectRefSection('ref-citation-finder')"
+                  >Citation Finder section</a
+                >).
               </li>
             </ul>
 
@@ -1115,7 +1127,136 @@ ER  - </pre
                 (right of the <code>(+)</code> button) switches to Wiki Chat mode. Visible only when
                 the wiki is initialized and has pages.
               </li>
+              <li>
+                <strong>Citation Finder toggle:</strong> the
+                <span class="material-symbols-outlined ref-inline-icon">quick_reference_all</span>
+                icon (next to the Wiki toggle) switches to Citation Finder mode. Visible only when
+                your LLM provider supports embeddings.
+              </li>
             </ul>
+          </div>
+        </section>
+
+        <!-- SECTION: CITATION FINDER -->
+        <section id="ref-citation-finder" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">quick_reference_all</span>
+            <h2 class="ref-section__title">Citation Finder</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The <strong>Citation Finder</strong> helps you write faster. Paste a paragraph you are
+              working on a grant proposal, a paper introduction, a literature review section and
+              Bango returns cards showing which articles in your library <em>support</em> or
+              <em>contradict</em> each claim, with the exact passage, a copy-ready citation, and a
+              link to open the source.
+            </p>
+
+            <div class="ref-callout">
+              <h4>Why you can trust the results</h4>
+              <p>
+                Bango does the searching first. When you imported your articles, Bango already read
+                them and knows which passages are relevant to which topics. When you click
+                <strong>Find Citations</strong>, Bango selects the most relevant passages from your
+                real articles and hands them to the AI. The AI only <em>ranks and explains</em> what
+                Bango found it never searches the open internet and it can only see the passages
+                Bango selected. This means it cannot invent a source, fabricate a quote, or
+                misattribute a finding to a paper that is not in your library. Every result is
+                grounded in real text from articles you have already imported.
+              </p>
+            </div>
+
+            <h3>Two Ways to Search</h3>
+            <ul>
+              <li>
+                <strong>Whole Block</strong> treats your pasted text as one idea and finds citations
+                that relate to it as a whole. Faster; best for short paragraphs or single claims.
+              </li>
+              <li>
+                <strong>Per Statement</strong> splits your text into separate claims and finds
+                citations for each one independently. More thorough; best for longer passages that
+                make several distinct points.
+              </li>
+            </ul>
+
+            <h3>Citation Styles</h3>
+            <p>
+              Pick a style from the <strong>Citation Style</strong> dropdown (APA, MLA, Chicago,
+              IEEE, or AMA). The <strong>Copy</strong> button on each result card formats the
+              citation in that style automatically, so you can paste it straight into your
+              manuscript.
+            </p>
+
+            <h3>How to Start</h3>
+            <ol>
+              <li>Open <strong>Chat / Citations</strong> from the sidebar.</li>
+              <li>
+                Click the
+                <span class="material-symbols-outlined ref-inline-icon">quick_reference_all</span>
+                Citation Finder icon to the right of the <code>(+)</code> button.
+              </li>
+              <li>
+                (Optional) Choose which article statuses to search: <em>Working</em>,
+                <em>Included</em>, and/or <em>Rejected</em>. Duplicates are always excluded.
+              </li>
+              <li>Paste your text into the box and click <strong>Find Citations</strong>.</li>
+              <li>
+                The first run on a library may take a moment to prepare (a progress bar shows the
+                status). Later searches are faster because the preparation is cached.
+              </li>
+            </ol>
+
+            <h3>Reading the Result Cards</h3>
+            <p>Each card shows one matching article:</p>
+            <ul>
+              <li>
+                <strong>Title, authors, year, journal, DOI</strong> at the top, with
+                <strong>Copy</strong> (citation) and <strong>View</strong> (open article) buttons.
+              </li>
+              <li>
+                <strong>The matching passage</strong> the specific quote from the article that
+                relates to your text, labeled with its section (e.g. <code>&sect;Results</code>,
+                <code>&sect;Methods</code>).
+              </li>
+              <li>
+                <strong>A badge:</strong> green <strong>&#10003; Validating</strong> (the passage
+                supports your text) or amber <strong>&#10007; Opposing</strong> (the passage
+                contradicts or challenges it).
+              </li>
+              <li>
+                <strong>Match strength</strong> a percentage showing how closely the passage relates
+                to your text.
+              </li>
+              <li>
+                <strong>An AI explanation</strong> one or two sentences describing how the passage
+                relates to what you wrote.
+              </li>
+              <li>
+                <strong>Fairly paraphrased warning</strong> if the AI thinks a passage has been
+                taken out of context or selectively quoted, it flags the card so you can
+                double-check before relying on it.
+              </li>
+            </ul>
+
+            <h3>Requirements</h3>
+            <ul>
+              <li>
+                An LLM provider that supports embeddings (most providers do; Anthropic Claude
+                currently does not). If the Citation Finder icon is not visible in the Chat view,
+                check your LLM Settings or pick a different provider.
+              </li>
+              <li>
+                At least one article in your library (in one of the statuses you have checked).
+              </li>
+            </ul>
+
+            <h3>Re-Searching</h3>
+            <p>
+              Each <strong>Find Citations</strong> click adds a new pair of messages to the chat
+              history (your pasted text as the user bubble, the results as the assistant bubble).
+              Scroll up to review earlier searches. Use <strong>Clear Chat</strong> to remove all
+              history.
+            </p>
           </div>
         </section>
 

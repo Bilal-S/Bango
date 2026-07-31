@@ -44,7 +44,7 @@ fn end_to_end_article_summary_with_literal_newline_parses() {
         serde_json::from_str(&sanitized).expect("sanitized payload must parse as valid JSON");
     assert_eq!(parsed["field"].as_str().unwrap(), "business_economics_finance");
     assert_eq!(parsed["subfield"].as_str().unwrap(), "green supply chain finance");
-    // The logical newline survives (data fidelity — escape, not strip).
+    // The logical newline survives (data fidelity - escape, not strip).
     assert!(
         parsed["summary_150_250_words"].as_str().unwrap().contains('\n'),
         "newline must be preserved in the parsed value"
@@ -53,7 +53,7 @@ fn end_to_end_article_summary_with_literal_newline_parses() {
 }
 
 /// `extract_json` (screening path) must accept a top-level array of screening
-/// responses whose `reasoning` field contains a literal newline — the most
+/// responses whose `reasoning` field contains a literal newline - the most
 /// common real-world failure vector for screening runs. Pre-fix, this would
 /// have hit "control character" on `serde_json::from_str` and marked the batch
 /// as an error; post-fix the sanitizer escapes the newline and the array

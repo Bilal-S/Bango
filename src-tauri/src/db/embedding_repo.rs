@@ -180,7 +180,7 @@ pub fn list_for_recall(
         }
     } else {
         // Build `status IN (?, ?, ?)` with one placeholder per status. No
-        // string interpolation — every status is bound as a parameter, so
+        // string interpolation - every status is bound as a parameter, so
         // arbitrary status strings cannot inject SQL.
         let placeholders: Vec<&str> = (0..status_filter.len()).map(|_| "?").collect();
         let in_clause = placeholders.join(", ");

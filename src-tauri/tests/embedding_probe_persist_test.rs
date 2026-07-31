@@ -12,7 +12,7 @@
 //! `reset_embedding_status` on every save, including parameters-only edits
 //! (concurrency / delay / context / temperature). This discarded a known-good
 //! `enabled`/`disabled` state (e.g. one just set by `test_llm_connection`) and
-//! forced the next embedding call to re-probe redundantly — the root cause of
+//! forced the next embedding call to re-probe redundantly - the root cause of
 //! the "probe fires on first Citation Finder call" bug. The fix guards the
 //! reset behind `embedding_relevant_changed` (provider / endpoint / model /
 //! api-key comparison) so parameters-only saves preserve the status.
@@ -187,7 +187,7 @@ fn embedding_relevant_changed_identical_configs_not_detected() {
 // ── save_llm_config conditional-reset contract ─────────────────────────
 //
 // These exercise the full conditional-reset flow against an in-memory DB
-// (the command layer is not invoked directly — it needs Tauri `State` — but
+// (the command layer is not invoked directly - it needs Tauri `State` - but
 // the conditional-reset logic mirrors `save_llm_config`'s body exactly: read
 // prev, compute `embedding_relevant_changed`, save, conditionally reset).
 // They pin the contract that a parameters-only save preserves a known-good
@@ -196,7 +196,7 @@ fn embedding_relevant_changed_identical_configs_not_detected() {
 /// Mirrors `save_llm_config`'s conditional-reset logic without the Tauri
 /// `State` + orchestrator dependencies, so it is callable from a plain
 /// integration test. Reads prev, saves next, conditionally resets the
-/// embedding status — exactly the sequence the command performs.
+/// embedding status - exactly the sequence the command performs.
 fn save_llm_config_conditional_reset(conn: &rusqlite::Connection, next: &LlmConfig) {
     let prev = llm_config_repo::get_config(conn).unwrap();
     let needs_reset = prev.as_ref().is_none_or(|p| embedding_relevant_changed(p, next));

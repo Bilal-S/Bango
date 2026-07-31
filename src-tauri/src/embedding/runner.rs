@@ -62,7 +62,7 @@ pub fn vector_matches_dim(vector: &[f32], effective_dim: i32) -> bool {
 ///
 /// Rules:
 /// - If the provider reports a positive `returned_dim` that DISAGREES with the
-///   probe value, trust the provider (the probe is stale — e.g. the model was
+///   probe value, trust the provider (the probe is stale - e.g. the model was
 ///   swapped between the probe and the call). The runner logs the drift + the
 ///   caller persists the corrected value back to `app_settings`.
 /// - Otherwise (returned_dim == 0, or agrees with probe), keep the probe value
@@ -320,7 +320,7 @@ pub async fn generate_embeddings_inner(
 
     // 4. Collect completions, writing rows under brief DB lock bursts. Check
     //    cancel between completions; on cancel, abort_all + break (in-flight
-    //    vectors are dropped — no DB writes from cancelled tasks).
+    //    vectors are dropped - no DB writes from cancelled tasks).
     let mut cancelled = false;
     while let Some(joined) = set.join_next().await {
         // Check cancellation before processing each completion.

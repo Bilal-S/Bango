@@ -1,10 +1,10 @@
 //! Screening engine: drives the stage-1 batch loop + delegates stage-2 borderline.
 //!
 //! Directory module split (refactor3 continuation):
-//! - `types.rs` — `ScreeningConfig`, `RunSyncContext`, `ScreeningProgress`, `LlmScreeningResponse`
-//! - `prompt_parts.rs` — `ScreeningPromptParts` + `Stage2Context` (shared prompt construction)
-//! - `stage2.rs` — `run_stage2_borderline` + the pure `is_borderline` predicate
-//! - `mod.rs` (this file) — `ScreeningEngine` struct, `run_sync`, small helpers, re-exports
+//! - `types.rs` - `ScreeningConfig`, `RunSyncContext`, `ScreeningProgress`, `LlmScreeningResponse`
+//! - `prompt_parts.rs` - `ScreeningPromptParts` + `Stage2Context` (shared prompt construction)
+//! - `stage2.rs` - `run_stage2_borderline` + the pure `is_borderline` predicate
+//! - `mod.rs` (this file) - `ScreeningEngine` struct, `run_sync`, small helpers, re-exports
 //!
 //! Public API unchanged: `bango_lib::screening::engine::*` import paths work identically.
 
@@ -121,7 +121,7 @@ impl ScreeningEngine {
     /// already emitted here); `false` if the sleep completed normally.
     ///
     /// **Cancel-polling contract**: must NOT use an `if` precondition on the
-    /// `notified()` select branch — tokio skips polling branches whose
+    /// `notified()` select branch - tokio skips polling branches whose
     /// precondition is false, so `notified()` never registers as a waiter and
     /// `notify_waiters()` becomes a no-op (cancel signal lost). Always poll
     /// `notified()`, then check the token inside the branch body.
@@ -169,7 +169,7 @@ impl ScreeningEngine {
         let app_handle = ctx.app_handle.clone();
         let target_article_id = ctx.target_article_id.clone();
 
-        // Reset state. `Notify` needs no reset — `notify_waiters()` only wakes
+        // Reset state. `Notify` needs no reset - `notify_waiters()` only wakes
         // current waiters; a fresh `notified()` future is created per select!.
         *self.cancel_token.lock().await = false;
         *self.pause_token.lock().await = false;
@@ -402,7 +402,7 @@ impl ScreeningEngine {
             };
 
             // Stage-1 LLM call wrapped in tokio::select! against cancel_notify.
-            // Single attempt — inner `client::send_with_retry` already handles
+            // Single attempt - inner `client::send_with_retry` already handles
             // transient 429/408/5xx with bounded retry.
             let llm_result = {
                 let cancel_notify = self.cancel_notify.clone();

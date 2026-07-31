@@ -13,8 +13,8 @@
 //! blindly stored the probe-time value, so a provider that returned vectors
 //! of an unexpected length silently wrote a wrong `dimensions` column,
 //! corrupting recall. The fix has two layers, each covered below:
-//!   1. `resolve_effective_dim` — pick the correct effective dimensionality.
-//!   2. `vector_matches_dim` — per-row length guard before storage.
+//!   1. `resolve_effective_dim` - pick the correct effective dimensionality.
+//!   2. `vector_matches_dim` - per-row length guard before storage.
 
 use bango_lib::embedding::runner::{resolve_effective_dim, vector_matches_dim};
 

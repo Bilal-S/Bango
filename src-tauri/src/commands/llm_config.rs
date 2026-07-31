@@ -219,7 +219,7 @@ pub async fn test_llm_connection(
 ///   or `" Embeddings disabled: provider does not support embeddings."`.
 ///
 /// The probe is one tiny HTTP call (embeds the word "probe"), adding ~1-2s to
-/// the Test Connection flow — acceptable within the existing "Testing…"
+/// the Test Connection flow - acceptable within the existing "Testing…"
 /// spinner UX. All probe errors are swallowed (mapped to `disabled`) so a probe
 /// failure never fails the Test Connection result.
 ///
@@ -269,7 +269,7 @@ pub fn persist_embedding_probe_to_conn(
     )
 }
 /// Runs the embedding probe HTTP call and returns the outcome tuple. Does NOT
-/// persist — the caller owns the `State<DbState>` and persists after the probe
+/// persist - the caller owns the `State<DbState>` and persists after the probe
 /// returns (brief lock burst). This split keeps the function `Send` (no `State`
 /// borrow held across the `.await`).
 async fn probe_embeddings_sync(

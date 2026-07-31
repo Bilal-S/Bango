@@ -3,12 +3,12 @@
 //! contracts.
 //!
 //! Three-layer pipeline:
-//! 1. **Embedding prefilter** — `embedding::recall::recall` (reused, not
+//! 1. **Embedding prefilter** - `embedding::recall::recall` (reused, not
 //!    reimplemented) embeds the query + max-pools cosine similarity across
 //!    each candidate's chunk rows, returning the top-30 article IDs.
-//! 2. **Token-Jaccard passage extraction** — `similarity::find_best_passage`
+//! 2. **Token-Jaccard passage extraction** - `similarity::find_best_passage`
 //!    picks the best-matching chunk per candidate (pure, no I/O).
-//! 3. **LLM classification** — `prompt` builds a prompt; the LLM classifies
+//! 3. **LLM classification** - `prompt` builds a prompt; the LLM classifies
 //!    each candidate as validating/opposing and writes a 1-2 sentence
 //!    relevance explanation.
 //!
@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 /// The canonical status strings the Citation Finder accepts. `duplicate` is
 /// deliberately excluded (duplicates are never citation candidates). This is
 /// the whitelist used by [`filter_valid_statuses`]; the backend does NOT apply
-/// a default — if the caller supplies no valid statuses the search returns the
+/// a default - if the caller supplies no valid statuses the search returns the
 /// "No articles match the selected filters." empty result rather than
 /// silently searching all articles.
 pub const CITATION_STATUS_WHITELIST: &[&str] = &["working", "included", "rejected"];
@@ -45,7 +45,7 @@ pub const CITATION_STATUS_WHITELIST: &[&str] = &["working", "included", "rejecte
 ///
 /// Pure `#[must_use]` so the boundary behavior is unit-testable in isolation.
 /// The Citation Finder applies this at the command boundary so the backend
-/// never assumes a default — an empty result means the search returns no
+/// never assumes a default - an empty result means the search returns no
 /// matches (NOT "search all statuses").
 #[must_use]
 pub fn filter_valid_statuses(input: &[String]) -> Vec<String> {
@@ -70,7 +70,7 @@ pub struct CitationFinderInput {
     /// (e.g. `["working", "included"]`). Filtered through
     /// [`filter_valid_statuses`] at the command boundary; an empty result
     /// (no valid statuses) returns the "No articles match the selected
-    /// filters." empty result — the backend never applies a default.
+    /// filters." empty result - the backend never applies a default.
     pub status_filter: Vec<String>,
 }
 
@@ -113,11 +113,11 @@ pub struct CitationMatch {
     /// through a normalized-substring gate so only quotes that actually
     /// appear in the passage survive (paraphrases/hallucinations are
     /// dropped). Empty when the LLM omitted the field OR none of its
-    /// sentences grounded — the UI falls back to the full `matched_passage`
+    /// sentences grounded - the UI falls back to the full `matched_passage`
     /// in that case (progressive disclosure: collapsed shows these
     /// snippets; expanded shows the full passage with them highlighted).
     pub highlighted_sentences: Vec<String>,
-    /// The user-facing "match %" — the **cosine** (semantic) score from the
+    /// The user-facing "match %" - the **cosine** (semantic) score from the
     /// recall layer, range 0.0–1.0. Jaccard is internal-only (drives passage
     /// selection); the card surfaces one number and it's the semantic one.
     pub confidence: f64,

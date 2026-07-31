@@ -250,7 +250,7 @@ async function onParamsChange() {
 function onFilterChange(filters: { search: string }) {
   if (!graph.value) return;
   // Co-citation nodes lack a `weight` attribute (they carry coCitationCount /
-  // citationCount), so the keyword filter cannot be reused — its
+  // citationCount), so the keyword filter cannot be reused - its
   // `weight >= minOccurrences` check would hide every node. Use the dedicated
   // co-citation search filter instead.
   const result = applyCocitationGraphFilters(graph.value, { search: filters.search });

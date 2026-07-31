@@ -237,7 +237,7 @@ impl ScrapeKind {
 ///
 /// `body_text` is `document.body.innerText` read via `tab.evaluate(...)`. The
 /// strings come from the live Citation Chaser app (validated via Chrome
-/// DevTools — see `.worktrees/scrapefix2.md` §3). They live in anonymous
+/// DevTools - see `.worktrees/scrapefix2.md` §3). They live in anonymous
 /// `container-fluid` divs with no stable element IDs, so a body-text scan is
 /// the robust detection strategy.
 ///
@@ -357,7 +357,7 @@ fn download_with_curl(
 /// `tauri::async_runtime::spawn_blocking(...)`. That executes on tokio's
 /// blocking thread pool, *not* on an async worker thread, so
 /// `reqwest::blocking::Client` will not panic. Do NOT call this from an async
-/// context — `reqwest::blocking` panics if polled from a tokio async worker.
+/// context - `reqwest::blocking` panics if polled from a tokio async worker.
 fn download_with_reqwest(
     url: &str,
     output_dir: &Path,

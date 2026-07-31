@@ -137,8 +137,8 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   **Journal-index loader** (`lib.rs::load_journal_index_from_path`, `pub` so
   `tests/journal_index_load_test.rs` can drive it directly): copies the bundled
   portal DB rows into the empty target `journal_index` using **two separate
-  connections** — a `SQLITE_OPEN_READ_ONLY` source and the target's own
-  `unchecked_transaction` — NOT `ATTACH DATABASE`. The previous `ATTACH` +
+  connections** - a `SQLITE_OPEN_READ_ONLY` source and the target's own
+  `unchecked_transaction` - NOT `ATTACH DATABASE`. The previous `ATTACH` +
   `INSERT...SELECT FROM portal` implementation failed on Windows when the
   bundled source was WAL-mode (SQLite could not acquire the cross-database
   lock inside the target's transaction). Resource resolution is 3-tier
@@ -183,7 +183,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `ScreeningEngine` struct + `run_sync`; the 285-line stage-2 borderline loop
     lives in `engine/stage2.rs` (`run_stage2_borderline(&Stage2Context)`,
     returns `Ok(true)` on cancel / `Ok(false)` on completion, `tokio::select!`
-    cancel wrappers inline — timing-sensitive contract). Types
+    cancel wrappers inline - timing-sensitive contract). Types
     (`ScreeningConfig`, `RunSyncContext`, `ScreeningProgress`,
     `LlmScreeningResponse`) live in `engine/types.rs`; shared prompt
     construction (`ScreeningPromptParts` + `Stage2Context`) lives in
@@ -311,17 +311,17 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     counter alone was insufficient because some batches succeed between
     timeouts (resetting the counter), so a slow LLM limped along without ever
     surfacing a user-visible message. Two new mechanisms address this:
-    (a) `ScreeningProgress.warning: Option<String>` — a non-fatal yellow banner
+    (a) `ScreeningProgress.warning: Option<String>` - a non-fatal yellow banner
     set after the **1st** timeout ("The LLM is responding slowly… Consider
     reducing batch_size"), cleared on the next successful batch; the frontend
     renders it as `.screening-view__warning-banner` (amber, `warning` icon);
-    (b) `total_timeouts: u32` counter + `TOTAL_TIMEOUT_THRESHOLD = 3` — after 3
+    (b) `total_timeouts: u32` counter + `TOTAL_TIMEOUT_THRESHOLD = 3` - after 3
     total (non-consecutive) timeouts, the run auto-stops with an actionable
     `fatal_error`: "Screening stopped: the LLM timed out N times… Reduce
     batch_size to 1-2 and restart. Already-screened articles are saved." This
     catches the intermittent-timeout pattern where the consecutive counter
     resets between failures. (The v8.6 `batch_size` clamp reduction from
-    `clamp(1, 15)` to `clamp(1, 5)` was **reverted** — the clamp silently
+    `clamp(1, 15)` to `clamp(1, 5)` was **reverted** - the clamp silently
     overrode the user's selection on the unproven assumption that large batches
     cause hangs, which masked the real per-batch behavior from the diagnostics.
     `commands/screening.rs` now honors `1..=15` verbatim, matching the frontend
@@ -366,7 +366,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     mutex); the Settings "Rebuild text chunks" button calls the same fn with
     `force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
     `get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` commands.
-    **Diagnostics (v8.7)** — always-on screening instrumentation surfaced to
+    **Diagnostics (v8.7)** - always-on screening instrumentation surfaced to
     diagnose a "hangs with a large corpus + Stop/Pause unresponsive" report.
     No behavioral changes; diagnostics-only. (1) `ScreeningProgress.phase:
     Option<String>` carries the coarse run-phase (`"preparing:translating"` /
@@ -383,7 +383,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     (chunk backfill) progress callback: `ensure_chunks_for_full_text_articles_with_progress`
     invokes a `ChunkProgressCb` per article; the screening task emits a
     `screening:progress` event + `chunk_progress: done/total` log line per
-    article. **The lock pattern is UNCHANGED** — `db.conn.lock()` is still held
+    article. **The lock pattern is UNCHANGED** - `db.conn.lock()` is still held
     across the whole pass exactly as today; the callback only emits events
     between articles. Layer 2 (deferred) will release the lock per article +
     move PDF parsing to `spawn_blocking`; this diagnostics-only addition
@@ -756,7 +756,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `{storage_root}/ris/` as `{clean_doi}_references.ris` /
     `{clean_doi}_citations.ris`. Three coupled contracts (design + validated
     signals in `.worktrees/scrapefix2.md`):
-    (1) **Cancellation** — every poll loop (`click_xpath_with_retry`,
+    (1) **Cancellation** - every poll loop (`click_xpath_with_retry`,
     `wait_for_element`, `wait_for_download_enabled`, the empty-result poll,
     and the pre/post-download hooks) routes its `thread::sleep` through
     `sleep_or_cancel(cancel, dur)`, which checks the `CancelToken`
@@ -774,16 +774,16 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `cancelBatchScraping()` sets the between-articles `batchCancelled` flag
     AND fire-and-forgets `cancel_scraping` so the current in-flight article
     aborts promptly instead of waiting up to 120s.
-    (2) **Empty-result detection** — a Shiny session that resolves to "0
+    (2) **Empty-result detection** - a Shiny session that resolves to "0
     references" or "no recorded citations" either disconnects the websocket
     (references: clicking Search on a 0-ref DOI tears down the session within
     ~8s, leaving `#refs_ris` disabled forever) or serves a 0-byte RIS file
     with a valid session href (citations: `#cits_ris` becomes enabled but
     `fetch(href)` returns HTTP 200 / 0 bytes). The post-Search
     `detect_empty_or_disconnect(body_text, kind)` poll (pure `#[must_use]`)
-    watches `document.body.innerText` for three stable signatures —
+    watches `document.body.innerText` for three stable signatures -
     `had 0 references` (refs), `no recorded citations in the Lens.org` (cits),
-    `Disconnected from the server` (either) — and returns
+    `Disconnected from the server` (either) - and returns
     `ScrapeError::NoData(reason)` within `EMPTY_RESULT_TIMEOUT_SECS = 20s`
     instead of the old 120s `wait_for_download_enabled` hang. The
     `validate_ris_nonempty(path)` guard is defense-in-depth after the
@@ -793,7 +793,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     toast + `skipped` counter), not errors; the backend's `is_skip_message`
     and the frontend's `isScrapeSkipMessage` mirror each other (prefix
     `"No data:"` or exact `"Cancelled"`).
-    (3) **Robust download** — `download_file` tries `download_with_reqwest`
+    (3) **Robust download** - `download_file` tries `download_with_reqwest`
     first (`reqwest::blocking`, browser-like headers, 10s connect / 30s
     overall timeout, 5-redirect policy; safe because the scrape runs on
     `spawn_blocking`, NOT a tokio async worker) and falls back to
@@ -928,7 +928,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `tests/bulk_tag_label_test.rs` (17 tests).
     **Bulk-export-by-ids fetcher**: `get_articles_by_ids(conn, ids)` composes
     `ARTICLE_SELECT_BASE` with a parameterized `id IN (?,…)` clause (one `?`
-    per id; no string interpolation) — the sole backend read path for the
+    per id; no string interpolation) - the sole backend read path for the
     Article-list bulk action bar "Export" button, distinct from
     `get_articles_for_export` (tab/status-scoped). Returns empty vec on empty
     input (avoids invalid `IN ()` SQL); unknown ids are silently absent. Tested
@@ -1168,14 +1168,14 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     JSON escape (`\n`, `\t`, `\r`, `\b`, `\f`, or `\u00XX` for the rest).
     Structural whitespace between tokens is preserved unchanged. **Why escape, not
     strip**: stripping would collapse paragraph breaks in `summary_150_250_words`,
-    run together multi-line `reasoning`, and damage `key_insights` bullets — silent
+    run together multi-line `reasoning`, and damage `key_insights` bullets - silent
     content corruption in user-facing text. Idempotent: a clean JSON document passes
     through byte-identical. (2) `strip_code_fences(raw)` strips ```` ```json ```` /
     ```` ``` ```` fences; moved here from `summary/prompt.rs` and re-exported from
     there for backward compat. (3) `prepare_llm_json(raw)` chains `strip_code_fences`
     + `escape_control_chars_in_json` in the correct order (fence-strip MUST run
     first). `prepare_llm_json` is the single pre-parser used by
-    **`LlmOrchestrator::send_json`** — the recommended entry point for any caller
+    **`LlmOrchestrator::send_json`** - the recommended entry point for any caller
     that feeds the LLM response into `serde_json::from_str`. `send_json` is a thin
     wrapper over `send` that runs `prepare_llm_json` on the result; callers that
     expect Markdown / plain text (chat, wiki chat, literature review, wiki ingest,
@@ -1295,11 +1295,11 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     **Title is `TEXT NOT NULL`**, so unlike the other scalar fields its
     binding arm rejects empty/whitespace-only input with `AppError::Validation`
     instead of clearing to NULL (the frontend inline editor also blocks empty
-    commits with a visible error — defense-in-depth). Tested in
+    commits with a visible error - defense-in-depth). Tested in
     `tests/article_metadata_test.rs` (`test_update_title` +
     `test_update_title_empty_rejected`).
     Frontend: **Title** is edited via double-click directly in the detail
-    header (`detail-header.vue` `<h2>` — no edit icon; the hover affordance +
+    header (`detail-header.vue` `<h2>` - no edit icon; the hover affordance +
     `title="Double-click to edit"` tooltip communicate editability, matching
     the Metadata card spans); `@update-title` is re-emitted by
     `article-detail-panel.vue` as `updateMetadata(id, 'title', value)` so it
@@ -1307,7 +1307,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     changes to the 5 host views or the composable. `article-metadata.vue`
     always renders all 7 Metadata-card fields (empty → muted `---`
     placeholder) and double-clicks any field to edit in place
-    (`nextTick` focus+select, `Enter`/blur commits, `Escape` cancels — same
+    (`nextTick` focus+select, `Enter`/blur commits, `Escape` cancels - same
     pattern as `tag-label-panel.vue` v6.9). Field-specific validation: **Year**
     requires a 4-digit integer in `[1800, 2100]` (frontend blocks invalid
     commits with a red hint; backend range guard clears out-of-range to NULL as
@@ -1452,7 +1452,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     mixed files; Phase 3 pre-flight skip + audit + proceed) +
     `tests/full_text_split_test.rs` (12 tests: isolated coverage of the split
     pipeline `extract_full_text_data` + `commit_full_text_to_db` +
-    `attach_full_text_split` — figures-flag true/false, soft-fallback on invalid
+    `attach_full_text_split` - figures-flag true/false, soft-fallback on invalid
     PDF, DOI-aware destination filename, chunk write, extraction-failure audit,
     end-to-end composition; the monolithic `attach_full_text_inner` path is
     covered by `tests/figures_flag_test.rs`). Phase 3 (live
@@ -1527,10 +1527,10 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   covering the pure `resolve_effective_dim` + `vector_matches_dim` helpers that
   drive the runner's per-row dimension validation), `tests/embedding_probe_persist_test.rs`
   (13, covering the Test Connection probe dimension-forwarding contract + the
-  `save_llm_config` conditional-reset contract — `embedding_relevant_changed`
-  — which ensures a parameters-only save does NOT wipe a known-good
+  `save_llm_config` conditional-reset contract - `embedding_relevant_changed`
+  - which ensures a parameters-only save does NOT wipe a known-good
   `embedding_status = enabled`, preventing the redundant Phase B probe on the
-  next Citation Finder run) — 74 tests total. Triggered by
+  next Citation Finder run) - 74 tests total. Triggered by
   post-summary fire-and-forget (`commands/summary.rs`), Test Connection probe
   (`commands/llm_config.rs`), rebuild-text-chunks cascade
   (`commands/full_text.rs`), and batch-import Phase 5. The runner accepts an
@@ -1545,16 +1545,16 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   lock burst. Cancellation is via `JoinSet::abort_all`: a Cancel click between
   `join_next()` completions aborts all in-flight tasks, dropping their vectors
   (no DB writes from cancelled tasks). The v1 Phase 5 mirror task (polling
-  `cancel_handle` every 100ms to forward to an atomic) was REMOVED — the
+  `cancel_handle` every 100ms to forward to an atomic) was REMOVED - the
   outer `abort_all` makes it obsolete. Phase 5 now snapshots `cancel_handle`
   into an `Arc<AtomicBool>` ONCE before calling the runner. The runner also
   validates per-row dimension consistency via two pure `#[must_use]` helpers
   (`resolve_effective_dim`, `vector_matches_dim`): a provider returning
   vectors of an unexpected length (model swap, truncated batch) no longer
-  silently stores a wrong `dimensions` column — the effective dim tracks the
+  silently stores a wrong `dimensions` column - the effective dim tracks the
   provider's reported value (with drift persisted back to `app_settings`), and
   any per-row mismatch is skipped + counted as an error. **v2 orchestrator
-  primitives**: `send_batch_parallel` (generic, free function —
+  primitives**: `send_batch_parallel` (generic, free function -
   order-preserving parallel dispatch via JoinSet with panic isolation) +
   `send_embedding_batch_parallel` (embedding-specific: per-text splitting via
   `split_text_by_token_budget` + sub-batch grouping via
@@ -1567,7 +1567,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
   `tests/llm_orchestrator_batch_test.rs` (17 tests: `send_batch_parallel`
   order/mixed/panic/empty + `send_embedding_batch_parallel` mockito dispatch +
   `embedding_limits` per-provider table) + `embedding/batching.rs` inline (7
-  tests: `group_into_embedding_batches` bin-pack respecting both caps) — 85
+  tests: `group_into_embedding_batches` bin-pack respecting both caps) - 85
   tests total (was 61).
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend.
   - **`src/assets/demo-project.bango.json`** - bundled demo project (loaded as raw text
@@ -1680,7 +1680,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     **sole entry point for "export selected"**: `article-list.vue::handleBulkExport`
     snapshots `Array.from(selectedIds.value)` and calls `useExport().exportRisForIds`,
     which opens the OS save dialog (`selected-articles.ris`) and writes RIS for
-    exactly the checked articles — distinct from the toolbar Export button +
+    exactly the checked articles - distinct from the toolbar Export button +
     `ExportDialog`, which export by tab/status (unchanged). `clearable-input.vue` is a reusable
     text/number input with a built-in clear ("x") affordance pinned to the right edge
     (Material Symbols `close` icon, `pr-8` on the input). Props: `modelValue` (v-model

@@ -64,8 +64,8 @@ export const useChatStore = defineStore('chat', () => {
 
   /** Citation Finder mode (`whole_block` vs `per_statement`). Default
    *  `whole_block`. Persisted only in-memory for the session (not in
-   *  app_settings — it's a UI toggle, not a project-wide preference).
-   *  Snake_case wire token — matches the Rust enum's
+   *  app_settings - it's a UI toggle, not a project-wide preference).
+   *  Snake_case wire token - matches the Rust enum's
    *  `#[serde(rename_all = "snake_case")]`. */
   const citationFinderMode = ref<CitationFinderMode>('whole_block');
 
@@ -156,7 +156,7 @@ export const useChatStore = defineStore('chat', () => {
 
   /**
    * Send a citation search. The status filter is REQUIRED (the backend does
-   * not apply a default — an empty array returns the "No articles match the
+   * not apply a default - an empty array returns the "No articles match the
    * selected filters." empty result). The view owns the checkbox state and
    * passes the live array here; `sendMessage` is no longer used for the
    * citation-finder source.
@@ -256,7 +256,7 @@ export const useChatStore = defineStore('chat', () => {
    * [`sendCitationSearch`](#sendCitationSearch) method (async-event-driven),
    * so if `sendMessage` is called while the source is citation-finder it
    * forwards to that method with an empty filter (which the backend rejects
-   * with the "No articles match" empty result — the view should call
+   * with the "No articles match" empty result - the view should call
    * `sendCitationSearch` directly instead).
    */
   async function sendMessage(text: string) {

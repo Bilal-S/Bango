@@ -129,7 +129,7 @@ function onNavigateToKeyword(nodeId: string) {
  * Gap 1b (backend `ArticleQuery.keywords` + `json_each()`).
  *
  * Routes through `buildBiblioArticleQuery`, which enforces
- * `status: 'included'` (decision D1) in one place — the keyword network is
+ * `status: 'included'` (decision D1) in one place - the keyword network is
  * scoped to included articles.
  */
 function viewKeywordArticles(): void {

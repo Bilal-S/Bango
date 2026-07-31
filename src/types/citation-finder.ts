@@ -1,5 +1,5 @@
 /**
- * Citation Finder types — frontend mirror of `src-tauri/src/citation_finder/mod.rs`.
+ * Citation Finder types - frontend mirror of `src-tauri/src/citation_finder/mod.rs`.
  *
  * Contract for the 3 Tauri commands (`find_citations`, `cancel_citation_search`,
  * `get_citation_finder_readiness`) + the 3 events (`citation:progress`,
@@ -47,7 +47,7 @@ export interface CitationMatch {
    *  the LLM omitted the field or none grounded → the card falls back to the
    *  full passage. */
   highlightedSentences: string[];
-  /** User-facing "match %" — the COSINE (semantic) score from the recall
+  /** User-facing "match %" - the COSINE (semantic) score from the recall
    *  layer, normalized from `[-1, 1]` to `[0, 1]`. Jaccard is internal-only. */
   confidence: number;
 }

@@ -12,9 +12,9 @@
  * to zip the `wiki-export/` directory into a user-chosen `.zip` file.
  *
  * **CSS**: the export stylesheet combines:
- * 1. The real `src/styles/markdown.css` (imported via Vite `?raw`) — the same
+ * 1. The real `src/styles/markdown.css` (imported via Vite `?raw`) - the same
  *    typography the in-app wiki viewer uses for `.markdown-content`.
- * 2. Wiki-specific styles extracted from `wiki-page-viewer.vue` (un-scoped) —
+ * 2. Wiki-specific styles extracted from `wiki-page-viewer.vue` (un-scoped) -
  *    `.wikilink`, `.art-ref`, `.wikilink--synthesis`, `.section-badge`.
  * This guarantees the exported pages look identical to the in-app wiki viewer.
  */
@@ -387,7 +387,7 @@ export function buildSearchIndex(
  * Wrap rendered HTML body in a full HTML document.
  *
  * The body is wrapped in `<div class="markdown-content">` so the markdown CSS
- * selectors apply correctly — matching the in-app wiki viewer's container.
+ * selectors apply correctly - matching the in-app wiki viewer's container.
  */
 export function wrapPageHtml(
   title: string,
@@ -569,7 +569,7 @@ async function gatherExportContext(): Promise<ExportContext> {
 }
 
 /**
- * Build the complete list of export files (pure function — no IPC calls).
+ * Build the complete list of export files (pure function - no IPC calls).
  *
  * Renders each wiki page to HTML with depth-aware resolvers + per-page
  * `linkArtRefsToSynthesis` (matching the in-app viewer), generates article

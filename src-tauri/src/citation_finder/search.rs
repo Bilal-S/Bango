@@ -7,7 +7,7 @@
 //! - **Phase A:** readiness check (brief lock). Decide whether Phase B runs.
 //! - **Phase B:** (conditional) auto-prepare embeddings by reusing
 //!   `generate_embeddings_inner` with the same cancel token.
-//! - **Phase C:** the search pipeline — claim-split (per-statement only) →
+//! - **Phase C:** the search pipeline - claim-split (per-statement only) →
 //!   recall (reuse) → containment passage → LLM classify → merge into
 //!   `CitationResult[]`.
 
@@ -164,7 +164,7 @@ pub struct FindCitationsContext<'a> {
 
 /// The core spawn-safe search pipeline.
 ///
-/// Returns `Vec<CitationResult>` — one entry per claim (per-statement) or a
+/// Returns `Vec<CitationResult>` - one entry per claim (per-statement) or a
 /// single entry with `claim: None` (whole-block).
 ///
 /// `ctx.emit_progress` is called with phase-appropriate payloads; the caller
@@ -178,7 +178,7 @@ pub async fn find_citations_inner(
     let FindCitationsContext { text, mode, status_filter, cancel_token, emit_progress, app_handle } =
         ctx;
     // Apply the status whitelist at the command boundary. The backend does NOT
-    // assume a default — if the caller supplies no valid statuses, the search
+    // assume a default - if the caller supplies no valid statuses, the search
     // returns the "No articles match the selected filters." empty result
     // rather than silently searching all articles. `duplicate` is always
     // dropped (never a citation candidate); typos/injection are filtered too.
@@ -271,7 +271,7 @@ pub async fn find_citations_inner(
         // them and they permanently sit outside the numerator. That left the
         // search dead-ended ("Embedding preparation incomplete (87% coverage,
         // 13/15 articles). Retry.") even though the runner had done its job
-        // correctly. The recall layer naturally handles partial coverage —
+        // correctly. The recall layer naturally handles partial coverage -
         // articles with no embedding rows are simply absent from the candidate
         // pool, which is the correct outcome (they have no semantic signal).
         // The standalone `generate_embeddings` command (Settings) has the same
@@ -492,7 +492,7 @@ pub fn normalize_claim_key(claim: &str) -> String {
 /// `lock_conn` burst, releasing between articles. This avoids holding the
 /// `DbState` mutex across up to 30 chunk reads (150 in per-statement mode with
 /// 5 claims), which would freeze every other DB-touching IPC command for the
-/// whole pass — the same mutex-starvation anti-pattern the root `AGENTS.md`
+/// whole pass - the same mutex-starvation anti-pattern the root `AGENTS.md`
 /// flags for screening. The per-article cost is one short lock acquire +
 /// release; `tokio::task::yield_now()` between articles lets the runtime
 /// flush progress events + give queued commands a turn.
@@ -652,7 +652,7 @@ fn merge_outputs(
     // Pre-normalize the claim_filter once so the per-output grouping filter
     // is also drift-tolerant. Without this, an LLM that lightly reformats the
     // claim text would have its output dropped by the raw `!=` filter before
-    // the normalized score lookup ever ran — the exact drift the normalized
+    // the normalized score lookup ever ran - the exact drift the normalized
     // key is supposed to tolerate.
     let normalized_filter = claim_filter.map(normalize_claim_key);
 

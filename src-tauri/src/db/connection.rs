@@ -40,7 +40,7 @@ pub fn lock_conn(conn_mutex: &Mutex<Connection>) -> Result<MutexGuard<'_, Connec
     let elapsed_ms = start.elapsed().as_millis();
     if elapsed_ms > SLOW_LOCK_THRESHOLD_MS {
         eprintln!(
-            "[screening:diag] lock_conn: SLOW acquire ({elapsed_ms}ms) — likely mutex starvation"
+            "[screening:diag] lock_conn: SLOW acquire ({elapsed_ms}ms) - likely mutex starvation"
         );
     }
     Ok(guard)

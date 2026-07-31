@@ -86,7 +86,7 @@ pub async fn recall(
     };
 
     // Max-pool per article. The seed is `NEG_INFINITY`, the identity element
-    // for `max` over f32 — this is the most idiomatic choice and is robust to
+    // for `max` over f32 - this is the most idiomatic choice and is robust to
     // any future broadening of the score range. (The previous `f32::MIN` seed
     // was technically also correct for cosine's `[-1.0, 1.0]` range since
     // `f32::MIN = -3.4e38 < -1.0`, but `NEG_INFINITY` communicates intent

@@ -184,7 +184,7 @@ fn multi_status_filter_combined_with_dimension_filter() {
 }
 
 /// Per-article rows in multiple statuses are all counted (max-pool happens in
-/// `recall`, not `list_for_recall` — this test confirms the row count).
+/// `recall`, not `list_for_recall` - this test confirms the row count).
 #[test]
 fn multi_status_filter_returns_all_chunks_for_matched_articles() {
     let conn = create_connection().unwrap();

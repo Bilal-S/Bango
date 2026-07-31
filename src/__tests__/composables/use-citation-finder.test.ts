@@ -63,7 +63,7 @@ describe('use-citation-finder (pure helpers)', () => {
       expect(apa).toContain('BMJ Global Health');
       expect(apa).toContain('doi:10.1136/bmjgh-2024-009999');
 
-      // MLA / Chicago / AMA: (Smith 2024) — no comma before the year.
+      // MLA / Chicago / AMA: (Smith 2024) - no comma before the year.
       expect(formatCitation(makeMatch(), 'MLA').startsWith('(Smith 2024)')).toBe(true);
       expect(formatCitation(makeMatch(), 'Chicago').startsWith('(Smith 2024)')).toBe(true);
       expect(formatCitation(makeMatch(), 'AMA').startsWith('(Smith 2024)')).toBe(true);
@@ -118,7 +118,7 @@ describe('use-citation-finder (pure helpers)', () => {
 
       expect(tauriCommand).toHaveBeenCalledWith('find_citations', {
         text: 'Sugar taxes reduce obesity.',
-        // Snake_case wire token — matches the Rust enum's
+        // Snake_case wire token - matches the Rust enum's
         // `#[serde(rename_all = "snake_case")]`.
         mode: 'whole_block',
         statusFilter: ['working', 'included'],

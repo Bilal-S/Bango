@@ -354,7 +354,7 @@ function onLanguageSelectChange(value: string): void {
 }
 
 // When the user switches back from "Other…" to the list via the ← button, the
-// dropdown re-renders. No extra watcher needed — the template's
+// dropdown re-renders. No extra watcher needed - the template's
 // `v-if="!languageOtherMode"` + the button handler reset `editingValue`.
 // Keep `editError` clear when not editing Year (defensive cleanup).
 watch(editingField, (f) => {
@@ -532,7 +532,7 @@ watch(
                 @keyup.escape="cancelEdit"
                 @change="onLanguageSelectChange(($event.target as HTMLSelectElement).value)"
               >
-                <option value="">—</option>
+                <option value="">-</option>
                 <option v-for="lang in LANGUAGE_OPTIONS" :key="lang" :value="lang">
                   {{ lang }}
                 </option>

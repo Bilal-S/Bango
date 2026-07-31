@@ -57,7 +57,7 @@ function onPageSizeChange(event: Event): void {
             ? 'bg-red-500 border-red-500 text-white hover:bg-red-600 hover:border-red-600'
             : 'border-slate-300 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
         "
-        :title="showFilters ? 'Clear filters' : 'Filters active (collapsed) — click to clear'"
+        :title="showFilters ? 'Clear filters' : 'Filters active (collapsed) - click to clear'"
         aria-label="Clear filters"
         @click="emit('clearFilters')"
       >

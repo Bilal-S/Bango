@@ -15,7 +15,7 @@ use crate::error::AppError;
 ///
 /// `provider_supports_embeddings` is `embedding_status != Disabled`
 /// (cf2.md §2.1): the toggle is hidden only on a *known-unsupported* provider
-/// (Anthropic, Z.AI). `Unknown` shows the toggle — Phase B's first run probes
+/// (Anthropic, Z.AI). `Unknown` shows the toggle - Phase B's first run probes
 /// via `generate_embeddings_inner` and resolves it to `Enabled`/`Disabled`.
 /// `Enabled` shows the toggle (unchanged). `dimensions` is still loaded so
 /// `coverage_pct` can filter same-dimension rows; it is NOT part of the
@@ -24,7 +24,7 @@ use crate::error::AppError;
 ///
 /// `coverage_pct` is `embedded_count / total_articles * 100`. The Phase A
 /// check inside `find_citations` runs Phase B (prepare) when `coverage_pct <
-/// 100.0`. Phase B is best-effort — the search proceeds regardless of the
+/// 100.0`. Phase B is best-effort - the search proceeds regardless of the
 /// post-prepare coverage (no 100% gate); see `search.rs` + the module
 /// `AGENTS.md` for why partial coverage is tolerated.
 pub fn compute_readiness(

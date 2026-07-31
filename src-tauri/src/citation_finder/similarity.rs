@@ -32,7 +32,7 @@ use crate::utils::chunking::Chunk;
 ///
 /// Containment is `|query ∩ chunk| / |query|` (query coverage), so 0.3 means
 /// "at least 30% of the query's tokens must appear in the chunk." This is the
-/// correct scale for containment — it is NOT comparable to the previous
+/// correct scale for containment - it is NOT comparable to the previous
 /// Jaccard threshold (0.05), which measured union-overlap and was diluted by
 /// long chunks.
 pub const MIN_PASSAGE_SCORE: f64 = 0.3;
@@ -53,7 +53,7 @@ pub fn tokenize_and_stem(text: &str) -> Vec<String> {
 /// - Disjoint token sets → 0.0.
 /// - Empty input (either side) → 0.0 (avoids the `0/0` NaN).
 ///
-/// **Not used as the passage gate** — Jaccard penalizes asymmetric lengths
+/// **Not used as the passage gate** - Jaccard penalizes asymmetric lengths
 /// (a short query against a long chunk scores low even for exact quotes).
 /// Retained as a `pub` helper for tests + potential future tie-breaking; the
 /// passage gate uses [`containment`] instead.
@@ -114,7 +114,7 @@ pub fn containment(query_tokens: &[String], chunk_tokens: &[String]) -> f64 {
 /// returns the one with the highest score plus its section label and score.
 /// Returns `None` when:
 /// - `chunks` is empty, OR
-/// - the best score is below `MIN_PASSAGE_SCORE` (0.3) — the candidate is
+/// - the best score is below `MIN_PASSAGE_SCORE` (0.3) - the candidate is
 ///   excluded from the LLM input.
 ///
 /// Containment (not Jaccard) is used because it is length-insensitive on the

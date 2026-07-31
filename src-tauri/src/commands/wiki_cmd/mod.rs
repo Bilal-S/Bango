@@ -2,18 +2,18 @@
 //! chat, ingest pipeline, and static-site export.
 //!
 //! Directory module split (refactor v6, see `.worktrees/refactor6.md`):
-//! - `mod.rs` (this file) — shared progress helpers (`pub(super)`),
+//! - `mod.rs` (this file) - shared progress helpers (`pub(super)`),
 //!   module declarations, and `pub use` re-exports so every historical
 //!   `crate::commands::wiki_cmd::*` import path keeps resolving (including
 //!   the `lib.rs` invoke-handler list + the `generate_export_inner` /
 //!   `SiteExportBundle` test entry points).
-//! - `status.rs` — drift check, status/root/init commands + result structs.
-//! - `raw_files.rs` — raw-file add/list/export commands.
-//! - `pages.rs` — page CRUD + page/source listings.
-//! - `search_lint.rs` — search, lint, graph.
-//! - `chat.rs` — wiki_chat delegate.
-//! - `ingest.rs` — ingest / rebuild / export-and-ingest + batch builder.
-//! - `site_export.rs` — static-site generate / zip / file helpers.
+//! - `status.rs` - drift check, status/root/init commands + result structs.
+//! - `raw_files.rs` - raw-file add/list/export commands.
+//! - `pages.rs` - page CRUD + page/source listings.
+//! - `search_lint.rs` - search, lint, graph.
+//! - `chat.rs` - wiki_chat delegate.
+//! - `ingest.rs` - ingest / rebuild / export-and-ingest + batch builder.
+//! - `site_export.rs` - static-site generate / zip / file helpers.
 //!
 //! Public API unchanged: `bango_lib::commands::wiki_cmd::*` import paths work
 //! identically to the pre-split single-file module.

@@ -524,7 +524,7 @@ async fn test_target_article_id_already_screened_is_noop() {
         assert_eq!(progress.completed, 1, "First run screens the target");
     }
 
-    // Run 2: target the same article again — it's already screened, so the
+    // Run 2: target the same article again - it's already screened, so the
     // lookup returns `None` and the engine exits immediately.
     {
         let mock = MockLlmClient::new(Vec::new());

@@ -248,7 +248,7 @@ export interface ScreeningProgress {
   rejected: number;
   errors: number;
   /** Articles deferred due to transient LLM errors (429/5xx/timeout/transport).
-   *  Not counted in `completed` or `errors` — left unscreened for the next run. */
+   *  Not counted in `completed` or `errors` - left unscreened for the next run. */
   deferred?: number;
   /** Fatal error that stopped the run (e.g. auth failure, consecutive transient
    *  failures). When set, `isRunning` is false and the UI shows a red banner. */

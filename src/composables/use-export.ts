@@ -104,7 +104,7 @@ export function useExport() {
 
   /** Export a specific set of articles (by UUID) to an RIS file. The sole
    *  entry point for the "Export Selected" bulk action in the Article list
-   *  bulk action bar — distinct from the toolbar Export, which exports by
+   *  bulk action bar - distinct from the toolbar Export, which exports by
    *  tab/status. Mirrors `exportRisForTab` (save dialog -> IPC -> error/loading
    *  handling). The RIS bytes are produced by the same backend pipeline as the
    *  tab export, so the output is byte-identical for the same article set. */

@@ -161,7 +161,7 @@ pub fn parse_figure_descriptions_response(
 ) -> Result<Vec<FigureDescription>, AppError> {
     // `prepare_llm_json` chains strip_code_fences + escape_control_chars_in_json.
     // Not `screening_engine::extract_json` (that helper corrupts object-shaped
-    // responses — see `utils::json_repair::strip_code_fences` docs).
+    // responses - see `utils::json_repair::strip_code_fences` docs).
     let prepared = prepare_llm_json(response);
     let value: serde_json::Value = serde_json::from_str(&prepared)
         .map_err(|e| AppError::Import(format!("Invalid JSON for figure descriptions: {e}")))?;

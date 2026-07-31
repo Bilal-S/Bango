@@ -116,7 +116,7 @@ pub fn build_per_statement_prompt(
 
 /// Format the candidates section shared by both prompts. Each passage block
 /// includes the article_id (so the LLM's JSON output can reference it), the
-/// article metadata (title, authors, year, journal, DOI — when available so
+/// article metadata (title, authors, year, journal, DOI - when available so
 /// the LLM can write informed explanations), the claim (when present), the
 /// matched passage, and the section origin.
 fn format_candidates_section(
@@ -164,7 +164,7 @@ fn format_candidates_section(
 /// occasionally emit camelCase regardless. Every field accepts BOTH shapes
 /// via `#[serde(alias = "...")]`. The canonical (snake_case) name is the
 /// primary path; the camelCase alias is the tolerance path. This struct is
-/// `Deserialize`-only (never serialized to the frontend — the IPC-facing
+/// `Deserialize`-only (never serialized to the frontend - the IPC-facing
 /// types are `CitationMatch`/`CitationResult`, which `Serialize`
 /// independently with their own `camelCase`), so dropping the struct-level
 /// `rename_all = "camelCase"` has zero IPC impact.
@@ -302,13 +302,13 @@ const WRAPPER_KEYS: &[&str] = &["results", "citations", "data", "matches", "item
 ///    JSON array", but LLMs sometimes wrap anyway.
 /// 2. **Per-element fault isolation**: each array element is deserialized
 ///    independently. One malformed element (missing field, typo'd key,
-///    nested object where a string was expected) costs only that element —
+///    nested object where a string was expected) costs only that element -
 ///    the rest of the batch survives. Previously a single bad element threw
 ///    away every good result alongside it (the exact failure mode in the
 ///    `missing field articleId` bug report: the whole response was valid
 ///    except that serde wanted camelCase while the prompt asked for
 ///    snake_case, so every element failed identically).
-/// 3. **Field-name aliases**: handled at the struct level — both snake_case
+/// 3. **Field-name aliases**: handled at the struct level - both snake_case
 ///    (what the prompt asks for) and camelCase (what some LLMs emit) parse.
 ///
 /// **Error contract**: if zero elements parse successfully, the original
@@ -356,7 +356,7 @@ pub fn parse_citation_outputs(raw: &str) -> Result<Vec<CitationLlmOutput>, serde
     }
 
     if outputs.is_empty() {
-        // Every element failed — surface the first error so the caller can
+        // Every element failed - surface the first error so the caller can
         // report what went wrong instead of silently returning an empty vec.
         // `first_error` is guaranteed `Some` here because `array` is
         // non-empty (guarded above) and every element failed, but a

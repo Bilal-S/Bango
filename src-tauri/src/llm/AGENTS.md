@@ -175,7 +175,7 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   `save_llm_config` resets `embedding_status` to `unknown` (keeps model + dims
   for the Settings UI) so a provider/endpoint/model switch re-evaluates.
 - **Capability probe** (`probe_embedding_support(config) -> ProbeOutcome`):
-  resolution order — (1) Anthropic → `disabled` immediately; (2) try the
+  resolution order - (1) Anthropic → `disabled` immediately; (2) try the
   provider-default embedding model with the word `"probe"`; (3) on failure,
   retry with the configured chat model (some local servers serve embeddings
   from the loaded model); (4) both fail → `disabled`. Returns
@@ -203,8 +203,8 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   mirrors `IngestLlmSender`) so its parallel + cancel behavior is unit-testable
   without a live provider.
 - **Lock discipline** (the runner): DB mutex is NEVER held across an `.await`.
-  Three brief lock bursts — (1) read work list + config + status, (2) persist
-  probe outcome if `unknown`, (3) per-completed-article `INSERT OR REPLACE` —
+  Three brief lock bursts - (1) read work list + config + status, (2) persist
+  probe outcome if `unknown`, (3) per-completed-article `INSERT OR REPLACE` -
   with the embedding HTTP calls happening lock-free between bursts.
 - **Per-row dimension guard**: `resolve_effective_dim(probe_dim, returned_dim)`
   trusts the provider on drift (keeps probe when returned is 0);

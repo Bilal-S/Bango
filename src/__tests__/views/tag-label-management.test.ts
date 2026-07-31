@@ -83,7 +83,7 @@ function findPanel(wrapper: ReturnType<typeof mount>, kind: 'tag' | 'label') {
   return match;
 }
 
-describe('tag-label-management.vue — D5 reset-filters deep-link envelope', () => {
+describe('tag-label-management.vue - D5 reset-filters deep-link envelope', () => {
   beforeEach(() => {
     mockTagsFetchIfNeeded.mockReset().mockResolvedValue(undefined);
     mockLabelsFetchIfNeeded.mockReset().mockResolvedValue(undefined);

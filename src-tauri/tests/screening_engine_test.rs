@@ -983,7 +983,7 @@ async fn single_transient_does_not_double_count_progress() {
     let progress = engine.get_progress().await;
     // The run stops after 1 batch (only 1 article, and it fails with 429).
     // Since consecutive_transient_failures = 1 (< 3 threshold), it doesn't
-    // auto-stop — but there are no more articles, so the loop ends naturally.
+    // auto-stop - but there are no more articles, so the loop ends naturally.
     // The single failure should show deferred=1, errors=0, completed=0.
     assert_eq!(progress.deferred, 1, "1 article deferred");
     assert_eq!(progress.errors, 0, "no hard errors (F1: no double-counting)");

@@ -1,4 +1,4 @@
-# Citation Finder — Test Inventory (cf2.md §9.2)
+# Citation Finder - Test Inventory (cf2.md §9.2)
 
 Consumed by `scripts/check-test-inventory.sh` (wired into `npm run check:all`).
 Rows use the machine-parseable `` `path::fn` `` format the script's regex
@@ -6,7 +6,7 @@ expects. Pure-helper unit tests live in external `src-tauri/tests/` files
 (extracted from inline `#[cfg(test)] mod tests` blocks per `docs/CLAUDE.md`
 §Testing). The `search.rs` pipeline tests stay inline because they exercise
 private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
-— those rows point at the `src/` file.
+- those rows point at the `src/` file.
 
 ## Rust
 
@@ -87,7 +87,7 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/tests/embedding_recall_multistatus_test.rs::single_status_filter_matches_historical_behavior` | backward-compat single status |
 | `src-tauri/tests/embedding_recall_multistatus_test.rs::multi_status_filter_working_plus_included` | working+included excludes rejected/duplicate |
 
-## TypeScript (Phase B — frontend)
+## TypeScript (Phase B - frontend)
 
 | Test identifier | Assertion |
 |-----------------|-----------|
@@ -107,7 +107,7 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
   testable decisions are extracted into pure helpers (`normalize_claim_key`,
   `merge_outputs`, `pool_finalists`). `normalize_claim_key` is `pub` and
   covered externally; `merge_outputs` + `pool_finalists` are private and
-  covered by the inline `search.rs` tests (the only inline block remaining —
+  covered by the inline `search.rs` tests (the only inline block remaining -
   see the `src/citation_finder/search.rs::` rows above).
 - The pure-helper tests (`similarity`, `prompt`, `claim_split`, `readiness`,
   `mod`) were extracted from inline `#[cfg(test)] mod tests` blocks into the

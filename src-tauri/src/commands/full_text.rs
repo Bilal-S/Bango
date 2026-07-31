@@ -728,7 +728,7 @@ pub struct RebuildChunksResult {
 /// `force`) candidate set, `article_id` is the article just processed.
 ///
 /// The callback is invoked **under the same `&Connection` lock** the caller
-/// holds — it must NOT re-enter the DB. It is purely for emitting diagnostic
+/// holds - it must NOT re-enter the DB. It is purely for emitting diagnostic
 /// progress events + log lines so the UI + stderr show the chunk-backfill
 /// phase advancing instead of a silent freeze. Diagnostics-only (Phase B
 /// instrumentation); carries no behavioral contract.
@@ -850,7 +850,7 @@ pub fn ensure_chunks_for_full_text_articles(
 /// **Lock contract: unchanged from `ensure_chunks_for_full_text_articles`.**
 /// This function still acquires no lock of its own; it operates on the
 /// `&Connection` the caller already holds. The screening task holds the DbState
-/// mutex for the full pass exactly as today — the per-article callback only
+/// mutex for the full pass exactly as today - the per-article callback only
 /// emits events between articles, it does NOT release/re-acquire the lock.
 /// Layer 2 (deferred) will refactor the lock scope; this diagnostics-only
 /// addition intentionally preserves the current locking to measure the real

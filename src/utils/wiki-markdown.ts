@@ -20,7 +20,7 @@
  * attributes directly (using the `slugToHref` / `artIdToHref` resolvers) so the
  * exported HTML works without Vue click handlers. Missing targets render as
  * `<span class="ref-missing">`. This is done in-pass (not as a post-pass) so
- * `marked.parse()` receives HTML with correct `href` attributes — avoiding the
+ * `marked.parse()` receives HTML with correct `href` attributes - avoiding the
  * fragile regex-on-final-HTML approach that broke when `marked` reformatted
  * anchors.
  */

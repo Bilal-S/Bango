@@ -46,7 +46,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `&[String]`) as the cosine prefilter. No reimplemented cosine + max-pool.
 - **Toggle visibility gate** (cf2.md §2.1): `provider_supports_embeddings`
   is `embedding_status != Disabled` (NOT `== Enabled AND dimensions > 0`).
-  `Unknown` shows the toggle — Phase B's first run probes via
+  `Unknown` shows the toggle - Phase B's first run probes via
   `generate_embeddings_inner` (the runner probes + recomputes the work list
   when it sees `UnknownNotProbed`) and resolves the status to `Enabled` or
   `Disabled`. `Disabled` hides the toggle (known-unsupported: Anthropic, Z.AI).
@@ -72,9 +72,9 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   three layers. (1) **Field-name aliases**: every `CitationLlmOutput` field
   accepts both snake_case (canonical, what the prompt asks for) and camelCase
   (what some LLMs emit) via `#[serde(alias = "...")]`. The struct is
-  `Deserialize`-only — it is never serialized to the frontend (the IPC-facing
+  `Deserialize`-only - it is never serialized to the frontend (the IPC-facing
   `CitationMatch`/`CitationResult` types serialize independently with their
-  own `camelCase`) — so dropping the struct-level `rename_all = "camelCase"`
+  own `camelCase`) - so dropping the struct-level `rename_all = "camelCase"`
   has zero IPC impact. `classification` + `relevance_explanation` carry
   `#[serde(default)]` (→ empty string); `parse_classification("")` returns
   `None` and drops the entry, so a missing classification is filtered not
@@ -82,7 +82,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   bare JSON array OR `{...}` with one of the known wrapper keys (`results`,
   `citations`, `data`, `matches`, `items`, `output`). (3) **Per-element fault
   isolation**: each array element is deserialized independently so one
-  malformed element (missing field, typo'd key) costs only that element — the
+  malformed element (missing field, typo'd key) costs only that element - the
   rest of the batch survives. If zero elements parse, the first error is
   surfaced (so genuine LLM failures aren't masked as an empty result); a
   genuine `[]` returns `Ok(vec![])`. Both `run_whole_block` and
@@ -104,7 +104,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `#[must_use]`) filters those through a normalized-substring gate
   (lowercase + whitespace-collapse + trim) against the actual
   `matched_passage` so paraphrases / merges / inventions are DROPPED before
-  display — displaying an ungrounded sentence as a quote would fabricate text
+  display - displaying an ungrounded sentence as a quote would fabricate text
   the paper does not contain. The survivors populate
   `CitationMatch.highlighted_sentences` (snake on the Rust side, camelCase on
   the wire). The card collapses to showing only those snippets by default
@@ -137,7 +137,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   negative cosine is recorded as the article's best score instead of being
   silently discarded by a `> 0.0` guard. Without this a true negative cosine
   would surface as `0.5` (neutral) instead of `0.0` (opposite direction).
-- **`Chunk.section: Option<String>`** — handled as `Option`; `None` for
+- **`Chunk.section: Option<String>`** - handled as `Option`; `None` for
   `SectionKind::Text`-derived chunks; the UI omits the `§…` badge. Abstract-
   only articles synthesize a chunk with `section: Some("Abstract")`.
 - **Metadata reaches the prompt**: `format_candidates_section` renders
@@ -155,7 +155,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   under the clippy `too_many_arguments` threshold (mirrors screening's
   `RunSyncContext`).
 - **Cancel token is `Arc<AtomicBool>`** (not `Mutex<bool>`), matching the
-  embedding runner's contract — `generate_embeddings_inner` takes
+  embedding runner's contract - `generate_embeddings_inner` takes
   `Option<Arc<AtomicBool>>` and the same token covers Phase B + Phase C.
   Cancel is checked between phases, between recall/passage calls, and before
   the 120s classification call. An in-flight LLM call completes naturally (or
@@ -182,10 +182,10 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `#[must_use]`, in `mod.rs`) filters the caller's `status_filter` against
   `["working","included","rejected"]` at the `find_citations_inner` boundary.
   `duplicate` is always dropped. An empty post-filter list returns the "No
-  articles match the selected filters." empty result — the backend never
+  articles match the selected filters." empty result - the backend never
   falls back to "all statuses" (the standalone `recall_articles` command's
   empty-means-all contract is a separate path).
-- **No new `LlmRequestType::skip_temperature` participation** —
+- **No new `LlmRequestType::skip_temperature` participation** -
   `CitationFinder` / `CitationFinderSplit` are standard chat-completion calls
   routed through `send_json` (JSON pre-parser applied).
 - **Timeouts**: `CitationFinder` = 120s (15 candidates + passages);
@@ -207,32 +207,32 @@ external test.
 
 ## Verification
 
-- `cargo test --lib citation_finder` — the inline `search.rs` tests
+- `cargo test --lib citation_finder` - the inline `search.rs` tests
   (`normalize_claim_key`, `merge_outputs` whole-block + per-statement +
   drift-tolerance + drop paths + cosine-normalization edge cases,
   `pool_finalists` dedup/truncate/empty).
-- `cargo test --test citation_finder_similarity_test` — containment +
+- `cargo test --test citation_finder_similarity_test` - containment +
   Jaccard (failure-mode pin) + `find_best_passage` + tokenizer edge cases.
-- `cargo test --test citation_finder_prompt_test` — system-prompt shape,
+- `cargo test --test citation_finder_prompt_test` - system-prompt shape,
   whole-block/per-statement structure, metadata render, `parse_classification`,
   `CitationLlmOutput` deserialization (camelCase alias + snake_case canonical
   + mixed-case), and `parse_citation_outputs` lenient parsing (bare array,
   object wrappers, per-element fault isolation, bug-report regression).
-- `cargo test --test citation_finder_claim_split_test` — `enforce_max_claims`
+- `cargo test --test citation_finder_claim_split_test` - `enforce_max_claims`
   truncation/trim/drop + prompt builder.
-- `cargo test --test citation_finder_readiness_test` — `coverage_percentage`
+- `cargo test --test citation_finder_readiness_test` - `coverage_percentage`
   edge cases.
-- `cargo test --test citation_finder_mod_test` — `filter_valid_statuses`
+- `cargo test --test citation_finder_mod_test` - `filter_valid_statuses`
   whitelist contract.
-- `cargo test --test citation_finder_search_test` — the public
+- `cargo test --test citation_finder_search_test` - the public
   `normalize_claim_key` pipeline contract (external pin).
-- `cargo test --test embedding_recall_multistatus_test` — the multi-status
+- `cargo test --test embedding_recall_multistatus_test` - the multi-status
   prefilter extension.
-- `cargo clippy --lib -- -D warnings` — clean (the project gate).
-- `cargo fmt --check` — clean.
+- `cargo clippy --lib -- -D warnings` - clean (the project gate).
+- `cargo fmt --check` - clean.
 - Frontend: `npx vitest run src/__tests__/composables/use-citation-finder.test.ts
   src/__tests__/components/citation-result-card.test.ts src/__tests__/chat.test.ts`
-  — formatCitation/findCitations + card + store (incl. citation-finder).
+  - formatCitation/findCitations + card + store (incl. citation-finder).
 
 ## Child DOX Index
 

@@ -7,7 +7,7 @@
 //!
 //! **Cancel-polling contract**: the `tokio::select!` LLM-call wrapper stays
 //! inline inside `run_stage2_borderline`. Always poll `notified()`, check the
-//! token inside the branch body — never use an `if` precondition on the select
+//! token inside the branch body - never use an `if` precondition on the select
 //! branch (an unregistered waiter makes `notify_waiters()` a no-op and silently
 //! loses the cancel signal).
 

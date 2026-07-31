@@ -19,7 +19,7 @@ fn filter_valid_statuses_keeps_valid_three() {
 
 #[test]
 fn filter_valid_statuses_drops_duplicate_status() {
-    // `duplicate` is deliberately NOT in the whitelist — duplicates are
+    // `duplicate` is deliberately NOT in the whitelist - duplicates are
     // never citation candidates.
     let out = filter_valid_statuses(&strs(&["working", "duplicate", "included"]));
     assert_eq!(out, strs(&["working", "included"]));
@@ -46,7 +46,7 @@ fn filter_valid_statuses_drops_duplicates_preserving_first_order() {
 #[test]
 fn filter_valid_statuses_empty_input_returns_empty() {
     // KEY CONTRACT: an empty result means the search returns "No articles
-    // match the selected filters." — the backend does NOT fall back to
+    // match the selected filters." - the backend does NOT fall back to
     // "all statuses" (the standalone `recall_articles` command's empty-
     // means-all contract is a separate code path).
     let out = filter_valid_statuses(&[]);

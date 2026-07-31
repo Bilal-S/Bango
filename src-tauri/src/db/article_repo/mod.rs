@@ -1,23 +1,23 @@
 //! Article repository: CRUD + queries + mutations for the `articles` table.
 //!
 //! Directory module split (refactor v6, see `.worktrees/refactor6.md`):
-//! - `mod.rs` (this file) — shared constants (`MAX_ARTICLES`,
+//! - `mod.rs` (this file) - shared constants (`MAX_ARTICLES`,
 //!   `ARTICLE_SELECT_BASE`), shared row mapper + helpers (`pub(super)`),
 //!   module declarations, and comprehensive `pub use` re-exports so every
 //!   historical `crate::db::article_repo::*` import path keeps resolving.
-//! - `screening_queries.rs` — counts + unscreened-working batch fetches +
+//! - `screening_queries.rs` - counts + unscreened-working batch fetches +
 //!   capacity helpers.
-//! - `insert.rs` — `insert_article`, `insert_articles_batch`.
-//! - `query.rs` — `ArticleQuery` + `query_articles` + the read-many fns.
-//! - `mutations.rs` — status / dedup / tags / labels / notes / AI decision /
+//! - `insert.rs` - `insert_article`, `insert_articles_batch`.
+//! - `query.rs` - `ArticleQuery` + `query_articles` + the read-many fns.
+//! - `mutations.rs` - status / dedup / tags / labels / notes / AI decision /
 //!   criteria / field-count mutations.
-//! - `metadata.rs` — `ArticleMetaField` + `ArticleMetaValue` +
+//! - `metadata.rs` - `ArticleMetaField` + `ArticleMetaValue` +
 //!   `update_article_metadata_field`.
-//! - `bulk_ops.rs` — bulk status + bulk tag/label add/remove + resets.
-//! - `full_text.rs` — full text + AI summary helpers.
-//! - `translation.rs` — `TranslationStatusInfo` + the translation-status helpers.
-//! - `doi_journal.rs` — DOI/journal/counts helpers + `rematch_all_journals`.
-//! - `delete.rs` — the hard-delete cascade.
+//! - `bulk_ops.rs` - bulk status + bulk tag/label add/remove + resets.
+//! - `full_text.rs` - full text + AI summary helpers.
+//! - `translation.rs` - `TranslationStatusInfo` + the translation-status helpers.
+//! - `doi_journal.rs` - DOI/journal/counts helpers + `rematch_all_journals`.
+//! - `delete.rs` - the hard-delete cascade.
 //!
 //! Public API unchanged: `bango_lib::db::article_repo::*` import paths work
 //! identically to the pre-split single-file module.

@@ -123,7 +123,7 @@ pub fn discover_importable_files(
 /// per-article DOI lookups during the attach loop are a pure in-memory O(1)
 /// operation (no DB read). The primary `DoiMatchMap` (keyed by cleaned-DOI)
 /// is used only during discovery to match on-disk filename stems and is not
-/// returned — the attach loop resolves DOIs by article-id via `id_to_doi`.
+/// returned - the attach loop resolves DOIs by article-id via `id_to_doi`.
 pub(crate) struct FullTextDiscovery {
     pub storage_dir: PathBuf,
     pub importable: Vec<(PathBuf, String)>,

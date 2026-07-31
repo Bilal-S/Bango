@@ -177,7 +177,7 @@ function onToggleCitationFinder() {
  *  Citations button + Ctrl/Cmd+Enter. Threads the live status-filter
  *  checkboxes (NEW-4) to the store's dedicated `sendCitationSearch`, which
  *  forwards them to the backend. The backend filters against the whitelist
- *  and applies NO default — an empty array (all checkboxes unchecked)
+ *  and applies NO default - an empty array (all checkboxes unchecked)
  *  returns the "No articles match the selected filters." empty result. */
 async function handleCitationSend() {
   // The Find button is `:disabled` when the prose is empty, but Ctrl/Cmd+Enter
@@ -236,7 +236,7 @@ function flattenForIeee(results: CitationResult[]): Array<{
 // Default: expanded (results visible on first paint; the user collapses the
 // claims they want to tuck away). Keyed by `${msgIdx}::${claim}` so the same
 // claim text in different bubbles (re-searches) stays independent, and the
-// state survives as long as the message list is append-only (which it is —
+// state survives as long as the message list is append-only (which it is -
 // messages are never reordered, only appended).
 const collapsedClaims = ref<Set<string>>(new Set());
 
@@ -577,25 +577,68 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
           ref="chatScrollContainer"
           class="flex-1 overflow-y-auto p-container-padding space-y-4 flex flex-col"
         >
-          <!-- Welcome state -->
-          <div
-            v-if="chatStore.messages.length === 0"
-            class="my-auto py-12 text-center max-w-md mx-auto"
-          >
-            <div
-              class="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600"
-            >
-              <span class="material-symbols-outlined text-[32px]">chat_add_on</span>
+          <!-- Welcome state: three-column overview of the three chat modes -->
+          <div v-if="chatStore.messages.length === 0" class="my-auto py-8 w-full max-w-5xl mx-auto">
+            <div class="chat-welcome-grid">
+              <!-- Academic Research Chat -->
+              <div class="chat-welcome-card">
+                <div class="chat-welcome-card__icon chat-welcome-card__icon--indigo">
+                  <span class="material-symbols-outlined">chat_add_on</span>
+                </div>
+                <h3 class="chat-welcome-card__title">Academic Research Chat</h3>
+                <p class="chat-welcome-card__desc">
+                  Ask questions about the articles in your library. Add articles to the context
+                  using the <strong>(+)</strong> button to ground the responses in specific research
+                  text.
+                </p>
+                <p class="chat-welcome-card__hint">
+                  <span class="material-symbols-outlined">add_circle</span>
+                  Click <strong>(+)</strong> to select articles, then type your question.
+                </p>
+              </div>
+
+              <!-- Wiki Chat -->
+              <div class="chat-welcome-card">
+                <div class="chat-welcome-card__icon chat-welcome-card__icon--purple">
+                  <span class="material-symbols-outlined">local_library</span>
+                </div>
+                <h3 class="chat-welcome-card__title">Wiki Chat</h3>
+                <p class="chat-welcome-card__desc">
+                  Ask questions answered from your synthesized knowledge base. The Wiki is built
+                  from your included articles and retrieves the most relevant pages for each
+                  question.
+                </p>
+                <p v-if="chatStore.wikiReady" class="chat-welcome-card__hint">
+                  <span class="material-symbols-outlined">local_library</span>
+                  Toggle the <strong>Wiki</strong> icon (right of <strong>(+)</strong>) to start.
+                </p>
+                <p v-else class="chat-welcome-card__hint chat-welcome-card__hint--muted">
+                  <span class="material-symbols-outlined">lock</span>
+                  Initialize the Wiki first (see the Wiki screen).
+                </p>
+              </div>
+
+              <!-- Citation Finder -->
+              <div class="chat-welcome-card">
+                <div class="chat-welcome-card__icon chat-welcome-card__icon--teal">
+                  <span class="material-symbols-outlined">quick_reference_all</span>
+                </div>
+                <h3 class="chat-welcome-card__title">Citation Finder</h3>
+                <p class="chat-welcome-card__desc">
+                  Paste text you are writing and get matching citations from your library. Bango
+                  finds the relevant passages first, so the AI cannot invent sources: every result
+                  is grounded in your real articles.
+                </p>
+                <p v-if="chatStore.citationFinderReady" class="chat-welcome-card__hint">
+                  <span class="material-symbols-outlined">quick_reference_all</span>
+                  Click the <strong>Citation Finder</strong> icon to start.
+                </p>
+                <p v-else class="chat-welcome-card__hint chat-welcome-card__hint--muted">
+                  <span class="material-symbols-outlined">lock</span>
+                  Requires an embedding-capable LLM provider (see Settings).
+                </p>
+              </div>
             </div>
-            <h3 class="text-lg font-semibold text-slate-900 mb-2">Academic Research Chat</h3>
-            <p class="text-sm text-slate-500 leading-relaxed mb-6">
-              Ask questions about the articles in your library. Add articles to the context using
-              the `+` button to ground the responses in specific research text.
-              <span v-if="chatStore.wikiReady">
-                Toggle the <strong>Wiki</strong> button to answer from your synthesized knowledge
-                base instead.
-              </span>
-            </p>
           </div>
 
           <template v-else>
@@ -869,7 +912,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 
             <!-- Row 3: Prose textarea + (Find Citations button OR live
                  progress). While a search is running, the progress indicator
-                 replaces the Find Citations button in place — the textarea
+                 replaces the Find Citations button in place - the textarea
                  stays visible so the user can draft the next search. -->
             <div class="citation-input-area__prose-row">
               <textarea
@@ -1340,6 +1383,96 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   animation: fade-in 0.3s ease-out forwards;
 }
 
+/* Three-column welcome grid (Academic Chat / Wiki Chat / Citation Finder).
+   Responsive: 3 columns on md+, single column on small screens. */
+.chat-welcome-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .chat-welcome-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.chat-welcome-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: #fff;
+  border: 1px solid rgb(226 232 240); /* slate-200 */
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.chat-welcome-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  margin-bottom: 0.25rem;
+}
+
+.chat-welcome-card__icon span.material-symbols-outlined {
+  font-size: 26px;
+}
+
+.chat-welcome-card__icon--indigo {
+  background: rgb(238 242 255); /* indigo-50 */
+  color: rgb(79 70 229); /* indigo-600 */
+}
+
+.chat-welcome-card__icon--purple {
+  background: rgb(250 232 255); /* purple-50 */
+  color: rgb(126 34 206); /* purple-700 */
+}
+
+.chat-welcome-card__icon--teal {
+  background: rgb(204 251 241); /* teal-100 */
+  color: rgb(15 118 110); /* teal-700 */
+}
+
+.chat-welcome-card__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: rgb(15 23 42); /* slate-900 */
+  margin: 0;
+}
+
+.chat-welcome-card__desc {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: rgb(71 85 105); /* slate-600 */
+  margin: 0;
+}
+
+.chat-welcome-card__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+  font-size: 0.72rem;
+  color: rgb(99 102 241); /* indigo-600 */
+  font-weight: 600;
+}
+
+.chat-welcome-card__hint span.material-symbols-outlined {
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.chat-welcome-card__hint--muted {
+  color: rgb(148 163 184); /* slate-400 */
+  font-weight: 500;
+}
+
 .dot-1,
 .dot-2,
 .dot-3 {
@@ -1470,7 +1603,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   margin-bottom: 0.75rem;
 }
 
-/* Close (X) button — exits citation mode. Sits at the same level as the
+/* Close (X) button - exits citation mode. Sits at the same level as the
    Citation Style dropdown (inside Row 1) and is pushed to the right edge with
    margin-left:auto so it introduces no extra top whitespace. Mirrors the
    wiki-reader close button's muted slate styling. Aligned to center so it

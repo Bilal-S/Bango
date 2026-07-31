@@ -39,7 +39,7 @@ fn seed_core_data(conn: &rusqlite::Connection) {
     ).expect("seed criterion");
 
     // Tags & labels (with user-chosen colors so the round-trip test exercises
-    // the `color` column — the bug this test guards against is the import path
+    // the `color` column - the bug this test guards against is the import path
     // omitting `color` from the INSERT, which silently drops it to NULL).
     conn.execute(
         "INSERT INTO tags (id, name, source, color) VALUES ('tag-1', 'ml', 'ai_suggested', '#ff0000')",

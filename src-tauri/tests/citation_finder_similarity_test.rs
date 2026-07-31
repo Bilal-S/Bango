@@ -96,7 +96,7 @@ fn jaccard_diluted_by_long_chunk_exact_quote() {
 fn containment_exact_quote_in_long_chunk_is_one() {
     // The user-reported scenario: a ~12-token query that appears verbatim
     // inside a ~300-token chunk. Containment = 12/12 = 1.0 (Jaccard would be
-    // ~0.04 — see `jaccard_diluted_by_long_chunk_exact_quote`). This is the
+    // ~0.04 - see `jaccard_diluted_by_long_chunk_exact_quote`). This is the
     // test that would have caught the shipped bug.
     let query: Vec<String> = (0..12).map(|i| format!("q{i}")).collect();
     let mut chunk_tokens = query.clone();

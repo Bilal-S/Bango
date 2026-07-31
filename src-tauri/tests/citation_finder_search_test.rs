@@ -4,9 +4,9 @@
 //! `State<DbState>` + `AppHandle`, so it cannot be driven directly from a
 //! `#[test]` (same constraint documented in `tests/embedding_runner_test.rs`).
 //! Instead, the pipeline's testable decisions live in pure helpers:
-//! - `normalize_claim_key` (the drift-tolerant claim lookup key) — tested here
+//! - `normalize_claim_key` (the drift-tolerant claim lookup key) - tested here
 //!   + in `search.rs` inline.
-//! - `merge_outputs`, `pool_finalists` — private, covered by the inline
+//! - `merge_outputs`, `pool_finalists` - private, covered by the inline
 //!   `#[cfg(test)] mod tests` in `search.rs`.
 //!
 //! This file exists so the binding test-inventory (`docs/test-plans/citation-

@@ -4,7 +4,7 @@
 //! newlines, but also tabs / form-feeds / NULs) inside JSON string values
 //! instead of escaping them as `\n` / `\t`. The outer OpenAI envelope is
 //! well-formed JSON, so `llm::client` can decode `choices[0].message.content`
-//! into a Rust `String` — but the inner summary/schema JSON, when re-parsed by
+//! into a Rust `String` - but the inner summary/schema JSON, when re-parsed by
 //! `serde_json::from_str`, fails with:
 //!
 //! ```text
@@ -43,13 +43,13 @@
 ///   unescaped `\` does **not** flip `in_string` off, so escaped quotes inside
 ///   the value are handled correctly.
 /// - **Outside a string literal** (structural JSON): whitespace newlines/tabs
-///   are already legal JSON insignia between tokens — pass through unchanged.
+///   are already legal JSON insignia between tokens - pass through unchanged.
 ///
 /// # Why escape, not strip
 ///
 /// Stripping control chars (`s.retain(|c| !c.is_control())`) would collapse
 /// paragraph breaks in `summary_150_250_words`, run together multi-line
-/// `reasoning`, and damage `key_insights` bullets — silent content corruption
+/// `reasoning`, and damage `key_insights` bullets - silent content corruption
 /// in user-facing text. Escaping preserves the logical content; only the JSON
 /// representation is normalized, matching what the LLM *should* have emitted.
 ///
@@ -106,7 +106,7 @@ pub fn escape_control_chars_in_json(raw: &str) -> String {
     // If the document ended mid-string with a dangling `\`, we've already
     // emitted the backslash above; the caller's `serde_json::from_str` will
     // report a clean "EOF while parsing a string" error. We do not attempt
-    // further repair here — that is `balance_braces`'s job (screening path)
+    // further repair here - that is `balance_braces`'s job (screening path)
     // and out of scope for control-char normalization.
     out
 }
@@ -155,10 +155,10 @@ pub fn strip_code_fences(raw: &str) -> String {
 /// and by JSON-parsing call sites that go through the orchestrator directly.
 ///
 /// Runs the two repairs in the correct order:
-/// 1. [`strip_code_fences`] — MUST run first because the fence strippers match
+/// 1. [`strip_code_fences`] - MUST run first because the fence strippers match
 ///    against the raw response (a leading ```` ``` ```` inside an already-escaped
 ///    JSON string value would be a false positive).
-/// 2. [`escape_control_chars_in_json`] — sanitizes raw control chars the LLM may
+/// 2. [`escape_control_chars_in_json`] - sanitizes raw control chars the LLM may
 ///    have placed inside JSON string values.
 ///
 /// Pure function: no I/O. Composable with further shape-specific repair
@@ -190,7 +190,7 @@ fn is_json_control_char(ch: char) -> bool {
 /// lowercase-hex `\u00XX` form that `serde_json` also accepts.
 ///
 /// Pushing directly into the caller's buffer avoids the awkward
-/// `&'static str` vs owned-`String` return type — the rare-control-char branch
+/// `&'static str` vs owned-`String` return type - the rare-control-char branch
 /// can allocate a small 6-byte string without leaking.
 #[inline]
 fn push_json_escape(out: &mut String, ch: char) {
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn preserves_structural_newlines_between_tokens() {
-        // Pretty-printed JSON has real newlines BETWEEN tokens — those are
+        // Pretty-printed JSON has real newlines BETWEEN tokens - those are
         // legal and must be preserved.
         let input = "{\n  \"key\": \"value\"\n}";
         assert_eq!(escape_control_chars_in_json(input), input);
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn handles_dangling_backslash_without_panic() {
         // String ends with `\` followed by other content. The `\` escapes the
-        // next char so the string does NOT close — but that would be invalid
+        // next char so the string does NOT close - but that would be invalid
         // JSON anyway. We just ensure no panic and that the backslash is
         // preserved for serde_json to report cleanly.
         let input = r#"{"text": "trailing \"   }"#;
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn escapes_nul_and_other_rare_control_chars() {
-        // NUL, SOH, US — the `\u00XX` branch.
+        // NUL, SOH, US - the `\u00XX` branch.
         let input = "{\"a\": \"x\u{0000}y\", \"b\": \"\u{0001}\", \"c\": \"\u{001F}\"}";
         assert!(serde_json::from_str::<serde_json::Value>(input).is_err());
         let out = escape_control_chars_in_json(input);
@@ -298,10 +298,10 @@ mod tests {
         //
         // We build the payload with `format!` + a real newline (`'\n'`) so
         // the resulting `String` actually contains an unescaped control byte
-        // inside the JSON string literal — exactly what `serde_json` rejects
+        // inside the JSON string literal - exactly what `serde_json` rejects
         // with "control character (\u0000-\u001F) found while parsing a
         // string". (Using a `r#"..."#` raw string would make `\n` two literal
-        // chars — backslash + n — and the payload would already be valid
+        // chars - backslash + n - and the payload would already be valid
         // JSON, defeating the regression's purpose.)
         let raw = format!(
             "{{\"field\": \"business_economics_finance\",\n\"summary_150_250_words\": \"This paper examines how digital technology platforms influence strategic behavior in green supply chain finance.{nl}{nl}The results indicate that platform access makes desirable strategies more likely to emerge.\",\n\"keywords\": [\"a\", \"b\"]}}",

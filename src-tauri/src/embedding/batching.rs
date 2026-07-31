@@ -10,7 +10,7 @@
 //! A sub-batch is closed when adding one more piece would exceed EITHER cap.
 //! A single piece whose `token_count` alone exceeds `max_tokens_per_batch`
 //! (only possible when `max_tokens_per_input == max_tokens_per_batch`, e.g.
-//! Ollama) forms its own sub-batch — the splitter already fragmented the text
+//! Ollama) forms its own sub-batch - the splitter already fragmented the text
 //! at `max_tokens_per_input`, so we cannot subdivide a `TextPiece` further
 //! here.
 

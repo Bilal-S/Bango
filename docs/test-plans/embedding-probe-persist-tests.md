@@ -1,4 +1,4 @@
-# Test Connection Embedding Probe Persistence — Test Inventory
+# Test Connection Embedding Probe Persistence - Test Inventory
 
 Consumed by `scripts/check-test-inventory.sh` (wired into `npm run check:all`).
 Rows use the machine-parseable `` `path::fn` `` format the script's regex
@@ -8,14 +8,14 @@ expects. Pure-helper + DB-backed integration tests live in external
 These tests pin two coupled contracts:
 
 1. **`persist_embedding_probe_to_conn`** (`commands::llm_config`): the
-   dimension-forwarding contract — Test Connection's probe forwards the real
+   dimension-forwarding contract - Test Connection's probe forwards the real
    `dimensions` to `app_settings`, not a hardcoded 0.
 2. **`embedding_relevant_changed` + `save_llm_config` conditional-reset**
    (`commands::llm_config`): the contract that a parameters-only LLM config
    save (concurrency / delay / context / temperature) does NOT reset
    `embedding_status`, while a provider / endpoint / model / api-key change
    DOES. The parameters-only reset was the root cause of the "probe fires on
-   first Citation Finder call" bug — the Settings auto-save watcher fired
+   first Citation Finder call" bug - the Settings auto-save watcher fired
    `save_llm_config` after Test Connection, wiping the `enabled` status the
    probe had just set and forcing Phase B to re-probe redundantly.
 

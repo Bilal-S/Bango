@@ -294,7 +294,7 @@ pub fn split_text_by_token_budget(text: &str, max_tokens: usize) -> Vec<TextPiec
 
 /// Naive sentence splitter: splits on `. `, `! `, `? ` boundaries, preserving
 /// the trailing punctuation with each sentence. Whitespace-only sentences are
-/// dropped. This is intentionally simple (no NLP) — good enough for embedding
+/// dropped. This is intentionally simple (no NLP) - good enough for embedding
 /// piece boundaries where exactness doesn't matter, only that splits avoid
 /// landing mid-word.
 fn split_into_sentences(text: &str) -> Vec<String> {
@@ -353,7 +353,7 @@ fn split_word_pack(text: &str, max_tokens: usize) -> Vec<TextPiece> {
 ///
 /// Used by [`crate::llm::orchestrator::LlmOrchestrator::send_embedding_batch_parallel`]
 /// when [`split_text_by_token_budget`] produced more than one piece for a
-/// single input text — each piece was embedded separately, then this fn merges
+/// single input text - each piece was embedded separately, then this fn merges
 /// the resulting vectors back into a single per-input vector so the storage
 /// contract `(article_id, chunk_index) -> 1 vector` is preserved.
 ///
