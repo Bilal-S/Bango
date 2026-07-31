@@ -230,6 +230,47 @@ function flattenForIeee(results: CitationResult[]): Array<{
   return out;
 }
 
+// ── Per-statement claim-group collapse state ────────────────────────────
+//
+// Each claim heading is a caret toggle that collapses/expands its cards.
+// Default: expanded (results visible on first paint; the user collapses the
+// claims they want to tuck away). Keyed by `${msgIdx}::${claim}` so the same
+// claim text in different bubbles (re-searches) stays independent, and the
+// state survives as long as the message list is append-only (which it is —
+// messages are never reordered, only appended).
+const collapsedClaims = ref<Set<string>>(new Set());
+
+/** Build the per-bubble key for a claim's collapse state. */
+function claimKey(msgIdx: number, claim: string): string {
+  return `${msgIdx}::${claim}`;
+}
+
+/** Whether a given claim's cards are currently collapsed. */
+function isClaimCollapsed(msgIdx: number, claim: string): boolean {
+  return collapsedClaims.value.has(claimKey(msgIdx, claim));
+}
+
+/** Toggle a claim's collapse state (add/remove from the Set). Mutating a
+ *  `Set` in place doesn't trigger reactivity, so we reassign the ref to a
+ *  fresh `Set` constructed from the updated contents. */
+function toggleClaimCollapsed(msgIdx: number, claim: string): void {
+  const key = claimKey(msgIdx, claim);
+  const next = new Set(collapsedClaims.value);
+  if (next.has(key)) {
+    next.delete(key);
+  } else {
+    next.add(key);
+  }
+  collapsedClaims.value = next;
+}
+
+/** Count the cards under a given claim (for the count badge). Reuses the same
+ *  filter predicate the template uses so the number always matches what would
+ *  render when expanded. */
+function claimCardCount(results: CitationResult[], claim: string): number {
+  return flattenForIeee(results).filter((c) => c.claim === claim).length;
+}
+
 onMounted(async () => {
   await checkLlmConfig();
   if (isLlmConfigured.value) {
@@ -617,13 +658,44 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
                         :key="group.claim ?? 'whole'"
                         class="citation-bubble__group"
                       >
-                        <h4 v-if="group.claim" class="citation-bubble__claim-heading">
-                          {{ group.claim }}
-                        </h4>
+                        <button
+                          v-if="group.claim"
+                          type="button"
+                          class="citation-bubble__claim-toggle"
+                          :aria-expanded="!isClaimCollapsed(idx, group.claim)"
+                          :title="
+                            isClaimCollapsed(idx, group.claim)
+                              ? 'Expand citations for this statement'
+                              : 'Collapse citations for this statement'
+                          "
+                          @click="toggleClaimCollapsed(idx, group.claim)"
+                        >
+                          <span
+                            class="citation-bubble__claim-count"
+                            :title="
+                              claimCardCount(msg.citations, group.claim) +
+                              ' citation' +
+                              (claimCardCount(msg.citations, group.claim) === 1 ? '' : 's')
+                            "
+                            >{{ claimCardCount(msg.citations, group.claim) }}</span
+                          >
+                          <span class="citation-bubble__claim-text">{{ group.claim }}</span>
+                          <span
+                            class="material-symbols-outlined citation-bubble__claim-caret"
+                            :class="{
+                              'citation-bubble__claim-caret--collapsed': isClaimCollapsed(
+                                idx,
+                                group.claim
+                              ),
+                            }"
+                            >expand_more</span
+                          >
+                        </button>
                         <CitationResultCard
                           v-for="card in flattenForIeee(msg.citations).filter(
                             (c) => c.claim === group.claim
                           )"
+                          v-show="group.claim ? !isClaimCollapsed(idx, group.claim) : true"
                           :key="card.match.articleId + '-' + card.ieeeIndex"
                           :match="card.match"
                           :style="msg.citationStyle ?? 'APA'"
@@ -1697,6 +1769,64 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   padding: 0.1875rem 0.375rem;
   border-radius: 0.25rem;
   margin: 0.25rem 0 0 0;
+}
+
+/* Per-statement claim-group collapse toggle (replaces the static <h4>). */
+.citation-bubble__claim-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0.25rem;
+  background: rgb(238 242 255); /* indigo-50 */
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  font-family: inherit;
+}
+
+.citation-bubble__claim-toggle:hover {
+  background: rgb(224 231 255); /* indigo-100 */
+}
+
+.citation-bubble__claim-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.3125rem;
+  border-radius: 9999px;
+  background: rgb(99 102 241); /* indigo-600 */
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.citation-bubble__claim-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: rgb(67 56 202); /* indigo-800 */
+  /* Long claims wrap; the toggle grows vertically. */
+  word-break: break-word;
+}
+
+.citation-bubble__claim-caret {
+  font-size: 16px;
+  color: rgb(99 102 241); /* indigo-600 */
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+/* Collapsed -> caret points right (rotated -90deg). Expanded -> points down. */
+.citation-bubble__claim-caret--collapsed {
+  transform: rotate(-90deg);
 }
 
 /* Wiki-mode banner (replaces the article context picker). */

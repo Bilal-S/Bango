@@ -988,6 +988,20 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     it self-heals via `fts::ensure_index_populated` on the next wiki read. Also dropped: the `wiki_index_manifest` drift-detection cache (created by migration v002), which self-heals via `wiki_check_for_updates`. `reset_project`
     additionally deletes the entire on-disk `wiki-root/` directory (resolved BEFORE the schema
     rebuild, while `app_settings` still holds the path config); wiki deletion is non-fatal.
+    **VACUUM on reset** (`reset_project_inner` calls `db::maintenance::vacuum_database`
+    after `rebuild_schema`): reclaims the on-disk space freed by the dropped tables so
+    `bango.db` + `bango.db-wal` shrink instead of retaining the pre-reset size (SQLite
+    never auto-shrinks the file). The helper (`src-tauri/src/db/maintenance.rs`) does a
+    journal-mode round trip - `DELETE` (forces a WAL checkpoint + removes the
+    `-wal`/`-shm` sidecars) → `VACUUM` (rewrites + shrinks the main file in
+    rollback-journal mode) → `WAL` (restores normal operating mode with fresh empty
+    sidecars) - because a plain `VACUUM` on a WAL-mode DB writes the compacted pages to
+    the WAL rather than shrinking the main file. Non-fatal: the user's data is already
+    wiped by `rebuild_schema`, so a VACUUM failure is logged to stderr and the reset
+    still succeeds. VACUUM is `O(n)` over the DB file, so it is intentionally NOT called
+    on per-article deletes or other hot paths - only at coarse, infrequent, destructive
+    boundaries. Tested in `tests/maintenance_test.rs` (file-backed space-reclaim +
+    fresh-empty-DB safety) + `tests/reset_project_test.rs::reset_runs_vacuum_without_error`.
   - **`src-tauri/src/commands/startup.rs`** - exposes `get_startup_status` and
     `perform_legacy_upgrade` (one-shot: `export_legacy_project` -> write backup to
     `app_data_dir` -> `rebuild_schema` -> journal reload -> `import_project`; backup file
@@ -1080,7 +1094,8 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `legacy_upgrade_needed(live, fallback)` pure decision function (live-probe-wins and
     snapshot-fallback branches). `reset_project_test.rs` covers `reset_project_inner`
     (Delete All Data): verifies the on-disk `wiki-root/` directory is deleted, `app_settings`
-    is cleared after rebuild, and the reset succeeds even when the wiki root is missing.
+    is cleared after rebuild, the reset succeeds even when the wiki root is missing, and the
+    post-reset VACUUM runs without error (`reset_runs_vacuum_without_error`).
     `wiki_consolidation_test.rs` covers the multi-batch consolidation pipeline
     (cross-batch dup merge + link rewrite + single-batch skip + unrelated-page
     preservation) using injectable `IngestLlmSender` fakes. `wiki_index_drift_test.rs`

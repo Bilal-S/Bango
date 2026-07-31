@@ -122,37 +122,30 @@ fn persist_probe_disabled_then_enabled_round_trip() {
 
 #[test]
 fn embedding_relevant_changed_provider_change_detected() {
-    let mut a = LlmConfig::default();
-    a.provider = LlmProvider::Openai;
-    let mut b = a.clone();
-    b.provider = LlmProvider::MistralAi;
+    let a = LlmConfig { provider: LlmProvider::Openai, ..Default::default() };
+    let b = LlmConfig { provider: LlmProvider::MistralAi, ..a.clone() };
     assert!(embedding_relevant_changed(&a, &b));
 }
 
 #[test]
 fn embedding_relevant_changed_endpoint_change_detected() {
-    let mut a = LlmConfig::default();
-    a.endpoint_url = "https://api.openai.com/v1".to_string();
-    let mut b = a.clone();
-    b.endpoint_url = "https://api.mistral.ai/v1".to_string();
+    let a =
+        LlmConfig { endpoint_url: "https://api.openai.com/v1".to_string(), ..Default::default() };
+    let b = LlmConfig { endpoint_url: "https://api.mistral.ai/v1".to_string(), ..a.clone() };
     assert!(embedding_relevant_changed(&a, &b));
 }
 
 #[test]
 fn embedding_relevant_changed_model_change_detected() {
-    let mut a = LlmConfig::default();
-    a.model_name = "gpt-4o".to_string();
-    let mut b = a.clone();
-    b.model_name = "gpt-4o-mini".to_string();
+    let a = LlmConfig { model_name: "gpt-4o".to_string(), ..Default::default() };
+    let b = LlmConfig { model_name: "gpt-4o-mini".to_string(), ..a.clone() };
     assert!(embedding_relevant_changed(&a, &b));
 }
 
 #[test]
 fn embedding_relevant_changed_api_key_change_detected() {
-    let mut a = LlmConfig::default();
-    a.api_key_encrypted = Some("sk-old".to_string());
-    let mut b = a.clone();
-    b.api_key_encrypted = Some("sk-new".to_string());
+    let a = LlmConfig { api_key_encrypted: Some("sk-old".to_string()), ..Default::default() };
+    let b = LlmConfig { api_key_encrypted: Some("sk-new".to_string()), ..a.clone() };
     assert!(embedding_relevant_changed(&a, &b));
 }
 
@@ -162,18 +155,22 @@ fn embedding_relevant_changed_parameters_only_not_detected() {
     // context window / temperature / skip_temperature) do NOT reset the
     // embedding status. This is the regression pin for the "probe fires on
     // first Citation Finder call" bug.
-    let mut a = LlmConfig::default();
-    a.max_concurrent_requests = 3;
-    a.request_delay_ms = 500;
-    a.context_window_tokens = 50_000;
-    a.temperature = 0.2;
-    a.skip_temperature = false;
-    let mut b = a.clone();
-    b.max_concurrent_requests = 5;
-    b.request_delay_ms = 1000;
-    b.context_window_tokens = 100_000;
-    b.temperature = 0.7;
-    b.skip_temperature = true;
+    let a = LlmConfig {
+        max_concurrent_requests: 3,
+        request_delay_ms: 500,
+        context_window_tokens: 50_000,
+        temperature: 0.2,
+        skip_temperature: false,
+        ..Default::default()
+    };
+    let b = LlmConfig {
+        max_concurrent_requests: 5,
+        request_delay_ms: 1000,
+        context_window_tokens: 100_000,
+        temperature: 0.7,
+        skip_temperature: true,
+        ..a.clone()
+    };
     assert!(
         !embedding_relevant_changed(&a, &b),
         "parameters-only changes must NOT trigger an embedding-status reset"
@@ -219,11 +216,13 @@ fn save_llm_config_parameters_only_preserves_enabled_status() {
     run_migrations(&conn).unwrap();
 
     // Seed: an initial config + a successful probe outcome (enabled).
-    let mut initial = LlmConfig::default();
-    initial.provider = LlmProvider::Openai;
-    initial.endpoint_url = "https://api.openai.com/v1".to_string();
-    initial.model_name = "gpt-4o".to_string();
-    initial.api_key_encrypted = Some("sk-test".to_string());
+    let initial = LlmConfig {
+        provider: LlmProvider::Openai,
+        endpoint_url: "https://api.openai.com/v1".to_string(),
+        model_name: "gpt-4o".to_string(),
+        api_key_encrypted: Some("sk-test".to_string()),
+        ..Default::default()
+    };
     llm_config_repo::save_config(&conn, &initial).unwrap();
     persist_embedding_probe_to_conn(
         &conn,
@@ -235,11 +234,13 @@ fn save_llm_config_parameters_only_preserves_enabled_status() {
     assert_eq!(app_settings_repo::get_embedding_status(&conn).unwrap(), EmbeddingStatus::Enabled);
 
     // Act: a parameters-only save (concurrency / delay / context / temperature).
-    let mut params_only = initial.clone();
-    params_only.max_concurrent_requests = 8;
-    params_only.request_delay_ms = 1200;
-    params_only.context_window_tokens = 128_000;
-    params_only.temperature = 0.5;
+    let params_only = LlmConfig {
+        max_concurrent_requests: 8,
+        request_delay_ms: 1200,
+        context_window_tokens: 128_000,
+        temperature: 0.5,
+        ..initial.clone()
+    };
     save_llm_config_conditional_reset(&conn, &params_only);
 
     // Assert: the enabled status (and model + dimensions) survived the save.
@@ -269,11 +270,13 @@ fn save_llm_config_provider_change_resets_status() {
     let conn = create_connection().unwrap();
     run_migrations(&conn).unwrap();
 
-    let mut initial = LlmConfig::default();
-    initial.provider = LlmProvider::Openai;
-    initial.endpoint_url = "https://api.openai.com/v1".to_string();
-    initial.model_name = "gpt-4o".to_string();
-    initial.api_key_encrypted = Some("sk-openai".to_string());
+    let initial = LlmConfig {
+        provider: LlmProvider::Openai,
+        endpoint_url: "https://api.openai.com/v1".to_string(),
+        model_name: "gpt-4o".to_string(),
+        api_key_encrypted: Some("sk-openai".to_string()),
+        ..Default::default()
+    };
     llm_config_repo::save_config(&conn, &initial).unwrap();
     persist_embedding_probe_to_conn(
         &conn,
@@ -285,11 +288,13 @@ fn save_llm_config_provider_change_resets_status() {
     assert_eq!(app_settings_repo::get_embedding_status(&conn).unwrap(), EmbeddingStatus::Enabled);
 
     // Act: switch provider (embedding-relevant change).
-    let mut switched = initial.clone();
-    switched.provider = LlmProvider::Anthropic;
-    switched.endpoint_url = "https://api.anthropic.com/v1".to_string();
-    switched.model_name = "claude-3-5-sonnet".to_string();
-    switched.api_key_encrypted = Some("sk-anthropic".to_string());
+    let switched = LlmConfig {
+        provider: LlmProvider::Anthropic,
+        endpoint_url: "https://api.anthropic.com/v1".to_string(),
+        model_name: "claude-3-5-sonnet".to_string(),
+        api_key_encrypted: Some("sk-anthropic".to_string()),
+        ..initial.clone()
+    };
     save_llm_config_conditional_reset(&conn, &switched);
 
     // Assert: status reset to unknown so the next probe re-evaluates.

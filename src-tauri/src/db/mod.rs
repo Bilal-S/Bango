@@ -11,6 +11,7 @@ pub mod gap_analysis_repo;
 pub mod journal_repo;
 pub mod label_repo;
 pub mod llm_config_repo;
+pub mod maintenance;
 pub mod migration;
 pub mod migrations;
 pub mod rebuild;

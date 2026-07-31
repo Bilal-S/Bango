@@ -90,7 +90,7 @@ pub fn export_ris_for_tab_to_file(
 
 /// Export a specific set of articles (by UUID) to an RIS file at the given
 /// path. The sole entry point for the "Export Selected" bulk action in the
-/// Article list bulk action bar — distinct from the toolbar Export, which
+/// Article list bulk action bar - distinct from the toolbar Export, which
 /// exports by tab/status. The RIS bytes are byte-identical to what
 /// `export_ris_for_tab_to_file` would produce for the same article set (same
 /// `articles_to_ris_export` pipeline), so downstream reference managers see no
@@ -175,15 +175,24 @@ pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> 
     std::fs::write(path, bytes).map_err(AppError::Io)
 }
 
-/// Reset the project: rebuild the DB schema (dropping all user tables) and
-/// delete the on-disk wiki-root directory. `journal_index` is preserved by
+/// Reset the project: rebuild the DB schema (dropping all user tables), delete
+/// the on-disk wiki-root directory, and `VACUUM` the database file so the freed
+/// pages are returned to the filesystem. `journal_index` is preserved by
 /// `rebuild_schema`. The wiki root must be resolved BEFORE the schema rebuild
 /// because `app_settings` (which holds `storage_root` and the optional
 /// `wiki_root_dir` override) is dropped by `rebuild_schema`.
 ///
-/// Wiki deletion is **non-fatal**: if resolving or deleting the wiki root
-/// fails, the DB reset still succeeds (the error is logged to stderr). The
-/// user can delete the directory manually if needed.
+/// Wiki deletion and VACUUM are both **non-fatal**: if resolving/deleting the
+/// wiki root or vacuuming fails, the DB reset still succeeds (the error is
+/// logged to stderr). The user's data has already been wiped by
+/// `rebuild_schema`, so surfacing a hard error for cleanup work would be
+/// misleading. The user can delete the wiki directory manually if needed.
+///
+/// VACUUM runs after the schema rebuild so it reclaims the free pages left by
+/// the dropped tables. Without it, `bango.db` stays at its pre-reset size even
+/// though it is logically empty (SQLite never auto-shrinks the file). The
+/// helper also checkpoints the WAL (`bango.db-wal`) so both on-disk files
+/// shrink.
 ///
 /// After the rebuild, `journal_index` is checked and reloaded from the bundled
 /// portal DB if empty (transparently heals the case where the startup auto-load
@@ -214,6 +223,15 @@ pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppErr
         if let Err(e) = storage::delete_wiki_root(root) {
             eprintln!("[reset_project] failed to delete wiki root '{}': {e}", root.display());
         }
+    }
+
+    // 4. VACUUM the database so the freed pages are returned to the filesystem.
+    //    Non-fatal: the user's data is already wiped by `rebuild_schema`, so a
+    //    VACUUM failure (e.g. transient disk-space issue during the file
+    //    rebuild) is logged but does not surface as a hard error. The helper
+    //    checkpoints the WAL first so both `bango.db` and `bango.db-wal` shrink.
+    if let Err(e) = crate::db::maintenance::vacuum_database(conn) {
+        eprintln!("[reset_project] failed to vacuum database after reset: {e}");
     }
 
     Ok(())

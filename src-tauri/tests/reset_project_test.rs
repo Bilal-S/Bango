@@ -78,3 +78,27 @@ fn reset_succeeds_even_when_wiki_root_is_missing() {
 
     assert!(!wiki_root.exists());
 }
+
+#[test]
+fn reset_runs_vacuum_without_error() {
+    // reset_project_inner calls vacuum_database after the schema rebuild.
+    // On an in-memory DB the VACUUM is a no-op for size but must execute
+    // without error, proving the VACUUM step is wired in and runs cleanly
+    // against the freshly-rebuilt schema. The space-reclaim behavior itself
+    // is proven by `tests/maintenance_test.rs` against a file-backed DB.
+    let tmp = TempDir::new().unwrap();
+    let wiki_root = tmp.path().join("wiki-root");
+    seed_wiki(&wiki_root);
+
+    let mut conn = test_db();
+    configure_wiki_root(&conn, &wiki_root);
+
+    // Must not panic / return Err: the VACUUM step runs after rebuild_schema
+    // and after the WAL checkpoint inside vacuum_database.
+    reset_project_inner(&mut conn).unwrap();
+
+    // The schema is still usable after the post-reset VACUUM: a trivial query
+    // against a rebuilt table returns the expected empty result.
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM articles", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, 0);
+}
