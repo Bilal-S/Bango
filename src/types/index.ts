@@ -177,6 +177,21 @@ export interface LabelWithCount extends Label {
   articleCount: number;
 }
 
+/**
+ * Result of a tag/label merge (`merge_tag` / `merge_label` commands). The
+ * precise counts are computed inside the destructive merge; the pre-confirm
+ * dialog shows an honest upper bound (`from.articleCount`), and these values
+ * surface in the success toast.
+ */
+export interface MergeResult {
+  fromName: string;
+  intoName: string;
+  /** Articles whose tag/label link genuinely moved. */
+  reassignedCount: number;
+  /** Articles that already had the survivor and were silently de-linked. */
+  alreadyHadSurvivorCount: number;
+}
+
 export interface AuditEntry {
   id: string;
   articleId: string;

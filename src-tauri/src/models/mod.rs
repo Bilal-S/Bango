@@ -7,3 +7,4 @@ pub mod llm_config;
 pub mod reference;
 pub mod search_strategy;
 pub mod tag;
+pub mod tag_label;

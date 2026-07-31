@@ -446,6 +446,40 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     35-char `sanitize_tag_or_label_name` gate so the backend sanitizer never silently
     truncates them. Both prompts also reinforce the ≤ 35-char + no-prefix rules so the
     standalone suggestion path stays consistent with the screening-time path.
+    **Staleness-flag contract (bugfix)**: `delete_tag` and `delete_label` set
+    both `mark_biblio_needs_refresh` + `mark_wiki_needs_refresh` after the repo
+    delete. These were previously the only two tag/label mutation paths that
+    omitted the flags, silently desyncing the keyword co-occurrence network
+    (`biblio_repo/networks/keywords.rs`) and the wiki concept hubs
+    (`wiki/ingest/concepts.rs`) after a delete - every other tag/label mutation
+    in `commands/articles.rs` already set them. Tested in
+    `tests/tags_labels_test.rs` (`test_delete_tag_sets_staleness_flags`,
+    `test_delete_label_sets_staleness_flags`).
+    **Merge ("Replace with...") contract**: `merge_tag` / `merge_label` commands
+    delegate to `pub fn merge_tag_inner` / `merge_label_inner` (testable without
+    `State<DbState>`). Each runs inside one `unchecked_transaction`: compute
+    overlap count BEFORE the destructive `UPDATE OR IGNORE` (so the signal is
+    preserved), call `tag_repo::merge_tags` / `label_repo::merge_labels`
+    (CASCADE removes overlap junction rows), write one coalesced `tag_remove` /
+    `label_remove` audit entry per *reassigned* article via the shared
+    `audit_repo::write_tag_label_audit` helper (single-entry bulk pattern;
+    detail string `Replaced "A" -> "B" (merge)` carries both halves), bump
+    `changed_at` via `article_repo::bump_changed_at`, set both staleness flags.
+    The `MergeResult` (defined once in `models/tag_label.rs`, returned by both
+    commands): `reassigned_count` excludes co-occurrence overlaps;
+    `already_had_survivor_count` reports them separately. The pre-confirm
+    dialog shows an honest upper bound (`from.articleCount`); the real counts
+    surface in the success toast. Tested in `tests/merge_tags_labels_test.rs`
+    (15 tests incl. `merge_tag_no_dangling_overlap_rows` CASCADE regression +
+    `merge_tag_chain_safe` chained-merge safety). Frontend:
+    `tag-label-merge-dialog.vue` (`suggest-input`-based picker + honest-count
+    confirm), `tag-label-panel.vue` `merge_type` button + `mergeRequest` emit,
+    `tag-label-management.vue` shared-dialog wiring + toast. The shared
+    `audit_repo::write_tag_label_audit` helper is the canonical loop for
+    multi-article tag/label audit entries, reused by both the bulk commands
+    (via `write_bulk_tag_label_audit` in `commands/articles.rs`) and the merge
+    commands. The delete-icon swap (`close` -> `delete` trash) is a deliberate
+    UX change; `aria-label="Delete {kind}"` is unchanged so existing tests pass.
     Frontend `tag-label-management.vue` (v6.9): double-click any tag/label chip to edit
     in place (same affordance as the criteria editor); `nextTick` auto-focus + select
     the input on edit-start, `@blur` commits, `Escape` cancels.

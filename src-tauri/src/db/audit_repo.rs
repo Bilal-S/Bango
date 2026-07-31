@@ -262,6 +262,26 @@ pub fn create_or_update_entry(
     create_entry(conn, article_id, action, from_status, to_status, details, source)
 }
 
+/// Write one coalesced audit entry per affected article. Reused by the bulk
+/// add/remove commands and the merge commands so the audit trail shape stays
+/// byte-identical across all multi-article tag/label mutations.
+///
+/// Each entry matches on `article_id + action + source`, so the 5-minute
+/// coalescing window in [`create_or_update_entry`] collapses rapid repeated
+/// mutations of the same type on the same article into a single row showing
+/// the final `detail`.
+pub fn write_tag_label_audit(
+    conn: &Connection,
+    affected_ids: &[String],
+    action: &str,
+    detail: &str,
+) -> Result<(), AppError> {
+    for id in affected_ids {
+        create_or_update_entry(conn, id, action, None, None, Some(detail), "user")?;
+    }
+    Ok(())
+}
+
 fn row_to_audit_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<AuditEntry> {
     let action_str: String = row.get(3)?;
     let source_str: String = row.get(7)?;

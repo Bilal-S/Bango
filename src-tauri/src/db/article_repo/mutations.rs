@@ -102,6 +102,15 @@ pub fn update_article_status(
     Ok(())
 }
 
+/// Bump `changed_at` on an article. Used by tag/label mutations that touch
+/// junction rows but don't go through the full `update_article_*` path (e.g.
+/// the merge commands). Centralizes the `datetime('now')` contract so raw SQL
+/// stays out of the command layer.
+pub fn bump_changed_at(conn: &Connection, article_id: &str) -> Result<(), AppError> {
+    conn.execute("UPDATE articles SET changed_at = datetime('now') WHERE id = ?1", [article_id])?;
+    Ok(())
+}
+
 pub fn update_article_tags(
     conn: &Connection,
     article_id: &str,

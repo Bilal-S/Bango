@@ -80,4 +80,30 @@ describe('useTagsStore', () => {
     const created = store.tags.find((t) => t.name === 'count-tag');
     expect(created!.articleCount).toBe(0);
   });
+
+  // ── mergeTag (demo branch) ──────────────────────────────────────────
+  it('mergeTag (demo) removes from-tag and folds its count into the survivor', async () => {
+    const store = useTagsStore();
+    await store.fetchTags();
+    const from = store.tags[0]!; // machine-learning, 142
+    const into = store.tags[1]!; // clinical-trial, 89
+    const expectedIntoCount = from.articleCount + into.articleCount;
+
+    const result = await store.mergeTag(from.id, into.id);
+
+    expect(result.fromName).toBe(from.name);
+    expect(result.intoName).toBe(into.name);
+    expect(result.reassignedCount).toBe(from.articleCount);
+    expect(result.alreadyHadSurvivorCount).toBe(0);
+    // from-tag gone, survivor absorbed the count
+    expect(store.tags.find((t) => t.id === from.id)).toBeUndefined();
+    expect(store.tags.find((t) => t.id === into.id)?.articleCount).toBe(expectedIntoCount);
+  });
+
+  it('mergeTag (demo) throws when from-id is unknown', async () => {
+    const store = useTagsStore();
+    await store.fetchTags();
+    const into = store.tags[0]!;
+    await expect(store.mergeTag('does-not-exist', into.id)).rejects.toThrow('Tag not found');
+  });
 });

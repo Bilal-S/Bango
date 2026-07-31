@@ -352,11 +352,12 @@ fn write_bulk_tag_label_audit(
     action: &str,
     name: &str,
 ) -> Result<(), AppError> {
+    // Delegate to the shared helper so the audit trail shape stays byte-identical
+    // across the bulk add/remove commands and the merge commands. Only the detail
+    // string is formatted here (bulk-specific prefix); the loop lives in the shared
+    // `audit_repo::write_tag_label_audit`.
     let detail = format!("Bulk {action}: \"{name}\"");
-    for id in affected_ids {
-        audit_repo::create_or_update_entry(conn, id, action, None, None, Some(&detail), "user")?;
-    }
-    Ok(())
+    audit_repo::write_tag_label_audit(conn, affected_ids, action, &detail)
 }
 
 /// Bulk add a tag to multiple articles. Returns the number of articles that

@@ -6,6 +6,13 @@ const props = defineProps<{
   name: string;
   color?: string | null;
   /**
+   * Optional article count rendered as a muted `(N)` suffix inside the chip.
+   * Used by the Tags & Labels management panel so the count travels with the
+   * pill (two-column row layout). Existing consumers (article detail, filter
+   * panel) pass no `count` and see byte-identical output.
+   */
+  count?: number;
+  /**
    * When true, renders a strong indigo halo (ring + glow) around the chip.
    * Used by `tags-section`/`labels-section` to surface already-assigned
    * chips whose name contains the substring typed into the add input, so the
@@ -42,6 +49,9 @@ const highlightStyle = computed(() =>
       ...highlightStyle,
     }"
   >
-    {{ name }}
+    {{ name
+    }}<span v-if="count !== undefined" class="opacity-70" :class="{ 'font-bold': count > 0 }">
+      ({{ count }})</span
+    >
   </span>
 </template>

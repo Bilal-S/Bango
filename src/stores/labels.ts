@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import type { Label, LabelWithCount } from '@/types';
+import type { Label, LabelWithCount, MergeResult } from '@/types';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
 const DEMO_LABELS: LabelWithCount[] = [
@@ -152,6 +152,37 @@ export const useLabelsStore = defineStore('labels', () => {
     }
   }
 
+  /**
+   * Replace one label with another. Mirrors `useTagsStore().mergeTag`. The
+   * survivor absorbs the from-label's articles and the from-label is deleted.
+   * No `invalidate()` (avoids the empty-list flicker).
+   *
+   * In demo mode the from-label is removed and its `articleCount` is folded
+   * into the survivor.
+   */
+  async function mergeLabel(fromId: string, intoId: string): Promise<MergeResult> {
+    if (!isTauri()) {
+      const from = labels.value.find((l) => l.id === fromId);
+      const into = labels.value.find((l) => l.id === intoId);
+      if (!from || !into) throw new Error('Label not found');
+      const moved = from.articleCount;
+      labels.value = labels.value
+        .filter((l) => l.id !== fromId)
+        .map((l) => (l.id === intoId ? { ...l, articleCount: l.articleCount + moved } : l));
+      return {
+        fromName: from.name,
+        intoName: into.name,
+        reassignedCount: moved,
+        alreadyHadSurvivorCount: 0,
+      };
+    }
+    const result = await tauriCommand<MergeResult>('merge_label', {
+      request: { fromId, intoId },
+    });
+    await fetchLabels();
+    return result;
+  }
+
   return {
     labels,
     loading,
@@ -165,6 +196,7 @@ export const useLabelsStore = defineStore('labels', () => {
     deleteLabel,
     updateLabelColor,
     suggestLabels,
+    mergeLabel,
     invalidate,
   };
 });

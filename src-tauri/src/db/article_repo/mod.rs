@@ -52,9 +52,9 @@ pub use full_text::{
 pub use insert::{insert_article, insert_articles_batch};
 pub use metadata::{update_article_metadata_field, ArticleMetaField, ArticleMetaValue};
 pub use mutations::{
-    clear_ai_reasoning, get_article_field_count, mark_as_duplicate, move_articles_to_working_batch,
-    move_to_working, override_ai_decision, update_article_criteria, update_article_labels,
-    update_article_status, update_article_tags, update_user_notes,
+    bump_changed_at, clear_ai_reasoning, get_article_field_count, mark_as_duplicate,
+    move_articles_to_working_batch, move_to_working, override_ai_decision, update_article_criteria,
+    update_article_labels, update_article_status, update_article_tags, update_user_notes,
 };
 pub use query::{
     get_all_articles, get_article_by_id, get_articles_by_ids, get_articles_by_status,

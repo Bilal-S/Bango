@@ -30,8 +30,8 @@ use crate::citation_finder::search::{
 
 /// Managed state: cancel token + progress snapshot. The cancel token uses
 /// `AtomicBool` (not `Mutex<bool>`) to match the embedding runner's contract
-/// - `generate_embeddings_inner` takes `Option<Arc<AtomicBool>>` and the same
-/// token must cover both Phase B and Phase C.
+/// - `generate_embeddings_inner` takes `Option<Arc<AtomicBool>>` and the
+///   token must cover both Phase B and Phase C.
 pub struct CitationFinderState {
     cancel_token: Arc<AtomicBool>,
     progress: Arc<Mutex<CitationFinderProgress>>,

@@ -101,13 +101,44 @@ describe('tag-label-panel.vue', () => {
     expect(wrapper.text()).toContain('No labels yet.');
   });
 
-  it('emits "delete" when the delete button is clicked', async () => {
+  it('shows a confirmation dialog on delete, then emits "delete" on confirm', async () => {
     const wrapper = mountPanel({ items: [makeTag({ id: 't1' })] });
-    // The delete button is the last button with title "Delete tag".
+    // Clicking the row delete button opens the confirmation dialog instead
+    // of emitting immediately.
     const deleteBtn = wrapper.find('button[aria-label="Delete tag"]');
     expect(deleteBtn.exists()).toBe(true);
     await deleteBtn.trigger('click');
+    expect(wrapper.emitted('delete')).toBeFalsy();
+    // The dialog is Teleported to document.body, so query there.
+    expect(document.body.querySelector('.dialog__danger-box')).toBeTruthy();
+    const confirmBtn = document.body.querySelector<HTMLButtonElement>('button.btn--danger');
+    expect(confirmBtn).toBeTruthy();
+    confirmBtn!.click();
+    await wrapper.vm.$nextTick();
     expect(wrapper.emitted('delete')![0]![0]).toBe('t1');
+  });
+
+  it('cancels the delete confirmation without emitting', async () => {
+    // Use a non-zero count so the confirmation dialog opens (zero-count
+    // deletes skip the dialog - see the next test).
+    const wrapper = mountPanel({ items: [makeTag({ id: 't1', articleCount: 5 })] });
+    await wrapper.find('button[aria-label="Delete tag"]').trigger('click');
+    // Cancel via the outline Cancel button (Teleported to body).
+    const cancelBtn = document.body.querySelector<HTMLButtonElement>('button.btn--outline');
+    expect(cancelBtn).toBeTruthy();
+    cancelBtn!.click();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted('delete')).toBeFalsy();
+    // Dialog is dismissed.
+    expect(document.body.querySelector('.dialog__danger-box')).toBeNull();
+  });
+
+  it('skips the confirmation dialog and deletes immediately when articleCount is 0', async () => {
+    const wrapper = mountPanel({ items: [makeTag({ id: 't1', articleCount: 0 })] });
+    await wrapper.find('button[aria-label="Delete tag"]').trigger('click');
+    // Emits immediately - no dialog opens.
+    expect(wrapper.emitted('delete')![0]![0]).toBe('t1');
+    expect(document.body.querySelector('.dialog__danger-box')).toBeNull();
   });
 
   it('emits "filter" when the filter button is clicked and articleCount > 0', async () => {

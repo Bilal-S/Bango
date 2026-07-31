@@ -2,7 +2,6 @@
 import { computed, nextTick, ref } from 'vue';
 import TagChip from '@/components/tag-chip.vue';
 import LabelChip from '@/components/label-chip.vue';
-import { formatArticleCount } from '@/utils/formatters';
 import { getColorScheme } from '@/utils/color';
 import type { TagWithCount, LabelWithCount } from '@/types';
 
@@ -32,6 +31,7 @@ const emit = defineEmits<{
   updateColor: [id: string, color: string | null];
   filter: [id: string];
   suggest: [];
+  mergeRequest: [payload: { id: string; name: string; articleCount: number }];
 }>();
 
 // ── Per-kind config ────────────────────────────────────────────────────
@@ -118,6 +118,40 @@ function onColorChange(id: string, event: Event): void {
   const input = event.target as HTMLInputElement;
   emit('updateColor', id, input.value);
 }
+
+// ── Delete confirmation ────────────────────────────────────────────────
+// Owns the confirmation-dialog state (mirrors the article-detail-panel
+// pattern). The delete button sets `pendingDelete` instead of emitting
+// immediately; the inline `.dialog` shows the name + a warning. On confirm,
+// emit `delete` and clear the state. This keeps the parent's `onDeleteTag`/
+// `onDeleteLabel` handlers unchanged - the confirmation gate lives here.
+interface PendingDelete {
+  id: string;
+  name: string;
+  articleCount: number;
+}
+const pendingDelete = ref<PendingDelete | null>(null);
+
+function requestDelete(item: { id: string; name: string; articleCount: number }): void {
+  // Skip the confirmation dialog when the tag/label has no articles - there's
+  // nothing to warn about, so the delete is frictionless.
+  if (item.articleCount === 0) {
+    emit('delete', item.id);
+    return;
+  }
+  pendingDelete.value = item;
+}
+
+function cancelDelete(): void {
+  pendingDelete.value = null;
+}
+
+function confirmDelete(): void {
+  if (!pendingDelete.value) return;
+  const id = pendingDelete.value.id;
+  pendingDelete.value = null;
+  emit('delete', id);
+}
 </script>
 
 <template>
@@ -189,104 +223,138 @@ function onColorChange(id: string, event: Event): void {
       </div>
     </div>
 
-    <!-- Chip list -->
-    <div class="p-4 lg:p-5 overflow-y-auto flex-1 space-y-3">
-      <div
-        v-for="item in items"
-        :key="item.id"
-        class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
-      >
-        <div class="flex items-center gap-3 flex-1 min-w-0">
-          <template v-if="editingId === item.id">
-            <input
-              v-model="editingName"
-              class="tlp-edit-input px-2 py-1 bg-surface-container-lowest border rounded-lg font-mono text-mono text-on-surface transition-all w-full min-w-0"
-              :class="config.accentBorder + ' focus:ring-1 ' + config.accentFocus"
-              @keyup.enter="commitEdit"
-              @keyup.escape="cancelEdit"
-              @blur="commitEdit"
-            />
-          </template>
-          <template v-else>
-            <span
-              class="cursor-pointer"
-              title="Double-click to edit"
-              @dblclick="startEdit(item.id, item.name)"
-            >
-              <TagChip v-if="kind === 'tag'" :name="item.name" :color="item.color" />
-              <LabelChip v-else :name="item.name" :color="item.color" />
-            </span>
-          </template>
-        </div>
-        <div class="flex items-center gap-4 flex-shrink-0">
-          <span class="font-body-sm text-body-sm text-on-surface-variant">{{
-            formatArticleCount(item.articleCount)
-          }}</span>
-          <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              class="p-1 text-outline rounded hover:bg-surface-variant transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              :class="config.accentHover"
-              :disabled="item.articleCount === 0"
-              :title="item.articleCount > 0 ? 'see assigned' : 'not assigned'"
-              @click="emit('filter', item.id)"
-            >
-              <span class="material-symbols-outlined text-[16px]">filter_arrow_right</span>
-            </button>
-            <label
-              class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
-              :style="{ color: item.color || getColorScheme(item.name, null).base }"
-              :title="`Set ${config.noun} color`"
-            >
-              <span class="material-symbols-outlined text-[16px]">palette</span>
-              <input
-                type="color"
-                class="absolute inset-0 opacity-0 cursor-pointer"
-                :value="item.color || getColorScheme(item.name, null).base"
-                :aria-label="`Set ${config.noun} color`"
-                @input="onColorChange(item.id, $event)"
-              />
-            </label>
+    <!-- Chip list. `TransitionGroup` wraps the rows so a delete animates
+         (shrink + fade) instead of vanishing instantly. Mirrors the AI-card
+         transition in `article-detail-panel.vue`. -->
+    <div class="p-4 lg:p-5 overflow-y-auto flex-1">
+      <TransitionGroup name="tlp-row" tag="div" class="space-y-3">
+        <div
+          v-for="item in items"
+          :key="item.id"
+          class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
+        >
+          <div class="flex items-center gap-3 flex-1 min-w-0">
             <template v-if="editingId === item.id">
-              <button
-                class="p-1 rounded transition-colors"
-                :class="config.accentText + ' hover:bg-surface-variant'"
-                :title="`Save ${config.noun}`"
-                :aria-label="`Save ${config.noun}`"
-                @click="commitEdit"
-              >
-                <span class="material-symbols-outlined text-[16px]">check</span>
-              </button>
-              <button
-                class="p-1 text-outline hover:bg-surface-variant rounded transition-colors"
-                :title="`Cancel edit`"
-                aria-label="Cancel edit"
-                @click="cancelEdit"
-              >
-                <span class="material-symbols-outlined text-[16px]">close</span>
-              </button>
+              <input
+                v-model="editingName"
+                class="tlp-edit-input px-2 py-1 bg-surface-container-lowest border rounded-lg font-mono text-mono text-on-surface transition-all w-full min-w-0"
+                :class="config.accentBorder + ' focus:ring-1 ' + config.accentFocus"
+                @keyup.enter="commitEdit"
+                @keyup.escape="cancelEdit"
+                @blur="commitEdit"
+              />
             </template>
             <template v-else>
-              <button
-                class="p-1 text-outline rounded transition-colors"
-                :class="config.accentHover + ' hover:bg-surface-variant'"
-                :title="`Edit ${config.noun}`"
-                :aria-label="`Edit ${config.noun}`"
-                @click="startEdit(item.id, item.name)"
+              <span
+                class="cursor-pointer"
+                title="Double-click to edit"
+                @dblclick="startEdit(item.id, item.name)"
               >
-                <span class="material-symbols-outlined text-[16px]">edit</span>
-              </button>
-              <button
-                class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
-                :title="`Delete ${config.noun}`"
-                :aria-label="`Delete ${config.noun}`"
-                @click="emit('delete', item.id)"
-              >
-                <span class="material-symbols-outlined text-[16px]">close</span>
-              </button>
+                <TagChip
+                  v-if="kind === 'tag'"
+                  :name="item.name"
+                  :color="item.color"
+                  :count="item.articleCount"
+                />
+                <LabelChip
+                  v-else
+                  :name="item.name"
+                  :color="item.color"
+                  :count="item.articleCount"
+                />
+              </span>
             </template>
           </div>
+          <div class="flex items-center flex-shrink-0">
+            <div
+              class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <template v-if="editingId === item.id">
+                <button
+                  class="p-1 rounded transition-colors"
+                  :class="config.accentText + ' hover:bg-surface-variant'"
+                  :title="`Save ${config.noun}`"
+                  :aria-label="`Save ${config.noun}`"
+                  @click="commitEdit"
+                >
+                  <span class="material-symbols-outlined text-[20px]">check</span>
+                </button>
+                <button
+                  class="p-1 text-outline hover:bg-surface-variant rounded transition-colors"
+                  :title="`Cancel edit`"
+                  aria-label="Cancel edit"
+                  @click="cancelEdit"
+                >
+                  <span class="material-symbols-outlined text-[20px]">close</span>
+                </button>
+              </template>
+              <template v-else>
+                <button
+                  class="p-1 text-outline rounded transition-colors"
+                  :class="config.accentHover + ' hover:bg-surface-variant'"
+                  :title="`Edit ${config.noun}`"
+                  :aria-label="`Edit ${config.noun}`"
+                  @click="startEdit(item.id, item.name)"
+                >
+                  <span class="material-symbols-outlined text-[20px]">edit</span>
+                </button>
+                <button
+                  class="p-1 text-outline rounded transition-colors"
+                  :class="config.accentHover + ' hover:bg-surface-variant'"
+                  :title="`Replace ${config.noun} with...`"
+                  :aria-label="`Replace ${config.noun} with...`"
+                  @click.stop="
+                    emit('mergeRequest', {
+                      id: item.id,
+                      name: item.name,
+                      articleCount: item.articleCount,
+                    })
+                  "
+                >
+                  <span class="material-symbols-outlined text-[20px]">cell_merge</span>
+                </button>
+                <button
+                  class="p-1 text-outline rounded hover:bg-surface-variant transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  :class="config.accentHover"
+                  :disabled="item.articleCount === 0"
+                  :title="item.articleCount > 0 ? 'see assigned' : 'not assigned'"
+                  @click="emit('filter', item.id)"
+                >
+                  <span class="material-symbols-outlined text-[20px]">filter_arrow_right</span>
+                </button>
+                <label
+                  class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
+                  :style="{ color: item.color || getColorScheme(item.name, null).base }"
+                  :title="`Set ${config.noun} color`"
+                >
+                  <span class="material-symbols-outlined text-[20px]">palette</span>
+                  <input
+                    type="color"
+                    class="absolute inset-0 opacity-0 cursor-pointer"
+                    :value="item.color || getColorScheme(item.name, null).base"
+                    :aria-label="`Set ${config.noun} color`"
+                    @input="onColorChange(item.id, $event)"
+                  />
+                </label>
+                <button
+                  class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
+                  :title="`Delete ${config.noun}`"
+                  :aria-label="`Delete ${config.noun}`"
+                  @click="
+                    requestDelete({
+                      id: item.id,
+                      name: item.name,
+                      articleCount: item.articleCount,
+                    })
+                  "
+                >
+                  <span class="material-symbols-outlined text-[20px]">delete</span>
+                </button>
+              </template>
+            </div>
+          </div>
         </div>
-      </div>
+      </TransitionGroup>
       <p
         v-if="items.length === 0"
         class="text-on-surface-variant font-body-sm text-body-sm text-center py-8"
@@ -294,6 +362,36 @@ function onColorChange(id: string, event: Event): void {
         {{ config.empty }}
       </p>
     </div>
+
+    <!-- Delete confirmation dialog (Teleported to body, mirrors
+         article-detail-panel.vue's delete-article pattern). Owned here so
+         the parent's `onDeleteTag`/`onDeleteLabel` handlers stay unchanged. -->
+    <Teleport to="body">
+      <div v-if="pendingDelete" class="dialog-overlay" @click.self="cancelDelete">
+        <div class="dialog">
+          <button class="dialog__close" aria-label="Close" @click="cancelDelete">
+            <span class="material-symbols-outlined">close</span>
+          </button>
+          <h2>Delete {{ config.noun }}</h2>
+          <div class="dialog__danger-box">
+            <span class="material-symbols-outlined">warning</span>
+            <p>
+              This will <strong>permanently delete</strong> the {{ config.noun }}
+              <code>{{ pendingDelete.name }}</code>
+              <span v-if="pendingDelete.articleCount > 0">
+                and remove it from
+                <strong>{{ pendingDelete.articleCount }}</strong> article(s)</span
+              >. The {{ config.noun }} is removed from your taxonomy; the articles themselves are
+              not deleted. This action <strong>cannot be undone</strong>.
+            </p>
+          </div>
+          <div class="dialog__actions">
+            <button class="btn btn--outline" @click="cancelDelete">Cancel</button>
+            <button class="btn btn--danger" @click="confirmDelete">Delete {{ config.noun }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -308,5 +406,31 @@ function onColorChange(id: string, event: Event): void {
   line-height: var(--line-height-h1, 28px);
   letter-spacing: var(--letter-spacing-h1, -0.01em);
   margin: 0;
+}
+
+/* Row leave transition: shrink + fade out over 250ms. Mirrors the AI-card
+   transition in `article-detail-panel.vue`. `max-height` (with a generous
+   cap) collapses the row, `opacity` fades it, and `margin` collapses the
+   `space-y-3` gap so siblings slide together smoothly. The `!important`
+   on `margin` overrides the parent `.space-y-3 > * + *` rule. */
+.tlp-row-leave-active {
+  transition:
+    max-height 0.25s ease-in,
+    opacity 0.25s ease-in,
+    margin 0.25s ease-in,
+    padding 0.25s ease-in;
+  overflow: hidden;
+}
+.tlp-row-leave-from {
+  max-height: 80px;
+  opacity: 1;
+}
+.tlp-row-leave-to {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 </style>

@@ -79,4 +79,29 @@ describe('useLabelsStore', () => {
     const created = store.labels.find((l) => l.name === 'count-label');
     expect(created!.articleCount).toBe(0);
   });
+
+  // ── mergeLabel (demo branch) ────────────────────────────────────────
+  it('mergeLabel (demo) removes from-label and folds its count into the survivor', async () => {
+    const store = useLabelsStore();
+    await store.fetchLabels();
+    const from = store.labels[0]!;
+    const into = store.labels[1]!;
+    const expectedIntoCount = from.articleCount + into.articleCount;
+
+    const result = await store.mergeLabel(from.id, into.id);
+
+    expect(result.fromName).toBe(from.name);
+    expect(result.intoName).toBe(into.name);
+    expect(result.reassignedCount).toBe(from.articleCount);
+    expect(result.alreadyHadSurvivorCount).toBe(0);
+    expect(store.labels.find((l) => l.id === from.id)).toBeUndefined();
+    expect(store.labels.find((l) => l.id === into.id)?.articleCount).toBe(expectedIntoCount);
+  });
+
+  it('mergeLabel (demo) throws when into-id is unknown', async () => {
+    const store = useLabelsStore();
+    await store.fetchLabels();
+    const from = store.labels[0]!;
+    await expect(store.mergeLabel(from.id, 'does-not-exist')).rejects.toThrow('Label not found');
+  });
 });

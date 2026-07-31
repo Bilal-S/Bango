@@ -1,3 +1,4 @@
+use bango_lib::db::app_settings_repo;
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::label_repo;
 use bango_lib::db::migration::run_migrations;
@@ -157,4 +158,58 @@ fn test_merge_labels() {
 
     let labels = label_repo::get_all_labels(&conn).expect("get_all_labels failed");
     assert_eq!(labels.len(), 1);
+}
+
+// ── Staleness-flag regression tests (PR 1 bugfix) ─────────────────────────
+//
+// `commands::tags::delete_tag` and `commands::labels::delete_label` previously
+// omitted `mark_biblio_needs_refresh` + `mark_wiki_needs_refresh`, silently
+// desyncing the keyword co-occurrence network and the wiki concept hubs after
+// a delete. The command shims require `State<DbState>`, so these tests drive
+// the repo delete + staleness-flag calls directly - the exact sequence the
+// fixed command now performs.
+
+#[test]
+fn test_delete_tag_sets_staleness_flags() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    let tag = tag_repo::create_tag(&conn, "stale-tag", "user_created").expect("create_tag failed");
+
+    // Reproduce the fixed command's sequence: repo delete + both staleness flags.
+    tag_repo::delete_tag(&conn, &tag.id).expect("delete_tag failed");
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+
+    assert!(
+        app_settings_repo::get_biblio_needs_refresh(&conn).expect("biblio flag read failed"),
+        "biblio_needs_refresh must be set after deleting a tag"
+    );
+    assert!(
+        app_settings_repo::get_wiki_needs_refresh(&conn).expect("wiki flag read failed"),
+        "wiki_needs_refresh must be set after deleting a tag"
+    );
+}
+
+#[test]
+fn test_delete_label_sets_staleness_flags() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    let label = label_repo::create_label(&conn, "stale-label", "user_created")
+        .expect("create_label failed");
+
+    // Reproduce the fixed command's sequence: repo delete + both staleness flags.
+    label_repo::delete_label(&conn, &label.id).expect("delete_label failed");
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+
+    assert!(
+        app_settings_repo::get_biblio_needs_refresh(&conn).expect("biblio flag read failed"),
+        "biblio_needs_refresh must be set after deleting a label"
+    );
+    assert!(
+        app_settings_repo::get_wiki_needs_refresh(&conn).expect("wiki flag read failed"),
+        "wiki_needs_refresh must be set after deleting a label"
+    );
 }

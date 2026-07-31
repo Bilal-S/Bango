@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import TagLabelPanel from '@/components/tag-label-panel.vue';
+import TagLabelMergeDialog from '@/components/tag-label-merge-dialog.vue';
+import { useToast } from '@/composables/use-toast';
 
 const router = useRouter();
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
+const toast = useToast();
 
 // Re-fetch on mount in case stores were invalidated (e.g. after project backup import)
 onMounted(() => {
@@ -71,6 +74,65 @@ function onFilterLabel(labelId: string): void {
 function onSuggestLabels(): void {
   void labelsStore.suggestLabels();
 }
+
+// ── Merge dialog wiring ────────────────────────────────────────────────
+type MergeKind = 'tag' | 'label';
+interface MergeFrom {
+  id: string;
+  name: string;
+  articleCount: number;
+}
+
+const mergeState = ref<{ kind: MergeKind; from: MergeFrom | null; visible: boolean }>({
+  kind: 'tag',
+  from: null,
+  visible: false,
+});
+
+/** Candidates exclude the `from` row. */
+const mergeCandidates = computed(() => {
+  const kind = mergeState.value.kind;
+  const fromId = mergeState.value.from?.id;
+  const source = kind === 'tag' ? tagsStore.tags : labelsStore.labels;
+  return source
+    .filter((item) => item.id !== fromId)
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      articleCount: item.articleCount,
+    }));
+});
+
+function onMergeRequestTag(payload: { id: string; name: string; articleCount: number }): void {
+  mergeState.value = { kind: 'tag', from: payload, visible: true };
+}
+
+function onMergeRequestLabel(payload: { id: string; name: string; articleCount: number }): void {
+  mergeState.value = { kind: 'label', from: payload, visible: true };
+}
+
+async function onMerge({ fromId, intoId }: { fromId: string; intoId: string }): Promise<void> {
+  const kind = mergeState.value.kind;
+  try {
+    const result =
+      kind === 'tag'
+        ? await tagsStore.mergeTag(fromId, intoId)
+        : await labelsStore.mergeLabel(fromId, intoId);
+    toast.show(
+      `Replaced "${result.fromName}" with "${result.intoName}" - ${result.reassignedCount} article(s) reassigned` +
+        (result.alreadyHadSurvivorCount > 0
+          ? `, ${result.alreadyHadSurvivorCount} already had it`
+          : '') +
+        '.',
+      'success'
+    );
+    mergeState.value.visible = false;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    toast.show(`Replace failed: ${msg}`, 'error');
+    // Dialog stays open so the user can retry.
+  }
+}
 </script>
 
 <template>
@@ -128,6 +190,7 @@ function onSuggestLabels(): void {
           @update-color="onUpdateTagColor"
           @filter="onFilterTag"
           @suggest="onSuggestTags"
+          @merge-request="onMergeRequestTag"
         />
         <TagLabelPanel
           kind="label"
@@ -139,8 +202,19 @@ function onSuggestLabels(): void {
           @update-color="onUpdateLabelColor"
           @filter="onFilterLabel"
           @suggest="onSuggestLabels"
+          @merge-request="onMergeRequestLabel"
         />
       </div>
     </div>
+
+    <!-- Shared merge dialog (one per kind, driven by `mergeState`) -->
+    <TagLabelMergeDialog
+      :kind="mergeState.kind"
+      :from="mergeState.from"
+      :candidates="mergeCandidates"
+      :visible="mergeState.visible"
+      @update:visible="mergeState.visible = $event"
+      @merge="onMerge"
+    />
   </div>
 </template>

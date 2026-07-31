@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import type { Tag, TagWithCount } from '@/types';
+import type { MergeResult, Tag, TagWithCount } from '@/types';
 import { isTauri, tauriCommand } from '@/composables/use-tauri-command';
 
 const DEMO_TAGS: TagWithCount[] = [
@@ -163,6 +163,39 @@ export const useTagsStore = defineStore('tags', () => {
     }
   }
 
+  /**
+   * Replace one tag with another. The survivor absorbs the from-tag's articles
+   * and the from-tag is deleted. Calls `merge_tag` then refetches (no
+   * `invalidate()` - that would flicker the empty list; `fetchTags()` overwrites
+   * atomically, matching the other mutations).
+   *
+   * In demo mode (no Tauri) the from-tag is removed and its `articleCount` is
+   * folded into the survivor; the synthesized `MergeResult` reports the moved
+   * count with zero overlap (the demo data has no per-article overlap signal).
+   */
+  async function mergeTag(fromId: string, intoId: string): Promise<MergeResult> {
+    if (!isTauri()) {
+      const from = tags.value.find((t) => t.id === fromId);
+      const into = tags.value.find((t) => t.id === intoId);
+      if (!from || !into) throw new Error('Tag not found');
+      const moved = from.articleCount;
+      tags.value = tags.value
+        .filter((t) => t.id !== fromId)
+        .map((t) => (t.id === intoId ? { ...t, articleCount: t.articleCount + moved } : t));
+      return {
+        fromName: from.name,
+        intoName: into.name,
+        reassignedCount: moved,
+        alreadyHadSurvivorCount: 0,
+      };
+    }
+    const result = await tauriCommand<MergeResult>('merge_tag', {
+      request: { fromId, intoId },
+    });
+    await fetchTags(); // NO invalidate() - avoids the empty-list flicker
+    return result;
+  }
+
   return {
     tags,
     loading,
@@ -176,6 +209,7 @@ export const useTagsStore = defineStore('tags', () => {
     deleteTag,
     updateTagColor,
     suggestTags,
+    mergeTag,
     invalidate,
   };
 });

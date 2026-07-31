@@ -4,9 +4,10 @@ use tauri::State;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::audit_repo;
-use crate::db::connection::DbState;
+use crate::db::connection::{lock_conn, DbState};
 use crate::db::criteria_repo;
 use crate::db::llm_config_repo;
 use crate::db::tag_repo;
@@ -14,6 +15,8 @@ use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::criterion::CriterionType;
 use crate::models::tag::Tag;
+use crate::models::tag_label::MergeResult;
+use rusqlite::params;
 
 /// Maximum number of top-cited articles to send with full context (title + abstract).
 const TOP_CITED_FULL_COUNT: usize = 5;
@@ -127,7 +130,14 @@ pub fn rename_tag(
 #[tauri::command]
 pub fn delete_tag(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    tag_repo::delete_tag(&conn, &id)
+    tag_repo::delete_tag(&conn, &id)?;
+    // Tag changes feed the keyword co-occurrence network + the wiki concept
+    // hubs. Every other tag/label mutation path sets both staleness flags; the
+    // standalone deletes must too so deleting a tag does not silently desync
+    // the derived biblio tables and the wiki pre-seed.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -341,4 +351,123 @@ Rules:
     let tags = tag_repo::create_tags_batch(&conn, &tag_names, "ai_suggested")?;
 
     Ok(SuggestTagsResult { tags })
+}
+
+// ── Merge ("Replace with...") ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeTagRequest {
+    /// Tag being deleted (its articles are reassigned to `into_id`).
+    pub from_id: String,
+    /// Surviving tag.
+    pub into_id: String,
+}
+
+/// Replace one tag with another: all articles carrying `from_id` are
+/// reassigned to `into_id`, then `from_id` is deleted. Destructive and
+/// irreversible; the frontend shows a confirmation dialog before invoking.
+///
+/// Returns the per-merge counts so the success toast can report the accurate
+/// `reassigned` + `already-had-survivor` split (the pre-confirm dialog can
+/// only show an honest upper bound).
+#[tauri::command]
+pub fn merge_tag(
+    db_state: State<'_, DbState>,
+    request: MergeTagRequest,
+) -> Result<MergeResult, AppError> {
+    let conn = lock_conn(&db_state.conn)?;
+    merge_tag_inner(&conn, &request.from_id, &request.into_id)
+}
+
+/// Core merge logic, extracted so it is testable without `State<DbState>`.
+///
+/// Implementation contract (all inside one `unchecked_transaction`):
+/// 1. Guard `from_id == into_id`.
+/// 2. Load `from`/`into` names.
+/// 3. Compute true counts BEFORE mutating (the `UPDATE OR IGNORE` in `merge_tags`
+///    would otherwise erase the overlap signal).
+/// 4. `tag_repo::merge_tags` (repo: `UPDATE OR IGNORE` + `DELETE FROM tags`).
+///    `PRAGMA foreign_keys=ON` + `ON DELETE CASCADE` removes the leftover overlap
+///    junction rows when the source tag row is deleted; no row is left dangling.
+/// 5. One coalesced `tag_remove` audit entry per *reassigned* article via the
+///    shared `audit_repo::write_tag_label_audit` helper (single-entry bulk
+///    pattern; the detail string carries both halves of the replace).
+/// 6. `bump_changed_at` for each reassigned article.
+/// 7. Set both staleness flags.
+/// 8. Commit + return `MergeResult`.
+pub fn merge_tag_inner(
+    conn: &rusqlite::Connection,
+    from_id: &str,
+    into_id: &str,
+) -> Result<MergeResult, AppError> {
+    if from_id == into_id {
+        return Err(AppError::Validation("Cannot replace a tag with itself".to_string()));
+    }
+
+    // Load names (also serves as the existence check).
+    let from_name: String = conn
+        .query_row("SELECT name FROM tags WHERE id = ?1", params![from_id], |row| row.get(0))
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Tag {from_id} not found"))
+            }
+            other => AppError::Database(other),
+        })?;
+    let into_name: String = conn
+        .query_row("SELECT name FROM tags WHERE id = ?1", params![into_id], |row| row.get(0))
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Tag {into_id} not found"))
+            }
+            other => AppError::Database(other),
+        })?;
+
+    // Compute the overlap count BEFORE mutating (the `UPDATE OR IGNORE` in
+    // `merge_tags` would otherwise erase the signal). `reassigned_count` is
+    // derived from the actual reassigned-ID list below, so it stays accurate
+    // even if rows change between the count and the mutate.
+    let overlap: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM article_tags \
+         WHERE tag_id = ?1 AND article_id IN (SELECT article_id FROM article_tags WHERE tag_id = ?2)",
+        params![from_id, into_id],
+        |row| row.get(0),
+    )?;
+
+    // Capture the reassigned article IDs (from-tag minus overlap).
+    let reassigned: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT article_id FROM article_tags WHERE tag_id = ?1 \
+             AND article_id NOT IN (SELECT article_id FROM article_tags WHERE tag_id = ?2)",
+        )?;
+        let rows = stmt.query_map(params![from_id, into_id], |row| row.get::<_, String>(0))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let tx = conn.unchecked_transaction()?;
+
+    tag_repo::merge_tags(&tx, from_id, into_id)?;
+
+    // One coalesced `tag_remove` audit entry per reassigned article. The detail
+    // string carries both halves of the replace so the Audit Timeline reads
+    // correctly (overlap-only articles were silently de-linked by the cascade
+    // and are intentionally NOT audited as tag_remove because no link moved).
+    let detail = format!("Replaced tag \"{from_name}\" -> \"{into_name}\" (merge)");
+    audit_repo::write_tag_label_audit(&tx, &reassigned, "tag_remove", &detail)?;
+
+    for id in &reassigned {
+        article_repo::bump_changed_at(&tx, id)?;
+    }
+
+    app_settings_repo::mark_biblio_needs_refresh(&tx);
+    app_settings_repo::mark_wiki_needs_refresh(&tx);
+
+    tx.commit()?;
+
+    Ok(MergeResult {
+        from_name,
+        into_name,
+        reassigned_count: reassigned.len(),
+        already_had_survivor_count: overlap as usize,
+    })
 }

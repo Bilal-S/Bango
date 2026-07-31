@@ -6,6 +6,12 @@ const props = defineProps<{
   name: string;
   color?: string | null;
   /**
+   * Optional article count rendered as a muted `(N)` suffix inside the chip.
+   * Mirrors `tag-chip.vue`'s `count` prop. Used by the Tags & Labels
+   * management panel for the two-column row layout.
+   */
+  count?: number;
+  /**
    * When true, renders a strong indigo halo (ring + glow) around the chip.
    * Used by `labels-section` to surface already-assigned chips whose name
    * contains the substring typed into the add input. Mirrors `tag-chip.vue`.
@@ -39,6 +45,9 @@ const highlightStyle = computed(() =>
     }"
   >
     <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: scheme.base }"></span>
-    {{ name }}
+    {{ name
+    }}<span v-if="count !== undefined" class="opacity-70" :class="{ 'font-bold': count > 0 }">
+      ({{ count }})</span
+    >
   </span>
 </template>

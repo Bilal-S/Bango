@@ -3,14 +3,18 @@ use tauri::State;
 
 use std::sync::Arc;
 
+use crate::db::app_settings_repo;
+use crate::db::article_repo;
 use crate::db::audit_repo;
-use crate::db::connection::DbState;
+use crate::db::connection::{lock_conn, DbState};
 use crate::db::criteria_repo;
 use crate::db::label_repo;
 use crate::db::llm_config_repo;
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::label::Label;
+use crate::models::tag_label::MergeResult;
+use rusqlite::params;
 
 /// Standard workflow labels that classify articles by review process state,
 /// quality assessment, and decision category. These complement the corpus-
@@ -109,7 +113,14 @@ pub fn rename_label(
 #[tauri::command]
 pub fn delete_label(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    label_repo::delete_label(&conn, &id)
+    label_repo::delete_label(&conn, &id)?;
+    // Label changes are part of article metadata used by bibliometrics + the
+    // wiki. Every other tag/label mutation path sets both staleness flags; the
+    // standalone deletes must too so deleting a label does not silently desync
+    // the derived biblio tables and the wiki pre-seed.
+    app_settings_repo::mark_biblio_needs_refresh(&conn);
+    app_settings_repo::mark_wiki_needs_refresh(&conn);
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -248,4 +259,106 @@ Rules:
     let labels = label_repo::create_labels_batch(&conn, &label_names, "ai_generated")?;
 
     Ok(SuggestLabelsResult { labels })
+}
+
+// ── Merge ("Replace with...") ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeLabelRequest {
+    /// Label being deleted (its articles are reassigned to `into_id`).
+    pub from_id: String,
+    /// Surviving label.
+    pub into_id: String,
+}
+
+/// Replace one label with another: all articles carrying `from_id` are
+/// reassigned to `into_id`, then `from_id` is deleted. Destructive and
+/// irreversible; the frontend shows a confirmation dialog before invoking.
+///
+/// Mirrors `commands::tags::merge_tag`. Returns the shared `MergeResult` so
+/// the success toast can report the accurate `reassigned` + `already-had-
+/// survivor` split.
+#[tauri::command]
+pub fn merge_label(
+    db_state: State<'_, DbState>,
+    request: MergeLabelRequest,
+) -> Result<MergeResult, AppError> {
+    let conn = lock_conn(&db_state.conn)?;
+    merge_label_inner(&conn, &request.from_id, &request.into_id)
+}
+
+/// Core merge logic, extracted so it is testable without `State<DbState>`.
+/// Mirrors `commands::tags::merge_tag_inner` (see that function's doc-comment
+/// for the full contract).
+pub fn merge_label_inner(
+    conn: &rusqlite::Connection,
+    from_id: &str,
+    into_id: &str,
+) -> Result<MergeResult, AppError> {
+    if from_id == into_id {
+        return Err(AppError::Validation("Cannot replace a label with itself".to_string()));
+    }
+
+    // Load names (also serves as the existence check).
+    let from_name: String = conn
+        .query_row("SELECT name FROM labels WHERE id = ?1", params![from_id], |row| row.get(0))
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Label {from_id} not found"))
+            }
+            other => AppError::Database(other),
+        })?;
+    let into_name: String = conn
+        .query_row("SELECT name FROM labels WHERE id = ?1", params![into_id], |row| row.get(0))
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Label {into_id} not found"))
+            }
+            other => AppError::Database(other),
+        })?;
+
+    // Compute the overlap count BEFORE mutating (the `UPDATE OR IGNORE` in
+    // `merge_labels` would otherwise erase the signal). `reassigned_count` is
+    // derived from the actual reassigned-ID list below, so it stays accurate
+    // even if rows change between the count and the mutate.
+    let overlap: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM article_labels \
+         WHERE label_id = ?1 AND article_id IN (SELECT article_id FROM article_labels WHERE label_id = ?2)",
+        params![from_id, into_id],
+        |row| row.get(0),
+    )?;
+
+    // Capture the reassigned article IDs (from-label minus overlap).
+    let reassigned: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT article_id FROM article_labels WHERE label_id = ?1 \
+             AND article_id NOT IN (SELECT article_id FROM article_labels WHERE label_id = ?2)",
+        )?;
+        let rows = stmt.query_map(params![from_id, into_id], |row| row.get::<_, String>(0))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let tx = conn.unchecked_transaction()?;
+
+    label_repo::merge_labels(&tx, from_id, into_id)?;
+
+    let detail = format!("Replaced label \"{from_name}\" -> \"{into_name}\" (merge)");
+    audit_repo::write_tag_label_audit(&tx, &reassigned, "label_remove", &detail)?;
+
+    for id in &reassigned {
+        article_repo::bump_changed_at(&tx, id)?;
+    }
+
+    app_settings_repo::mark_biblio_needs_refresh(&tx);
+    app_settings_repo::mark_wiki_needs_refresh(&tx);
+
+    tx.commit()?;
+
+    Ok(MergeResult {
+        from_name,
+        into_name,
+        reassigned_count: reassigned.len(),
+        already_had_survivor_count: overlap as usize,
+    })
 }
