@@ -105,7 +105,7 @@ The engine now distinguishes between transient errors (rate limits, server error
 
 A new slow-LLM warning banner appears after the first timeout, suggesting you reduce batch size or increase request delay. After three timeouts across the run (even if successful batches happen in between), the run stops with a clear message. Progress reporting is now accurate: deferred articles do not inflate the completion percentage, and a separate "N article(s) deferred" notice keeps you informed.
 
-### Clear AI Decision
+### Delete AI Decision
 
 A trashcan icon on the AI Decision card lets you clear the LLM's reasoning and confidence score while preserving the screening timestamp and your own Include or Exclude choice. The card auto-collapses (your collapse preference is remembered), and the action writes an audit entry visible in the Timeline.
 
@@ -185,7 +185,7 @@ A database VACUUM command reclaims disk space after major operations like projec
 
 The start screen now includes a project load button. A Share Bango menu item helps you tell colleagues about the tool. The landing page at bango.boncode.net was refreshed, and the in-app Help documentation was updated with content covering all six bibliometric tools, the wiki system, and the citation finder.
 
-Test coverage reached the 70 percent line coverage target for both Rust and TypeScript, and many large inline test blocks were extracted to dedicated test files to keep the source code compact.
+Test coverage reached nearly 65%  (target 70 percent) line coverage for both Rust and TypeScript, and many large inline test blocks were extracted to dedicated test files to keep the source code compact.
 
 The old screening engine monolith was split into submodules for types, prompt construction, and stage two processing, with pure functions extracted for decision resolution, error classification, and JSON parsing. The LLM call layer was refactored to improve JSON resilience through control character escaping (LLMs sometimes put literal newlines inside JSON string values, which serde cannot parse). The project backup import was decomposed into twenty per-table import functions with a shared ID remap map.
 

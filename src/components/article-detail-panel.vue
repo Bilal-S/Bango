@@ -235,7 +235,24 @@ function handleScreenClick(): void {
 // Audit trail expand/collapse state
 const auditExpanded = ref(false);
 
-// Panel resizing logic
+// Panel resizing logic.
+//
+// The drag-shield overlay (rendered in the template when `isResizing` is true)
+// sits above the FullTextReader's PDF <iframe> during an active resize. An
+// <iframe> owns a separate document and swallows mouse events that land on it,
+// so without the shield a drag that crosses the iframe area would stop
+// delivering `mousemove`/`mouseup` to this window - the `mouseup` listener
+// would never fire, the resize would get permanently stuck, and the panel
+// would track every subsequent mouse movement (including clicks in the article
+// table). The shield forces the events to the parent document instead.
+//
+// Two defense-in-depth guards prevent a stuck resize even if an event is lost
+// outside the shield's coverage:
+//  1. `doResize` ends the drag when a `mousemove` arrives with `buttons === 0`
+//     (no button pressed). This catches a lost `mouseup` (mouse left the
+//     window, OS-level interruption, etc.).
+//  2. `stopResize` is idempotent - it removes the listeners and restores the
+//     cursor, and a `stopped` flag prevents double-invocation.
 const panelWidth = ref(parseInt(localStorage.getItem('bango-detail-panel-width') || '480'));
 const isResizing = ref(false);
 
@@ -244,19 +261,29 @@ function startResize(e: MouseEvent): void {
   isResizing.value = true;
   const startX = e.clientX;
   const startWidth = panelWidth.value;
-
-  function doResize(moveEvent: MouseEvent): void {
-    const delta = startX - moveEvent.clientX;
-    const newWidth = Math.max(320, Math.min(900, startWidth + delta));
-    panelWidth.value = newWidth;
-    localStorage.setItem('bango-detail-panel-width', newWidth.toString());
-  }
+  let stopped = false;
 
   function stopResize(): void {
+    if (stopped) return;
+    stopped = true;
     isResizing.value = false;
     window.removeEventListener('mousemove', doResize);
     window.removeEventListener('mouseup', stopResize);
     document.body.style.cursor = '';
+  }
+
+  function doResize(moveEvent: MouseEvent): void {
+    // Safety net: if the mouse button is no longer pressed but we never saw
+    // the mouseup (e.g. the cursor left the window mid-drag), end the resize
+    // immediately so the listener does not stay permanently active.
+    if (moveEvent.buttons === 0) {
+      stopResize();
+      return;
+    }
+    const delta = startX - moveEvent.clientX;
+    const newWidth = Math.max(320, Math.min(900, startWidth + delta));
+    panelWidth.value = newWidth;
+    localStorage.setItem('bango-detail-panel-width', newWidth.toString());
   }
 
   window.addEventListener('mousemove', doResize);
@@ -311,10 +338,15 @@ const {
     }"
     :style="fullScreen ? {} : { '--detail-panel-width': panelWidth + 'px' }"
   >
-    <!-- Resize Handle (desktop only, hidden in fullscreen) -->
+    <!-- Resize Handle (desktop only, hidden in fullscreen).
+         Sits ABOVE the FullTextReader overlay (z-50) so the panel stays
+         resizable while the PDF/text reader is open - without this the
+         overlay swallows the drag events and the panel cannot be resized
+         until the reader is closed. The persisted width applies to the
+         whole detail panel and survives closing the reader. -->
     <div
       v-if="!fullScreen"
-      class="resizer hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-indigo-400/50 active:bg-indigo-600 transition-colors"
+      class="resizer hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-[60] hover:bg-indigo-400/50 active:bg-indigo-600 transition-colors"
       @mousedown="startResize"
     />
 
@@ -569,6 +601,23 @@ const {
           </div>
         </div>
       </div>
+    </Teleport>
+
+    <!-- Drag shield: a transparent full-viewport overlay rendered only during
+         an active resize. Without this, the FullTextReader's PDF <iframe>
+         (a separate document) swallows mousemove/mouseup events that land on
+         it, so a drag that crosses the iframe would never see its mouseup and
+         the resize would get permanently stuck (the panel would then track
+         every mouse movement, including clicks in the article table). The
+         shield forces those events to the parent document. Teleported to
+         <body> + position: fixed so it also covers the article table and any
+         other sibling outside this <aside>. -->
+    <Teleport to="body">
+      <div
+        v-if="isResizing"
+        class="fixed inset-0 z-[9999] cursor-col-resize"
+        data-testid="drag-shield"
+      />
     </Teleport>
 
     <!-- Footer Actions -->

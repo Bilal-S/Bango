@@ -26,6 +26,10 @@ const fullTextContent = ref<string | null>(null);
 const fullTextExpanded = ref(false);
 const pdfSrc = ref<string | null>(null);
 const absoluteFilePath = ref<string | null>(null);
+/** Whether the on-disk PDF is missing and we are showing extracted DB text */
+const showFallbackBanner = ref(false);
+/** The expected (but missing) PDF path, surfaced in the banner */
+const fallbackPath = ref<string | null>(null);
 
 /** Whether the attached file is a PDF */
 const isPdfAttachment = computed(() => {
@@ -42,9 +46,23 @@ async function openFullTextView(): Promise<void> {
   fullTextContent.value = props.article.fullText;
   pdfSrc.value = null;
   absoluteFilePath.value = null;
+  showFallbackBanner.value = false;
+  fallbackPath.value = null;
 
   if (isPdfAttachment.value) {
     const { tauriCommand } = await import('@/composables/use-tauri-command');
+    /* Resolve the expected file path first - used for the external-open button
+       and for the fallback banner when the PDF is missing from disk. */
+    try {
+      const filePath = await tauriCommand<string | null>('get_full_text_file_path', {
+        articleId: props.article.id,
+      });
+      if (filePath) {
+        absoluteFilePath.value = filePath;
+      }
+    } catch (e) {
+      console.warn('Failed to resolve full-text file path:', e);
+    }
     try {
       const bytes = await tauriCommand<ArrayBuffer | null>('read_full_text_file_bytes', {
         articleId: props.article.id,
@@ -54,15 +72,15 @@ async function openFullTextView(): Promise<void> {
           type: 'application/pdf',
         });
         pdfSrc.value = URL.createObjectURL(blob);
+      } else {
+        /* The PDF is not present on disk (the backend returns null when the
+           file does not exist). Show a banner so the user understands why the
+           reader is rendering extracted database text instead of the PDF. */
+        showFallbackBanner.value = true;
+        fallbackPath.value = absoluteFilePath.value;
       }
     } catch (e) {
       console.warn('Failed to load PDF bytes for inline viewing:', e);
-    }
-    const filePath = await tauriCommand<string | null>('get_full_text_file_path', {
-      articleId: props.article.id,
-    });
-    if (filePath) {
-      absoluteFilePath.value = filePath;
     }
   }
 }
@@ -96,6 +114,8 @@ function closeFullTextView(): void {
   pdfSrc.value = null;
   showFullTextView.value = false;
   fullTextExpanded.value = false;
+  showFallbackBanner.value = false;
+  fallbackPath.value = null;
 }
 
 /** Toggle full-text expand.
@@ -133,6 +153,8 @@ watch(
     fullTextContent.value = null;
     pdfSrc.value = null;
     absoluteFilePath.value = null;
+    showFallbackBanner.value = false;
+    fallbackPath.value = null;
   }
 );
 
@@ -224,6 +246,18 @@ defineExpose({ openFullTextView, fullTextFileIcon });
           close
         </button>
       </div>
+    </div>
+    <!-- Fallback banner: the PDF file is missing from the storage directory,
+         so the reader is showing extracted database text instead. -->
+    <div
+      v-if="showFallbackBanner"
+      class="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-800 text-xs shrink-0"
+    >
+      <span class="material-symbols-outlined text-[16px] shrink-0">warning</span>
+      <span>
+        Displaying Fallback Data - No PDF in
+        {{ fallbackPath ?? 'the storage directory' }} found.
+      </span>
     </div>
     <!-- PDF inline viewer using Blob URL -->
     <div v-if="isPdfAttachment && pdfSrc" class="flex-1 overflow-hidden">
