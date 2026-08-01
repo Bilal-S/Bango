@@ -470,13 +470,49 @@ pub fn reset_embedding_status(conn: &Connection) -> Result<(), AppError> {
     set_setting(conn, EMBEDDING_STATUS_KEY, Some(EmbeddingStatus::Unknown.as_str()))
 }
 
+// ── Embedding model override (premium) ───────────────────────────────────────
+
+/// The `app_settings` key for the optional embedding-model override (premium).
+///
+/// When set to a non-empty model name, `probe_embedding_support` tries this
+/// model FIRST, ahead of the provider-default and the configured chat model.
+/// This lets premium users pin a specific embedding model (e.g.
+/// `text-embedding-3-large`, a specific Ollama embedding model) instead of
+/// relying on auto-detection. When the override fails (404/405/auth error),
+/// the probe falls back to the standard auto-detection order so a bad override
+/// never hard-disables embeddings.
+///
+/// Machine-local (excluded from `PROJECT_PORTABLE_SETTINGS`): the choice is
+/// tied to the provider configuration on this machine, which does not travel
+/// with a project backup.
+pub const EMBEDDING_MODEL_OVERRIDE_KEY: &str = "embedding_model_override";
+
+/// Read the embedding-model override. Returns `None` when the key is absent or
+/// the stored value trims to empty (so an empty input = "let the probe pick").
+pub fn get_embedding_model_override(conn: &Connection) -> Result<Option<String>, AppError> {
+    Ok(get_setting(conn, EMBEDDING_MODEL_OVERRIDE_KEY)?
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty()))
+}
+
+/// Persist the embedding-model override. Pass `None` or an empty/whitespace
+/// string to clear the override (restore auto-detection).
+pub fn set_embedding_model_override(
+    conn: &Connection,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    let trimmed = value.map(str::trim).filter(|s| !s.is_empty());
+    set_setting(conn, EMBEDDING_MODEL_OVERRIDE_KEY, trimmed)
+}
+
 // ── Project-portable settings (export/import) ───────────────────────────────
 //
 // `app_settings` mixes project-level intent (screening rules, summary mode,
 // auto-translate) with machine-local state (storage root, premium flag,
-// staleness flags). Only the project-level subset travels with a backup so
-// restoring a project on a new machine preserves the user's screening
-// configuration without leaking secrets or clobbering local state.
+// staleness flags, embedding model override). Only the project-level subset
+// travels with a backup so restoring a project on a new machine preserves the
+// user's screening configuration without leaking secrets or clobbering local
+// state.
 
 /// The subset of `app_settings` keys that travel with a project backup.
 ///
@@ -487,7 +523,7 @@ pub fn reset_embedding_status(conn: &Connection) -> Result<(), AppError> {
 ///
 /// Explicitly **excluded** (stay machine-local, never exported):
 /// `storage_root`, `flag_premium`, `biblio_needs_refresh`, `wiki_needs_refresh`,
-/// `wiki_dir_hash`, `fulltext_storage_dir` (legacy).
+/// `wiki_dir_hash`, `fulltext_storage_dir` (legacy), `embedding_model_override`.
 pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     SCREENING_CUSTOM_LOGIC_KEY,
     AUTO_TRANSLATE_KEY,

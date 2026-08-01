@@ -166,14 +166,14 @@ async fn embed_texts_ollama_single_prompt() {
 #[tokio::test]
 async fn probe_anthropic_disabled_immediately() {
     let cfg = config(LlmProvider::Anthropic, "http://unused", "claude-3");
-    let outcome = probe_embedding_support(&cfg).await;
+    let outcome = probe_embedding_support(&cfg, None).await;
     assert_eq!(outcome.status, "disabled");
 }
 
 #[tokio::test]
 async fn probe_zai_disabled_immediately() {
     let cfg = config(LlmProvider::ZAi, "http://unused", "glm-4");
-    let outcome = probe_embedding_support(&cfg).await;
+    let outcome = probe_embedding_support(&cfg, None).await;
     assert_eq!(outcome.status, "disabled");
 }
 
@@ -185,7 +185,7 @@ async fn probe_openai_default_model_enabled() {
         server.mock("POST", "/embeddings").with_status(200).with_body(body).create_async().await;
 
     let cfg = config(LlmProvider::Openai, &server.url(), "gpt-4o");
-    let outcome = probe_embedding_support(&cfg).await;
+    let outcome = probe_embedding_support(&cfg, None).await;
     assert_eq!(outcome.status, "enabled", "reason: {}", outcome.reason);
     assert_eq!(outcome.model, "text-embedding-3-small");
     assert_eq!(outcome.dimensions, 3);
@@ -205,7 +205,7 @@ async fn probe_openai_default_404_falls_back_to_chat_model() {
         server.mock("POST", "/embeddings").with_status(200).with_body(body).create_async().await;
 
     let cfg = config(LlmProvider::Openai, &server.url(), "gpt-4o");
-    let outcome = probe_embedding_support(&cfg).await;
+    let outcome = probe_embedding_support(&cfg, None).await;
     assert_eq!(outcome.status, "enabled", "reason: {}", outcome.reason);
     assert_eq!(outcome.model, "gpt-4o", "fell back to the configured chat model");
 }
@@ -221,6 +221,63 @@ async fn probe_both_models_fail_returns_disabled() {
         .await;
 
     let cfg = config(LlmProvider::Openai, &server.url(), "gpt-4o");
-    let outcome = probe_embedding_support(&cfg).await;
+    let outcome = probe_embedding_support(&cfg, None).await;
     assert_eq!(outcome.status, "disabled", "reason: {}", outcome.reason);
+}
+
+#[tokio::test]
+async fn probe_override_model_tried_first_and_wins() {
+    // The override is tried first. When it succeeds, the provider-default and
+    // chat model are never tried (the probe returns immediately).
+    let mut server = mockito::Server::new_async().await;
+    let body = r#"{"data":[{"embedding":[0.9,0.8,0.7,0.6,0.5],"index":0}]}"#;
+    let _m =
+        server.mock("POST", "/embeddings").with_status(200).with_body(body).create_async().await;
+
+    let cfg = config(LlmProvider::Openai, &server.url(), "gpt-4o");
+    let outcome = probe_embedding_support(&cfg, Some("text-embedding-3-large")).await;
+    assert_eq!(outcome.status, "enabled", "reason: {}", outcome.reason);
+    assert_eq!(outcome.model, "text-embedding-3-large", "override model wins");
+    assert_eq!(outcome.dimensions, 5);
+}
+
+#[tokio::test]
+async fn probe_override_failure_falls_back_to_auto_detection() {
+    // The override is tried first but 404s. The probe must fall through to the
+    // provider-default model, which succeeds - so a bad override never
+    // hard-disables embeddings.
+    let mut server = mockito::Server::new_async().await;
+    // First call (override model) -> 404.
+    let _m1 = server
+        .mock("POST", "/embeddings")
+        .with_status(404)
+        .with_body(r#"{"error":{"message":"model not found"}}"#)
+        .create_async()
+        .await;
+    // Second call (provider-default) -> 200.
+    let body = r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#;
+    let _m2 =
+        server.mock("POST", "/embeddings").with_status(200).with_body(body).create_async().await;
+
+    let cfg = config(LlmProvider::Openai, &server.url(), "gpt-4o");
+    let outcome = probe_embedding_support(&cfg, Some("bogus-override-model")).await;
+    assert_eq!(outcome.status, "enabled", "reason: {}", outcome.reason);
+    assert_eq!(
+        outcome.model, "text-embedding-3-small",
+        "fell back to the provider-default after the override failed"
+    );
+}
+
+#[tokio::test]
+async fn probe_override_empty_string_treated_as_no_override() {
+    // An empty/whitespace override is ignored (auto-detection runs normally).
+    let mut server = mockito::Server::new_async().await;
+    let body = r#"{"data":[{"embedding":[0.1,0.2,0.3],"index":0}]}"#;
+    let _m =
+        server.mock("POST", "/embeddings").with_status(200).with_body(body).create_async().await;
+
+    let cfg = config(LlmProvider::Openai, &server.url(), "gpt-4o");
+    let outcome = probe_embedding_support(&cfg, Some("   ")).await;
+    assert_eq!(outcome.status, "enabled", "reason: {}", outcome.reason);
+    assert_eq!(outcome.model, "text-embedding-3-small", "empty override ignored");
 }

@@ -202,8 +202,16 @@ pub async fn generate_embeddings_inner(
         let Some(cfg) = config.clone() else {
             return Err(AppError::Validation("LLM not configured".to_string()));
         };
+        // Read the user's embedding-model override (premium) so the probe
+        // tries it first. Best-effort: a read failure logs + proceeds with
+        // `None` (auto-detection-only), matching the existing pattern where a
+        // probe failure never blocks the embedding pipeline.
+        let override_model = {
+            let conn = lock_conn(&db_state.conn)?;
+            app_settings_repo::get_embedding_model_override(&conn).unwrap_or(None)
+        };
         // Probe (no lock held during HTTP).
-        let outcome = probe_embedding_support(&cfg).await;
+        let outcome = probe_embedding_support(&cfg, override_model.as_deref()).await;
         let new_status = if outcome.status == "enabled" {
             EmbeddingStatus::Enabled
         } else {

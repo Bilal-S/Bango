@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { watch, ref, computed, nextTick } from 'vue';
+import { watch, ref, computed, nextTick, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
+import { useEmbeddingSettings } from '@/composables/use-embedding-settings';
+import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useScreeningStore } from '@/stores/screening';
 import { formatLlmError } from '@/utils/llm-error';
 
 const router = useRouter();
 const screeningStore = useScreeningStore();
+const { isPremium } = useFeatureFlags();
+const {
+  modelOverride,
+  saving: savingEmbeddingOverride,
+  load: loadEmbeddingOverride,
+  save: saveEmbeddingOverride,
+} = useEmbeddingSettings();
 
 const {
   config,
@@ -271,6 +280,42 @@ watch(lastSavedAt, (ts) => {
     screeningStore.invalidate();
   }
 });
+
+// ── Embedding model override (premium) ────────────────────────────────────
+//
+// Premium-only field. When set, the embedding probe tries the user's pinned
+// model first (ahead of the provider-default + chat model). Loaded once on
+// mount via `get_embedding_status` (which returns `modelOverride`). Saved via
+// a debounced watcher (600ms trailing, same pattern as the Parameters fields)
+// so typing fires one save per pause. Clearing the field (empty input) clears
+// the override and restores auto-detection.
+const EMBEDDING_OVERRIDE_SAVE_DELAY_MS = 600;
+let embeddingOverrideSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let embeddingOverrideInitialized = false;
+
+onMounted(() => {
+  if (isPremium.value) {
+    void loadEmbeddingOverride();
+  }
+});
+
+watch(modelOverride, (value) => {
+  // Skip the initial propagation that fires when `loadEmbeddingOverride`
+  // populates the ref from the backend (avoid an immediate no-op save
+  // round-trip that would also reset `embedding_status` to `unknown`).
+  if (!embeddingOverrideInitialized) {
+    embeddingOverrideInitialized = true;
+    return;
+  }
+  if (!isPremium.value) return;
+  if (embeddingOverrideSaveTimer !== null) {
+    clearTimeout(embeddingOverrideSaveTimer);
+  }
+  embeddingOverrideSaveTimer = setTimeout(() => {
+    embeddingOverrideSaveTimer = null;
+    void saveEmbeddingOverride(value);
+  }, EMBEDDING_OVERRIDE_SAVE_DELAY_MS);
+});
 </script>
 
 <template>
@@ -402,6 +447,33 @@ watch(lastSavedAt, (ts) => {
                 </button>
               </div>
             </div>
+          </div>
+
+          <!-- Embedding Model override (premium only). Sits directly under the
+               Model Name / API Key row. When set, the embedding probe tries
+               this model first; when empty, auto-detection is used. -->
+          <div v-if="isPremium" class="field provider-card__embedding-override">
+            <label class="field__label">
+              Embedding Model
+              <span class="provider-card__premium-badge">Premium</span>
+            </label>
+            <div class="field__inline">
+              <input
+                v-model="modelOverride"
+                type="text"
+                class="field__input field__input--mono"
+                placeholder="e.g. text-embedding-3-large (leave blank for auto)"
+              />
+              <span
+                v-if="savingEmbeddingOverride"
+                class="material-symbols-outlined provider-card__status-spinner"
+                >progress_activity</span
+              >
+            </div>
+            <p class="field__hint">
+              Overrides auto-detection for the Citation Finder embeddings. Leave blank to let the
+              probe pick the model.
+            </p>
           </div>
 
           <!-- Test result / error feedback (directly under Model/API Key inputs) -->
@@ -892,5 +964,20 @@ watch(lastSavedAt, (ts) => {
 
 .provider-card__help-link:hover {
   text-decoration: underline;
+}
+
+/* Premium badge for the Embedding Model label */
+.provider-card__premium-badge {
+  display: inline-block;
+  margin-left: 0.375rem;
+  padding: 0.0625rem 0.375rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #78350f;
+  background-color: #fde68a;
+  border-radius: var(--radius-full, 9999px);
+  vertical-align: middle;
 }
 </style>

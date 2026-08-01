@@ -30,6 +30,11 @@ pub struct EmbeddingStatusInfo {
     pub status: String,
     pub model: String,
     pub dimensions: i32,
+    /// The user's pinned embedding-model override (premium). `None` when the
+    /// key is absent or empty (auto-detection active). Surfaced so the Settings
+    /// UI can pre-fill the `EMBEDDING MODEL` input for premium users.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
 }
 
 /// Generate (or regenerate) embeddings for a set of articles.
@@ -114,7 +119,13 @@ pub fn get_embedding_status(db_state: State<'_, DbState>) -> Result<EmbeddingSta
     let status = app_settings_repo::get_embedding_status(&conn)?;
     let model = app_settings_repo::get_embedding_model(&conn)?.unwrap_or_default();
     let dimensions = app_settings_repo::get_embedding_dimensions(&conn)?;
-    Ok(EmbeddingStatusInfo { status: status.as_str().to_string(), model, dimensions })
+    let model_override = app_settings_repo::get_embedding_model_override(&conn)?;
+    Ok(EmbeddingStatusInfo {
+        status: status.as_str().to_string(),
+        model,
+        dimensions,
+        model_override,
+    })
 }
 
 /// Explicitly probe the provider for embedding support. Sets the triple-state
@@ -136,7 +147,13 @@ pub async fn probe_embeddings(db_state: State<'_, DbState>) -> Result<ProbeOutco
         };
         return Ok(outcome);
     };
-    let outcome = probe_embedding_support(&cfg).await;
+    // Forward the user's embedding-model override (premium) so the probe tries
+    // it first, ahead of auto-detection.
+    let override_model = {
+        let conn = lock_conn(&db_state.conn)?;
+        app_settings_repo::get_embedding_model_override(&conn)?
+    };
+    let outcome = probe_embedding_support(&cfg, override_model.as_deref()).await;
     let new_status = if outcome.status == "enabled" {
         EmbeddingStatus::Enabled
     } else {
@@ -145,4 +162,34 @@ pub async fn probe_embeddings(db_state: State<'_, DbState>) -> Result<ProbeOutco
     let conn = lock_conn(&db_state.conn)?;
     app_settings_repo::set_embedding_status(&conn, new_status, &outcome.model, outcome.dimensions)?;
     Ok(outcome)
+}
+
+/// Set the embedding-model override (premium-only).
+///
+/// When set to a non-empty model name, the probe tries this model first. When
+/// set to `None`/empty, the override is cleared and auto-detection is restored.
+/// On save, the embedding triple-state is reset to `unknown` so the next probe
+/// (next embedding call or `Test Connection`) re-evaluates against the new
+/// override.
+///
+/// Premium enforcement is defense-in-depth: the frontend hides the input for
+/// non-premium users, and this command rejects the save with `AppError::Validation`
+/// when `AppFlags.premium` is false.
+#[tauri::command]
+pub fn set_embedding_model_override(
+    db_state: State<'_, DbState>,
+    flags: State<'_, crate::AppFlags>,
+    value: Option<String>,
+) -> Result<(), AppError> {
+    if !flags.premium {
+        return Err(AppError::Validation(
+            "Embedding model override is a premium feature".to_string(),
+        ));
+    }
+    let conn = lock_conn(&db_state.conn)?;
+    app_settings_repo::set_embedding_model_override(&conn, value.as_deref())?;
+    // Reset the capability state so the next probe re-evaluates with the new
+    // override model (the prior status/model/dimensions may no longer apply).
+    app_settings_repo::reset_embedding_status(&conn)?;
+    Ok(())
 }

@@ -336,10 +336,19 @@ pub struct ProbeOutcome {
 
 /// Probe a provider for embedding capability. Resolution order:
 /// 1. Anthropic -> `disabled` immediately.
-/// 2. Try provider-default embedding model with a tiny probe text.
-/// 3. On failure, retry with the configured chat model.
-/// 4. Both fail -> `disabled`.
-pub async fn probe_embedding_support(config: &LlmConfig) -> ProbeOutcome {
+/// 2. User override (if set + non-empty) -> try first. On failure, fall through
+///    to auto-detection so a bad override never hard-disables embeddings.
+/// 3. Try provider-default embedding model with a tiny probe text.
+/// 4. On failure, retry with the configured chat model.
+/// 5. All fail -> `disabled`.
+///
+/// `override_model` is the premium user's pinned embedding model name (read
+/// from `app_settings.embedding_model_override`). Pass `None` for the
+/// historical auto-detection-only behavior (used by all non-premium callers).
+pub async fn probe_embedding_support(
+    config: &LlmConfig,
+    override_model: Option<&str>,
+) -> ProbeOutcome {
     if !check_embedding_support(&config.provider) {
         return ProbeOutcome {
             status: "disabled".to_string(),
@@ -349,7 +358,31 @@ pub async fn probe_embedding_support(config: &LlmConfig) -> ProbeOutcome {
         };
     }
 
-    // Try the provider-default model first (if one exists).
+    // Try the user's override first (if set). A failure here is non-fatal -
+    // fall through to auto-detection so a stale/incorrect override never
+    // hard-disables embeddings.
+    if let Some(ov) = override_model.map(str::trim).filter(|s| !s.is_empty()) {
+        match embed_texts(config, &["probe".to_string()], ov).await {
+            Ok((vectors, dims)) if !vectors.is_empty() => {
+                return ProbeOutcome {
+                    status: "enabled".to_string(),
+                    model: ov.to_string(),
+                    dimensions: dims,
+                    reason: "Embeddings enabled using override model".to_string(),
+                };
+            }
+            Ok(_) => {
+                eprintln!(
+                    "[embedding] override model {ov} returned no vectors; trying auto-detection"
+                );
+            }
+            Err(e) => {
+                eprintln!("[embedding] override model {ov} failed: {e}; trying auto-detection");
+            }
+        }
+    }
+
+    // Try the provider-default model (if one exists).
     if let Some(default_model) = default_embedding_model(&config.provider) {
         match embed_texts(config, &["probe".to_string()], default_model).await {
             Ok((vectors, dims)) if !vectors.is_empty() => {

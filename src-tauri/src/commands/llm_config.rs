@@ -98,10 +98,12 @@ pub async fn test_llm_connection(
     orchestrator: State<'_, Arc<LlmOrchestrator>>,
     _app_handle: tauri::AppHandle,
 ) -> Result<TestConnectionResult, AppError> {
-    let config = {
+    let (config, embedding_override) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        llm_config_repo::get_config(&conn)?
-            .ok_or_else(|| AppError::Validation("No LLM config found".to_string()))?
+        let cfg = llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("No LLM config found".to_string()))?;
+        let ov = crate::db::app_settings_repo::get_embedding_model_override(&conn)?;
+        (cfg, ov)
     };
 
     // First attempt: use config as-is (temperature included unless already
@@ -127,9 +129,10 @@ pub async fn test_llm_connection(
                 }
                 // Test Connection succeeded: probe embedding support
                 // synchronously so the response payload + message include the
-                // outcome (critique 2.4).
+                // outcome (critique 2.4). Forward the user's embedding-model
+                // override (premium) so the probe tries it first.
                 let (emb_status, emb_model, emb_dims, emb_suffix) =
-                    probe_embeddings_sync(&retry_config).await;
+                    probe_embeddings_sync(&retry_config, embedding_override.as_deref()).await;
                 // Persist the probe outcome (brief lock burst). Forwards the
                 // real dimensions from the probe so `recall` (which gates on
                 // `dimensions > 0`) works immediately after Test Connection
@@ -146,8 +149,10 @@ pub async fn test_llm_connection(
             } else {
                 // Plain success: probe embedding support synchronously so the
                 // response payload + message include the outcome (critique 2.4).
+                // Forward the user's embedding-model override (premium) so the
+                // probe tries it first.
                 let (emb_status, emb_model, emb_dims, emb_suffix) =
-                    probe_embeddings_sync(&config).await;
+                    probe_embeddings_sync(&config, embedding_override.as_deref()).await;
                 persist_embedding_probe(&db_state, &emb_status, &emb_model, emb_dims);
                 Ok(TestConnectionResult {
                     success: true,
@@ -176,8 +181,11 @@ pub async fn test_llm_connection(
                             llm_config_repo::save_config(&conn, &retry_config)?;
                         }
                         // Probe embedding support synchronously (critique 2.4).
+                        // Forward the user's embedding-model override (premium)
+                        // so the probe tries it first.
                         let (emb_status, emb_model, emb_dims, emb_suffix) =
-                            probe_embeddings_sync(&retry_config).await;
+                            probe_embeddings_sync(&retry_config, embedding_override.as_deref())
+                                .await;
                         persist_embedding_probe(&db_state, &emb_status, &emb_model, emb_dims);
                         Ok(TestConnectionResult {
                             success: true,
@@ -272,10 +280,15 @@ pub fn persist_embedding_probe_to_conn(
 /// persist - the caller owns the `State<DbState>` and persists after the probe
 /// returns (brief lock burst). This split keeps the function `Send` (no `State`
 /// borrow held across the `.await`).
+///
+/// `override_model` is the premium user's pinned embedding model name (read
+/// once from `app_settings` by the caller). When `Some` + non-empty, the probe
+/// tries it first and falls back to auto-detection on failure.
 async fn probe_embeddings_sync(
     config: &LlmConfig,
+    override_model: Option<&str>,
 ) -> (Option<String>, Option<String>, i32, String) {
-    let outcome = crate::llm::embedding::probe_embedding_support(config).await;
+    let outcome = crate::llm::embedding::probe_embedding_support(config, override_model).await;
 
     // Build the response fields + message suffix (no DB access here). The
     // dimensions are forwarded so `persist_embedding_probe` can store the real

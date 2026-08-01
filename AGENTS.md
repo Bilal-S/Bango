@@ -523,6 +523,26 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `cites:` citations and populates `reference_papers` +
     `article_reference_links`; defaults to `false`; **included in
     `PROJECT_PORTABLE_SETTINGS`** - non-secret user preference).
+    `embedding_model_override` (optional plaintext embedding-model name;
+    **premium-only** - the `set_embedding_model_override` command rejects
+    non-premium callers with `AppError::Validation`. When set to a non-empty
+    model name, `probe_embedding_support` tries it FIRST, ahead of the
+    provider-default and the configured chat model, so a premium user can pin a
+    specific embedding model (e.g. `text-embedding-3-large`, a specific Ollama
+    embedding model) instead of relying on auto-detection. When the override
+    fails (404/405/auth), the probe falls back to the standard auto-detection
+    order so a bad override never hard-disables embeddings. Empty/whitespace =
+    cleared (auto-detection restored). Saving via `set_embedding_model_override`
+    resets `embedding_status` to `unknown` so the next probe re-evaluates. Read
+    by `test_llm_connection` + `generate_embeddings` (runner) + `probe_embeddings`
+    and forwarded as `Option<&str>` into `probe_embedding_support(config, override)`.
+    Surfaced in the `EmbeddingStatusInfo` response (`modelOverride` field) so the
+    Settings UI (`settings-provider-card.vue`, gated on `useFeatureFlags().isPremium`)
+    can pre-fill the `EMBEDDING MODEL` input. **Deliberately excluded from
+    `PROJECT_PORTABLE_SETTINGS`** - machine-local, tied to this machine's
+    provider configuration; matches `embedding_status`/`flag_premium`. Tested in
+    `tests/embedding_model_override_test.rs` (6 tests: default-None, round-trip,
+    whitespace-trim, clear-to-empty, clear-to-whitespace, not-portable)).
     `mark_biblio_needs_refresh(conn)` is called by every mutation that
     changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
     project backup restore in `commands/export_cmd::import_project_backup`,
