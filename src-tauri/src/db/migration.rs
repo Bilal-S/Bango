@@ -170,16 +170,33 @@ mod tests {
     fn heal_is_noop_when_version_already_current() {
         let conn = mem_conn();
         // Full migration chain applied (v001 + v002 + v003 + v004 + v005 +
-        // v006 + v007): version=7, v003 marker column exists. heal must be a
-        // no-op because the version is not stale (the heal pre-pass only
+        // v006 + v007 + v008): version=8, v003 marker column exists. heal must
+        // be a no-op because the version is not stale (the heal pre-pass only
         // advances to 3 when the marker exists AND user_version < 3).
         crate::db::migration::run_migrations(&conn).unwrap();
         let v_before: i32 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(v_before, 7);
+        assert_eq!(v_before, 8);
 
         heal_partial_migrations(&conn).unwrap();
         let v_after: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap();
-        assert_eq!(v_after, 7);
+        assert_eq!(v_after, 8);
+    }
+
+    #[test]
+    fn v008_restores_audit_entries_article_id_index() {
+        let conn = mem_conn();
+        crate::db::migration::run_migrations(&conn).unwrap();
+
+        // The index exists after the full chain (v001 creates it, v003→v007
+        // drop it via the CHECK-rebuild pattern, v008 restores it).
+        let exists: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_audit_entries_article_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1, "idx_audit_entries_article_id must exist after v008");
     }
 }
