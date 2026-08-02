@@ -38,6 +38,7 @@ use commands::citation_finder::CitationFinderState;
 use commands::scraping::ScrapingState;
 use commands::screening::ScreeningState;
 use commands::startup::StartupStatus;
+use commands::wiki_cmd::WikiIngestState;
 use db::connection::DbState;
 use db::schema_check::{check_schema, SchemaStatus};
 use llm::orchestrator::LlmOrchestrator;
@@ -152,6 +153,7 @@ pub fn run() {
         .manage(batch_import::BatchImportState::default())
         .manage(ScrapingState::default())
         .manage(CitationFinderState::default())
+        .manage(WikiIngestState::default())
         .invoke_handler(tauri::generate_handler![
             commands::health_check,
             commands::startup::get_startup_status,
@@ -335,6 +337,7 @@ pub fn run() {
             commands::wiki_cmd::wiki_check_for_updates,
             commands::wiki_cmd::wiki_generate_export,
             commands::wiki_cmd::wiki_zip_export,
+            commands::wiki_cmd::cancel_wiki_ingest,
             commands::openalex::search_openalex,
             commands::openalex::import_openalex_articles,
             commands::openalex::check_dois_in_library,

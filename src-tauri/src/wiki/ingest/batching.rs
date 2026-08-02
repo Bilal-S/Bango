@@ -7,6 +7,7 @@
 //! 25-95% range.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -356,15 +357,32 @@ pub const INGEST_SYSTEM_PROMPT: &str = "You are a research knowledge-base synthe
 ///
 /// `progress_range` is `(start_pct, end_pct)` - the slice of the 0-100 pipeline
 /// bar that the LLM + write phase should occupy (e.g. `(25, 95)`).
+///
+/// `cancel_token` is an optional `Arc<AtomicBool>` that, when signalled,
+/// aborts the in-flight LLM batches via `JoinSet::abort_all` and returns
+/// `Ok(report)` with `report.errors.push("Cancelled")`. `None` means no
+/// cancel token was threaded in (e.g. tests), so the pipeline runs to
+/// completion. The token is polled between `join_next().await` completions
+/// (not inside a `tokio::select!` against the LLM call itself) because the
+/// LLM call runs inside a spawned task; `abort_all` is the mechanism that
+/// actually cancels the in-flight HTTP request by dropping the task future.
 pub async fn run_chunked_ingest(
     root: &Path,
     batches: Vec<IngestBatch>,
     sender: Arc<dyn IngestLlmSender>,
     app_handle: Option<&tauri::AppHandle>,
     progress_range: (usize, usize),
+    cancel_token: Option<&Arc<AtomicBool>>,
 ) -> Result<IngestReport, AppError> {
     let mut report = IngestReport::default();
     if batches.is_empty() {
+        return Ok(report);
+    }
+
+    // Early cancel check: if the token was already signalled during the
+    // pre-seed phases, skip the LLM calls entirely.
+    if cancel_token.is_some_and(|t| t.load(Ordering::SeqCst)) {
+        report.errors.push("Cancelled".to_string());
         return Ok(report);
     }
 
@@ -390,9 +408,28 @@ pub async fn run_chunked_ingest(
     // Collect results as they complete. For single-batch runs we write pages
     // immediately (current behavior). For multi-batch runs we collect all pages
     // and consolidate them after all batches finish.
+    //
+    // Cancel contract: the cancel token is polled between `join_next().await`
+    // completions. When signalled, we call `join_set.abort_all()` to drop the
+    // in-flight LLM call futures (cancelling the underlying `reqwest` requests
+    // by dropping the task), discard any results from this iteration, and
+    // return `Ok(report)` with `report.errors.push("Cancelled")`. Already-
+    // completed batches' pages are preserved (single-batch: already on disk;
+    // multi-batch: in `collected_pages` but NOT written - the consolidation +
+    // write pass is skipped because we return early).
     let mut collected_pages: Vec<ParsedPage> = Vec::new();
     let mut completed = 0usize;
     while let Some(res) = join_set.join_next().await {
+        // Check for cancel between completions. When signalled, abort all
+        // remaining tasks and return early.
+        if cancel_token.is_some_and(|t| t.load(Ordering::SeqCst)) {
+            join_set.abort_all();
+            eprintln!("[wiki:diag] cancel detected during LLM batch; aborting remaining tasks");
+            report.errors.push("Cancelled".to_string());
+            // Drain any remaining join results to clean up the JoinSet.
+            while join_set.join_next().await.is_some() {}
+            return Ok(report);
+        }
         completed += 1;
         match res {
             Ok(Ok((batch_index, pages))) => {

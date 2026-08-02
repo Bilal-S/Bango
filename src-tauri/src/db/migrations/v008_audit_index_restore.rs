@@ -10,9 +10,9 @@
 //!
 //! The index backs two hot paths (`src-tauri/src/db/audit_repo.rs`):
 //! 1. The Article Detail audit trail query
-//!    (`WHERE article_id = ? ORDER BY timestamp DESC`) — without the index this
+//!    (`WHERE article_id = ? ORDER BY timestamp DESC`) - without the index this
 //!    is a full table scan of `audit_entries`, which grows unboundedly.
-//! 2. The `ON DELETE CASCADE` on `audit_entries.article_id` — a hard article
+//! 2. The `ON DELETE CASCADE` on `audit_entries.article_id` - a hard article
 //!    delete must find all matching audit rows; without the index that is
 //!    another full scan.
 //!

@@ -162,7 +162,9 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
 
 ## Testing
 
-- Rust: `cargo test` for unit and integration tests.
+- Run specific tests first before running overall test suite
+- Rust: normally run this to only get failing and ignored tests: `cargo test | grep -v " \.\.\. ok$"`
+- Rust: only run this if you need a list of all tests that have run: `cargo test` for unit and integration tests.
 - TypeScript: Vitest for unit tests.
 - Test file naming: `*.test.ts` for TS, `*_test.rs` or inline `#[cfg(test)]` for Rust.
 - Place Rust integration and database repository tests in the `src-tauri/tests/` directory.

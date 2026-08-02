@@ -262,11 +262,11 @@ fn export_frontmatter_carries_article_metadata() {
 }
 
 // -------------------------------------------------------------------------
-// prepare_all (article export + user files together)
+// load + write article exports + user files (lock-release split)
 // -------------------------------------------------------------------------
 
 #[test]
-fn prepare_all_runs_both_on_ramps() {
+fn load_and_write_included_articles_and_process_user_files() {
     let conn = test_db();
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
@@ -275,10 +275,70 @@ fn prepare_all_runs_both_on_ramps() {
     insert_with_status(&conn, sample_new_article("Art", "art abstract"), "included");
     std::fs::write(root.join("raw/notes.txt"), "user notes").unwrap();
 
-    let report = raw_export::prepare_all(&conn, root).unwrap();
-    assert_eq!(report.articles_written, 1);
-    assert_eq!(report.user_files_written, 1);
+    let articles = raw_export::load_included_articles(&conn).unwrap();
+    let article_report = raw_export::write_article_exports(root, &articles, None, None).unwrap();
+    let user_report = raw_export::process_user_files(root).unwrap();
+    assert_eq!(article_report.articles_written, 1);
+    assert_eq!(user_report.user_files_written, 1);
     assert!(root.join("raw/user-notes.md").exists());
+}
+
+// -------------------------------------------------------------------------
+// cancel aborts write_article_exports mid-loop (Phase A cancel)
+// -------------------------------------------------------------------------
+
+#[test]
+fn cancel_aborts_write_article_exports_mid_loop() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // Insert articles via the DB, then load them as proper `Article` values.
+    let conn = test_db();
+    let id1 = insert_with_status(&conn, sample_new_article("Article 1", "abstract 1"), "included");
+    let id2 = insert_with_status(&conn, sample_new_article("Article 2", "abstract 2"), "included");
+    let id3 = insert_with_status(&conn, sample_new_article("Article 3", "abstract 3"), "included");
+    let articles = raw_export::load_included_articles(&conn).unwrap();
+    assert_eq!(articles.len(), 3, "should have three included articles");
+    // Confirm the IDs match.
+    let ids: Vec<&str> = articles.iter().map(|a| a.id.as_str()).collect();
+    assert!(ids.contains(&id1.as_str()));
+    assert!(ids.contains(&id2.as_str()));
+    assert!(ids.contains(&id3.as_str()));
+
+    // Cancel signalled from the start.
+    let cancel = Arc::new(AtomicBool::new(true));
+    let report = raw_export::write_article_exports(root, &articles, None, Some(&cancel)).unwrap();
+    assert!(report.cancelled, "report should be cancelled");
+    assert_eq!(
+        report.articles_written, 0,
+        "no articles should be written when cancelled before first iteration"
+    );
+
+    // Not-yet-cancelled: the first article writes, then cancel fires.
+    let cancel2 = Arc::new(AtomicBool::new(false));
+    let count = std::cell::Cell::new(0usize);
+    let report2 = raw_export::write_article_exports(
+        root,
+        &articles,
+        Some(&|_idx, _total, _article_id| {
+            let n = count.get() + 1;
+            count.set(n);
+            // Signal cancel after the first article is written.
+            if n >= 1 {
+                cancel2.store(true, Ordering::SeqCst);
+            }
+        }),
+        Some(&cancel2),
+    )
+    .unwrap();
+    assert!(report2.cancelled, "report should be cancelled after first article");
+    assert_eq!(
+        report2.articles_written, 1,
+        "first article should be written before cancel took effect"
+    );
 }
 
 // -------------------------------------------------------------------------

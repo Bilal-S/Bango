@@ -26,6 +26,9 @@ mod search_lint;
 mod site_export;
 mod status;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 // Re-export every public symbol so callers + the lib.rs invoke-handler list
 // keep using `commands::wiki_cmd::<name>` without caring about the split.
 //
@@ -43,6 +46,8 @@ pub use raw_files::*;
 pub use search_lint::*;
 pub use site_export::*;
 pub use status::*;
+
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::Emitter;
@@ -98,4 +103,65 @@ pub(super) fn log_wiki_ingest_warnings(
     if let Err(e) = crate::db::audit_repo::log_error(conn, &summary) {
         eprintln!("[wiki] failed to log ingest warnings to audit table: {e}");
     }
+}
+
+/// Managed state holding the currently-active wiki ingest's cancel token, if
+/// any.
+///
+/// `Some` while an ingest is in flight; the frontend's `cancel_wiki_ingest`
+/// command calls `.cancel()` on it. The slot is cleared when the ingest
+/// returns (success, error, or cancel). Mirrors `ScrapingState` in
+/// `commands/scraping.rs`.
+///
+/// The cancel token is an `Arc<AtomicBool>` (not a `tokio::sync::Notify`)
+/// because the wiki ingest pipeline checks it between synchronous pre-seed
+/// steps (which run on the tokio runtime but do not `await`), not just inside
+/// `tokio::select!` branches. The `run_chunked_ingest` LLM-batch loop polls
+/// the same `AtomicBool` between `join_next().await` completions and calls
+/// `join_set.abort_all()` on cancel.
+#[derive(Default)]
+pub struct WikiIngestState {
+    active: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+impl WikiIngestState {
+    /// Lock the active-token slot, recovering from poison by taking the inner
+    /// guard. A poisoned mutex here means a panic occurred while a prior
+    /// `set_active`/`clear_active`/`cancel_active` held the lock; the slot is
+    /// still readable/writable, and the cancel contract is best-effort anyway
+    /// (the frontend's Stop button is the authoritative signal), so we recover
+    /// rather than propagate. Mirrors `ScrapingState::lock_active`.
+    fn lock_active(&self) -> std::sync::MutexGuard<'_, Option<Arc<AtomicBool>>> {
+        self.active.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Install `token` as the active ingest token. Returns the previously
+    /// active token (if any).
+    pub fn set_active(&self, token: Arc<AtomicBool>) -> Option<Arc<AtomicBool>> {
+        self.lock_active().replace(token)
+    }
+
+    /// Clear the active token slot. Called when the ingest returns.
+    pub fn clear_active(&self) {
+        *self.lock_active() = None;
+    }
+
+    /// Signal cancellation to the active token, if one is present. Safe to
+    /// call when no ingest is running (no-op).
+    pub fn cancel_active(&self) {
+        if let Some(token) = self.lock_active().as_ref() {
+            token.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// Check whether a cancel token (if present) has been signalled.
+///
+/// Pure helper - no Tauri state dependency. The wiki ingest pipeline calls
+/// this between each pre-seed step and between LLM batch completions to decide
+/// whether to abort early. `None` means no cancel token was threaded in (e.g.
+/// tests), so the pipeline runs to completion.
+#[must_use]
+pub fn is_cancelled(token: Option<&Arc<AtomicBool>>) -> bool {
+    token.is_some_and(|t| t.load(Ordering::SeqCst))
 }

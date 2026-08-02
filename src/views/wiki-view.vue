@@ -247,8 +247,12 @@ async function checkForUpdatesOnMount(): Promise<void> {
       await loadPages();
       graphPanelRef.value?.refresh();
     }
-  } catch {
-    // Non-fatal: the manual "Check for Updates" toolbar button is available.
+  } catch (e) {
+    // Non-fatal, but surface the message so a persistent backend failure is
+    // not silently hidden. The manual "Check for Updates" toolbar button
+    // remains available for retry.
+    const msg = e instanceof Error ? e.message : String(e);
+    toast.show(`Wiki update check failed: ${msg}`, 'error');
   }
 }
 
@@ -326,8 +330,11 @@ async function autoIngestIfStale(): Promise<void> {
       navHistory.clear();
       await loadPages();
       graphPanelRef.value?.refresh();
-    } catch {
-      // Non-fatal: user can manually rebuild via Actions -> Rebuild Wiki.
+    } catch (e) {
+      // Surface the actual error so the user is not left staring at a frozen
+      // spinner. The manual "Rebuild Wiki" toolbar action remains available.
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.show(`Wiki auto-update failed: ${msg}`, 'error');
     }
   }
 }

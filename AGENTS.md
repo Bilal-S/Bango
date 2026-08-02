@@ -626,6 +626,32 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     Single-batch runs (`batches.len() == 1`) skip all consolidation - the LLM sees
     all sources at once and produces a self-consistent page set, so the manifest,
     pre-seed, dedup, and link rewrite are zero-cost no-ops.
+    **Cancel-token + progress contract** (v2, see `.worktrees/wiki2.md`): all
+    three entry points (`wiki_ingest`, `wiki_rebuild`, `wiki_export_and_ingest`)
+    snapshot a fresh `Arc<AtomicBool>` into the managed `WikiIngestState`
+    (`commands/wiki_cmd/mod.rs`, mirrors `ScrapingState`) at start and clear it
+    on return. The frontend `cancel_wiki_ingest` command signals the active
+    token. The pipeline checks `is_cancelled` between each of the 7 pre-seed
+    steps in `build_batches_with_manifest` (on cancel: `Ok(Vec::new())` = empty
+    batches = no LLM calls) and between `join_next().await` completions in
+    `run_chunked_ingest` (on cancel: `join_set.abort_all()`, drop in-flight
+    results, return `Ok(report)` with `report.errors.push("Cancelled")`).
+    There is no `Cancelled` error variant - mirrors the screening engine's
+    `Ok(true)`/`Ok(false)` convention. The `WikiPrepProgressCb` callback fires
+    at each pre-seed step with `(step_pct, message)` in the 15-25% range so the
+    frontend progress bar advances past 15% with a meaningful phase label
+    instead of freezing silently. The `biblio_needs_refresh` flag gates
+    `run_full_normalization` (skip when fresh = the common case after visiting
+    the Bibliometrics dashboard). `[wiki:diag]` always-on logging (mirrors
+    `[screening:diag]`) emits phase transitions + cancel detection to stderr.
+    `raw_export::prepare_all_with_progress` splits the article load (under DB
+    lock) from the file writes (lock-free) so the CPU-bound
+    `structure_full_text` extraction does not block other IPC commands.
+    Tested in `tests/wiki_ingest_test.rs` (6 freeze tests) +
+    `src/__tests__/composables/use-wiki.test.ts` +
+    `src/__tests__/components/wiki-toolbar.test.ts` +
+    `src/__tests__/views/wiki-view.test.ts`; binding inventory in
+    `docs/test-plans/wiki-ingest-freeze-tests.md`.
     **Deterministic 5-layer pre-seed matrix** (`build_batches_with_manifest` in
     `commands/wiki_cmd/ingest.rs` (the `wiki_cmd` module is a directory since
     refactor v6), runs unconditionally before the LLM on every

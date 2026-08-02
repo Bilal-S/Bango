@@ -195,7 +195,12 @@ async fn build_batches_unconditionally_pre_seeds_authors_on_single_batch() {
     // pages exist on disk (written by the pre-seed, not the LLM).
     let (mut conn, root) = setup_db_with_authors();
     // Export raw sources so build_ingest_prompt_batches finds something.
-    bango_lib::wiki::raw_export::prepare_all(&conn, &root).unwrap();
+    // Use the lock-release split pattern: load under lock, write lock-free.
+    {
+        let articles = bango_lib::wiki::raw_export::load_included_articles(&conn).unwrap();
+        bango_lib::wiki::raw_export::write_article_exports(&root, &articles, None, None).unwrap();
+        bango_lib::wiki::raw_export::process_user_files(&root).unwrap();
+    }
     bango_lib::wiki::storage::scaffold_tree(&root).unwrap();
 
     // Run normalization so biblio_authors is populated.
@@ -209,7 +214,8 @@ async fn build_batches_unconditionally_pre_seeds_authors_on_single_batch() {
     let batches =
         ingest::build_ingest_prompt_batches(&root, 50_000, Some(&manifest), false).unwrap();
     let sender: Arc<dyn IngestLlmSender> = Arc::new(EmptySender);
-    let _report = ingest::run_chunked_ingest(&root, batches, sender, None, (25, 95)).await.unwrap();
+    let _report =
+        ingest::run_chunked_ingest(&root, batches, sender, None, (25, 95), None).await.unwrap();
 
     // Author pages exist despite the LLM returning nothing.
     let authors_dir = root.join("wiki/authors");

@@ -229,6 +229,19 @@ export function useWiki() {
   }
 
   /**
+   * Cancel any in-flight wiki ingest (rebuild / export-and-ingest / plain
+   * ingest). Signals the backend cancel token so the pipeline aborts between
+   * pre-seed steps or between LLM batch completions. Safe to call when no
+   * ingest is running (no-op). The progress bar clears when the backend
+   * returns the cancelled report.
+   *
+   * @returns void (the backend cancel command never fails)
+   */
+  async function cancelIngest(): Promise<void> {
+    await tauriCommand<void>('cancel_wiki_ingest');
+  }
+
+  /**
    * On-demand drift check: detect external edits to wiki .md files and
    * re-index them transparently without re-running the LLM ingest.
    *
@@ -289,6 +302,7 @@ export function useWiki() {
     ingestWiki,
     rebuild,
     exportAndIngest,
+    cancelIngest,
     checkForUpdates,
     resetState,
   };

@@ -36,6 +36,7 @@ const {
   rebuild,
   exportAndIngest,
   checkForUpdates,
+  cancelIngest,
   progress,
 } = useWiki();
 const toast = useToast();
@@ -656,6 +657,19 @@ function handleChat(): void {
       <span class="wiki-toolbar__progress-label">{{ progress.message }}</span>
     </div>
 
+    <!-- Cancel button: visible only during an active ingest (progress bar
+         is showing). Signals the backend cancel token so the pipeline aborts
+         between pre-seed steps or between LLM batch completions. -->
+    <button
+      v-if="progress"
+      class="wiki-toolbar__btn wiki-toolbar__btn--cancel"
+      title="Cancel the in-flight wiki ingest"
+      @click="cancelIngest"
+    >
+      <span class="material-symbols-outlined text-[18px]">stop_circle</span>
+      <span>Stop</span>
+    </button>
+
     <!-- Spacer pushes stats to the right -->
     <div v-if="!progress" class="flex-1"></div>
 
@@ -873,6 +887,18 @@ function handleChat(): void {
 .wiki-toolbar__btn--primary:hover:not(:disabled) {
   background-color: rgb(79 70 229); /* indigo-700 */
   color: #fff;
+}
+
+.wiki-toolbar__btn--cancel {
+  background-color: rgb(254 242 242); /* red-50 */
+  border-color: rgb(252 165 165); /* red-300 */
+  color: rgb(220 38 38); /* red-600 */
+}
+
+.wiki-toolbar__btn--cancel:hover:not(:disabled) {
+  background-color: rgb(254 226 226); /* red-200 */
+  border-color: rgb(248 113 113); /* red-400 */
+  color: rgb(185 28 28); /* red-700 */
 }
 
 /* Shared dropdown menu styling */

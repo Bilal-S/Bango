@@ -107,7 +107,8 @@ async fn multi_batch_ingest_consolidates_cross_batch_duplicates() {
     assert_eq!(batches.len(), 2, "expected exactly 2 batches for this fixture");
 
     let sender: Arc<dyn IngestLlmSender> = Arc::new(DupSimulatingSender);
-    let report = ingest::run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+    let report =
+        ingest::run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
     // Two pages came in; consolidation merged them into one.
     assert_eq!(report.pages_written, 1, "duplicate pages should consolidate to 1");
@@ -183,7 +184,8 @@ async fn single_batch_ingest_skips_consolidation() {
     }
 
     let sender: Arc<dyn IngestLlmSender> = Arc::new(SameSlugSender);
-    let report = ingest::run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+    let report =
+        ingest::run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
     // Single-batch path: both pages "written" (count = 2), last-write-wins on
     // disk. No consolidation happened (otherwise count would be 1).
@@ -223,7 +225,8 @@ async fn multi_batch_ingest_preserves_unrelated_pages() {
     }
 
     let sender: Arc<dyn IngestLlmSender> = Arc::new(DistinctSender);
-    let report = ingest::run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+    let report =
+        ingest::run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
     // Two unrelated pages, no merges.
     assert_eq!(report.pages_written, 2, "unrelated pages should not merge");

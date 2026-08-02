@@ -801,7 +801,7 @@ async fn run_chunked_ingest_processes_batches_in_parallel_and_writes_all_pages()
 
     let sender: Arc<dyn IngestLlmSender> =
         Arc::new(FakeSender { delay_ms: 30, fail_marker: None, omit_provenance: false });
-    let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
     // One page per source (6) regardless of how many batches.
     assert_eq!(report.pages_written, 6);
@@ -830,7 +830,7 @@ async fn run_chunked_ingest_continues_on_single_batch_failure() {
         fail_marker: Some("### Source: Article 0".to_string()),
         omit_provenance: false,
     });
-    let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
     // At least one error recorded, but other batches' pages still written.
     assert!(!report.errors.is_empty(), "expected at least one batch error");
@@ -852,7 +852,7 @@ async fn run_chunked_ingest_empty_when_no_batches() {
 
     let sender: Arc<dyn IngestLlmSender> =
         Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: false });
-    let report = run_chunked_ingest(root, Vec::new(), sender, None, (25, 95)).await.unwrap();
+    let report = run_chunked_ingest(root, Vec::new(), sender, None, (25, 95), None).await.unwrap();
     assert_eq!(report.pages_written, 0);
     assert!(report.errors.is_empty());
 }
@@ -872,7 +872,7 @@ async fn run_chunked_ingest_parallel_is_faster_than_sequential_sum() {
     let sender: Arc<dyn IngestLlmSender> =
         Arc::new(FakeSender { delay_ms: 100, fail_marker: None, omit_provenance: false });
     let start = std::time::Instant::now();
-    let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
     let elapsed = start.elapsed();
 
     // If sequential, elapsed >= batches * 100ms. Allow generous headroom
@@ -903,7 +903,7 @@ async fn run_chunked_ingest_reports_ungrounded_llm_pages() {
 
     let sender: Arc<dyn IngestLlmSender> =
         Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: true });
-    let report = run_chunked_ingest(root, batches, sender, None, (25, 95)).await.unwrap();
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
     // Pages are still written (gate is non-fatal).
     assert_eq!(report.pages_written, 3);
@@ -1088,6 +1088,165 @@ fn jaccard_similarity_disjoint_sets() {
     let b: HashSet<String> = ["beta"].iter().map(|s| s.to_string()).collect();
     let sim = jaccard_similarity(&a, &b);
     assert!((sim - 0.0).abs() < 0.001);
+}
+
+// -----------------------------------------------------------------
+// Wiki ingest freeze tests (T3.2 from .worktrees/wiki2.md)
+// -----------------------------------------------------------------
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// A sender that sleeps for a configurable delay, allowing the cancel token to
+/// be signalled mid-batch. Used by `cancel_token_aborts_during_llm_batch`.
+struct DelayedSender {
+    delay_ms: u64,
+}
+
+#[async_trait]
+impl IngestLlmSender for DelayedSender {
+    async fn send(&self, _prompt: &str) -> Result<String, AppError> {
+        tokio::time::sleep(std::time::Duration::from_millis(self.delay_ms)).await;
+        Ok("<!-- PAGE:dummy -->\n---\nid: dummy\ntitle: \"Dummy\"\ntype: concept\n\
+            slug: dummy\nsummary: \"\"\nstatus: draft\nlinks: []\n\
+            source_articles: [\"art-0\"]\n---\n\n# Dummy\n\nBody. [^art-art-0]\n"
+            .to_string())
+    }
+}
+
+#[tokio::test]
+async fn cancel_token_aborts_between_preseed_phases() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    let cancel = Arc::new(AtomicBool::new(true));
+
+    let sender: Arc<dyn IngestLlmSender> =
+        Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: false });
+    let report =
+        run_chunked_ingest(root, batches, sender, None, (25, 95), Some(&cancel)).await.unwrap();
+
+    assert!(
+        report.errors.iter().any(|e| e.contains("Cancelled")),
+        "expected Cancelled error, got: {:?}",
+        report.errors
+    );
+    assert_eq!(report.pages_written, 0);
+}
+
+#[tokio::test]
+async fn cancel_token_aborts_during_llm_batch() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 4, 2000);
+
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
+    assert!(batches.len() >= 2, "need multiple batches for this test");
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = Arc::clone(&cancel);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        cancel_clone.store(true, Ordering::SeqCst);
+    });
+
+    let sender: Arc<dyn IngestLlmSender> = Arc::new(DelayedSender { delay_ms: 200 });
+    let report =
+        run_chunked_ingest(root, batches, sender, None, (25, 95), Some(&cancel)).await.unwrap();
+
+    assert!(
+        report.errors.iter().any(|e| e.contains("Cancelled")),
+        "expected Cancelled error, got: {:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn progress_events_fire_for_each_preseed_step() {
+    let events: std::cell::RefCell<Vec<(usize, String)>> = std::cell::RefCell::new(Vec::new());
+    let cb: Option<&dyn Fn(usize, &str)> = Some(&|step, msg| {
+        events.borrow_mut().push((step, msg.to_string()));
+    });
+
+    let steps = [
+        (15, "Normalizing bibliometrics..."),
+        (16, "Preparing author pages..."),
+        (17, "Preparing synthesis pages..."),
+        (18, "Preparing concept hubs..."),
+        (19, "Preparing method hubs..."),
+        (20, "Preparing source pages..."),
+        (21, "Building LLM batches..."),
+    ];
+    for (step, msg) in &steps {
+        if let Some(f) = cb {
+            f(*step, msg);
+        }
+    }
+
+    let collected = events.borrow();
+    assert_eq!(collected.len(), 7, "all 7 pre-seed steps should fire the callback");
+    assert_eq!(collected[0].0, 15);
+    assert_eq!(collected[6].0, 21);
+    assert!(collected[0].1.contains("Normalizing"));
+    assert!(collected[6].1.contains("Building LLM batches"));
+}
+
+#[tokio::test]
+async fn normalization_skipped_when_biblio_fresh() {
+    let conn = Connection::open_in_memory().unwrap();
+    bango_lib::db::migration::run_migrations(&conn).unwrap();
+
+    conn.execute(
+        "INSERT INTO articles (id, title, status, authors, publication_year, abstract_text) \
+         VALUES ('art-1', 'Test', 'included', '[]', 2021, 'Abstract.')",
+        [],
+    )
+    .unwrap();
+
+    bango_lib::db::app_settings_repo::clear_biblio_needs_refresh(&conn);
+    assert!(!bango_lib::db::app_settings_repo::get_biblio_needs_refresh(&conn).unwrap());
+
+    let author_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM biblio_authors", [], |row| row.get(0)).unwrap_or(0);
+    assert_eq!(author_count, 0, "biblio_authors should be empty when normalization is skipped");
+}
+
+#[tokio::test]
+async fn normalization_error_is_non_fatal() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    bango_lib::db::migration::run_migrations(&conn).unwrap();
+
+    conn.execute(
+        "INSERT INTO articles (id, title, status, authors, publication_year, abstract_text) \
+         VALUES ('art-1', 'Test', 'included', '[]', 2021, 'Abstract.')",
+        [],
+    )
+    .unwrap();
+
+    bango_lib::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
+    assert!(bango_lib::db::app_settings_repo::get_biblio_needs_refresh(&conn).unwrap());
+
+    let result = bango_lib::db::biblio_repo::run_full_normalization(&mut conn);
+    let _ = result;
+}
+
+#[tokio::test]
+async fn wiki_ingest_emits_batch_progress_with_app_handle() {
+    use bango_lib::commands::wiki_cmd::{WikiProgress, WIKI_PIPELINE_TOTAL_STEPS};
+
+    let progress = WikiProgress {
+        step: 50,
+        total_steps: WIKI_PIPELINE_TOTAL_STEPS,
+        message: "Processed batch 1/2: 3 pages".to_string(),
+    };
+
+    let json = serde_json::to_string(&progress).unwrap();
+    assert!(json.contains("\"step\":50"), "step field should serialize: {json}");
+    assert!(json.contains("\"totalSteps\":100"), "totalSteps should be camelCase: {json}");
+    assert!(json.contains("\"message\""), "message field should serialize: {json}");
 }
 
 // Reference the ingest module so unused-import warnings stay clean when

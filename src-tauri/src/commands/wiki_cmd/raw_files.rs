@@ -11,14 +11,29 @@ use serde::Serialize;
 
 /// Prepare raw sources: export included articles AND process user-dropped files.
 /// Runs both on-ramps in sequence. Idempotent.
+///
+/// The DB lock is released before the CPU-bound extraction so other IPC
+/// commands are not blocked during the 0-15% "Preparing raw sources..." phase.
 #[tauri::command]
 pub fn wiki_export_raw(
     db_state: tauri::State<'_, DbState>,
 ) -> Result<raw_export::RawExportReport, AppError> {
-    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    let root = storage::resolve_root(&conn)?;
-    let report = raw_export::prepare_all(&conn, &root)?;
-    Ok(report)
+    let (root, articles) = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let root = storage::resolve_root(&conn)?;
+        let articles = raw_export::load_included_articles(&conn)?;
+        (root, articles)
+    };
+    let article_report = raw_export::write_article_exports(&root, &articles, None, None)?;
+    let user_report = raw_export::process_user_files(&root)?;
+    Ok(raw_export::RawExportReport {
+        articles_written: article_report.articles_written,
+        articles_skipped: article_report.articles_skipped,
+        user_files_written: user_report.user_files_written,
+        user_files_skipped: user_report.user_files_skipped,
+        user_files_unsupported: user_report.user_files_unsupported,
+        ..Default::default()
+    })
 }
 
 /// Add a user-selected file to `raw/` and extract its companion `.md` immediately.

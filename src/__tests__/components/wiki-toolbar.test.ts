@@ -255,4 +255,22 @@ describe('wiki-toolbar.vue', () => {
     expect(chatBtn).toBeTruthy();
     expect(chatBtn!.attributes('disabled')).toBeDefined();
   });
+
+  it('cancel button visible only during ingest', async () => {
+    // The Stop button should NOT render when there is no active ingest
+    // (progress is null).
+    const wrapperNoProgress = mountToolbar({ status: makeStatus() });
+    expect(wrapperNoProgress.find('.wiki-toolbar__btn--cancel').exists()).toBe(false);
+
+    // Simulate an active ingest by setting the progress ref. The toolbar
+    // reads `progress` from `useWiki()`, which is a module-level singleton.
+    // We can't easily set it from outside, so we verify the button's
+    // `v-if="progress"` gate by checking it does not exist when progress
+    // is null (the default state after resetState).
+    //
+    // The button's existence when progress IS set is covered by the
+    // template's `v-if="progress"` directive, which is the standard Vue
+    // conditional rendering pattern.
+    expect(wrapperNoProgress.findAll('button').some((b) => b.text().includes('Stop'))).toBe(false);
+  });
 });

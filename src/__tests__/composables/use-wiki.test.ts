@@ -461,6 +461,15 @@ describe('use-wiki', () => {
     });
   });
 
+  describe('cancelIngest', () => {
+    it('cancelIngest invokes cancel_wiki_ingest', async () => {
+      mockTauriCommand.mockResolvedValue(undefined);
+      const wiki = useWiki();
+      await wiki.cancelIngest();
+      expect(mockTauriCommand).toHaveBeenCalledWith('cancel_wiki_ingest');
+    });
+  });
+
   describe('resetState', () => {
     it('clears all shared singleton state', async () => {
       // Populate state by fetching status.

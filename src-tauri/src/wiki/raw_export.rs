@@ -18,6 +18,8 @@
 //! us skip unchanged sources on re-runs.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use lopdf::{Document as LopdfDocument, Object as LopdfObject};
 use rusqlite::Connection;
@@ -44,6 +46,9 @@ pub struct RawExportReport {
     pub user_files_skipped: usize,
     /// Files whose extension has no extractor (reported, not fatal).
     pub user_files_unsupported: Vec<String>,
+    /// Whether the operation was cancelled mid-loop (Phase A cancel).
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -263,19 +268,58 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Export all `status = 'included'` articles to `raw/{article_id}.md`.
-/// Idempotent: skips articles whose content hash is unchanged since last export.
-pub fn export_included_articles(
-    conn: &Connection,
+/// Progress callback for `write_article_exports`. Mirrors `ChunkProgressCb`
+/// in `commands/full_text.rs`: `(index, total, article_id)`. The caller emits
+/// `wiki:progress` events in the 0-15% range so the user sees per-article
+/// progress during the "Preparing raw sources..." phase instead of a silent
+/// freeze.
+pub type ArticleExportProgressCb<'a> = Option<&'a dyn Fn(usize, usize, &str)>;
+
+/// Load all `status = 'included'` articles from the DB. This is the only phase
+/// that needs the DB lock; the returned `Vec<Article>` carries `full_text` in
+/// memory so the subsequent `write_article_exports` phase can run lock-free.
+/// Splitting the load from the write is the batch-import Phase 1 lesson
+/// (`attach_full_text_split`): hold the lock only for the row read, run the
+/// CPU-bound `structure_full_text` extraction without the lock so other
+/// DB-touching IPC commands are not blocked.
+pub fn load_included_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
+    article_repo::get_articles_by_status(conn, "included")
+}
+
+/// Write loaded articles to `raw/{article_id}.md`. Idempotent: skips articles
+/// whose content hash is unchanged since last export. The `progress_cb` fires
+/// after each article so the caller can emit `wiki:progress` events in the
+/// 0-15% range.
+///
+/// This function does NOT touch the DB - the `Article` struct carries
+/// `full_text` in memory - so the caller can release the DB lock before
+/// calling it.
+///
+/// `cancel` is checked at the top of each iteration. On signal the function
+/// returns `Ok(report)` with `report.cancelled = true` (the articles already
+/// written are preserved). Pass `None` when no cancel token is threaded in
+/// (e.g. synchronous `wiki_export_raw` or tests).
+pub fn write_article_exports(
     root: &Path,
+    articles: &[Article],
+    progress_cb: ArticleExportProgressCb<'_>,
+    cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<RawExportReport, AppError> {
     let raw_dir = root.join("raw");
     std::fs::create_dir_all(&raw_dir)?;
 
-    let articles = article_repo::get_articles_by_status(conn, "included")?;
+    let total = articles.len();
     let mut report = RawExportReport::default();
 
-    for article in &articles {
+    for (idx, article) in articles.iter().enumerate() {
+        // Phase A cancel: checked before each article so Stop works during
+        // "Preparing raw sources..." (0-15%). Already-written files are
+        // preserved; a cancelled report surfaces via `report.cancelled`.
+        if cancel.is_some_and(|t| t.load(Ordering::SeqCst)) {
+            report.cancelled = true;
+            return Ok(report);
+        }
+
         let (content, content_source) = article_content(article);
         let body = article_body(article, &content, content_source);
         let source_hash = hash_str(&body);
@@ -286,6 +330,9 @@ pub fn export_included_articles(
         if let Ok((existing_fm, _)) = frontmatter::read_file(&path) {
             if existing_fm.get("source_hash") == Some(source_hash.as_str()) {
                 report.articles_skipped += 1;
+                if let Some(cb) = progress_cb {
+                    cb(idx + 1, total, &article.id);
+                }
                 continue;
             }
         }
@@ -294,9 +341,26 @@ pub fn export_included_articles(
         fm.set("source_hash", &source_hash);
         frontmatter::write_file(&path, &fm, &body)?;
         report.articles_written += 1;
+        if let Some(cb) = progress_cb {
+            cb(idx + 1, total, &article.id);
+        }
     }
 
     Ok(report)
+}
+
+/// Export all `status = 'included'` articles to `raw/{article_id}.md`.
+/// Idempotent: skips articles whose content hash is unchanged since last export.
+///
+/// This is the legacy single-call wrapper. Prefer `load_included_articles` +
+/// `write_article_exports` in new callers so the lock is released during the
+/// CPU-bound extraction and cancel can be threaded through.
+pub fn export_included_articles(
+    conn: &Connection,
+    root: &Path,
+) -> Result<RawExportReport, AppError> {
+    let articles = load_included_articles(conn)?;
+    write_article_exports(root, &articles, None, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -650,19 +714,6 @@ pub fn process_user_files(root: &Path) -> Result<RawExportReport, AppError> {
     }
 
     Ok(report)
-}
-
-/// Run both on-ramps: article export + user-file processing.
-pub fn prepare_all(conn: &Connection, root: &Path) -> Result<RawExportReport, AppError> {
-    let article_report = export_included_articles(conn, root)?;
-    let user_report = process_user_files(root)?;
-    Ok(RawExportReport {
-        articles_written: article_report.articles_written,
-        articles_skipped: article_report.articles_skipped,
-        user_files_written: user_report.user_files_written,
-        user_files_skipped: user_report.user_files_skipped,
-        user_files_unsupported: user_report.user_files_unsupported,
-    })
 }
 
 /// Copy a user-selected file into `raw/` and extract its companion `.md` immediately.
