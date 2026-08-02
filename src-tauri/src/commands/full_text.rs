@@ -617,6 +617,18 @@ pub fn delete_full_text(
         );
     }
 
+    // Clear embeddings for the article alongside chunks. Embeddings are
+    // regenerable derived artifacts and should be removed when the source full
+    // text is deleted so stale vectors don't survive. Non-fatal: a missing
+    // table on an older DB is logged to the audit trail and the operation
+    // continues.
+    if let Err(e) = crate::db::embedding_repo::delete_embeddings_for_article(&conn, &article_id) {
+        let _ = crate::db::audit_repo::log_error(
+            &conn,
+            &format!("Failed to clear embeddings for article {article_id}: {e}"),
+        );
+    }
+
     // Removing the full text downgrades the content source for the wiki ingest
     // (falls back to ai_summary or abstract). Mark stale so the next visit
     // re-ingests with the correct content.
