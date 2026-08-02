@@ -121,8 +121,7 @@ async fn wiki_ingest_inner(
     // LLM batch dispatch - skipped when unconfigured. The pre-seed pages are
     // already on disk; finalize_ingest will FTS5-index them regardless.
     let mut report = if skip_llm {
-        let mut r = ingest::IngestReport::default();
-        r.pages_written = pre_seed_pages;
+        let mut r = ingest::IngestReport { pages_written: pre_seed_pages, ..Default::default() };
         r.errors.push(
             "LLM not configured: deterministic pre-seed pages written, \
              LLM synthesis skipped."
@@ -440,8 +439,7 @@ async fn wiki_rebuild_inner(
     // LLM batch dispatch - skipped when unconfigured. The pre-seed pages are
     // already on disk; finalize_ingest will FTS5-index them regardless.
     let mut report = if skip_llm {
-        let mut r = ingest::IngestReport::default();
-        r.pages_written = pre_seed_pages;
+        let mut r = ingest::IngestReport { pages_written: pre_seed_pages, ..Default::default() };
         r.errors.push(
             "LLM not configured: deterministic pre-seed pages written, \
              LLM synthesis skipped."
@@ -590,8 +588,7 @@ async fn wiki_export_and_ingest_inner(
     // LLM batch dispatch - skipped when unconfigured. The pre-seed pages are
     // already on disk; finalize_ingest will FTS5-index them regardless.
     let mut report = if skip_llm {
-        let mut r = ingest::IngestReport::default();
-        r.pages_written = pre_seed_pages;
+        let mut r = ingest::IngestReport { pages_written: pre_seed_pages, ..Default::default() };
         r.errors.push(
             "LLM not configured: deterministic pre-seed pages written, \
              LLM synthesis skipped."

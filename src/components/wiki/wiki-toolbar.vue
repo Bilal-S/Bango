@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useWiki } from '@/composables/use-wiki';
@@ -52,10 +52,16 @@ const deleting = ref(false);
 const rebuilding = ref(false);
 const checkingUpdates = ref(false);
 const generatingSite = ref(false);
+const cancelling = ref(false);
 const showExportDialog = ref(false);
 const exportTitle = ref('');
 const wikiGenerated = ref(false);
 const lintReport = ref<import('@/types/wiki').LintReport | null>(null);
+
+// Reset the cancelling flag when progress clears (backend completed/cancelled).
+watch(progress, (val) => {
+  if (val === null) cancelling.value = false;
+});
 
 async function handleInit(): Promise<void> {
   try {
@@ -663,11 +669,17 @@ function handleChat(): void {
     <button
       v-if="progress"
       class="wiki-toolbar__btn wiki-toolbar__btn--cancel"
+      :disabled="cancelling"
       title="Cancel the in-flight wiki ingest"
-      @click="cancelIngest"
+      @click="
+        async () => {
+          cancelling = true;
+          await cancelIngest();
+        }
+      "
     >
       <span class="material-symbols-outlined text-[18px]">stop_circle</span>
-      <span>Stop</span>
+      <span>{{ cancelling ? 'Cancelling...' : 'Stop' }}</span>
     </button>
 
     <!-- Spacer pushes stats to the right -->
