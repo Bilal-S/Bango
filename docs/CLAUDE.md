@@ -8,7 +8,7 @@
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): description`.
   Never auto-add your agent name as a co-author (`Co-Authored-By:` trailer) to commit messages.
 - Never manually modify `CHANGELOG.md` or any file marked as auto-generated.
-- Never use the emdash character (`—`).  
+- Never use the emdash (&mdash;) character (`—`) in any generated text.  
   Use a plain dash (`-`) instead in all generated text and comments.
 
 ## Engineering Principles
@@ -92,7 +92,7 @@
   sections (more than two lines), use standard block comments (`/* ... */`),
   NOT repeated `//` line comments.
 - Use single-line `//` comments only for short notes (one to two lines).
-- Never use the emdash character; use a plain dash (`-`) in all comments.
+- Never use the emdash (&mdash;) character. Use a plain dash (`-`) in all comments.
 
 ### File Organization
 - `src/components/` - reusable Vue components.

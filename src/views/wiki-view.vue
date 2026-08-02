@@ -81,6 +81,7 @@ const { handleDeleteArticle } = useArticleDelete({
 
 const checkingLlm = ref(true);
 const isLlmConfigured = ref(false);
+const llmBannerDismissed = ref(false);
 
 const pages = ref<WikiPageSummary[]>([]);
 
@@ -552,6 +553,31 @@ watch(searchQuery, (q) => {
       />
     </header>
 
+    <!-- LLM not configured but pages exist: slim horizontal warning banner
+         (mirrors the PDF fallback banner in full-text-reader.vue). -->
+    <div
+      v-if="!isLlmConfigured && hasPages && !llmBannerDismissed"
+      class="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-800 text-xs shrink-0"
+    >
+      <span class="material-symbols-outlined text-[16px] shrink-0">warning</span>
+      <span class="flex-1">
+        LLM Provider Not Configured - pre-seed pages are available, but LLM synthesis is disabled.
+      </span>
+      <button
+        class="text-xs font-medium text-amber-800 hover:text-amber-900 hover:underline shrink-0"
+        @click="goToSettings"
+      >
+        Configure LLM Settings
+      </button>
+      <button
+        class="material-symbols-outlined text-[16px] text-amber-500 hover:text-amber-800 cursor-pointer shrink-0"
+        title="Dismiss"
+        @click="llmBannerDismissed = true"
+      >
+        close
+      </button>
+    </div>
+
     <div v-if="checkingLlm || loading" class="flex-1 flex items-center justify-center">
       <div class="text-center">
         <div
@@ -563,7 +589,11 @@ watch(searchQuery, (q) => {
       </div>
     </div>
 
-    <div v-else-if="!isLlmConfigured" class="flex-1 flex items-center justify-center p-6">
+    <!-- LLM not configured: full-page card when no pages exist yet -->
+    <div
+      v-else-if="!isLlmConfigured && !hasPages"
+      class="flex-1 flex items-center justify-center p-6"
+    >
       <div
         class="max-w-md w-full bg-white rounded-2xl border border-slate-200 shadow-sm p-6 text-center animate-fade-in"
       >
