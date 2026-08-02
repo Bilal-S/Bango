@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
+import { ref, computed, nextTick, onMounted, watch } from 'vue';
 import type { Article } from '@/types';
 import StatusBadge from './status-badge.vue';
 import { getPublicationTypeLabel } from '@/utils/formatters';
+import { invoke } from '@tauri-apps/api/core';
 
 const props = defineProps<{
   article: Article;
@@ -98,6 +99,39 @@ function cancelTitle(): void {
   titleDraft.value = '';
   titleError.value = null;
 }
+
+// ── Original title (pre-translation) ──────────────────────────────────
+// Fetched on-demand only for translated articles so untranslated ones
+// incur zero DB cost. The original title is stored in
+// `article_original_content` and surfaced here in brackets alongside the
+// translated English title.
+const originalTitle = ref<string | null>(null);
+
+async function fetchOriginalTitle(): Promise<void> {
+  if (!props.article.isTranslated) {
+    originalTitle.value = null;
+    return;
+  }
+  try {
+    originalTitle.value = await invoke<string | null>('get_original_title', {
+      articleId: props.article.id,
+    });
+  } catch {
+    originalTitle.value = null;
+  }
+}
+
+onMounted(() => {
+  void fetchOriginalTitle();
+});
+
+// Re-fetch when navigating to a different article in the same panel.
+watch(
+  () => props.article.id,
+  () => {
+    void fetchOriginalTitle();
+  }
+);
 </script>
 
 <template>
@@ -251,7 +285,13 @@ function cancelTitle(): void {
       title="Double-click to edit"
       @dblclick="startEditTitle"
     >
-      {{ article.title }}
+      {{ article.title
+      }}<span
+        v-if="originalTitle && originalTitle !== article.title"
+        class="text-slate-400 text-base font-normal"
+      >
+        ({{ originalTitle }})
+      </span>
     </h2>
   </div>
 </template>

@@ -466,6 +466,20 @@ pub fn biblio_get_journal_info(
     crate::db::journal_repo::get_journal_info(&conn, &journal_index_id)
 }
 
+/// Fetch the original (pre-translation) title for an article, if any.
+/// Returns `None` when the article has not been translated or no original
+/// content is archived. Used by the frontend detail-header to display the
+/// original title in brackets alongside the translated English title.
+#[tauri::command]
+pub fn get_original_title(
+    db_state: State<'_, DbState>,
+    article_id: String,
+) -> Result<Option<String>, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let content = crate::db::article_original_repo::get_original_content(&conn, &article_id)?;
+    Ok(content.and_then(|c| c.original_title))
+}
+
 /// Interactive journal search for the article-metadata autocomplete. Returns
 /// candidate `journal_index` rows ranked by ISSN, exact name, then LIKE
 /// substring (shortest title first). Unlike the automatic `match_journal`,
