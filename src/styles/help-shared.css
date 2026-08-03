@@ -2,8 +2,9 @@
  * Shared styles for Help Guide tab components.
  *
  * These classes are reused across multiple help tabs (About cards, Footer cards,
- * Demo tile, intro sections). Import this file from each `help-tab-*.vue` component
- * so the visual language stays consistent without duplicating CSS.
+ * Demo tile, intro sections, and step cards). Import this file from each
+ * `help-tab-*.vue` component so the visual language stays consistent without
+ * duplicating CSS.
  *
  * NOTE: These styles are intentionally NOT scoped. Each consuming component wraps
  * its template in a unique root class (e.g. `.ht-guide`, `.ht-biblio`) so the
@@ -260,12 +261,163 @@
   }
 }
 
+/* ===================== STEP CARDS ===================== */
+/*
+ * Shared numbered step-card pattern used by help-tab-guide.vue (User Guide)
+ * and help-tab-zotero.vue (Using Zotero). Each step is a numbered indicator
+ * with a connecting line, plus a card holding the icon, title, summary,
+ * details list, and an optional "Go to" button.
+ */
+
+.ht-guide__steps,
+.ht-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+}
+
+.ht-step {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.ht-step + .ht-step {
+  margin-top: 0;
+}
+
+.ht-step__indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ht-step__number {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #4f46e5;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  flex-shrink: 0;
+}
+
+.ht-step__line {
+  width: 2px;
+  flex: 1;
+  background-color: #c7d2fe;
+  margin-top: var(--space-2);
+}
+
+.ht-step__card {
+  flex: 1;
+  background-color: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
+}
+
+.ht-step__card-header {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.ht-step__icon {
+  font-size: 22px;
+  color: #4f46e5;
+  flex-shrink: 0;
+}
+
+.ht-step__card-title-area {
+  flex: 1;
+}
+
+.ht-step__title {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin: 0 0 var(--space-1) 0;
+}
+
+.ht-step__summary {
+  font-size: var(--font-size-body);
+  color: var(--color-on-surface-variant);
+  margin: 0;
+}
+
+.ht-step__details {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-3) 0;
+}
+
+.ht-step__detail {
+  position: relative;
+  padding-left: var(--space-4);
+  font-size: var(--font-size-body);
+  color: var(--color-on-surface-variant);
+  line-height: var(--line-height-body);
+  margin-bottom: var(--space-2);
+}
+
+.ht-step__detail::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #4f46e5;
+}
+
+.ht-step__detail:last-child {
+  margin-bottom: 0;
+}
+
+.ht-step__go-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background-color: #eef2ff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+  font-family: inherit;
+}
+
+.ht-step__go-btn:hover {
+  background-color: #4f46e5;
+  color: #ffffff;
+}
+
+.ht-step__go-icon {
+  font-size: 16px;
+}
+
 /* ===================== RESPONSIVE ===================== */
 
 @media (max-width: 767px) {
   .ht-footer-card,
   .ht-demo-card,
   .ht-about-card {
+    flex-direction: column;
+  }
+
+  .ht-step__card-header {
     flex-direction: column;
   }
 }

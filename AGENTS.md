@@ -1734,7 +1734,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `biblio-authors.vue` is the Author Productivity Ranking view (sortable table + slide-over
     detail panel + Google Scholar external lookup icons). `help-guide.vue` is the `/help` shell
     (tab bar + `?tab=`/`#hash` deep-link routing) that renders one `help-tab-*.vue` component
-    per tab (guide, bibliometrics, troubleshooting, local-ai, reference); the Bibliometrics tab
+    per tab (guide, bibliometrics, troubleshooting, local-ai, zotero, reference); the Bibliometrics tab
     documents all six completed modules. `help-tab-reference.vue` is the sidebar +
     scroll-spy Reference tab; the Wiki section (`ref-wiki`, nav icon `local_library`) sits
     under Chat Assistant and covers the wiki-root layout, getting-started workflow, supported
@@ -1817,9 +1817,12 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `update:modelValue` (v-model, every keystroke), `clear` (ONLY when "x" is clicked),
     `enter` (forwarded keyup.enter), `input`/`focus`/`blur` (forwarded). The canonical
     place for the clearable-input pattern going forward. `journal-info-card.vue` lazily loads
-    journal metadata via the `biblio_get_journal_info` command. `help/` holds the five
-    `help-tab-*.vue` tab components consumed by `help-guide.vue`; shared card styles live in
-    `src/styles/help-shared.css`. `settings/` holds the settings sub-components consumed by
+    journal metadata via the `biblio_get_journal_info` command. `help/` holds the six
+    `help-tab-*.vue` tab components consumed by `help-guide.vue` (guide, bibliometrics,
+    troubleshooting, local-ai, zotero, reference); shared card + step-card styles live in
+    `src/styles/help-shared.css` (the numbered `ht-step__*` pattern was promoted from
+    `help-tab-guide.vue` scoped CSS so both the User Guide and the Using Zotero tabs reuse
+    it). `settings/` holds the settings sub-components consumed by
     `settings-view.vue`: `settings-provider-card.vue` (consolidated AI Provider box - warning +
     connection details + parameters + Revert/Get Models/Test Connection + test-result/error
     feedback in one bordered `<section>`;

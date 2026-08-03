@@ -6,8 +6,9 @@ import HelpTabBibliometrics from '@/components/help/help-tab-bibliometrics.vue';
 import HelpTabTroubleshooting from '@/components/help/help-tab-troubleshooting.vue';
 import HelpTabLocalAi from '@/components/help/help-tab-local-ai.vue';
 import HelpTabReference from '@/components/help/help-tab-reference.vue';
+import HelpTabZotero from '@/components/help/help-tab-zotero.vue';
 
-type HelpTab = 'guide' | 'biblio' | 'troubleshoot' | 'local-ai' | 'reference';
+type HelpTab = 'guide' | 'biblio' | 'troubleshoot' | 'local-ai' | 'zotero' | 'reference';
 
 const route = useRoute();
 const activeTab = ref<HelpTab>('guide');
@@ -31,6 +32,7 @@ onMounted(() => {
     tab === 'local-ai' ||
     tab === 'guide' ||
     tab === 'biblio' ||
+    tab === 'zotero' ||
     tab === 'reference'
   ) {
     activeTab.value = tab as HelpTab;
@@ -53,6 +55,7 @@ watch(
       newTab === 'local-ai' ||
       newTab === 'guide' ||
       newTab === 'biblio' ||
+      newTab === 'zotero' ||
       newTab === 'reference'
     ) {
       activeTab.value = newTab as HelpTab;
@@ -85,6 +88,7 @@ function handleSwitchTab(tab: string): void {
     tab === 'biblio' ||
     tab === 'troubleshoot' ||
     tab === 'local-ai' ||
+    tab === 'zotero' ||
     tab === 'reference'
   ) {
     activeTab.value = tab as HelpTab;
@@ -147,6 +151,16 @@ function handleSwitchTab(tab: string): void {
       </button>
       <button
         class="help-tabs__btn"
+        :class="{ 'help-tabs__btn--active': activeTab === 'zotero' }"
+        role="tab"
+        :aria-selected="activeTab === 'zotero'"
+        @click="activeTab = 'zotero'"
+      >
+        <span class="material-symbols-outlined help-tabs__icon">book_4</span>
+        Using Zotero
+      </button>
+      <button
+        class="help-tabs__btn"
         :class="{ 'help-tabs__btn--active': activeTab === 'reference' }"
         role="tab"
         :aria-selected="activeTab === 'reference'"
@@ -162,6 +176,7 @@ function handleSwitchTab(tab: string): void {
     <HelpTabBibliometrics v-else-if="activeTab === 'biblio'" />
     <HelpTabTroubleshooting v-else-if="activeTab === 'troubleshoot'" />
     <HelpTabLocalAi v-else-if="activeTab === 'local-ai'" :initial-hash="routeHash" />
+    <HelpTabZotero v-else-if="activeTab === 'zotero'" />
     <HelpTabReference
       v-else-if="activeTab === 'reference'"
       :initial-hash="routeHash"
