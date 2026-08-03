@@ -2,18 +2,28 @@
 import { computed, nextTick, ref } from 'vue';
 import TagChip from '@/components/tag-chip.vue';
 import LabelChip from '@/components/label-chip.vue';
+import ClearableInput from '@/components/clearable-input.vue';
 import { getColorScheme } from '@/utils/color';
+import { useTagLabelFilter, type FilterableItem } from '@/composables/use-tag-label-filter';
 import type { TagWithCount, LabelWithCount } from '@/types';
 
 /**
  * Shared panel for the Tags & Labels screen. Renders the header (with the
- * panel-level "Suggest with AI" action), the add-input row, and the chip
- * list with inline edit / color / filter / delete affordances.
+ * panel-level "Suggest with AI" action), the add-input row, the sticky
+ * filter/sort sub-bar, and the chip list with inline edit / color / filter /
+ * delete affordances.
  *
  * Extracted from `tag-label-management.vue` where the tag and label panels
  * were ~140 lines of near-identical markup. Both kinds are driven from one
  * implementation; `kind` selects the chip component, accent color, copy,
  * and tooltips.
+ *
+ * Filter/sort bar (Option A): a thin sticky sub-bar lives at the top of the
+ * scrolling chip area. It carries a filter toggle, two sort buttons
+ * (`alpha` = A-Z, `frequency` = 1-100), and a caret that expands/collapses a
+ * filter input row (`ClearableInput`). Each panel owns its own state (the two
+ * panels do not share filter/sort). State is not persisted. Default sort is
+ * alpha A-Z ascending so the initial view matches the historical behavior.
  */
 
 type Kind = 'tag' | 'label';
@@ -45,6 +55,7 @@ const config = computed(() => {
       placeholder: 'Add new tag...',
       addAria: 'Add tag',
       empty: 'No tags yet.',
+      noMatch: 'No matching tags.',
       suggestTooltip: 'Suggest tags from your article corpus using AI',
       accentText: 'text-primary',
       accentFocus: 'focus:border-primary focus:ring-primary',
@@ -60,6 +71,7 @@ const config = computed(() => {
     placeholder: 'Add new label...',
     addAria: 'Add label',
     empty: 'No labels yet.',
+    noMatch: 'No matching labels.',
     suggestTooltip: 'Suggest labels from your articles using AI',
     accentText: 'text-secondary',
     accentFocus: 'focus:border-secondary focus:ring-secondary',
@@ -67,6 +79,17 @@ const config = computed(() => {
     accentHover: 'hover:text-secondary',
   };
 });
+
+// ── Filter + sort bar state ────────────────────────────────────────────
+// Each panel owns its own instance; state is not persisted. `props.items`
+// flows through as the reactive source so displayItems stays in sync with
+// store mutations (create/rename/delete/merge/suggest). The explicit
+// `<FilterableItem>` type param unifies the `TagWithCount[] | LabelWithCount[]`
+// prop union onto the structural supertype both kinds satisfy (the union
+// itself is not assignable to either concrete array type). The template only
+// reads `id`/`name`/`color`/`articleCount`, all of which live on
+// `FilterableItem`, so the narrower `source` field is correctly irrelevant.
+const filter = useTagLabelFilter<FilterableItem>(() => props.items);
 
 // ── Add input ──────────────────────────────────────────────────────────
 const newName = ref('');
@@ -157,7 +180,7 @@ function confirmDelete(): void {
 <template>
   <section
     ref="rootEl"
-    class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col min-h-[400px] lg:h-[700px]"
+    class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col min-h-[400px] lg:max-h-[700px]"
   >
     <!-- Panel header: title + count badge + Suggest action -->
     <div class="p-4 lg:p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
@@ -225,142 +248,281 @@ function confirmDelete(): void {
 
     <!-- Chip list. `TransitionGroup` wraps the rows so a delete animates
          (shrink + fade) instead of vanishing instantly. Mirrors the AI-card
-         transition in `article-detail-panel.vue`. -->
-    <div class="p-4 lg:p-5 overflow-y-auto flex-1">
-      <TransitionGroup name="tlp-row" tag="div" class="space-y-3">
-        <div
-          v-for="item in items"
-          :key="item.id"
-          class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
-        >
-          <div class="flex items-center gap-3 flex-1 min-w-0">
-            <template v-if="editingId === item.id">
-              <input
-                v-model="editingName"
-                class="tlp-edit-input px-2 py-1 bg-surface-container-lowest border rounded-lg font-mono text-mono text-on-surface transition-all w-full min-w-0"
-                :class="config.accentBorder + ' focus:ring-1 ' + config.accentFocus"
-                @keyup.enter="commitEdit"
-                @keyup.escape="cancelEdit"
-                @blur="commitEdit"
-              />
-            </template>
-            <template v-else>
-              <span
-                class="cursor-pointer"
-                title="Double-click to edit"
-                @dblclick="startEdit(item.id, item.name)"
-              >
-                <TagChip
-                  v-if="kind === 'tag'"
-                  :name="item.name"
-                  :color="item.color"
-                  :count="item.articleCount"
-                />
-                <LabelChip
-                  v-else
-                  :name="item.name"
-                  :color="item.color"
-                  :count="item.articleCount"
-                />
-              </span>
-            </template>
-          </div>
-          <div class="flex items-center flex-shrink-0">
-            <div
-              class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+         transition in `article-detail-panel.vue`. The sticky filter/sort
+         sub-bar (Option A) pins to the top of this scroll area. -->
+    <div class="overflow-y-auto flex-1">
+      <!-- Sticky filter/sort sub-bar. Collapsed by default to a single thin
+           row (filter icon + two sort buttons + caret). Clicking the row or
+           the caret expands a ClearableInput below it. `sticky top-0 z-10`
+           keeps the bar visible while chips scroll under it; the surface
+           background + bottom border prevent bleed-through. -->
+      <div
+        class="sticky top-0 z-10 bg-surface-bright border-b border-surface-variant px-4 lg:px-5 py-2"
+      >
+        <div class="flex items-center gap-2">
+          <!-- Filter toggle (icon-only; the row itself is also clickable) -->
+          <button
+            type="button"
+            class="p-1 rounded transition-colors hover:bg-surface-variant"
+            :class="filter.filterOpen.value ? config.accentText : 'text-outline'"
+            :title="`Filter ${config.noun}s`"
+            :aria-label="`Filter ${config.noun}s`"
+            :aria-expanded="filter.filterOpen.value"
+            aria-controls="tlp-filter-row"
+            @click="filter.toggleFilterOpen()"
+          >
+            <span class="material-symbols-outlined text-[20px]">filter_list</span>
+          </button>
+
+          <!-- Sort by alpha (A-Z). Active = accent; arrow_downward for asc,
+               arrow_upward for desc. Clicking the active sort flips direction;
+               clicking the inactive sort switches active + resets to asc. -->
+          <button
+            type="button"
+            class="tlp-sort-btn flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[12px] font-medium transition-colors"
+            :class="
+              filter.sortMode.value === 'alpha'
+                ? config.accentText + ' bg-surface-container'
+                : 'text-outline hover:bg-surface-variant'
+            "
+            :title="
+              filter.sortMode.value === 'alpha'
+                ? filter.sortDir.value === 'asc'
+                  ? 'Sorted A-Z. Click to reverse.'
+                  : 'Sorted Z-A. Click to reverse.'
+                : 'Sort A-Z'
+            "
+            :aria-pressed="filter.sortMode.value === 'alpha'"
+            @click="filter.toggleSort('alpha')"
+          >
+            <span class="material-symbols-outlined text-[16px]">sort</span>
+            <span>A-Z</span>
+            <span
+              v-if="filter.sortMode.value === 'alpha'"
+              class="material-symbols-outlined text-[14px]"
+              >{{ filter.sortDir.value === 'asc' ? 'arrow_downward' : 'arrow_upward' }}</span
             >
+          </button>
+
+          <!-- Sort by frequency (1-100). Same toggle semantics as alpha. -->
+          <button
+            type="button"
+            class="tlp-sort-btn flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[12px] font-medium transition-colors"
+            :class="
+              filter.sortMode.value === 'frequency'
+                ? config.accentText + ' bg-surface-container'
+                : 'text-outline hover:bg-surface-variant'
+            "
+            :title="
+              filter.sortMode.value === 'frequency'
+                ? filter.sortDir.value === 'asc'
+                  ? 'Sorted 1-100 (smallest first). Click to reverse.'
+                  : 'Sorted 100-1 (largest first). Click to reverse.'
+                : 'Sort by frequency (1-100)'
+            "
+            :aria-pressed="filter.sortMode.value === 'frequency'"
+            @click="filter.toggleSort('frequency')"
+          >
+            <span class="material-symbols-outlined text-[16px]">sort</span>
+            <span>1-100</span>
+            <span
+              v-if="filter.sortMode.value === 'frequency'"
+              class="material-symbols-outlined text-[14px]"
+              >{{ filter.sortDir.value === 'asc' ? 'arrow_downward' : 'arrow_upward' }}</span
+            >
+          </button>
+
+          <div class="flex-1" />
+
+          <!-- Collapsed-state summary + caret. The count surfaces ONLY here
+               (next to the caret) so the expanded filter row stays clean. -->
+          <span
+            v-if="filter.isFiltering.value"
+            class="text-[11px] text-on-surface-variant font-label-caps text-label-caps"
+          >
+            Showing {{ filter.shownCount.value }} of {{ filter.totalCount.value }}
+          </span>
+          <button
+            type="button"
+            class="p-1 rounded transition-colors hover:bg-surface-variant text-outline"
+            :title="filter.filterOpen.value ? 'Collapse filter' : 'Expand filter'"
+            :aria-label="filter.filterOpen.value ? 'Collapse filter' : 'Expand filter'"
+            :aria-expanded="filter.filterOpen.value"
+            aria-controls="tlp-filter-row"
+            @click="filter.toggleFilterOpen()"
+          >
+            <span
+              class="material-symbols-outlined text-[18px] transition-transform"
+              :class="{ 'rotate-180': filter.filterOpen.value }"
+              >expand_more</span
+            >
+          </button>
+        </div>
+
+        <!-- Expanded filter input row. Slides in under the bar when open.
+             The count lives next to the caret (above), so this row holds
+             only the ClearableInput. -->
+        <div v-if="filter.filterOpen.value" id="tlp-filter-row" class="mt-2">
+          <ClearableInput
+            v-model="filter.query.value"
+            :placeholder="`Filter ${config.noun}s...`"
+            :input-class="
+              'bg-surface-container-lowest border-outline-variant text-on-surface py-1.5 text-sm ' +
+              config.accentFocus
+            "
+            @clear="filter.clearFilter()"
+          />
+        </div>
+      </div>
+
+      <!-- Chip rows. Note: the previous `p-4 lg:p-5` padding moved to this
+           wrapper so the sticky bar spans the full width of the scroll area. -->
+      <div class="p-4 lg:p-5">
+        <TransitionGroup name="tlp-row" tag="div" class="space-y-3">
+          <div
+            v-for="item in filter.displayItems.value"
+            :key="item.id"
+            class="flex items-center justify-between group p-2 hover:bg-surface-container rounded-lg transition-colors"
+          >
+            <div class="flex items-center gap-3 flex-1 min-w-0">
               <template v-if="editingId === item.id">
-                <button
-                  class="p-1 rounded transition-colors"
-                  :class="config.accentText + ' hover:bg-surface-variant'"
-                  :title="`Save ${config.noun}`"
-                  :aria-label="`Save ${config.noun}`"
-                  @click="commitEdit"
-                >
-                  <span class="material-symbols-outlined text-[20px]">check</span>
-                </button>
-                <button
-                  class="p-1 text-outline hover:bg-surface-variant rounded transition-colors"
-                  :title="`Cancel edit`"
-                  aria-label="Cancel edit"
-                  @click="cancelEdit"
-                >
-                  <span class="material-symbols-outlined text-[20px]">close</span>
-                </button>
+                <input
+                  v-model="editingName"
+                  class="tlp-edit-input px-2 py-1 bg-surface-container-lowest border rounded-lg font-mono text-mono text-on-surface transition-all w-full min-w-0"
+                  :class="config.accentBorder + ' focus:ring-1 ' + config.accentFocus"
+                  @keyup.enter="commitEdit"
+                  @keyup.escape="cancelEdit"
+                  @blur="commitEdit"
+                />
               </template>
               <template v-else>
-                <button
-                  class="p-1 text-outline rounded transition-colors"
-                  :class="config.accentHover + ' hover:bg-surface-variant'"
-                  :title="`Edit ${config.noun}`"
-                  :aria-label="`Edit ${config.noun}`"
-                  @click="startEdit(item.id, item.name)"
+                <span
+                  class="cursor-pointer"
+                  title="Double-click to edit"
+                  @dblclick="startEdit(item.id, item.name)"
                 >
-                  <span class="material-symbols-outlined text-[20px]">edit</span>
-                </button>
-                <button
-                  class="p-1 text-outline rounded transition-colors"
-                  :class="config.accentHover + ' hover:bg-surface-variant'"
-                  :title="`Replace ${config.noun} with...`"
-                  :aria-label="`Replace ${config.noun} with...`"
-                  @click.stop="
-                    emit('mergeRequest', {
-                      id: item.id,
-                      name: item.name,
-                      articleCount: item.articleCount,
-                    })
-                  "
-                >
-                  <span class="material-symbols-outlined text-[20px]">cell_merge</span>
-                </button>
-                <button
-                  class="p-1 text-outline rounded hover:bg-surface-variant transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  :class="config.accentHover"
-                  :disabled="item.articleCount === 0"
-                  :title="item.articleCount > 0 ? 'see assigned' : 'not assigned'"
-                  @click="emit('filter', item.id)"
-                >
-                  <span class="material-symbols-outlined text-[20px]">filter_arrow_right</span>
-                </button>
-                <label
-                  class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
-                  :style="{ color: item.color || getColorScheme(item.name, null).base }"
-                  :title="`Set ${config.noun} color`"
-                >
-                  <span class="material-symbols-outlined text-[20px]">palette</span>
-                  <input
-                    type="color"
-                    class="absolute inset-0 opacity-0 cursor-pointer"
-                    :value="item.color || getColorScheme(item.name, null).base"
-                    :aria-label="`Set ${config.noun} color`"
-                    @input="onColorChange(item.id, $event)"
+                  <TagChip
+                    v-if="kind === 'tag'"
+                    :name="item.name"
+                    :color="item.color"
+                    :count="item.articleCount"
                   />
-                </label>
-                <button
-                  class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
-                  :title="`Delete ${config.noun}`"
-                  :aria-label="`Delete ${config.noun}`"
-                  @click="
-                    requestDelete({
-                      id: item.id,
-                      name: item.name,
-                      articleCount: item.articleCount,
-                    })
-                  "
-                >
-                  <span class="material-symbols-outlined text-[20px]">delete</span>
-                </button>
+                  <LabelChip
+                    v-else
+                    :name="item.name"
+                    :color="item.color"
+                    :count="item.articleCount"
+                  />
+                </span>
               </template>
             </div>
+            <div class="flex items-center flex-shrink-0">
+              <div
+                class="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <template v-if="editingId === item.id">
+                  <button
+                    class="p-1 rounded transition-colors"
+                    :class="config.accentText + ' hover:bg-surface-variant'"
+                    :title="`Save ${config.noun}`"
+                    :aria-label="`Save ${config.noun}`"
+                    @click="commitEdit"
+                  >
+                    <span class="material-symbols-outlined text-[20px]">check</span>
+                  </button>
+                  <button
+                    class="p-1 text-outline hover:bg-surface-variant rounded transition-colors"
+                    :title="`Cancel edit`"
+                    aria-label="Cancel edit"
+                    @click="cancelEdit"
+                  >
+                    <span class="material-symbols-outlined text-[20px]">close</span>
+                  </button>
+                </template>
+                <template v-else>
+                  <button
+                    class="p-1 text-outline rounded transition-colors"
+                    :class="config.accentHover + ' hover:bg-surface-variant'"
+                    :title="`Edit ${config.noun}`"
+                    :aria-label="`Edit ${config.noun}`"
+                    @click="startEdit(item.id, item.name)"
+                  >
+                    <span class="material-symbols-outlined text-[20px]">edit</span>
+                  </button>
+                  <button
+                    class="p-1 text-outline rounded transition-colors"
+                    :class="config.accentHover + ' hover:bg-surface-variant'"
+                    :title="`Replace ${config.noun} with...`"
+                    :aria-label="`Replace ${config.noun} with...`"
+                    @click.stop="
+                      emit('mergeRequest', {
+                        id: item.id,
+                        name: item.name,
+                        articleCount: item.articleCount,
+                      })
+                    "
+                  >
+                    <span class="material-symbols-outlined text-[20px]">cell_merge</span>
+                  </button>
+                  <button
+                    class="p-1 text-outline rounded hover:bg-surface-variant transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    :class="config.accentHover"
+                    :disabled="item.articleCount === 0"
+                    :title="item.articleCount > 0 ? 'see assigned' : 'not assigned'"
+                    @click="emit('filter', item.id)"
+                  >
+                    <span class="material-symbols-outlined text-[20px]">filter_arrow_right</span>
+                  </button>
+                  <label
+                    class="relative cursor-pointer p-1 rounded hover:bg-surface-variant transition-colors"
+                    :style="{ color: item.color || getColorScheme(item.name, null).base }"
+                    :title="`Set ${config.noun} color`"
+                  >
+                    <span class="material-symbols-outlined text-[20px]">palette</span>
+                    <input
+                      type="color"
+                      class="absolute inset-0 opacity-0 cursor-pointer"
+                      :value="item.color || getColorScheme(item.name, null).base"
+                      :aria-label="`Set ${config.noun} color`"
+                      @input="onColorChange(item.id, $event)"
+                    />
+                  </label>
+                  <button
+                    class="p-1 text-outline hover:text-error rounded hover:bg-error-container transition-colors"
+                    :title="`Delete ${config.noun}`"
+                    :aria-label="`Delete ${config.noun}`"
+                    @click="
+                      requestDelete({
+                        id: item.id,
+                        name: item.name,
+                        articleCount: item.articleCount,
+                      })
+                    "
+                  >
+                    <span class="material-symbols-outlined text-[20px]">delete</span>
+                  </button>
+                </template>
+              </div>
+            </div>
           </div>
-        </div>
-      </TransitionGroup>
-      <p
-        v-if="items.length === 0"
-        class="text-on-surface-variant font-body-sm text-body-sm text-center py-8"
-      >
-        {{ config.empty }}
-      </p>
+        </TransitionGroup>
+        <!-- Two empty states: (1) the taxonomy is genuinely empty
+           (items.length === 0) -> "No tags yet." / "No labels yet.";
+           (2) items exist but the filter matched none -> "No matching tags."
+           / "No matching labels." (only when the filter is actively narrowing). -->
+        <p
+          v-if="items.length === 0"
+          class="text-on-surface-variant font-body-sm text-body-sm text-center py-8"
+        >
+          {{ config.empty }}
+        </p>
+        <p
+          v-else-if="filter.isFiltering.value && filter.shownCount.value === 0"
+          class="text-on-surface-variant font-body-sm text-body-sm text-center py-8"
+        >
+          {{ config.noMatch }}
+        </p>
+      </div>
     </div>
 
     <!-- Delete confirmation dialog (Teleported to body, mirrors

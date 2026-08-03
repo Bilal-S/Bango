@@ -174,4 +174,127 @@ describe('tag-label-panel.vue', () => {
     await editEl.trigger('keyup.escape');
     expect(wrapper.emitted('rename')).toBeFalsy();
   });
+
+  // ── Filter / sort sub-bar (Option A) ─────────────────────────────────
+  describe('filter/sort sub-bar', () => {
+    function makeTags(): TagWithCount[] {
+      return [
+        makeTag({ id: 'a', name: 'apple', articleCount: 5 }),
+        makeTag({ id: 'b', name: 'banana', articleCount: 10 }),
+        makeTag({ id: 'c', name: 'cherry', articleCount: 5 }),
+        makeTag({ id: 'd', name: 'date', articleCount: 1 }),
+      ];
+    }
+
+    it('renders the sticky sub-bar with both sort buttons and a caret', () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      // Filter toggle, alpha sort, frequency sort, caret all present.
+      expect(wrapper.find('button[aria-label="Filter tags"]').exists()).toBe(true);
+      expect(wrapper.find('button[aria-pressed="true"]').exists()).toBe(true); // alpha default-active
+      expect(wrapper.find('button[title="Sort by frequency (1-100)"]').exists()).toBe(true);
+      expect(wrapper.find('button[aria-label="Expand filter"]').exists()).toBe(true);
+    });
+
+    it('the filter input is hidden until the bar is expanded', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      // No filter input rendered initially.
+      expect(wrapper.find('input[placeholder="Filter tags..."]').exists()).toBe(false);
+      await wrapper.find('button[aria-label="Expand filter"]').trigger('click');
+      expect(wrapper.find('input[placeholder="Filter tags..."]').exists()).toBe(true);
+    });
+
+    it('typing in the filter input narrows the chip list', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      // Expand the filter row, type "an" -> only banana matches.
+      await wrapper.find('button[aria-label="Expand filter"]').trigger('click');
+      const input = wrapper.find('input[placeholder="Filter tags..."]');
+      await input.setValue('an');
+      // Stubbed TagChip renders nothing, so assert on the row count via the
+      // rendered names. The chips are stubbed, but the editable wrapper span
+      // carries the dblclick title; the underlying text is gone. Instead,
+      // count the v-for rows by keying off the hover action bar rows.
+      const rows = wrapper.findAll('.group.p-2');
+      expect(rows).toHaveLength(1);
+    });
+
+    it('shows "No matching tags." when the filter matches nothing', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      await wrapper.find('button[aria-label="Expand filter"]').trigger('click');
+      await wrapper.find('input[placeholder="Filter tags..."]').setValue('zzz');
+      expect(wrapper.text()).toContain('No matching tags.');
+    });
+
+    it('keeps the header count badge at the total (4 Total) even when filtering', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      await wrapper.find('button[aria-label="Expand filter"]').trigger('click');
+      await wrapper.find('input[placeholder="Filter tags..."]').setValue('an');
+      // Header badge stays "4 Total".
+      expect(wrapper.text()).toContain('4 Total');
+      // The in-bar count line reflects the filtered count.
+      expect(wrapper.text()).toContain('Showing 1 of 4');
+    });
+
+    it('shows "Showing X of N" only while a filter query is active', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      await wrapper.find('button[aria-label="Expand filter"]').trigger('click');
+      expect(wrapper.text()).not.toContain('Showing');
+      await wrapper.find('input[placeholder="Filter tags..."]').setValue('a');
+      expect(wrapper.text()).toContain('Showing 3 of 4');
+    });
+
+    it('clearing the filter input restores all items', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      await wrapper.find('button[aria-label="Expand filter"]').trigger('click');
+      const input = wrapper.find('input[placeholder="Filter tags..."]');
+      await input.setValue('an');
+      expect(wrapper.findAll('.group.p-2')).toHaveLength(1);
+      // Click the ClearableInput "x" clear button.
+      await wrapper.find('button[aria-label="Clear"]').trigger('click');
+      expect(wrapper.findAll('.group.p-2')).toHaveLength(4);
+    });
+
+    it('clicking the active sort (alpha) flips direction A-Z -> Z-A', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      // Default: alpha asc ("Sorted A-Z. Click to reverse.").
+      const alphaBtn = wrapper.find('button[title="Sorted A-Z. Click to reverse."]');
+      expect(alphaBtn.exists()).toBe(true);
+      await alphaBtn.trigger('click');
+      // After toggle: desc ("Sorted Z-A. Click to reverse.").
+      expect(wrapper.find('button[title="Sorted Z-A. Click to reverse."]').exists()).toBe(true);
+    });
+
+    it('clicking the inactive sort (frequency) switches active and resets to asc', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      const freqBtn = wrapper.find('button[title="Sort by frequency (1-100)"]');
+      await freqBtn.trigger('click');
+      // Now frequency is active at asc.
+      expect(
+        wrapper.find('button[title="Sorted 1-100 (smallest first). Click to reverse."]').exists()
+      ).toBe(true);
+      // Alpha is no longer the active sort - its title reverts to "Sort A-Z".
+      expect(wrapper.find('button[title="Sort A-Z"]').exists()).toBe(true);
+    });
+
+    it('only one sort is active at a time (frequency active -> alpha inactive)', async () => {
+      const wrapper = mountPanel({ items: makeTags() });
+      await wrapper.find('button[title="Sort by frequency (1-100)"]').trigger('click');
+      // Exactly one pressed sort button.
+      const pressed = wrapper.findAll('button[aria-pressed="true"]');
+      expect(pressed).toHaveLength(1);
+    });
+
+    it('uses label-specific copy ("No matching labels.", "Filter labels...") for kind=label', async () => {
+      const wrapper = mountPanel({ kind: 'label', items: [] });
+      // Empty state is the "no labels yet" copy when there are no items at all.
+      expect(wrapper.text()).toContain('No labels yet.');
+      // Provide items via remount to exercise the no-match path.
+      const wrapper2 = mountPanel({
+        kind: 'label',
+        items: [makeTag({ id: 'l1', name: 'priority-read', articleCount: 3 }) as never],
+      });
+      await wrapper2.find('button[aria-label="Expand filter"]').trigger('click');
+      await wrapper2.find('input[placeholder="Filter labels..."]').setValue('zzz');
+      expect(wrapper2.text()).toContain('No matching labels.');
+    });
+  });
 });
