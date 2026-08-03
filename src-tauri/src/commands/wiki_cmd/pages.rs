@@ -3,6 +3,7 @@
 //! Extracted from the pre-split `wiki_cmd.rs` (refactor v6). Bodies moved
 //! VERBATIM; no behavioral change.
 
+use crate::db::app_settings_repo::clear_wiki_needs_refresh;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::wiki::{frontmatter, fts, raw_export, storage};
@@ -129,11 +130,10 @@ pub fn wiki_delete_page(
 /// Delete the entire wiki output (the `wiki/` subtree). Keeps `raw/`,
 /// `templates/`, and `AGENTS.md`.
 ///
-/// Does NOT touch the `wiki_needs_refresh` staleness flag. That flag signals
-/// "the article corpus changed since the last ingest" and is set by corpus-
-/// mutation sites (imports, status changes, full-text attachments). Setting it
-/// here would make `wiki-view.vue`'s `autoIngestIfStale` immediately rebuild
-/// what the user just deleted. The user can manually rebuild via the toolbar.
+/// Clears the `wiki_needs_refresh` staleness flag so that
+/// `wiki-view.vue`'s `autoIngestIfStale` does NOT trigger a rebuild when the
+/// user revisits the Wiki page. The user must explicitly rebuild via the
+/// toolbar.
 #[tauri::command]
 pub fn wiki_delete_wiki(db_state: tauri::State<'_, DbState>) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -144,6 +144,9 @@ pub fn wiki_delete_wiki(db_state: tauri::State<'_, DbState>) -> Result<(), AppEr
     }
     // Re-scaffold the empty wiki tree + log.md.
     storage::scaffold_tree(&root)?;
+    // Clear the staleness flag so autoIngestIfStale does not
+    // rebuild what the user just deleted on the next visit.
+    clear_wiki_needs_refresh(&conn);
     Ok(())
 }
 
