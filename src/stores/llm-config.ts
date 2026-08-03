@@ -30,8 +30,31 @@ export const MIN_CONTEXT_WINDOW_TOKENS = 16_000;
  * `llama_cpp`). Cloud providers require an API key; these do not. Kept as a
  * shared constant so any frontend gate (e.g. `isConfigured`, future readiness
  * checks) stays in sync.
+ *
+ * Exported so every caller that needs the local-provider distinction (the
+ * `useLlmConfig` composable, the Settings card's required-key halo, etc.)
+ * reads from ONE copy instead of re-deriving it. The backend Rust match in
+ * `llm_config_repo::has_config` is the ultimate source of truth; this Set
+ * must stay in sync with it.
  */
-const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set(['ollama', 'lmStudio', 'llamaCpp']);
+export const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
+  'ollama',
+  'lmStudio',
+  'llamaCpp',
+]);
+
+/**
+ * Canonical "is this provider local (no API key required)?" predicate.
+ * Mirrors the backend `is_local` match in `llm_config_repo::has_config`.
+ * Use this instead of re-deriving the provider list at every call site so
+ * the local-provider contract has exactly one frontend definition.
+ *
+ * @param provider - The LLM provider identifier to test.
+ * @returns `true` for `ollama`, `lmStudio`, `llamaCpp`; `false` otherwise.
+ */
+export function isLocalProvider(provider: LlmProvider): boolean {
+  return LOCAL_PROVIDERS.has(provider);
+}
 
 const DEFAULT_CONFIG: LlmConfig = {
   provider: 'openai',

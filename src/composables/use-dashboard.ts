@@ -3,6 +3,7 @@ import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
 import { tauriCommand } from '@/composables/use-tauri-command';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { stripUuidFromDetails } from '@/utils/formatters';
 import type { WikiStatus } from '@/types/wiki';
 interface StatusCounts {
@@ -64,8 +65,14 @@ export function useDashboard() {
   const screeningStore = useScreeningStore();
 
   // ── CTA signals (fetched in refresh(), non-fatal) ───────────────────────
-  /** True when `has_llm_config` returns true (LLM provider + key + model set). */
-  const llmConfigured = ref(false);
+  /**
+   * Reactive "is the LLM configured?" gate sourced from the canonical Pinia
+   * store via the shared `useLlmConfigured` composable. Replaces the former
+   * one-shot `has_llm_config` IPC probe so the dashboard CTA reacts instantly
+   * to Settings edits (e.g. clearing the API key flips the CTA back to
+   * "Connect LLM" without a manual refresh).
+   */
+  const llmConfigured = useLlmConfigured();
   /**
    * True when the wiki is initialized AND has at least one generated page
    * (mirrors the `chat-view.vue` wikiReady test: `initialized && pageCount > 0`).
@@ -205,34 +212,22 @@ export function useDashboard() {
   /**
    * Force a full refresh of articles + audit + dashboard-CTA signals from the DB.
    *
-   * The CTA signals (`has_llm_config`, `wiki_get_status`) are fetched in
-   * parallel with the article/audit loads. Both are non-fatal: on error they
-   * default to `false`, which correctly falls the button back to the safest
-   * CTA (`connect_llm` if LLM probe fails, `build_wiki` if wiki probe fails).
+   * The wiki CTA signal (`wiki_get_status`) is fetched in parallel with the
+   * article/audit loads. The LLM-configured signal is NOT probed here anymore:
+   * it is a reactive `ComputedRef` from `useLlmConfigured()` that tracks the
+   * Pinia store, so it updates instantly on Settings edits without a refresh.
+   * The wiki probe is non-fatal: on error it defaults to `false`, which
+   * correctly falls the button back to the `build_wiki` CTA.
    */
   async function refresh(): Promise<void> {
     articlesStore.invalidate();
     auditStore.invalidate();
-    // Fire all four loads in parallel; the CTA probes swallow errors so a
-    // backend hiccup on one endpoint doesn't block the dashboard render.
-    const [, , /* articles */ /* audit */ llmOk, wikiOk] = await Promise.all([
-      articlesStore.fetchIfNeeded(),
-      auditStore.fetchIfNeeded(),
-      probeLlmConfigured(),
-      probeWikiBuilt(),
-    ]);
-    llmConfigured.value = llmOk;
+    // Fire the three remaining loads in parallel; the wiki probe swallows
+    // errors so a backend hiccup doesn't block the dashboard render.
+    const wikiOk = await probeWikiBuilt();
+    await Promise.all([articlesStore.fetchIfNeeded(), auditStore.fetchIfNeeded()]);
     wikiBuilt.value = wikiOk;
     initialDataLoaded.value = true;
-  }
-
-  /** Non-fatal `has_llm_config` probe. Returns false on any error. */
-  async function probeLlmConfigured(): Promise<boolean> {
-    try {
-      return await tauriCommand<boolean>('has_llm_config');
-    } catch {
-      return false;
-    }
   }
 
   /**

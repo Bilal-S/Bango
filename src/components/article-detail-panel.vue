@@ -12,7 +12,7 @@ import LabelsSection from './labels-section.vue';
 import ArticleNotes from './article-notes.vue';
 import ArticleReferences from './article-references.vue';
 import FullTextReader from './full-text-reader.vue';
-import { useLlmConfigStore } from '@/stores/llm-config';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { useScreeningStore } from '@/stores/screening';
 import {
   requestArticleAiSummary,
@@ -68,16 +68,13 @@ const emit = defineEmits<{
   clearAiReasoning: [id: string];
 }>();
 
-const llmConfigStore = useLlmConfigStore();
 const screeningStore = useScreeningStore();
 
-// Ensure store is loaded
-void llmConfigStore.fetchIfNeeded();
-
-// Whether an LLM provider is configured and ready. Delegates to the store
-// getter, which mirrors the backend `llm_config_repo::has_config` contract
-// (local providers like LM Studio / Ollama / llama.cpp do not need a key).
-const isLlmConfigured = computed(() => llmConfigStore.isConfigured);
+// Canonical LLM-configured gate (wraps `useLlmConfigStore().isConfigured`).
+// The composable mirrors the backend `llm_config_repo::has_config` contract
+// (local providers like LM Studio / Ollama / llama.cpp do not need a key) and
+// defensively pre-warms the store via `fetchIfNeeded()`.
+const isLlmConfigured = useLlmConfigured();
 
 // Parsed AI summary data
 const aiSummaryData = computed<AiSummaryData | null>(() =>

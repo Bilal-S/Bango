@@ -41,6 +41,13 @@ function resetMockState(): void {
   mockTokenWarning.value = null;
 }
 
+// `screening-progress.vue` ANDs `readiness.hasLlmConfig` with the live
+// `useLlmConfigured()` gate. Mock it true so the Start button is enabled
+// (the readiness mock already sets hasLlmConfig: true).
+vi.mock('@/composables/use-llm-configured', () => ({
+  useLlmConfigured: () => ref(true),
+}));
+
 vi.mock('@/composables/use-screening', () => ({
   useScreening: () => ({
     progress: mockProgress,

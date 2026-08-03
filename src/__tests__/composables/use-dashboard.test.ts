@@ -163,6 +163,14 @@ vi.mock('@/composables/use-tauri-command', () => ({
   tauriCommand: vi.fn(),
 }));
 
+// Mock the LLM-configured composable so tests can drive `llmConfigured`
+// reactively without going through the real Pinia store. The dashboard no
+// longer probes `has_llm_config` itself; the gate is owned by the store.
+const mockLlmConfigured = ref(false);
+vi.mock('@/composables/use-llm-configured', () => ({
+  useLlmConfigured: () => mockLlmConfigured,
+}));
+
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useDashboard } from '@/composables/use-dashboard';
 import { makeArticle } from '../helpers/fixtures';
@@ -202,6 +210,7 @@ describe('useDashboard', () => {
     mockArticles.value = [];
     mockAuditFeed.value = [];
     mockScreeningProgress.value = null;
+    mockLlmConfigured.value = false;
   });
 
   describe('counts', () => {
@@ -283,14 +292,10 @@ describe('useDashboard', () => {
 
   describe('CTA state machine', () => {
     it('returns connect_llm when LLM is not configured', () => {
-      const tauriCmd = vi.mocked(tauriCommand);
-      tauriCmd.mockImplementation((cmd: string) => {
-        if (cmd === 'has_llm_config') return Promise.resolve(false);
-        return Promise.resolve(null);
-      });
-
-      const { cta, ctaState, llmConfigured } = useDashboard();
-      llmConfigured.value = false;
+      // `mockLlmConfigured` defaults to false (set in beforeEach); no
+      // `has_llm_config` IPC mock is needed because the dashboard reads the
+      // gate from the store composable now.
+      const { cta, ctaState } = useDashboard();
 
       expect(ctaState.value).toBe('connect_llm');
       expect(cta.value.icon).toBe('link');
@@ -299,9 +304,9 @@ describe('useDashboard', () => {
 
     it('returns start_screening when LLM configured and working articles exist', () => {
       mockArticles.value = [makeArticle({ id: 'a1', status: 'working' })];
+      mockLlmConfigured.value = true;
 
-      const { cta, ctaState, llmConfigured } = useDashboard();
-      llmConfigured.value = true;
+      const { cta, ctaState } = useDashboard();
 
       expect(ctaState.value).toBe('start_screening');
       expect(cta.value.route).toBe('/screening');
@@ -309,9 +314,9 @@ describe('useDashboard', () => {
 
     it('returns build_wiki when LLM configured, no working, wiki not built', () => {
       mockArticles.value = [makeArticle({ id: 'a1', status: 'included' })];
+      mockLlmConfigured.value = true;
 
-      const { cta, ctaState, llmConfigured, wikiBuilt } = useDashboard();
-      llmConfigured.value = true;
+      const { cta, ctaState, wikiBuilt } = useDashboard();
       wikiBuilt.value = false;
 
       expect(ctaState.value).toBe('build_wiki');
@@ -320,9 +325,9 @@ describe('useDashboard', () => {
 
     it('returns review_wiki when LLM configured, no working, wiki built', () => {
       mockArticles.value = [makeArticle({ id: 'a1', status: 'included' })];
+      mockLlmConfigured.value = true;
 
-      const { cta, ctaState, llmConfigured, wikiBuilt } = useDashboard();
-      llmConfigured.value = true;
+      const { cta, ctaState, wikiBuilt } = useDashboard();
       wikiBuilt.value = true;
 
       expect(ctaState.value).toBe('review_wiki');
@@ -369,10 +374,10 @@ describe('useDashboard', () => {
     it('calls probes and sets signals', async () => {
       const tauriCmd = vi.mocked(tauriCommand);
       tauriCmd.mockImplementation((cmd: string) => {
-        if (cmd === 'has_llm_config') return Promise.resolve(true);
         if (cmd === 'wiki_get_status') return Promise.resolve({ initialized: true, pageCount: 5 });
         return Promise.resolve(null);
       });
+      mockLlmConfigured.value = true;
 
       const { refresh, llmConfigured, wikiBuilt } = useDashboard();
       await refresh();
@@ -385,17 +390,17 @@ describe('useDashboard', () => {
       const tauriCmd = vi.mocked(tauriCommand);
       tauriCmd.mockRejectedValue(new Error('fail'));
 
-      const { refresh, llmConfigured, wikiBuilt } = useDashboard();
+      const { refresh, wikiBuilt } = useDashboard();
       await refresh();
 
-      expect(llmConfigured.value).toBe(false);
+      // llmConfigured is driven by the store mock, not the failed probe; the
+      // wiki probe failure sets wikiBuilt to false.
       expect(wikiBuilt.value).toBe(false);
     });
 
     it('wikiBuilt is false when pageCount is 0', async () => {
       const tauriCmd = vi.mocked(tauriCommand);
       tauriCmd.mockImplementation((cmd: string) => {
-        if (cmd === 'has_llm_config') return Promise.resolve(true);
         if (cmd === 'wiki_get_status') return Promise.resolve({ initialized: true, pageCount: 0 });
         return Promise.resolve(null);
       });

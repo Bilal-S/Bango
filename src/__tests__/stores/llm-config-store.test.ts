@@ -236,5 +236,25 @@ describe('useLlmConfigStore', () => {
       store.invalidate();
       expect(store.isConfigured).toBe(false);
     });
+
+    // Regression test for the original bug: clearing the API key in Settings
+    // must flip `isConfigured` to false reactively so every
+    // `useLlmConfigured()` consumer (Chat, Wiki, Screening, Dashboard CTA,
+    // OpenAlex Smart Search) updates instantly without a manual refresh.
+    it('reactively flips to false when apiKeyEncrypted is cleared', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(savedConfig);
+
+      const store = useLlmConfigStore();
+      await store.fetch();
+      expect(store.isConfigured).toBe(true);
+
+      // Simulate the Settings v-model clearing the API key field.
+      store.config.apiKeyEncrypted = null;
+      expect(store.isConfigured).toBe(false);
+
+      // Simulate the user re-typing a key.
+      store.config.apiKeyEncrypted = 'new-key';
+      expect(store.isConfigured).toBe(true);
+    });
   });
 });

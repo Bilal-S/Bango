@@ -5,7 +5,7 @@ import { useSummary, type CitationStyle } from '@/composables/use-summary';
 import { useGapAnalysis } from '@/composables/use-gap-analysis';
 import { useArticlesStore } from '@/stores/articles';
 import { useCriteriaStore } from '@/stores/criteria';
-import { useLlmConfigStore } from '@/stores/llm-config';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
@@ -30,7 +30,6 @@ const {
 
 const articlesStore = useArticlesStore();
 const criteriaStore = useCriteriaStore();
-const llmConfigStore = useLlmConfigStore();
 
 /** Active output mode: Literature Review (existing) or Research Gaps (new).
  *  Defaults to the literature review so the existing UX is unchanged. Set
@@ -57,12 +56,11 @@ const CITATION_STYLES: CitationStyle[] = ['APA', 'MLA', 'Chicago', 'IEEE', 'AMA'
 
 const includedCount = computed(() => articlesStore.byStatus.included);
 const hasAims = computed(() => criteriaStore.aims.length > 0);
-// Delegate to the canonical store getter (`isConfigured`) so the gate stays in
-// sync with the backend `llm_config_repo::has_config` contract and correctly
-// recognizes local providers (Ollama / LM Studio / llama.cpp) that have no API
-// key. Re-deriving from `apiKeyEncrypted` here would incorrectly disable the
-// buttons for every local provider.
-const hasLlmConfig = computed(() => llmConfigStore.isConfigured);
+// Canonical LLM-configured gate (wraps `useLlmConfigStore().isConfigured`).
+// The composable mirrors the backend `llm_config_repo::has_config` contract
+// (local providers like LM Studio / Ollama / llama.cpp do not need a key) and
+// defensively pre-warms the store via `fetchIfNeeded()`.
+const hasLlmConfig = useLlmConfigured();
 
 const canGenerate = computed(() => includedCount.value > 0 && hasAims.value && hasLlmConfig.value);
 
@@ -274,7 +272,8 @@ onMounted(async () => {
   await Promise.all([
     articlesStore.fetchArticles(),
     criteriaStore.fetchIfNeeded(),
-    llmConfigStore.fetchIfNeeded(),
+    // `useLlmConfigured()` already pre-warms the store on first read, so no
+    // explicit `fetchIfNeeded()` is needed here.
   ]);
   // Restore previously saved outputs for both modes.
   await Promise.all([loadSavedSummary(), loadSavedGap()]);

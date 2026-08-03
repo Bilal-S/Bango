@@ -4,7 +4,7 @@ import { onBeforeRouteLeave, useRouter } from 'vue-router';
 import { marked } from 'marked';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import { useCriteriaStore } from '@/stores/criteria';
-import { useLlmConfigStore } from '@/stores/llm-config';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { useToast } from '@/composables/use-toast';
 import { formatLlmError } from '@/utils/llm-error';
 import type { SearchStrategyResult } from '@/types/search-strategy';
@@ -18,10 +18,12 @@ import type { Criterion, ResearchAim } from '@/types';
 const toast = useToast();
 
 const criteriaStore = useCriteriaStore();
-const llmConfigStore = useLlmConfigStore();
 
-// Pre-warm LLM config if not already loaded
-llmConfigStore.fetchIfNeeded();
+// Canonical LLM-configured gate (wraps `useLlmConfigStore().isConfigured`).
+// The composable mirrors the backend `llm_config_repo::has_config` contract
+// (local providers like LM Studio / Ollama / llama.cpp do not need a key) and
+// defensively pre-warms the store via `fetchIfNeeded()`.
+const llmConfigured = useLlmConfigured();
 
 // Read directly from store - pre-warmed at startup, no onMounted fetch needed.
 const aims = computed(() => criteriaStore.aims);
@@ -336,15 +338,15 @@ function priorityLabel(priority: Priority): string {
 // ── AI assistant logic ──────────────────────────────────────────────
 
 const hasAims = computed(() => aims.value.length > 0);
-// Use the store's canonical getter so local providers (LM Studio / Ollama /
-// llama.cpp) enable the AI buttons. Re-deriving from `apiKeyEncrypted` would
-// wrongly disable them - see `isConfigured` docstring in `llm-config.ts`.
-const canUseAi = computed(() => hasAims.value && llmConfigStore.isConfigured);
+// Use the canonical gate so local providers (LM Studio / Ollama / llama.cpp)
+// enable the AI buttons. Re-deriving from `apiKeyEncrypted` would wrongly
+// disable them - see `isConfigured` docstring in `llm-config.ts`.
+const canUseAi = computed(() => hasAims.value && llmConfigured.value);
 
-const canGenerateStrategy = computed(() => hasAims.value && llmConfigStore.isConfigured);
+const canGenerateStrategy = computed(() => hasAims.value && llmConfigured.value);
 const strategyButtonTitle = computed(() => {
   if (!hasAims.value) return 'Add at least one research aim first';
-  if (!llmConfigStore.isConfigured) return 'Configure an LLM in Settings first';
+  if (!llmConfigured.value) return 'Configure an LLM in Settings first';
   return 'Generate database-ready Boolean search strings from your aims';
 });
 

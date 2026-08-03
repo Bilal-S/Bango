@@ -15,6 +15,8 @@ import { useWiki } from '@/composables/use-wiki';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
 import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
+import { useLlmConfigStore } from '@/stores/llm-config';
 import { getReadiness, stopCitationListeners } from '@/composables/use-citation-finder';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
@@ -25,9 +27,23 @@ import type { CitationFinderMode } from '@/types/citation-finder';
 const router = useRouter();
 const toast = useToast();
 const chatStore = useChatStore();
+const llmConfigStore = useLlmConfigStore();
 
-const checkingLlm = ref(true);
-const isLlmConfigured = ref(false);
+/**
+ * Reactive "is the LLM configured?" gate from the canonical composable.
+ * Replaces the former local `isLlmConfigured` ref that was populated by a
+ * one-shot `has_llm_config` IPC call in `onMounted` and went stale on
+ * Settings edits. Now any Settings change (e.g. clearing the API key)
+ * instantly re-evaluates this gate and the empty-state card below.
+ */
+const isLlmConfigured = useLlmConfigured();
+/**
+ * True while the LLM config store is loading for the very first time so the
+ * "Checking LLM configuration..." spinner shows instead of flashing the
+ * unconfigured card before bootstrap resolves the store. Reactive over the
+ * store's `initialized` flag.
+ */
+const checkingLlm = computed(() => !llmConfigStore.initialized);
 const articles = ref<Article[]>([]);
 const showSelector = ref(false);
 const searchQuery = ref('');
@@ -272,11 +288,11 @@ function claimCardCount(results: CitationResult[], claim: string): number {
 }
 
 onMounted(async () => {
-  await checkLlmConfig();
-  if (isLlmConfigured.value) {
-    await Promise.all([loadArticles(), checkWikiStatus(), checkCitationFinderReadiness()]);
-    scrollToBottom();
-  }
+  // The LLM-configured gate is reactive (no IPC probe needed). Still kick
+  // off the wiki status + citation readiness loads so the toggle visibility
+  // is correct on first paint; the LLM gate itself is read reactively.
+  await Promise.all([loadArticles(), checkWikiStatus(), checkCitationFinderReadiness()]);
+  scrollToBottom();
 });
 
 // Tear down citation:* listeners on unmount so navigating away from Chat
@@ -284,16 +300,6 @@ onMounted(async () => {
 onUnmounted(() => {
   stopCitationListeners();
 });
-
-async function checkLlmConfig() {
-  try {
-    isLlmConfigured.value = await tauriCommand<boolean>('has_llm_config');
-  } catch {
-    isLlmConfigured.value = false;
-  } finally {
-    checkingLlm.value = false;
-  }
-}
 
 /** Fetch wiki status and flip the store's `wikiReady` flag (drives toggle
  *  visibility). The wiki toggle only appears when the wiki is initialized AND

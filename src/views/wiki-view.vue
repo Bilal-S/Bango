@@ -19,6 +19,8 @@ import { useToast } from '@/composables/use-toast';
 import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
 import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
+import { useLlmConfigStore } from '@/stores/llm-config';
 import { openPath } from '@tauri-apps/plugin-opener';
 
 // Name the component so <keep-alive include="WikiView"> in app-shell.vue
@@ -61,6 +63,7 @@ const {
   deleteFullTextAttachment,
 } = useArticleSearch();
 const { screenArticle } = useScreening();
+const llmConfigStore = useLlmConfigStore();
 
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
@@ -79,8 +82,21 @@ const { handleDeleteArticle } = useArticleDelete({
   },
 });
 
-const checkingLlm = ref(true);
-const isLlmConfigured = ref(false);
+/**
+ * Reactive "is the LLM configured?" gate from the canonical composable.
+ * Replaces the former local `isLlmConfigured` ref that was populated by a
+ * one-shot `has_llm_config` IPC call and went stale on Settings edits.
+ * Because the store is reactive, clearing the API key in Settings instantly
+ * flips this gate + collapses the empty-state cards below.
+ */
+const isLlmConfigured = useLlmConfigured();
+/**
+ * True while the LLM config store is loading for the very first time so the
+ * "Checking LLM configuration..." spinner shows instead of flashing the
+ * unconfigured card before bootstrap resolves the store. Reactive over the
+ * store's `initialized` flag.
+ */
+const checkingLlm = computed(() => !llmConfigStore.initialized);
 const llmBannerDismissed = ref(false);
 
 const pages = ref<WikiPageSummary[]>([]);
@@ -204,16 +220,18 @@ onMounted(async () => {
   await checkForUpdatesOnMount();
 });
 
-/** Re-run all readiness checks (LLM config, wiki status, pages, stale ingest)
- *  whenever the user re-enters the Wiki view. This is critical because the
- *  view is keep-alive cached: `onMounted` only fires once for the component's
- *  lifetime, so without re-checking in `onActivated`, the empty-state gates
- *  (LLM configured, included articles > 0, wiki initialized) stay frozen at
- *  whatever value they had on first mount - e.g. the "LLM Provider Not
- *  Configured" card would persist even after the user configures an LLM in
- *  Settings and returns. All four calls are idempotent backend reads. */
+/** Re-run the wiki status + pages + stale-ingest checks whenever the user
+ *  re-enters the Wiki view. This is critical because the view is keep-alive
+ *  cached: `onMounted` only fires once for the component's lifetime, so
+ *  without re-checking in `onActivated`, the wiki status + page list + drift
+ *  detection would stay frozen at whatever value they had on first mount.
+ *
+ *  The LLM-configured gate is NOT re-checked here anymore: it is a reactive
+ *  `ComputedRef` from `useLlmConfigured()` that tracks the Pinia store, so it
+ *  updates instantly on Settings edits without any re-probe. All three
+ *  remaining calls are idempotent backend reads. */
 async function runReadinessChecks(): Promise<void> {
-  await Promise.all([checkLlmConfig(), refreshStatus()]);
+  await Promise.all([refreshStatus()]);
   await loadPages();
   // Auto-ingest if wiki is stale (articles changed since last ingest).
   await autoIngestIfStale();
@@ -337,21 +355,6 @@ async function autoIngestIfStale(): Promise<void> {
       const msg = e instanceof Error ? e.message : String(e);
       toast.show(`Wiki auto-update failed: ${msg}`, 'error');
     }
-  }
-}
-
-async function checkLlmConfig(): Promise<void> {
-  // Reset the loading flag on every call (not just the first mount) so the
-  // spinner shows while re-checking on keep-alive re-activation. Without
-  // this, the stale `isLlmConfigured` value drives the empty-state gates
-  // until the fresh fetch resolves.
-  checkingLlm.value = true;
-  try {
-    isLlmConfigured.value = await tauriCommand<boolean>('has_llm_config');
-  } catch {
-    isLlmConfigured.value = false;
-  } finally {
-    checkingLlm.value = false;
   }
 }
 

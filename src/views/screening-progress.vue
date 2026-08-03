@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useScreening } from '@/composables/use-screening';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { formatLlmError } from '@/utils/llm-error';
 import ScreeningProgressBar from '@/components/screening-progress-bar.vue';
 import ScreeningStats from '@/components/screening-stats.vue';
@@ -28,6 +29,15 @@ const {
 
 const router = useRouter();
 const resettingWorkingList = ref(false);
+
+/**
+ * Reactive "is the LLM configured?" gate from the canonical composable. Used
+ * to layer instant Settings-edit reactivity on top of the backend composite
+ * `readiness.hasLlmConfig` field: the Start button + guardrails read this so
+ * clearing the API key in Settings disables screening immediately, without
+ * waiting for `screeningStore.fetchReadiness()` to re-run.
+ */
+const llmConfigured = useLlmConfigured();
 
 const screeningErrorInfo = computed(() => {
   if (!error.value) {
@@ -188,11 +198,21 @@ onUnmounted(() => {
   stopListening();
 });
 
-/** Computed: can the user start screening? */
+/** Computed: can the user start screening?
+ *  ANDs the backend composite readiness with the live `llmConfigured` gate
+ *  so the Start button reacts instantly to Settings edits (clearing the API
+ *  key disables screening without waiting for `readiness` to re-fetch). */
 const canStart = computed(() => {
   const r = readiness.value;
   if (!r) return false;
-  return r.totalUnscreened > 0 && r.hasAims && r.hasInclusion && r.hasExclusion && r.hasLlmConfig;
+  return (
+    r.totalUnscreened > 0 &&
+    r.hasAims &&
+    r.hasInclusion &&
+    r.hasExclusion &&
+    r.hasLlmConfig &&
+    llmConfigured.value
+  );
 });
 
 /** Computed: list of blocking reasons to show the user (cascading: prerequisites first). */
@@ -206,7 +226,11 @@ const blockingReasons = computed((): string[] => {
     prereqReasons.push('No inclusion criteria defined. Add criteria in the Criteria Editor.');
   if (!r.hasExclusion)
     prereqReasons.push('No exclusion criteria defined. Add criteria in the Criteria Editor.');
-  if (!r.hasLlmConfig) prereqReasons.push('LLM is not configured. Set up your LLM in Settings.');
+  // Also surface the LLM message when the live gate is off even if the stale
+  // readiness snapshot still has `hasLlmConfig = true` (race: Settings edit
+  // happened after the last readiness fetch).
+  if (!r.hasLlmConfig || !llmConfigured.value)
+    prereqReasons.push('LLM is not configured. Set up your LLM in Settings.');
 
   // Only surface the "no articles" warning once prerequisites are satisfied
   if (prereqReasons.length === 0 && r.totalUnscreened === 0) {
@@ -215,11 +239,20 @@ const blockingReasons = computed((): string[] => {
   return prereqReasons;
 });
 
-/** Computed: true when all prerequisites are met but no unscreened articles exist. */
+/** Computed: true when all prerequisites are met but no unscreened articles
+ *  exist. Includes the live `llmConfigured` gate so this stays accurate when
+ *  the LLM is configured/deconfigured between readiness fetches. */
 const isWorkingListScreened = computed((): boolean => {
   const r = readiness.value;
   if (!r) return false;
-  return r.hasAims && r.hasInclusion && r.hasExclusion && r.hasLlmConfig && r.totalUnscreened === 0;
+  return (
+    r.hasAims &&
+    r.hasInclusion &&
+    r.hasExclusion &&
+    r.hasLlmConfig &&
+    llmConfigured.value &&
+    r.totalUnscreened === 0
+  );
 });
 </script>
 
@@ -332,8 +365,14 @@ const isWorkingListScreened = computed((): boolean => {
         <ul>
           <li v-for="(reason, idx) in blockingReasons" :key="idx">{{ reason }}</li>
         </ul>
-        <!-- Actionable LLM config guidance -->
-        <div v-if="readiness && !readiness.hasLlmConfig" class="screening-view__llm-setup-card">
+        <!-- Actionable LLM config guidance. Also shows when the live
+             `llmConfigured` gate is off even if the stale readiness snapshot
+             still reports `hasLlmConfig = true` (race: Settings edit happened
+             after the last readiness fetch). -->
+        <div
+          v-if="readiness && (!readiness.hasLlmConfig || !llmConfigured)"
+          class="screening-view__llm-setup-card"
+        >
           <span class="material-symbols-outlined screening-view__llm-setup-icon">smart_toy</span>
           <div class="screening-view__llm-setup-body">
             <p class="screening-view__llm-setup-text">

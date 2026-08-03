@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ref } from 'vue';
 import { setActivePinia, createPinia } from 'pinia';
 import type { OpenAlexResultItem, OpenAlexSearchResponse } from '@/types/openalex';
 
 vi.mock('@/composables/use-tauri-command', () => ({
   tauriCommand: vi.fn(),
+}));
+
+// `smartSearchAvailable` is now a computed over the canonical LLM-configured
+// composable. Mock it with a controllable ref so tests can drive the gate.
+const mockLlmConfigured = ref(false);
+vi.mock('@/composables/use-llm-configured', () => ({
+  useLlmConfigured: () => mockLlmConfigured,
 }));
 
 import { useOpenAlexStore } from '@/stores/openalex';
@@ -76,6 +84,7 @@ describe('OpenAlex Store', () => {
     const { tauriCommand } = await import('@/composables/use-tauri-command');
     tauriMock = vi.mocked(tauriCommand);
     tauriMock.mockReset();
+    mockLlmConfigured.value = false;
     Object.defineProperty(window, 'localStorage', {
       value: shimLocalStorage(),
       configurable: true,
@@ -394,10 +403,17 @@ describe('OpenAlex Store', () => {
       expect(store.smartSearchLoading).toBe(false);
     });
 
-    it('checkSmartSearchAvailability_handles_error', async () => {
-      tauriMock.mockRejectedValueOnce(new Error('fail'));
+    it('smartSearchAvailable_tracks_the_llm_configured_gate', () => {
+      // `smartSearchAvailable` is a computed over `useLlmConfigured()`, so it
+      // reactively follows the mock ref. No IPC probe is involved anymore.
+      mockLlmConfigured.value = false;
       const store = useOpenAlexStore();
-      await store.checkSmartSearchAvailability();
+      expect(store.smartSearchAvailable).toBe(false);
+
+      mockLlmConfigured.value = true;
+      expect(store.smartSearchAvailable).toBe(true);
+
+      mockLlmConfigured.value = false;
       expect(store.smartSearchAvailable).toBe(false);
     });
   });
@@ -443,14 +459,15 @@ describe('OpenAlex Store', () => {
     expect(store.results[1]?.alreadyInLibrary).toBe(false);
   });
 
-  it('smart_search_mode_gated_on_llm_configured', async () => {
-    tauriMock.mockResolvedValueOnce(false);
+  it('smart_search_mode_gated_on_llm_configured', () => {
+    // `smartSearchAvailable` is now a computed over `useLlmConfigured()`; no
+    // `has_llm_config` IPC probe is involved. Mutate the mock ref and the
+    // store's computed follows.
+    mockLlmConfigured.value = false;
     const store = useOpenAlexStore();
-    await store.checkSmartSearchAvailability();
     expect(store.smartSearchAvailable).toBe(false);
 
-    tauriMock.mockResolvedValueOnce(true);
-    await store.checkSmartSearchAvailability();
+    mockLlmConfigured.value = true;
     expect(store.smartSearchAvailable).toBe(true);
   });
 

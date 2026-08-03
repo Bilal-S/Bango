@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { tauriCommand } from './use-tauri-command';
-import { useLlmConfigStore } from '@/stores/llm-config';
+import { useLlmConfigStore, LOCAL_PROVIDERS } from '@/stores/llm-config';
 import type { TestResult } from '@/stores/llm-config';
 
 const providerDisplayNames: Record<string, string> = {
@@ -54,6 +54,19 @@ export function useLlmConfig() {
     saving.value = true;
     try {
       await tauriCommand('save_llm_config', { config: store.config });
+      // Re-fetch the persisted config so the in-memory store reflects the
+      // post-save DB state. The backend encrypts `api_key_encrypted`, so the
+      // plaintext the user typed is replaced by the encrypted blob. This
+      // keeps `isConfigured` + every `useLlmConfigured()` consumer in sync
+      // with the actual persisted state after every save.
+      //
+      // The debounced Parameters auto-save path (`scheduleParamSave`) also
+      // routes through `save()`. Re-fetching after a param-only save is safe:
+      // the backend does not transform the param fields (concurrency, delay,
+      // context tokens, temperature), so the re-fetched values match what the
+      // user just edited. The cost is one extra DB read per save; saves are
+      // infrequent (manual button or 600ms trailing-edge on param edits).
+      await store.fetch();
       lastSavedAt.value = Date.now();
     } finally {
       saving.value = false;
@@ -132,7 +145,10 @@ export function useLlmConfig() {
   }
 
   function isLocalProvider(): boolean {
-    return ['llamaCpp', 'ollama', 'lmStudio'].includes(store.config.provider);
+    // Delegate to the canonical `LOCAL_PROVIDERS` Set exported from the store
+    // so there is exactly one copy of the local-provider set in the frontend
+    // (mirrors the backend `is_local` match in `llm_config_repo::has_config`).
+    return LOCAL_PROVIDERS.has(store.config.provider);
   }
 
   async function fetchModels(): Promise<void> {

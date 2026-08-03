@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
 import { tauriCommand } from '@/composables/use-tauri-command';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
 import type {
   OpenAlexResultItem,
   OpenAlexSearchResponse,
@@ -25,7 +26,15 @@ export const useOpenAlexStore = defineStore('openalex', () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const smartSearchLoading = ref(false);
-  const smartSearchAvailable = ref(false);
+  /**
+   * Reactive "Smart Search is available" gate, derived from the canonical
+   * LLM-configured composable. Smart Search requires an LLM to generate the
+   * OpenAlex Boolean query from aims + criteria, so this mirrors the same
+   * gate every other LLM-dependent feature uses. Replaces the former one-shot
+   * `has_llm_config` IPC probe (`checkSmartSearchAvailability`) which went
+   * stale on Settings edits.
+   */
+  const smartSearchAvailable = useLlmConfigured();
   const hasSearched = ref(false);
 
   // Settings
@@ -254,15 +263,6 @@ export const useOpenAlexStore = defineStore('openalex', () => {
     await loadSettings();
   }
 
-  async function checkSmartSearchAvailability(): Promise<void> {
-    try {
-      const hasConfig = await tauriCommand<boolean>('has_llm_config', {});
-      smartSearchAvailable.value = hasConfig;
-    } catch {
-      smartSearchAvailable.value = false;
-    }
-  }
-
   async function smartSearch(): Promise<void> {
     smartSearchLoading.value = true;
     error.value = null;
@@ -333,7 +333,6 @@ export const useOpenAlexStore = defineStore('openalex', () => {
     refreshLibraryFlags,
     loadSettings,
     saveSettings,
-    checkSmartSearchAvailability,
     smartSearch,
   };
 });

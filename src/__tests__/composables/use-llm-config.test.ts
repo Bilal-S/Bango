@@ -146,7 +146,14 @@ describe('useLlmConfig', () => {
     });
 
     it('scheduleParamSave debounces save by default delay', async () => {
-      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+      // `save()` now re-fetches the config after persisting (so the in-memory
+      // store reflects the post-save encrypted-blob state), so mock both
+      // commands.
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'save_llm_config') return Promise.resolve(undefined);
+        if (cmd === 'get_llm_config') return Promise.resolve(null);
+        return Promise.resolve(undefined);
+      });
       const c = useLlmConfig();
       c.scheduleParamSave();
       // Not called immediately.
@@ -154,6 +161,8 @@ describe('useLlmConfig', () => {
       // Fast-forward past the debounce window (600ms).
       await vi.advanceTimersByTimeAsync(600);
       expect(tauriCommand).toHaveBeenCalledWith('save_llm_config', expect.any(Object));
+      // The post-save re-fetch also fires.
+      expect(tauriCommand).toHaveBeenCalledWith('get_llm_config');
       expect(c.lastSavedAt.value).toBeGreaterThan(0);
     });
 
@@ -167,7 +176,12 @@ describe('useLlmConfig', () => {
     });
 
     it('scheduling again resets the timer (only the last save fires)', async () => {
-      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+      // `save()` re-fetches after persisting, so mock both commands.
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'save_llm_config') return Promise.resolve(undefined);
+        if (cmd === 'get_llm_config') return Promise.resolve(null);
+        return Promise.resolve(undefined);
+      });
       const c = useLlmConfig();
       c.scheduleParamSave();
       await vi.advanceTimersByTimeAsync(400); // before the 600ms window
@@ -175,7 +189,13 @@ describe('useLlmConfig', () => {
       await vi.advanceTimersByTimeAsync(400); // would have fired if not reset
       expect(tauriCommand).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(200); // 600ms since the second schedule
-      expect(tauriCommand).toHaveBeenCalledTimes(1);
+      // The save fires exactly once (debounce reset worked). The re-fetch
+      // also fires once, so the total IPC call count is 2. Assert on the
+      // save command specifically to make the intent clear.
+      expect(tauriCommand).toHaveBeenCalledTimes(2);
+      expect(
+        vi.mocked(tauriCommand).mock.calls.filter(([cmd]) => cmd === 'save_llm_config')
+      ).toHaveLength(1);
     });
   });
 });

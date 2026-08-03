@@ -78,6 +78,39 @@ Default section order:
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
 
+### Frontend "is the LLM configured?" gate - single canonical pattern
+
+- EVERY frontend feature gate that depends on "LLM configured" (Chat, Wiki,
+  Screening, OpenAlex Smart Search, Dashboard CTA, AI Summary, AI buttons in
+  the article detail panel, Search Strategy Builder, Citation Finder
+  readiness) MUST read `useLlmConfigured()` (from
+  `src/composables/use-llm-configured.ts`), which wraps
+  `useLlmConfigStore().isConfigured`.
+- No component, view, composable, or store may hold a local
+  `isLlmConfigured`/`llmConfigured`/`smartSearchAvailable` ref populated by a
+  one-shot `has_llm_config` IPC call, nor re-derive the local-provider
+  (`ollama`/`lmStudio`/`llamaCpp`) check from `apiKeyEncrypted`. Both
+  patterns go stale on Settings edits (the original bug: clearing the API key
+  in Settings did not disable Chat/Wiki/Screening until a manual refresh).
+- The Pinia store (`src/stores/llm-config.ts`) is the single source of truth.
+  Its `isConfigured` computed mirrors the backend
+  `llm_config_repo::has_config` contract (initialized + endpoint + model +
+  (local-provider OR API key)). `useLlmConfigStore` exports `LOCAL_PROVIDERS`
+  + `isLocalProvider(provider)` so the local-provider set has exactly one
+  frontend definition (mirrors the backend Rust `is_local` match).
+- The `has_llm_config` Tauri command stays registered (the screening
+  `get_screening_readiness` composite still calls `has_config` server-side),
+  but NO frontend caller may invoke it directly. The one exception is
+  `screening-progress.vue`, which ANDs the backend composite
+  `readiness.hasLlmConfig` with `useLlmConfigured()` so the Start button +
+  guardrails react instantly to Settings edits without waiting for the
+  composite readiness to re-fetch.
+- `use-llm-config.ts::save()` re-fetches the store after every successful
+  `save_llm_config` so the in-memory `config` reflects the post-save DB state
+  (the backend encrypts `api_key_encrypted`, replacing the plaintext the user
+  typed with the encrypted blob). This keeps `isConfigured` accurate after
+  every save.
+
 ## Child DOX Index
 
 Top-level source directories. Child `AGENTS.md` files exist under

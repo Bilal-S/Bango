@@ -17,7 +17,10 @@ const emit = defineEmits<{
 }>();
 
 onMounted(async () => {
-  await Promise.all([store.loadSettings(), store.checkSmartSearchAvailability()]);
+  // `smartSearchAvailable` is now a reactive computed over `useLlmConfigured()`,
+  // so there is no availability probe to call on mount - the gate tracks the
+  // Pinia store automatically.
+  await store.loadSettings();
 });
 
 async function handleSearch(): Promise<void> {
