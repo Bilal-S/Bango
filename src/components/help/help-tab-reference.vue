@@ -1948,77 +1948,168 @@ ER  - </pre
             <p>
               Configure AI connections, custom directories, reprocessing tasks, and project backups.
               Bango's settings are arranged into modular cards to help you manage your workspace.
+              API keys are encrypted locally and never included in project backups.
             </p>
 
-            <h3>API Key Encryption</h3>
-            <p>
-              To protect your credentials, LLM API keys are encrypted locally using **AES-256-GCM**.
-              The decryption key is derived cryptographically from your local machine's hostname,
-              username, and a secure app salt. API keys are never included in project backups.
-            </p>
-
-            <h3>Configurable Options & Cards</h3>
+            <h3>AI Provider</h3>
+            <p>A single consolidated box for the LLM connection.</p>
             <ul>
               <li>
-                <strong>LLM Provider Settings:</strong> Select your AI provider (Google Gemini,
-                Anthropic Claude, OpenAI, Ollama, LM Studio, or custom endpoints) and enter your
-                credentials. Use the model picker to select active models.
+                <strong>Providers:</strong> OpenAI, Anthropic, Google Gemini, Mistral AI, z.ai,
+                llama.cpp, Ollama, LM Studio, or Custom.
               </li>
               <li>
-                <strong>AI Summary Settings:</strong> Toggle the "Include Section Summaries" option.
-                When enabled, the AI reads your PDFs section-by-section (Methods, Results,
-                Discussion) to build a structured breakdown of study design, sample size,
-                population, effect sizes, and limitations.
+                <strong>Connection Details:</strong> Endpoint URL, Model Name (pick from the list or
+                type a custom one), and API Key. Local providers (llama.cpp, Ollama, LM Studio) do
+                not require an API key.
               </li>
               <li>
-                <strong>AI Screening Preferences:</strong> Configure the active screening mode:
+                <strong>Parameters:</strong> Max Context Tokens, Concurrency, Request Delay, and
+                Temperature. These auto-save a short delay after each edit, so changes take effect
+                for the next AI call without a manual Save.
+              </li>
+              <li>
+                <strong>Actions:</strong>
                 <ul>
-                  <li>
-                    <em>Abstract Mode:</em> Evaluates articles using title and abstract text alone
-                    (default).
-                  </li>
-                  <li>
-                    <em>Enhanced Mode:</em> Evaluates abstract plus the top criteria-matched
-                    passages from full text.
-                  </li>
-                  <li>
-                    <em>Two-Stage Mode:</em> Screens abstracts first, then runs a full-text pass
-                    only for borderline papers (confidence in configurable range, e.g.,
-                    <code>[0.4, 0.7)</code>).
-                  </li>
+                  <li><em>Revert</em> - discard unsaved edits.</li>
+                  <li><em>Get Models</em> - fetch the live model list from the provider.</li>
+                  <li><em>Test Connection</em> - verify the setup.</li>
                 </ul>
-                Allows setting the chunk budget per article (default 2400 words) and active sections
-                (default Methods, Results).
-              </li>
-              <li>
-                <strong>File Storage:</strong> Defines the Bango documents root folder. All cached
-                files, PDF attachments, scrapers, and the local Wiki files reside in subdirectories
-                here (<code>fulltext/</code>, <code>ris/</code>, <code>wiki-root/</code>).
-              </li>
-              <li>
-                <strong>Maintenance & Imports (Reprocessing):</strong>
-                <ul>
-                  <li>
-                    <em>Rebuild Text Chunks:</em> Forces Bango to re-parse and split attached
-                    full-text files into vector chunks.
-                  </li>
-                  <li>
-                    <em>Batch Import:</em> A three-phase automated pipeline that scans your Storage
-                    directory. It links PDFs to articles via DOI (Phase 1), imports Citation
-                    Chaser/RIS metadata (Phase 2), and pre-generates AI summaries (Phase 3).
-                  </li>
-                </ul>
-              </li>
-              <li>
-                <strong>Project Management:</strong> Contains core project options. Export backup as
-                a <code>.bango.json</code> file, import a backup to restore data, reset the current
-                project database, or delete all data.
-              </li>
-              <li>
-                <strong>Diagnostics & Notification History:</strong> View previous toast messages,
-                system logs, and error trails.
               </li>
             </ul>
+
+            <h3>AI Summaries</h3>
+            <p>
+              Three toggles control how Bango generates AI summaries for articles with full text.
+            </p>
+            <ul>
+              <li>
+                <strong>Auto Generate Summaries:</strong> when enabled, articles are summarized
+                automatically as soon as a full-text attachment completes.
+              </li>
+              <li>
+                <strong>Section Summaries:</strong> adds per-section breakdowns (Methods, Results,
+                Discussion) to each summary.
+              </li>
+              <li>
+                <strong>Auto Translate (experimental):</strong> translates non-English articles to
+                English during upload or batch import. Translation quality depends on the LLM and
+                should not be considered accurate without further validation.
+              </li>
+            </ul>
+
+            <h3>Screening Preferences</h3>
+            <p>Configure behavior when screening articles.</p>
+            <ul>
+              <li>
+                <strong>Screening Mode:</strong>
+                <ul>
+                  <li><em>Abstract only</em> - default; screens on the abstract alone.</li>
+                  <li>
+                    <em>Enhanced</em> - sends abstract plus the top criteria-matched passages from
+                    full text.
+                  </li>
+                  <li>
+                    <em>Two-stage</em> - abstract first; only borderline articles get a second
+                    full-text pass.
+                  </li>
+                </ul>
+                Enhanced and Two-stage modes apply full-text evidence per article only when a PDF is
+                attached and fall back to abstract-only screening otherwise.
+              </li>
+              <li>
+                <strong>Auto-navigate after decision:</strong> when enabled, Bango automatically
+                advances to the next article after you include or reject the current one.
+              </li>
+            </ul>
+
+            <h3>Storage</h3>
+            <p>The Bango documents root folder and its subdirectory tree.</p>
+            <ul>
+              <li><code>fulltext/</code> - article PDFs and text extracts.</li>
+              <li><code>ris/</code> - Citation Chaser output.</li>
+              <li><code>wiki-root/</code> - the LLM Wiki (plain Markdown).</li>
+            </ul>
+            <p>
+              Use <strong>Browse</strong> to point Bango at a custom directory, or
+              <strong>Reset to Default</strong> to restore the platform default.
+            </p>
+
+            <h3>Maintenance & Imports (Reprocessing)</h3>
+            <ul>
+              <li>
+                <strong>Rebuild Text Chunks:</strong> forces Bango to re-parse and split attached
+                full-text files into retrieval chunks.
+              </li>
+              <li>
+                <strong>Batch Import:</strong> a five-phase automated pipeline that scans your
+                Storage directory and matches files to articles by DOI. The phases run in order:
+                <ol>
+                  <li>
+                    <strong>Full Text</strong> - attaches PDF/TXT files from
+                    <code>fulltext/</code> to matching articles.
+                  </li>
+                  <li>
+                    <strong>Citations</strong> - imports Citation Chaser RIS/BibTeX files from
+                    <code>ris/</code>.
+                  </li>
+                  <li>
+                    <strong>Translations</strong> - translates non-English newly-attached articles
+                    (only when Auto Translate is enabled).
+                  </li>
+                  <li>
+                    <strong>AI Summaries</strong> - generates summaries for newly-attached articles
+                    (only when Auto Generate Summaries is enabled).
+                  </li>
+                  <li>
+                    <strong>Embeddings</strong> - builds semantic-search vectors for the included
+                    corpus (skips articles already embedded).
+                  </li>
+                </ol>
+                Files must follow the DOI-based naming convention (e.g. DOI
+                <code>10.1016/j.jand.2021.06.013</code> becomes
+                <code>10.1016_j.jand.2021.06.013.pdf</code> in <code>fulltext/</code>, or
+                <code>10.1016_j.jand.2021.06.013_references.ris</code> in <code>ris/</code>).
+                Articles that already have the relevant data are skipped.
+              </li>
+            </ul>
+
+            <h3>Project Management</h3>
+            <p>
+              Export the current project as a <code>.bango.json</code> backup, import a backup to
+              restore data, reset the project database, or delete all data. See the
+              <a href="#ref-backup">Backup & Restore</a> section for the full workflow.
+            </p>
+
+            <h3>OpenAlex Search</h3>
+            <p>Configure the OpenAlex catalog integration.</p>
+            <ul>
+              <li>
+                <strong>API Key (optional):</strong> raises the rate limit from 10 to 100 requests
+                per second.
+              </li>
+              <li>
+                <strong>Email (polite pool):</strong> sent with every request; defaults to a Bango
+                app address if left blank.
+              </li>
+              <li>
+                <strong>Retrieve Reference Details:</strong> batch-fetches referenced-works metadata
+                when importing from OpenAlex. May trigger rate limits for articles with many
+                references.
+              </li>
+            </ul>
+
+            <h3>Notification History</h3>
+            <p>
+              An in-memory viewer of recent toast messages (newest first), useful for retracing
+              transient popups that disappeared.
+            </p>
+
+            <h3>Diagnostics</h3>
+            <p>
+              A persistent log of system errors and operational events, helpful when troubleshooting
+              import, screening, or LLM failures.
+            </p>
           </div>
           <footer class="ref-section__footer">
             <HelpScrollToTop @click="scrollToTop" />
