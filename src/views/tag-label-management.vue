@@ -136,8 +136,10 @@ async function onMerge({ fromId, intoId }: { fromId: string; intoId: string }): 
 </script>
 
 <template>
-  <div class="p-container-padding bg-surface-container-low min-h-full">
-    <div class="max-w-7xl mx-auto space-y-stack-gap">
+  <div
+    class="p-container-padding bg-surface-container-low min-h-full flex flex-col lg:h-full lg:overflow-hidden"
+  >
+    <div class="max-w-7xl mx-auto space-y-stack-gap w-full flex-1 flex flex-col min-h-0">
       <!-- Page Header -->
       <div class="flex items-center justify-between pb-4">
         <div>
@@ -179,7 +181,10 @@ async function onMerge({ fromId, intoId }: { fromId: string; intoId: string }): 
       </div>
 
       <!-- Dual-Panel Layout -->
-      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-container-padding items-start">
+      <div
+        v-else
+        class="grid grid-cols-1 lg:grid-cols-2 lg:grid-rows-1 gap-container-padding flex-1 min-h-0"
+      >
         <TagLabelPanel
           kind="tag"
           :items="tagsStore.tags"

@@ -180,7 +180,7 @@ function confirmDelete(): void {
 <template>
   <section
     ref="rootEl"
-    class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col min-h-[400px] lg:max-h-[700px]"
+    class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm overflow-hidden flex flex-col min-h-[400px]"
   >
     <!-- Panel header: title + count badge + Suggest action -->
     <div class="p-4 lg:p-5 border-b border-surface-variant bg-surface-bright flex-shrink-0">
