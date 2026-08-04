@@ -115,7 +115,7 @@ Download the file that matches your operating system and architecture.
 | File | Best For |
 |------|----------|
 | [`Microsoft Store`](https://apps.microsoft.com/detail/9np2bhgxt8h3) | **Recommended.**  Microsoft verified and signed installer for personal use. |
-| [`Bango_3.0.6_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v3.0.6/Bango_3.0.6_x64-setup.exe) | Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. You will be asked to grant permissions during install. |
+| [`Bango_3.0.6_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v3.0.6/Bango_3.0.6_x64-setup.exe) | Standard installer with a setup wizard. Installs to Program Files and creates Start Menu entries. You will be asked to grant permissions during install: Click `More info` link, then `Run anyway` button. |
 | [`Bango_3.0.6_x64_en-US.msi`](https://github.com/Bilal-S/Bango/releases/download/v3.0.6/Bango_3.0.6_x64_en-US.msi) | Enterprise or automated deployments. Windows Installer package suitable for group policy distribution. |
 
 
