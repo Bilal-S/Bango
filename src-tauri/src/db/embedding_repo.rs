@@ -125,6 +125,35 @@ pub fn list_hashes_for_article(
     Ok(out)
 }
 
+/// One stored row's staleness-relevant fields: `(chunk_index, input_hash,
+/// model_name)`. The director uses this richer shape (vs.
+/// [`list_hashes_for_article`]) to detect a **model mismatch**: when the
+/// stored `model_name` differs from the current `embedding_model` setting,
+/// the row is treated as stale regardless of the input_hash so Phase B
+/// regenerates it. Without this check, switching embedding models (e.g.
+/// `text-embedding-3-small` → `text-embedding-3-large`, or switching provider
+/// entirely) leaves all rows "fresh" by hash but invisible to recall (which
+/// filters by the new dimensions), producing a silent zero-results bug.
+pub fn list_hashes_and_model_for_article(
+    conn: &Connection,
+    article_id: &str,
+) -> Result<Vec<(i32, String, String)>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT chunk_index, input_hash, model_name FROM article_embeddings WHERE article_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![article_id], |row| {
+        let ci: i64 = row.get(0)?;
+        let hash: String = row.get(1)?;
+        let model: String = row.get(2).unwrap_or_default();
+        Ok((ci as i32, hash, model))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// Count all embedding rows in the table (across all articles). Used by the
 /// search-time gate to decide whether semantic search is even possible
 /// (empty table => LIKE fallback).
@@ -132,6 +161,35 @@ pub fn count_embeddings(conn: &Connection) -> Result<i64, AppError> {
     let count: i64 =
         conn.query_row("SELECT COUNT(*) FROM article_embeddings", [], |row| row.get(0))?;
     Ok(count)
+}
+
+/// The set of distinct `model_name` values currently stored across all
+/// embedding rows. Used by the Citation Finder's model-mismatch detection
+/// (`get_embedding_model_mismatch`) so the frontend can warn the user before
+/// searching with a different embedding model than the rows were generated
+/// with (which would silently exclude all rows from recall via the dimensions
+/// filter). Returns an empty vec when the table is empty.
+pub fn list_distinct_model_names(conn: &Connection) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT model_name FROM article_embeddings WHERE model_name IS NOT NULL AND model_name != ''",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Delete ALL embedding rows in the table. Used by the "regenerate on model
+/// switch" path (`regenerate_embeddings` command): a clean delete + re-embed
+/// is clearer than `force=true` re-embed because the latter leaves orphan rows
+/// when the per-article chunk count shrinks (e.g. an article's full text was
+/// edited down to a shorter form). `ON DELETE CASCADE` does not apply here
+/// because no article is being deleted.
+pub fn delete_all_embeddings(conn: &Connection) -> Result<(), AppError> {
+    conn.execute("DELETE FROM article_embeddings", [])?;
+    Ok(())
 }
 
 /// Count embedding rows for a single article (0 if none).

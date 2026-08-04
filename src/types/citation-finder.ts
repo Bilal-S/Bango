@@ -62,13 +62,42 @@ export interface CitationResult {
 }
 
 /** Readiness payload returned by `get_citation_finder_readiness`. Drives the
- *  toggle visibility (hidden when `providerSupportsEmbeddings === false`). */
+ *  toggle visibility + disabled state.
+ *
+ *  The frontend reads `embeddingStatus` to distinguish "known-unsupported"
+ *  (`'disabled'`) from "not yet probed" (`'unknown'`). The toggle renders in a
+ *  disabled state when `embeddingStatus === 'disabled'` so the user can see
+ *  the feature exists + learn they need to switch providers, rather than the
+ *  toggle silently disappearing. `providerSupportsEmbeddings` is kept for
+ *  backward compatibility but is NOT the sole gate. */
 export interface CitationFinderReadiness {
   totalArticles: number;
   embeddedCount: number;
   coveragePct: number;
   providerSupportsEmbeddings: boolean;
   statuses: string[];
+  /** Raw triple-state string. `'unknown'` (probe has not run) | `'enabled'` |
+   *  `'disabled'` (known-unsupported: Anthropic, Z.AI). */
+  embeddingStatus: 'unknown' | 'enabled' | 'disabled';
+  /** The last-working embedding model name (e.g. `'text-embedding-3-small'`).
+   *  `null` when the probe has not run or the provider is disabled. Surfaced
+   *  so the disabled-state message can be specific and so the model-mismatch
+   *  dialog can show the stored model. */
+  embeddingModel: string | null;
+}
+
+/** Model-mismatch payload returned by `get_embedding_model_mismatch`. `null`
+ *  when there is no mismatch (rows are fresh or the table is empty). Present
+ *  when stored rows were generated with a different model than the current
+ *  `embedding_model` setting, so the Citation Finder shows a confirmation
+ *  dialog before searching (recall would silently return zero hits because it
+ *  filters by the new dimensions). */
+export interface EmbeddingModelMismatch {
+  currentModel: string;
+  storedModel: string;
+  /** Total embedding rows currently stored (context for the dialog's
+   *  "this will re-embed N rows" message). */
+  storedRowCount: number;
 }
 
 /** Progress payload emitted via the `citation:progress` event and returned by

@@ -5,6 +5,7 @@ import type { WikiChatMessage } from '@/types/wiki';
 import type {
   CitationFinderMode,
   CitationFinderProgress,
+  CitationFinderReadiness,
   CitationResult,
   CitationStyle,
 } from '@/types/citation-finder';
@@ -59,8 +60,29 @@ export const useChatStore = defineStore('chat', () => {
 
   /** Whether the citation finder toggle should be visible. Populated by
    *  `chat-view.vue` from `get_citation_finder_readiness`. When false (e.g.
-   *  Anthropic provider, or embeddings not yet enabled) the toggle is hidden. */
+   *  Anthropic provider, or embeddings not yet enabled) the toggle is hidden.
+   *
+   *  DEPRECATED: kept for backward compat with existing `chat-view` watchers +
+   *  the welcome-card hint, but the toggle's visible/disabled/hidden state is
+   *  now driven by `citationReadiness.embeddingStatus` via the
+   *  `citationToggleState` computed. New callers should prefer
+   *  `citationToggleState`. */
   const citationFinderReady = ref(false);
+
+  /** Full readiness payload (drives the toggle's visible/disabled/hidden
+   *  state via `citationToggleState`). `null` until the first
+   *  `get_citation_finder_readiness` IPC completes. Refreshed reactively by
+   *  `chat-view`'s `watch(() => llmConfigStore.config, ...)` so a Settings
+   *  provider switch updates the toggle live (the same reactivity contract as
+   *  `useLlmConfigured()`). */
+  const citationReadiness = ref<CitationFinderReadiness | null>(null);
+
+  /** Tracks whether the user has dismissed the model-mismatch dialog for the
+   *  current stored model. The key is the `storedModel` string; when the user
+   *  clicks "Continue anyway" we record the key so the dialog does not nag on
+   *  every subsequent search. Cleared on `clearChat` (new session = new
+   *  chance to warn). `null` = no mismatch has been dismissed yet. */
+  const mismatchDismissedFor = ref<string | null>(null);
 
   /** Citation Finder mode (`whole_block` vs `per_statement`). Default
    *  `whole_block`. Persisted only in-memory for the session (not in
@@ -105,6 +127,10 @@ export const useChatStore = defineStore('chat', () => {
     error.value = null;
     source.value = 'articles';
     citationProgress.value = null;
+    // Reset the mismatch-dismissal tracker so a new session gets a fresh
+    // chance to warn the user if their embeddings are stale relative to the
+    // current model.
+    mismatchDismissedFor.value = null;
     // Tear down any dangling citation:* listeners (e.g. a search was in
     // flight when the user cleared). The next search re-subscribes.
     stopCitationListeners();
@@ -129,6 +155,24 @@ export const useChatStore = defineStore('chat', () => {
   /** Update the citation-finder readiness flag (drives toggle visibility). */
   function setCitationFinderReady(ready: boolean) {
     citationFinderReady.value = ready;
+  }
+
+  /** Set the full readiness payload (drives the toggle's
+   *  visible/disabled/hidden state via the view's `citationToggleState`
+   *  computed). Also updates the legacy `citationFinderReady` bool for
+   *  backward-compat with the welcome-card hint. */
+  function setCitationReadiness(r: CitationFinderReadiness | null) {
+    citationReadiness.value = r;
+    // Mirror the derived bool so the welcome card's `citationFinderReady`
+    // branch keeps working without a separate watcher.
+    citationFinderReady.value = r ? r.providerSupportsEmbeddings : false;
+  }
+
+  /** Record that the user dismissed the model-mismatch dialog for the given
+   *  stored-model key, so subsequent searches in the same session do not nag.
+   *  Pass `null` to reset (e.g. after a regenerate completes). */
+  function setMismatchDismissed(storedModel: string | null) {
+    mismatchDismissedFor.value = storedModel;
   }
 
   /** Set the citation-finder mode. */
@@ -330,6 +374,8 @@ export const useChatStore = defineStore('chat', () => {
     source,
     wikiReady,
     citationFinderReady,
+    citationReadiness,
+    mismatchDismissedFor,
     citationFinderMode,
     citationStyle,
     citationProgress,
@@ -342,6 +388,8 @@ export const useChatStore = defineStore('chat', () => {
     toggleWikiMode,
     setWikiReady,
     setCitationFinderReady,
+    setCitationReadiness,
+    setMismatchDismissed,
     setCitationFinderMode,
     setCitationStyle,
     cancelCitationSearch,

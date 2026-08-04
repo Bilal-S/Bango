@@ -9,7 +9,9 @@ use rusqlite::{params_from_iter, Connection};
 
 use crate::citation_finder::CitationFinderReadiness;
 use crate::db::app_settings_repo::{self, EmbeddingStatus};
+use crate::db::llm_config_repo;
 use crate::error::AppError;
+use crate::llm::embedding::check_embedding_support;
 
 /// Compute the readiness payload for the given status filter.
 ///
@@ -22,6 +24,22 @@ use crate::error::AppError;
 /// toggle-visibility gate (a probe has not necessarily run yet when the toggle
 /// is first shown).
 ///
+/// **Static-override for known-unsupported providers (authoritative)**: when
+/// the configured provider is statically known to not support embeddings
+/// (`check_embedding_support` returns `false` for `Anthropic` / `ZAi`), the
+/// returned `embedding_status` is ALWAYS overridden to `"disabled"` -
+/// regardless of the persisted status value. This is authoritative (not just
+/// a fallback for un-probed `Unknown` state) so it catches un-probed
+/// `Unknown` (probe has not run), stale `Enabled` (left over from a previous
+/// OpenAI session), and save-debounce timing races.
+///
+/// The persisted `app_settings.embedding_status` is NOT mutated here
+/// (read-only derivation for the readiness payload); the probe + runner keep
+/// reading the persisted value directly so they're unaffected. The persisted
+/// triple-state is the canonical signal for the probe/runner; this payload
+/// derivation is purely for toggle visibility and reflects the static truth
+/// when it is stronger than the persisted signal.
+///
 /// `coverage_pct` is `embedded_count / total_articles * 100`. The Phase A
 /// check inside `find_citations` runs Phase B (prepare) when `coverage_pct <
 /// 100.0`. Phase B is best-effort - the search proceeds regardless of the
@@ -31,8 +49,23 @@ pub fn compute_readiness(
     conn: &Connection,
     status_filter: &[String],
 ) -> Result<CitationFinderReadiness, AppError> {
-    let status = app_settings_repo::get_embedding_status(conn)?;
+    let mut status = app_settings_repo::get_embedding_status(conn)?;
     let dimensions = app_settings_repo::get_embedding_dimensions(conn)?;
+    let embedding_model = app_settings_repo::get_embedding_model(conn)?;
+
+    // Static-override (authoritative): when the configured provider is
+    // statically known-unsupported (Anthropic, Z.AI), override the REPORTED
+    // status to Disabled regardless of the persisted value. This catches
+    // un-probed Unknown, stale Enabled (left over from a previous OpenAI
+    // session), and save-debounce timing races. The persisted value is NOT
+    // mutated - this is a read-only derivation for the readiness payload; the
+    // probe + runner keep reading the persisted value directly.
+    if let Some(cfg) = llm_config_repo::get_config(conn)? {
+        if !check_embedding_support(&cfg.provider) {
+            status = EmbeddingStatus::Disabled;
+        }
+    }
+
     let provider_supports = status != EmbeddingStatus::Disabled;
 
     let total_articles = count_articles_by_status(conn, status_filter)?;
@@ -45,6 +78,8 @@ pub fn compute_readiness(
         coverage_pct,
         provider_supports_embeddings: provider_supports,
         statuses: status_filter.to_vec(),
+        embedding_status: status.as_str().to_string(),
+        embedding_model,
     })
 }
 

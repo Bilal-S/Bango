@@ -17,12 +17,17 @@ import { useArticleDelete } from '@/composables/use-article-delete';
 import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { useLlmConfigStore } from '@/stores/llm-config';
-import { getReadiness, stopCitationListeners } from '@/composables/use-citation-finder';
+import {
+  getReadiness,
+  stopCitationListeners,
+  getModelMismatch,
+  regenerateEmbeddings,
+} from '@/composables/use-citation-finder';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 import WikiPageViewer from '@/components/wiki/wiki-page-viewer.vue';
 import CitationResultCard from '@/components/citation-result-card.vue';
 import type { WikiSourceInfo } from '@/types/wiki';
-import type { CitationFinderMode } from '@/types/citation-finder';
+import type { CitationFinderMode, EmbeddingModelMismatch } from '@/types/citation-finder';
 
 const router = useRouter();
 const toast = useToast();
@@ -158,18 +163,95 @@ const citationStatusFilter = computed(() => {
  *  citation toolbar + prose textarea. */
 const isCitationMode = computed(() => chatStore.source === 'citation-finder');
 
-/** Citation-finder readiness check. Populates `chatStore.citationFinderReady`
- *  (drives the 3rd toggle visibility). Runs on mount + when the view is
- *  re-activated after navigation. */
+/**
+ * The Citation Finder toggle's visible/disabled/hidden state, derived from
+ * the readiness payload's `embeddingStatus` triple-state. Replaces the former
+ * boolean-only gate (`providerSupportsEmbeddings`) which silently hid the
+ * toggle on known-unsupported providers (Anthropic, Z.AI) - leaving the user
+ * with no indication the feature existed or that switching providers would
+ * unlock it.
+ *
+ * - `'enabled'`: embeddings are working; toggle is clickable.
+ * - `'unknown'`: probe has not run yet; toggle is clickable (Phase B will
+ *   probe on first run).
+ * - `'disabled'`: provider is known to not support embeddings; toggle renders
+ *   but is `disabled` with a tooltip pointing the user to Settings.
+ * - `'hidden'`: readiness has not loaded yet (initial mount) OR the LLM is
+ *   not configured (the whole chat workspace is gated on `isLlmConfigured`).
+ */
+const citationToggleState = computed<'enabled' | 'unknown' | 'disabled' | 'hidden'>(() => {
+  const r = chatStore.citationReadiness;
+  if (!r || !isLlmConfigured.value) return 'hidden';
+  return r.embeddingStatus;
+});
+
+/** Tooltip for the Citation Finder toggle, varying by state. */
+const citationToggleTitle = computed(() => {
+  if (isCitationMode.value) {
+    return 'Citation Finder active. Click to return to article context.';
+  }
+  switch (citationToggleState.value) {
+    case 'disabled':
+      return 'Current provider does not support embeddings. Switch to an embedding-capable provider (e.g. OpenAI, Ollama) in Settings to use Citation Finder.';
+    case 'unknown':
+      return 'Find citations for text you are writing (semantic search over your library). First run will prepare embeddings.';
+    default:
+      return 'Find citations for text you are writing (semantic search over your library)';
+  }
+});
+
+/** Citation-finder readiness check. Populates `chatStore.citationReadiness`
+ *  (drives the 3rd toggle's visible/disabled/hidden state via
+ *  `citationToggleState`). Runs on mount, after Settings edits (via the
+ *  `llmConfigStore.config` watcher), and after a regenerate completes. */
 async function checkCitationFinderReadiness() {
   try {
     const r = await getReadiness(citationStatusFilter.value);
-    chatStore.setCitationFinderReady(r.providerSupportsEmbeddings);
+    chatStore.setCitationReadiness(r);
   } catch {
-    // Provider not configured / embeddings disabled → hide the toggle.
-    chatStore.setCitationFinderReady(false);
+    // Provider not configured / IPC error → hide the toggle.
+    chatStore.setCitationReadiness(null);
   }
 }
+
+// Reactively re-check readiness when the LLM config changes (e.g. the user
+// switches provider in Settings, or runs Test Connection which probes
+// embeddings + updates `embedding_status`). This mirrors the canonical
+// `useLlmConfigured()` pattern - the previous one-shot `onMounted` check went
+// stale until the user navigated away and back. Deep watch because the config
+// object is mutated in place by the Settings auto-save watcher.
+watch(
+  () => llmConfigStore.config,
+  () => {
+    void checkCitationFinderReadiness();
+  },
+  { deep: true }
+);
+
+// ── Model-mismatch confirmation dialog ──────────────────────────────────
+//
+// Before each submit we check `get_embedding_model_mismatch`: if stored
+// embeddings were generated with a different model than the current
+// `embedding_model` setting, `recall` would silently return zero hits (it
+// filters by the new dimensions). Rather than letting the user discover this
+// via an empty result, we pop a confirmation dialog with three options:
+//   1. Regenerate  - delete all + re-embed (the correct path).
+//   2. Continue    - proceed anyway (partial recall; the user knows).
+//   3. Cancel      - abort the search entirely.
+// The dialog only fires once per stored-model key per session
+// (`mismatchDismissedFor`) so it doesn't nag on every subsequent search.
+
+/** The active model-mismatch payload when the dialog is open; `null` when
+ *  closed. Set by `handleCitationSend` before dispatching the search. */
+const mismatchDialog = ref<EmbeddingModelMismatch | null>(null);
+
+/** The prose text held while the mismatch dialog is open; re-dispatched via
+ *  `continueSearch` when the user clicks "Continue anyway". */
+const pendingSearchText = ref('');
+
+/** True while the "Regenerate" action is dispatching (disables the dialog's
+ *  buttons + shows a spinner so the user knows the regenerate started). */
+const regenerating = ref(false);
 
 /** Citation-style <select> options (the shared 5-style list). */
 const citationStyleOptions: CitationStyle[] = ['APA', 'MLA', 'Chicago', 'IEEE', 'AMA'];
@@ -189,12 +271,22 @@ function onToggleCitationFinder() {
   }
 }
 
-/** Submit the citation search. Driven by the prose textarea + the Find
- *  Citations button + Ctrl/Cmd+Enter. Threads the live status-filter
- *  checkboxes (NEW-4) to the store's dedicated `sendCitationSearch`, which
- *  forwards them to the backend. The backend filters against the whitelist
- *  and applies NO default - an empty array (all checkboxes unchecked)
- *  returns the "No articles match the selected filters." empty result. */
+/**
+ * Submit the citation search. Driven by the prose textarea + the Find
+ * Citations button + Ctrl/Cmd+Enter. Before dispatching, performs the cheap
+ * model-mismatch pre-check: if stored embeddings were generated with a
+ * different model than the current `embedding_model` setting, `recall` would
+ * silently return zero hits (it filters by the new dimensions), so we pop a
+ * confirmation dialog. The dialog only fires once per stored-model key per
+ * session (`chatStore.mismatchDismissedFor`) so it doesn't nag on every
+ * subsequent search.
+ *
+ * Threads the live status-filter checkboxes to the store's dedicated
+ * `sendCitationSearch`, which forwards them to the backend. The backend
+ * filters against the whitelist and applies NO default - an empty array
+ * (all checkboxes unchecked) returns the "No articles match the selected
+ * filters." empty result.
+ */
 async function handleCitationSend() {
   // The Find button is `:disabled` when the prose is empty, but Ctrl/Cmd+Enter
   // bypasses the disabled button, so we must guard here + show the toast
@@ -206,11 +298,101 @@ async function handleCitationSend() {
   if (chatStore.loading) return;
   const text = citationProse.value;
   citationProse.value = '';
-  // Pass the live checkbox state; the store owns the message list + the
-  // citation-finder branch. The backend's `filter_valid_statuses` whitelists
-  // `['working','included','rejected']` and drops everything else.
+
+  // Cheap pre-check: detect a stored-model mismatch before searching. The
+  // check is one `SELECT DISTINCT model_name` + one `COUNT(*)` (sub-ms on a
+  // local SQLite), so it's safe to run on every submit. When a mismatch is
+  // detected AND the user has not already dismissed it for this stored-model
+  // key, pop the dialog + hold the prose text for the continue path.
+  try {
+    const mismatch = await getModelMismatch();
+    if (
+      mismatch &&
+      mismatch.storedModel &&
+      chatStore.mismatchDismissedFor !== mismatch.storedModel
+    ) {
+      mismatchDialog.value = mismatch;
+      pendingSearchText.value = text;
+      return;
+    }
+  } catch {
+    // Non-fatal: if the mismatch IPC fails, proceed with the search. The
+    // user will see whatever results recall produces (possibly empty).
+  }
+
+  await runCitationSearch(text);
+}
+
+/** Run the actual citation search (store delegate). Extracted so the mismatch
+ *  dialog's "Continue anyway" path can re-dispatch the held prose. */
+async function runCitationSearch(text: string) {
   await chatStore.sendCitationSearch(text, citationStatusFilter.value);
   scrollToBottom();
+}
+
+/**
+ * Confirm the model-mismatch dialog: regenerate all embeddings in the active
+ * status scope. The backend `regenerate_embeddings` deletes every row in the
+ * scope then re-runs `generate_embeddings_inner` (which probes + embeds every
+ * article). The dialog closes immediately + the user watches the embedding
+ * progress bar in the citation input area (Phase B).
+ *
+ * The held prose is NOT auto-submitted after the regenerate because the
+ * regeneration is async + the user should search again once it completes (the
+ * progress UI communicates completion via `embedding:done`). The held prose
+ * is restored to the textarea so the user can re-submit with one click.
+ */
+async function confirmMismatchRegenerate() {
+  if (!mismatchDialog.value || regenerating.value) return;
+  regenerating.value = true;
+  try {
+    // Scope the regeneration to the same statuses the search uses so we don't
+    // wipe embeddings the user generated for other statuses via the
+    // standalone Settings command.
+    const scope = citationStatusFilter.value.join(',');
+    await regenerateEmbeddings(scope);
+    toast.show(
+      'Regenerating embeddings in the background. Search again once the progress bar completes.',
+      'info'
+    );
+    // Restore the held prose so the user can re-submit after the regenerate.
+    citationProse.value = pendingSearchText.value;
+    pendingSearchText.value = '';
+    // Mark this mismatch as resolved so the dialog doesn't re-fire for the
+    // same stored model if the user searches again before the regenerate
+    // completes.
+    chatStore.setMismatchDismissed(mismatchDialog.value.storedModel);
+    mismatchDialog.value = null;
+    // Re-fetch readiness so the toggle + coverage reflect the regeneration
+    // starting (coverage will drop to 0% then climb).
+    void checkCitationFinderReadiness();
+  } catch (e) {
+    toast.show(
+      `Failed to start regeneration: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    );
+  } finally {
+    regenerating.value = false;
+  }
+}
+
+/** Continue with the search despite the model mismatch. Records the dismissal
+ *  so the dialog does not re-fire for the same stored model this session, then
+ *  dispatches the held prose. */
+async function continueMismatchSearch() {
+  if (!mismatchDialog.value) return;
+  const text = pendingSearchText.value;
+  chatStore.setMismatchDismissed(mismatchDialog.value.storedModel);
+  mismatchDialog.value = null;
+  pendingSearchText.value = '';
+  await runCitationSearch(text);
+}
+
+/** Cancel the mismatch dialog: clears the held prose + closes the dialog
+ *  without recording a dismissal (so the next submit re-evaluates). */
+function cancelMismatchDialog() {
+  mismatchDialog.value = null;
+  pendingSearchText.value = '';
 }
 
 /** Copy a citation string to the clipboard + toast. */
@@ -635,9 +817,27 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
                   finds the relevant passages first, so the AI cannot invent sources: every result
                   is grounded in your real articles.
                 </p>
-                <p v-if="chatStore.citationFinderReady" class="chat-welcome-card__hint">
+                <!-- The hint branches on `citationToggleState` (the same computed
+                     that drives the toggle button), NOT the legacy
+                     `citationFinderReady` boolean. The disabled branch surfaces
+                     the "switch provider" message + a Settings link so the user
+                     on a known-unsupported provider (Anthropic, Z.AI) sees an
+                     actionable warning instead of a misleading "click to start"
+                     or a silent lock icon. -->
+                <p
+                  v-if="citationToggleState === 'enabled' || citationToggleState === 'unknown'"
+                  class="chat-welcome-card__hint"
+                >
                   <span class="material-symbols-outlined">quick_reference_all</span>
                   Click the <strong>Citation Finder</strong> icon to start.
+                </p>
+                <p
+                  v-else-if="citationToggleState === 'disabled'"
+                  class="chat-welcome-card__hint chat-welcome-card__hint--warning"
+                >
+                  <span class="material-symbols-outlined">block</span>
+                  Your provider does not support embeddings. Switch to OpenAI, Google or a local
+                  provider (Ollama, LM Studio) in Settings to use Citation Finder.
                 </p>
                 <p v-else class="chat-welcome-card__hint chat-welcome-card__hint--muted">
                   <span class="material-symbols-outlined">lock</span>
@@ -833,6 +1033,50 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
                status checkboxes, prose textarea, Find Citations button, and
                the live progress + Cancel UI. -->
           <div v-else-if="isCitationMode" class="citation-input-area">
+            <!-- Disabled-provider banner: shown when the user managed to enter
+                 citation mode (e.g. the toggle was clickable when they
+                 clicked it, then the provider was changed in Settings to an
+                 unsupported one) but the current provider does not support
+                 embeddings. Mirrors the wiki-banner pattern. -->
+            <div v-if="citationToggleState === 'disabled'" class="citation-disabled-banner">
+              <span class="material-symbols-outlined text-[16px]">block</span>
+              <span class="citation-disabled-banner__text">
+                Current provider does not support Citation Finder embeddings. Switch to an
+                embedding-capable provider in Settings.
+              </span>
+              <button
+                class="citation-disabled-banner__btn"
+                title="Open Settings"
+                @click="router.push('/settings')"
+              >
+                Open Settings
+              </button>
+            </div>
+
+            <!-- Coverage / first-run notice (Deliverable 3): surfaces the
+                 readiness payload's coverage so the user knows whether the
+                 first search will trigger a one-time embedding-generation
+                 pass (Phase B) and how many articles are in scope. Hidden
+                 when there are no articles in the selected statuses (the
+                 empty-search path handles that case) or when coverage is
+                 already complete. -->
+            <div
+              v-if="
+                chatStore.citationReadiness &&
+                chatStore.citationReadiness.totalArticles > 0 &&
+                chatStore.citationReadiness.coveragePct < 100 &&
+                !chatStore.citationProgress
+              "
+              class="citation-coverage-notice"
+            >
+              <span class="material-symbols-outlined text-[14px]">database</span>
+              <span>
+                First run will prepare embeddings for
+                {{ chatStore.citationReadiness.totalArticles }} article(s) - this may take several
+                minutes. Subsequent searches are fast.
+              </span>
+            </div>
+
             <!-- Single control row: Citation Style dropdown → status
                  checkboxes → Mode segmented toggle → close (X). Everything is
                  at the same level so there's no extra whitespace; the close
@@ -1082,19 +1326,24 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
               <span class="material-symbols-outlined text-[24px]">local_library</span>
             </button>
 
-            <!-- Citation Finder toggle button (3rd toggle). Visible only when
-                 the provider supports embeddings. Same chrome as the wiki
-                 toggle (.citation-toggle mirrors .wiki-toggle). -->
+            <!-- Citation Finder toggle button (3rd toggle). Renders in a
+                 visible-but-disabled state when the provider is known to not
+                 support embeddings (Anthropic, Z.AI) so the user can see the
+                 feature exists + learn they need to switch providers, rather
+                 than the toggle silently disappearing. Clickable when
+                 `citationToggleState` is `'enabled'` or `'unknown'` (Phase B
+                 probes on first run). Hidden only when readiness has not
+                 loaded yet OR the LLM is not configured. -->
             <button
-              v-if="chatStore.citationFinderReady"
+              v-if="citationToggleState !== 'hidden'"
               class="citation-toggle"
-              :class="{ 'citation-toggle--active': isCitationMode }"
-              :title="
-                isCitationMode
-                  ? 'Citation Finder active. Click to return to article context.'
-                  : 'Find citations for text you are writing (semantic search over your library)'
-              "
+              :class="{
+                'citation-toggle--active': isCitationMode,
+                'citation-toggle--disabled': citationToggleState === 'disabled',
+              }"
+              :title="citationToggleTitle"
               :aria-pressed="isCitationMode"
+              :disabled="citationToggleState === 'disabled'"
               @click="onToggleCitationFinder"
             >
               <span class="material-symbols-outlined text-[24px]">quick_reference_all</span>
@@ -1185,6 +1434,77 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
         </div>
       </div>
     </Transition>
+
+    <!-- Citation Finder embedding model-mismatch dialog. Pops before a search
+         when stored embeddings were generated with a different model than the
+         current `embedding_model` setting (so recall would silently return
+         zero hits). Three options: Regenerate (delete all + re-embed),
+         Continue (proceed with partial recall), Cancel (abort). -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="mismatchDialog"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          @click.self="cancelMismatchDialog"
+        >
+          <div
+            class="mismatch-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mismatch-title"
+          >
+            <div class="mismatch-dialog__icon">
+              <span class="material-symbols-outlined">sync_problem</span>
+            </div>
+            <h3 id="mismatch-title" class="mismatch-dialog__title">
+              Embeddings were generated with a different model
+            </h3>
+            <p class="mismatch-dialog__body">
+              Your stored embeddings were generated with
+              <code>{{ mismatchDialog.storedModel }}</code> but the current embedding model is
+              <code>{{ mismatchDialog.currentModel || '(unknown)' }}</code
+              >. For consistent results, regenerate your embeddings ({{
+                mismatchDialog.storedRowCount
+              }}
+              row(s) will be re-embedded). Otherwise Citation Finder may silently return zero
+              matches.
+            </p>
+            <div class="mismatch-dialog__actions">
+              <button
+                type="button"
+                class="mismatch-dialog__btn mismatch-dialog__btn--ghost"
+                :disabled="regenerating"
+                @click="cancelMismatchDialog"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="mismatch-dialog__btn mismatch-dialog__btn--secondary"
+                :disabled="regenerating"
+                @click="continueMismatchSearch"
+              >
+                Continue anyway
+              </button>
+              <button
+                type="button"
+                class="mismatch-dialog__btn mismatch-dialog__btn--primary"
+                :disabled="regenerating"
+                @click="confirmMismatchRegenerate"
+              >
+                <span
+                  v-if="regenerating"
+                  class="mismatch-dialog__spinner"
+                  aria-label="Regenerating"
+                ></span>
+                <span v-else class="material-symbols-outlined text-[16px]">refresh</span>
+                {{ regenerating ? 'Starting…' : 'Regenerate' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- Article Selection Modal -->
     <Teleport to="body">
@@ -1479,6 +1799,15 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   font-weight: 500;
 }
 
+/* Warning variant: known-unsupported provider (Anthropic, Z.AI). Amber
+   chrome so it reads as an actionable "switch provider" warning instead of
+   the muted "not available" lock. Matches the citation-disabled-banner
+   palette. */
+.chat-welcome-card__hint--warning {
+  color: rgb(180 83 9); /* amber-700 */
+  font-weight: 600;
+}
+
 .dot-1,
 .dot-2,
 .dot-3 {
@@ -1598,6 +1927,19 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   box-shadow:
     0 0 0 3px rgb(199 210 254 / 0.9),
     0 1px 2px rgb(15 23 42 / 0.08);
+}
+
+/* Disabled state: known-unsupported provider (Anthropic, Z.AI). The toggle
+   stays visible (so the user can see the feature exists + the tooltip tells
+   them to switch providers) but is muted + non-interactive. */
+.citation-toggle--disabled,
+.citation-toggle--disabled:hover {
+  background-color: rgb(241 245 249); /* slate-100 */
+  border-color: rgb(226 232 240); /* slate-200 */
+  color: rgb(148 163 184); /* slate-400 */
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.7;
 }
 
 /* Citation Finder input area (replaces article-context pills + single-line
@@ -2208,5 +2550,191 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 .slide-leave-to {
   transform: translateX(100%);
   opacity: 0;
+}
+
+/* Fade transition for the model-mismatch dialog (mirrors the article selector
+   + tooltip patterns - simple opacity + tiny scale). */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Citation Finder disabled-provider banner (amber/warning chrome, mirrors the
+   wiki-banner layout but in warning colors so it reads as "blocked"). */
+.citation-disabled-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background-color: rgb(254 243 199); /* amber-100 */
+  border: 1px solid rgb(252 211 77); /* amber-300 */
+  color: rgb(120 53 15); /* amber-900 */
+}
+
+.citation-disabled-banner__text {
+  flex: 1;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.citation-disabled-banner__btn {
+  padding: 0.1875rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgb(252 211 77); /* amber-300 */
+  background: #fff;
+  color: rgb(180 83 9); /* amber-700 */
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.citation-disabled-banner__btn:hover {
+  background: rgb(254 249 195); /* amber-50 */
+}
+
+/* Citation Finder coverage / first-run notice. Muted slate chrome (not a
+   warning - just an FYI that the first search will trigger a one-time
+   embedding-generation pass). */
+.citation-coverage-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.375rem;
+  background-color: rgb(241 245 249); /* slate-100 */
+  border: 1px solid rgb(226 232 240); /* slate-200 */
+  color: rgb(71 85 105); /* slate-600 */
+  font-size: 0.6875rem;
+}
+
+/* Citation Finder model-mismatch confirmation dialog. */
+.mismatch-dialog {
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.18);
+  padding: 1.5rem;
+  max-width: 32rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mismatch-dialog__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  background: rgb(254 243 199); /* amber-100 */
+  color: rgb(180 83 9); /* amber-700 */
+}
+
+.mismatch-dialog__icon span.material-symbols-outlined {
+  font-size: 28px;
+}
+
+.mismatch-dialog__title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: rgb(15 23 42); /* slate-900 */
+  margin: 0;
+}
+
+.mismatch-dialog__body {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: rgb(71 85 105); /* slate-600 */
+  margin: 0;
+}
+
+.mismatch-dialog__body code {
+  background: rgb(241 245 249);
+  padding: 0.0625rem 0.25rem;
+  border-radius: 0.1875rem;
+  font-family: monospace;
+  font-size: 0.85em;
+  color: rgb(15 23 42);
+}
+
+.mismatch-dialog__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.mismatch-dialog__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4375rem 0.875rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
+  border: 1px solid transparent;
+}
+
+.mismatch-dialog__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mismatch-dialog__btn--ghost {
+  background: transparent;
+  color: rgb(100 116 139); /* slate-500 */
+  border-color: rgb(203 213 225); /* slate-300 */
+}
+
+.mismatch-dialog__btn--ghost:hover:not(:disabled) {
+  background: rgb(241 245 249); /* slate-100 */
+}
+
+.mismatch-dialog__btn--secondary {
+  background: #fff;
+  color: rgb(71 85 105); /* slate-600 */
+  border-color: rgb(203 213 225); /* slate-300 */
+}
+
+.mismatch-dialog__btn--secondary:hover:not(:disabled) {
+  background: rgb(241 245 249); /* slate-100 */
+}
+
+.mismatch-dialog__btn--primary {
+  background: rgb(99 102 241); /* indigo-600 */
+  color: #fff;
+  border-color: rgb(79 70 229); /* indigo-700 */
+}
+
+.mismatch-dialog__btn--primary:hover:not(:disabled) {
+  background: rgb(79 70 229); /* indigo-700 */
+}
+
+.mismatch-dialog__spinner {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 1.5px solid rgb(255 255 255 / 0.4);
+  border-top-color: #fff;
+  border-radius: 9999px;
+  animation: mismatch-dialog-spin 0.7s linear infinite;
+}
+
+@keyframes mismatch-dialog-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

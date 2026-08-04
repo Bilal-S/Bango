@@ -152,8 +152,29 @@ pub struct CitationFinderReadiness {
     pub coverage_pct: f64,
     /// `embedding_status == Enabled AND dimensions > 0`. Drives toggle
     /// visibility (hidden when `false`, e.g. on Anthropic).
+    ///
+    /// NOTE: the frontend no longer uses this as the SOLE toggle gate - it now
+    /// reads `embedding_status` (below) to distinguish "known-unsupported"
+    /// (`disabled`) from "not yet probed" (`unknown`). The toggle renders in a
+    /// disabled state when `embedding_status == "disabled"` so the user can see
+    /// the feature exists + learn they need to switch providers, rather than
+    /// the toggle silently disappearing.
     pub provider_supports_embeddings: bool,
     pub statuses: Vec<String>,
+    /// Raw triple-state string (`"unknown"` | `"enabled"` | `"disabled"`).
+    /// Lets the UI render a disabled-but-visible toggle with a precise tooltip
+    /// on known-unsupported providers (Anthropic, Z.AI) while still showing the
+    /// toggle on `unknown` (first run, probe has not fired yet). The backend
+    /// `find_citations` Phase A guard still uses `provider_supports_embeddings`
+    /// (the derived bool) so behavior is unchanged.
+    pub embedding_status: String,
+    /// The last-working embedding model name (e.g.
+    /// `"text-embedding-3-small"`). `None` when the probe has not yet run or
+    /// the provider is disabled. Surfaced so the disabled-state message can be
+    /// specific ("Anthropic does not serve embeddings…") and so the
+    /// model-mismatch dialog can show the stored model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
 }
 
 /// Progress payload emitted via the `citation:progress` event and returned by

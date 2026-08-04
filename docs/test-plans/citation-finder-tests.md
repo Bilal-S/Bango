@@ -65,6 +65,11 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/tests/citation_finder_readiness_test.rs::coverage_half` | 5/10 → 50% |
 | `src-tauri/tests/citation_finder_readiness_test.rs::coverage_zero_embedded` | 0/N → 0% |
 | `src-tauri/tests/citation_finder_readiness_test.rs::coverage_embedded_exceeds_total_clamps` | defensive clamp to 100% |
+| `src-tauri/tests/citation_finder_readiness_test.rs::compute_readiness_anthropic_overrides_unknown_to_disabled` | Anthropic + un-probed → reports `disabled` (static override) |
+| `src-tauri/tests/citation_finder_readiness_test.rs::compute_readiness_zai_overrides_unknown_to_disabled` | Z.AI + un-probed → reports `disabled` (static override) |
+| `src-tauri/tests/citation_finder_readiness_test.rs::compute_readiness_openai_keeps_unknown_when_not_probed` | OpenAI + un-probed → stays `unknown` (no static override) |
+| `src-tauri/tests/citation_finder_readiness_test.rs::compute_readiness_anthropic_overrides_persisted_enabled` | static override is authoritative: wins over stale persisted `enabled` |
+| `src-tauri/tests/citation_finder_readiness_test.rs::compute_readiness_anthropic_keeps_persisted_disabled` | persisted `disabled` is a no-op for the static check |
 | `src-tauri/tests/citation_finder_mod_test.rs::filter_valid_statuses_keeps_valid_three` | whitelist keeps the 3 valid statuses |
 | `src-tauri/tests/citation_finder_mod_test.rs::filter_valid_statuses_drops_duplicate_status` | `duplicate` always dropped |
 | `src-tauri/tests/citation_finder_mod_test.rs::filter_valid_statuses_empty_input_returns_empty` | empty → empty (no "all statuses" fallback) |
@@ -86,6 +91,19 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/tests/embedding_recall_multistatus_test.rs::empty_filter_returns_all_statuses` | §7 API: empty filter = all rows |
 | `src-tauri/tests/embedding_recall_multistatus_test.rs::single_status_filter_matches_historical_behavior` | backward-compat single status |
 | `src-tauri/tests/embedding_recall_multistatus_test.rs::multi_status_filter_working_plus_included` | working+included excludes rejected/duplicate |
+| `src-tauri/tests/embedding_director_test.rs::director_detects_model_mismatch_as_stale` | stored model differs from current → row marked stale (pins the silent zero-results fix) |
+| `src-tauri/tests/embedding_director_test.rs::director_skips_fresh_rows_when_hash_matches` | hash + model both match → row skipped (AllFresh) |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::no_mismatch_when_stored_matches_current` | stored == current → None |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::no_mismatch_when_nothing_stored` | empty stored → None |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::mismatch_when_stored_differs_from_current` | stored != current → Some(stored) |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::mismatch_case_insensitive` | ASCII case differences are NOT a mismatch |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::mismatch_returns_first_offending_model_when_multiple_stored` | first non-matching model wins |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::mismatch_when_current_set_but_stored_empty` | empty stored model is a mismatch when current is known |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::no_mismatch_when_both_current_and_stored_empty` | both empty → None (nothing probed yet) |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::list_distinct_model_names_returns_unique_values` | DISTINCT model_name across rows |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::list_distinct_model_names_empty_when_table_empty` | empty table → empty vec |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::list_distinct_model_names_omits_null_and_empty` | NULL/empty model_name filtered out |
+| `src-tauri/tests/embedding_model_mismatch_test.rs::delete_all_embeddings_clears_every_row` | DELETE FROM article_embeddings wipes all rows |
 
 ## TypeScript (Phase B - frontend)
 
@@ -93,6 +111,10 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 |-----------------|-----------|
 | `src/__tests__/composables/use-citation-finder.test.ts::formatCitation_outputs_valid_string_per_style` | all 5 styles produce a parseable citation (consolidated) |
 | `src/__tests__/composables/use-citation-finder.test.ts::findCitations_dispatches_command_and_listens_for_done` | IPC + event wiring (verifies find_citations invoked, send_chat_message not) |
+| `src/__tests__/composables/use-citation-finder.test.ts::getModelMismatch_dispatches_command_and_returns_payload` | mismatch IPC wiring + payload shape |
+| `src/__tests__/composables/use-citation-finder.test.ts::getModelMismatch_returns_null_when_no_mismatch` | null passthrough when no mismatch |
+| `src/__tests__/composables/use-citation-finder.test.ts::regenerateEmbeddings_dispatches_scoped_command` | scoped regenerate IPC wiring |
+| `src/__tests__/composables/use-citation-finder.test.ts::regenerateEmbeddings_passes_null_for_all_statuses` | null filter = all statuses |
 | `src/__tests__/components/citation-result-card.test.ts::renders_metadata_passage_badge_confidence` | card layout contract |
 | `src/__tests__/components/citation-result-card.test.ts::sectionOrigin_null_omits_badge` | null section → no § badge |
 | `src/__tests__/chat.test.ts::citation_finder_source_toggle` | 3rd source toggle works |

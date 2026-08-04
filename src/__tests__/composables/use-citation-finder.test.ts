@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { formatCitation, firstAuthor, findCitations } from '@/composables/use-citation-finder';
+import {
+  formatCitation,
+  firstAuthor,
+  findCitations,
+  getModelMismatch,
+  regenerateEmbeddings,
+} from '@/composables/use-citation-finder';
 import { tauriCommand } from '@/composables/use-tauri-command';
 import type { CitationMatch } from '@/types/citation-finder';
 
@@ -129,6 +135,49 @@ describe('use-citation-finder (pure helpers)', () => {
         expect(cmd).not.toBe('send_chat_message');
         expect(cmd).not.toBe('wiki_chat');
       }
+    });
+  });
+
+  describe('getModelMismatch IPC wiring', () => {
+    it('getModelMismatch_dispatches_command_and_returns_payload', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (tauriCommand as any).mockResolvedValue({
+        currentModel: 'text-embedding-3-small',
+        storedModel: 'text-embedding-3-large',
+        storedRowCount: 42,
+      });
+      const out = await getModelMismatch();
+      expect(tauriCommand).toHaveBeenCalledWith('get_embedding_model_mismatch');
+      expect(out).toEqual({
+        currentModel: 'text-embedding-3-small',
+        storedModel: 'text-embedding-3-large',
+        storedRowCount: 42,
+      });
+    });
+
+    it('getModelMismatch_returns_null_when_no_mismatch', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (tauriCommand as any).mockResolvedValue(null);
+      const out = await getModelMismatch();
+      expect(out).toBeNull();
+    });
+  });
+
+  describe('regenerateEmbeddings IPC wiring', () => {
+    it('regenerateEmbeddings_dispatches_scoped_command', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (tauriCommand as any).mockResolvedValue(undefined);
+      await regenerateEmbeddings('working,included');
+      expect(tauriCommand).toHaveBeenCalledWith('regenerate_embeddings', {
+        statusFilter: 'working,included',
+      });
+    });
+
+    it('regenerateEmbeddings_passes_null_for_all_statuses', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (tauriCommand as any).mockResolvedValue(undefined);
+      await regenerateEmbeddings(null);
+      expect(tauriCommand).toHaveBeenCalledWith('regenerate_embeddings', { statusFilter: null });
     });
   });
 });

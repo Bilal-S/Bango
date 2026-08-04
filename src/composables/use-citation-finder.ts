@@ -22,6 +22,7 @@ import type {
   CitationResult,
   CitationStyle,
   CitationMatch,
+  EmbeddingModelMismatch,
 } from '@/types/citation-finder';
 
 /** The status filter the search is scoped to. Duplicates are always excluded
@@ -159,6 +160,39 @@ export async function getReadiness(
   return tauriCommand<CitationFinderReadiness>('get_citation_finder_readiness', {
     statusFilter,
   });
+}
+
+/**
+ * Detect whether stored embeddings were generated with a different model than
+ * the current `embedding_model` setting. Returns `null` when there is no
+ * mismatch (rows are fresh or the table is empty). Returns the mismatch
+ * payload when the user switched embedding models since the last
+ * `generate_embeddings` run - the Citation Finder's submit handler shows a
+ * confirmation dialog in that case because `recall` filters by the new
+ * dimensions and would silently return zero hits.
+ *
+ * Cheap (one `SELECT DISTINCT model_name` + one `COUNT(*)`); safe to call on
+ * every submit.
+ */
+export async function getModelMismatch(): Promise<EmbeddingModelMismatch | null> {
+  return tauriCommand<EmbeddingModelMismatch | null>('get_embedding_model_mismatch');
+}
+
+/**
+ * Regenerate ALL embeddings in the given status scope. Deletes every existing
+ * row in that scope then re-runs `generate_embeddings_inner` (which probes +
+ * embeds every article). Used by the Citation Finder's model-mismatch
+ * confirmation dialog ("Regenerate" button). Emits `embedding:progress` /
+ * `embedding:done` events; the caller does NOT await completion (the dialog
+ * closes immediately and the user watches the progress bar in the citation
+ * input area).
+ *
+ * @param statusFilter  Comma-joined status string (e.g. `"working,included"`)
+ *                      matching `EmbeddingScope.status_filter`'s single-string
+ *                      contract. Pass `null` to regenerate across ALL statuses.
+ */
+export async function regenerateEmbeddings(statusFilter: string | null): Promise<void> {
+  await tauriCommand<unknown>('regenerate_embeddings', { statusFilter });
 }
 
 // ── Citation formatting (pure, no deps) ───────────────────────────────────

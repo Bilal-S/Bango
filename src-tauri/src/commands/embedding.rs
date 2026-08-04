@@ -37,6 +37,54 @@ pub struct EmbeddingStatusInfo {
     pub model_override: Option<String>,
 }
 
+/// Model-mismatch payload returned by `get_embedding_model_mismatch`. `None`
+/// (serialized as `null`) when there is no mismatch (or no embeddings stored).
+/// `Some` when stored rows were generated with a different `model_name` than
+/// the current `embedding_model` setting, so the user gets a confirmation
+/// dialog before searching (which would silently return zero hits because
+/// `recall` filters by the new dimensions).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingModelMismatch {
+    /// The model name currently set in `app_settings.embedding_model` (set by
+    /// the probe). Empty when the probe has not run yet.
+    pub current_model: String,
+    /// One of the stored model names that differs from `current_model`. When
+    /// multiple distinct stored models exist (e.g. the user switched models
+    /// twice without regenerating), the first non-matching one is reported -
+    /// the dialog's CTA ("regenerate to be consistent") is the same regardless.
+    pub stored_model: String,
+    /// Total embedding rows currently stored (context for the dialog's
+    /// "this will re-embed N rows" message).
+    pub stored_row_count: i64,
+}
+
+/// Pure helper: given the distinct stored model names + the current model,
+/// return the first stored name that does not match (case-insensitive ASCII).
+/// `None` when there is no mismatch or nothing is stored.
+///
+/// Extracted as `#[must_use]` so the mismatch-detection logic is unit-testable
+/// in isolation without a DB.
+#[must_use]
+pub fn first_mismatched_model(stored: &[String], current: Option<&str>) -> Option<String> {
+    let current_str = current.unwrap_or("");
+    // First pass: find a stored model whose name differs from the current
+    // setting (case-insensitive ASCII comparison - model names are ASCII).
+    let mismatched = stored.iter().find(|s| !s.eq_ignore_ascii_case(current_str));
+    if let Some(m) = mismatched {
+        return Some(m.clone());
+    }
+    // Second pass: if the current model is known but a stored row carries an
+    // empty model name (pre-feature row, or corrupt), that's also a mismatch
+    // so the row is flagged for regeneration + the column backfilled.
+    if !current_str.is_empty() {
+        if let Some(m) = stored.iter().find(|s| s.is_empty()) {
+            return Some(m.clone());
+        }
+    }
+    None
+}
+
 /// Generate (or regenerate) embeddings for a set of articles.
 ///
 /// - `article_ids`: when non-empty, embeds exactly those articles (overrides
@@ -162,6 +210,122 @@ pub async fn probe_embeddings(db_state: State<'_, DbState>) -> Result<ProbeOutco
     let conn = lock_conn(&db_state.conn)?;
     app_settings_repo::set_embedding_status(&conn, new_status, &outcome.model, outcome.dimensions)?;
     Ok(outcome)
+}
+
+/// Detect whether stored embeddings were generated with a different model
+/// than the current `embedding_model` setting. Returns `None` (serialized as
+/// `null`) when there is no mismatch (rows are fresh or the table is empty).
+/// Returns `Some(EmbeddingModelMismatch)` when the user switched embedding
+/// models since the last `generate_embeddings` run - in that case the Citation
+/// Finder shows a confirmation dialog before searching because `recall`
+/// filters by the new dimensions and would silently return zero hits.
+///
+/// The check is intentionally cheap (one `SELECT DISTINCT model_name` + one
+/// `COUNT(*)`) so it can run on every Citation Finder submit without a
+/// perceptible delay.
+#[tauri::command]
+pub fn get_embedding_model_mismatch(
+    db_state: State<'_, DbState>,
+) -> Result<Option<EmbeddingModelMismatch>, AppError> {
+    let conn = lock_conn(&db_state.conn)?;
+    let current = app_settings_repo::get_embedding_model(&conn)?;
+    let stored = crate::db::embedding_repo::list_distinct_model_names(&conn)?;
+    let Some(mismatched) = first_mismatched_model(&stored, current.as_deref()) else {
+        return Ok(None);
+    };
+    let stored_row_count = crate::db::embedding_repo::count_embeddings(&conn)?;
+    Ok(Some(EmbeddingModelMismatch {
+        current_model: current.unwrap_or_default(),
+        stored_model: mismatched,
+        stored_row_count,
+    }))
+}
+
+/// Regenerate ALL embeddings from scratch. Deletes every row in
+/// `article_embeddings` then re-runs `generate_embeddings_inner` (which probes
+/// + embeds every article in the scope). Used by the Citation Finder's
+/// model-mismatch confirmation dialog ("Regenerate" button) and as a future
+/// standalone "Regenerate embeddings" Settings affordance.
+///
+/// The delete-then-regenerate path is clearer than `force=true` re-embed
+/// because the latter leaves orphan rows when the per-article chunk count
+/// shrinks (e.g. an article's full text was edited down). A clean delete
+/// guarantees the table reflects only the current corpus + current model.
+///
+/// `status_filter` scopes the regeneration (default `"included"` - the
+/// Citation Finder's default candidate pool). The delete is ALSO scoped to
+/// those statuses so a regenerate-from-Citation-Finder does not wipe
+/// embeddings the user may have generated for other statuses via the
+/// standalone Settings command. Pass an empty filter to delete + regenerate
+/// across all statuses.
+///
+/// Returns immediately after spawning the background task; the frontend
+/// listens to `embedding:progress` / `embedding:done` for the real result.
+#[tauri::command]
+pub async fn regenerate_embeddings(
+    _db_state: State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+    status_filter: Option<String>,
+) -> Result<EmbeddingRunReport, AppError> {
+    // Phase 1: scoped delete (brief lock). The delete must run BEFORE the
+    // runner re-derives its work list so the director sees an empty table and
+    // produces full work. We scope the delete to the same status filter the
+    // runner will use so a Citation-Finder regenerate does not wipe rows the
+    // user generated for other statuses via the standalone command.
+    {
+        let db = app_handle.state::<DbState>();
+        let conn = lock_conn(&db.conn)?;
+        if let Some(ref filter) = status_filter {
+            // Build `status IN (?, ?, ?)` - split the comma-joined filter the
+            // runner uses (matches `EmbeddingScope.status_filter`'s single-
+            // string contract). Every status is bound as a parameter so no
+            // SQL injection.
+            let statuses: Vec<&str> =
+                filter.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+            if statuses.is_empty() {
+                crate::db::embedding_repo::delete_all_embeddings(&conn)?;
+            } else {
+                let placeholders: Vec<&str> = (0..statuses.len()).map(|_| "?").collect();
+                let in_clause = placeholders.join(", ");
+                let sql = format!(
+                    "DELETE FROM article_embeddings \
+                     WHERE article_id IN (SELECT id FROM articles WHERE status IN ({in_clause}))"
+                );
+                let pairs: Vec<&dyn rusqlite::ToSql> =
+                    statuses.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                conn.execute(&sql, rusqlite::params_from_iter(pairs.iter()))?;
+            }
+        } else {
+            crate::db::embedding_repo::delete_all_embeddings(&conn)?;
+        }
+    }
+
+    // Phase 2: re-embed (background task; emits `embedding:progress`/`done`).
+    let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
+    let sender: Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
+        Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
+    // `force=false` is correct here because the delete above emptied the
+    // relevant rows, so the director's hash-comparison naturally produces full
+    // work. (force=true would also work but would bypass the model-mismatch
+    // signal in the director's report.)
+    let scope = EmbeddingScope { article_ids: None, status_filter, force: false };
+    let handle = app_handle.clone();
+    tokio::task::spawn(async move {
+        let st = handle.state::<DbState>();
+        let _ =
+            generate_embeddings_inner(&st, Arc::clone(&sender), scope, Some(&handle), true, None)
+                .await;
+    })
+    .await
+    .map_err(|e| AppError::Import(format!("regenerate task panicked: {e}")))?;
+    Ok(EmbeddingRunReport {
+        generated: 0,
+        skipped: 0,
+        errors: 0,
+        status: "started".to_string(),
+        model: String::new(),
+        skip_reason: None,
+    })
 }
 
 /// Set the embedding-model override (premium-only).

@@ -116,7 +116,10 @@ fn director_skips_fresh_rows_when_hash_matches() {
     set_enabled(&conn);
     seed_article(&conn, "a1", "included", "Title", "Abstract");
 
-    // Pre-insert a matching embedding row so the hash matches.
+    // Pre-insert a matching embedding row so the hash matches AND the model
+    // name matches the current `embedding_model` setting (`set_enabled` sets
+    // "text-embedding-3-small"). A stored model mismatch marks the row stale
+    // regardless of the hash (see `director_detects_model_mismatch_as_stale`).
     let text = bango_lib::embedding::text::format_embedding_text("Title", "Abstract", None);
     let hash = bango_lib::embedding::text::hash_text(&text);
     embedding_repo::insert_embedding(
@@ -127,7 +130,7 @@ fn director_skips_fresh_rows_when_hash_matches() {
             embedding: &[0.1; 4],
             dimensions: 4,
             input_hash: &hash,
-            model_name: "m",
+            model_name: "text-embedding-3-small",
             provider: "p",
             generated_at: 1,
         },
@@ -138,6 +141,47 @@ fn director_skips_fresh_rows_when_hash_matches() {
     assert_eq!(list.skip_reason, Some(SkipReason::AllFresh));
     assert!(list.rows.is_empty(), "fresh rows are skipped");
     assert_eq!(list.skipped_fresh, 1);
+}
+
+#[test]
+fn director_detects_model_mismatch_as_stale() {
+    // A stored row whose `model_name` differs from the current
+    // `embedding_model` setting is marked stale regardless of the input_hash.
+    // This is the fix for the silent zero-results bug: switching embedding
+    // models (e.g. text-embedding-3-small → text-embedding-3-large) changes
+    // the vector dimensions, so recall filters out every old row. Without
+    // this check the director reports all rows "fresh" by hash, Phase B
+    // produces zero work, coverage reads 100%, and every search returns zero
+    // hits with no explanation.
+    let conn = create_connection().unwrap();
+    run_migrations(&conn).unwrap();
+    seed_config(&conn);
+    set_enabled(&conn); // sets embedding_model = "text-embedding-3-small"
+    seed_article(&conn, "a1", "included", "Title", "Abstract");
+
+    // Insert a row with a matching hash BUT a different model name
+    // ("text-embedding-3-large"). The hash alone would mark it fresh; the
+    // model mismatch must override that.
+    let text = bango_lib::embedding::text::format_embedding_text("Title", "Abstract", None);
+    let hash = bango_lib::embedding::text::hash_text(&text);
+    embedding_repo::insert_embedding(
+        &conn,
+        &NewEmbeddingRow {
+            article_id: "a1",
+            chunk_index: TITLE_ABSTRACT_CHUNK_INDEX,
+            embedding: &[0.1; 4],
+            dimensions: 4,
+            input_hash: &hash,
+            model_name: "text-embedding-3-large",
+            provider: "p",
+            generated_at: 1,
+        },
+    )
+    .unwrap();
+
+    let list = compute_work_list(&conn, &EmbeddingScope::default()).unwrap();
+    assert_eq!(list.rows.len(), 1, "model mismatch => needs re-embedding");
+    assert_ne!(list.skip_reason, Some(SkipReason::AllFresh));
 }
 
 #[test]

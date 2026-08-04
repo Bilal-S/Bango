@@ -44,13 +44,49 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   "whole-block" / "per-statement", but IPC payloads use the underscores.
 - **Reuses `embedding::recall::recall`** (extended to multi-status
   `&[String]`) as the cosine prefilter. No reimplemented cosine + max-pool.
-- **Toggle visibility gate** (cf2.md §2.1): `provider_supports_embeddings`
-  is `embedding_status != Disabled` (NOT `== Enabled AND dimensions > 0`).
-  `Unknown` shows the toggle - Phase B's first run probes via
-  `generate_embeddings_inner` (the runner probes + recomputes the work list
-  when it sees `UnknownNotProbed`) and resolves the status to `Enabled` or
-  `Disabled`. `Disabled` hides the toggle (known-unsupported: Anthropic, Z.AI).
-  The toggle never dead-ends: a click on `Unknown` runs Phase B, which probes.
+- **Toggle visibility gate** (cf2.md §2.1): the readiness payload now carries
+  `embedding_status: String` (`"unknown"` | `"enabled"` | `"disabled"`) +
+  `embedding_model: Option<String>` so the frontend can render the toggle in a
+  visible-but-disabled state when the provider is known-unsupported (Anthropic,
+  Z.AI), instead of silently hiding it. The previous boolean-only gate
+  (`provider_supports_embeddings`) left users on unsupported providers with no
+  indication the feature existed. The frontend's `citationToggleState`
+  computed derives `'enabled' | 'unknown' | 'disabled' | 'hidden'` from
+  `embedding_status`; the toggle is `disabled` (with a tooltip pointing to
+  Settings) only when `embedding_status == 'disabled'`, and `'hidden'` only
+  when readiness has not loaded or the LLM is not configured. The backend
+  `find_citations` Phase A guard still uses `provider_supports_embeddings`
+  (the derived bool) so the runtime behavior is unchanged.
+
+  **Reactivity**: the frontend `chat-view.vue` watches `llmConfigStore.config`
+  (deep) + re-runs `checkCitationFinderReadiness()` on every change so a
+  Settings provider switch updates the toggle live (mirrors the canonical
+  `useLlmConfigured()` pattern). The previous one-shot `onMounted` check went
+  stale until the user navigated away and back.
+
+  **Static-override for known-unsupported providers (authoritative)**:
+  `compute_readiness` consults `llm::embedding::check_embedding_support(provider)`
+  and, when the configured provider is statically known-unsupported
+  (`Anthropic` / `ZAi`), the REPORTED `embedding_status` is ALWAYS overridden
+  to `"disabled"` - regardless of the persisted status value. This is
+  authoritative (not just a fallback for un-probed `Unknown` state) so it
+  catches un-probed `Unknown`, stale `Enabled` (left over from a previous
+  OpenAI session), and save-debounce timing races. The persisted
+  `app_settings.embedding_status` is NOT mutated here (read-only derivation
+  for the readiness payload); the probe + runner keep reading the persisted
+  value directly. Pinned by the `compute_readiness_{anthropic,zai,openai}_*`
+  tests in `tests/citation_finder_readiness_test.rs`, including
+  `compute_readiness_anthropic_overrides_persisted_enabled` which asserts the
+  override wins over a stale persisted `enabled`.
+
+  **Provider-card debounced save** (`settings-provider-card.vue`): the
+  debounced auto-save watcher tracks `provider`, `endpointUrl`, `modelName`,
+  AND `apiKeyEncrypted` in addition to the 4 Parameters fields, so changing
+  the provider dropdown persists to the DB within 600ms (previously it only
+  persisted on Test Connection, leaving the DB stale + breaking the readiness
+  override which reads the persisted provider field). Gated on `!testing` and
+  `!fetchingModels` so it doesn't race with those paths' explicit saves.
+
   **Probe-skipping**: Phase B's probe fires ONLY when `embedding_status ==
   Unknown`. After `Test Connection` probes and sets `Enabled`, Phase B skips
   the probe and proceeds straight to embedding generation. The earlier bug
@@ -61,6 +97,28 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   (`commands::llm_config::embedding_relevant_changed`) gates the reset behind
   a provider/endpoint/model/api-key comparison so parameters-only saves
   preserve the status. Pinned by `embedding_probe_persist_test.rs`.
+
+- **Model-mismatch detection** (`get_embedding_model_mismatch` command +
+  `first_mismatched_model` pure helper in `commands/embedding.rs`): before
+  each submit the frontend calls `get_embedding_model_mismatch`, which returns
+  `Some(EmbeddingModelMismatch { currentModel, storedModel, storedRowCount })`
+  when stored embeddings were generated with a different model than the
+  current `embedding_model` setting. `recall` filters by the new dimensions, so
+  stale-model rows are silently excluded - without this check the user gets a
+  zero-results search with no explanation. The frontend pops a confirmation
+  dialog (Regenerate / Continue anyway / Cancel) keyed by `storedModel` +
+  tracked in `chatStore.mismatchDismissedFor` so it doesn't nag on every
+  subsequent search. The "Regenerate" path calls `regenerate_embeddings`
+  (scoped delete + re-embed); "Continue anyway" records the dismissal + proceeds.
+
+  The director's per-row staleness check was ALSO extended: a stored row is
+  stale when `stored_hash != input_hash || stored_model != current_model` (was
+  hash-only). This makes Phase B's auto-prepare actually regenerate stale-
+  model rows on the first Citation Finder run, fixing the "100% coverage /
+  zero results" silent failure at its source. Pinned by
+  `director_detects_model_mismatch_as_stale` in
+  `tests/embedding_director_test.rs` + the 7 pure-helper cases in
+  `tests/embedding_model_mismatch_test.rs`.
 - **`misrepresents_source`** (`CitationLlmOutput` field): `true` = the matched
   passage is taken out of context / selectively quoted in a way that
   misrepresents the source. The `#[serde(alias = "fairlyParaphrased")]` keeps

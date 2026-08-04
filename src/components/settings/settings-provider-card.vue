@@ -233,22 +233,36 @@ watch(
   }
 );
 
-// ── Debounced auto-save for the Parameters fields ─────────────────────────
+// ── Debounced auto-save for ALL config fields ─────────────────────────────
 //
-// The Parameters card has no Save button. Without this watcher, editing
-// Concurrency / Context Tokens / Request Delay / Temperature mutates only the
-// in-memory Pinia store: the change never reaches `save_llm_config`, so the
-// orchestrator's `update_settings` is never called and the next LLM call uses
-// stale concurrency/delay. The watcher debounces `save()` (600ms trailing) so
-// dragging the Context Tokens slider fires one save per pause, not one per
-// tick. It is gated on `!testing` (Test Connection already saves) and skips
-// the very first run so loading the config from the DB doesn't trigger a
-// spurious re-save. After a successful save the cached screening-readiness
-// estimate (which depends on `contextWindowTokens`) is invalidated so the
-// progress bar reflects the new value on the next screening-view visit.
+// The Provider card has no Save button. Without this watcher, editing any
+// field mutates only the in-memory Pinia store: the change never reaches
+// `save_llm_config`, so the orchestrator's `update_settings` is never called
+// and the next LLM call uses stale concurrency/delay/provider. The watcher
+// debounces `save()` (600ms trailing) so dragging the Context Tokens slider
+// fires one save per pause, not one per tick.
+//
+// CRITICAL: this watcher tracks `provider`, `endpointUrl`, `modelName`, AND
+// `apiKeyEncrypted` in addition to the 4 Parameters fields. The provider
+// dropdown's `watch(() => config.value.provider, ...)` mutates `endpointUrl`
+// + `modelName` synchronously (all three change in one tick), so without
+// tracking them here the provider change would NEVER persist until the user
+// clicks Test Connection - leaving the DB stale (old provider + old
+// `embedding_status`) and breaking the Citation Finder toggle visibility
+// (which reads the persisted provider to detect known-unsupported providers
+// like Anthropic/Z.AI via `compute_readiness`'s static-override).
+//
+// Gated on `!testing` (Test Connection already saves) and `!fetchingModels`
+// (Get Models saves explicitly) so a concurrent debounced save cannot race
+// with their explicit save + re-fetch. Skips the very first run so loading
+// the config from the DB doesn't trigger a spurious re-save.
 let paramSaveStarted = false;
 watch(
   () => [
+    config.value.provider,
+    config.value.endpointUrl,
+    config.value.modelName,
+    config.value.apiKeyEncrypted,
     config.value.maxConcurrentRequests,
     config.value.requestDelayMs,
     config.value.contextWindowTokens,
@@ -261,10 +275,10 @@ watch(
       paramSaveStarted = true;
       return;
     }
-    // Don't schedule a debounced save while Test Connection is running: that
-    // path saves explicitly + re-fetches, and a concurrent debounced save
-    // could race with the re-fetch.
-    if (testing.value) return;
+    // Don't schedule a debounced save while Test Connection or Get Models is
+    // running: those paths save explicitly + re-fetch, and a concurrent
+    // debounced save could race with the re-fetch.
+    if (testing.value || fetchingModels.value) return;
     scheduleParamSave();
   }
 );

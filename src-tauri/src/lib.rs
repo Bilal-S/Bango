@@ -351,6 +351,8 @@ pub fn run() {
             commands::embedding::get_embedding_status,
             commands::embedding::probe_embeddings,
             commands::embedding::set_embedding_model_override,
+            commands::embedding::get_embedding_model_mismatch,
+            commands::embedding::regenerate_embeddings,
             commands::citation_finder::find_citations,
             commands::citation_finder::cancel_citation_search,
             commands::citation_finder::get_citation_finder_readiness,

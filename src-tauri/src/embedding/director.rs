@@ -130,6 +130,13 @@ pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<Wo
         });
     }
 
+    // The current embedding model name (used for the model-mismatch staleness
+    // check). Read once outside the per-article loop so we don't re-query
+    // `app_settings` for every article. `None` means the probe has not run yet
+    // (the gate above already returned `SkipReason::UnknownNotProbed` in that
+    // case, so this branch is unreachable when `status == Unknown`).
+    let current_model = app_settings_repo::get_embedding_model(conn)?;
+
     let total_articles = target_ids.len();
     let mut rows: Vec<EmbedTask> = Vec::new();
     let mut skipped_fresh = 0usize;
@@ -153,16 +160,44 @@ pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<Wo
         let expected =
             expected_rows(&article.title, &article.abstract_text, &chunks, article.has_full_text);
 
-        // Load stored hashes once per article.
-        let stored: std::collections::HashMap<i32, String> = if scope.force {
+        // Load stored (chunk_index → (input_hash, model_name)) once per
+        // article. The model_name is tracked alongside the hash so a model
+        // switch (e.g. `text-embedding-3-small` → `text-embedding-3-large`)
+        // marks every row stale even when the input text (and therefore the
+        // hash) is unchanged. Without this, switching models leaves all rows
+        // "fresh" by hash but invisible to recall (which filters by the new
+        // dimensions), producing a silent zero-results bug.
+        let stored: std::collections::HashMap<i32, (String, String)> = if scope.force {
             std::collections::HashMap::new()
         } else {
-            embedding_repo::list_hashes_for_article(conn, id)?.into_iter().collect()
+            embedding_repo::list_hashes_and_model_for_article(conn, id)?
+                .into_iter()
+                .map(|(ci, h, m)| (ci, (h, m)))
+                .collect()
         };
 
         for (chunk_index, text) in expected {
             let input_hash = hash_text(&text);
-            let needs = scope.force || (stored.get(&chunk_index) != Some(&input_hash));
+            // Stale when: force | hash mismatch | model mismatch.
+            // The model-mismatch arm compares the stored `model_name` against
+            // the current `embedding_model` setting. An empty stored model
+            // (pre-feature rows, or a corrupt row) is treated as a mismatch
+            // so the row is regenerated + the model column backfilled.
+            let needs = scope.force
+                || match stored.get(&chunk_index) {
+                    None => true, // no stored row
+                    Some((stored_hash, stored_model)) => {
+                        // ASCII case-insensitive model comparison is sufficient
+                        // because embedding model names are ASCII (e.g.
+                        // `text-embedding-3-small`). A stored empty model name
+                        // (pre-feature row, or corrupt) is a mismatch so the
+                        // row is regenerated + the column backfilled.
+                        let model_mismatch = !stored_model
+                            .eq_ignore_ascii_case(current_model.as_deref().unwrap_or(""))
+                            || (current_model.is_some() && stored_model.is_empty());
+                        *stored_hash != input_hash || model_mismatch
+                    }
+                };
             if needs {
                 rows.push(EmbedTask { article_id: id.clone(), chunk_index, text, input_hash });
             } else {
