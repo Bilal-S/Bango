@@ -172,7 +172,7 @@ function handleSwitchTab(tab: string): void {
     </nav>
 
     <!-- Active tab content -->
-    <HelpTabGuide v-if="activeTab === 'guide'" />
+    <HelpTabGuide v-if="activeTab === 'guide'" :initial-hash="routeHash" />
     <HelpTabBibliometrics v-else-if="activeTab === 'biblio'" />
     <HelpTabTroubleshooting v-else-if="activeTab === 'troubleshoot'" />
     <HelpTabLocalAi v-else-if="activeTab === 'local-ai'" :initial-hash="routeHash" />

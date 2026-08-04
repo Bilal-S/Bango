@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import '@/styles/help-shared.css';
 
 /**
@@ -9,6 +10,8 @@ import '@/styles/help-shared.css';
  * prop (from the parent shell's route hash) so deep-links like
  * `/help?tab=reference#ref-references-citations` scroll to the right section on mount.
  */
+
+const router = useRouter();
 
 const props = defineProps<{
   initialHash?: string;
@@ -433,6 +436,14 @@ watch(
               <li>
                 <strong>Quick Actions:</strong> Navigation buttons to jump directly to key screening
                 tasks.
+              </li>
+              <li>
+                <strong>Start New Project:</strong> Once a project is loaded, a
+                <em>Start New Project</em> link appears in the dashboard header (next to the primary
+                CTA). Clicking it opens an informational dialog explaining the
+                <a href="#ref-backup">back up &rarr; delete &rarr; begin-fresh</a> workflow for
+                Bango's single-project model, with shortcuts to the Help Guide and Project
+                Management settings.
               </li>
             </ul>
           </div>
@@ -1971,7 +1982,65 @@ ER  - </pre
                 current project database. A warnings modal requires explicit confirmation before
                 initiating the overwrite.
               </li>
+              <li>
+                <strong>Delete All Data:</strong> Permanently wipes the database (articles,
+                criteria, tags, labels, audit trail) AND the on-disk
+                <code>wiki-root/</code> directory and generated wiki. The
+                <code>journal_index</code> reference table and your LLM/API settings survive.
+                Requires typing <code>DELETE</code> to confirm.
+              </li>
             </ul>
+
+            <h3>Starting a New Project</h3>
+            <p>
+              Bango is a <strong>single-project</strong> application: one active review at a time
+              (multi-project workspaces are out of scope). To begin a new review, follow this
+              workflow:
+            </p>
+            <ol>
+              <li>
+                <strong>Back up</strong> - In Settings &rarr; Project Management, click
+                <strong>Export Backup</strong> to save your current project as a
+                <code>.bango.json</code> file. This is optional but strongly recommended so you can
+                restore the project later.
+              </li>
+              <li>
+                <strong>Delete</strong> - Click <strong>Start New Project</strong> (or
+                <strong>Delete All Data</strong>) in the Project Management card and type
+                <code>DELETE</code> to confirm. This clears the database and removes the on-disk
+                Wiki. Full-text PDF and text files inside the Bango document directory will not be
+                deleted. If you wish, you can delete them manually.
+              </li>
+              <li>
+                <strong>Begin fresh</strong> - Define new research aims and criteria, import new
+                articles (RIS/BibTeX), or use the Search Strategy Builder + OpenAlex search to
+                discover articles. See the
+                <button
+                  type="button"
+                  class="ref-link"
+                  @click="router.push('/help?tab=guide#starting-points')"
+                >
+                  Starting Points
+                </button>
+                section in the User Guide for the three valid entry paths.
+              </li>
+            </ol>
+            <div class="ref-callout">
+              <h4>Quick shortcut</h4>
+              <p>
+                The <strong>Project Dashboard</strong> header carries a
+                <em>Start New Project</em> link (visible once a project is loaded). Clicking it
+                opens an informational dialog summarizing this workflow with shortcuts to the Help
+                Guide and the Settings &rarr; Project Management card.
+              </p>
+            </div>
+            <p>
+              <em>Note:</em> The on-disk <code>fulltext/</code> directory (PDFs and extracted text)
+              and <code>wiki-root/</code> directory (generated wiki) are NOT included in the
+              <code>.bango.json</code> backup. If you want to preserve them, copy the
+              <strong>Bango Documents directory</strong> (shown in Settings &rarr; Storage) manually
+              before deleting.
+            </p>
           </div>
         </section>
       </div>
@@ -2056,7 +2125,12 @@ ER  - </pre
   border-radius: var(--radius-md);
   padding: var(--space-5);
   box-shadow: var(--shadow-sm);
-  scroll-margin-top: var(--space-4);
+  /* The help-tabs nav bar is sticky at `top: 0` (~48-56px tall). Without
+     this offset, scrollIntoView lands the section title hidden under the
+     bar. 80px clears the bar + its bottom border + a small visual gap so
+     the title is fully visible after any scroll-to-section navigation
+     (sidebar click, deep-link hash, or cross-tab link). */
+  scroll-margin-top: 80px;
 }
 
 .ref-section__header {

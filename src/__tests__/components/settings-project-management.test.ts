@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { createRouter, createMemoryHistory } from 'vue-router';
 
 // Mock @tauri-apps/api/core so the component's `get_storage_root` call in
 // onMounted resolves instead of hitting the real Tauri bridge.
@@ -29,10 +30,22 @@ import SettingsProjectManagement from '@/components/settings/settings-project-ma
 /** Mount the settings card with a fresh Pinia and the mocked Tauri bridge.
  * The import dialog is opened by clicking the "Import Backup" button so the
  * file-picker markup is rendered. */
+/** Build a minimal memory-history router so `useRouter()` resolves in tests
+ * (the component now uses the router to deep-link the Help Reference section). */
+function buildTestRouter() {
+  return createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/', component: { template: '<div/>' } },
+      { path: '/help', component: { template: '<div/>' } },
+    ],
+  });
+}
+
 async function mountWithImportDialog() {
   setActivePinia(createPinia());
   const wrapper = mount(SettingsProjectManagement, {
-    global: { plugins: [createPinia()] },
+    global: { plugins: [createPinia(), buildTestRouter()] },
   });
   await flushPromises();
   const openBtn = wrapper.findAll('button').find((b) => b.text().includes('Import Backup'));
@@ -199,5 +212,76 @@ describe('settings-project-management.vue', () => {
     expect(wrapper.find('.file-picker__filename').text()).toBe('export.json');
     const importBtn = wrapper.findAll('button').find((b) => b.text().trim() === 'Import');
     expect(importBtn?.attributes('disabled')).toBeUndefined();
+  });
+});
+
+describe('settings-project-management.vue - Start New Project button + info-box', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    mockImportProject.mockReset();
+    mockExportProject.mockReset();
+    mockResetProject.mockReset();
+    mockInvoke.mockResolvedValue({
+      effectivePath: '/home/user/Bango',
+      isCustom: false,
+      defaultPath: '/home/user/Bango',
+    });
+  });
+
+  it('renders the updated card description mentioning start-fresh', async () => {
+    setActivePinia(createPinia());
+    const wrapper = mount(SettingsProjectManagement, {
+      global: { plugins: [createPinia(), buildTestRouter()] },
+    });
+    await flushPromises();
+    const desc = wrapper.find('.settings-card__desc');
+    expect(desc.exists()).toBe(true);
+    expect(desc.text()).toContain('Start a new project');
+  });
+
+  it('renders the info-box explaining the single-project model', async () => {
+    setActivePinia(createPinia());
+    const wrapper = mount(SettingsProjectManagement, {
+      global: { plugins: [createPinia(), buildTestRouter()] },
+    });
+    await flushPromises();
+    const infoBox = wrapper.find('.settings-card__info-box');
+    expect(infoBox.exists()).toBe(true);
+    expect(infoBox.text()).toContain('one project at a time');
+    expect(infoBox.text()).toContain('Delete All Data');
+    // The "Learn more" link is present.
+    expect(wrapper.find('.settings-card__learn-more').exists()).toBe(true);
+  });
+
+  it('renders the Start New Project primary button', async () => {
+    setActivePinia(createPinia());
+    const wrapper = mount(SettingsProjectManagement, {
+      global: { plugins: [createPinia(), buildTestRouter()] },
+    });
+    await flushPromises();
+    const startBtn = wrapper.findAll('button').find((b) => b.text().includes('Start New Project'));
+    expect(startBtn).toBeTruthy();
+    // It carries the primary style (visually distinct from secondary actions).
+    expect(startBtn?.classes()).toContain('btn--primary');
+  });
+
+  it('Start New Project button opens the existing Delete dialog (no separate dialog)', async () => {
+    setActivePinia(createPinia());
+    const wrapper = mount(SettingsProjectManagement, {
+      global: { plugins: [createPinia(), buildTestRouter()] },
+    });
+    await flushPromises();
+    // No dialog initially.
+    expect(wrapper.find('.dialog-overlay').exists()).toBe(false);
+
+    const startBtn = wrapper.findAll('button').find((b) => b.text().includes('Start New Project'));
+    await startBtn!.trigger('click');
+    await flushPromises();
+
+    // The existing Delete All Project Data dialog opens.
+    const overlay = wrapper.find('.dialog-overlay');
+    expect(overlay.exists()).toBe(true);
+    expect(overlay.text()).toContain('Delete All Project Data');
+    expect(overlay.find('.dialog--danger').exists()).toBe(true);
   });
 });

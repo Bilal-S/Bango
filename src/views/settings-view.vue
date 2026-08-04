@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, nextTick } from 'vue';
+import { useRoute } from 'vue-router';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import SettingsProviderCard from '@/components/settings/settings-provider-card.vue';
 import SettingsAiSummaries from '@/components/settings/settings-ai-summaries.vue';
@@ -12,8 +13,27 @@ import SettingsNotificationHistory from '@/components/settings/settings-notifica
 import SettingsDiagnostics from '@/components/settings/settings-diagnostics.vue';
 
 const appVersion = __APP_VERSION__;
+const route = useRoute();
 const { dbVersion, dbMaxVersion } = useFeatureFlags();
 const showVersion = computed(() => dbMaxVersion.value > 0);
+
+/**
+ * On mount, if the route carries `?focus=project-management` (set by the
+ * Dashboard's "Start New Project" dialog), smooth-scroll the Project
+ * Management card into view so the user lands directly on it instead of the
+ * top of the Settings page. Wrapped in `nextTick` + `requestAnimationFrame`
+ * so the card's DOM node exists before we query it.
+ */
+onMounted(() => {
+  if (route.query.focus !== 'project-management') return;
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      document
+        .getElementById('settings-project-management')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+});
 </script>
 
 <template>
@@ -41,7 +61,11 @@ const showVersion = computed(() => dbMaxVersion.value > 0);
       <SettingsScreeningPreferences />
       <SettingsStorage />
       <SettingsReprocessing />
-      <SettingsProjectManagement />
+      <!-- `id` is the scroll target for the Dashboard's "Start New Project"
+           dialog (`/settings?focus=project-management`). -->
+      <div id="settings-project-management">
+        <SettingsProjectManagement />
+      </div>
       <SettingsOpenAlex />
       <SettingsNotificationHistory />
       <SettingsDiagnostics />
@@ -85,5 +109,12 @@ const showVersion = computed(() => dbMaxVersion.value > 0);
   flex-direction: column;
   gap: 1rem;
   margin-top: 2rem;
+}
+
+/* Scroll target for the Dashboard's "Start New Project" deep-link
+   (`?focus=project-management`). `scroll-margin-top` keeps the card header
+   clear of any sticky app-shell chrome when scrolled into view. */
+#settings-project-management {
+  scroll-margin-top: 1rem;
 }
 </style>

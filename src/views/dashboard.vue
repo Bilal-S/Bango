@@ -161,6 +161,26 @@ function navigateToArticle(articleId: string): void {
 const { demoLoading, demoError, loadDemo } = useDemo(router);
 const { importProject } = useExport();
 
+// --- Start New Project info dialog (shown when a project is loaded) ---
+// Single-project model: surfaces the export → delete → begin-fresh workflow
+// without hiding it behind Settings discovery.
+const showStartNewProjectDialog = ref(false);
+
+/** Navigate to the Project Management settings card. The `focus` query param
+ *  tells the Settings view to scroll the Project Management card into view on
+ *  arrival, since it sits further down the page (after AI Summaries, Screening,
+ *  Storage, and Reprocessing). */
+function goToProjectManagement(): void {
+  showStartNewProjectDialog.value = false;
+  router.push('/settings?focus=project-management');
+}
+
+/** Open the Help Guide's "Starting Points" anchor. */
+function openHelpGuideStartingPoints(): void {
+  showStartNewProjectDialog.value = false;
+  router.push('/help?tab=guide#starting-points');
+}
+
 // --- Load Existing Project (from a .bango.json backup file) ---
 // Uses a hidden HTML <input type="file"> rather than the Tauri fs dialog so
 // the picker can read from any directory (the `fs:allow-read-file` capability
@@ -206,10 +226,20 @@ async function onProjectFileSelected(event: Event): Promise<void> {
         <h1 class="page-title">Project Dashboard</h1>
         <p class="dashboard__subtitle"><b>Bango - Your Literature Review Assistant</b></p>
       </div>
-      <button v-if="hasArticles" class="dashboard__cta" @click="navigateTo(cta.route)">
-        <span class="material-symbols-outlined dashboard__cta-icon">{{ cta.icon }}</span>
-        {{ cta.label }}
-      </button>
+      <div v-if="hasArticles" class="dashboard__header-actions">
+        <button
+          class="dashboard__start-new-link"
+          title="Back up your current project and start a fresh one"
+          @click="showStartNewProjectDialog = true"
+        >
+          <span class="material-symbols-outlined dashboard__start-new-icon">restart_alt</span>
+          Start New Project
+        </button>
+        <button class="dashboard__cta" @click="navigateTo(cta.route)">
+          <span class="material-symbols-outlined dashboard__cta-icon">{{ cta.icon }}</span>
+          {{ cta.label }}
+        </button>
+      </div>
     </section>
 
     <!-- Loading State -->
@@ -488,6 +518,56 @@ async function onProjectFileSelected(event: Event): Promise<void> {
         </div>
       </template>
     </template>
+
+    <!-- Start New Project info dialog (shown when a project is loaded).
+         Surfaces the export → delete → begin-fresh workflow for Bango's
+         single-project model so the user knows how to start over. -->
+    <div
+      v-if="showStartNewProjectDialog"
+      class="dialog-overlay"
+      @click.self="showStartNewProjectDialog = false"
+    >
+      <div class="dialog">
+        <h2>Start a New Project</h2>
+        <p class="dialog__desc">
+          Bango manages <strong>one project at a time</strong>. To begin a new review, back up your
+          current project first, then delete all data and start fresh.
+        </p>
+        <div class="dialog__info-box">
+          <span class="material-symbols-outlined">info</span>
+          <div>
+            <p><strong>Recommended workflow:</strong></p>
+            <ol class="dashboard__start-new-steps">
+              <li>
+                <strong>Back up</strong> - Export the current project to a
+                <code>.bango.json</code> file so you can restore it later.
+              </li>
+              <li>
+                <strong>Delete</strong> - Use "Delete All Data" in Settings to clear the database.
+                This also removes the on-disk Wiki, but does not delete full-text PDFs.
+              </li>
+              <li>
+                <strong>Begin fresh</strong> - Define new criteria, import new articles, or search
+                OpenAlex to discover articles for your new review.
+              </li>
+            </ol>
+          </div>
+        </div>
+        <div class="dialog__actions">
+          <button class="btn btn--outline" @click="showStartNewProjectDialog = false">
+            Cancel
+          </button>
+          <button class="btn btn--outline" @click="openHelpGuideStartingPoints">
+            <span class="material-symbols-outlined btn__icon">menu_book</span>
+            Open Help Guide
+          </button>
+          <button class="btn btn--primary" @click="goToProjectManagement">
+            <span class="material-symbols-outlined btn__icon">settings</span>
+            Go to Project Management
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -573,6 +653,74 @@ async function onProjectFileSelected(event: Event): Promise<void> {
 
 .dashboard__cta-icon {
   font-size: 18px;
+}
+
+/* Header action group: "Start New Project" link + primary CTA side by side.
+   On narrow viewports the header stacks vertically (see .dashboard__header
+   responsive rule above), so this group wraps gracefully. */
+.dashboard__header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* The "Start New Project" text-link: deliberately quiet (ghost/outline
+   style) so the primary CTA (Connect LLM / Start Screening / Build Wiki)
+   stays the visually dominant action. Turns indigo on hover. */
+.dashboard__start-new-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  background: transparent;
+  color: var(--color-on-surface-variant);
+  border: 1px solid var(--color-border);
+  padding: 8px 14px;
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background-color 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.dashboard__start-new-link:hover {
+  color: #4f46e5;
+  border-color: #c7d2fe;
+  background-color: #eef2ff;
+}
+
+.dashboard__start-new-icon {
+  font-size: 16px;
+}
+
+/* Numbered steps list inside the Start New Project dialog info-box. Tighter
+   spacing than the default <ol> so it reads as a compact workflow. */
+.dashboard__start-new-steps {
+  margin: var(--space-2) 0 0 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dashboard__start-new-steps li {
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-body);
+  color: var(--color-on-surface-variant);
+}
+
+.dashboard__start-new-steps code {
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  background-color: rgba(79, 70, 229, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 /* Loading & Error States */

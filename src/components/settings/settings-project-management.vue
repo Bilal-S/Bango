@@ -1,9 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { useExport } from '@/composables/use-export';
 
+const router = useRouter();
 const { error, exportProject, importProject, resetProject } = useExport();
+
+/** Open the Help Reference Backup & Restore section in a new tab/view. */
+function openBackupHelp(): void {
+  router.push('/help?tab=reference#ref-backup');
+}
 
 const showImportDialog = ref(false);
 const showExportDialog = ref(false);
@@ -122,8 +129,33 @@ async function doDeleteProject(): Promise<void> {
       <span class="material-symbols-outlined text-primary">settings_backup_restore</span>
       Project Management
     </h2>
-    <p class="settings-card__desc">Import, export, or reset your project data.</p>
+    <p class="settings-card__desc">
+      Start a new project, import a backup, export, or reset your data.
+    </p>
+
+    <!-- Info-box: surfaces the single-project "start fresh" workflow so the
+         user understands Bango manages one project at a time and how to begin
+         a new review. -->
+    <div class="settings-card__info-box">
+      <span class="material-symbols-outlined">tips_and_updates</span>
+      <div>
+        <p>
+          Bango manages <strong>one project at a time</strong>. To start a new review, export a
+          backup of your current project first, then use <strong>Delete All Data</strong> to begin
+          fresh.
+        </p>
+        <button class="settings-card__learn-more" @click="openBackupHelp">
+          <span class="material-symbols-outlined">menu_book</span>
+          Learn more
+        </button>
+      </div>
+    </div>
+
     <div class="settings-card__actions">
+      <button class="btn btn--primary" @click="showDeleteDialog = true">
+        <span class="material-symbols-outlined btn__icon">restart_alt</span>
+        Start New Project
+      </button>
       <button class="btn btn--secondary" @click="showImportDialog = true">
         <span class="material-symbols-outlined btn__icon">upload_file</span>
         Import Backup
@@ -268,6 +300,65 @@ async function doDeleteProject(): Promise<void> {
 
 <style scoped>
 @import './settings-card-shared.css';
+
+/* Info-box: indigo-tinted callout that explains the single-project model +
+   the start-fresh workflow. Mirrors the `.dialog__info-box` shape but with a
+   softer background so it sits in the card body, not a dialog. */
+.settings-card__info-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 1.25rem;
+  background-color: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: var(--radius-lg, 0.5rem);
+  color: #312e81;
+  font-size: 13px;
+}
+
+.settings-card__info-box .material-symbols-outlined {
+  color: #4f46e5;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.settings-card__info-box p {
+  margin: 0;
+  line-height: 18px;
+}
+
+.settings-card__info-box p + .settings-card__learn-more {
+  margin-top: 0.5rem;
+}
+
+/* Inline "Learn more" text-link button - opens the Help Reference Backup &
+   Restore section. Ghost style: no border, indigo text + icon, underlines on
+   hover so it reads as a link, not a button. */
+.settings-card__learn-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #4f46e5;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: inherit;
+  transition: text-decoration 0.15s;
+}
+
+.settings-card__learn-more:hover {
+  text-decoration: underline;
+}
+
+.settings-card__learn-more .material-symbols-outlined {
+  font-size: 16px;
+}
 
 .settings-card__error-banner {
   margin-top: 1rem;

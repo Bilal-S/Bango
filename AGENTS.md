@@ -1863,7 +1863,15 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `settings-project-management.vue` (import/export/delete
     + dialogs; Delete All Data also wipes the on-disk Wiki and resets
     `useWiki`/`useChatStore.wikiReady`; Export dialog warns that the Bango Documents
-    directory - full-text PDFs + Wiki - is NOT backed up),
+    directory - full-text PDFs + Wiki - is NOT backed up;
+    **"Start New Project" entry point** - card description now frames the
+    single-project model, an indigo info-box explains the export → delete →
+    begin-fresh workflow with a "Learn more" link to
+    `/help?tab=reference#ref-backup`, and a primary "Start New Project" button
+    jumps straight to the existing Delete dialog behind the "type DELETE" guard
+    rather than introducing a separate dialog; the dashboard's "Start New
+    Project" header link opens an informational dialog with the same workflow
+    + shortcuts to Help Guide + this card),
     `settings-notification-history.vue` (in-memory toast history viewer; newest-first list with
     type-colored dots, timestamps, and a Clear History button; reads the `history` ref from
     `use-toast`; sits immediately before Diagnostics in the card stack), and
