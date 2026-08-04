@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import '@/styles/help-shared.css';
+import HelpScrollToTop from '@/components/help/help-scroll-to-top.vue';
 
 /**
  * Reference tab.
@@ -44,6 +45,20 @@ function scrollToSection(id: string): void {
 
 function selectRefSection(id: string): void {
   scrollToSection(id);
+}
+
+/**
+ * Scroll-to-top handler for the reusable footer button at the bottom of each
+ * Reference section card. Resets the scroll container to the top (the opening
+ * state of the Reference tab) and restores the first sidebar entry as the
+ * active highlight, matching what the user sees when they first click the
+ * Reference tab.
+ */
+function scrollToTop(): void {
+  activeRefSection.value = 'ref-ai-philosophy';
+  if (scrollContainer) {
+    scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 }
 
 function handleScroll(): void {
@@ -407,6 +422,9 @@ watch(
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: DASHBOARD -->
@@ -447,6 +465,9 @@ watch(
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: CRITERIA EDITOR -->
@@ -503,6 +524,9 @@ watch(
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: IMPORT BIBLIOGRAPHY -->
@@ -567,6 +591,9 @@ ER  - </pre
               </div>
             </div>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: DUPLICATE RESOLUTION -->
@@ -611,6 +638,9 @@ ER  - </pre
               <li><strong>Skip:</strong> Defers decision to review later.</li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: TAGS & LABELS -->
@@ -646,6 +676,9 @@ ER  - </pre
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: AI SCREENING -->
@@ -698,6 +731,9 @@ ER  - </pre
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: TRANSLATION PIPELINE -->
@@ -820,6 +856,9 @@ ER  - </pre
               scripts (Cyrillic, CJK, Arabic).
             </p>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: ARTICLE DETAIL PANELS -->
@@ -877,6 +916,9 @@ ER  - </pre
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: REFERENCES & CITATIONS -->
@@ -955,6 +997,9 @@ ER  - </pre
               <li><code>not_in_library</code>: No match exists in the current library.</li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: BIBLIOMETRICS -->
@@ -1022,6 +1067,9 @@ ER  - </pre
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: CHAT ASSISTANT -->
@@ -1146,6 +1194,9 @@ ER  - </pre
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: CITATION FINDER -->
@@ -1269,6 +1320,9 @@ ER  - </pre
               history.
             </p>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: RESEARCH GAP REPORT -->
@@ -1321,6 +1375,9 @@ ER  - </pre
               stay within your LLM's context window budget.
             </p>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: SEARCH STRATEGY BUILDER -->
@@ -1371,6 +1428,9 @@ ER  - </pre
               database queries aligned with your review scope.
             </p>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: COMPLEX SCREENING RULES -->
@@ -1436,6 +1496,9 @@ ER  - </pre
               only applied when you start a new screening run.
             </p>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: WIKI -->
@@ -1870,6 +1933,9 @@ ER  - </pre
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: SETTINGS & SECURITY -->
@@ -1954,6 +2020,9 @@ ER  - </pre
               </li>
             </ul>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
 
         <!-- SECTION: BACKUP & RESTORE -->
@@ -2042,6 +2111,9 @@ ER  - </pre
               before deleting.
             </p>
           </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
         </section>
       </div>
     </div>
@@ -2059,8 +2131,14 @@ ER  - </pre
 
 .ref-sidebar {
   position: sticky;
-  top: var(--space-4);
-  max-height: calc(100vh - 120px);
+  /* Offset below the sticky help-tabs nav bar (~48-56px tall + border + gap).
+     The old `top: var(--space-4)` (16px) left the sidebar's top hidden behind
+     the tab bar once scrolling started. 80px mirrors the `scroll-margin-top`
+     on `.ref-section` (same bar, same convention) so the sidebar's top aligns
+     with the first section title instead of slipping under the bar. */
+  top: 80px;
+  /* Keep a 20px bottom gap: 100vh - 80px (top) - 20px (bottom breathing room). */
+  max-height: calc(100vh - 100px);
   overflow-y: auto;
 }
 
@@ -2199,6 +2277,15 @@ ER  - </pre
 
 .ref-section__body li:last-child {
   margin-bottom: 0;
+}
+
+/* Footer at the bottom of each Reference section card - holds the reusable
+   scroll-to-top icon. Right-aligned; no dividing line (the icon is the only
+   affordance and a border would add visual noise). */
+.ref-section__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-4);
 }
 
 .ref-example-grid {

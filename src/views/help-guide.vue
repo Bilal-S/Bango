@@ -97,7 +97,7 @@ function handleSwitchTab(tab: string): void {
 </script>
 
 <template>
-  <div class="help-guide" :class="{ 'help-guide--wide': activeTab === 'reference' }">
+  <div class="help-guide">
     <!-- Page Header -->
     <section class="help-guide__header">
       <h1 class="page-title">Help & Guides</h1>
@@ -187,13 +187,16 @@ function handleSwitchTab(tab: string): void {
 
 <style scoped>
 .help-guide {
+  /* Unified width across all tabs. Previously the Reference tab used a wider
+     1200px modifier (`.help-guide--wide`) while the other tabs used 860px,
+     which made the Reference tab "stick out" and caused a visible width jump
+     on tab switch. 1200px matches the previous Reference-tab width (the
+     documented max for the sidebar + scroll-spy layout) and gives the other
+     tabs' grids (e.g. the Guide tab's 3-column Starting Points) more breathing
+     room. */
   padding: var(--container-padding);
-  max-width: 860px;
-  margin: 0 auto;
-}
-
-.help-guide--wide {
   max-width: 1200px;
+  margin: 0 auto;
 }
 
 @media (max-width: 767px) {
