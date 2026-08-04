@@ -530,8 +530,9 @@ async function onProjectFileSelected(event: Event): Promise<void> {
       <div class="dialog">
         <h2>Start a New Project</h2>
         <p class="dialog__desc">
-          Bango manages <strong>one project at a time</strong>. To begin a new review, back up your
-          current project first, then delete all data and start fresh.
+          Bango manages <strong>one project at a time</strong>. You need to delete this project to
+          start a new one. You do this by using the <strong>Project Management</strong>
+          features in the Settings Area.
         </p>
         <div class="dialog__info-box">
           <span class="material-symbols-outlined">info</span>
@@ -539,7 +540,7 @@ async function onProjectFileSelected(event: Event): Promise<void> {
             <p><strong>Recommended workflow:</strong></p>
             <ol class="dashboard__start-new-steps">
               <li>
-                <strong>Back up</strong> - Export the current project to a
+                <strong>Backup</strong> - Export the current project to a
                 <code>.bango.json</code> file so you can restore it later.
               </li>
               <li>
