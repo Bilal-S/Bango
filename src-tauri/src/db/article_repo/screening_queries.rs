@@ -34,10 +34,8 @@ pub fn count_working(conn: &Connection) -> Result<usize, AppError> {
     Ok(count)
 }
 
-/// Get the MAX character length (title + abstract) among unscreened working articles.
-/// Used for worst-case token estimation without materializing any rows.
-/// Uses the pre-computed `data_length` column to avoid per-query LENGTH() calculations.
-/// Returns 0 if no unscreened working articles exist.
+/// Max character length (title + abstract) among unscreened working articles.
+/// Uses pre-computed `data_length`. Returns 0 if none.
 pub fn max_article_char_len(conn: &Connection) -> Result<usize, AppError> {
     let max_len: usize = conn.query_row(
         "SELECT COALESCE(MAX(data_length), 0) FROM articles \
@@ -48,21 +46,14 @@ pub fn max_article_char_len(conn: &Connection) -> Result<usize, AppError> {
     Ok(max_len)
 }
 
-/// Fetch a small batch of unscreened working articles.
-/// Optimized to fetch only necessary fields for screening.
+/// Fetch a batch of unscreened working articles (minimal fields for screening).
 pub fn get_next_unscreened_working_batch(
     conn: &Connection,
     limit: usize,
     after_sequence_id: Option<i64>,
 ) -> Result<Vec<Article>, AppError> {
-    // The `after_sequence_id` cursor lets the screening engine advance past
-    // articles it already attempted in the current run (e.g. a transient LLM
-    // error left them unscreened). Without it, the engine would re-fetch the
-    // same unscreened batch forever within a single run. A fresh run (new
-    // engine instance) starts with `None` so all unscreened articles are
-    // eligible again.
-    // Use a single SQL with `COALESCE` so we always bind both params (?1=limit, ?2=cursor).
-    // When `after_sequence_id` is None (fresh run), bind 0 so `sequence_id > 0` matches all.
+    // `after_sequence_id` cursor advances past already-attempted articles within
+    // the current run (transient LLM errors left them unscreened). Fresh run = None.
     let cursor = after_sequence_id.unwrap_or(0);
     let mut stmt = conn.prepare(
         "SELECT id, sequence_id, title, abstract_text, authors, publication_year, has_full_text \
@@ -130,8 +121,8 @@ pub fn get_next_unscreened_working_batch(
             num_references: None,
             has_citation_details: false,
             has_reference_details: false,
-            // Tier 3: read the real has_full_text flag so the screening engine
-            // knows which articles have retrievable full-text evidence chunks.
+            // Tier 3: read the real has_full_text flag so the engine knows which
+            // articles have retrievable full-text evidence chunks.
             has_full_text: row.get::<_, i32>(6)? != 0,
             full_text_file_name: None,
             // Screening does not need the figures/tables flag; default false.
@@ -147,18 +138,8 @@ pub fn get_next_unscreened_working_batch(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Fetch a specific unscreened working article by its UUID, using the same
-/// minimal field set as `get_next_unscreened_working_batch` (only the columns
-/// needed by the screening prompt). Returns `None` if the article is not found,
-/// not in `working` status, or has already been screened (`screened_at IS NOT
-/// NULL`).
-///
-/// Powers the per-article "Screen" button in the article detail panel: the user
-/// clicks Screen on a specific article and the engine screens that exact ID
-/// (instead of the next-by-`sequence_id` one the batch path would pick). The
-/// `Option` return lets the command layer distinguish "article already
-/// screened / not eligible" from "article not found" without a separate
-/// existence check.
+/// Fetch a specific unscreened working article by UUID (minimal fields).
+/// Returns `None` if not found, not `working`, or already screened.
 pub fn get_unscreened_working_article_by_id(
     conn: &Connection,
     article_id: &str,

@@ -45,11 +45,9 @@ pub struct StorageRootInfo {
     pub default_path: String,
 }
 
-/// Get the current Bango documents root info.
-///
-/// All on-disk project artifacts derive from this root as subdirectories
-/// (`fulltext/`, `ris/`, `wiki-root/`). Performs a one-time lazy migration
-/// from the legacy `fulltext_storage_dir` key.
+/// All on-disk artifacts derive from this root (`fulltext/`, `ris/`,
+/// `wiki-root/`). Performs a one-time lazy migration from the legacy
+/// `fulltext_storage_dir` key.
 #[tauri::command]
 pub fn get_storage_root(db_state: tauri::State<'_, DbState>) -> Result<StorageRootInfo, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -57,9 +55,9 @@ pub fn get_storage_root(db_state: tauri::State<'_, DbState>) -> Result<StorageRo
     let effective_path = app_settings_repo::get_storage_root(&conn)?;
     let default_path = compute_default_storage_root();
 
-    // `is_custom` is true when the stored `storage_root` differs from the
-    // platform default. After lazy migration a derived-from-legacy default
-    // path also equals `default_path`, so it correctly reports `false`.
+    /* `is_custom`: true when stored root differs from platform default.
+     * After lazy migration, derived-from-legacy defaults also match, so
+     * they correctly report `false`. */
     let is_custom = effective_path != default_path;
 
     Ok(StorageRootInfo { effective_path, is_custom, default_path })
@@ -84,11 +82,9 @@ pub fn set_storage_root(
     Ok(StorageRootInfo { effective_path, is_custom, default_path })
 }
 
-/// Read the experimental auto-translate toggle. Defaults to `true` (enabled)
-/// when the `auto_translate` key is absent. Powers the Settings -> AI Summaries
-/// "Auto Translate" switch. Unlike the sibling localStorage-backed summary
-/// toggles, this lives in the database so backend processing stages can read
-/// it directly.
+/// Read the auto-translate toggle. Defaults `true` when absent. Lives in DB
+/// so backend processing stages can read it directly (unlike localStorage
+/// summary toggles).
 #[tauri::command]
 pub fn get_auto_translate(db_state: tauri::State<'_, DbState>) -> Result<bool, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -106,8 +102,7 @@ pub fn set_auto_translate(
 }
 
 /// Read the optional custom screening-instructions text. Returns `null` when
-/// the key is absent or empty (today's priority-only behavior). Powers the
-/// Criteria screen -> "Custom Screening Instructions" textarea.
+/// absent or empty (priority-only behavior).
 #[tauri::command]
 pub fn get_screening_custom_logic(
     db_state: tauri::State<'_, DbState>,
@@ -116,9 +111,7 @@ pub fn get_screening_custom_logic(
     app_settings_repo::get_screening_custom_logic(&conn)
 }
 
-/// Persist the custom screening-instructions text. The value is trimmed of
-/// surrounding whitespace; an empty string is allowed and effectively
-/// disables the feature.
+/// Persist the custom screening-instructions text. Trimmed; empty disables.
 #[tauri::command]
 pub fn set_screening_custom_logic(
     db_state: tauri::State<'_, DbState>,
@@ -128,22 +121,17 @@ pub fn set_screening_custom_logic(
     app_settings_repo::set_screening_custom_logic(&conn, &value)
 }
 
-/// Read the user-editable project name shown in the Dashboard header. Returns
-/// `null` when the key is absent or empty (the dashboard renders its
-/// "Project Dashboard" fallback in that case). Travels with project backups
-/// (portable).
+/// Read the user-editable Dashboard title. `None` when absent/empty (the
+/// dashboard shows "Project Dashboard"). Portable: travels with backups.
 #[tauri::command]
 pub fn get_project_name(db_state: tauri::State<'_, DbState>) -> Result<Option<String>, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
     app_settings_repo::get_project_name(&conn)
 }
 
-/// Persist the user-editable project name. The value is trimmed of surrounding
-/// whitespace and hard-capped to `PROJECT_NAME_MAX_LEN` (50) chars as
-/// defense-in-depth (the frontend `<input maxlength>` is the primary gate).
-/// An empty/whitespace-only value clears the name (stored as NULL) so the
-/// dashboard reverts to the "Project Dashboard" fallback, matching the
-/// inline-edit "clear to reset" contract.
+/// Persist the Dashboard title. Trimmed + hard-capped at
+/// `PROJECT_NAME_MAX_LEN` (50), defense-in-depth (frontend `<input maxlength>`
+/// is primary). Empty/whitespace clears to NULL → fallback.
 #[tauri::command]
 pub fn set_project_name(
     db_state: tauri::State<'_, DbState>,

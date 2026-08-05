@@ -1,10 +1,4 @@
-/**
- * Wiki type definitions.
- *
- * Mirrors the Rust structs in `src-tauri/src/commands/wiki_cmd.rs`.
- * Keep these in sync with the backend serialization (`#[serde(rename_all =
- * "camelCase")]`).
- */
+/* Wiki type definitions. Mirrors Rust structs (camelCase serde). */
 
 /** Status payload returned by `wiki_get_status`. */
 export interface WikiStatus {

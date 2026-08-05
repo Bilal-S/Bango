@@ -1,12 +1,4 @@
-//! Reference + Citation harvest for OpenAlex imports.
-//!
-//! When `openalex_retrieve_references` is enabled, this module fetches both
-//! directions of the citation graph for each imported article:
-//! - **Outgoing references** (`referenced_works`): the article's bibliography
-//! - **Incoming citations** (`cites:` filter): works that cite this article
-//!
-//! Both are inserted as `reference_papers` + `article_reference_links` with
-//! the appropriate `ReferenceType` (`Reference` or `Citation`).
+//! Reference + Citation harvest for OpenAlex imports (both directions of citation graph).
 
 use tauri::State;
 
@@ -16,16 +8,10 @@ use crate::db::reference_repo;
 use crate::openalex;
 use crate::openalex::mapping;
 
-/// Harvest both outgoing references and incoming citations for a set of
-/// imported articles. Each entry in `article_work_pairs` is an
-/// `(article_id, openalex_work_id)` pair.
+/// Harvest references + citations for imported article-work pairs.
 ///
-/// This function is called from `import_openalex_articles` Phase 2 and runs
-/// entirely on the tokio runtime. DB locks are held only for millisecond-scale
-/// SQLite writes (insert reference papers + create links + audit entries).
-///
-/// Non-fatal: per-article errors are logged to the audit trail via
-/// `audit_repo::log_error_best_effort` and do not block the import.
+/// Non-fatal: per-article errors logged to audit trail. DB locks only for
+/// millisecond-scale writes.
 pub async fn harvest_references_and_citations(
     article_work_pairs: &[(String, String)],
     mailto: &str,
@@ -36,9 +22,8 @@ pub async fn harvest_references_and_citations(
         return;
     }
 
-    // Step 1: Fetch full work data for all imported articles to get their
-    // `referenced_works` arrays. The search select excludes this field to
-    // keep search payloads small, so we re-fetch here.
+    // Fetch full work data for all imported articles to get their
+    // `referenced_works` arrays (search `select` excludes this field).
     let openalex_ids: Vec<String> = article_work_pairs.iter().map(|(_, wid)| wid.clone()).collect();
 
     let fetched_works =
@@ -50,22 +35,21 @@ pub async fn harvest_references_and_citations(
             }
         };
 
-    // Build a lookup: openalex_id -> referenced_works
+    // Build lookup: openalex_id -> referenced_works
     let work_refs_map: std::collections::HashMap<&String, &Vec<String>> =
         fetched_works.iter().map(|w| (&w.id, &w.referenced_works)).collect();
 
     for (article_id, work_id) in article_work_pairs {
-        // --- Outgoing references (the article's bibliography) ---
+        // Outgoing references (bibliography)
         harvest_outgoing_references(article_id, work_id, &work_refs_map, mailto, api_key, db_state)
             .await;
 
-        // --- Incoming citations (works that cite this article) ---
+        // Incoming citations
         harvest_incoming_citations(article_id, work_id, mailto, api_key, db_state).await;
     }
 }
 
-/// Write an article-scoped audit error entry so harvest failures surface in
-/// the article's Audit Timeline (not just the generic Diagnostics feed).
+/// Write article-scoped audit error so harvest failures surface in Audit Timeline.
 fn log_harvest_error(db_state: &State<'_, DbState>, article_id: &str, details: &str) {
     match crate::db::connection::lock_conn(&db_state.conn) {
         Ok(conn) => {
@@ -85,7 +69,7 @@ fn log_harvest_error(db_state: &State<'_, DbState>, article_id: &str, details: &
     }
 }
 
-/// Fetch and insert the article's outgoing references (its bibliography).
+/// Fetch and insert the article's outgoing references (bibliography).
 async fn harvest_outgoing_references(
     article_id: &str,
     work_id: &str,

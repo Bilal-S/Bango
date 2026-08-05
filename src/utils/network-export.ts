@@ -1,15 +1,6 @@
-/**
- * Network export utilities shared by the bibliometric analytical modules
- * (Co-Authorship, Citation, and Keyword co-occurrence networks).
- *
- * Callers should pass a `defaultName` matching their module so the save
- * dialog suggests the appropriate file name (e.g. `citation-network.png`).
- *
- * Uses the same Tauri IPC command pattern as RIS export:
- *   save() dialog → tauriCommand('write_*_to_file', { path, ... })
- *
- * Supports PNG (via @sigma/export-image → base64) and GEXF (via graphology-gexf).
- */
+/* Network export utilities: PNG via @sigma/export-image → base64, GEXF via graphology-gexf.
+ * Callers pass a `defaultName` matching their module (e.g. `citation-network.png`).
+ * Uses the same save() dialog → Tauri IPC pattern as RIS export. */
 
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from '../composables/use-tauri-command';
@@ -20,11 +11,7 @@ import type Graph from 'graphology';
 
 export type NetworkExportFormat = 'png' | 'gexf';
 
-/**
- * Export the current Sigma renderer viewport as a PNG image.
- *
- * Flow: toBlob() → FileReader → base64 string → Tauri `write_base64_to_file`
- */
+/** Export Sigma renderer viewport as PNG. Flow: toBlob() → FileReader → base64 → IPC. */
 export async function exportNetworkPng(
   renderer: Sigma,
   defaultName = 'coauthor-network.png'
@@ -34,41 +21,29 @@ export async function exportNetworkPng(
     filters: [{ name: 'PNG Image', extensions: ['png'] }],
   });
 
-  if (!filePath) return false; // user cancelled
+  if (!filePath) return false;
 
-  // Render the graph to a PNG blob via @sigma/export-image
-  // Use sigmaSettings to override label threshold so labels always appear in the export
   const blob: Blob = await toBlob(renderer, {
     format: 'png',
     backgroundColor: '#ffffff',
-    sigmaSettings: {
-      labelRenderedSizeThreshold: 0, // always show labels in export
-    },
+    sigmaSettings: { labelRenderedSizeThreshold: 0 },
   });
 
-  // Convert blob → base64 string
   const base64 = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
-      // reader.result is "data:image/png;base64,AAAA..."
       const dataUrl = reader.result as string;
-      const raw = dataUrl.split(',')[1]!; // strip the data URI prefix
-      resolve(raw);
+      resolve(dataUrl.split(',')[1]!);
     };
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
 
-  // Write via Tauri IPC command (bypasses fs plugin permission issues)
   await tauriCommand('write_base64_to_file', { path: filePath, data: base64 });
   return true;
 }
 
-/**
- * Export the graphology graph as a GEXF XML file.
- *
- * Flow: gexf.write() → XML string → Tauri `write_text_to_file`
- */
+/** Export graphology graph as GEXF XML. Flow: gexf.write() → XML → IPC. */
 export async function exportNetworkGexf(
   graph: Graph,
   defaultName = 'coauthor-network.gexf'
@@ -78,7 +53,7 @@ export async function exportNetworkGexf(
     filters: [{ name: 'GEXF File', extensions: ['gexf'] }],
   });
 
-  if (!filePath) return false; // user cancelled
+  if (!filePath) return false;
 
   const xml = gexf.write(graph);
   await tauriCommand('write_text_to_file', { path: filePath, content: xml });

@@ -118,9 +118,9 @@ pub fn ris_record_to_new_article(record: &RisRecord) -> NewArticle {
     let data_length = title.chars().count() + abstract_text.chars().count();
     let token_estimate = data_length / 4;
 
-    // Affiliation: prefer explicit field (set by BibTeX converter),
-    // otherwise extract from author_address (RIS AD field): first comma-separated part
-    // e.g. "McGill Univ, Sch Comp Sci, Montreal, PQ, Canada" → "McGill Univ"
+    /* Affiliation: prefer explicit field (set by BibTeX converter), otherwise
+    extract first comma-separated part of author_address (RIS AD).
+    e.g. "McGill Univ, Sch Comp Sci, Montreal..." → "McGill Univ" */
     let affiliation = record.affiliation.clone().or_else(|| {
         record.author_address.as_ref().and_then(|addr| {
             addr.split(',').next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
@@ -238,14 +238,11 @@ pub async fn import_ris_file(
         app_settings_repo::mark_biblio_needs_refresh(&conn);
         app_settings_repo::mark_wiki_needs_refresh(&conn);
 
-        // Auto-translate trigger: enqueue metadata-only translation jobs for
-        // non-English articles when `auto_translate = true`. Non-fatal -
-        // errors are logged by the helper and never fail the import.
-        //
-        // Tier 1a: capture the imported IDs, then explicitly drop the
-        // connection guard BEFORE enqueuing so the import lock is not held
-        // across the (separately locking) batch-enqueue round-trip. The
-        // enqueue helper re-locks for a short filtered read + bulk write.
+        /* Auto-translate trigger: enqueue metadata-only translation jobs for
+        non-English articles when `auto_translate = true`. Non-fatal.
+        Tier 1a: capture imported IDs, then drop the connection guard BEFORE
+        enqueuing so the import lock is not held across the (separately
+        locking) batch-enqueue round-trip. */
         let imported_ids: Vec<String> = updated_articles.iter().map(|a| a.id.clone()).collect();
         let import_payload = ImportResult {
             imported_count: updated_articles.len(),
@@ -448,8 +445,8 @@ pub async fn import_bibtex_file(
     }
 }
 
-/// Extract CR (Cited References) from imported RIS records and store them.
-/// Non-fatal: errors are logged to audit but don't fail the import.
+/// Extract CR (Cited References) from imported RIS records, insert them as
+/// reference papers, and link to the articles. Non-fatal: errors logged to audit.
 pub fn extract_cr_for_imported(
     conn: &rusqlite::Connection,
     imported: &[Article],

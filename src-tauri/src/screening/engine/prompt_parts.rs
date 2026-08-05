@@ -1,9 +1,5 @@
-//! Shared prompt parts built once per run + the `Stage2Context` bundle.
-//!
-//! `ScreeningPromptParts` is built once at run start (aims, criteria entries,
-//! existing tags/labels, custom logic, evidence texts). It feeds both the
-//! stage-1 batch prompt and each stage-2 single-article prompt so neither
-//! rebuilds from locals.
+//! `ScreeningPromptParts` built once per run; feeds stage-1 batch + stage-2
+//! single-article prompts. `Stage2Context` bundles shared data + run-control params.
 
 use std::collections::HashMap;
 
@@ -11,8 +7,7 @@ use crate::models::criterion::{Criterion, ResearchAim};
 use crate::screening::engine::ScreeningConfig;
 use crate::screening::prompt::{AimEntry, ArticleEntry, CriterionEntry, ScreeningPromptInput};
 
-/// Shared prompt parts built once per run. Cloned into each stage-1 batch
-/// prompt and each stage-2 single-article prompt via `build_prompt_input`.
+/// Shared prompt parts built once per run. Cloned into each `build_prompt_input`.
 #[derive(Clone)]
 pub(crate) struct ScreeningPromptParts {
     aim_entries: Vec<AimEntry>,
@@ -21,8 +16,7 @@ pub(crate) struct ScreeningPromptParts {
     existing_tag_names: Vec<String>,
     existing_label_names: Vec<String>,
     custom_logic: Option<String>,
-    /// Consumed by `run_sync` (enhanced-mode evidence retrieval) + stage-2
-    /// (borderline evidence retrieval) - hence `pub(crate)`.
+    /// Consumed by enhanced-mode + stage-2 evidence retrieval.
     pub(crate) inclusion_texts: Vec<String>,
     pub(crate) exclusion_texts: Vec<String>,
 }
@@ -71,8 +65,7 @@ impl ScreeningPromptParts {
         }
     }
 
-    /// Build a `ScreeningPromptInput` for a batch of article entries, cloning
-    /// the shared parts. Used by both stage-1 (batch) and stage-2 (single).
+    /// Build `ScreeningPromptInput` for a batch, cloning shared parts.
     pub(crate) fn build_prompt_input(&self, articles: Vec<ArticleEntry>) -> ScreeningPromptInput {
         ScreeningPromptInput {
             aims: self.aim_entries.clone(),
@@ -86,8 +79,8 @@ impl ScreeningPromptParts {
     }
 }
 
-/// Bundles shared decision data + run-control params for `run_stage2_borderline`
-/// so the method stays under `clippy::too_many_arguments`. Built once per batch.
+/// Shared data + run-control params for `run_stage2_borderline` (avoids
+/// `clippy::too_many_arguments`). Built once per batch.
 pub(crate) struct Stage2Context<'a> {
     pub(crate) prompt_parts: &'a ScreeningPromptParts,
     pub(crate) criteria: &'a [Criterion],

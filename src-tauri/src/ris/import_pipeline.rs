@@ -65,8 +65,7 @@ impl From<RisParseError> for ImportValidationError {
     }
 }
 
-/// Validation mode: strict (articles require title+abstract+authors),
-/// lenient (references only warn, don't block import), or none.
+/// Validation strictness: strict (requires title+abstract+authors), or none.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValidationMode {
     /// Full validation - records without title/abstract/authors are excluded.

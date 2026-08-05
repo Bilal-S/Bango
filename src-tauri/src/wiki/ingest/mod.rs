@@ -1,39 +1,9 @@
-//! LLM-powered wiki ingest.
+//! LLM-powered wiki ingest. Raw sources → LLM prompt → `<!-- PAGE:slug -->` delimited pages →
+//! write to `wiki/` → append log → rebuild FTS5.
 //!
-//! Takes the raw sources (`raw/*.md`) and asks the LLM to synthesize them into
-//! wiki pages (concepts, authors, methods, synthesis) with `[[wikilinks]]` and
-//! `summary` frontmatter. Writes the generated pages to `wiki/`, appends a log
-//! entry, and rebuilds the FTS5 index.
-//!
-//! Workflow:
-//! 1. `process_user_files` - ensure `raw/` is uniform `.md`.
-//! 2. Read the `AGENTS.md` contract + concatenate raw sources.
-//! 3. Build a prompt instructing the LLM to output pages in a parseable format.
-//! 4. Parse the LLM response into pages (delimited by `<!-- PAGE:slug -->`).
-//! 5. Write pages to `wiki/{type}/`.
-//! 6. Append a run entry to `wiki/log.md`.
-//! 7. Rebuild the FTS5 index.
-//!
-//! ## Module layout
-//!
-//! This is a directory module. The concerns are split across focused submodules:
-//! - [`mod`] (this file): core types (`IngestReport`, `ParsedPage`), the core
-//!   pipeline (`write_pages_from_response`, `finalize_ingest`,
-//!   `parse_llm_pages`, `write_page`), and re-exports.
-//! - [`batching`]: chunked/parallel batch building + the LLM sender trait +
-//!   `run_chunked_ingest`.
-//! - [`consolidation`]: deterministic dedup + `[[wikilink]]` rewrite
-//!   (multi-batch only).
-//! - [`authors`]: Phase 1 author manifest + pre-seed.
-//! - [`synthesis`]: Phase 2 synthesis pre-seed from AI summaries.
-//! - [`concepts`]: Phase 3 concept hub pre-seed from top user-curated tags
-//!   (top-40 by included-article count) + `biblio_terms` (top-N by frequency),
-//!   slug-deduped so tags win on collisions.
-//! - [`methods`]: Phase 4 method hub pre-seed from AI-summary `study_design`
-//!   with a `biblio_terms` fallback (abstracts-only corpora).
-//! - [`sources`]: Layer 1 external-document source page pre-seed.
-//! - [`slugs`]: shared slug squeezing utilities (dedupes the former
-//!   `author_slug` / `concept_slug` near-duplicate logic).
+//! Submodules: `batching` (chunked/parallel), `consolidation` (dedup + link rewrite),
+//! `authors` (Phase 1 manifest), `synthesis` (Phase 2 pre-seed), `concepts` (Phase 3 hubs),
+//! `methods` (Phase 4), `sources` (Layer 1 external docs), `slugs` (shared slug helpers).
 
 use std::path::Path;
 
@@ -67,8 +37,7 @@ pub use methods::preseed_methods;
 pub use sources::preseed_document_source_pages;
 pub use synthesis::preseed_synthesis_from_ai_summaries;
 
-/// The maximum number of characters of raw source to send to the LLM.
-/// Conservative to stay within typical context windows.
+/// Max chars of raw source sent to LLM (~12k tokens). Conservative for context windows.
 pub const MAX_SOURCE_CHARS: usize = 48_000; // ~12k tokens
 
 /// Result of an ingest run.
@@ -90,10 +59,7 @@ pub struct ParsedPage {
     pub body: String,
 }
 
-/// Run the full ingest pipeline. Requires an LLM response string (the caller
-/// obtains it via the orchestrator; this function is split for testability).
-/// Write wiki pages from the LLM response (async, with per-page progress).
-/// Does NOT touch the DB connection - caller must call `finalize_ingest` afterwards.
+/// Write wiki pages from LLM response. Does NOT touch DB; caller runs `finalize_ingest` after.
 pub async fn write_pages_from_response(
     root: &Path,
     llm_response: &str,
@@ -132,16 +98,15 @@ pub async fn write_pages_from_response(
     Ok(report)
 }
 
-/// Finalize ingest: rebuild FTS5, append log, clear staleness flag.
-/// Kept synchronous (no .await) since it uses &Connection.
+/// Finalize: rebuild FTS5 + manifest + dir hash, append log entry, clear staleness flag.
+/// Synchronous (uses `&Connection`, no `.await`).
 pub fn finalize_ingest(
     conn: &Connection,
     root: &Path,
     report: &mut IngestReport,
 ) -> Result<(), AppError> {
-    // Rebuild the FTS5 index + the drift-detection manifest + dir hash in one
-    // shot so the on-demand `wiki_check_for_updates` doesn't false-positive a
-    // drift immediately after an ingest.
+    /* Rebuild FTS5 + drift-detection manifest + dir hash so `wiki_check_for_updates`
+    doesn't false-positive drift immediately after ingest. */
     if let Err(e) = fts::ensure_table(conn) {
         report.errors.push(format!("FTS table creation failed: {e}"));
     }
@@ -167,9 +132,7 @@ pub fn finalize_ingest(
     Ok(())
 }
 
-/// Parse the LLM response into pages.
-/// Each page is delimited by `<!-- PAGE:slug -->` and contains a frontmatter
-/// block + body.
+/// Parse LLM response into pages. Each delimited by `<!-- PAGE:slug -->`, containing frontmatter + body.
 pub fn parse_llm_pages(response: &str) -> Vec<ParsedPage> {
     let mut pages = Vec::new();
     let delimiter = "<!-- PAGE:";

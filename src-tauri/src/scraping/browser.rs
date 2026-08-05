@@ -1,6 +1,4 @@
-//! Cross-platform detection of Chromium / Chrome installations.
-//!
-//! Preference order: Chromium → Google Chrome.
+//! Cross-platform Chromium/Chrome detection. Prefers Chromium.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -27,7 +25,7 @@ pub struct BrowserInfo {
     pub executable: PathBuf,
 }
 
-/// Try running `cmd --version` to see if the browser exists on PATH.
+/// Try `cmd --version` to check if the browser exists on PATH.
 fn is_on_path(cmd: &str) -> Option<PathBuf> {
     Command::new(cmd)
         .arg("--version")
@@ -47,10 +45,7 @@ fn exists_at(path: &str) -> Option<PathBuf> {
     }
 }
 
-/// Detect a Chromium or Chrome executable on the current system.
-///
-/// Checks standard installation locations and the system `PATH`.
-/// Prefers Chromium over Chrome.
+/// Detect a Chromium or Chrome executable. Prefers Chromium over Chrome.
 pub fn detect_browser() -> Result<BrowserInfo, BrowserError> {
     // Platform-specific well-known paths, checked before PATH.
     let candidates: Vec<Option<PathBuf>> = if cfg!(target_os = "linux") {
@@ -89,7 +84,7 @@ pub fn detect_browser() -> Result<BrowserInfo, BrowserError> {
             },
         ]
     } else {
-        // Fallback for other platforms: just try PATH
+        // Fallback for other platforms
         vec![
             is_on_path("chromium-browser"),
             is_on_path("chromium"),

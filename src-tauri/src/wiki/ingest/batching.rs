@@ -1,10 +1,6 @@
-//! Chunked / parallel ingest pipeline.
-//!
-//! Splits raw sources into batches sized to the configured context window,
-//! dispatches them concurrently via a `tokio::task::JoinSet` (bounded by the
-//! orchestrator's `max_concurrent_requests` semaphore), and emits `wiki:progress`
-//! on every batch completion so the progress bar moves smoothly across the
-//! 25-95% range.
+//! Chunked/parallel ingest pipeline. Splits raw sources into batches sized to the configured
+//! context window, dispatches concurrently via `JoinSet`, emits `wiki:progress` per batch
+//! so the progress bar moves smoothly across 25-95%.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,8 +19,7 @@ use super::authors::AuthorManifest;
 use super::consolidation::{consolidate_pages, rewrite_page_links};
 use super::{parse_llm_pages, write_page, IngestReport, ParsedPage, MAX_SOURCE_CHARS};
 
-/// Fraction of the configured context window reserved for the input prompt.
-/// The remainder is available for the model's output (the wiki pages).
+/// Fraction of context window reserved for input. Remainder for output (wiki pages).
 const INPUT_BUDGET_FRACTION: f64 = 0.4;
 
 /// Hard cap on the number of input chars per batch, regardless of the
@@ -37,9 +32,8 @@ fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
 }
 
-/// Compute the input character budget for one batch from the configured context
-/// window. Falls back to `MAX_SOURCE_CHARS` when the configured window is
-/// unusable (zero / negative).
+/// Compute input char budget per batch from configured context window. Falls back to
+/// `MAX_SOURCE_CHARS` when window is unusable (zero/negative). Clamped [4_000, MAX_BATCH_INPUT_CHARS].
 #[must_use]
 pub fn batch_input_char_budget(context_window_tokens: i32) -> usize {
     if context_window_tokens <= 0 {
@@ -89,9 +83,8 @@ pub fn load_raw_sources(root: &Path) -> Result<Vec<RawSource>, AppError> {
     Ok(sources)
 }
 
-/// Build a compact, metadata-only index of ALL sources. Embedded in every
-/// batch prompt so the model can `[[link]]` to sources it does not fully
-/// process - this is what keeps batches independent and parallelizable.
+/// Build a compact metadata-only index of ALL sources. Embedded in every batch prompt
+/// so the model can `[[link]]` across batches without sequential slug-forwarding.
 fn build_source_index(sources: &[RawSource]) -> String {
     let mut out = String::new();
     for s in sources {
@@ -101,13 +94,8 @@ fn build_source_index(sources: &[RawSource]) -> String {
     out
 }
 
-/// Build a prompt section listing the external documents (uploaded via Add
-/// Documents) in the batch. Each entry shows the slug + title so the LLM knows
-/// exactly which `[[user-slug]]` / `[^art-user-slug]` link to use when citing
-/// an uploaded document.
-///
-/// Returns an empty string when the batch contains no user documents (so it can
-/// be unconditionally interpolated without adding noise to corpus-only runs).
+/// Build a prompt section listing external documents (Add Documents). Teaches LLM the exact
+/// `[[user-slug]]` / `[^art-user-slug]` link forms. Empty string when batch has no user docs.
 fn build_external_docs_section(batch_sources: &[&RawSource]) -> String {
     // Heuristic: a source is an external document when its slug starts with
     // `user-`. Article exports use UUIDs as slugs; uploaded files use
@@ -134,15 +122,8 @@ fn build_external_docs_section(batch_sources: &[&RawSource]) -> String {
     out
 }
 
-/// Build a single batch's prompt from the contract, the full source index,
-/// the batch's source bodies, and the standard instructions block.
-///
-/// `methods_pre_seeded` controls the methods directive: when `true`, the
-/// directive tells the LLM that method pages are pre-seeded and to link, not
-/// duplicate. When `false`, it tells the LLM methods are NOT pre-seeded and it
-/// should create them. Either way, the focus list asks the LLM to create
-/// method pages for methodologies present in the sources, so gaps are always
-/// filled (the consolidation pass dedups any overlaps).
+/// Build a single batch's prompt from contract, full source index, batch bodies, and instructions.
+/// `methods_pre_seeded` controls the methods directive: link (don't duplicate) vs create.
 fn build_batch_prompt(
     contract: &str,
     source_index: &str,
@@ -161,11 +142,9 @@ fn build_batch_prompt(
     let manifest_section =
         author_manifest.map(AuthorManifest::to_prompt_section).unwrap_or_default();
     let external_docs_section = build_external_docs_section(batch_sources);
-    // Methods directive: conditional on whether the deterministic pre-seed
-    // actually wrote any method pages. When it did, tell the LLM to link, not
-    // duplicate. When it didn't, tell the LLM methods are NOT pre-seeded and
-    // it should create them. Either way, the focus list below asks the LLM to
-    // create methods so gaps are filled.
+    /* Methods directive: conditional on whether deterministic pre-seed wrote any method pages.
+    When it did, tell LLM to link, not duplicate. When it didn't, tell LLM to create.
+    Either way, focus list below asks LLM to create methods so gaps are filled. */
     let methods_directive = if methods_pre_seeded {
         "Method pages have ALSO been pre-seeded deterministically. Do NOT \
          create duplicate pages for them either - link to the existing pages."
@@ -231,11 +210,9 @@ fn build_batch_prompt(
     )
 }
 
-/// Split the raw sources into batches sized to the configured input budget.
-///
-/// Each batch carries the full source index (so the model can cross-link to
-/// sources outside its batch), making the batches independent and safe to run
-/// in parallel. Returns an empty `Vec` when there are no sources.
+/// Split raw sources into batches sized to configured input budget. Each batch carries
+/// the full source index for cross-linking, making batches independent and parallel-safe.
+/// Returns empty `Vec` when no sources.
 pub fn build_ingest_prompt_batches(
     root: &Path,
     context_window_tokens: i32,
@@ -341,31 +318,15 @@ pub const INGEST_SYSTEM_PROMPT: &str = "You are a research knowledge-base synthe
      the target page as the link text (e.g. [[sugar-tax]] NOT [[Sugar Tax]] or [[Sugar-Tax]]). \
      Do not use em dashes.";
 
-/// Run the chunked, parallel ingest pipeline.
+/// Run chunked/parallel ingest. Single batch: writes immediately (LLM sees all sources,
+/// self-consistent). Multi-batch: collects all parsed pages, runs deterministic dedup
+/// + link rewrite to consolidate near-duplicates from independent batches, then writes.
 ///
-/// - **Single batch** (`batches.len() == 1`): writes pages immediately as they
-///   complete. No dedup, no link rewriting. The LLM sees all sources at once
-///   and produces a self-consistent page set.
-/// - **Multiple batches** (`batches.len() > 1`): collects all parsed pages
-///   across batches, runs a deterministic dedup pass to merge near-duplicate
-///   concept/method pages (which independent batches often produce), rewrites
-///   inbound `[[wikilinks]]` to the canonical slugs, then writes the
-///   consolidated page set. This prevents the fragmentation that parallel
-///   batches would otherwise cause (`childhood-obesity` vs
-///   `obesity-in-children`). No LLM merge calls - the merge is a lossless
-///   append + metadata union.
+/// `cancel_token` is polled between `join_next()` completions; on signal calls `abort_all`
 ///
-/// `progress_range` is `(start_pct, end_pct)` - the slice of the 0-100 pipeline
-/// bar that the LLM + write phase should occupy (e.g. `(25, 95)`).
+/// (drops in-flight tasks), returns `Ok(report)` with `report.errors.push("Cancelled")`.
 ///
-/// `cancel_token` is an optional `Arc<AtomicBool>` that, when signalled,
-/// aborts the in-flight LLM batches via `JoinSet::abort_all` and returns
-/// `Ok(report)` with `report.errors.push("Cancelled")`. `None` means no
-/// cancel token was threaded in (e.g. tests), so the pipeline runs to
-/// completion. The token is polled between `join_next().await` completions
-/// (not inside a `tokio::select!` against the LLM call itself) because the
-/// LLM call runs inside a spawned task; `abort_all` is the mechanism that
-/// actually cancels the in-flight HTTP request by dropping the task future.
+/// `progress_range` = `(start_pct, end_pct)` slice of the 0-100 pipeline bar.
 pub async fn run_chunked_ingest(
     root: &Path,
     batches: Vec<IngestBatch>,
@@ -379,8 +340,7 @@ pub async fn run_chunked_ingest(
         return Ok(report);
     }
 
-    // Early cancel check: if the token was already signalled during the
-    // pre-seed phases, skip the LLM calls entirely.
+    /* Early cancel check: skip LLM calls entirely if token signalled during pre-seed phases. */
     if cancel_token.is_some_and(|t| t.load(Ordering::SeqCst)) {
         report.errors.push("Cancelled".to_string());
         return Ok(report);
@@ -405,18 +365,12 @@ pub async fn run_chunked_ingest(
         });
     }
 
-    // Collect results as they complete. For single-batch runs we write pages
-    // immediately (current behavior). For multi-batch runs we collect all pages
-    // and consolidate them after all batches finish.
-    //
-    // Cancel contract: the cancel token is polled between `join_next().await`
-    // completions. When signalled, we call `join_set.abort_all()` to drop the
-    // in-flight LLM call futures (cancelling the underlying `reqwest` requests
-    // by dropping the task), discard any results from this iteration, and
-    // return `Ok(report)` with `report.errors.push("Cancelled")`. Already-
-    // completed batches' pages are preserved (single-batch: already on disk;
-    // multi-batch: in `collected_pages` but NOT written - the consolidation +
-    // write pass is skipped because we return early).
+    /* Collect results as they complete. Single-batch: write immediately.
+    Multi-batch: collect all, consolidate after all batches finish.
+    Cancel: poll token between join_next() completions. On signal, abort_all
+    drops in-flight LLM tasks, returns early. Already-completed batches'
+    pages are preserved (single-batch: on disk; multi-batch: in collected_pages
+    but NOT written - consolidation + write skipped). */
     let mut collected_pages: Vec<ParsedPage> = Vec::new();
     let mut completed = 0usize;
     while let Some(res) = join_set.join_next().await {
@@ -513,15 +467,9 @@ pub async fn run_chunked_ingest(
         }
     }
 
-    // Tier A1 grounding gate: run the lint and append the count + slugs of
-    // pages failing the provenance checks to the report. The message includes
-    // the page slugs + the specific failure reason (missing source_articles vs
-    // missing [^art-id] citations) so the user can see exactly which pages are
-    // affected without having to run the standalone Lint command. Failures are
-    // non-fatal (pages are already written) but surface in the report + the
-    // audit log (via log_wiki_ingest_warnings in the command layer) so the UI
-    // + Diagnostics can show the user which pages need review. Author/source
-    // pages are exempt (pre-seeded with a different provenance shape).
+    /* Tier A1 grounding gate: lint pages after ingest, append ungrounded page
+    errors to report. Non-fatal (pages already written) but surfaces in UI/Diagnostics.
+    Author/source pages exempt (pre-seeded with different provenance shape). */
     if let Ok(lint_report) = crate::wiki::engine::lint(root) {
         let ungrounded: Vec<&crate::wiki::engine::LintIssue> = lint_report
             .issues

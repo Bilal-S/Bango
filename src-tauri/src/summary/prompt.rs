@@ -5,12 +5,8 @@ pub struct ArticleSummary {
     pub year: Option<i32>,
     pub abstract_text: String,
     pub keywords: Vec<String>,
-    /// Optional supporting evidence distilled from the article's
-    /// `full_text_ai_summary` blob (Shape A). When `Some`, the prompt assembler
-    /// appends an `Evidence:` block after the abstract so the literature-review
-    /// LLM gains access to structured study facts (study design, sample size,
-    /// effect sizes). `None` preserves the legacy abstract-only prompt
-    /// byte-for-byte (backward compat).
+    /// Shape A evidence from `full_text_ai_summary`. When `Some`, appends `Evidence:` block
+    /// with structured study facts. `None` = legacy abstract-only prompt (backward compat).
     pub evidence: Option<String>,
 }
 
@@ -34,63 +30,46 @@ pub struct SummaryPromptInput {
     pub screening_data: ScreeningData,
     pub citation_style: String,
     pub articles: Vec<ArticleSummary>,
-    /// Full inclusion criterion definitions (Shape 0). Rendered into the
-    /// Methodology context so the LLM can name the actual eligibility rules
-    /// instead of inferring them from aggregate exclusion counts. Empty when
-    /// no inclusion criteria are defined.
+    /// Full inclusion criterion definitions (Shape 0). Rendered for Methodology context.
+    /// Empty when none defined.
     pub inclusion_criteria: Vec<String>,
-    /// Full exclusion criterion definitions (Shape 0). Same role as above.
+    /// Full exclusion criterion definitions (Shape 0). Same role.
     pub exclusion_criteria: Vec<String>,
 }
 
 pub const SYSTEM_PROMPT: &str = "You are an expert academic literature review writer. You produce well-structured, scholarly literature reviews with proper in-text citations and a complete references section. You only cite sources that are explicitly provided. You never fabricate references. You write in formal academic English with natural variation in sentence length. You never use em dashes.";
 
-/// System prompt for the single-article AI summary (full-text analysis).
-/// Produces a structured JSON-only response matching the `AiSummaryData`
-/// schema consumed by the frontend (`src/composables/use-ai-summary.ts`).
+/// Single-article full-text AI summary system prompt. Produces JSON matching `AiSummaryData` schema.
 pub const ARTICLE_SUMMARY_SYSTEM_PROMPT: &str = include_str!("ai_article_summary_prompt.md");
 
-/// System prompt variant that also requests per-section summaries.
-///
-/// Used by `generate_article_ai_summary` when `include_section_summaries` is
-/// true AND `classify_sections` detected at least one high-value section
-/// (Methods/Results/Discussion). The model returns the standard
-/// `AiSummaryData` fields PLUS a `section_summaries` array. The frontend
-/// `parseAiSummary` treats `section_summaries` as optional, so v1 callers
-/// keep working unchanged.
+/// Section-aware variant. Used when `include_section_summaries=true` and ≥1 high-value
+/// section (Methods/Results/Discussion) detected. Returns `AiSummaryData` + `section_summaries`
+/// array. Frontend treats `section_summaries` as optional (v1 backward compat).
 pub const ARTICLE_SUMMARY_WITH_SECTIONS_SYSTEM_PROMPT: &str =
     include_str!("ai_article_summary_with_sections_prompt.md");
 
-/// System prompt for the batched figure/table caption description (Tier 2
-/// Phase 4). Grounded "caption parser": the model summarizes what each caption
-/// *states* and reproduces quantitative values mentioned in the caption text;
-/// it must not invent visual details not present in the caption.
+/// Batched figure/table caption description prompt (Tier 2 Phase 4). Grounded caption
+/// parser: summarizes what each caption states; must not invent visual details.
 pub const FIGURE_DESCRIPTION_SYSTEM_PROMPT: &str = include_str!("figure_description_prompt.md");
 
-/// Tier 1 fallback: simple markdown-structured prompt for models that struggle
-/// with complex JSON schemas (e.g., reasoning models that consume their output
-/// budget on thinking tokens). Parsed by `parse_markdown_summary`.
+/// Tier 1 markdown-structured fallback for models that struggle with JSON schemas.
+/// Parsed by `parse_markdown_summary`.
 pub const ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT: &str =
     include_str!("ai_article_summary_markdown_fallback_prompt.md");
 
 use crate::error::AppError;
-// `strip_code_fences`, `escape_control_chars_in_json`, and the combined
-// `prepare_llm_json` live in `utils::json_repair` so the orchestrator's
-// `send_json` can use them without taking a summary-module dependency. They are
-// re-exported here for backward compatibility with existing callers that import
-// them from `summary::prompt`.
+/* `strip_code_fences`, `escape_control_chars_in_json`, and `prepare_llm_json` live in
+`utils::json_repair` so the orchestrator's `send_json` can use them without a
+summary-module dependency. Re-exported here for backward compat. */
 pub use crate::utils::json_repair::{
     escape_control_chars_in_json, prepare_llm_json, strip_code_fences,
 };
 
-/// One LLM-described figure/table caption (Tier 2 Phase 4).
-///
-/// Stored in the `full_text_ai_summary` JSON blob under `figures`/`tables`.
-/// `caption` is the verbatim extracted caption text; `description` is the
-/// grounded LLM summary of what the caption states.
+/// LLM-described figure/table caption (Tier 2 Phase 4). Stored in `full_text_ai_summary`.
+/// `caption` = verbatim extracted text; `description` = grounded LLM summary.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FigureDescription {
-    /// The figure or table number as a string: "1", "2a".
+    /// Figure/table number, e.g. "1", "2a".
     pub number: String,
     /// The verbatim caption text extracted by `extract_captions`.
     #[serde(default)]
@@ -100,24 +79,17 @@ pub struct FigureDescription {
     pub description: String,
 }
 
-/// Tier 4.2/4.3: one LLM-described table caption with the optional `markdown`
-/// GFM column for tables-as-GFM rendering. Mirrors the TS `TableDescription`
-/// interface in `src/composables/use-ai-summary.ts`.
-///
-/// Stored in the `full_text_ai_summary` JSON blob under `tables`. The
-/// `markdown` field carries the preserved GFM rows extracted by
-/// `detect_markdown_tables` (T2.2), so the frontend can render the table
-/// natively instead of showing the caption + description text only. Old blobs
-/// without `markdown` render text-only (the field is optional / `#[serde(default)]`).
+/// LLM-described table with optional GFM `markdown` column (Tier 4.2/4.3).
+/// Stored in `full_text_ai_summary` under `tables`. `markdown` carries preserved GFM rows
+/// from `detect_markdown_tables` (T2.2) for native rendering. Old blobs render text-only.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TableDescription {
-    /// The table number as a string: "1", "2a".
+    /// Table number, e.g. "1", "2a".
     pub number: String,
-    /// The verbatim extracted caption text.
+    /// Verbatim extracted caption text.
     #[serde(default)]
     pub caption: String,
-    /// GFM markdown rows extracted from the full text (T2.2). Empty when no
-    /// `detect_markdown_tables` match was found for this table's number.
+    /// GFM markdown rows from full text (T2.2). Empty when no match.
     #[serde(default)]
     pub markdown: String,
     /// The grounded LLM summary of what the caption states.
@@ -125,10 +97,8 @@ pub struct TableDescription {
     pub description: String,
 }
 
-/// Render the user prompt for the batched figure/table description call.
-///
-/// The prompt includes the paper title and one numbered block per caption
-/// (`[N] <caption text>`). Pure function: no I/O.
+/// Render user prompt for batched figure/table description. One numbered block per caption.
+/// Pure, no I/O.
 #[must_use]
 pub fn build_figure_description_prompt(
     title: &str,
@@ -151,17 +121,13 @@ pub fn build_figure_description_prompt(
     )
 }
 
-/// Parse the batched figure/table description LLM response into a list.
-///
-/// Tolerates markdown code fences and trailing/leading whitespace. Returns
-/// an error (no panic) on malformed JSON. Each element must have a `number`;
-/// `description` defaults to an empty string when absent.
+/// Parse batched figure/table description response. Tolerates code fences + whitespace.
+/// Returns Err on malformed JSON. `description` defaults to empty when absent.
 pub fn parse_figure_descriptions_response(
     response: &str,
 ) -> Result<Vec<FigureDescription>, AppError> {
-    // `prepare_llm_json` chains strip_code_fences + escape_control_chars_in_json.
-    // Not `screening_engine::extract_json` (that helper corrupts object-shaped
-    // responses - see `utils::json_repair::strip_code_fences` docs).
+    /* `prepare_llm_json` chains strip_code_fences + escape_control_chars_in_json.
+    Not `screening_engine::extract_json` (that helper corrupts object-shaped responses). */
     let prepared = prepare_llm_json(response);
     let value: serde_json::Value = serde_json::from_str(&prepared)
         .map_err(|e| AppError::Import(format!("Invalid JSON for figure descriptions: {e}")))?;
@@ -185,16 +151,9 @@ pub fn parse_figure_descriptions_response(
     Ok(out)
 }
 
-/// Merge figure/table descriptions into the `full_text_ai_summary` blob.
-///
-/// - `existing_blob`: the current JSON string (may be empty or malformed;
-///   malformed blobs are treated as empty so the merge never panics).
-/// - `figures` / `tables`: the descriptions keyed by number. Only entries whose
-///   `number` matches an extracted caption get the `caption` text attached.
-/// - Preserves all existing top-level fields (including `section_summaries`),
-///   adds/replaces `figures` + `tables`, and stamps `schema_version: 2`.
-///
-/// Returns the serialized JSON string ready for `article_repo::set_ai_summary`.
+/// Merge figure/table descriptions into `full_text_ai_summary` blob. Preserves all existing
+/// top-level fields (incl. `section_summaries`), adds/replaces `figures` + `tables`, stamps
+/// `schema_version: 2`. Malformed blobs treated as empty. Returns serialized JSON.
 #[must_use]
 pub fn merge_figure_descriptions_into_blob(
     existing_blob: Option<&str>,
@@ -213,28 +172,10 @@ pub fn merge_figure_descriptions_into_blob(
     value.to_string()
 }
 
-/// Merge a freshly-generated summary blob into the existing blob, preserving
-/// `figures`/`tables` (and any other keys the summary path does not produce).
-///
-/// This closes the `set_ai_summary` overwrite footgun (Tier 4 Phase 0): without
-/// it, `generate_article_ai_summary` wipes `figures`/`tables` on regen because
-/// the freshly-generated summary blob does not include them. With this helper,
-/// the summary path mirrors `merge_figure_descriptions_into_blob`'s
-/// preserve-on-write contract, so the two commands compose safely regardless
-/// of ordering.
-///
-/// - `existing_blob`: the current JSON string (may be empty or malformed;
-///   malformed blobs are treated as empty so the merge never panics).
-/// - `fresh_summary_json`: the freshly-generated summary blob (must be a JSON
-///   object; if it is malformed, the existing blob is returned unchanged with
-///   `schema_version` bumped per `force_v2`).
-/// - `force_v2`: when true, stamps `schema_version: 2` on the merged blob
-///   (passed as `used_section_path` from the caller so the section-aware path
-///   guarantees v2 per the T1.3 contract). When false, preserves the existing
-///   `schema_version` if present (no downgrade).
-///
-/// Mirrors `merge_figure_descriptions_into_blob`'s pure, no-panic contract.
-/// Returns the serialized JSON string ready for `article_repo::set_ai_summary`.
+/// Merge fresh summary into existing blob, preserving keys the summary doesn't produce
+/// (closes the `set_ai_summary` overwrite footgun, Tier 4 Phase 0: `generate_article_ai_summary`
+/// regen would wipe `figures`/`tables` otherwise). Malformed blobs treated as empty.
+/// `force_v2` stamps `schema_version: 2` (T1.3 contract). Returns serialized JSON.
 #[must_use]
 pub fn merge_summary_into_blob(
     existing_blob: Option<&str>,
@@ -293,21 +234,9 @@ pub fn build_synthesis_prompt(title: &str, field: &str, section_summaries_json: 
     )
 }
 
-/// Tier 4.2: Merge the per-section summaries, figure/table descriptions, and
-/// synthesis digest into one unified blob. Single-write composition: the caller
-/// produces all parts, then this helper merges them into one `set_ai_summary`
-/// write so there is no intermediate state where some keys are missing.
-///
-/// - `existing_blob`: the current JSON string (preserves unknown keys; malformed
-///   blobs are treated as empty so the merge never panics).
-/// - `section_summaries_json`: the `section_summaries` array as a JSON string
-///   (from T1.3's per-section calls).
-/// - `figures` / `tables`: the LLM-described figure/table captions (T2.1).
-/// - `synthesis_digest_json`: the synthesis call's `{summary_150_250_words,
-///   key_insights, keywords}` blob (T4.2 step 4).
-///
-/// Stamps `schema_version: 2`. Returns the serialized JSON string ready for
-/// `article_repo::set_ai_summary`.
+/// Tier 4.2: Merge section summaries, figure/table descriptions, and synthesis digest
+/// into one unified blob. Single-write composition — no intermediate state.
+/// Stamps `schema_version: 2`. Returns serialized JSON.
 #[must_use]
 pub fn merge_unified_blob(
     existing_blob: Option<&str>,
@@ -353,35 +282,10 @@ pub fn merge_unified_blob(
     value.to_string()
 }
 
-/// Tier 1 fallback: Parse a markdown-structured summary response into the same
-/// JSON blob shape the primary JSON path produces. This is the robust fallback
-/// for models that struggle with complex JSON schemas (e.g., reasoning models
-/// that consume their output budget on thinking tokens).
-///
-/// Expected markdown format (headings + body):
-/// ```text
-/// ## Field
-/// medicine / public_health
-///
-/// ## Summary
-/// <150-250 word digest>
-///
-/// ## Key Insights
-/// - Insight 1
-/// - Insight 2
-///
-/// ## Keywords
-/// sugar, tax, SSB, obesity
-///
-/// ## Structured Extraction
-/// study_type: RCT
-/// population: N=1000 children
-/// ```
-///
-/// Unknown headings are ignored. Missing headings produce empty defaults.
-/// `schema_version` is stamped to `2` so the frontend renders the enriched view.
-///
-/// Pure function: no I/O. Returns a JSON string ready for `set_ai_summary`.
+/// Tier 1 fallback: Parse markdown summary into JSON blob. For models that struggle with
+/// JSON schemas. Expected format: `## Field`, `## Summary`, `## Key Insights` (bullets),
+/// `## Keywords`, `## Structured Extraction` (`key: value`). Unknown headings ignored;
+/// missing = empty defaults. Stamps `schema_version: 2`. Pure, no I/O.
 #[must_use]
 pub fn parse_markdown_summary(markdown: &str) -> String {
     let mut field = String::new();
@@ -441,13 +345,8 @@ pub fn parse_markdown_summary(markdown: &str) -> String {
     blob.to_string()
 }
 
-/// Helper: parse a heading section's body into the appropriate fields.
-///
-/// `flush_section` has 6 distinct mutable output targets (field, subfield,
-/// summary, key_insights, keywords, structured_extraction) plus 2 inputs
-/// (heading, body). Each is a separate semantic destination, so the signature
-/// is clearer than introducing a builder/accumulator struct for an internal
-/// helper.
+/// Parse heading section body. 6 mutable output targets + 2 inputs; builder struct
+/// would not simplify this internal helper.
 #[allow(clippy::too_many_arguments)]
 fn flush_section(
     heading: Option<&str>,
@@ -529,23 +428,16 @@ fn flush_section(
     }
 }
 
-/// High-value section kinds that the section-aware summary extracts.
-///
-/// `Introduction` / `Conclusion` / `Abstract` are deliberately excluded:
-/// they are either already covered by the whole-paper summary or are low
-/// value as standalone section summaries for systematic-review work.
+/// High-value section kinds for section-aware summary. Introduction/Conclusion/Abstract
+/// excluded: covered by whole-paper summary or low-value standalone.
 const HIGH_VALUE_SECTION_KINDS: &[crate::utils::sections::SectionKind] = &[
     crate::utils::sections::SectionKind::Methods,
     crate::utils::sections::SectionKind::Results,
     crate::utils::sections::SectionKind::Discussion,
 ];
 
-/// Filter `classify_sections` output to the high-value subset (Methods /
-/// Results / Discussion).
-///
-/// Returns the input unchanged if it is empty or contains only `Text` /
-/// `References` (the degenerate "no real sections detected" case). The
-/// caller uses an empty result to skip the section-aware prompt branch.
+/// Filter sections to Methods/Results/Discussion. Returns input unchanged if empty or
+/// only Text/References. Empty result → skip section-aware branch.
 #[must_use]
 pub fn filter_high_value_sections(
     sections: &[crate::utils::sections::Section],
@@ -553,21 +445,9 @@ pub fn filter_high_value_sections(
     sections.iter().filter(|s| HIGH_VALUE_SECTION_KINDS.contains(&s.kind)).cloned().collect()
 }
 
-/// Ensure the parsed AI-summary JSON blob carries `schema_version: 2`.
-///
-/// Per the T1.3 contract (`chunkingplan.md` §T1.3), the backend MUST guarantee
-/// `schema_version: 2` when the section-aware summary path runs, regardless of
-/// whether the model emitted the field. This keeps frontend `parseAiSummary`
-/// gating reliable: a blob with `schema_version >= 2` is rendered via the
-/// enriched view, a blob without it (or `1`) renders via the legacy view.
-///
-/// - If `value` is an object and `schema_version` is missing or < 2, it is set
-///   to `2`.
-/// - If `value` is not an object, the function is a no-op (defensive: a
-///   malformed top-level array/string is left untouched; the caller's validation
-///   already confirmed it is a JSON object in practice).
-///
-/// Pure function: no I/O. Tested directly.
+/// Ensure `schema_version: 2` in AI-summary JSON blob (T1.3 contract). Required for
+/// frontend enriched-view gating. Sets to 2 if object and missing/<2; no-op for non-objects.
+/// Pure, no I/O.
 pub fn ensure_schema_version_v2(value: &mut serde_json::Value) {
     let Some(obj) = value.as_object_mut() else {
         return;
@@ -581,18 +461,8 @@ pub fn ensure_schema_version_v2(value: &mut serde_json::Value) {
     }
 }
 
-/// Render detected high-value sections into a structured block for the LLM
-/// user prompt.
-///
-/// Each section is rendered as:
-///
-/// ```text
-/// === SECTION: Methods ===
-/// <section body>
-/// ```
-///
-/// Sections with empty bodies are skipped. Returns an empty string when no
-/// sections are provided (the caller falls back to the standard prompt).
+/// Render high-value sections for LLM prompt. Format: `=== SECTION: {kind} ===` + body.
+/// Skips empty-bodied sections. Empty string if none provided.
 #[must_use]
 pub fn build_section_context(sections: &[crate::utils::sections::Section]) -> String {
     let mut blocks = Vec::with_capacity(sections.len());
@@ -607,24 +477,10 @@ pub fn build_section_context(sections: &[crate::utils::sections::Section]) -> St
     blocks.join("\n\n")
 }
 
-/// Distill a per-article `full_text_ai_summary` JSON blob into a compact
-/// evidence string for the project-wide literature-review prompt (Shape A).
-///
-/// Extracts the highest-signal fields the literature-review LLM can directly
-/// use to synthesize patterns across studies:
-/// - `field` / `subfield` (research domain)
-/// - `structured_extraction` facts (`study_type`, `population`,
-///   `intervention_exposure`, `outcomes`, `effect_size`, etc.) as `key: value`
-///   lines
-/// - `summary_150_250_words` digest (truncated to keep the prompt bounded)
-///
-/// Returns `None` when the blob is missing, malformed, or carries no usable
-/// facts (so the caller leaves `ArticleSummary.evidence = None` and the prompt
-/// stays byte-identical to the legacy abstract-only path). Never panics:
-/// malformed JSON falls back to `None` (per CLAUDE.md line 89 - validate before
-/// field access).
-///
-/// Pure function: no I/O. Tested directly.
+/// Distill `full_text_ai_summary` blob into compact evidence string (Shape A) for
+/// literature-review prompt. Extracts: field/subfield, structured_extraction facts,
+/// digest (truncated to 600 chars). Returns None if blob missing/malformed/empty.
+/// Pure, never panics.
 #[must_use]
 pub fn format_ai_summary_as_evidence(blob: Option<&str>) -> Option<String> {
     let raw = blob?;
@@ -691,13 +547,8 @@ pub fn format_ai_summary_as_evidence(blob: Option<&str>) -> Option<String> {
     }
 }
 
-/// Format screening statistics into a human-readable summary for the prompt.
-///
-/// When `inclusion_criteria` / `exclusion_criteria` are non-empty (Shape 0),
-/// the full criterion definitions are rendered so the LLM can name the actual
-/// eligibility rules in the Methodology section instead of inferring them from
-/// aggregate exclusion counts alone. Empty lists produce no criteria lines
-/// (backward compatible with callers that pass `&[]`).
+/// Format screening stats for prompt. When criteria non-empty (Shape 0), renders full
+/// definitions so LLM names actual eligibility rules. Empty lists = backward compat.
 #[must_use]
 pub fn format_screening_summary(
     data: &ScreeningData,
@@ -797,10 +648,9 @@ pub fn build_summary_prompt(input: &SummaryPromptInput) -> String {
             } else {
                 format!("\nKeywords: {}", a.keywords.join(", "))
             };
-            // Shape A: append the distilled evidence block when present so the
-            // LLM can cite structured facts (study design, sample size, effect
-            // sizes) in the Results/Discussion synthesis. Empty when `None`
-            // (abstract-only mode) - preserves the legacy prompt byte-for-byte.
+            /* Shape A: append distilled evidence block so the LLM can cite structured
+            facts (study design, sample size, effect sizes). `None` = legacy
+            abstract-only prompt (backward compat). */
             let evidence = if let Some(ev) = &a.evidence {
                 format!("\nEvidence: {ev}")
             } else {

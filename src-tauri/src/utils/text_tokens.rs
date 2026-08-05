@@ -1,21 +1,12 @@
-//! Shared text tokenization used by both the Wiki FTS5 BM25 index and the
-//! Tier 3 screening chunk-retrieval scorer.
-//!
-//! Centralizing the tokenizer here keeps the in-memory TF scorer
-//! (`screening::chunk_retrieval`) consistent with the FTS5 `unicode61` index
-//! (`wiki::fts::build_match_query`): both split on non-alphanumeric characters,
-//! lowercase, and drop the same English stop-word list. A divergence between
-//! the two would silently change which passages the scorer ranks highest vs.
-//! which the index considers matches.
-//!
-//! Pure functions only: no I/O, no DB. All `#[must_use]`.
+/*! Shared text tokenization used by both the Wiki FTS5 BM25 index and the
+Tier 3 screening chunk-retrieval scorer.
 
-/// A small set of English stop words dropped from queries and scoring to avoid
-/// surfacing/boosting only passages that happen to contain common particles.
-/// Tokens are matched case-insensitively against lowercased input.
-///
-/// Mirrors the list previously inlined in `wiki/fts.rs`; kept here so the
-/// FTS5 MATCH builder and the screening TF scorer share one source of truth.
+Both split on non-alphanumeric characters, lowercase, and drop the same
+stop-word list. Keeping them in sync ensures the in-memory TF scorer and the
+FTS5 index agree on token matching. Pure, `#[must_use]`. */
+
+/** English stop words dropped from queries and scoring. One source of truth
+shared by the FTS5 MATCH builder and the screening TF scorer. */
 pub const STOP_WORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it",
     "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these",
@@ -24,14 +15,8 @@ pub const STOP_WORDS: &[&str] = &[
     "would", "should", "my", "your", "our",
 ];
 
-/// Split text into raw (pre-stop-word-filtering) tokens.
-///
-/// Splits on any run of non-alphanumeric characters (so punctuation and
-/// whitespace both separate tokens), lowercases each token. Empty tokens are
-/// dropped. This matches FTS5's `unicode61` tokenizer behavior closely enough
-/// that the in-memory scorer and the index agree on token boundaries.
-///
-/// Pure: no allocations beyond the returned `Vec`.
+/** Split text into raw tokens, splitting on non-alphanumeric runs,
+lowercasing each, and dropping empty tokens. Matches FTS5 `unicode61`. */
 #[must_use]
 pub fn tokenize(text: &str) -> Vec<String> {
     text.split(|c: char| !c.is_alphanumeric())
@@ -40,12 +25,8 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Tokenize and drop stop words.
-///
-/// Falls back to all tokens if stop-word stripping would remove everything
-/// (so "the and is" still yields three tokens rather than silently becoming
-/// empty). This mirrors `build_match_query`'s fallback rule so a criteria
-/// string made entirely of stop words still contributes to scoring.
+/** Tokenize and drop stop words. Falls back to all tokens if stop-word
+stripping would remove everything, mirroring `build_match_query`'s fallback. */
 #[must_use]
 pub fn tokenize_for_match(text: &str) -> Vec<String> {
     let raw = tokenize(text);

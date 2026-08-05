@@ -22,36 +22,22 @@ pub fn set_setting(conn: &Connection, key: &str, value: Option<&str>) -> Result<
 }
 
 /// The `app_settings` key for the Bango documents root directory.
-///
-/// All on-disk project artifacts derive from this root as subdirectories:
-/// - `fulltext/` - article PDFs + text extracts
-/// - `ris/` - Citation Chaser output
-/// - `wiki-root/` - LLM Wiki (Markdown)
-///
-/// If unconfigured, defaults to `~/Documents/Bango/`.
+/// All on-disk artifacts derive from this root: `fulltext/`, `ris/`, `wiki-root/`.
+/// Defaults to `~/Documents/Bango/` if unconfigured.
 pub const STORAGE_ROOT_KEY: &str = "storage_root";
 
-/// The legacy `app_settings` key (pre-reorg) that stored the full *fulltext*
-/// path rather than the root. Read once during lazy migration
-/// (see [`get_storage_root`]) and then superseded by [`STORAGE_ROOT_KEY`].
+/// Legacy key (pre-reorg) that stored the full `fulltext/` path. Read once during
+/// lazy migration ([`get_storage_root`]), then superseded by [`STORAGE_ROOT_KEY`].
 const LEGACY_FULLTEXT_STORAGE_DIR_KEY: &str = "fulltext_storage_dir";
 
 /// Subdirectory name under the storage root for full-text attachments.
 pub const FULLTEXT_DIR_NAME: &str = "fulltext";
 
-/// Resolve the Bango documents root, performing a one-time lazy migration
-/// from the legacy `fulltext_storage_dir` key to [`STORAGE_ROOT_KEY`].
-///
-/// Migration rules (only run when `storage_root` is absent):
-/// 1. Legacy value ending in `fulltext` (e.g. `~/Documents/Bango/fulltext`)
-///    -> root = parent (`~/Documents/Bango`).
-/// 2. Legacy custom value *not* ending in `fulltext` -> root = the value as-is
-///    (preserves the prior non-fulltext custom-dir behavior).
-/// 3. Legacy absent/empty -> default `~/Documents/Bango/`.
-///
-/// After computing, the normalized root is persisted to `storage_root` so
-/// subsequent reads are O(1) and the legacy key is never consulted again.
-/// Ensures the directory exists.
+/// Resolve the Bango documents root, lazily migrating from the legacy
+/// `fulltext_storage_dir` key when `storage_root` is absent.
+/// Migration: trailing `fulltext` segment → parent becomes root; custom path kept
+/// as-is; absent → default `~/Documents/Bango/`. Persists result so the legacy
+/// key is never consulted again. Ensures directory exists.
 pub fn get_storage_root(conn: &Connection) -> Result<String, AppError> {
     // Fast path: the new key is already set.
     if let Some(root) = get_setting(conn, STORAGE_ROOT_KEY)? {
@@ -95,11 +81,9 @@ pub fn get_fulltext_dir(conn: &Connection) -> Result<String, AppError> {
     Ok(fulltext.to_string_lossy().to_string())
 }
 
-/// Derive the storage root from a legacy `fulltext_storage_dir` value.
-///
-/// - Trailing `fulltext` segment stripped (parent becomes root).
-/// - Non-fulltext custom path kept as-is.
-/// - Empty/absent falls back to `default`.
+/// Derive storage root from a legacy `fulltext_storage_dir` value.
+/// Trailing `fulltext` segment → parent; non-fulltext custom path kept as-is;
+/// absent falls back to `default`.
 #[must_use]
 pub fn normalize_legacy_to_root(legacy: Option<&str>, default: &str) -> String {
     let Some(p) = legacy.filter(|s| !s.is_empty()) else {
@@ -137,15 +121,12 @@ fn compute_default_storage_root() -> String {
     docs.join("Bango").to_string_lossy().to_string()
 }
 
-/// The `app_settings` key that records whether bibliometric normalized data
-/// is stale and needs to be rebuilt on the next visit to the Bibliometrics
-/// dashboard. Mutations that affect bibliometrics (imports, reference/citation
-/// imports, tag/label edits, status changes, AI screening) set this to "true".
+/// `app_settings` key tracking whether bibliometric data is stale.
+/// Set to `"true"` by any mutation affecting biblio data (imports, ref/citation
+/// imports, tag/label edits, status changes, AI screening).
 pub const BIBLIO_NEEDS_REFRESH_KEY: &str = "biblio_needs_refresh";
 
-/// Mark bibliometric data as stale. Called by any mutation that changes the
-/// underlying data bibliometrics depends on (articles, references, tags,
-/// labels, screening decisions). Non-fatal: errors are logged to stderr.
+/// Mark bibliometric data as stale. Non-fatal: errors are logged to stderr.
 pub fn mark_biblio_needs_refresh(conn: &Connection) {
     if let Err(e) = set_setting(conn, BIBLIO_NEEDS_REFRESH_KEY, Some("true")) {
         eprintln!("[biblio] failed to mark needs_refresh: {e}");
@@ -159,22 +140,18 @@ pub fn clear_biblio_needs_refresh(conn: &Connection) {
     }
 }
 
-/// Whether bibliometric data is stale and should be re-normalized.
-/// Absent key is treated as not stale (fresh) so post-reset state (no
-/// articles) does not trigger an unnecessary normalization.
+/// Whether bibliometric data is stale. Absent key = fresh so post-reset (no articles)
+/// doesn't trigger an unnecessary normalization.
 pub fn get_biblio_needs_refresh(conn: &Connection) -> Result<bool, AppError> {
     Ok(get_setting(conn, BIBLIO_NEEDS_REFRESH_KEY)?.map(|v| v == "true").unwrap_or(false))
 }
 
-/// The `app_settings` key that records whether the LLM Wiki needs to be
-/// re-ingested. Set by any mutation that changes the wiki's raw sources
-/// (article import, status -> included, full-text attach, AI summary regen).
-/// Cleared after a successful `wiki_ingest`.
+/// `app_settings` key tracking whether the LLM Wiki needs re-ingesting.
+/// Set by mutations changing wiki raw sources (article import, status→included,
+/// full-text attach, AI summary regen). Cleared after `wiki_ingest`.
 pub const WIKI_NEEDS_REFRESH_KEY: &str = "wiki_needs_refresh";
 
-/// Mark wiki data as stale. Called by any mutation that changes the wiki's
-/// raw sources (article import, status -> included, full-text attach, AI
-/// summary regen). Non-fatal: errors are logged to stderr.
+/// Mark wiki data as stale. Non-fatal: errors logged to stderr.
 pub fn mark_wiki_needs_refresh(conn: &Connection) {
     if let Err(e) = set_setting(conn, WIKI_NEEDS_REFRESH_KEY, Some("true")) {
         eprintln!("[wiki] failed to mark needs_refresh: {e}");
@@ -197,8 +174,7 @@ pub fn get_wiki_needs_refresh(conn: &Connection) -> Result<bool, AppError> {
 
 // ── Tier 3 screening-mode settings ──────────────────────────────────────────
 //
-// All keys are stored in the `app_settings` key/value table. Each has a stable
-// default; absent keys fall back to the default. See `docs/bango-v4-spec.md`
+// All keys in `app_settings`. Absent key → default. See `docs/bango-v4-spec.md`
 // §4.3.1 (Screening Modes) and §8.1 (Configuration Settings).
 
 /// `app_settings` key for the active screening mode.
@@ -279,9 +255,7 @@ pub fn set_enhanced_top_k(conn: &Connection, value: usize) -> Result<(), AppErro
 }
 
 /// The sections eligible for enhanced-screening evidence chunks.
-/// Default `["Methods", "Results"]`. Discussion/Limitations excluded (lower
-/// screening signal). The allow-list is fixed at this default in the UI; power
-/// users edit via `app_settings` only.
+/// Default `["Methods", "Results"]`. Discussion/Limitations excluded.
 pub fn get_enhanced_screening_sections(conn: &Connection) -> Result<Vec<String>, AppError> {
     Ok(get_setting(conn, ENHANCED_SCREENING_SECTIONS_KEY)?
         .map(|v| {
@@ -323,8 +297,7 @@ pub fn set_two_stage_high(conn: &Connection, value: f64) -> Result<(), AppError>
 }
 
 /// Per-article chunk budget (words) for enhanced / two-stage screening.
-/// Default 2400 (~600 tokens). Caps per-article cost so no single article can
-/// blow the screening context window.
+/// Default 2400 (~600 tokens). Caps per-article cost.
 pub fn get_chunk_budget_per_article(conn: &Connection) -> Result<usize, AppError> {
     Ok(get_setting(conn, CHUNK_BUDGET_PER_ARTICLE_KEY)?
         .and_then(|v| v.parse::<usize>().ok())
@@ -336,10 +309,9 @@ pub fn set_chunk_budget_per_article(conn: &Connection, value: usize) -> Result<(
     set_setting(conn, CHUNK_BUDGET_PER_ARTICLE_KEY, Some(&value.to_string()))
 }
 
-/// Expected fraction of articles that fall in the two-stage borderline band
-/// `[two_stage_low, two_stage_high)` and receive a second full-text-aware
-/// pass. Used by the §4.3 token-warning estimator. Default 0.15. Clamped to
-/// `[0.0, 1.0]` on read; absent/garbage values fall back to the default.
+/// Expected fraction of articles falling in the two-stage borderline band
+/// `[two_stage_low, two_stage_high)` that receive a second full-text pass.
+/// Used by §4.3 token-warning estimator. Default 0.15. Clamped to `[0.0, 1.0]`.
 pub fn get_two_stage_expected_borderline_fraction(conn: &Connection) -> Result<f64, AppError> {
     Ok(get_setting(conn, TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY)?
         .and_then(|v| v.parse::<f64>().ok())
@@ -356,18 +328,13 @@ pub fn set_two_stage_expected_borderline_fraction(
 
 // ── Custom Screening Instructions ────────────────────────────────────────────
 
-/// The `app_settings` key for the optional custom screening-instructions text.
-///
-/// Free-text combinatorial rules the LLM applies during screening (AND/OR
-/// gates, hard exclusions, conditional inclusion). References criteria by
-/// their globally unique number (inclusion `1..N`, exclusion continues
-/// `N+1..N+M`, matching the Criteria screen). Empty/absent = today's
-/// priority-only behavior (backward-compatible). Stored verbatim (only
-/// trimmed of surrounding whitespace on read).
+/// `app_settings` key for optional custom screening-instructions text.
+/// Free-text combinatorial rules (AND/OR gates, hard exclusions, conditional
+/// inclusion). References criteria by global number (inclusion 1..N, exclusion
+/// N+1..N+M). Empty/absent = priority-only (backward-compatible).
 pub const SCREENING_CUSTOM_LOGIC_KEY: &str = "screening_custom_logic";
 
-/// Read the custom screening-instructions text. Returns `None` when the key
-/// is absent or the stored value trims to empty.
+/// Read custom screening instructions. `None` when absent or trims to empty.
 pub fn get_screening_custom_logic(conn: &Connection) -> Result<Option<String>, AppError> {
     Ok(get_setting(conn, SCREENING_CUSTOM_LOGIC_KEY)?
         .map(|v| v.trim().to_string())
@@ -383,17 +350,13 @@ pub fn set_screening_custom_logic(conn: &Connection, value: &str) -> Result<(), 
 
 // ── Embedding settings (triple-state capability flag) ───────────────────────
 
-/// The `app_settings` key recording the embedding capability state.
-/// Values: `"unknown"` (default) | `"enabled"` | `"disabled"`. Set by the
-/// `probe_embedding_support` flow during `Test Connection` or the first
-/// embedding call. Reset to `"unknown"` whenever LLM config changes.
+/// `app_settings` key for embedding capability state.
+/// Values: `"unknown"` (default) | `"enabled"` | `"disabled"`. Reset when LLM config changes.
 pub const EMBEDDING_STATUS_KEY: &str = "embedding_status";
-/// The `app_settings` key recording the working embedding model name once the
-/// probe succeeds (e.g. `"text-embedding-3-small"`).
+/// Working embedding model name once the probe succeeds (e.g. `"text-embedding-3-small"`).
 pub const EMBEDDING_MODEL_KEY: &str = "embedding_model";
-/// The `app_settings` key recording the embedding vector dimensionality once
-/// the probe succeeds (e.g. `1536`). Used by recall to filter rows whose
-/// dimensions don't match the current model.
+/// Embedding vector dimensionality once the probe succeeds (e.g. `1536`). Used by
+/// recall to filter rows whose dimensions don't match the current model.
 pub const EMBEDDING_DIMENSIONS_KEY: &str = "embedding_dimensions";
 
 /// The triple-state embedding capability. `Unknown` (default) means the probe
@@ -472,31 +435,21 @@ pub fn reset_embedding_status(conn: &Connection) -> Result<(), AppError> {
 
 // ── Embedding model override (premium) ───────────────────────────────────────
 
-/// The `app_settings` key for the optional embedding-model override (premium).
+/// `app_settings` key for the optional embedding-model override (premium).
 ///
-/// When set to a non-empty model name, `probe_embedding_support` tries this
-/// model FIRST, ahead of the provider-default and the configured chat model.
-/// This lets premium users pin a specific embedding model (e.g.
-/// `text-embedding-3-large`, a specific Ollama embedding model) instead of
-/// relying on auto-detection. When the override fails (404/405/auth error),
-/// the probe falls back to the standard auto-detection order so a bad override
-/// never hard-disables embeddings.
-///
-/// Machine-local (excluded from `PROJECT_PORTABLE_SETTINGS`): the choice is
-/// tied to the provider configuration on this machine, which does not travel
-/// with a project backup.
+/// When set, `probe_embedding_support` tries this model FIRST, ahead of auto-detection.
+/// Falls back to standard order on failure (404/405/auth) so a bad override never
+/// hard-disables embeddings. Machine-local — excluded from `PROJECT_PORTABLE_SETTINGS`.
 pub const EMBEDDING_MODEL_OVERRIDE_KEY: &str = "embedding_model_override";
 
-/// Read the embedding-model override. Returns `None` when the key is absent or
-/// the stored value trims to empty (so an empty input = "let the probe pick").
+/// Read the embedding-model override. `None` when absent or trims to empty.
 pub fn get_embedding_model_override(conn: &Connection) -> Result<Option<String>, AppError> {
     Ok(get_setting(conn, EMBEDDING_MODEL_OVERRIDE_KEY)?
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty()))
 }
 
-/// Persist the embedding-model override. Pass `None` or an empty/whitespace
-/// string to clear the override (restore auto-detection).
+/// Persist the embedding-model override. `None` / empty → clear (auto-detection restored).
 pub fn set_embedding_model_override(
     conn: &Connection,
     value: Option<&str>,
@@ -507,34 +460,21 @@ pub fn set_embedding_model_override(
 
 // ── Project name (editable dashboard title) ─────────────────────────────────
 
-/// The `app_settings` key for the user-editable project name shown in the
-/// Dashboard header (replaces the "Project Dashboard" placeholder once set).
-///
-/// Free-text, up to [`PROJECT_NAME_MAX_LEN`] characters. Stored verbatim
-/// (only trimmed of surrounding whitespace on read). Empty/absent = the
-/// dashboard shows the "Project Dashboard" fallback. Portable: travels with
-/// a project backup so restoring on a new machine keeps the user's title.
+/// `app_settings` key for the user-editable project name shown in the
+/// Dashboard header. Empty/absent → "Project Dashboard" fallback. Portable.
 pub const PROJECT_NAME_KEY: &str = "project_name";
 
-/// Maximum character length enforced for the project name. The frontend
-/// `<input maxlength>` is the primary gate; the backend `set_project_name`
-/// hard-caps as defense-in-depth so a stale frontend (or a direct DB write)
-/// cannot store an overlong value.
+/// Max character length for project name. Frontend `<input maxlength>` is primary
+/// gate; backend hard-caps as defense-in-depth.
 pub const PROJECT_NAME_MAX_LEN: usize = 50;
 
-/// Read the project name. Returns `None` when the key is absent or the stored
-/// value trims to empty (the dashboard renders its "Project Dashboard"
-/// fallback in that case).
+/// Read the project name. `None` when absent or trims to empty.
 pub fn get_project_name(conn: &Connection) -> Result<Option<String>, AppError> {
     Ok(get_setting(conn, PROJECT_NAME_KEY)?.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()))
 }
 
-/// Persist the project name. The value is trimmed of surrounding whitespace
-/// and hard-capped to [`PROJECT_NAME_MAX_LEN`] chars (counted by `char::count`,
-/// not byte length, so multi-byte CJK/emoji counts as one char per code point).
-/// An empty/whitespace-only value is stored as `NULL` (effectively a clear),
-/// keeping the table clean and matching [`get_project_name`]'s `None`-on-empty
-/// contract.
+/// Persist the project name. Trimmed + hard-capped to [`PROJECT_NAME_MAX_LEN`]
+/// chars (by `char::count`, not byte length). Empty → stored as NULL.
 pub fn set_project_name(conn: &Connection, value: &str) -> Result<(), AppError> {
     let trimmed = value.trim();
     let capped: String = trimmed.chars().take(PROJECT_NAME_MAX_LEN).collect();
@@ -545,22 +485,11 @@ pub fn set_project_name(conn: &Connection, value: &str) -> Result<(), AppError> 
 // ── Project-portable settings (export/import) ───────────────────────────────
 //
 // `app_settings` mixes project-level intent (screening rules, summary mode,
-// auto-translate, project name) with machine-local state (storage root,
-// premium flag, staleness flags, embedding model override). Only the
-// project-level subset travels with a backup so restoring a project on a new
-// machine preserves the user's screening configuration + project title
-// without leaking secrets or clobbering local state.
+// auto-translate, project name) with machine-local state. Only the project-level
+// subset travels with a backup — no secrets or local state.
 
 /// The subset of `app_settings` keys that travel with a project backup.
-///
-/// - `screening_custom_logic` - combinatorial screening rules (the new feature)
-/// - `summary_evidence_mode` - literature-review evidence enrichment
-/// - `auto_translate` - experimental non-English → English translation toggle
-/// - `screening_mode` + enhanced/two-stage params - per-run screening behavior
-/// - `project_name` - user-editable dashboard title
-///
-/// Explicitly **excluded** (stay machine-local, never exported):
-/// `storage_root`, `flag_premium`, `biblio_needs_refresh`, `wiki_needs_refresh`,
+/// Explicitly excluded: `storage_root`, `flag_premium`, `*_needs_refresh`,
 /// `wiki_dir_hash`, `fulltext_storage_dir` (legacy), `embedding_model_override`.
 pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     SCREENING_CUSTOM_LOGIC_KEY,
@@ -584,10 +513,8 @@ pub fn is_project_portable(key: &str) -> bool {
     PROJECT_PORTABLE_SETTINGS.contains(&key)
 }
 
-/// Export the project-portable `app_settings` rows as `(key, value)` pairs.
-/// Used by `export::project::export_project` so a backup → restore cycle
-/// preserves the user's screening configuration across machines. Rows with
-/// NULL or empty values are omitted (they'd be no-ops on import anyway).
+/// Export project-portable `app_settings` as `(key, value)` pairs.
+/// Used by `export::project::export_project`. NULL/empty values omitted.
 pub fn export_project_portable_settings(
     conn: &Connection,
 ) -> Result<Vec<(String, String)>, AppError> {
@@ -611,20 +538,16 @@ pub fn export_project_portable_settings(
 
 // ── Auto Translate setting ──────────────────────────────────────────────────
 
-/// The `app_settings` key for the experimental auto-translate toggle.
-///
-/// When enabled, articles written in other languages are translated to English
-/// during AI processing (import trigger, full-text attach trigger, batch-import
-/// Phase 3, and the screening pre-step). Default is `false` (opt-in): the user
-/// must enable it explicitly in Settings so imports do not silently trigger
-/// background translation + LLM cost. Unlike the sibling AI Summary toggles
-/// (which live in `localStorage`), this is persisted in the database so it can
-/// be read by backend processing stages.
+/// `app_settings` key for the experimental auto-translate toggle.
+/// When enabled, non-English articles are translated to English during AI processing.
+/// Default `false` (opt-in) — user must enable explicitly. Unlike the sibling
+/// AI Summary toggles (in `localStorage`), this is DB-backed so backend stages
+/// can read it.
 pub const AUTO_TRANSLATE_KEY: &str = "auto_translate";
 
-/// Whether auto-translate is enabled. Absent key = `false` (opt-in default).
-/// Any value other than the exact strings `"true"` / `"false"` falls back to
-/// the default so a corrupted row never silently enables the feature.
+/// Whether auto-translate is enabled. Absent key = `false`. Any value other than
+/// exact `"true"`/`"false"` falls back to default so a corrupted row never
+/// silently enables the feature.
 pub fn get_auto_translate(conn: &Connection) -> Result<bool, AppError> {
     Ok(match get_setting(conn, AUTO_TRANSLATE_KEY)?.as_deref() {
         Some("true") => true,

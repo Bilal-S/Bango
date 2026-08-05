@@ -154,27 +154,21 @@ function onFocus(): void {
 
 function selectSuggestion(row: string | SuggestOption): void {
   const name = rowLabel(row);
-  // Disabled rows are visually present but must never fire a selection. The
-  // `@mousedown` handler in the template guards the call site too, but this
-  // is the authoritative gate (defense-in-depth if a future caller invokes
-  // the method directly).
+  /* Disabled rows must never fire a selection. `@mousedown` in template also
+     guards, but this is the authoritative gate (defense-in-depth). */
   if (isDisabled(name)) return;
   // In options mode, pass the full object so the parent can read the id.
   const option = typeof row === 'string' ? undefined : row;
   emit('select', name, option);
   if (props.clearOnSelect) {
-    // Clear the input and keep the dropdown open so the user can immediately
-    // add another entry. The parent's @select handler updates the article +
-    // refreshes the suggestions list, so the dropdown re-populates with the
-    // remaining (un-assigned) entries. This matches the "revert to initial
-    // state with dropdown open" UX requested for the tags/labels flow.
+    /* Clear input + keep dropdown open for immediate re-add. The parent's
+       @select handler refreshes suggestions, so dropdown re-populates with
+       remaining un-assigned entries. */
     emit('update:modelValue', '');
     isOpen.value = true;
   } else {
-    // Single-select mode: populate the input with the chosen value so the
-    // user can review it, then close the dropdown. The parent reads the
-    // value via v-model on a subsequent confirm action (e.g. a button), so
-    // it must survive the selection.
+    /* Single-select: populate input with chosen value for review, close
+       dropdown. Parent reads via v-model on subsequent confirm action. */
     emit('update:modelValue', name);
     isOpen.value = false;
   }
@@ -192,16 +186,13 @@ function onKeydown(event: KeyboardEvent): void {
         emit('update:modelValue', '');
         isOpen.value = true;
       }
-      // In single-select mode the parent's @enter handler is expected to
-      // close the dialog (or otherwise consume the value), so we leave the
-      // input populated and the dropdown state untouched.
+      /* Single-select: parent's @enter handler is expected to close the dialog
+         (or consume the value). We leave the input populated, dropdown untouched. */
     }
   } else if (event.key === 'Escape') {
     isOpen.value = false;
-    // Bubble the Escape so a single-select parent can cancel the edit. The
-    // dropdown is already closed above; the emit lets the parent decide
-    // whether to also exit edit mode (string-mode multi-add consumers ignore
-    // this since they keep the dropdown open across selections).
+    /* Bubble Escape so single-select parent can cancel the edit. String-mode
+       multi-add consumers ignore this (they keep dropdown open on selections). */
     emit('escape');
   }
 }

@@ -50,8 +50,7 @@ pub fn get_recent_audit_entries(
     }
 }
 
-/// Returns one row per import file with the correct article count,
-/// aggregated at the SQL level so the count is always accurate.
+/// One row per import file with article count aggregated at the SQL level.
 pub fn get_import_activities(
     conn: &Connection,
     limit: usize,
@@ -99,9 +98,8 @@ pub fn get_import_activities(
     }
 }
 
-/// Return a unified, timestamp-ordered activity feed by merging individual
-/// audit entries and grouped import rows in one SQL query. The caller gets
-/// a flat, correctly paginated list - no client-side merge or re-sort needed.
+/// Unified, timestamp-ordered activity feed merging individual audit entries
+/// and grouped import rows in one SQL query — no client-side merge needed.
 pub fn get_activity_feed(
     conn: &Connection,
     limit: usize,
@@ -146,12 +144,10 @@ pub fn get_activity_feed(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Coalescing window for [`create_or_update_entry`]. When a second entry with
-/// the same `article_id + action + source` arrives within this many seconds of
-/// the previous one, the existing row is updated instead of inserting a new
-/// row. This prevents audit-trail spam when the user makes several rapid edits
-/// of the same type (e.g. adding 3 labels one at a time produces a single
-/// `label_add` entry showing the final count).
+/// Coalescing window (seconds) for [`create_or_update_entry`]. When a second entry
+/// with same `article_id + action + source` arrives within this window, the existing
+/// row is updated instead of inserting a new one — prevents audit-trail spam from rapid
+/// same-type edits.
 const COALESCE_WINDOW_SECS: i64 = 300;
 
 pub fn create_entry(
@@ -190,17 +186,10 @@ pub fn create_entry(
     })
 }
 
-/// Create an audit entry, or **coalesce** with the most recent matching entry
-/// if one exists within the [`COALESCE_WINDOW_SECS`] window.
-///
-/// Coalescing matches on `article_id + action + source`. When a match is found,
-/// the existing row's `details`, `from_status`, `to_status`, and `timestamp` are
-/// updated to reflect the latest change. This prevents audit-trail spam when the
-/// user makes several rapid edits of the same type (e.g. adding 3 labels one at
-/// a time produces a single `label_add` entry showing the final count).
-///
-/// When no recent matching entry exists, this delegates to [`create_entry`] and
-/// inserts a new row.
+/// Create an audit entry, or coalesce with the most recent matching entry within
+/// the [`COALESCE_WINDOW_SECS`] window. Coalescing matches on `article_id + action + source`;
+/// when found, updates the existing row's `details`, `from_status`, `to_status`, and
+/// `timestamp`. Otherwise delegates to [`create_entry`].
 pub fn create_or_update_entry(
     conn: &Connection,
     article_id: &str,
@@ -262,14 +251,9 @@ pub fn create_or_update_entry(
     create_entry(conn, article_id, action, from_status, to_status, details, source)
 }
 
-/// Write one coalesced audit entry per affected article. Reused by the bulk
-/// add/remove commands and the merge commands so the audit trail shape stays
-/// byte-identical across all multi-article tag/label mutations.
-///
-/// Each entry matches on `article_id + action + source`, so the 5-minute
-/// coalescing window in [`create_or_update_entry`] collapses rapid repeated
-/// mutations of the same type on the same article into a single row showing
-/// the final `detail`.
+/// Write one coalesced audit entry per affected article. Reused by bulk add/remove
+/// and merge commands so the audit trail shape stays byte-identical across all
+/// multi-article tag/label mutations.
 pub fn write_tag_label_audit(
     conn: &Connection,
     affected_ids: &[String],
@@ -347,15 +331,11 @@ pub fn log_error(conn: &Connection, details: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// System-level (non-article, non-error) audit actions recordable via
-/// [`log_system_action`]. Each variant maps to a row in `audit_entries` with
-/// `article_id = NULL` and `source = 'ai'`. Kept distinct from the
-/// article-bound [`AuditAction`] enum so the "no article" contract is
-/// explicit at the call site.
+/// System-level (non-article, non-error) audit actions. Each variant maps to a row
+/// with `article_id = NULL` and `source = 'ai'`.
 #[derive(Debug, Clone, Copy)]
 pub enum SystemAction {
-    /// Search Strategy Builder produced a Boolean search strategy (spec §8.4).
-    /// Maps to `action = 'search_strategy'`.
+    /// Search Strategy Builder Boolean output (spec §8.4). Maps to `action = 'search_strategy'`.
     SearchStrategy,
 }
 
@@ -368,16 +348,8 @@ impl SystemAction {
     }
 }
 
-/// Log a system-level (non-article, non-error) audit row.
-///
-/// Mirrors [`log_error`]'s NULL-writing shape (`article_id = NULL` so the row
-/// surfaces in `get_generic_audit_entries`) but takes an arbitrary action +
-/// records `source = 'ai'` (the actor for system-level successes). Use this
-/// instead of overloading [`create_entry`]'s `article_id: &str` signature
-/// (which would force every caller to pass an empty string and risk the row
-/// being missed by the `article_id IS NULL` filter).
-///
-/// For error-path system rows, keep using [`log_error`] / [`log_error_best_effort`].
+/// Log a system-level (non-article, non-error) audit row. `article_id = NULL`,
+/// `source = 'ai'`. For error-path system rows, use [`log_error`] / [`log_error_best_effort`].
 pub fn log_system_action(
     conn: &Connection,
     action: SystemAction,
@@ -393,16 +365,10 @@ pub fn log_system_action(
     Ok(())
 }
 
-/// Best-effort wrapper around [`log_error`] for the common "I'm in an error arm
-/// and want to record what happened, but I must not mask the real error"
-/// pattern. Acquires the shared connection mutex tolerantly; if the mutex is
-/// poisoned OR the audit write itself fails, the failure is swallowed because
-/// the caller is already on its way to returning a more important error.
-///
-/// This exists so call sites do not inline `if let Ok(conn) = ...lock()` blocks
-/// (which trip the "MUST route through `lock_conn`" rule). Use this instead of
-/// `log_error` ONLY when you are inside an `Err(e) =>` arm and intend to
-/// `return Err(e)` immediately after - for non-error-path audit writes, call
+/// Best-effort wrapper around [`log_error`] for the "in an error arm, record what
+/// happened without masking the real error" pattern. Tolerantly acquires the mutex;
+/// on poison/failure, swallows the audit error. Use ONLY inside `Err(e) =>` arms
+/// where you're about to return the real error. For non-error-path writes, use
 /// `log_error` directly with a `lock_conn` guard.
 pub fn log_error_best_effort(conn_mutex: &std::sync::Mutex<Connection>, details: &str) {
     let Ok(conn) = conn_mutex.lock() else {

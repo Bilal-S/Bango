@@ -27,10 +27,9 @@ const error = ref<string | null>(null);
 const graph = ref<WikiGraph | null>(null);
 const stats = ref({ nodes: 0, edges: 0, orphans: 0 });
 
-// Hover tooltip state (mirrors citation-network-graph.vue): the full node
-// title + summary + page type show in a Vue-rendered popover positioned via
-// sigma's `moveBody` event, while the on-graph label is truncated to 25 chars
-// so long LLM titles don't overflow the canvas.
+/* Hover tooltip: full title + summary + page type shown in a Vue popover
+   positioned via sigma's `moveBody` event. On-graph label truncated to 25 chars
+   so long LLM titles don't overflow the canvas. */
 const hoveredNode = ref<{
   label: string;
   summary: string;
@@ -53,13 +52,12 @@ function truncateLabel(title: string, max = 25): string {
 
 let sigma: Sigma | null = null;
 let graphologyGraph: Graph | null = null;
-// ResizeObserver used to defer Sigma init until the container has non-zero
-// dimensions (Sigma throws "Container has no width" when the element is
-// display:none / not yet laid out, e.g. when the Graph tab is hidden at mount).
+/* ResizeObserver defers Sigma init until container has non-zero dimensions
+   (Sigma throws "Container has no width" when display:none / not yet laid out). */
 let containerObserver: ResizeObserver | null = null;
-// Re-entrancy guard: prevents overlapping `render()` invocations from killing
-// a Sigma instance mid-construction (happens when the ResizeObserver fires
-// while a refresh is already in progress, or on rapid tab switches).
+/* Re-entrancy guard: prevents overlapping `render()` invocations from killing
+   a Sigma instance mid-construction (ResizeObserver fires while refresh is in
+   progress, or rapid tab switches). */
 let isRendering = false;
 
 /** Disconnect the container ResizeObserver if one is active. */
@@ -205,11 +203,9 @@ async function loadAndRender(): Promise<void> {
       return;
     }
     render();
-    // After the graph is laid out + Sigma is ready, center on the focused
-    // node (the page the user is currently viewing) so the graph opens
-    // already focused on it. Deferred via nextTick so Sigma's first frame
-    // (which computes the camera's default framing) has flushed; otherwise
-    // the animate() call can be overwritten by the initial viewport setup.
+    /* Center on the focused node after layout. Deferred via nextTick so Sigma's
+       first frame flushes; otherwise `animate()` can be overwritten by the
+       initial viewport setup. */
     if (props.focusSlug) {
       await nextTick();
       focusOnNode(props.focusSlug);
@@ -221,19 +217,9 @@ async function loadAndRender(): Promise<void> {
   }
 }
 
-/**
- * Animate the camera to center + zoom on the node with the given slug.
- *
- * Reads the node's post-layout position via Sigma's `getNodeDisplayData`
- * (which reflects ForceAtlas2-assigned x/y) and animates the camera to it
- * with a gentle zoom-in (`ratio: 0.5` - Sigma's default viewport ratio is 1;
- * lower values zoom in). Mirrors the bibliometric co-authorship "focus after
- * selection" behavior.
- *
- * Defensive: no-op when Sigma/graph isn't ready, when the slug isn't in the
- * graph, or when the resolved coordinates are NaN/Infinity (which would
- * animate the camera off-graph and produce a blank-looking canvas).
- */
+/** Animate camera to center+zoom on the node with the given slug.
+ *  No-op when Sigma/graph isn't ready, slug isn't present, or coordinates
+ *  are NaN/Infinity (would animate off-graph and look blank). */
 function focusOnNode(slug: string): void {
   if (!sigma || !graphologyGraph) return;
   if (!graphologyGraph.hasNode(slug)) return;
@@ -280,18 +266,11 @@ function render(): void {
 function renderInner(): void {
   if (!containerRef.value || !graph.value) return;
 
-  // Guard: Sigma reads container dimensions at construction time and throws
-  // "Container has no width" when they are 0. This happens when the Graph tab
-  // is hidden (v-show -> display:none) at mount, or when onMounted fires
-  // before the browser performs layout. Defer init via a one-shot
-  // ResizeObserver that re-calls render() once the element has a real size.
-  //
-  // IMPORTANT: the observer is NOT disconnected here or in its own callback.
-  // It is disconnected inside renderInner() AFTER Sigma is successfully
-  // constructed (see end of this function). Previously the observer was
-  // disconnected inside its callback before re-calling render(), so if the
-  // deferred render failed to append a canvas there was no retry path and the
-  // panel stayed silently blank with no error.
+  /* Sigma reads container dimensions at construction time and throws
+     "Container has no width" when 0 (hidden tab at mount, or onMounted fires
+     before layout). Defer init via a one-shot ResizeObserver. The observer
+     disconnects AFTER Sigma succeeds inside renderInner(); keeping it alive
+     allows retry if the deferred render fails to attach a canvas. */
   const { clientWidth, clientHeight } = containerRef.value;
   if (clientWidth === 0 || clientHeight === 0) {
     // Avoid stacking multiple observers if render is re-entered while hidden.
@@ -339,13 +318,9 @@ function renderInner(): void {
     });
   }
 
-  // Add edges (only between known nodes - broken links are skipped).
-  // Dedupe: the wiki graph may contain duplicate edges (the LLM can emit the
-  // same [[target]] link multiple times from a single page). graphology in
-  // `multi: false` mode throws on the second addEdge with the same endpoints,
-  // which would abort render() mid-construction (killing the old sigma before
-  // the new one is created - leaving the panel blank). Track seen endpoint
-  // pairs and skip duplicates.
+  /* Add edges (only between known nodes - broken links skipped). Dedupe:
+     graphology in `multi: false` throws on duplicate endpoint pairs, which
+     would abort render() mid-construction. Track seen pairs and skip dupes. */
   const knownSlugs = new Set(graph.value.nodes.map((n) => n.slug));
   const seenEdges = new Set<string>();
   for (const edge of graph.value.edges) {
@@ -435,16 +410,13 @@ function renderInner(): void {
   // Apply any existing filters after render.
   applyFilters();
 
-  // SUCCESS: Sigma constructed. NOW it is safe to disconnect the deferral
-  // observer (it has done its job). Doing this here rather than inside the
-  // observer callback guarantees that if Sigma construction failed to append
-  // a canvas, the observer stays attached and can retry on the next
-  // resize/layout pass.
+  /* Sigma constructed - now safe to disconnect the deferral observer.
+     Done here (not in the observer callback) so if canvas fails to attach,
+     the observer stays attached and can retry on the next resize/layout pass. */
   disconnectContainerObserver();
 
-  // Verify Sigma actually attached a canvas. If it didn't, surface a visible
-  // error (Retry state) instead of leaving the panel silently blank. This
-  // converts the previous silent-no-canvas failure into an actionable state.
+  /* Verify Sigma attached a canvas. If not, surface error (Retry state)
+     instead of leaving panel silently blank. */
   if (containerRef.value && !containerRef.value.querySelector('canvas')) {
     if (sigma) {
       sigma.kill();
@@ -476,9 +448,9 @@ async function handleResize(): Promise<void> {
   render();
 }
 
-// Expose `refresh` (re-fetch + re-render after ingest), `focusOnNode`
-// (imperative camera-center on a slug), and `handleResize` (fix stale canvas
-// dimensions on tab switch / keep-alive re-entry) for the parent.
+/* Expose `refresh` (re-fetch + re-render after ingest), `focusOnNode`
+   (camera-center on a slug), and `handleResize` (fix stale canvas dimensions
+   on tab switch / keep-alive re-entry) for the parent. */
 defineExpose({ refresh: loadAndRender, focusOnNode, handleResize });
 </script>
 

@@ -1,22 +1,10 @@
 <script setup lang="ts">
-/**
- * Reusable text/number input with a built-in clear ("x") affordance pinned to
- * the right edge. Wraps a native `<input>` (so all native attrs flow through)
- * and surfaces the events a parent needs for filter-style inputs:
+/** Reusable text/number input with built-in clear ("x") affordance.
  *
- * - `update:modelValue` (v-model) on every keystroke.
- * - `clear` ONLY when the "x" is clicked (parent decides what "clear" means:
- *   e.g. coerce `''` -> `null` for number fields, then re-run the query).
- * - `enter`, `input`, `focus`, `blur` forwarded so existing handlers (e.g. the
- *   Author autocomplete dropdown, Enter-to-apply) keep working unchanged.
- *
- * The clear button is hidden while the field is empty OR disabled, matching
- * the established pattern in `citation-controls.vue` / `cocitation-controls.vue`.
- *
- * Optional `maxlength` + `autofocus` props cover single-line inline-edit use
- * cases (e.g. the Dashboard project-name title); both default to no-op so
- * existing callers are unaffected.
- */
+ * Wraps native `<input>`. `update:modelValue` on every keystroke; `clear`
+ * only on "x" click (parent coerces: e.g. `''`->`null` for number fields).
+ * Forwards `enter`, `input`, `focus`, `blur`. Clear hidden when empty/disabled.
+ * `maxlength` + `autofocus` cover inline-edit cases (dashboard title). */
 import { onMounted, ref } from 'vue';
 
 const props = withDefaults(
@@ -88,9 +76,8 @@ function onBlur(): void {
 }
 
 function clear(): void {
-  // Emit the cleared text via v-model so a text parent picks it up for free,
-  // then emit `clear` so the parent can coerce (e.g. '' -> null for numbers)
-  // and re-submit the query.
+  /* Emit cleared text via v-model so text parent picks it up free, then emit
+     `clear` so parent can coerce (e.g. '' -> null for numbers) and re-submit. */
   emit('update:modelValue', '');
   emit('clear');
 }

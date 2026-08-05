@@ -1,10 +1,4 @@
-/**
- * Types for the Co-Citation Analysis visualization module.
- *
- * Unlike the citation network (directed: A cites B), the co-citation network is
- * **undirected**: an edge A - B means papers A and B are frequently cited
- * together by the same citing articles.
- */
+/* Co-Citation Network types. Undirected: edge A-B = frequently cited together. */
 
 /** A single node (reference paper) in the co-citation network. */
 export interface CocitationNode {

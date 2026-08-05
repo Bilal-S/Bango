@@ -1,46 +1,29 @@
 #![allow(clippy::expect_used)]
-//! Batch Import Processor.
+//! 5-phase pipeline scanning the Bango Documents directory for files produced
+//! by external tools and importing them into the article database by DOI match:
+//! 1. Full Text (`fulltext/`): attach `{normalized_doi}.pdf/.txt`. Skips
+//!    articles that already have full text.
+//! 2. Citations (`ris/`): import `{normalized_doi}_references.ris` /
+//!    `_citations.ris` / `.bib` files. Skips articles with existing details.
+//! 3. Translations: enqueue `FullText` jobs for non-English articles. Gated on
+//!    `app_settings.auto_translate` (default false, opt-in).
+//! 4. AI Summaries: generate via `generate_article_ai_summary_inner` for
+//!    newly-attached articles without a summary. Gated on
+//!    `bango-full-text-summaries` localStorage flag. Runs after translations.
+//! 5. Embeddings: embed `included` corpus so semantic search has a candidate
+//!    pool. Idempotent via director staleness check. Gated on LLM configured +
+//!    embeddings not disabled.
 //!
-//! A four-phase pipeline that scans the Bango Documents directory for files
-//! produced by external tools (Citation Chaser, manual PDF drops) and imports
-//! them into the article database:
-//!
-//! 1. **Full Text** (`fulltext/`): attach `{normalized_doi}.pdf` / `.txt` files
-//!    to articles matching by DOI. Skips articles that already have full text.
-//! 2. **Citations** (`ris/`): import `{normalized_doi}_references.ris` /
-//!    `_citations.ris` / `.bib` files. Skips articles that already have the
-//!    corresponding reference/citation details.
-//! 3. **Translations** : for each article that got full
-//!    text attached in Phase 1 and has a non-English `language`, enqueue a
-//!    `FullText` translation job and wait for it. Runs when `auto_translate`
-//!    is true (the DB-backed `app_settings.auto_translate` flag).
-//! 4. **AI Summaries**: for each article that got full text attached in Phase
-//!    1 (and has no existing summary), generate one via the same path as the
-//!    "Generate AI Summary" button in the article detail panel. Only runs when
-//!    `auto_summarize` is true (the frontend passes the
-//!    `bango-full-text-summaries` localStorage flag). Runs after translations
-//!    so it reads English text.
-//!
-//! All four phases run inside a single spawned background task so the UI stays
-//! responsive and the user can navigate to other sections. The runner emits
-//! `batch-import:progress` events **per-item** within each phase; the frontend
-//! listens and updates a progress bar. The user can cancel at any point via
-//! [`cancel_batch_import`]; the runner checks the cancel token between items
-//! (an in-flight LLM request completes naturally).
+//! All phases run in one spawned background task. Emits
+//! `batch-import:progress` per-item; cancel via [`cancel_batch_import`].
+//!       In-flight LLM requests complete naturally.
 //!
 //! # Lock scope (Concern 3)
 //!
-//! Phases 1 and 2 previously ran inside a `spawn_blocking` that locked the
-//! `DbState` mutex ONCE at the top and held the guard across every per-article
-//! PDF parse. That froze every other DB-touching IPC command for the whole
-//! phase. Both phases are now `async` and lock the mutex in short bursts:
-//! one brief burst for discovery, then one short burst per article for the DB
-//! write only. The CPU-bound PDF parse + text extraction runs on
-//! `spawn_blocking` via `commands::full_text::attach_full_text_split`
-//! (Phase 1) with **no DB lock held**; only the DB-write portion
-//! (`commit_full_text_to_db`: update row + chunk insert + audit entries +
-//! staleness flags) runs under the short burst. See
-//! `full_text_phase.rs` for the per-article lock contract.
+//! Phases 1-2 are `async` with short DB lock bursts (discovery + per-article
+//! write). CPU-bound PDF parse runs on `spawn_blocking` with no lock held via
+//! `attach_full_text_split`. See `full_text_phase.rs` for the per-article
+//! lock contract.
 use crate::db::app_settings_repo;
 use crate::db::article_repo::{self, ArticleDoiInfo};
 use crate::db::connection::DbState;
@@ -56,8 +39,7 @@ pub mod full_text_phase;
 pub mod summary_phase;
 pub mod translations_phase;
 
-/// A wrapper around the DOI match map. Defined here so both phase modules can
-/// share one type without a circular dependency on each other.
+/// DOI match map shared across phases (avoids circular deps).
 pub struct DoiMatchMap(pub HashMap<String, ArticleDoiInfo>);
 
 impl DoiMatchMap {
@@ -82,28 +64,22 @@ impl DoiMatchMap {
     }
 }
 
-/// Result of a single phase's execution.
+/// Per-phase execution result.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchImportPhaseResult {
-    /// Total items discovered for this phase (before cancellation/processing).
+    /// Total items discovered before cancellation.
     pub total: usize,
-    /// Items processed (attempted) so far. May be less than `total` if cancelled.
+    /// Items attempted (may be < total if cancelled).
     pub processed: usize,
-    /// Items that succeeded.
     pub succeeded: usize,
-    /// Items that failed.
     pub failed: usize,
-    /// Non-fatal error messages collected during the phase.
+    /// Non-fatal error messages.
     #[serde(default)]
     pub errors: Vec<String>,
 }
 
-/// Which phase is currently running (1-indexed for display).
-///
-/// The pipeline is 4 phases - Full Text →
-/// Citations → Translations → AI Summaries. Translations runs when
-/// `auto_translate` is enabled so summaries read English text.
+/// Pipeline phases (1-indexed for display).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BatchImportPhase {
     FullText = 1,
@@ -114,7 +90,6 @@ pub enum BatchImportPhase {
 }
 
 impl BatchImportPhase {
-    /// Human-readable phase name.
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
@@ -127,43 +102,38 @@ impl BatchImportPhase {
     }
 }
 
-/// The progress payload emitted via the `batch-import:progress` event and
-/// returned by `get_batch_import_progress`.
+/// Progress payload emitted via `batch-import:progress` and returned by
+/// `get_batch_import_progress`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchImportProgress {
-    /// Current phase (1-based).
+    /// 1-based.
     pub phase: usize,
-    /// Human-readable phase name.
     pub phase_name: String,
-    /// Items completed in the current phase so far.
+    /// Items completed in the current phase.
     pub completed: usize,
     /// Total items in the current phase.
     pub total: usize,
-    /// Overall percentage across all 4 phases (0-100).
+    /// Overall percentage (0-100) across all phases.
     pub overall_percent: usize,
-    /// Human-readable status message (e.g. the filename being processed).
+    /// Human-readable status (e.g. filename being processed).
     #[serde(default)]
     pub message: String,
-    /// Whether the runner is currently active.
     pub is_running: bool,
-    /// Whether the runner was cancelled by the user.
     pub is_cancelled: bool,
-    /// Final per-phase results (populated as each phase completes).
+    /// Per-phase results (populated as each phase completes).
     #[serde(default)]
     pub full_text: Option<BatchImportPhaseResult>,
     #[serde(default)]
     pub citations: Option<BatchImportPhaseResult>,
-    /// Translation phase result.
     #[serde(default)]
     pub translations: Option<BatchImportPhaseResult>,
     #[serde(default)]
     pub summaries: Option<BatchImportPhaseResult>,
 }
 
-/// Managed state holding the cancel token and progress snapshot. Both use
-/// `std::sync::Mutex` (not `tokio::sync`) so per-item progress callbacks can
-/// fire synchronously inside the phase loops without any `.await`.
+/// Managed state: cancel token + progress snapshot. Uses `std::sync::Mutex`
+/// so per-item progress callbacks fire synchronously without `.await`.
 pub struct BatchImportState {
     cancel_token: Arc<Mutex<bool>>,
     progress: Arc<Mutex<BatchImportProgress>>,
@@ -179,19 +149,18 @@ impl Default for BatchImportState {
 }
 
 impl BatchImportState {
-    /// Get a cloned handle to the cancel token so background tasks can poll it.
+    /// Cloned cancel token for background tasks.
     pub fn cancel_handle(&self) -> Arc<Mutex<bool>> {
         Arc::clone(&self.cancel_token)
     }
 
-    /// Get a cloned handle to the progress struct so background tasks can
-    /// update it.
+    /// Cloned progress handle for background tasks.
     pub fn progress_handle(&self) -> Arc<Mutex<BatchImportProgress>> {
         Arc::clone(&self.progress)
     }
 }
 
-/// Compute a percentage (0-100) avoiding division by zero.
+/// Compute 0-100% avoiding division by zero.
 #[allow(clippy::manual_checked_ops)]
 fn percent(processed: usize, total: usize) -> usize {
     if total == 0 {
@@ -201,12 +170,8 @@ fn percent(processed: usize, total: usize) -> usize {
     }
 }
 
-/// Emit a progress update via both the event system and the shared progress
-/// struct (so `get_batch_import_progress` returns the latest snapshot).
-///
-/// This is **synchronous** (not `async`) so it can be called from inside the
-/// phase loops via the `on_progress` callback. The `app_handle.emit()` call is
-/// non-blocking (it queues the event on the JS side).
+/// Emit progress via event system + shared struct (sync, so callable from
+/// phase loops via on_progress callback). `app_handle.emit()` is non-blocking.
 #[allow(clippy::too_many_arguments)]
 fn emit_progress(
     app_handle: &tauri::AppHandle,
@@ -264,14 +229,11 @@ fn emit_progress(
 }
 
 /// Start the batch import pipeline. Returns immediately after spawning the
-/// background task; the frontend tracks progress via the `batch-import:progress`
-/// event and can cancel via [`cancel_batch_import`].
+/// background task.
 ///
-/// # Arguments
-/// * `auto_summarize` - When true, Phase 4 runs (generate AI summaries for
-///   newly-attached articles). When false, only Phases 1-3 run.
-/// * `include_section_summaries` - Forwarded to the summary generator. Should
-///   mirror the `bango-section-summaries` localStorage flag.
+/// * `auto_summarize` - when true, Phase 4 runs.
+/// * `include_section_summaries` - forwarded to summary generator (mirrors
+///   `bango-section-summaries` localStorage flag).
 #[tauri::command]
 pub async fn start_batch_import(
     app_handle: tauri::AppHandle,
@@ -354,12 +316,9 @@ pub async fn start_batch_import(
         // ═══════════════════════════════════════════════════════════════════
         //  Phase 1: Full Text (async, short DB lock bursts - Concern 3)
         // ═══════════════════════════════════════════════════════════════════
-        //
-        // The DB mutex is held only for the brief initial discovery and for
-        // the short per-article write burst inside the phase. The previous
-        // shape locked the connection ONCE at the top of a `spawn_blocking`
-        // and held the guard across every per-article PDF parse, which froze
-        // every other DB-touching IPC command for the duration of the phase.
+        /* DB mutex held only for brief initial discovery + per-article
+        write burst. CPU-bound PDF parse runs on `spawn_blocking` with
+        no lock held via `attach_full_text_split` (Concern 3 fix). */
         let p1_cancel = Arc::clone(&cancel_for_task);
         let p1_progress = Arc::clone(&progress);
         let p1_app = app_handle_clone.clone();
@@ -737,13 +696,9 @@ pub async fn start_batch_import(
         // ═══════════════════════════════════════════════════════════════════
         //  Phase 5: Embeddings (always runs - idempotent via director staleness)
         // ═══════════════════════════════════════════════════════════════════
-        //
-        // Embeds the `included` corpus so semantic search (citation finding)
-        // has a candidate pool immediately after a batch import. Idempotent:
-        // the director's `input_hash` staleness check skips articles whose
-        // embeddings are already fresh, so a repeat import with no content
-        // changes is a no-op (cheap). Gated on LLM configured + embeddings
-        // not disabled; otherwise skips with a clear message.
+        /* Embeds `included` corpus for semantic search. Idempotent via
+        director `input_hash` staleness check; gated on LLM configured +
+        embeddings not disabled. */
         let emb_result = embeddings_phase::run_embeddings_phase(
             &db,
             &app_handle_clone,
@@ -795,11 +750,9 @@ pub async fn start_batch_import(
     Ok(guard.clone())
 }
 
-/// Cancel a running batch import. The runner checks the token between items; an
-/// in-flight LLM request completes naturally.
-///
-/// `expect()` on the cancel-token mutex is a poisoned-mutex panic point (see
-/// `start_batch_import` doc).
+/// Cancel a running batch import. Checked between items; in-flight LLM
+/// requests complete naturally. `expect()` on the cancel-token mutex is a
+/// poisoned-mutex panic point.
 #[allow(clippy::expect_used)]
 #[tauri::command]
 pub async fn cancel_batch_import(batch_state: State<'_, BatchImportState>) -> Result<(), AppError> {
@@ -808,10 +761,8 @@ pub async fn cancel_batch_import(batch_state: State<'_, BatchImportState>) -> Re
     Ok(())
 }
 
-/// Get the current batch-import progress snapshot (for polling or initial load).
-///
-/// `expect()` on the progress mutex is a poisoned-mutex panic point (see
-/// `start_batch_import` doc).
+/// Current progress snapshot (for polling or initial load). `expect()` on the
+/// progress mutex is a poisoned-mutex panic point.
 #[allow(clippy::expect_used)]
 #[tauri::command]
 pub async fn get_batch_import_progress(

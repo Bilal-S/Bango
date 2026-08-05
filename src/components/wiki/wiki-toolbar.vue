@@ -241,9 +241,8 @@ async function handleLint(): Promise<void> {
       toast.show('Health check complete: clean. No issues found.', 'success');
     } else {
       const summary = `${report.errors} errors, ${report.warnings} warnings, ${report.infos} infos`;
-      // Rebuild regenerates all pages via the LLM with the hardened prompt,
-      // which fixes most broken-link / orphan issues. Recommend it whenever
-      // any issue is present.
+      /* Rebuild regenerates all pages via LLM with the hardened prompt, fixing
+         most broken-link/orphan issues. Recommend it whenever any issue present. */
       toast.show(
         `Health check complete: ${summary}. Rebuild recommended.`,
         report.errors > 0 ? 'error' : 'warning'

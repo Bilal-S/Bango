@@ -6,9 +6,8 @@ use crate::screening::decision::ArticleDecision;
 use crate::screening::tags_labels::{create_or_match_label, create_or_match_tag};
 use rusqlite::Connection;
 
-/// Mark a single article as a screening error: set `screening_error = 1`,
-/// `screened_at = now`, and insert an `ai_screen` audit entry with the error
-/// details.
+/// Mark article as screening error: `screening_error = 1`, `screened_at = now`,
+/// insert `ai_screen` audit entry with error details.
 pub fn set_screening_error(
     conn: &Connection,
     article_id: &str,
@@ -36,11 +35,7 @@ pub fn set_screening_error(
     Ok(())
 }
 
-/// Mark every article in `batch` as a screening error with the same reason.
-///
-/// Replaces the verbatim `for article in &batch { set_screening_error(...) }`
-/// loops that appeared at 3 sites in `run_sync` (non-transient error,
-/// count-mismatch, parse-error).
+/// Mark every article in batch as screening error with same reason.
 pub fn mark_batch_screening_error(
     conn: &Connection,
     batch: &[Article],
@@ -53,16 +48,10 @@ pub fn mark_batch_screening_error(
     Ok(())
 }
 
-/// Write one article's screening decision to the DB: update the article row
-/// (status, ai_decision, ai_reasoning, confidence, matched criteria, tokens),
-/// create/match suggested tags, apply auto-labels from matched criteria, and
-/// optionally save extracted terms.
-///
-/// Covers both the stage-1 and stage-2 per-article write blocks.
-/// `save_terms` is `true` for stage-1 (which extracts terms) and `false` for
-/// stage-2 (which does not).
-///
-/// Takes `&Connection` (caller manages lock scope; `MutexGuard` is `!Send`).
+/// Write article screening result to DB: update row, create/match tags,
+/// apply auto-labels from matched criteria, optionally save extracted terms.
+/// Covers both stage-1 and stage-2 per-article write blocks.
+/// `save_terms` = true for stage-1 (extracts terms), false for stage-2.
 #[allow(clippy::too_many_arguments)]
 pub fn write_article_screening_result(
     conn: &Connection,
@@ -116,17 +105,16 @@ pub struct ScreeningUpdate<'a> {
     pub matched_inc: &'a [String],
     pub matched_exc: &'a [String],
     pub actual_tokens: Option<usize>,
-    /// Tier 3: when `Some`, the audit detail line names the evidence sections
-    /// used (e.g. `"§Methods, §Results"`), producing an `ai_screen_enhanced`
-    /// audit action. When `None`, the audit action is the legacy `ai_screen`.
+    /// When `Some`, names evidence sections (e.g. `"§Methods, §Results"`), producing
+    /// an `ai_screen_enhanced` audit action. `None` = legacy `ai_screen`.
     pub evidence_sections: Option<&'a str>,
 }
 
-/// Write the screening decision to the DB: update the article row (status,
-/// ai_decision, ai_reasoning, confidence, matched criteria, tokens) and insert
-/// the audit entry (`ai_screen` or `ai_screen_enhanced`).
+/// Write screening decision to DB: update article row (status, ai_decision, tokens)
+/// + insert audit entry (`ai_screen` or `ai_screen_enhanced`). Token count COALESCE
+///   accumulates for two-stage (stage-2 adds to stage-1, doesn't overwrite).
 ///
-/// Takes `&Connection` (caller manages lock scope; `MutexGuard` is `!Send`).
+/// Takes `&Connection` (caller manages lock scope).
 pub fn update_article_after_screening(
     conn: &Connection,
     update: ScreeningUpdate,
@@ -135,11 +123,8 @@ pub fn update_article_after_screening(
     let matched_inc_json = serde_json::to_string(update.matched_inc)?;
     let matched_exc_json = serde_json::to_string(update.matched_exc)?;
 
-    // Tier 3 Gap 6: two-stage screening calls this twice for borderline
-    // articles (stage 1 then stage 2). The flat `actual_tokens = ?7` write
-    // previously discarded the stage-1 token count. Accumulate atomically via
-    // `COALESCE(actual_tokens, 0) + ?7` so the column reflects the full cost
-    // (stage 1 starts from NULL -> `COALESCE(NULL,0)+t == t`, unchanged).
+    /* Tier 3 Gap 6: two-stage calls this twice for borderline articles.
+    COALESCE(actual_tokens, 0) + ? accumulates rather than overwriting. */
     conn.execute(
         "UPDATE articles SET status = ?1, ai_decision = ?2, ai_reasoning = ?3, ai_confidence = ?4, \
          matched_inclusion_criteria = ?5, matched_exclusion_criteria = ?6, screened_at = datetime('now'), changed_at = datetime('now'), \
@@ -158,9 +143,8 @@ pub fn update_article_after_screening(
     )?;
 
     let audit_id = uuid::Uuid::new_v4().to_string();
-    // Tier 3: enhanced / two-stage stage-2 entries use the `ai_screen_enhanced`
-    // action and name the evidence sections in the details so decision flips
-    // are visible in the audit trail. Abstract / stage-1 entries stay `ai_screen`.
+    /* Enhanced/two-stage stage-2 entries use `ai_screen_enhanced` + name evidence
+    sections in details. Abstract/stage-1 stay `ai_screen`. */
     let (action, details) = match update.evidence_sections {
         Some(sections) => (
             "ai_screen_enhanced",

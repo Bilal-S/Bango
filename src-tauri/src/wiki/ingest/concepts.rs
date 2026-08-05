@@ -1,24 +1,10 @@
-//! Concept hub pre-seed (Phase 3).
+//! Concept hub pre-seed (Phase 3). Two complementary sources:
+//! 1. User-curated tags (top-40 by included-article count). Highest-signal: user-chosen,
+//!    often multi-word domain concepts. Queried first → wins on slug collisions.
+//! 2. `biblio_terms` (top-25 by frequency). Backfills concepts the user hasn't tagged.
 //!
-//! Pre-seeds `wiki/concepts/{term-slug}.md` from two complementary sources:
-//!
-//! 1. **User-curated tags** (top-40 by included-article count). Tags are the
-//!    highest-signal source because the user explicitly chose them; many are
-//!    multi-word domain concepts (`supply-chain-management`,
-//!    `agri-food-digitalization`) that the unigram-only `biblio_terms`
-//!    extraction cannot produce. Queried first so tags win on slug collisions
-//!    with terms.
-//! 2. **`biblio_terms`** (top-25 by frequency). Extracted from article
-//!    keywords + titles + abstracts by the bibliometric normalizer. Backfills
-//!    concepts the user hasn't tagged.
-//!
-//! Slug-based merge: if a tag and a term normalize to the same slug, the
-//! term's articles + co-occurring concepts are UNIONED into the tag's page
-//! (tags are the preferred canonical display name). Reviewed (user-edited)
-//! pages are preserved.
-//!
-//! Each concept page is a hub linking to the articles that contain the
-//! term/tag and to co-occurring concepts.
+//! Slug-based merge: when tag/term normalize to same slug, term's articles + co-terms
+//! are unioned into tag's page (lossless). Reviewed pages preserved.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -35,16 +21,8 @@ use super::slugs::concept_slug;
 /// they get a larger budget than the `biblio_terms` fallback.
 pub const TAG_CONCEPT_LIMIT: usize = 40;
 
-/// Convert a tag name (kebab-case or free text) into a human-readable display
-/// name suitable for a wiki page title.
-///
-/// `"supply-chain-management"` -> `"Supply Chain Management"`,
-/// `"agri-food-digitalization"` -> `"Agri Food Digitalization"`,
-/// `"RCT"` -> `"Rct"` (intentional - tags are conventionally lowercase
-/// kebab-case; mixed-case acronyms are rare and the wiki editor lets the user
-/// refine the title).
-///
-/// Pure function. Used by `fetch_top_tags` to populate `TermRow.raw_term`.
+/// Convert tag name → human-readable display name for wiki page title.
+/// `supply-chain-management` → `Supply Chain Management`.
 #[must_use]
 pub fn tag_to_display_name(tag: &str) -> String {
     tag.split(|c: char| !c.is_alphanumeric())
@@ -75,11 +53,8 @@ pub struct TermRow {
     pub co_terms: Vec<String>,
 }
 
-/// Query the top-N terms by total frequency across included articles, with the
-/// list of articles each appears in + the top co-occurring terms.
-///
-/// Shared by `preseed_concept_hubs` and `methods::fetch_methods_from_terms`
-/// (the abstracts-only fallback path).
+/// Query top-N terms by total frequency across included articles, with articles + co-occurring terms.
+/// Shared by `preseed_concept_hubs` and `methods::fetch_methods_from_terms`.
 pub(super) fn fetch_top_terms(conn: &Connection, limit: usize) -> Result<Vec<TermRow>, AppError> {
     // Top terms by total frequency.
     let mut stmt = conn.prepare(
@@ -149,26 +124,10 @@ pub(super) fn fetch_top_terms(conn: &Connection, limit: usize) -> Result<Vec<Ter
     Ok(out)
 }
 
-/// Query the top-N user-curated tags by included-article count, shaped as
-/// `TermRow`s so the existing renderer applies unchanged.
-///
-/// Tags are the highest-signal concept source because the user explicitly
-/// chose them. Many are multi-word domain concepts
-/// (`supply-chain-management`, `agri-food-digitalization`) that the
-/// unigram-only `biblio_terms` extraction cannot produce.
-///
-/// Each row carries:
-/// - `raw_term` = human-readable display name via `tag_to_display_name`.
-/// - `normalized_term` = the tag name lowercased (so it dedups against terms
-///   that resolve to the same slug).
-/// - `frequency` = the included-article count (matches how `fetch_top_terms`
-///   weights terms by total frequency).
-/// - `article_ids` = the included articles carrying the tag.
-/// - `co_terms` = the top co-occurring tag names (tags that share the most
-///   articles with this one). Used for the "Related Concepts" links.
-///
-/// Errors are non-fatal at the call site (the caller proceeds with terms
-/// alone when the tag query fails or the tables are absent).
+/// Query top-N user-curated tags by included-article count, shaped as `TermRow`s for the
+/// existing renderer. `raw_term` = display name via `tag_to_display_name`,
+/// `normalized_term` = lowercase (dedups against terms), `co_terms` = top co-occurring tags.
+/// Non-fatal: caller proceeds with terms alone on failure.
 pub(super) fn fetch_top_tags(conn: &Connection, limit: usize) -> Result<Vec<TermRow>, AppError> {
     // Top tags by included-article count.
     let mut stmt = conn.prepare(
@@ -238,17 +197,9 @@ pub(super) fn fetch_top_tags(conn: &Connection, limit: usize) -> Result<Vec<Term
     Ok(out)
 }
 
-/// Pre-seed `wiki/concepts/{slug}.md` from user-curated tags (top-40 by
-/// included-article count) PLUS `biblio_terms` (top-N by frequency). Tags are
-/// queried first so they win on slug collisions (a tag and a term that
-/// normalize to the same slug produce a single page using the tag's display
-/// name, with the articles unioned). Reviewed (user-edited) pages are
-/// preserved.
-///
-/// Each concept page is a hub linking to the articles that carry the tag/term
-/// (`[[{article_id}]]` synthesis links) and to co-occurring concepts.
-///
-/// Returns the count of pages written.
+/// Pre-seed `wiki/concepts/{slug}.md` from user-curated tags (top-40) + `biblio_terms` (top-N).
+/// Tags queried first → win on slug collisions (tag's display name, articles unioned).
+/// Reviewed (user-edited) pages preserved. Returns count of pages written.
 pub fn preseed_concept_hubs(
     conn: &Connection,
     root: &Path,
@@ -259,11 +210,9 @@ pub fn preseed_concept_hubs(
     // Tags first: highest-signal, user-curated, often multi-word.
     let tags = fetch_top_tags(conn, TAG_CONCEPT_LIMIT).unwrap_or_default();
     let terms = fetch_top_terms(conn, limit)?;
-    // Merge by slug: tags first (canonical), then terms. When a term collides
-    // with an existing slug, its articles + co_terms are UNIONED into the
-    // canonical row (lossless) instead of being dropped. This keeps the tag's
-    // display name while still capturing every article that references the
-    // concept, regardless of whether it was tagged or extracted from text.
+    /* Merge by slug: tags first (canonical), then terms. When a term collides with existing slug,
+    its articles + co_terms are unioned (lossless). Preserves tag's display name while capturing
+    every article referencing the concept, tagged or extracted from text. */
     let mut by_slug: std::collections::HashMap<String, TermRow> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for term in tags.into_iter().chain(terms) {
@@ -314,7 +263,7 @@ pub fn preseed_concept_hubs(
     Ok(written)
 }
 
-/// Render the frontmatter + body for a concept hub page. Pure function.
+/// Render frontmatter + body for a concept hub page. Pure function (no I/O).
 fn render_concept_hub(term: &TermRow, slug: &str) -> (Frontmatter, String) {
     let mut fm = Frontmatter::default();
     fm.set("id", slug);
@@ -335,10 +284,9 @@ fn render_concept_hub(term: &TermRow, slug: &str) -> (Frontmatter, String) {
         term.co_terms.iter().map(|t| format!("\"[[{}]]\"", concept_slug(t))).collect();
     fm.set("links", &format!("[{}]", co_links.join(", ")));
 
-    // NOTE: do NOT emit `# {title}` as the first body line. The page title
-    // lives in frontmatter and is rendered separately by the wiki viewer's
-    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
-    // show the title twice on the rendered page.
+    /* NOTE: do NOT emit `# {title}` as body header. Title lives in frontmatter,
+    rendered by the viewer's `<h1>{{ page.title }}</h1>`. Duplicating in body
+    would show the title twice. */
     let mut body = String::new();
     body.push_str(&format!(
         "Found in {} included articles (total frequency: {}).\n",

@@ -51,11 +51,10 @@ const isTranslationPending = computed(
     props.article.translationStatus === 'queued' || props.article.translationStatus === 'running'
 );
 
-// ── Inline title editing (double-click) ────────────────────────────────
-// Mirrors the proven pattern in `article-metadata.vue` (v6.9): at most one
-// field edited at a time, `nextTick` focus + select on edit-start, Enter
-// commits, Escape cancels, blur commits. Title is `TEXT NOT NULL` so empty
-// drafts are blocked with a red hint (matches the Year validation gate).
+/* Inline title editing (double-click). Mirrors article-metadata.vue v6.9:
+   one field at a time, nextTick focus+select on start, Enter commits, Escape
+   cancels, blur commits. Title is TEXT NOT NULL so empty drafts block with
+   a red hint (matches Year validation gate). */
 const isEditingTitle = ref(false);
 const titleDraft = ref('');
 const titleError = ref<string | null>(null);
@@ -100,11 +99,9 @@ function cancelTitle(): void {
   titleError.value = null;
 }
 
-// ── Original title (pre-translation) ──────────────────────────────────
-// Fetched on-demand only for translated articles so untranslated ones
-// incur zero DB cost. The original title is stored in
-// `article_original_content` and surfaced here in brackets alongside the
-// translated English title.
+/* Original title (pre-translation): fetched on-demand for translated articles
+   only. Stored in `article_original_content`, surfaced in brackets alongside
+   the translated English title. */
 const originalTitle = ref<string | null>(null);
 
 async function fetchOriginalTitle(): Promise<void> {

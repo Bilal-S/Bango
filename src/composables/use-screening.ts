@@ -20,16 +20,8 @@ export function useScreening() {
   }
 
   /**
-   * Screen a single article by its UUID. Powers the per-article "Screen" button
-   * in the article detail panel. The backend `screen_article` command targets
-   * the exact article (not the next-by-sequence-id one the batch path would
-   * pick) and emits `screening:progress` events with `currentArticleTitles:
-   * [article.title]` so the spinner on the button (and any table-row spinners)
-   * drives off the same global progress store as batch screening.
-   *
-   * The concurrent-start guard lives on the backend: if a batch run is already
-   * in progress, the command returns the current progress instead of starting a
-   * new run, and the spinner state on the button reflects that.
+   * Screen a single article. The backend `screen_article` command targets the
+   * exact article and emits `screening:progress` events.
    */
   async function screenArticle(articleId: string): Promise<void> {
     loading.value = true;

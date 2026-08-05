@@ -152,14 +152,7 @@ export const useLabelsStore = defineStore('labels', () => {
     }
   }
 
-  /**
-   * Replace one label with another. Mirrors `useTagsStore().mergeTag`. The
-   * survivor absorbs the from-label's articles and the from-label is deleted.
-   * No `invalidate()` (avoids the empty-list flicker).
-   *
-   * In demo mode the from-label is removed and its `articleCount` is folded
-   * into the survivor.
-   */
+  /** Replace one label with another. Mirrors `mergeTag`. No `invalidate()`. */
   async function mergeLabel(fromId: string, intoId: string): Promise<MergeResult> {
     if (!isTauri()) {
       const from = labels.value.find((l) => l.id === fromId);

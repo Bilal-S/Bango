@@ -1,25 +1,9 @@
-//! Tier 4.1: AI summary as screening evidence (complementarity mode).
+//! AI summary + chunks as screening evidence (complementarity mode). Pure.
 //!
-//! Pure (no I/O, no DB). Given an article's AI-summary blob (Option) and its
-//! criteria-ranked chunks (`ScoredChunk` slice), pick the best evidence source
-//! and format it for the screening prompt's `## Supporting Evidence` block.
-//!
-//! **Complementarity (Q1 = B):** when BOTH an AI summary and chunks exist, send
-//! the summary's `structured_extraction` facts PLUS the single highest-ranked
-//! verbatim chunk as a grounding citation (NOT strict priority). The system
-//! prompt's explicit "_cross-check any summary fact against the verbatim chunk_"
-//! instruction is the hallucination-propagation mitigation.
-//!
-//! Evidence hierarchy:
-//! 1. AI summary present AND >= 1 chunk survived ranking -> `AiSummaryWithChunk`
-//!    (summary's `structured_extraction` facts + the single highest-ranked chunk
-//!    as a verbatim grounding citation).
-//! 2. AI summary present AND no chunks -> `AiSummaryAlone`.
-//! 3. No AI summary AND chunks present -> `Chunks` (Tier 3 behavior).
-//! 4. Neither -> `None`.
-//!
-//! The chunks-only path is byte-identical to the Tier 3 `format_chunks_as_evidence`
-//! output so abstract-mode + chunks-only-mode prompts stay stable.
+//! Evidence hierarchy: AI summary + top-1 verbatim chunk > summary alone > chunks alone > none.
+//! Complementarity: when both exist, send summary facts + highest-ranked verbatim chunk
+//! as grounding citation. System prompt tells LLM to cross-check summary against verbatim.
+//! Chunks-only path is byte-identical to Tier 3 output.
 
 use crate::db::chunk_repo;
 use crate::screening::chunk_retrieval::{
@@ -56,17 +40,10 @@ pub enum EvidenceSource {
     None,
 }
 
-/// Pick the best evidence source and format it for the screening prompt.
-///
-/// **Complementarity (Q1 = B):** when BOTH an AI summary and chunks exist, send
-/// the summary's `structured_extraction` facts PLUS the single highest-ranked
-/// verbatim chunk. NOT strict priority. See module docs.
-///
-/// Per CLAUDE.md line 89 (`_never deserialize untrusted input as serde_json::Value
-/// without validation_`), the AI-summary JSON is validated to be an object before
-/// any field access. Malformed/hand-crafted blobs fall back to `Chunks` (no panic).
-///
-/// Pure function: callers pass in the candidate data. No DB, no I/O.
+/// Pick best evidence source and format for the screening prompt.
+/// Complementarity (Q1=B): when both summary and chunks exist, send summary
+/// facts + top-1 verbatim chunk. AI-summary JSON is validated as object
+/// before field access; malformed falls back to Chunks.
 #[must_use]
 pub fn resolve_evidence(
     ai_summary_json: Option<&str>,
@@ -124,11 +101,8 @@ struct ParsedSummary {
     digest: Option<String>,
 }
 
-/// Parse and validate the AI-summary JSON blob.
-///
-/// Per CLAUDE.md line 89, validate the top-level is an object before reaching
-/// into fields. Returns `None` on malformed JSON or non-object top-level so the
-/// caller falls back to `Chunks` (no panic).
+/// Parse and validate AI-summary JSON blob. Requires object top-level + at least
+/// a digest or non-empty structured_extraction; degenerate blobs fall back to chunks.
 fn parse_summary_blob(raw: &str) -> Option<ParsedSummary> {
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
     let obj = value.as_object()?;
@@ -223,17 +197,8 @@ fn format_ai_summary_alone(summary: &ParsedSummary) -> String {
 
 // ── Internal: chunks formatting (byte-identical to Tier 3) ──────────────────
 
-/// Format scored chunks as the `[§Methods] ...` body for the chunks-only path.
-///
-/// **Delegate.** The canonical implementation lives in
-/// `chunk_retrieval::format_chunks_as_evidence` (the lowest-level module both
-/// `engine` and this module depend on). That function returns `Option<String>`
-/// (`None` on empty); the chunks-only path is only reached when at least one
-/// chunk survived ranking, so we unwrap to `String` here.
-///
-/// Byte-identical to the Tier 3 `engine::format_chunks_as_evidence` output so
-/// the chunks-only path produces stable prompts (covered by
-/// `resolve_evidence_chunks_path_unchanged_from_tier3`).
+/// Delegate to `chunk_retrieval::format_chunks_as_evidence` (canonical impl).
+/// Byte-identical to Tier 3 engine output.
 fn format_chunks_as_evidence(chunks: &[ScoredChunk]) -> String {
     crate::screening::chunk_retrieval::format_chunks_as_evidence(chunks).unwrap_or_default()
 }
@@ -256,10 +221,7 @@ fn build_chunks_sections_label(chunks: &[ScoredChunk]) -> String {
     }
 }
 
-// Note: the pure-module tests for `resolve_evidence` live in the standalone
-// integration test file `src-tauri/tests/evidence_test.rs` (extracted per
-// CLAUDE.md lines 147-148: "Avoid large inline unit tests in library source
-// files... instead, move them into standalone integration test files").
+/* `resolve_evidence` tests live in `src-tauri/tests/evidence_test.rs`. */
 
 /// The evidence body string plus the deduped section labels that survived
 /// ranking (e.g. `"§Methods, §Results"`), for the audit trail.

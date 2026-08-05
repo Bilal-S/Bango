@@ -1,9 +1,5 @@
 /**
  * Composable for computing the main path (SPC) in a Web Worker.
- *
- * Serializes the graph to plain data, posts it to the worker, and exposes
- * reactive `mainPathNodes` / `mainPathEdges` refs plus a `computing` flag.
- *
  * The worker is lazily instantiated and terminated on unmount.
  */
 
@@ -19,10 +15,7 @@ export function useMainPathWorker(graph: Ref<Graph | null>) {
   // Worker instance held in a shallowRef so Vue doesn't try to make it reactive.
   const worker = shallowRef<Worker | null>(null);
 
-  // Guard against worker callbacks firing after the host component has
-  // unmounted.  During route transitions, the worker may resolve while the
-  // component tree is being torn down; writing to the refs at that point can
-  // trigger watchers on a dying graph and crash.
+  // Guard against worker callbacks firing after unmount during route transitions.
   let isUnmounted = false;
 
   function getWorker(): Worker | null {

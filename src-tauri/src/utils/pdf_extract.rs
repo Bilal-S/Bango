@@ -3,87 +3,59 @@ use std::path::Path;
 
 use lopdf::Document as LopdfDocument;
 
-/// Maximum number of words allowed in extracted full text.
+/// Maximum words allowed in extracted full text.
 const MAX_WORDS: usize = 30_000;
 
 /// Fraction of non-whitespace characters in the C1 control range
-/// (U+0080-U+009F) at/above which the extracted text is treated as mojibake.
+/// (U+0080–U+009F) at/above which the text is treated as mojibake.
 ///
-/// Legacy CJK PDFs often embed fonts that use a Shift-JIS / EUC-JP / CP949 /
-/// GB18030 byte encoding without a ToUnicode CMap. `unpdf` trusts the font and
-/// emits the raw byte values as Latin-1 code points, producing strings like
-/// `"ÍN"` where `0x82 0xCD` should have decoded as `は` and `0x94 0x4E` as
-/// `年`. The telltale signature is a high density of C1 control characters
-/// (which are exceedingly rare in valid UTF-8 text), so we detect the pattern
-/// and re-decode the underlying bytes via `chardetng` + `encoding_rs`.
+/// Legacy CJK PDFs often embed fonts using Shift-JIS / EUC-JP / CP949 /
+/// GB18030 without a ToUnicode CMap. `unpdf` emits raw byte values as Latin-1
+/// code points. The telltale signature is a high density of C1 controls.
 ///
-/// The threshold is intentionally low (0.5%): C1 controls are non-printable
-/// device-control characters (e.g. "Partial Line Forward", "Private Use 2")
-/// that have no legitimate place in extracted document text, so even a small
-/// density is definitive evidence of mojibake. For a 15 000-char extraction,
-/// 0.5% is ~75 C1 chars - well above the noise floor and well below the
-/// diluted ratios seen in CJK-with-heavy-English-loanwords PDFs (the naika
-/// fixture is 3.9% despite being ~60% English loanwords + digits).
+/// Threshold is intentionally low (0.5%): C1 controls are non-printable and
+/// have no legitimate place in extracted text, so even a small density is
+/// definitive. For a 15 000-char extraction this is ~75 C1 chars.
 const MOJIBAKE_C1_DENSITY_THRESHOLD: f64 = 0.005;
 
 /// Minimum non-whitespace character count before mojibake detection runs.
 /// Tiny strings can produce noisy ratios; skip them.
 const MOJIBAKE_MIN_CHARS: usize = 50;
 
-/// Absolute minimum C1 control-char count for the mojibake verdict. Guards
-/// against false positives on short extractions that contain a stray control
-/// char (e.g. a single U+0080 from a malformed font glyph). Combined with the
-/// density threshold: a text is mojibake when it has at least this many C1
-/// chars AND the density is at/above the threshold.
+/// Minimum C1 control-char count for the mojibake verdict. Guards against
+/// false positives from a stray control char. Combined with density threshold:
+/// text is mojibake when count AND density are both at/above their thresholds.
 const MOJIBAKE_MIN_C1_COUNT: usize = 10;
 
-/// Extracts clean full text from a PDF file.
-///
-/// Pipeline:
-/// 1. Extract text page-by-page using lopdf for header/footer detection
-/// 2. Detect repeating header/footer lines across pages
-/// 3. Extract full text using `unpdf` (best quality, handles custom font encodings)
-///    - Falls back to `pdf-extract` if `unpdf` fails (legacy compat)
-///    - Falls back to `lopdf` page-by-page if both fail (degraded but always works)
-/// 4. **Mojibake recovery**: legacy CJK PDFs without a ToUnicode CMap produce
-///    garbled text (raw Shift-JIS/EUC-JP byte values emitted as Latin-1 code
-///    points). When the C1 control-char density exceeds the threshold, the
-///    bytes are re-detected via `chardetng` and re-decoded via `encoding_rs`.
-/// 5. Remove detected headers/footers from the extracted text
-/// 6. Strip abstract and references sections
-/// 7. Truncate to MAX_WORDS
+/** Extracts clean full text from a PDF. Pipeline:
+1. lopdf header/footer detection
+2. `unpdf` → `pdf-extract` fallback → `lopdf` page-by-page last resort
+3. Mojibake recovery (chardetng + encoding_rs, only when C1 density at/above threshold)
+4. Remove detected headers/footers
+5. Strip abstract and references
+6. Truncate to MAX_WORDS */
 pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
-    // Step 1: Detect headers/footers from lopdf (also pre-loads pages for fallback)
     let header_footer_lines = detect_headers_footers(file_path)?;
 
-    // Step 2: Extract full text.
-    // Tier 1: unpdf (best quality - handles Type1 custom fonts without panicking)
-    // Tier 2: pdf-extract (legacy fallback - may panic on broken Unicode maps)
-    // Tier 3: lopdf page-by-page (last resort - degraded but always works)
+    /* Tier 1: unpdf (best quality, Type1 custom fonts). Tier 2: pdf-extract
+    (legacy fallback, may panic). Tier 3: lopdf page-by-page (always works). */
     let raw_text = match extract_via_unpdf(file_path) {
         Ok(text) if !text.trim().is_empty() => text,
-        _ => {
-            // unpdf failed or returned empty - try pdf-extract with panic safety.
-            match extract_text_safe(file_path) {
-                Ok(text) => text,
-                Err(e) => {
-                    // pdf-extract also failed - fall back to lopdf.
-                    eprintln!(
+        _ => match extract_text_safe(file_path) {
+            Ok(text) => text,
+            Err(e) => {
+                eprintln!(
                         "[pdf_extract] pdf-extract failed/panicked: {e} - falling back to lopdf extraction"
                     );
-                    let doc = LopdfDocument::load(file_path)
-                        .map_err(|e2| format!("Fallback PDF load also failed: {e2}"))?;
-                    extract_all_pages_text(&doc)?
-                }
+                let doc = LopdfDocument::load(file_path)
+                    .map_err(|e2| format!("Fallback PDF load also failed: {e2}"))?;
+                extract_all_pages_text(&doc)?
             }
-        }
+        },
     };
 
-    // Step 3: Mojibake recovery. Runs BEFORE header/footer stripping so the
-    // cleaner Unicode text flows through the rest of the pipeline (section
-    // classification, chunking, translation). Only fires when the C1
-    // control-char density exceeds the threshold; clean UTF-8 text passes
-    // through unchanged.
+    /* Mojibake recovery runs BEFORE stripping so the cleaner text feeds section
+    classification, chunking, translation. Only fires above threshold. */
     let recovered = recover_mojibake(&raw_text);
 
     // Step 4: Remove detected header/footer lines
@@ -102,68 +74,44 @@ pub fn extract_pdf_text(file_path: &Path) -> Result<String, String> {
 // Mojibake detection + recovery (legacy CJK PDFs without a ToUnicode CMap)
 // ---------------------------------------------------------------------------
 
-/// Detect whether `text` is mojibake and, if so, try to recover the original
-/// Unicode text by re-decoding the underlying bytes.
-///
-/// Returns the recovered Unicode text when recovery succeeds, or the original
-/// text unchanged when:
-/// - the text is too short to evaluate (`MOJIBAKE_MIN_CHARS`),
-/// - the C1 control-char density is below the threshold (not mojibake), or
-/// - `chardetng` is not confident enough / the candidate encoding is not one of
-///   the known legacy CJK encodings.
-///
-/// This is a heuristic, not a guarantee: it trades a narrow false-positive risk
-/// on genuinely Latin-1 text (which is rare in academic PDFs) for fixing the
-/// common legacy-CJK-PDF case where `unpdf` emits raw Shift-JIS byte values as
-/// Latin-1 code points. The detector only fires on a high density of C1 control
-/// characters (U+0080-U+009F), which are exceedingly rare in valid UTF-8 text
-/// and in valid Latin-1 text (they are non-printable controls).
+/** Recover original Unicode from mojibake (legacy CJK PDFs) by re-decoding
+bytes via `chardetng` + `encoding_rs`.
+
+Returns recovered text on success, original unchanged when text is too short,
+C1 density is below threshold, or the detector is not confident in a known CJK
+encoding. Heuristic: trades a narrow false-positive risk on Latin-1 text for
+fixing common legacy-CJK-PDF cases. */
 #[must_use]
 pub fn recover_mojibake(text: &str) -> String {
     if !is_mojibake(text) {
         return text.to_string();
     }
-    // Re-encode the (already-decoded) Rust string back to its original bytes
-    // via Latin-1. This is the inverse of the buggy decode `unpdf` performed:
-    // it took each raw byte and cast it to a `char`, which in Rust is the same
-    // as Latin-1 decoding for bytes in 0x00-0xFF.
+    /* Re-encode back to Latin-1 bytes (inverse of buggy `unpdf` decode). */
     let bytes: Vec<u8> = text.chars().map(|c| u8::try_from(c).unwrap_or(b'?')).collect();
 
-    // Run the charset detector on the raw bytes.
     let mut detector = chardetng::EncodingDetector::new();
     detector.feed(&bytes, true);
     let (encoding, confident) = detector.guess_assess(None, true);
 
-    // Only accept the candidate when (a) the detector is confident AND (b) the
-    // encoding is one of the known legacy CJK encodings. This guards against
-    // false-positive re-decode of legitimate Latin-1 / Windows-1252 text.
+    /* Only accept confident detection of a known legacy CJK encoding. */
     if !confident || !is_legacy_cjk_encoding(encoding) {
         return text.to_string();
     }
 
     let (decoded, _, had_errors) = encoding.decode(&bytes);
     if had_errors {
-        // The detector's candidate still produced replacement chars; keep the
-        // original rather than introducing a different kind of garbage.
         return text.to_string();
     }
-    // Sanity check: the recovered text must have a LOWER C1 density than the
-    // original (otherwise we made things worse). This catches pathological
-    // cases where the detector picked a wrong-but-non-erroring encoding.
+    /* Sanity check: recovered text must have LOWER C1 density than original. */
     if c1_control_density(&decoded) >= c1_control_density(text) {
         return text.to_string();
     }
     decoded.into_owned()
 }
 
-/// `true` when `text` shows the mojibake signature: enough non-whitespace
-/// content to evaluate, an absolute C1 control-char count at/above the floor,
-/// AND a C1 control-char density at/above the threshold.
-///
-/// The two-part guard (absolute count + density) prevents false positives on
-/// short extractions with a stray control char while still catching the
-/// diluted-but-real mojibake from CJK PDFs whose text is heavy with ASCII
-/// loanwords + digits (e.g. the naika fixture: 591 C1 chars / 3.9% density).
+/** `true` when `text` has enough content to evaluate AND absolute C1 count
+AND density are both at/above their thresholds. Two-part guard prevents false
+positives on short extractions with a stray control char. */
 #[must_use]
 pub fn is_mojibake(text: &str) -> bool {
     let non_ws: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
@@ -199,10 +147,9 @@ fn c1_control_ratio(non_ws: &[char]) -> f64 {
     c1 as f64 / non_ws.len() as f64
 }
 
-/// `true` when `encoding` is one of the legacy CJK encodings whose raw byte
-/// streams produce the mojibake signature when misinterpreted as Latin-1.
-/// Restricting recovery to this set prevents false-positive re-decode of
-/// legitimate Latin-1 / Windows-1252 / UTF-8 text.
+/** `true` when `encoding` is a legacy CJK encoding whose raw byte streams
+produce mojibake when misinterpreted as Latin-1. Restricting to this set
+prevents false-positive re-decode of legitimate text. */
 fn is_legacy_cjk_encoding(encoding: &'static encoding_rs::Encoding) -> bool {
     // `encoding_rs` exposes the canonical static singletons; compare by name.
     let name = encoding.name();
@@ -228,11 +175,8 @@ fn extract_text_safe(file_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("PDF extraction failed: {e}"))
 }
 
-/// Extract text via `unpdf` - the highest-quality PDF text extractor.
-///
-/// `unpdf` handles custom Type1 font encodings that cause `pdf-extract` to
-/// panic and `lopdf` to produce garbled output. Pure Rust, MIT-licensed,
-/// no external dependencies. Synchronous API (no async runtime needed).
+/** Extract via `unpdf` — highest-quality PDF text extractor, handles custom
+Type1 font encodings that cause `pdf-extract` to panic. Pure Rust, sync. */
 fn extract_via_unpdf(file_path: &Path) -> Result<String, String> {
     let doc = unpdf::parse_file(file_path).map_err(|e| format!("unpdf parse failed: {e}"))?;
     let options = unpdf::render::RenderOptions::default();
@@ -519,13 +463,11 @@ pub fn remove_header_footer_lines(text: &str, header_footer_lines: &[String]) ->
         .join("\n")
 }
 
-/// Strip the abstract section from the beginning of the text.
-/// Looks for "Abstract" heading and removes everything up to the next section heading.
-///
-/// Note: `classify_sections` (in `utils::sections`) provides a more structured
-/// view of the same document. This substring-based stripper is kept because it
-/// is proven and covered by existing tests; new consumers (T1.2 chunking,
-/// T1.3 section summaries) use `classify_sections` directly.
+/** Strip the abstract section from the beginning of the text.
+Removes everything from an "Abstract" heading to the next section heading.
+
+Kept because proven and covered by tests; new consumers use
+`classify_sections` directly. */
 #[must_use]
 pub fn strip_abstract(text: &str) -> String {
     let abstract_patterns = [
@@ -589,12 +531,10 @@ pub fn strip_abstract(text: &str) -> String {
     }
 }
 
-/// Strip the references section from the end of the text.
-///
-/// Note: `classify_sections` (in `utils::sections`) provides a more structured
-/// view of the same document. This substring-based stripper is kept because it
-/// is proven and covered by existing tests; new consumers (T1.2 chunking,
-/// T1.3 section summaries) use `classify_sections` directly.
+/** Strip the references section from the end of the text.
+
+Kept because proven and covered by tests; new consumers use
+`classify_sections` directly. */
 #[must_use]
 pub fn strip_references(text: &str) -> String {
     let ref_patterns = [

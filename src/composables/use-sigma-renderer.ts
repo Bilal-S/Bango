@@ -102,11 +102,10 @@ interface SigmaRendererOptions {
  *   await initRenderer(container.value!, graph, opts);
  */
 export function useSigmaRenderer() {
-  // IMPORTANT: this ref MUST live inside the function (component instance scope),
-  // NOT at module scope. A module-scoped singleton is shared across all callers,
-  // so one component's onUnmounted → destroyRenderer() would kill another
-  // component's renderer, causing crashes during route transitions where parent
-  // and child both use this composable.
+  /* IMPORTANT: this ref MUST live inside the function (component instance),
+  NOT at module scope. A module-scoped singleton is shared across all callers,
+  so one component's onUnmounted -> destroyRenderer() would kill another
+  component's renderer during route transitions. */
   const renderer = shallowRef<Sigma | null>(null);
   const isRendering = ref(false);
 

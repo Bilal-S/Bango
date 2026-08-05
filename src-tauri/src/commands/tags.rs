@@ -27,10 +27,8 @@ const MIN_KEYWORD_FREQUENCY: usize = 2;
 /// Maximum number of keywords to send to the LLM.
 const MAX_KEYWORDS: usize = 200;
 
-/// Standard field-of-study tags that classify content by research methodology
-/// and study type. These are commonly used across academic disciplines and
-/// should be suggested by the LLM (up to 4) when they match the corpus.
-///
+/// Standard methodology/study-type tags commonly used across academic
+/// disciplines. The LLM should suggest up to 4 when they match the corpus.
 /// All entries are lowercase, hyphenated, and ≤ 35 chars so they pass the
 /// backend sanitization in `screening::engine::sanitize_tag_or_label_name`.
 const STANDARD_STUDY_TAGS: &[&str] = &[
@@ -364,9 +362,9 @@ pub struct MergeTagRequest {
     pub into_id: String,
 }
 
-/// Replace one tag with another: all articles carrying `from_id` are
-/// reassigned to `into_id`, then `from_id` is deleted. Destructive and
-/// irreversible; the frontend shows a confirmation dialog before invoking.
+/// Replace one tag with another: all articles carrying `from_id` are reassigned
+/// to `into_id`, then `from_id` is deleted. Destructive and irreversible; the
+/// frontend shows a confirmation dialog before invoking.
 ///
 /// Returns the per-merge counts so the success toast can report the accurate
 /// `reassigned` + `already-had-survivor` split (the pre-confirm dialog can
@@ -380,19 +378,17 @@ pub fn merge_tag(
     merge_tag_inner(&conn, &request.from_id, &request.into_id)
 }
 
-/// Core merge logic, extracted so it is testable without `State<DbState>`.
+/// Core merge logic, testable without `State<DbState>`.
 ///
-/// Implementation contract (all inside one `unchecked_transaction`):
+/// All inside one `unchecked_transaction`:
 /// 1. Guard `from_id == into_id`.
 /// 2. Load `from`/`into` names.
-/// 3. Compute true counts BEFORE mutating (the `UPDATE OR IGNORE` in `merge_tags`
+/// 3. Compute true counts BEFORE mutating (`UPDATE OR IGNORE` in `merge_tags`
 ///    would otherwise erase the overlap signal).
-/// 4. `tag_repo::merge_tags` (repo: `UPDATE OR IGNORE` + `DELETE FROM tags`).
-///    `PRAGMA foreign_keys=ON` + `ON DELETE CASCADE` removes the leftover overlap
-///    junction rows when the source tag row is deleted; no row is left dangling.
+/// 4. `tag_repo::merge_tags` (`UPDATE OR IGNORE` + `DELETE FROM tags`).
+///    `ON DELETE CASCADE` removes leftover overlap junction rows.
 /// 5. One coalesced `tag_remove` audit entry per *reassigned* article via the
-///    shared `audit_repo::write_tag_label_audit` helper (single-entry bulk
-///    pattern; the detail string carries both halves of the replace).
+///    shared `audit_repo::write_tag_label_audit` helper.
 /// 6. `bump_changed_at` for each reassigned article.
 /// 7. Set both staleness flags.
 /// 8. Commit + return `MergeResult`.

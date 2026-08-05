@@ -1,7 +1,6 @@
-//! Synthesis page pre-seed (Phase 2).
-//!
-//! Pre-seeds `wiki/synthesis/{article_id}.md` for every included article that
-//! has an AI summary, using the article UUID as its slug.
+//! Synthesis page pre-seed (Phase 2). Pre-seeds `wiki/synthesis/{article_id}.md` for every
+//! included article with an AI summary. Slug = article UUID; body = summary_150_250_words +
+//! key insights + keywords → concept wikilinks. Reviewed pages preserved.
 
 use std::path::Path;
 
@@ -12,9 +11,8 @@ use crate::wiki::frontmatter::{self, Frontmatter};
 
 use super::slugs::{concept_slug, sanitize_slug};
 
-/// A parsed AI summary JSON blob - the deterministic source for synthesis pages.
-/// All fields are optional; the pre-seeder skips articles whose summary is
-/// missing or unparseable.
+/// Parsed AI summary JSON blob. All fields optional; pre-seeder skips articles with
+/// missing/unparseable summaries.
 #[derive(Debug, Default)]
 pub struct ParsedAiSummary {
     pub summary: Option<String>,
@@ -29,11 +27,7 @@ pub struct ParsedAiSummary {
     pub section_summaries: Vec<ParsedSectionSummary>,
 }
 
-/// One element of the `section_summaries` array in a v2 AI-summary blob.
-///
-/// Typed facts (`study_design`, `sample_size`, `effect_size`,
-/// `confidence_interval`) are optional and only meaningful for specific section
-/// kinds; `summary` + `key_points` are always present when the section exists.
+/// One element of the `section_summaries` array (v2 AI-summary blob). Typed facts optional.
 #[derive(Debug, Default, Clone)]
 pub struct ParsedSectionSummary {
     pub section: String,
@@ -45,9 +39,7 @@ pub struct ParsedSectionSummary {
     pub confidence_interval: Option<String>,
 }
 
-/// Parse an article's `full_text_ai_summary` JSON blob into a `ParsedAiSummary`.
-/// Returns `None` when the blob is empty or unparseable (the caller skips that
-/// article gracefully).
+/// Parse `full_text_ai_summary` JSON into `ParsedAiSummary`. Returns `None` on empty/unparseable.
 pub fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -94,11 +86,7 @@ pub fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
     })
 }
 
-/// Parse the `section_summaries` array out of a v2 AI-summary blob.
-///
-/// Each element is an object with `section`, `summary`, `key_points`, and
-/// optional typed facts. Malformed elements are skipped (no panic). Returns an
-/// empty `Vec` when the blob has no `section_summaries` array (v1 blobs).
+/// Parse `section_summaries` array from v2 blob. Empty vec for v1 blobs or absent array.
 fn parse_section_summaries(value: &serde_json::Value) -> Vec<ParsedSectionSummary> {
     let Some(arr) = value.get("section_summaries").and_then(|v| v.as_array()) else {
         return Vec::new();
@@ -167,20 +155,9 @@ fn fetch_articles_with_summaries(conn: &Connection) -> Result<Vec<ArticleWithSum
     Ok(articles)
 }
 
-/// Pre-seed `wiki/synthesis/{article_id}.md` for every included article that
-/// has an AI summary. Each page uses the article UUID as its slug (matching the
-/// existing `[[uuid]]` / `[^art-uuid]` convention) and its `source_articles`
-/// frontmatter is the singleton `[article_id]`.
-///
-/// The body is the `summary_150_250_words` digest + a "Key Insights" bulleted
-/// section (when present). Keywords become `[[concept-slug]]` candidates in the
-/// `tags` frontmatter so the graph connects to the Phase-3 concept hubs.
-///
-/// Reviewed (user-edited) synthesis pages are preserved. Articles without an AI
-/// summary (or with unparseable JSON) are skipped - the LLM can still produce a
-/// synthesis page for them.
-///
-/// Returns the count of pages written.
+/// Pre-seed `wiki/synthesis/{article_id}.md` for every included article with AI summary.
+/// Body: `summary_150_250_words` + key insights + keyword wikilinks.
+/// Reviewed pages preserved. Returns count written.
 pub fn preseed_synthesis_from_ai_summaries(
     conn: &Connection,
     root: &Path,
@@ -253,10 +230,8 @@ fn render_synthesis_page(
         fm.set("subfield", subfield);
     }
 
-    // NOTE: do NOT emit `# {title}` as the first body line. The page title
-    // lives in frontmatter and is rendered separately by the wiki viewer's
-    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
-    // show the title twice on the rendered page.
+    /* Title lives in frontmatter, rendered by viewer header. Duplicating as
+    `# {title}` would show the title twice on the rendered page. */
     let mut body = String::new();
     let year_str = article.year.map(|y| format!(" ({})", y)).unwrap_or_default();
     body.push_str(&format!("## Summary\n\n{}{}\n", digest, year_str));
@@ -273,9 +248,8 @@ fn render_synthesis_page(
         body.push_str(&links.join(", "));
         body.push('\n');
     }
-    // T1.3: render per-section subsections (Methods/Results/Discussion) when
-    // the v2 blob carries `section_summaries`. Old (v1) blobs have an empty
-    // list and skip this branch entirely (graceful backward compat).
+    /* T1.3: per-section subsections when v2 blob carries `section_summaries`.
+    Old (v1) blobs have empty list → graceful backward compat. */
     for ss in &parsed.section_summaries {
         let heading = match ss.section.to_lowercase().as_str() {
             "methods" | "methodology" | "materials and methods" => "Methods",

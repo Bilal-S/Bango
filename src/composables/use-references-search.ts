@@ -99,12 +99,8 @@ export function useReferencesSearch() {
   /**
    * Promote a reference paper to a Working-list article.
    *
-   * @param paperId - The reference paper id to promote.
    * @param options.refreshArticlesOfInterest - When `false`, skips the
-   *   `loadArticlesOfInterest()` refresh so the caller can remove the card
-   *   locally with an exit animation instead of letting the refresh yank it.
-   *   Defaults to `true` (backward compatible).
-   * @returns The new article id, or `null` on failure.
+   *   refresh so the caller can animate the card out locally. Default `true`.
    */
   async function promotePaper(
     paperId: string,

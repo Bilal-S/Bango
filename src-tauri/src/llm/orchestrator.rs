@@ -1,13 +1,8 @@
 //! Centralized LLM request coordinator.
 //!
 //! All LLM calls MUST go through `LlmOrchestrator` (Tauri managed state).
-//! The orchestrator enforces:
-//! - Concurrency limits (`max_concurrent_requests`)
-//! - Rate limiting (`request_delay_ms`)
-//! - Unified error logging
-//! - Post-call persistence of the `skip_temperature` flag when the client
-//!   recovers from a temperature-rejection 400 (so the next call skips the
-//!   wasteful first-attempt failure)
+//! Enforces: concurrency limits, rate limiting, unified error logging, and
+//! post-call `skip_temperature` persistence after temperature-rejection recovery.
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,18 +20,14 @@ use crate::llm::embedding::embedding_limits;
 use crate::models::llm_config::LlmConfig;
 use crate::utils::json_repair::prepare_llm_json;
 
-/// Best-effort callback used by the orchestrator to persist the
-/// `skip_temperature` flag when the client recovered from a temperature-rejection 400.
+/// Best-effort callback to persist `skip_temperature` after client temperature-rejection recovery.
 ///
-/// Implementations acquire the DB lock, run `llm_config_repo::set_skip_temperature`, and drop the
-/// lock. The implementation MUST NOT be invoked while any caller holds the DB lock: every
-/// orchestrator call site releases its DB lock before calling `orchestrator.send` (per spec §8.1
-/// "lock-release-call-lock" worker pattern + the same discipline enforced across all command
-/// handlers), so the post-call lock acquisition here is provably deadlock-free.
+/// Implementations run `llm_config_repo::set_skip_temperature` under a DB lock.
+/// INVARIANT: never invoked while any caller holds the DB lock (every orchestrator
+/// call site releases its lock before calling `orchestrator.send` per spec §8.1
+/// "lock-release-call-lock"), so post-call lock acquisition is provably deadlock-free.
 ///
-/// The trait exists so the orchestrator stays decoupled from `tauri::AppHandle` + `DbState`
-/// (testable without the Tauri runtime) and so tests can inject a fake that records invocations
-/// without a live SQLite connection.
+/// Trait decouples orchestrator from `tauri::AppHandle` + `DbState` for testability.
 pub trait TemperatureFlagPersister: Send + Sync {
     /// Persist `skip_temperature = skip`. Best-effort: implementations log and
     /// swallow errors so a DB failure never fails a successful LLM call.
@@ -47,41 +38,24 @@ pub trait TemperatureFlagPersister: Send + Sync {
 /// types except screening).
 const LLM_TIMEOUT_SECS: u64 = 600;
 
-/// Maximum time to wait for a single screening LLM response (stage-1 abstract
-/// and stage-2 enhanced/two-stage). Screening is a high-volume, low-latency
-/// operation compared to AI summaries / wiki ingest / chat, and abstract
-/// screening prompts are small, so a tighter cap surfaces hung/slow calls as
-/// errors within ~2 minutes instead of stalling the run for the 10-minute
-/// default. The user can mitigate sustained slowness by lowering `batch_size`.
+/// Timeout for screening LLM calls (stage-1 abstract + stage-2 enhanced/two-stage).
+/// Tighter than `LLM_TIMEOUT_SECS` because screening prompts are small and high-volume;
+/// surfaces hung calls in ~2 min. Mitigate slowness by lowering `batch_size`.
 const SCREENING_TIMEOUT_SECS: u64 = 120;
 
-/// Maximum time to wait for a single embedding request (generation or recall).
-/// Embedding calls are small + bounded (one or a few texts per request), so a
-/// 30s cap surfaces a hung provider promptly. The inner `client::send_with_retry`
-/// still handles transient 429/5xx within this window.
+/// Timeout for embedding requests (generation or recall). 30s cap surfaces a
+/// hung provider promptly. Inner `client::send_with_retry` handles transients.
 const EMBEDDING_TIMEOUT_SECS: u64 = 30;
 
-/// Maximum time to wait for the Citation Finder's main classification call
-/// (`citation_finder/AGENTS.md`). The prompt carries up to 15 candidates + matched passages,
-/// so the LLM has more work than a screening batch but far less than a wiki
-/// ingest. 120s surfaces a hung provider while leaving room for slow local
-/// models.
+/// Timeout for Citation Finder main classification (`citation_finder/AGENTS.md`).
+/// 120s surfaces a hung provider while leaving room for slow local models.
 const CITATION_FINDER_TIMEOUT_SECS: u64 = 120;
 
-/// Maximum time to wait for the Citation Finder's claim-split call
-/// (per-statement mode). Small prompt, but local LLMs can be slow on the
-/// first call (model load), so 60s is safer than cf1's 30s.
+/// Timeout for Citation Finder claim-split (per-statement mode). 60s allows for
+/// slow local model first-call (model load).
 const CITATION_FINDER_SPLIT_TIMEOUT_SECS: u64 = 60;
 
-/// Pick the per-call wall-clock timeout based on the request type.
-///
-/// Screening (both stage-1 `Screening` and stage-2 `EnhancedScreening`) uses
-/// the tighter `SCREENING_TIMEOUT_SECS` cap. All other request types
-/// (summaries, chat, wiki ingest, translation, gap analysis, etc.) use the
-/// default `LLM_TIMEOUT_SECS`.
-///
-/// Pure function so it can be unit-tested in isolation without a live
-/// orchestrator or network.
+/// Per-`LlmRequestType` wall-clock timeout. Pure for unit-test isolation.
 #[must_use]
 pub fn timeout_for(request_type: &LlmRequestType) -> Duration {
     match request_type {
@@ -97,7 +71,8 @@ pub fn timeout_for(request_type: &LlmRequestType) -> Duration {
     }
 }
 
-/// Label for categorizing LLM request sources.
+/// Labels for categorizing LLM request sources. Used by [`timeout_for`] for per-type
+/// timeouts and by diagnostics for per-call-type traffic/cost tracking.
 #[derive(Debug, Clone)]
 pub enum LlmRequestType {
     Screening,
@@ -111,97 +86,50 @@ pub enum LlmRequestType {
     Chat,
     WikiIngest,
     WikiChat,
-    /// T1.3: per-section AI summary (Methods/Results/Discussion) generated
-    /// alongside the whole-paper summary.
+    /// T1.3: per-section Methods/Results/Discussion summary alongside whole-paper summary.
     SectionSummary,
     /// Tier 2 Phase 4: batched LLM description of figure/table captions.
     FigureDescription,
-    /// Tier 3: enhanced / two-stage screening stage 2 (abstract + retrieved
-    /// full-text chunks). Stage 1 stays `Screening`. Categorized separately so
-    /// diagnostics can distinguish abstract-only from full-text-aware calls.
+    /// Tier 3: stage-2 enhanced/two-stage screening (abstract + full-text chunks).
     EnhancedScreening,
-    /// Tier 4.2: unified AI summary - the synthesis call that combines
-    /// per-section summaries + figure/table descriptions into one upgraded
-    /// `summary_150_250_words` digest. Distinguishes the unified path from the
-    /// legacy monolithic `ArticleSummary` and the section-only `SectionSummary`.
+    /// Tier 4.2: unified AI summary combining per-section + figure descriptions.
     UnifiedSummary,
-    /// Multilingual translation: per-chunk or per-metadata translation of a
-    /// non-English article to English. Categorized separately so diagnostics
-    /// can distinguish translation calls (Plan-A permanent rewrite) from
-    /// screening/summary calls. The translation engine owns a thin
-    /// `TranslationLlmClient` that logs `job_id`/`part_id` before delegating
-    /// to the orchestrator via `send_with_type(LlmRequestType::Translation)`.
+    /// Multilingual translation: per-chunk/metadata English rewrite.
     Translation,
-    /// Research Gap Analysis: corpus-wide Markdown report over included
-    /// articles (thematic coverage, identified gaps, methodological landscape,
-    /// future directions). Distinguishes the call from `SummaryGeneration`
-    /// (the literature review) in diagnostics so per-mode cost and failure
-    /// rates are visible.
+    /// Research Gap Analysis: corpus-wide Markdown report over included articles.
     GapAnalysis,
-    /// Search Strategy Builder (spec §8.4): generates database-ready Boolean
-    /// search strings for 8 academic databases from the research aims +
-    /// criteria. One call per generation; the result is session-scoped (no
-    /// persistence). Distinguished from `CriteriaGeneration` so diagnostics
-    /// can separate search-strategy requests from criteria suggest/critique.
+    /// Search Strategy Builder: generates database-ready Boolean queries from aims + criteria.
     SearchStrategy,
-    /// OpenAlex Smart Search (Tier 2): generates an OpenAlex Boolean query
-    /// from research aims + inclusion/exclusion criteria. The user reviews
-    /// the query before executing it against the OpenAlex API.
+    /// OpenAlex Smart Search: generates OpenAlex Boolean query from aims + criteria.
     OpenAlexSmartSearch,
-    /// Embedding generation / recall (per-chunk or query embedding via the
-    /// provider's embedding endpoint). Distinct from chat completion so
-    /// diagnostics can separate embedding traffic from chat traffic, and so
-    /// `timeout_for` can apply the tighter 30s cap. The `send_embedding`
-    /// orchestrator method routes here; it does NOT participate in the
-    /// `skip_temperature` machinery (embeddings have no temperature param).
+    /// Embedding generation / recall. Does NOT participate in `skip_temperature` machinery.
     Embedding,
-    /// Citation Finder main classification call: rank + classify + explain
-    /// (`citation_finder/AGENTS.md`). Carries up to 15 candidates + matched passages, so the
-    /// 120s cap is tighter than the 10-minute default but generous enough for
-    /// local LLMs.
+    /// Citation Finder main classification: rank + classify + explain.
     CitationFinder,
-    /// Citation Finder claim-split call (per-statement mode): split the pasted
-    /// prose into ≤5 distinct claims. Small prompt, but local LLMs can be slow
-    /// on the first call, so the cap is 60s.
+    /// Citation Finder claim-split (per-statement mode): ≤5 distinct claims.
     CitationFinderSplit,
 }
 
-/// Centralized LLM request coordinator.
+/// Centralized LLM request coordinator (Tauri managed state).
 ///
-/// Registered as Tauri managed state. All LLM calls flow through here
-/// to enforce concurrency limits and rate limiting from `LlmConfig`.
-///
-/// The concurrency limit is enforced by a `tokio::sync::Semaphore` wrapped in
-/// a `std::sync::RwLock<Arc<Semaphore>>`. `tokio::Semaphore` only supports
-/// growing (`add_permits`), not shrinking, so `update_settings` swaps in a
-/// fresh semaphore of the exact new size instead of mutating the old one.
-/// `send()` clones the `Arc<Semaphore>` under a brief read lock and drops the
-/// guard before awaiting permit acquisition, so settings updates are never
-/// blocked by in-flight requests and no lock guard is held across an `.await`.
+/// Concurrency: `tokio::sync::Semaphore` in `RwLock<Arc<Semaphore>>`. Since tokio's
+/// Semaphore only grows, `update_settings` swaps in a fresh one. `send()` clones
+/// the Arc under a brief read lock and drops it before `.await`, so settings
+/// updates are never blocked.
 pub struct LlmOrchestrator {
     semaphore: RwLock<Arc<Semaphore>>,
     last_request: Arc<tokio::sync::Mutex<Instant>>,
     request_delay_ms: Arc<tokio::sync::Mutex<u64>>,
-    /// Best-effort `skip_temperature` persister. `None` in tests (no-op); `Some`
-    /// in production, wired in `init_background_state` after the orchestrator is
-    /// constructed. Kept optional + set via a separate setter so the existing
-    /// 2-param [`new`](Self::new) constructor stays unchanged - the ~40 test
-    /// call sites need zero edits.
+    /// Best-effort `skip_temperature` persister. `None` in tests; `Some` in production.
     temp_persister: RwLock<Option<Arc<dyn TemperatureFlagPersister>>>,
-    /// In-session latch: once any call in this process recovers from a
-    /// temperature-rejection 400, this flips to `true` so every subsequent call
-    /// omits `temperature` from the start (no wasteful first-attempt 400 + retry).
-    /// Lock-free (`AtomicBool`) because it is written once (the first rejection)
-    /// and read on every call. Complements the DB persistence (which covers
-    /// future process restarts but cannot reach the in-memory `LlmConfig`
-    /// cached by long-running consumers like the screening engine).
+    /// In-session latch: flips to `true` on first temperature-rejection recovery
+    /// so subsequent calls omit `temperature` from the start. Lock-free; complements
+    /// DB persistence for in-memory config caches.
     temperature_rejected_in_session: AtomicBool,
 }
 
-/// No-op persister used when no DB is available (tests, or production before
-/// `set_temperature_persister` is wired). Drops the flag silently; the next
-/// call simply retries temperature-recovery again if the model still rejects
-/// `temperature`.
+/// No-op persister used when no DB is available (tests, or pre-wiring).
+/// Drops the flag silently; next call retries temperature-recovery if the model still rejects.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoOpTemperaturePersister;
 
@@ -212,13 +140,8 @@ impl TemperatureFlagPersister for NoOpTemperaturePersister {
 }
 
 impl LlmOrchestrator {
-    /// Create a new orchestrator with the given concurrency limit and delay.
-    ///
-    /// The temperature-flag persister starts as `None`; production wires it via
-    /// [`set_temperature_persister`](Self::set_temperature_persister) after the
-    /// orchestrator is registered as managed state. Keeping it out of the
-    /// constructor signature means the ~40 existing test call sites (`new(...)`)
-    /// need zero edits.
+    /// Create a new orchestrator. Temperature persister starts as `None`;
+    /// production wires it via [`set_temperature_persister`](Self::set_temperature_persister).
     pub fn new(max_concurrent: usize, request_delay_ms: u64) -> Self {
         Self {
             semaphore: RwLock::new(Arc::new(Semaphore::new(max_concurrent.max(1)))),
@@ -232,24 +155,17 @@ impl LlmOrchestrator {
     }
 
     /// Wire the best-effort `skip_temperature` persister (production only).
-    ///
-    /// Must be called once during startup (`init_background_state`) after the
-    /// `DbState` is available. When unset, temperature-recovery still WORKS
-    /// (the client retries without `temperature`), but the flag is not
-    /// persisted, so the next call repeats the wasteful first-attempt failure.
+    /// Called once during startup after `DbState` is available.
     pub fn set_temperature_persister(&self, persister: Arc<dyn TemperatureFlagPersister>) {
         *self.temp_persister.write().unwrap_or_else(|p| p.into_inner()) = Some(persister);
     }
 
-    /// Best-effort: if the client set `CallMeta.temperature_was_rejected`,
-    /// spawn a detached task to persist `skip_temperature = true`. Failures are
-    /// logged and swallowed so a DB hiccup never fails a successful LLM call.
+    /// If `meta.temperature_was_rejected`, latch in-session flag + spawn detached
+    /// task to persist `skip_temperature = true`. Best-effort; DB failures logged.
     ///
-    /// INVARIANT: this MUST run AFTER the LLM call returns, never before or
-    /// during. Every caller of [`send`](Self::send) releases its DB lock before
-    /// invoking the orchestrator (spec §8.1 "lock-release-call-lock" worker
-    /// pattern + the same discipline enforced across all command handlers), so
-    /// the persister's lock acquisition here cannot deadlock with a caller.
+    /// INVARIANT: runs AFTER the LLM call returns. Every caller releases its DB lock
+    /// before invoking the orchestrator, so the persister's lock acquisition is
+    /// provably deadlock-free.
     fn maybe_persist_skip_temperature(&self, meta: client::CallMeta) {
         if !meta.temperature_was_rejected {
             return;
@@ -281,18 +197,10 @@ impl LlmOrchestrator {
 
     /// Update concurrency/delay settings when LLM config changes.
     ///
-    /// Replaces the semaphore with a fresh one of the exact requested size.
-    /// This correctly handles both growing and shrinking the limit (the
-    /// previous `add_permits` approach could only grow, and used
-    /// `available_permits` instead of capacity, causing unbounded growth when
-    /// requests were in-flight during a save).
-    ///
-    /// In-flight requests holding permits on the old semaphore are unaffected;
-    /// they keep the old `Arc<Semaphore>` alive until their permit drops. This
-    /// means a lower limit takes effect for *new* acquisitions only - there is
-    /// a brief transient window where (old in-flight + new capacity) may exceed
-    /// the new limit. This is acceptable for an advisory LLM rate limiter and
-    /// avoids preemptively cancelling running requests.
+    /// Swaps in a fresh semaphore of the exact requested size (handles both grow
+    /// and shrink). In-flight requests holding the old semaphore are unaffected.
+    /// A lower limit takes effect for new acquisitions only — brief transient
+    /// acceptable for an advisory rate limiter.
     pub async fn update_settings(&self, max_concurrent: usize, request_delay_ms: u64) {
         let new_sem = Arc::new(Semaphore::new(max_concurrent.max(1)));
         // Recover from poison (a panicked lock holder) rather than unwinding:
@@ -302,8 +210,7 @@ impl LlmOrchestrator {
     }
 
     /// Send a chat completion request through the orchestrator.
-    ///
-    /// Enforces concurrency limits and rate limiting.
+    /// Enforces concurrency limits + rate limiting + per-request-type timeout.
     pub async fn send(
         &self,
         config: &LlmConfig,
@@ -323,14 +230,10 @@ impl LlmOrchestrator {
         // 2. Rate limiting: ensure minimum delay between requests
         self.enforce_rate_limit().await;
 
-        // 3. If a prior call in this session already discovered the model
-        //    rejects `temperature`, clone the caller's config with
-        //    `skip_temperature = true` so this call omits the parameter from
-        //    the start (no wasteful first-attempt 400 + retry). The session
-        //    latch complements DB persistence: the DB flag covers future
-        //    process restarts, but cannot reach the in-memory `LlmConfig`
-        //    cached by long-running consumers (e.g. the screening engine's
-        //    `HttpLlmClient.config`).
+        /* If a prior call in this session discovered temperature rejection,
+        clone config with skip_temperature = true so this call omits the
+        parameter from the start. Session latch complements DB persistence
+        for in-memory config caches (screening engine, etc.). */
         let effective_config: LlmConfig;
         let config_ref = if self.temperature_rejected_in_session.load(Ordering::Relaxed)
             && !config.skip_temperature
@@ -370,10 +273,8 @@ impl LlmOrchestrator {
             call_start.elapsed().as_millis()
         );
 
-        // 4. Unpack the 3-tuple (content, tokens, CallMeta), persist the
-        //    temperature flag if the client recovered from a rejection, and
-        //    log errors centrally. Persistence is best-effort + detached; see
-        //    `maybe_persist_skip_temperature`.
+        /* Unpack the (content, tokens, CallMeta) 3-tuple, persist temperature
+        flag on recovery, and centralize error logging. */
         let result = result.map(|(content, tokens, meta)| {
             self.maybe_persist_skip_temperature(meta);
             (content, tokens)
@@ -387,24 +288,12 @@ impl LlmOrchestrator {
         result
     }
 
-    /// Send a chat completion whose response is expected to be JSON, and run the
-    /// shared JSON pre-parser on the result.
+    /// Send a chat completion whose response is expected to be JSON. Chains
+    /// [`send`](Self::send) with `prepare_llm_json` (strips code fences, escapes
+    /// raw control chars in strings). Returned `String` is ready for `serde_json::from_str`.
     ///
-    /// This is the recommended entry point for any caller that will feed the
-    /// LLM response into `serde_json::from_str`. It chains:
-    /// 1. [`send`](Self::send) (concurrency + rate limit + timeout).
-    /// 2. [`utils::json_repair::prepare_llm_json`] - strips markdown code fences
-    ///    and escapes raw control characters (`0x00`–`0x1F`) that the LLM may
-    ///    have placed inside JSON string values, so `serde_json` accepts the
-    ///    payload. Non-destructive: a clean JSON response passes through
-    ///    byte-identical.
-    ///
-    /// Callers that expect Markdown / plain text (chat, wiki chat, literature
-    /// review, wiki ingest, markdown-fallback retry) MUST use [`send`](Self::send)
-    /// instead - running the JSON pre-parser on prose would corrupt quoted spans.
-    ///
-    /// The returned `String` is the prepared JSON (ready for `serde_json::from_str`).
-    /// The `usize` is the prompt+completion token total (unchanged from `send`).
+    /// JSON-returning callers (summaries, criteria, smart search, etc.) MUST use
+    /// this. Prose callers (chat, wiki, translation, etc.) MUST use [`send`](Self::send).
     pub async fn send_json(
         &self,
         config: &LlmConfig,
@@ -418,14 +307,10 @@ impl LlmOrchestrator {
 
     /// Send an embedding request through the orchestrator.
     ///
-    /// Enforces concurrency limits + rate limiting + a 30s timeout (via
-    /// `LlmRequestType::Embedding`). Delegates to `llm::embedding::embed_texts`
-    /// for the provider-specific HTTP shape. Returns `(vectors, dimensions)`.
-    ///
-    /// Embeddings do NOT participate in the `skip_temperature` machinery (no
-    /// temperature param), so this path is independent of `send_chat_completion`.
-    /// Callers MUST release their DB lock before invoking this (same
-    /// lock-release-call-lock discipline as `send`).
+    /// Enforces concurrency + rate limiting + 30s `Embedding` timeout. Delegates
+    /// to `llm::embedding::embed_texts`. Does NOT participate in `skip_temperature`
+    /// machinery. Callers MUST release DB lock before invoking (same lock-release-
+    /// call-lock discipline as `send`).
     pub async fn send_embedding(
         &self,
         config: &LlmConfig,
@@ -458,10 +343,8 @@ impl LlmOrchestrator {
         result
     }
 
-    /// Send a chat completion without acquiring the semaphore.
-    ///
-    /// Used for test-connection requests where the user expects immediate feedback.
-    /// Rate limiting is still enforced.
+    /// Send without semaphore (used for test-connection feedback). Rate limiting still enforced.
+    /// Temperature-flag NOT persisted here; the sole caller (`test_llm_connection`) owns its own.
     pub async fn send_unthrottled(
         &self,
         config: &LlmConfig,
@@ -514,13 +397,9 @@ impl LlmOrchestrator {
         *last = Instant::now();
     }
 
-    /// Test an LLM connection using a simple "hello" prompt.
-    /// Does NOT go through the semaphore (not a real request).
-    ///
-    /// Temperature-recovery still applies (the client retries without
-    /// `temperature` on a rejection 400), but the flag is NOT persisted here -
-    /// the caller (`test_llm_connection` command) owns its own persistence so it
-    /// can show the user the "temperature not supported - auto-adjusted" toast.
+    /// Test an LLM connection with a simple "hello" prompt. Does NOT go through
+    /// the semaphore. Temperature-recovery still applies; in-session flag is latched
+    /// on recovery. DB persistence is owned by the caller (`test_llm_connection`).
     pub async fn test_connection(
         &self,
         config: &LlmConfig,
@@ -548,13 +427,9 @@ impl LlmOrchestrator {
         Ok((content, tokens, meta))
     }
 
-    /// List available models for a provider's discovery endpoint.
-    ///
-    /// Routes the metadata/discovery call through the orchestrator so it
-    /// participates in concurrency limiting (`max_concurrent_requests`) and
-    /// rate limiting (`request_delay_ms`) just like chat-completion calls.
-    /// This matters because some providers (e.g. OpenAI) count `/models`
-    /// requests against the same rate-limit budget as completions.
+    /// List available models via the provider's discovery endpoint. Routes through
+    /// the semaphore + rate limit since some providers count `/models` against the
+    /// same budget as completions.
     pub async fn list_models(
         &self,
         provider: &crate::models::llm_config::LlmProvider,
@@ -587,55 +462,27 @@ impl LlmOrchestrator {
         result
     }
 
-    /// Get number of available semaphore permits (for diagnostics).
-    ///
-    /// Reflects the *current* semaphore only. Immediately after
-    /// `update_settings`, permits held on the previous semaphore are not
-    /// counted, so this may briefly under-report real in-flight work during
-    /// the swap transient window.
+    /// Current semaphore permits (for diagnostics). May briefly under-report in-flight
+    /// work during the `update_settings` swap transient window.
     pub fn available_permits(&self) -> usize {
         self.semaphore.read().unwrap_or_else(|p| p.into_inner()).available_permits()
     }
 
-    // ── v2: generic parallel dispatch + embedding-specific batch ────────────
-    //
-    // `send_batch_parallel` and `send_embedding_batch_parallel` are FREE
-    // functions (not methods on `&self`) because `JoinSet::spawn` requires
-    // `'static` futures, and a `&self` method cannot produce `'static`
-    // closures that call other `&self` methods (the borrow is finite-lifetime).
-    // As free functions, the embedding-specific variant takes `&Arc<Self>` so
-    // the closure can `Arc::clone` the orchestrator (an owned, `'static`
-    // handle) and call `send_embedding` via deref inside each spawned task.
-    // Callers always have `Arc<LlmOrchestrator>` (Tauri managed state), so the
-    // `&Arc<Self>` receiver is natural.
+    /* `send_batch_parallel` and `send_embedding_batch_parallel` are FREE
+    functions (not `&self` methods) because `JoinSet::spawn` requires
+    `'static` futures. Embedding variant takes `&Arc<Self>` so the inner
+    closure can `Arc::clone` the orchestrator into each spawned task. */
 }
 
 // ── v2 free functions: generic parallel dispatch ────────────────────────────
 
-/// Dispatch an arbitrary set of independent work units in parallel via a
-/// `tokio::task::JoinSet`, reassembling results in INPUT ORDER regardless of
-/// completion order.
+/// Dispatch independent work units in parallel via `JoinSet`, reassembling in
+/// INPUT ORDER. Generic over batch/result/closure/future types.
 ///
-/// Generic over `B` (input batch type), `R` (per-batch result), `F` (closure),
-/// and `Fut` (the future the closure returns). Each batch runs in its own
-/// spawned task; the closure is cloned (`Arc`) per task.
-///
-/// Semantics:
-/// - **Order-preserving**: result `i` corresponds to `batches[i]`.
-/// - **Per-batch failures tolerated**: a failed task fills its slot with `Err`;
-///   other slots are unaffected.
-/// - **Panic isolation**: a panicking task fills its slot with
-///   `Err(AppError::Import("task panicked"))` and does not abort the whole
-///   call (the `JoinSet` is polled to completion).
-/// - **No cancellation at this layer**: callers own their cancel granularity.
-///   The returned `Vec` is full-length once `await` resolves.
-/// - **No semaphore acquisition here**: the `work_fn` closure acquires its own
-///   permit (e.g., via [`LlmOrchestrator::send_embedding`]); the
-///   orchestrator's `max_concurrent_requests` is the single global throttle.
-///
-/// Used by [`send_embedding_batch_parallel`] and available for future callers
-/// (screening evidence batching, wiki ingest, gap analysis) that need a generic
-/// "N inputs → N outputs, in order" parallel primitive.
+/// Contracts: order-preserving (result `i` = `batches[i]`), per-batch failures
+/// tolerated, panic isolation (slot filled with `Err`, not abort-all), no
+/// cancellation at this layer, no semaphore (caller's `work_fn` acquires its own).
+/// Used by [`send_embedding_batch_parallel`] and available for future callers.
 pub async fn send_batch_parallel<B, R, F, Fut>(
     batches: Vec<B>,
     work_fn: F,
@@ -668,11 +515,8 @@ where
                 slots[idx] = Some(result);
             }
             Err(join_err) => {
-                // Panic or cancellation of a task. The slot it was destined
-                // for is not recoverable from the join error itself (tokio
-                // does not surface the index), so scan for the first unfilled
-                // slot and mark it as a panic-Err. This keeps the result vec
-                // full-length + ordered.
+                /* Task panicked or cancelled. Scan for first unfilled slot and mark
+                as Err so the result vec stays full-length + ordered. */
                 if let Some(slot) = slots.iter_mut().find(|s| s.is_none()) {
                     *slot = Some(Err(AppError::Import(format!("task panicked: {join_err}"))));
                 }
@@ -690,31 +534,18 @@ where
 
 // ── v2 free functions: embedding-specific batch parallel dispatch ───────────
 
-/// Embed a slice of input texts, returning ONE vector per input in input order,
-/// with arbitrary-length texts handled losslessly via per-text splitting +
-/// token-weighted mean-pooling.
+/// Embed input texts, returning one vector per input in input order. Arbitrary-length
+/// texts handled losslessly via per-text splitting + mean-pooling.
 ///
-/// Takes `&Arc<LlmOrchestrator>` (not `&self`) so the inner closure can
-/// `Arc::clone` the orchestrator into each spawned task, producing `'static`
-/// futures required by `JoinSet::spawn`. Callers always hold
-/// `Arc<LlmOrchestrator>` (Tauri managed state).
+/// Takes `&Arc<LlmOrchestrator>` so inner closure can `Arc::clone` into spawned tasks.
 ///
-/// Pipeline (v2.4 of `.worktrees/embed-plan.md`):
-/// 1. `embedding_limits(provider, model)` → per-provider limits.
-/// 2. `split_text_by_token_budget(text, limits.max_tokens_per_input)` per text
-///    → `Vec<Vec<TextPiece>>` (most texts → 1 piece; over-long → N).
-/// 3. Flatten into `Vec<(input_idx, TextPiece)>`.
-/// 4. `group_into_embedding_batches(flat, &limits)` → sub-batches respecting
-///    BOTH `max_inputs_per_batch` AND `max_tokens_per_batch`.
-/// 5. Strip indices for HTTP; remember them for reassembly.
-/// 6. Delegate parallel HTTP dispatch to [`send_batch_parallel`] with a closure
-///    wrapping [`LlmOrchestrator::send_embedding`].
-/// 7. Scatter per-batch vectors into per-input slots; `pool_vectors` where
-///    multiple pieces landed in one slot.
-/// 8. Return `(ordered Vec<Vec<f32>>, effective_dim)`.
+/// Pipeline (`.worktrees/embed-plan.md`):
+/// 1. Resolve `embedding_limits` → 2. Split each text by `max_tokens_per_input` →
+/// 3. Flatten into `(input_idx, TextPiece)` → 4. Group into sub-batches respecting
+///    BOTH caps → 5-6. Parallel HTTP via `send_batch_parallel` → 7. Scatter + pool →
+///    8. Return `(ordered Vec<Vec<f32>>, effective_dim)`.
 ///
-/// The `effective_dim` is the dimensionality of the first non-empty returned
-/// vector; callers validate the rest match (per-row `vector_matches_dim` guard).
+/// `effective_dim` taken from first non-empty vector; caller validates rest match.
 pub async fn send_embedding_batch_parallel(
     orchestrator: &Arc<LlmOrchestrator>,
     config: &LlmConfig,
@@ -727,9 +558,8 @@ pub async fn send_embedding_batch_parallel(
 
     let limits = embedding_limits(&config.provider, model);
 
-    // 2. Split each text into pieces that each fit `max_tokens_per_input`.
-    //    Also record per-piece token counts so the pooling step can use
-    //    token-weighted means (matches `pool_vectors`'s weighting contract).
+    /* Split each text into pieces fitting `max_tokens_per_input`. Record per-piece
+    token counts for pooling. */
     let split: Vec<Vec<TextPiece>> =
         texts.iter().map(|t| split_text_by_token_budget(t, limits.max_tokens_per_input)).collect();
 
@@ -744,11 +574,8 @@ pub async fn send_embedding_batch_parallel(
     // 4. Group into sub-batches respecting both caps.
     let sub_batches = group_into_embedding_batches(flat, &limits);
 
-    // 5-6. Strip indices for HTTP; remember them for reassembly. Dispatch each
-    //      sub-batch via `send_embedding` in parallel through the generic
-    //      `send_batch_parallel` primitive. The closure Arc-clones the
-    //      orchestrator (an owned, `'static` handle) + config + model so each
-    //      spawned task is self-contained.
+    /* Strip indices for HTTP dispatch; remember them for reassembly. Clone the
+    orchestrator Arc so each spawned task is `'static` + self-contained. */
     let mut dispatch_batches: Vec<(Vec<usize>, Vec<String>, Vec<usize>)> = Vec::new();
     for sub in sub_batches {
         let (indices, pieces): (Vec<usize>, Vec<TextPiece>) = sub.into_iter().unzip();
@@ -757,10 +584,7 @@ pub async fn send_embedding_batch_parallel(
         dispatch_batches.push((indices, strings, token_counts));
     }
 
-    // Clone the Arc into an OWNED local before the closure so the closure can
-    // be `'static` (it captures `orch_owned: Arc<LlmOrchestrator>` by value,
-    // not the borrowed `&Arc<LlmOrchestrator>`). Each task then Arc-clones
-    // this owned handle.
+    /* Clone orchestrator Arc so the `'static` closure captures it by value. */
     let orch_owned = Arc::clone(orchestrator);
     let config_arc = Arc::new(config.clone());
     let model_arc = Arc::new(model.to_string());
@@ -776,10 +600,8 @@ pub async fn send_embedding_batch_parallel(
     })
     .await;
 
-    // 7. Scatter per-batch vectors into per-input slots. Track per-slot token
-    //    weights (from the piece's token_count) so `pool_vectors` uses
-    //    token-weighted means for over-long inputs (matching v2-2 locked
-    //    decision). Single-piece slots are returned verbatim by `pool_vectors`.
+    /* Scatter per-batch vectors into per-input slots. Collect per-piece weights
+    for `pool_vectors` over split inputs. */
     let mut slots: Vec<Vec<Vec<f32>>> = vec![Vec::new(); texts.len()];
     let mut slot_weights: Vec<Vec<usize>> = vec![Vec::new(); texts.len()];
     let mut effective_dim: i32 = 0;
@@ -791,14 +613,10 @@ pub async fn send_embedding_batch_parallel(
             }
             if slot_idx < slots.len() {
                 slots[slot_idx].push(vec);
-                // Uniform weight fallback: the per-piece token counts are
-                // flattened into the dispatch but not carried through the HTTP
-                // response. For the pooled path (over-long inputs), uniform
-                // weighting produces a stable L2-normalized direction that
-                // participates correctly in cosine recall. (The plan's
-                // token-weighted ideal requires threading token counts through
-                // the sub-batch response; this is a documented approximation
-                // for the rare pooled path.)
+                /* Uniform weight fallback: per-piece token counts aren't carried
+                through HTTP. Uniform weighting produces a stable L2-normalized
+                direction for cosine recall. Token-weighted means require
+                threading counts through the sub-batch response (rare path). */
                 slot_weights[slot_idx].push(1);
             }
         }

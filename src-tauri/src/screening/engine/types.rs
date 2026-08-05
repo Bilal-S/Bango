@@ -1,11 +1,10 @@
-//! Data types for the screening engine: config, run context, progress, LLM response.
+//! Screening engine data types: config, run context, progress, LLM response.
 
 use serde::{Deserialize, Serialize};
 
 use crate::db::app_settings_repo::ScreeningMode;
 
-/// Tier 3 screening configuration. Built by the command layer from `app_settings`;
-/// pure value type (no I/O).
+/// Screening config built from `app_settings`. Pure value type.
 #[derive(Debug, Clone)]
 pub struct ScreeningConfig {
     pub mode: ScreeningMode,
@@ -35,18 +34,14 @@ impl Default for ScreeningConfig {
     }
 }
 
-/// Per-invocation run-control params. Bundles `request_delay_ms` + `app_handle`
-/// + `target_article_id` so `run_sync` stays under `clippy::too_many_arguments`.
+/// Run-control params bundled to keep `run_sync` under `clippy::too_many_arguments`.
 #[derive(Clone, Default)]
 pub struct RunSyncContext {
-    /// Inter-batch throttle (ms); cancellable. Applied between stage-1 batches,
-    /// between stage-1 and stage-2, and between stage-2 articles.
+    /// Cancellable inter-batch throttle (ms).
     pub request_delay_ms: u64,
-    /// When `Some`, emits `screening:progress` events after each mutation.
-    /// `None` in tests.
+    /// Emits `screening:progress` events when set. `None` in tests.
     pub app_handle: Option<tauri::AppHandle>,
-    /// `Some(id)` screens one specific article by UUID (per-article "Screen"
-    /// button). `None` = normal batch mode.
+    /// Screen one article by UUID (`Some`), or batch mode (`None`).
     pub target_article_id: Option<String>,
 }
 
@@ -58,11 +53,11 @@ pub struct ScreeningProgress {
     pub included: usize,
     pub rejected: usize,
     pub errors: usize,
-    /// Transient-error deferrals (429, transient 401/403, 5xx, timeout, transport).
-    /// NOT counted in `completed`/`errors`; left unscreened for the next run.
+    /// Transient-error deferrals (429, 401/403, 5xx, timeout, transport).
+    /// Not counted in `completed`/`errors`; left unscreened for next run.
     #[serde(default)]
     pub deferred: usize,
-    /// Fatal error that stopped the run. `None` for normal completion/cancel.
+    /// Fatal error that stopped the run. `None` = normal completion/cancel.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fatal_error: Option<String>,
     /// Non-fatal warning (e.g. slow LLM). Cleared on next success.
@@ -72,14 +67,14 @@ pub struct ScreeningProgress {
     pub current_article_titles: Vec<String>,
     pub elapsed_ms: u64,
     pub estimated_remaining_ms: Option<u64>,
-    /// Two-stage stage label (e.g. `"Stage 2: 3/12 borderline (full text)"`).
+    /// Two-stage label (e.g. `"Stage 2: 3/12 borderline (full text)"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage: Option<String>,
-    /// Two-stage per-stage total (borderline count). `None` for single-stage.
+    /// Two-stage per-stage total (borderline count).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_total: Option<usize>,
-    /// Coarse run-phase label: `"preparing:translating"` / `"preparing:chunking"`
-    /// / `"screening"` / `"stage2"`. Diagnostics-only; no behavioral contract.
+    /// Run-phase label for diagnostics: `"preparing:translating"` / `"preparing:chunking"`
+    /// / `"screening"` / `"stage2"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
 }

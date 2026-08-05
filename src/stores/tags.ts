@@ -163,16 +163,8 @@ export const useTagsStore = defineStore('tags', () => {
     }
   }
 
-  /**
-   * Replace one tag with another. The survivor absorbs the from-tag's articles
-   * and the from-tag is deleted. Calls `merge_tag` then refetches (no
-   * `invalidate()` - that would flicker the empty list; `fetchTags()` overwrites
-   * atomically, matching the other mutations).
-   *
-   * In demo mode (no Tauri) the from-tag is removed and its `articleCount` is
-   * folded into the survivor; the synthesized `MergeResult` reports the moved
-   * count with zero overlap (the demo data has no per-article overlap signal).
-   */
+  /** Replace one tag with another: survivor absorbs from-tag's articles,
+   *  from-tag deleted. No `invalidate()` to avoid empty-list flicker. */
   async function mergeTag(fromId: string, intoId: string): Promise<MergeResult> {
     if (!isTauri()) {
       const from = tags.value.find((t) => t.id === fromId);

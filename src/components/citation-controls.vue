@@ -416,33 +416,19 @@ const emit = defineEmits<{
   (e: 'clear-clusters'): void;
   (e: 'recalculate'): void;
   (e: 'reset-analysis'): void;
-  /**
-   * Emitted when the "Show Unmatched References" toggle changes.  The parent
-   * re-fetches the network from the backend with the new flag, because adding
-   * or removing unmatched leaf nodes cannot be done with client-side filtering
-   * alone.
-   */
+  /** Toggled when Show Unmatched References changes. Parent re-fetches
+   *  network (client-side filtering alone can't add/remove leaf nodes). */
   (e: 'unmatched-change', showUnmatched: boolean): void;
-  /**
-   * Phase 2 - Time-Slice: emitted on every `input` event (dragging a slider
-   * handle).  The parent applies the year-range filter immediately to hide/show
-   * nodes but defers the expensive ForceAtlas2 re-layout until `change` (slider
-   * release) is emitted via `year-range-commit`.
-   */
+  /** Time-Slice: emitted on every slider `input`. Parent hides/shows nodes
+   *  immediately but defers ForceAtlas2 re-layout to `year-range-commit`. */
   (
     e: 'year-range-input',
     range: [number, number],
     filters?: { minCitations: number; showIsolated: boolean; search: string }
   ): void;
-  /**
-   * Phase 2 - Time-Slice: emitted on `change` (slider release).  The parent runs
-   * the ForceAtlas2 re-layout on the now-filtered subgraph.
-   */
+  /** Time-Slice: emitted on slider release. Parent runs ForceAtlas2 re-layout. */
   (e: 'year-range-commit', range: [number, number]): void;
-  /**
-   * Phase 3 - Main Path: emitted when the user toggles the SPC highlight.  The
-   * parent triggers the worker computation and applies the visual highlight.
-   */
+  /** Main Path: SPC highlight toggled. Parent triggers worker + visual highlight. */
   (e: 'main-path-change', showMainPath: boolean): void;
   /** Emitted when the user clears the isolation mode from the sidebar badge. */
   (e: 'clear-isolation'): void;
@@ -451,11 +437,7 @@ const emit = defineEmits<{
 const searchQuery = ref('');
 const minCitations = ref(0);
 const showIsolated = ref(true);
-/**
- * Local toggle state for "Show Unmatched References".  Kept in sync with the
- * `showUnmatched` prop so the parent remains the source of truth (it owns the
- * refetch), while still allowing two-way toggle behaviour.
- */
+/** Local toggle for Show Unmatched, kept in sync with prop so parent owns refetch. */
 const showUnmatched = ref(props.showUnmatched);
 watch(
   () => props.showUnmatched,
@@ -466,13 +448,8 @@ watch(
 const showSuggestions = ref(false);
 const showExportMenu = ref(false);
 
-/**
- * Phase 2 - Time-Slice year-range state.
- *
- * `yearStart` / `yearEnd` are local refs initialised to the full extent of the
- * data.  They are kept in sync with the parent's minYear/maxYear props so
- * that programmatic resets (e.g. from the detail panel) are reflected in the UI.
- */
+/** Time-Slice year range. Local refs initialised to full data extent; kept in
+ *  sync with parent's minYear/maxYear for programmatic resets. */
 const yearStart = ref(props.minYear);
 const yearEnd = ref(props.maxYear);
 watch(
@@ -523,9 +500,8 @@ function selectFirstSuggestion() {
     searchQuery.value = first.display;
     showSuggestions.value = false;
     emit('locate-paper', first.label);
-    // Clear the live-hide filter so the focus dimming from locate-paper
-    // takes over on the full graph. Without this, the composite `display`
-    // string matches no node attributes and hides every node.
+    /* Clear live-hide filter so focus dimming from locate-paper takes over.
+       Without this the composite `display` string hides every node. */
     clearSearchFilter();
   }
 }
@@ -534,9 +510,8 @@ function selectSuggestion(s: { label: string; display: string; searchText: strin
   searchQuery.value = s.display;
   showSuggestions.value = false;
   emit('locate-paper', s.label);
-  // Clear the live-hide filter so the focus dimming from locate-paper
-  // takes over on the full graph. Without this, the composite `display`
-  // string matches no node attributes and hides every node.
+  /* Clear live-hide filter so focus dimming from locate-paper takes over.
+     Without this the composite `display` string hides every node. */
   clearSearchFilter();
 }
 

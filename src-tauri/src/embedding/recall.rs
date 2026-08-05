@@ -1,10 +1,6 @@
-//! Bounded cosine recall for the citation-finding feature.
-//!
-//! Given a query string, embed it, then max-pool cosine similarity across each
-//! article's rows, returning the top-K article IDs. The candidate pool is
-//! bounded by the `included` corpus (default) and filtered to rows matching the
-//! current model's dimensions so a provider switch doesn't mix incompatible
-//! vectors.
+//! Bounded cosine recall: embed query → max-pool cosine per article → top-K IDs.
+//! Candidate pool bounded by `included` corpus; filtered to current model's dimensions
+//! so provider switches don't mix incompatible vectors.
 
 use std::sync::Arc;
 
@@ -27,23 +23,11 @@ pub struct EmbeddingHit {
     pub score: f32,
 }
 
-/// Recall the top-`top_k` articles whose embeddings are most similar to `query`.
+/// Recall top-K articles by embedding cosine similarity to `query`.
 ///
-/// - Embeds the query via the orchestrator (one call).
-/// - Loads all same-dimension rows from `article_embeddings` (optionally
-///   filtered by article status; empty slice = all statuses).
-/// - Max-pools cosine similarity per article (best chunk wins).
-/// - Returns the top-K sorted by score descending.
-///
-/// `status_filter` is a slice of status strings. When non-empty, the candidate
-/// pool is scoped to articles in any of those statuses. When empty, no filter
-/// is applied. The previous single-status `Option<&str>` signature was
-/// extended to a slice for the Citation Finder, which needs `working +
-/// included` while excluding `duplicate`/`rejected`. Pass `&["included"
-/// .to_string()]` for the historical single-status behavior.
-///
-/// Returns an empty vec when embeddings are disabled, the table is empty, or
-/// the query embedding fails (caller falls back to LIKE).
+/// Embeds query → max-pools cosine per article → top-K sorted descending.
+/// `status_filter`: non-empty → scoped to those statuses; empty → all.
+/// Returns empty vec on disabled/empty/failure (caller falls back to LIKE).
 pub async fn recall(
     db_state: &State<'_, DbState>,
     orchestrator: &Arc<LlmOrchestrator>,
@@ -85,13 +69,9 @@ pub async fn recall(
         embedding_repo::list_for_recall(&conn, dimensions, status_filter)?
     };
 
-    // Max-pool per article. The seed is `NEG_INFINITY`, the identity element
-    // for `max` over f32 - this is the most idiomatic choice and is robust to
-    // any future broadening of the score range. (The previous `f32::MIN` seed
-    // was technically also correct for cosine's `[-1.0, 1.0]` range since
-    // `f32::MIN = -3.4e38 < -1.0`, but `NEG_INFINITY` communicates intent
-    // more clearly and avoids any confusion about `f32::MIN` vs
-    // `f32::MIN_POSITIVE`.)
+    /* Max-pool per article: `f32::NEG_INFINITY` is the identity for `max` over f32.
+    `f32::MIN` was also correct for cosine `[-1, 1]` (`-3.4e38 < -1`), but
+    `NEG_INFINITY` communicates intent more clearly. */
     use std::collections::HashMap;
     let mut best: HashMap<String, f32> = HashMap::new();
     for row in rows {

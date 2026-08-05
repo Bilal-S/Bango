@@ -1,27 +1,13 @@
-//! Phase 1: Scan the `fulltext/` directory and attach PDF/TXT files to
-//! articles by DOI match.
-//!
-//! Files must be named `{normalized_doi}.pdf` or `{normalized_doi}.txt`, where
-//! `normalized_doi` is the article's DOI run through
-//! [`crate::scraping::citation_chaser::clean_doi_filename`]. This mirrors the
-//! Citation Chaser RIS naming convention (`{clean_doi}_references.ris`).
+//! Phase 1: Scan `fulltext/` and attach PDF/TXT files to articles by DOI
+//! match. Files named `{normalized_doi}.pdf/.txt` via
+//! [`crate::scraping::citation_chaser::clean_doi_filename`].
 //!
 //! # Lock scope (Concern 3)
 //!
-//! The DB mutex is held only for:
-//! 1. The brief initial discovery (build the match map + resolve the storage
-//!    dir) - one short burst at the start of the phase.
-//! 2. The short per-article DB-write burst via the split pipeline
-//!    `attach_full_text_split` (`update_full_text` + chunk insert + audit
-//!    entries + staleness flags).
-//!
-//! The CPU-bound PDF parse + text extraction runs on `spawn_blocking` with
-//! NO lock held (via [`crate::commands::full_text::extract_full_text_data`]),
-//! so other IPC commands stay responsive during a large batch import. This
-//! replaces the previous shape that locked the connection ONCE at the top of a
-//! `spawn_blocking` and held the guard across every per-article PDF parse, and
-//! the intermediate shape that released the lock between articles but still
-//! held it across each per-article parse.
+//! DB mutex held only for (1) brief discovery and (2) per-article write burst
+//! via `attach_full_text_split`. CPU-bound PDF parse runs on `spawn_blocking`
+//! via [`crate::commands::full_text::extract_full_text_data`] with no lock
+//! held, so other IPC commands stay responsive.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,24 +20,19 @@ use crate::scraping::citation_chaser::clean_doi_filename;
 
 use super::{BatchImportPhaseResult, DoiMatchMap};
 
-/// A secondary lookup index built once during discovery: `article_id -> DOI`.
-/// The primary match map is keyed by cleaned-DOI (so the discovery scan can
-/// match on-disk filename stems directly); this secondary index lets the
-/// per-article attach loop recover the article's DOI in O(1) instead of
-/// scanning the match map values per article (O(n²) overall). Built alongside
-/// `DoiMatchMap` so the two stay consistent.
+/// Secondary lookup index built during discovery: `article_id -> DOI`.
+/// Enables O(1) DOI recovery per article in the attach loop (avoiding O(n²)
+/// scans of the cleaned-DOI-keyed match map).
 type IdToDoiMap = HashMap<String, String>;
 
 /// The file extensions recognized as full-text attachments.
 const FULLTEXT_EXTENSIONS: &[&str] = &["pdf", "txt"];
 
-/// Build the DOI match map from articles with DOIs. Each article's DOI is
-/// normalized through `clean_doi_filename` so it matches the on-disk filename
-/// stem. Articles with `has_full_text = true` are included but flagged so the
-/// phase 1 scanner skips them (the map serves all 3 phases).
+/// Build DOI match map from articles with DOIs. Each DOI normalized through
+/// `clean_doi_filename`. Has-full-text articles are included but flagged for
+/// skipping. Pure `#[must_use]`.
 ///
-/// Pure function (`#[must_use]`): no I/O. Extracted so tests can verify the
-/// matching logic against a fixture list of articles.
+/// First article per cleaned-DOI key wins (avoids ambiguous matches).
 #[must_use]
 pub fn build_fulltext_match_map(articles: &[ArticleDoiInfo]) -> DoiMatchMap {
     let mut map: HashMap<String, ArticleDoiInfo> = HashMap::with_capacity(articles.len());
@@ -67,10 +48,8 @@ pub fn build_fulltext_match_map(articles: &[ArticleDoiInfo]) -> DoiMatchMap {
     DoiMatchMap(map)
 }
 
-/// Build the secondary `article_id -> DOI` lookup index from the same article
-/// list as [`build_fulltext_match_map`]. This lets the per-article attach loop
-/// recover each article's DOI in O(1) instead of scanning the match map values
-/// (which is keyed by cleaned-DOI, not article-id). Pure `#[must_use]`.
+/// Build secondary `article_id -> DOI` index from the same article list.
+/// O(1) lookup in the attach loop. Pure `#[must_use]`.
 #[must_use]
 pub fn build_id_to_doi_map(articles: &[ArticleDoiInfo]) -> IdToDoiMap {
     articles
@@ -80,14 +59,9 @@ pub fn build_id_to_doi_map(articles: &[ArticleDoiInfo]) -> IdToDoiMap {
         .collect()
 }
 
-/// Discover all importable full-text files in the `fulltext/` directory.
-///
-/// Returns `(matched, total_files)` where `matched` is the count of files
-/// whose stem matches an article DOI in `match_map` AND the article does not
-/// already have full text attached. Pure I/O + lookup; no DB writes.
-///
-/// Used by the runner to compute the phase total for progress reporting before
-/// starting the attach loop.
+/// Discover importable full-text files in `fulltext/`. Returns `(path,
+/// article_id)` for files whose stem matches an article DOI and whose article
+/// doesn't already have full text. Pure I/O + lookup; no DB writes.
 pub fn discover_importable_files(
     fulltext_dir: &Path,
     match_map: &DoiMatchMap,
@@ -118,24 +92,16 @@ pub fn discover_importable_files(
     importable
 }
 
-/// Discovery payload returned by the brief initial lock burst. The
-/// `id_to_doi` index is carried alongside the importable file list so
-/// per-article DOI lookups during the attach loop are a pure in-memory O(1)
-/// operation (no DB read). The primary `DoiMatchMap` (keyed by cleaned-DOI)
-/// is used only during discovery to match on-disk filename stems and is not
-/// returned - the attach loop resolves DOIs by article-id via `id_to_doi`.
+/// Discovery payload from the brief initial lock burst. `id_to_doi` enables
+/// O(1) DOI lookup per article during the attach loop.
 pub(crate) struct FullTextDiscovery {
     pub storage_dir: PathBuf,
     pub importable: Vec<(PathBuf, String)>,
     pub id_to_doi: IdToDoiMap,
 }
 
-/// Brief initial lock burst: resolve the storage dir, build the DOI match map,
-/// discover importable files. The lock is released before this function
-/// returns, so the per-article attach loop runs WITHOUT holding the mutex.
-///
-/// Extracted from `run_full_text_phase` so the async wrapper and the
-/// synchronous test harness can share the discovery step.
+/// Brief lock burst: resolve storage dir, build maps, discover files.
+/// Lock released before return; per-article attach runs without mutex.
 pub(crate) fn discover(conn: &rusqlite::Connection) -> Result<FullTextDiscovery, AppError> {
     let storage_dir = compute_storage_dir(conn)?;
     let articles = article_repo::get_articles_with_doi_info(conn)?;
@@ -145,19 +111,10 @@ pub(crate) fn discover(conn: &rusqlite::Connection) -> Result<FullTextDiscovery,
     Ok(FullTextDiscovery { storage_dir, importable, id_to_doi })
 }
 
-/// Run Phase 1: attach each importable full-text file to its matched article.
-///
-/// The DB mutex is held only for the brief initial discovery and for the
-/// short per-article DB-write burst inside [`attach_full_text_split`]. The
-/// CPU-bound PDF parse + text extraction runs on `spawn_blocking` with NO
-/// lock held (Concern 3 gap fix), so other IPC commands stay responsive
-/// during a large import.
-///
-/// The caller's `is_cancelled` closure is checked before each file so the
-/// runner can abort mid-phase.
-///
-/// Returns a [`BatchImportPhaseResult`] with counts and the list of
-/// newly-attached article IDs (consumed by Phase 3).
+/// Run Phase 1: attach importable full-text files via split pipeline.
+/// DB mutex held for brief discovery + per-article write burst only;
+/// CPU-bound PDF parse on `spawn_blocking` with no lock (Concern 3 fix).
+/// Returns result + newly-attached article IDs (consumed by Phase 3).
 pub async fn run_full_text_phase<F, P>(
     conn_mutex: &Mutex<rusqlite::Connection>,
     is_cancelled: &F,
@@ -190,20 +147,13 @@ where
         on_progress(processed, total, &format!("Phase 1 - Full Text - found {total} files - attempting to attach {} of {total}: {filename}", processed + 1));
         processed += 1;
 
-        // Look up the article's DOI via the secondary `id_to_doi` index so
-        // the destination filename uses the DOI-aware naming convention
-        // (Concern 2). The index is built once during discovery, so this is a
-        // pure in-memory O(1) lookup - no DB round-trip. (The previous shape
-        // scanned `match_map.0.values()` per article, which was O(n²)
-        // overall because the primary map is keyed by cleaned-DOI, not by
-        // article-id.)
+        /* DOI lookup via secondary `id_to_doi` index (O(1) in-memory,
+        Concern 2). Previous shape scanned `match_map.0.values()` per
+        article (O(n²)). */
         let article_doi = id_to_doi.get(article_id).map(String::as_str);
 
-        // Split attach pipeline (Concern 3 gap fix): the CPU-bound PDF parse
-        // + text extraction runs on `spawn_blocking` with NO DB lock held,
-        // then a short lock burst handles only the DB writes. This keeps the
-        // DbState mutex held for millisecond-scale bursts instead of the
-        // 1-5s per-PDF parse, so other IPC commands stay responsive.
+        /* Split attach (Concern 3): CPU-bound PDF parse on `spawn_blocking`
+        with no lock; only DB writes take a millisecond-scale burst. */
         let attach_result =
             attach_full_text_split(conn_mutex, article_id, article_doi, path, &storage_dir).await;
 
@@ -218,10 +168,8 @@ where
                     "Batch import Phase 1 (article {article_id}): Failed to attach '{filename}': {e}"
                 );
                 errors.push(format!("Failed to attach '{filename}': {e}"));
-                // Surface in the Audit Timeline (general error) so failures
-                // aren't only visible in the transient progress UI. Non-fatal:
-                // ignore audit-write errors so a logging failure can't break
-                // the import loop.
+                /* Surface in Audit Timeline. Non-fatal: ignore audit-write
+                errors so logging can't break the import loop. */
                 let conn = crate::db::connection::lock_conn(conn_mutex)?;
                 let _ = crate::db::audit_repo::log_error(&conn, &audit);
             }

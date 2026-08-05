@@ -17,9 +17,9 @@ const emit = defineEmits<{
 }>();
 
 onMounted(async () => {
-  // `smartSearchAvailable` is now a reactive computed over `useLlmConfigured()`,
-  // so there is no availability probe to call on mount - the gate tracks the
-  // Pinia store automatically.
+  /* `smartSearchAvailable` is now a reactive computed over `useLlmConfigured()`,
+     so there is no availability probe to call on mount - the gate tracks the
+     Pinia store automatically. */
   await store.loadSettings();
 });
 

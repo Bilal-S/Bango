@@ -10,8 +10,8 @@ use crate::models::biblio::{
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
-/// Total number of work steps reported by `biblio_normalize` via the
-/// `biblio:progress` event. Kept in sync with the emit calls below.
+/// Total work steps reported by `biblio_normalize` via `biblio:progress`.
+/// Kept in sync with the emit calls below.
 const BIBLIO_NORMALIZE_TOTAL_STEPS: usize = 8;
 
 /// Parameters for the co-citation network command.
@@ -56,17 +56,10 @@ fn emit_progress(app_handle: &tauri::AppHandle, step: usize, message: &str) {
     );
 }
 
-/// Run bibliometric normalization: extract and normalize all authors and terms
-/// from the articles table into the biblio_* tables.
-///
-/// Delegates the DB work to `biblio_repo::run_full_normalization` (which wraps
-/// the 8-step pipeline in a single transaction) and emits progress events
-/// around it. The shared pure function is also called by the wiki ingest path
-/// so multi-batch wiki ingest does not depend on the user having visited the
-/// Bibliometrics dashboard first.
-///
-/// Clears the `biblio_needs_refresh` flag once the transaction commits
-/// successfully.
+/// Run bibliometric normalization: extract + normalize authors and terms into
+/// the `biblio_*` tables. Delegates to `biblio_repo::run_full_normalization`
+/// (shared by the wiki ingest path). Emits `biblio:progress` events; clears
+/// `biblio_needs_refresh` on success.
 #[tauri::command]
 pub async fn biblio_normalize(
     db_state: tauri::State<'_, DbState>,
@@ -210,11 +203,9 @@ pub async fn biblio_get_author_productivity_kpis(
     biblio_repo::get_author_productivity_kpis(&conn)
 }
 
-/// Get the co-citation network as JSON for graph rendering.
-///
-/// Computes co-citation on-demand from `article_reference_links` (type=1).
-/// All four normalization modes (raw, cosine, jaccard, pearson) are computed
-/// and returned in each edge; the frontend selects which to visualize.
+/// Co-citation network as JSON. Computed on-demand from `article_reference_links`
+/// (type=1). All four normalization modes included in each edge; frontend
+/// selects which to visualize.
 #[tauri::command]
 pub async fn biblio_get_cocitation_network(
     db_state: tauri::State<'_, DbState>,

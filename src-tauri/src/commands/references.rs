@@ -22,8 +22,8 @@ pub struct ExtractCrPayload {
     pub ris_extras: Option<serde_json::Value>,
 }
 
-/// Extract CR (Cited References) from an article's RIS extras,
-/// insert them as reference papers, and link them to the article.
+/// Extract CR (Cited References) from an article's RIS extras, insert as
+/// reference papers, and link to the article.
 #[tauri::command]
 pub fn extract_cr_references(
     db_state: tauri::State<'_, DbState>,
@@ -574,21 +574,15 @@ pub struct ImportReferencesPayload {
     pub ref_type: String,
 }
 
-/// Import references/citations from an RIS or BibTeX file and link them to an
-/// article. Reusable core extracted from the Tauri command so the batch import
-/// runner can call it per-file without re-acquiring the `DbState` mutex.
-///
-/// Auto-detects the file format: BibTeX (`.bib`) is parsed via
-/// [`crate::bibtex::parser::parse_bibtex`] + [`convert_bibtex_entries`];
-/// everything else is parsed as RIS via [`read_content`] +
-/// [`parse_and_validate`].
+/// Import references/citations from an RIS or BibTeX file and link to an
+/// article. Auto-detects format: `.bib` → BibTeX; otherwise RIS. Reusable
+/// core extracted from the Tauri command for batch-import per-file calls.
 ///
 /// # Arguments
 /// * `conn` - A locked SQLite connection.
-/// * `article_id` - The parent article to link the references/citations to.
+/// * `article_id` - The parent article to link to.
 /// * `file_path` - Path to the RIS or BibTeX file on disk.
-/// * `ref_type_str` - `"reference"` (backward references) or `"citation"`
-///   (forward citations).
+/// * `ref_type_str` - `"reference"` (backward) or `"citation"` (forward).
 pub fn import_references_inner(
     conn: &rusqlite::Connection,
     article_id: &str,

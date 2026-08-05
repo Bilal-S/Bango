@@ -1,9 +1,6 @@
-//! Deterministic page consolidation (multi-batch only).
-//!
-//! Merges near-duplicate pages produced by independent parallel ingest batches
-//! and rewrites inbound `[[wikilinks]]` to canonical slugs. All logic here is
-//! deterministic (no LLM merge calls) - the merge is a lossless append +
-//! metadata union.
+//! Deterministic page consolidation (multi-batch only). Merges near-duplicate pages from
+//! independent parallel batches, rewrites inbound `[[wikilinks]]` to canonical slugs.
+//! Deterministic (no LLM merge calls). Merge = lossless append + metadata union.
 
 use std::collections::{HashMap, HashSet};
 
@@ -19,30 +16,20 @@ pub const DEDUP_JACCARD_THRESHOLD: f64 = 0.5;
 /// near-duplicates regardless of slug similarity.
 pub const DEDUP_SHARED_SOURCES_MIN: usize = 2;
 
-/// Merge near-duplicate pages in-place. Returns a map of `old_slug -> new_slug`
-/// for all pages that were merged into a canonical page (the inbound link
-/// rewriter uses this to update `[[wikilinks]]` across the page set).
-///
-/// Detection (two pages are duplicates when ANY is true):
-/// - Exact slug match (case-insensitive).
-/// - Stemmed-token Jaccard similarity of slugs >= `DEDUP_JACCARD_THRESHOLD`.
-/// - Shared `source_articles` count >= `DEDUP_SHARED_SOURCES_MIN`.
-///
-/// Merge is lossless: the duplicate's body is appended under a
-/// `## Additional perspectives` heading; `source_articles` and `tags` are
-/// unioned. The canonical page is the one with the shortest slug (most likely
-/// the LLM's "preferred" form) or, on ties, the first encountered.
+/// Merge near-duplicate pages in-place. Returns `old_slug → new_slug` map for link rewrite.
+/// Detection (any is true): case-insensitive slug match, stemmed Jaccard ≥ threshold,
+/// shared `source_articles` ≥ min. Merge is lossless: duplicate body appended under
+/// `## Additional perspectives`; `source_articles` + `tags` unioned. Canonical = shortest slug.
 pub fn consolidate_pages(pages: &mut Vec<ParsedPage>) -> HashMap<String, String> {
     if pages.len() <= 1 {
         return HashMap::new();
     }
 
-    // Build the list of merge targets: for each page, find the canonical page
-    // it should merge INTO (if any). We use a simple O(n^2) scan since n is
-    // small (dozens to low hundreds of pages).
+    /* Build merge targets: for each page, find the canonical page it should merge into.
+    O(n^2) scan; n is small (dozens to low hundreds of pages). */
     let n = pages.len();
-    // `canonical[i]` = the index of the page that page `i` should merge into.
-    // Initially, each page is its own canonical.
+    /* `canonical[i]` = index of the page that page `i` should merge into.
+    Initially each page is its own canonical. */
     let mut canonical: Vec<usize> = (0..n).collect();
     let mut slug_map: HashMap<String, String> = HashMap::new();
 
@@ -75,11 +62,9 @@ pub fn consolidate_pages(pages: &mut Vec<ParsedPage>) -> HashMap<String, String>
         }
     }
 
-    // Collect the list of merges: (source_idx, canonical_idx). We build the
-    // merge data (body + frontmatter to append) from the immutable borrow,
-    // then apply the appends + removals in separate passes to satisfy the
-    // borrow checker.
-    let mut merges: Vec<(usize, usize)> = Vec::new(); // (source_idx, canonical_idx)
+    /* Collect merge data: (source_idx, canonical_idx). Build from immutable borrows
+    first, then apply appends + removals in separate passes. */
+    let mut merges: Vec<(usize, usize)> = Vec::new();
     for (i, &canon) in canonical.iter().enumerate().take(n) {
         if canon != i {
             merges.push((i, canon));
@@ -95,11 +80,10 @@ pub fn consolidate_pages(pages: &mut Vec<ParsedPage>) -> HashMap<String, String>
         let src_body = pages[src_idx].body.clone();
         let src_fm = pages[src_idx].frontmatter.clone();
         append_data.entry(canon_idx).or_default().push((src_body, src_fm));
-        // Record the slug redirect.
+        /* Case-insensitive: lowercase old slug so rewriter matches [[Old-Slug]]
+        as well as [[old-slug]]. */
         let old_slug = pages[src_idx].slug.clone();
         let new_slug = pages[canon_idx].slug.clone();
-        // Case-insensitive: store the lowercased old slug so the rewriter can
-        // match [[Old-Slug]] as well as [[old-slug]].
         slug_map.insert(old_slug.to_lowercase(), new_slug);
     }
 
@@ -126,8 +110,7 @@ pub fn consolidate_pages(pages: &mut Vec<ParsedPage>) -> HashMap<String, String>
     slug_map
 }
 
-/// Union a list-valued frontmatter field from `src` into `dest`.
-/// Handles the `[a, b]` inline YAML format used by the wiki frontmatter.
+/// Union a list-valued frontmatter field from `src` into `dest` ([a, b] inline YAML format).
 fn union_list_field(dest: &mut Frontmatter, src: &Frontmatter, field: &str) {
     let dest_list = frontmatter::parse_list(dest.get(field).unwrap_or(""));
     let src_list = frontmatter::parse_list(src.get(field).unwrap_or(""));
@@ -144,7 +127,8 @@ fn union_list_field(dest: &mut Frontmatter, src: &Frontmatter, field: &str) {
     dest.set(field, &formatted);
 }
 
-/// Determine whether two parsed pages are near-duplicates.
+/// Whether two parsed pages are near-duplicates (any: case-insensitive slug match,
+/// stemmed Jaccard ≥ threshold, shared source_articles ≥ min).
 pub(super) fn pages_are_duplicates(a: &ParsedPage, b: &ParsedPage) -> bool {
     // Exact slug match (case-insensitive).
     if a.slug.to_lowercase() == b.slug.to_lowercase() {
@@ -168,10 +152,8 @@ pub(super) fn pages_are_duplicates(a: &ParsedPage, b: &ParsedPage) -> bool {
     false
 }
 
-/// Tokenize a slug into a set of stemmed words (using the project's existing
-/// Snowball stemmer). This catches semantic paraphrase with word reordering
-/// (`childhood-obesity` vs `obesity-in-children` both stem to {childhood,
-/// obes} / {obes, children} - the `in` stopword is filtered).
+/// Tokenize slug into stemmed-word set (Snowball stemmer). Catches paraphrase with reordering
+/// (e.g. `childhood-obesity` vs `obesity-in-children` → {childhood,obes} / {obes,children}).
 fn stemmed_token_set(slug: &str) -> HashSet<String> {
     let stopwords: HashSet<&str> =
         ["in", "of", "the", "a", "an", "and", "or", "for", "to", "on"].into_iter().collect();
@@ -197,11 +179,9 @@ pub fn jaccard_similarity(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
     intersection as f64 / union as f64
 }
 
-/// Rewrite `[[wikilink]]` targets in every page's body to point to the
-/// canonical slug. The `slug_map` keys are lowercased old slugs; matching is
-/// case-insensitive (per the lint convention where `[[Sugar-Reduction]]`
-/// resolves to `sugar-reduction`). Aliases are preserved:
-/// `[[old-slug|Alias]]` -> `[[new-slug|Alias]]`.
+/// Rewrite `[[wikilink]]` targets in every page's body to canonical slugs.
+/// Keys are lowercased old slugs; matching is case-insensitive. Aliases preserved:
+/// `[[old-slug|Alias]]` → `[[new-slug|Alias]]`.
 pub fn rewrite_page_links(pages: &mut [ParsedPage], slug_map: &HashMap<String, String>) {
     if slug_map.is_empty() {
         return;

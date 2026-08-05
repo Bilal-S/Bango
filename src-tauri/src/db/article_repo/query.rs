@@ -35,13 +35,8 @@ pub fn get_articles_by_status(conn: &Connection, status: &str) -> Result<Vec<Art
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Fetch articles for tab-aware export.
-/// - `status`: `"all"` for all articles, or a specific status like `"included"`, `"working"`, etc.
-/// - `screening_errors_only`: when true, only working articles with screening errors are returned.
-///
-/// `status` is bound via `?1` (parameterized) rather than interpolated, per CLAUDE.md
-/// ("Never interpolate user input into SQL"). The value flows from a `#[tauri::command]`
-/// parameter; enum-controlled, but parameterized for rule compliance and defense-in-depth.
+/// Fetch articles for tab-aware export. `status` is bound as `?1` (not interpolated).
+/// - `"all"`: all articles. `screening_errors_only`: working + screened.
 pub fn get_articles_for_export(
     conn: &Connection,
     status: &str,
@@ -73,16 +68,9 @@ pub fn get_articles_for_export(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Fetch a specific set of articles by their UUIDs, for the "Export Selected"
-/// bulk action. Composes `ARTICLE_SELECT_BASE` with a parameterized `IN (?,…)`
-/// clause - one `?` placeholder per id (no string interpolation, per CLAUDE.md
-/// SQL rules). Returns an empty vec when `ids` is empty (avoids emitting
-/// invalid `IN ()` SQL). Unknown ids are silently absent from the result (the
-/// `filter_map` drops row-decode errors, matching the other read fns).
-///
-/// Note: SQLite's default `SQLITE_MAX_VARIABLE_NUMBER` is 999 (32766 in newer
-/// builds). Realistic bulk-export selections are far below this; if it ever
-/// becomes a concern, chunk the ids and union the results.
+/// Fetch articles by UUIDs for the "Export Selected" bulk action.
+/// Composes `ARTICLE_SELECT_BASE` with parameterized `IN (?,…)` — one `?` per id
+/// (no string interpolation). Empty input → empty vec. Unknown ids silently absent.
 pub fn get_articles_by_ids(conn: &Connection, ids: &[String]) -> Result<Vec<Article>, AppError> {
     if ids.is_empty() {
         return Ok(Vec::new());
@@ -132,26 +120,17 @@ pub struct ArticleQuery {
     pub tags: Vec<String>,
     #[serde(default)]
     pub labels: Vec<String>,
-    /// Tags the article must NOT have (NOT-filter, exclusion). Mirrors `tags`
-    /// but emits a `NOT IN` clause so the UI can toggle a pill between
-    /// inclusion (`tags`) and exclusion (`excluded_tags`).
+    /// Tags the article must NOT have (NOT-filter). Mirrors `tags` but emits `NOT IN`.
     #[serde(default)]
     pub excluded_tags: Vec<String>,
-    /// Labels the article must NOT have (NOT-filter, exclusion). Mirrors
-    /// `labels` but emits a `NOT IN` clause.
+    /// Labels the article must NOT have (NOT-filter). Mirrors `labels` but emits `NOT IN`.
     #[serde(default)]
     pub excluded_labels: Vec<String>,
-    /// Case-insensitive partial-match filter on `articles.doi` (emits
-    /// `LOWER(doi) LIKE '%...%'`). Empty string/None filters nothing. The
-    /// Article list filter panel exposes a free-text input for this.
+    /// Case-insensitive partial-match on `doi` (`LOWER(doi) LIKE '%...%'`).
     #[serde(default)]
     pub doi: Option<String>,
     /// When true, restrict to articles with no DOI (`doi IS NULL OR doi = ''`).
-    /// Mutually exclusive with `doi`: the UI disables the text input when this
-    /// is checked, and this branch wins if both are somehow set (the empty-DOI
-    /// filter is the more specific intent and we avoid emitting contradictory
-    /// SQL). Powers the "Only no DOI" checkbox in the filter panel for the
-    /// data-enrichment workflow of finding articles missing DOIs.
+    /// Mutually exclusive with `doi`; this wins if both are set.
     #[serde(default)]
     pub doi_empty: bool,
     pub limit: Option<i64>,
@@ -216,9 +195,7 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
         param_values.push(Box::new(pattern));
     }
 
-    // DOI filter. Two mutually exclusive modes; the empty-DOI branch wins if
-    // both are somehow set so we never emit contradictory SQL
-    // (`doi LIKE '%x%' AND doi IS NULL` would return zero rows).
+    // DOI filter. The empty-DOI branch wins if both set (avoids contradictory SQL).
     if query.doi_empty {
         sql.push_str(" AND (doi IS NULL OR doi = '')");
     } else if let Some(ref doi) = query.doi {
@@ -247,11 +224,8 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
         param_values.push(Box::new(label.to_lowercase()));
     }
 
-    // NOT-filters: articles must NOT have any of these tags/labels. Mirrors the
-    // inclusion loops above but emits `NOT IN` so the UI can toggle a pill
-    // between inclusion (`tags`/`labels`) and exclusion
-    // (`excluded_tags`/`excluded_labels`). An article with no matching row in
-    // the join table is NOT IN the subquery result, so it passes the filter.
+    // NOT-filters: articles must NOT have these tags/labels. Mirrors inclusion loops
+    // but emits `NOT IN`. An article with no matching junction row passes.
     for tag in &query.excluded_tags {
         let idx = param_values.len() + 1;
         sql.push_str(&format!(

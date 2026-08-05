@@ -19,10 +19,7 @@ export function formatArticleCount(count: number): string {
   return `${count} article${count === 1 ? '' : 's'}`;
 }
 
-/**
- * Strip any UUID (8-4-4-4-12 hex pattern) from a details string.
- * Also cleans up dangling prepositions like "of article " or "into article " left behind.
- */
+/** Strip UUIDs (8-4-4-4-12 hex) from a details string. Cleans dangling prepositions. */
 export function stripUuidFromDetails(details: string | null): string | null {
   if (!details) return null;
   const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
@@ -34,9 +31,7 @@ export function stripUuidFromDetails(details: string | null): string | null {
   return result || null;
 }
 
-/**
- * Determine the file type icon based on filename.
- */
+/** Determine file type icon from filename extension. */
 export function getFullTextFileIcon(fileName: string | null | undefined): string | null {
   if (!fileName) return null;
   const lower = fileName.toLowerCase();
@@ -45,9 +40,7 @@ export function getFullTextFileIcon(fileName: string | null | undefined): string
   return 'draft';
 }
 
-/**
- * Format a list of author names.
- */
+/** Format list of author names, truncating to first author + "et al." past limit. */
 export function formatAuthors(
   authors: string[] | null | undefined,
   limit = 3,
@@ -58,24 +51,14 @@ export function formatAuthors(
   return `${authors[0]} et al.`;
 }
 
-/**
- * Create a DOI hyperlink if possible.
- */
+/** Create DOI hyperlink if possible. */
 export function doiLink(doi: string | null | undefined): string | undefined {
   if (!doi) return undefined;
   return doi.startsWith('http') ? doi : `https://doi.org/${doi}`;
 }
 
-/**
- * Average occurrences per year across the active span of a term.
- *
- * Computed as total occurrences divided by the inclusive year span
- * (lastYear - firstYear + 1). Returns `null` when there is no year data.
- *
- * Examples:
- * - 3 occurrences across 2018, 2020, 2024 -> 3 / 7 ≈ 0.43
- * - 10 occurrences all in 2020             -> 10 / 1 = 10.0
- */
+/** Average occurrences/year across the active span (lastYear - firstYear + 1).
+ *  Returns null when no year data. */
 export function avgPerYear(
   yearCounts: { year: number; count: number }[] | null | undefined
 ): number | null {
@@ -93,10 +76,7 @@ export function avgPerYear(
   return total / span;
 }
 
-/**
- * Convert a short publication type code (e.g. JOUR, BOOK) to a human-friendly label.
- * Defaults to 'Publication' if clean code is not recognized or not provided.
- */
+/** Convert short publication type code (JOUR, BOOK, etc.) to human label. */
 export function getPublicationTypeLabel(type: string | null | undefined): string {
   if (!type) return 'Publication';
   const cleanType = type.trim().toUpperCase();
@@ -121,19 +101,8 @@ export function getPublicationTypeLabel(type: string | null | undefined): string
   return map[cleanType] || 'Publication';
 }
 
-/**
- * Derive the display label for the storage-root folder in the Settings
- * directory tree. Returns the last path segment plus a trailing slash so the
- * tree root reads naturally (e.g. `/data/my-research` -> `my-research/`).
- *
- * Trailing separators are stripped before taking the last segment so
- * `/home/u/Documents/Bango/` still resolves to `Bango/`. Falls back to
- * `Bango/` when the path is empty, root-only (`/`), or has no discernible
- * segment so the tree never shows a blank root.
- *
- * @param path - the effective storage root path (forward or back slashes).
- * @returns the last segment with a trailing slash.
- */
+/** Derive display label for storage-root: last path segment + trailing slash.
+ *  Falls back to `Bango/` on empty/root-only paths. */
 export function folderLabelFromPath(path: string): string {
   // Normalize backslashes (Windows) to forward slashes for uniform splitting,
   // then drop trailing separators so the last split is the real folder name.
@@ -144,28 +113,12 @@ export function folderLabelFromPath(path: string): string {
 }
 
 /**
- * Truncate `text` to at most `maxLen` characters at the last word boundary
- * (never mid-word), appending an ellipsis (`...`) when truncation occurs.
+ * Truncate `text` to at most `maxLen` chars at last word boundary,
+ * appending `...` when truncated. Hard-truncates if first word exceeds max.
+ * Counts code points via `Array.from`, not UTF-16 units.
  *
- * - If `text` already fits, it is returned verbatim (no trimming, no ellipsis).
- * - If the first word alone exceeds `maxLen`, it is hard-truncated at `maxLen`
- *   with an ellipsis (so a long single token still yields a sensible label).
- * - Surrounding whitespace is trimmed before measuring, and any whitespace
- *   preceding the cut point is removed so the ellipsis sits flush against the
- *   last kept word.
- *
- * Counts characters by `Array.from(text)` code points (not UTF-16 code units),
- * so multi-byte text (CJK, emoji) is counted the same way a browser counts
- * `maxlength`.
- *
- * @param text - the source string (e.g. a research aim).
- * @param maxLen - the maximum character length of the result, excluding the
- *   ellipsis. Must be >= 1.
- * @returns the truncated string (with `...` when shortened), or the trimmed
- *   original when it already fits.
- * @example truncateAtWordBoundary('A short aim', 20) // 'A short aim'
- * @example truncateAtWordBoundary('A very long research aim about obesity', 20) // 'A very long...'
- * @example truncateAtWordBoundary('supercalifragilistic', 10) // 'supercalif...'
+ * @param maxLen - max characters excluding ellipsis. Must be >= 1.
+ * @returns truncated string with `...` when shortened, or trimmed original.
  */
 export function truncateAtWordBoundary(text: string, maxLen: number): string {
   const trimmed = text.trim();

@@ -64,9 +64,8 @@ const { applyCitationGraphFilters } = useSigmaRenderer();
 const toast = useToast();
 
 /**
- * Article detail panel (opened via "open linked record" from the citation
- * paper detail panel). Re-uses the same ArticleDetailPanel used in the
- * Articles view so the user sees the full record with notes/tags/labels etc.
+ * Article detail panel (opened via "open linked record" from citation paper
+ * detail). Re-uses the same ArticleDetailPanel as the Articles view.
  */
 const {
   selectedArticle: detailArticle,
@@ -89,11 +88,8 @@ const { screenArticle } = useScreening();
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
 
-// Article delete UI orchestration is centralized in `useArticleDelete`
-// (shared with the other detail-panel host views), mirroring
-// `useFullTextAttachment`. Mirrors `onCloseArticleDetail`: the composable's
-// `deleteArticle` nulls the selected article / audit trail, and the
-// `onDeleted` hook clears the local visibility gate + fullscreen flag.
+/* Article delete orchestration centralized in `useArticleDelete`. Composable
+ * nulls `selectedArticle`; `onDeleted` hook clears local visibility + fullscreen. */
 const { handleDeleteArticle } = useArticleDelete({
   deleteArticle,
   onDeleted: () => {
@@ -104,10 +100,7 @@ const { handleDeleteArticle } = useArticleDelete({
 
 const selectedPaper = ref<CitationNode | null>(null);
 
-/**
- * Isolation mode: when active, the graph dims all nodes except the selected
- * paper and its ancestry (papers it cites) or progeny (papers citing it).
- */
+/* Isolation mode: dims all nodes except selected paper + ancestry/progeny. */
 const isolationMode = ref<{ nodeId: string; direction: IsolationDirection; label?: string } | null>(
   null
 );
@@ -262,9 +255,8 @@ function onCloseArticleDetail() {
 // `useFullTextAttachment` (shared with the other detail-panel host views).
 const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
 
-// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
-// (shared with the other detail-panel host views). The composable owns the
-// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+/* AI-reasoning clear orchestration centralized in `useClearAiReasoning`.
+ * Composable owns toast; `useArticleSearch.clearAiReasoning` owns IPC + refresh. */
 const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 
 function onFilterChange(filters: {

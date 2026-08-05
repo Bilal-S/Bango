@@ -29,15 +29,9 @@ function copyDoi(): void {
   });
 }
 
-/**
- * Copy a normalized version of the DOI suitable for use as a filename.
- * Strips any `https://doi.org/` prefix, lowercases, and replaces characters
- * that are unsafe in filenames (`/`, spaces, etc.) with underscores. Matches
- * the batch-import `clean_doi_filename` convention so the copied value can be
- * used directly to name `{clean_doi}_references.ris` files.
- *
- * Example: `10.1108/MRR-12-2021-0866` → `10.1108_mrr-12-2021-0866`
- */
+/** Copy normalized DOI (filename-safe): strips https://doi.org/ prefix,
+ *  lowercases, replaces unsafe chars with underscores. Matches
+ *  `clean_doi_filename` convention. */
 function copyCleanDoi(): void {
   if (!props.article.doi) return;
   const raw = props.article.doi.replace(/^https?:\/\/doi\.org\//i, '');
@@ -51,17 +45,14 @@ function copyCleanDoi(): void {
   });
 }
 
-// ── Inline edit ────────────────────────────────────────────────────────
-// At most one field is edited at a time. We query the edit input by class
-// within the section root rather than using a `ref` inside `v-for` / template
-// branches (which Vue 3 collects into an array, breaking `.focus()`).
-// Mirrors the proven pattern in `tag-label-panel.vue` (v6.9).
+/* Inline edit: at most one field edited at a time. We query by class within
+   the section root rather than using a `ref` inside `v-for`/template branches
+   (Vue 3 collects those into arrays, breaking `.focus()`). Mirrors tag-label-panel.vue v6.9. */
 const rootEl = ref<HTMLElement | null>(null);
 const editingField = ref<string | null>(null);
 const editingValue = ref('');
-/** Validation error message for the in-flight edit (currently only Year uses
- *  this; null = no error). When set, the input stays open and a red hint shows
- *  below it; the user must fix or Escape-cancel. */
+/** Validation error for the in-flight edit (currently only Year).
+ *  When set, input stays open + red hint; user must fix or Escape-cancel. */
 const editError = ref<string | null>(null);
 /** Tracks whether the language dropdown is in "Other…" free-text mode. */
 const languageOtherMode = ref(false);
@@ -76,13 +67,9 @@ type MetaField =
   | 'doi'
   | 'keywords';
 
-/**
- * Curated language list for the Lang dropdown. Covers the languages most
- * commonly seen in academic publishing + the languages the translation
- * pipeline supports. "Other…" lets the user type a custom value not in the
- * list. Stored values are free-form `Option<String>` on the backend so any
- * value works with `is_english_language` / `should_skip_translation`.
- */
+/** Curated language list for the Lang dropdown. Covers common academic
+ *  languages + those the translation pipeline supports. "Other…" allows
+ *  custom values. Backend stores free-form `Option<String>`. */
 const LANGUAGE_OPTIONS: readonly string[] = [
   'English',
   'French',
@@ -164,15 +151,9 @@ function startEdit(field: MetaField): void {
   });
 }
 
-/**
- * Commit the in-flight edit. Emits the typed value to the parent, which routes
- * it through the `update_article_metadata` IPC and re-fetches the article so
- * the chip flips live. Empty/whitespace-only values are forwarded so the
- * backend clears the field to NULL (or `[]` for array fields).
- *
- * For Year: validates first; on error, keeps the input open + shows a red hint
- * instead of committing.
- */
+/** Commit in-flight edit. Emits typed value to parent (routes through
+ *  `update_article_metadata` IPC). Empty/whitespace forwarded so backend
+ *  clears to NULL. For Year: validates first; keeps input open on error. */
 function commitEdit(): void {
   const raw = editingField.value;
   if (raw == null) return;
@@ -238,13 +219,10 @@ const journalUnrecognized = computed(
     !!props.article.journal && props.article.journal.trim() !== '' && !props.article.journalIndexId
 );
 
-// ── Journal autocomplete ───────────────────────────────────────────────
-// When editing the Journal field, a `SuggestInput` (options mode) debounces
-// the typed query through the `search_journal_index` IPC and renders
-// candidate rows (title, publisher, ISSN badge). Selecting a row commits the
-// canonical title AND links the article to the journal_index row; free-text
-// Enter commits the raw text and lets the backend's hardened `match_journal`
-// resolve it if possible.
+/* Journal autocomplete: `SuggestInput` (options mode) debounces through
+   `search_journal_index` IPC, renders candidate rows (title, publisher, ISSN).
+   Selecting a row commits the canonical title AND links to journal_index;
+   free-text Enter commits raw text for backend `match_journal` to resolve. */
 const journalOptions = ref<SuggestOption[]>([]);
 let journalSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -258,10 +236,8 @@ function toOptions(matches: JournalIndexMatch[]): SuggestOption[] {
   }));
 }
 
-/**
- * Debounced journal search. Fires 200ms after the last keystroke when editing
- * the journal field. Queries shorter than 2 characters clear the list.
- */
+/** Debounced journal search: fires 200ms after last keystroke, clears list
+ *  for queries shorter than 2 chars. */
 function runJournalSearch(query: string): void {
   if (journalSearchTimer) clearTimeout(journalSearchTimer);
   const trimmed = query.trim();
@@ -281,12 +257,8 @@ function runJournalSearch(query: string): void {
   }, 200);
 }
 
-/**
- * Commit a journal autocomplete selection. Emits the canonical title to the
- * parent (so `update_article_metadata` stores it) AND links the article to the
- * chosen `journal_index` row via the dedicated IPC, which also backfills
- * ISSN/eISSN and marks the biblio + wiki staleness flags.
- */
+/** Commit journal autocomplete selection: stores canonical title, links to
+ *  `journal_index` row (backfills ISSN/eISSN, marks staleness flags). */
 function onJournalSelect(_name: string, option?: SuggestOption): void {
   if (!option) return;
   emit('updateField', 'journal', option.label);
@@ -301,10 +273,7 @@ function onJournalSelect(_name: string, option?: SuggestOption): void {
   journalOptions.value = [];
 }
 
-/**
- * Free-text journal commit (Enter with no row selected). Emits the raw text so
- * the backend's hardened `match_journal` resolves the link if it can.
- */
+/** Free-text journal commit: emits raw text for backend's `match_journal`. */
 function commitJournalText(text: string): void {
   const trimmed = text.trim();
   if (trimmed === readField('journal')) {
@@ -353,10 +322,9 @@ function onLanguageSelectChange(value: string): void {
   }
 }
 
-// When the user switches back from "Other…" to the list via the ← button, the
-// dropdown re-renders. No extra watcher needed - the template's
-// `v-if="!languageOtherMode"` + the button handler reset `editingValue`.
-// Keep `editError` clear when not editing Year (defensive cleanup).
+/* When switching back from "Other…" to the list, the dropdown re-renders.
+   The `v-if` + button handler reset `editingValue` - no extra watcher needed.
+   Keep `editError` clear when not editing Year (defensive cleanup). */
 watch(editingField, (f) => {
   if (f !== 'publicationYear') editError.value = null;
 });

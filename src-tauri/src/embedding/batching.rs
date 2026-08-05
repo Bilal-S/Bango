@@ -1,36 +1,16 @@
 //! Pure sub-batch grouping for the v2 embedding pipeline.
 //!
-//! [`group_into_embedding_batches`] is the pure bin-pack helper that
-//! `LlmOrchestrator::send_embedding_batch_parallel` uses to split a flat list
-//! of `(input_idx, TextPiece)` pairs into per-HTTP-request sub-batches that
-//! respect ALL THREE provider limits simultaneously:
-//! - `max_inputs_per_batch` (e.g. OpenAI: 2048, Ollama/Google: 1)
-//! - `max_tokens_per_batch` (e.g. OpenAI: ~300_000, local: smaller)
-//!
-//! A sub-batch is closed when adding one more piece would exceed EITHER cap.
-//! A single piece whose `token_count` alone exceeds `max_tokens_per_batch`
-//! (only possible when `max_tokens_per_input == max_tokens_per_batch`, e.g.
-//! Ollama) forms its own sub-batch - the splitter already fragmented the text
-//! at `max_tokens_per_input`, so we cannot subdivide a `TextPiece` further
-//! here.
+//! [`group_into_embedding_batches`] greedily packs `(input_idx, TextPiece)` pairs into
+//! sub-batches respecting provider limits (`max_inputs_per_batch`, `max_tokens_per_batch`).
+//! A sub-batch closes when the next piece would exceed either cap.
 
 use crate::embedding::text::TextPiece;
 use crate::llm::embedding::EmbeddingLimits;
 
-/// Group a flat list of `(input_idx, TextPiece)` pairs into sub-batches that
-/// each fit within the provider's per-request limits.
+/// Group `(input_idx, TextPiece)` pairs into sub-batches within provider limits.
 ///
-/// Rules:
-/// - Greedily accumulate pieces into the current sub-batch.
-/// - Close the sub-batch (and start a new one) when adding the next piece
-///   would exceed `max_inputs_per_batch` OR `max_tokens_per_batch`.
-/// - A single piece that alone exceeds `max_tokens_per_batch` forms its own
-///   sub-batch (it cannot be subdivided at this layer).
-/// - Empty input returns an empty vec (no sub-batches); the caller handles
-///   the empty case before dispatching.
-///
-/// Pure `#[must_use]` so it is unit-testable in isolation without a live
-/// orchestrator or network.
+/// Greedy accumulation. Closes sub-batch when next piece exceeds `max_inputs_per_batch`
+/// OR `max_tokens_per_batch`. Oversized piece gets its own sub-batch. Empty input → empty vec.
 #[must_use]
 pub fn group_into_embedding_batches(
     flat: Vec<(usize, TextPiece)>,

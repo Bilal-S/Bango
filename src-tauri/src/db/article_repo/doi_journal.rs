@@ -9,8 +9,6 @@ use crate::error::AppError;
 use crate::models::article::Article;
 
 /// Lightweight article info for batch import DOI matching.
-/// Used by the batch-import phases to match files on disk to articles by DOI
-/// and to skip articles that already have full text / references / citations.
 #[derive(Debug, Clone)]
 pub struct ArticleDoiInfo {
     pub id: String,
@@ -23,9 +21,8 @@ pub struct ArticleDoiInfo {
     pub has_ai_summary: bool,
 }
 
-/// Load all articles that have a non-null, non-empty DOI with their full-text /
-/// reference / citation / AI-summary flags. Used by the batch-import runner to
-/// build the DOI match map in a single query instead of one lookup per file.
+/// Load articles with non-null DOI + full-text/ref/citation/AI-summary flags.
+/// Single query for the batch-import DOI match map.
 pub fn get_articles_with_doi_info(conn: &Connection) -> Result<Vec<ArticleDoiInfo>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, doi, has_full_text, has_reference_details, has_citation_details, \
@@ -103,12 +100,8 @@ pub fn get_article_counts(
     Ok(counts)
 }
 
-/// Check which DOIs from the input list already exist in the `articles` table.
-/// Uses a single batched query with a dynamically-built parameterized `IN (...)`
-/// clause. Returns the subset of DOIs that are present in the library.
-///
-/// Used by the OpenAlex search integration to grey out the "Add" button for
-/// works whose DOI already matches an article in the library.
+/// Check which DOIs already exist in `articles`. Batched parameterized `IN (...)` query.
+/// Returns the subset of DOIs present in the library.
 pub fn check_dois_in_library(conn: &Connection, dois: &[String]) -> Result<Vec<String>, AppError> {
     if dois.is_empty() {
         return Ok(Vec::new());
@@ -129,8 +122,8 @@ pub fn check_dois_in_library(conn: &Connection, dois: &[String]) -> Result<Vec<S
     Ok(found)
 }
 
-/// Post-import step: resolve `journal_index_id` for articles that have ISSN/eISSN/journal name
-/// but no journal link yet. Non-fatal - errors are silently ignored.
+/// Post-import: resolve `journal_index_id` for articles with ISSN/eISSN/journal
+/// but no journal link. Non-fatal.
 pub fn resolve_journal_links(conn: &Connection, articles: &[Article]) -> usize {
     let mut resolved = 0usize;
     for article in articles {

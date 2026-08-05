@@ -1,10 +1,4 @@
-/**
- * Types for the Citation Network visualization module.
- * These mirror the enriched JSON returned by `biblio_get_citation_network`.
- *
- * Unlike the co-authorship network, the citation network is a **directed**
- * graph: an edge `source → target` means *source cites target*.
- */
+/* Citation Network types. Directed graph: edge source→target means source cites target. */
 
 /** A single node (article/paper) in the citation network. */
 export interface CitationNode {
@@ -24,10 +18,7 @@ export interface CitationNode {
   cluster: number | null;
   /** Display color (assigned from cluster palette). */
   color?: string;
-  /**
-   * True when the node is an unmatched reference paper (not linked to an
-   * included article).  Used to render dashed/faint leaf nodes.
-   */
+  /** Unmatched reference paper (not linked to included article). Renders dashed. */
   unmatched?: boolean;
   referenceType?: string | null;
 }
@@ -39,10 +30,7 @@ export interface CitationEdge {
   /** Cited article. */
   target: string;
   weight: number;
-  /**
-   * True when this edge connects an article to an unmatched reference leaf.
-   * Used to render dashed/faint edges.
-   */
+  /** Edge to unmatched reference leaf. Renders dashed. */
   unmatched?: boolean;
 }
 

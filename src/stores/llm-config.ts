@@ -6,52 +6,25 @@ import type { LlmConfig, LlmProvider } from '@/types';
 export interface TestResult {
   success: boolean;
   message: string;
-  /** Embedding capability outcome from the synchronous probe. Undefined when
-   * the connection test failed (no probe ran). `"enabled"` / `"disabled"` when
-   * the probe ran. Surfaced in the Test Connection message so the user knows
-   * whether semantic search is available. */
+  /** Embedding capability from sync probe. Undefined when test failed. */
   embeddingStatus?: string;
-  /** The working embedding model name (only set when embeddingStatus is
-   * `"enabled"`). */
+  /** Working embedding model name (set when embeddingStatus is `"enabled"`). */
   embeddingModel?: string;
 }
 
-/**
- * The minimum selectable context window, in tokens. The Settings UI slider
- * floor and the load-time clamp both use this so a legacy config below the
- * floor is transparently bumped up on load (keeping the badge and slider
- * consistent with the UI floor).
- */
+/** Minimum context window in tokens for the Settings slider + load-time clamp. */
 export const MIN_CONTEXT_WINDOW_TOKENS = 16_000;
 
-/**
- * Local LLM providers that do not require an API key. Mirrors the backend
- * `is_local` set in `llm_config_repo::has_config` (`ollama` | `lm_studio` |
- * `llama_cpp`). Cloud providers require an API key; these do not. Kept as a
- * shared constant so any frontend gate (e.g. `isConfigured`, future readiness
- * checks) stays in sync.
- *
- * Exported so every caller that needs the local-provider distinction (the
- * `useLlmConfig` composable, the Settings card's required-key halo, etc.)
- * reads from ONE copy instead of re-deriving it. The backend Rust match in
- * `llm_config_repo::has_config` is the ultimate source of truth; this Set
- * must stay in sync with it.
- */
+/** Local LLM providers that do not require an API key. Must stay in sync with
+ *  the backend Rust `is_local` match in `llm_config_repo::has_config`. */
 export const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
   'ollama',
   'lmStudio',
   'llamaCpp',
 ]);
 
-/**
- * Canonical "is this provider local (no API key required)?" predicate.
- * Mirrors the backend `is_local` match in `llm_config_repo::has_config`.
- * Use this instead of re-deriving the provider list at every call site so
- * the local-provider contract has exactly one frontend definition.
- *
- * @param provider - The LLM provider identifier to test.
- * @returns `true` for `ollama`, `lmStudio`, `llamaCpp`; `false` otherwise.
- */
+/** Canonical "is this provider local (no API key)?" predicate. Mirrors the
+ *  backend `is_local` match. */
 export function isLocalProvider(provider: LlmProvider): boolean {
   return LOCAL_PROVIDERS.has(provider);
 }
@@ -75,13 +48,9 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
   const testResult = ref<TestResult | null>(null);
 
   /**
-   * Whether an LLM provider is fully configured and ready to serve requests.
-   * Mirrors the backend `llm_config_repo::has_config` contract: the store must
-   * be initialized, endpoint + model must be non-empty, and either the provider
-   * is local (no key required) or an API key is present. Use this getter
-   * everywhere a feature gates on "LLM configured" instead of re-deriving it
-   * from `apiKeyEncrypted` (which incorrectly disables local providers like
-   * LM Studio / Ollama / llama.cpp).
+   * Whether an LLM provider is fully configured. Mirrors the backend
+   * `llm_config_repo::has_config` contract: initialized, endpoint+model
+   * non-empty, and either local or an API key is present.
    */
   const isConfigured = computed(() => {
     if (!initialized.value) return false;

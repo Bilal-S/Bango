@@ -1,12 +1,9 @@
-//! Screening engine: drives the stage-1 batch loop + delegates stage-2 borderline.
+//! Screening engine: batch loop + delegate stage-2 borderline.
 //!
-//! Directory module split (refactor3 continuation):
 //! - `types.rs` - `ScreeningConfig`, `RunSyncContext`, `ScreeningProgress`, `LlmScreeningResponse`
 //! - `prompt_parts.rs` - `ScreeningPromptParts` + `Stage2Context` (shared prompt construction)
-//! - `stage2.rs` - `run_stage2_borderline` + the pure `is_borderline` predicate
-//! - `mod.rs` (this file) - `ScreeningEngine` struct, `run_sync`, small helpers, re-exports
-//!
-//! Public API unchanged: `bango_lib::screening::engine::*` import paths work identically.
+//! - `stage2.rs` - `run_stage2_borderline` + `is_borderline` predicate
+//! - `mod.rs` - `ScreeningEngine` struct, `run_sync`, helpers, re-exports
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,9 +33,8 @@ mod prompt_parts;
 mod stage2;
 mod types;
 
-// Always-on diagnostic logger: fires in release builds so production users can
-// capture a phase/cancel/mutex trace via `Bango 2>screening.log`. Prefixes
-// `[screening:diag]`; contains NO PII.
+/* Always-on diagnostic logger: fires in release builds for phase/cancel/mutex tracing.
+Capturable via `Bango 2>screening.log`. Prefix `[screening:diag]`, no PII. */
 pub(crate) fn log_diag(args: std::fmt::Arguments<'_>) {
     eprintln!("[screening:diag] {}", args);
 }
@@ -58,9 +54,8 @@ pub use types::{LlmScreeningResponse, RunSyncContext, ScreeningConfig, Screening
 pub struct ScreeningEngine {
     pub(crate) progress: Arc<Mutex<ScreeningProgress>>,
     pub(crate) cancel_token: Arc<Mutex<bool>>,
-    /// One-shot notification for immediate cancellation. `notify_waiters()`
-    /// wakes any `select!` branch awaiting `notified()` so Stop aborts the
-    /// in-flight LLM call within milliseconds (not the orchestrator timeout).
+    /* One-shot cancellation: `notify_waiters()` wakes `select!` branches awaiting
+    `notified()`, aborting the in-flight LLM call within milliseconds. */
     pub(crate) cancel_notify: Arc<tokio::sync::Notify>,
     pub(crate) pause_token: Arc<Mutex<bool>>,
     batch_size: usize,
@@ -73,6 +68,7 @@ impl Default for ScreeningEngine {
 }
 
 impl ScreeningEngine {
+    /// Create engine with default batch size 1.
     pub fn new() -> Self {
         Self {
             progress: Arc::new(Mutex::new(ScreeningProgress::default())),
@@ -83,7 +79,7 @@ impl ScreeningEngine {
         }
     }
 
-    /// Create engine with a specific batch size (min 1).
+    /// Create engine with specific batch size (min 1).
     pub fn with_batch_size(batch_size: usize) -> Self {
         Self {
             progress: Arc::new(Mutex::new(ScreeningProgress::default())),
@@ -114,17 +110,11 @@ impl ScreeningEngine {
         *self.pause_token.lock().await = false;
     }
 
-    /// Sleep for `delay_ms`, aborting immediately if cancelled. Wraps the
-    /// inter-batch throttle in a `tokio::select!` against `cancel_notify`.
+    /// Sleep `delay_ms`, aborting immediately if cancelled via `cancel_notify`.
+    /// Returns `true` if aborted (caller returns immediately); `false` if completed.
     ///
-    /// Returns `true` if aborted (caller returns immediately; final progress
-    /// already emitted here); `false` if the sleep completed normally.
-    ///
-    /// **Cancel-polling contract**: must NOT use an `if` precondition on the
-    /// `notified()` select branch - tokio skips polling branches whose
-    /// precondition is false, so `notified()` never registers as a waiter and
-    /// `notify_waiters()` becomes a no-op (cancel signal lost). Always poll
-    /// `notified()`, then check the token inside the branch body.
+    /// **Cancel contract**: always poll `notified()`, check token inside branch -
+    /// never use `if` precondition (unregistered waiter = lost signal).
     pub(super) async fn delay_or_cancel(
         &self,
         app_handle: &Option<tauri::AppHandle>,
@@ -152,10 +142,9 @@ impl ScreeningEngine {
         }
     }
 
-    /// Run the screening engine. `config` selects abstract/enhanced/two-stage
-    /// behavior. `ctx.target_article_id = Some(id)` screens one specific article
-    /// (per-article "Screen" button); `None` = batch mode. The article must be
-    /// `working` + unscreened, else the engine exits with `Ok(())` (no-op).
+    /// Run screening. `config` selects abstract/enhanced/two-stage mode.
+    /// `ctx.target_article_id = Some(id)` = single article; `None` = batch.
+    /// Article must be `working` + unscreened, else no-op.
     pub async fn run_sync(
         &self,
         conn_mutex: &std::sync::Mutex<Connection>,
@@ -169,8 +158,8 @@ impl ScreeningEngine {
         let app_handle = ctx.app_handle.clone();
         let target_article_id = ctx.target_article_id.clone();
 
-        // Reset state. `Notify` needs no reset - `notify_waiters()` only wakes
-        // current waiters; a fresh `notified()` future is created per select!.
+        /* Reset state. `Notify` needs no reset — `notify_waiters()` only wakes
+        current waiters; fresh `notified()` created per select!. */
         *self.cancel_token.lock().await = false;
         *self.pause_token.lock().await = false;
 
@@ -211,9 +200,8 @@ impl ScreeningEngine {
             )
         };
 
-        // Custom-logic gate: same trim + non-empty check as the prompt emitter.
-        // When in force, the LLM's decision is final (combinatorial AND/OR/hard-
-        // exclusion rules transcend the generic priority resolver).
+        /* Custom-logic gate: when in force, LLM decision is final (combinatorial
+        rules transcend the generic priority resolver). */
         let has_custom_logic =
             custom_logic.as_deref().map(str::trim).is_some_and(|text| !text.is_empty());
 
@@ -256,8 +244,8 @@ impl ScreeningEngine {
 
         let start = Instant::now();
 
-        // Heartbeat: emits a `[screening:diag] HEARTBEAT` line every 5s. Exits
-        // when the run completes or is cancelled (never leaks past the run).
+        /* Heartbeat: emits `[screening:diag] HEARTBEAT` every 5s; exits when
+        run completes or is cancelled. */
         let hb_cancel = self.cancel_token.clone();
         let hb_progress = self.progress.clone();
         tokio::spawn(async move {
@@ -320,8 +308,8 @@ impl ScreeningEngine {
                 break;
             }
 
-            // Advance cursor past this batch so transient-error batches aren't
-            // re-fetched infinitely (reset on each new run / new engine).
+            /* Advance cursor past this batch so transient-deferred articles
+            aren't re-fetched infinitely (reset per new run). */
             if target_article_id.is_none() {
                 last_attempted_seq = batch.iter().map(|a| a.sequence_id).max();
             }
@@ -354,9 +342,8 @@ impl ScreeningEngine {
                 self.emit_progress(&app_handle, &progress);
             }
 
-            // Build article entries. Enhanced mode retrieves top-K chunks per
-            // article with `has_full_text`. Two-stage stage-1 is abstract-only.
-            // Gap 7: capture the precise evidence-sections label per article.
+            /* Build article entries. Enhanced mode retrieves top-K chunks per
+            article with `has_full_text`. Two-stage stage-1 is abstract-only. */
             let mut enhanced_evidence_labels: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
 
@@ -401,9 +388,8 @@ impl ScreeningEngine {
                 LlmRequestType::Screening
             };
 
-            // Stage-1 LLM call wrapped in tokio::select! against cancel_notify.
-            // Single attempt - inner `client::send_with_retry` already handles
-            // transient 429/408/5xx with bounded retry.
+            /* Stage-1 LLM call: single attempt (inner retry handles 429/408/5xx).
+            Wrapped in `tokio::select!` against `cancel_notify` for instant Stop. */
             let llm_result = {
                 let cancel_notify = self.cancel_notify.clone();
                 loop {
@@ -503,7 +489,7 @@ impl ScreeningEngine {
             let (response_text, total_tokens) = match response_data {
                 Some(data) => data,
                 None => {
-                    // Hard-error path only (transients `continue` above).
+                    /* Hard-error path only (transients `continue` above). */
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();
                     progress.completed += batch.len();
@@ -516,7 +502,7 @@ impl ScreeningEngine {
 
             match crate::screening::json_parse::process_screening_responses(&response_text) {
                 Ok(screenings) => {
-                    // Count mismatch → mark batch as errors.
+                    /* Count mismatch → mark batch as errors. */
                     if screenings.len() != batch.len() {
                         {
                             let c = crate::db::connection::lock_conn(conn_mutex)?;
@@ -538,7 +524,7 @@ impl ScreeningEngine {
                         continue;
                     }
 
-                    // Per-article decision + write.
+                    /* Per-article decision + write. */
                     for (article, screening) in batch.iter().zip(screenings.iter()) {
                         if screening.decision == "error" {
                             {
@@ -584,7 +570,7 @@ impl ScreeningEngine {
                         }
                     }
 
-                    // Two-stage: delegate borderline re-screening.
+                    /* Two-stage: delegate borderline re-screening. */
                     if two_stage_mode {
                         let stage2_ctx = Stage2Context {
                             prompt_parts: &prompt_parts,
@@ -611,7 +597,7 @@ impl ScreeningEngine {
                         }
                     }
 
-                    // Post-batch elapsed/ETA.
+                    /* Post-batch elapsed/ETA. */
                     let mut progress = self.progress.lock().await;
                     let elapsed = start.elapsed().as_millis() as u64;
                     progress.elapsed_ms = elapsed;
@@ -644,7 +630,7 @@ impl ScreeningEngine {
             }
         }
 
-        // Final event.
+        /* Final event. */
         {
             let mut progress = self.progress.lock().await;
             progress.is_running = false;
@@ -654,7 +640,7 @@ impl ScreeningEngine {
         Ok(())
     }
 
-    /// Lock progress, apply `f`, emit `screening:progress` if app handle set.
+    /// Lock progress, apply `f`, emit `screening:progress` if app_handle set.
     pub(super) async fn update_progress(
         &self,
         app_handle: &Option<tauri::AppHandle>,
@@ -677,30 +663,29 @@ impl ScreeningEngine {
     }
 }
 
-// ── Backward-compat re-exports (external tests import these from `engine`) ──
+/* Backward-compat re-exports (external tests import these from `engine`). */
 
-/// Re-export of `json_parse` helpers for backward compatibility.
+/// Re-export `json_parse` helpers.
 pub use crate::screening::json_parse::{
     balance_braces, extract_json, process_screening_responses, repair_truncated_json_array,
 };
 
-/// Delegate to `chunk_retrieval::format_chunks_as_evidence` (kept `pub` for
-/// backward compat with `tests/evidence_test.rs`).
+/// Delegate to `chunk_retrieval::format_chunks_as_evidence` (pub for test compat).
 #[must_use]
 pub fn format_chunks_as_evidence(chunks: &[ScoredChunk]) -> Option<String> {
     crate::screening::chunk_retrieval::format_chunks_as_evidence(chunks)
 }
 
-/// Re-export of `tags_labels` helpers for backward compatibility.
+/// Re-export `tags_labels` helpers.
 pub use crate::screening::tags_labels::{
     create_or_match_label, create_or_match_tag, sanitize_tag_or_label_name,
     truncate_at_word_boundary,
 };
 
-/// Re-export of `decision` helpers for backward compatibility.
+/// Re-export `decision` helpers.
 pub use crate::screening::decision::{
     augment_matched_from_reasoning, build_global_criterion_numbering,
 };
 
-/// Re-export of `error_classify` helpers for backward compatibility.
+/// Re-export `error_classify` helpers.
 pub use crate::screening::error_classify::{is_auth_failure, is_transient_llm_error};

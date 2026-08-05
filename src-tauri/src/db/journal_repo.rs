@@ -3,9 +3,8 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::models::biblio::{JournalInfo, YearCount};
 
-/// A single `journal_index` hit returned by `search_journal_index` for the
-/// interactive journal autocomplete. Distinct from `JournalInfo` (which carries
-/// full bibliometric aggregates and powers the Journal Info Card).
+/// A `journal_index` hit for the interactive journal autocomplete.
+/// Distinct from `JournalInfo` (full bibliometric aggregates).
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalIndexMatch {
@@ -16,20 +15,10 @@ pub struct JournalIndexMatch {
     pub publisher_name: Option<String>,
 }
 
-/// Normalize an ISSN string for lookup. Returns an empty string for inputs that
-/// are not a valid ISSN after cleaning; callers should skip empty results.
+/// Normalize an ISSN string for lookup. Returns empty for non-valid ISSNs.
 ///
-/// Handles common dirty-ISSN shapes seen in RIS/BibTeX exports:
-/// - `"13665545 (ISSN)"`  -> `"1366-5545"`  (EBSCO RIS suffix + unhyphenated)
-/// - `"0378-5955 ; Print"` -> `"0378-5955"` (BibTeX semicolon suffix)
-/// - `"12345678"`          -> `"1234-5678"` (unhyphenated 8-digit)
-/// - `"2572-3170"`         -> `"2572-3170"` (already clean)
-/// - `""` / whitespace     -> `""`          (empty)
-/// - `"9783161484100"`     -> `""`          (ISBN-length garbage rejected)
-///
-/// The final `^\d{4}-[\dXx]$` guard rejects ISBNs, partial digits, and noise so
-/// they cannot fabricate a fake ISSN that collides with a real one. Pure;
-/// `#[must_use]`.
+/// Handles dirty shapes from RIS/BibTeX: `"(ISSN)"` suffix, semicolon suffix,
+/// unhyphenated 8-digit, ISBN garbage rejected. Pure, `#[must_use]`.
 #[must_use]
 pub fn normalize_issn(raw: &str) -> String {
     // 1. Trim.
@@ -61,9 +50,8 @@ pub fn normalize_issn(raw: &str) -> String {
     }
 }
 
-/// Uppercase a trailing lowercase `x` check digit so the returned ISSN is in
-/// the canonical spec form (`dddd-ddddX`, not `dddd-ddddx`). Digits and an
-/// already-uppercase `X` pass through unchanged.
+/// Uppercase a trailing lowercase `x` check digit to canonical spec form (`X`).
+/// Digits and already-uppercase `X` pass through.
 fn canonicalize_issn(s: &str) -> String {
     let bytes = s.as_bytes();
     if bytes.len() == 9 && (bytes[8] == b'x') {
@@ -87,19 +75,9 @@ fn is_valid_issn(s: &str) -> bool {
                 && (bytes[8] == b'X' || bytes[8] == b'x')))
 }
 
-/// Normalize a journal title for *equality comparison* (not substring search).
-/// Folds common symbol variants so `"Production & Operations Management"`
-/// compares equal to `"Production and Operations Management"`. Does not affect
-/// the stored title. Returns the trimmed, lowercased, space-collapsed form.
-///
-/// Steps:
-/// 1. Lowercase.
-/// 2. Strip trailing parenthetical suffixes (`(2076-3387)`, `(Print)`, ...).
-/// 3. Replace `&` with `and`.
-/// 4. Replace `:` and `-` with a single space.
-/// 5. Collapse whitespace runs to a single space; trim.
-///
-/// Pure; `#[must_use]`.
+/// Normalize a journal title for **equality comparison** (not substring search).
+/// Folds common symbol variants: `&`↔`and`, `:`/`-`→space, strips parenthetical
+/// ISSN/edition suffixes, lowercases, collapses whitespace. Pure, `#[must_use]`.
 #[must_use]
 pub fn normalize_journal_name(raw: &str) -> String {
     let mut s = raw.to_lowercase();
@@ -133,24 +111,15 @@ pub fn resolve_journal_id(
 }
 
 /// Look up a `journal_index` row by ISSN, eISSN, or journal name.
-/// Returns the `id` if a match is found.
+/// **Sole automatic matching function** — every caller routes here.
 ///
-/// This is the **sole automatic matching function**. Every caller (import,
-/// project restore, "Rematch Journals", frontend journal edit) routes here, so
-/// hardening this function fixes every path at once.
+/// Search order (first hit wins): (1) `issn` = article-ISSN, (2) `eissn` =
+/// article-ISSN (cross-check), (3) `eissn` = article-eISSN, (4) `issn` =
+/// article-eISSN (cross-check), (5) normalized-name equality.
 ///
-/// Search order (each tier normalizes its input; the first hit wins):
-/// 1. `issn` column = `normalize_issn(article.issn)`
-/// 2. `eissn` column = `normalize_issn(article.issn)` (cross-check, Bug A)
-/// 3. `eissn` column = `normalize_issn(article.eissn)`
-/// 4. `issn` column = `normalize_issn(article.eissn)` (cross-check, Bug A)
-/// 5. `normalize_journal_name(journal_title) = normalize_journal_name(article.journal)`
-///
-/// There is intentionally **no LIKE / substring tier** here. Silent auto-linking
-/// during import must not pick the wrong journal among similar names
-/// ("Journal of Health Economics" vs "Journal of Health Economics and Policy").
-/// Substring matching is confined to `search_journal_index`, which feeds a
-/// user-driven autocomplete where the human reviews candidates.
+/// Intentionally **no LIKE/substring**: silent auto-linking must not pick the
+/// wrong journal among similar names. Substring matching is confined to
+/// `search_journal_index` (user-driven autocomplete).
 pub fn match_journal(
     conn: &Connection,
     issn: Option<&str>,
@@ -181,16 +150,12 @@ pub fn match_journal(
         }
     }
 
-    // Tier 5: symbol-insensitive name equality (Bug C: `&` vs `AND`, `:` vs `-`,
-    // parenthetical ISSN/edition suffixes).
+    // Tier 5: symbol-insensitive name equality.
     if let Some(name) = journal_name {
         let normalized = normalize_journal_name(name);
         if !normalized.is_empty() {
-            // Fetch candidate rows whose raw title shares the same normalized
-            // form. SQLite cannot compute `normalize_journal_name` server-side,
-            // so we narrow with a cheap `LIKE` on the lowercased title tokens
-            // and confirm equality in Rust. The candidate set is small because
-            // we constrain to rows sharing the first token.
+            // SQLite cannot compute normalize_journal_name server-side, so
+            // narrow with a cheap LIKE on the first token and confirm equality in Rust.
             let first_token = normalized.split_whitespace().next().unwrap_or(&normalized);
             let pattern = format!("%{first_token}%");
             let mut stmt = conn.prepare(
@@ -224,28 +189,21 @@ fn find_by_column(
     Ok(result)
 }
 
-/// The minimum non-whitespace length a query must reach before the LIKE
-/// substring tier of `search_journal_index` fires. Short queries would return
-/// noisy, unhelpful candidate lists.
+/// Minimum non-whitespace length before the LIKE tier of `search_journal_index` fires.
 const MIN_LIKE_QUERY_LEN: usize = 4;
 
-/// Default cap on the number of autocomplete candidates returned by
-/// `search_journal_index`. Keeps the dropdown readable and the query cheap.
+/// Default cap on autocomplete candidates. Keeps the dropdown readable.
 const DEFAULT_SEARCH_LIMIT: i64 = 25;
 
-/// Interactive journal search for the article-metadata autocomplete. Because
-/// the user reviews the candidate list before selecting, substring LIKE is safe
-/// here (unlike the automatic `match_journal` path).
+/// Interactive journal search for the article-metadata autocomplete. Substring LIKE
+/// is safe here because the user reviews candidates.
 ///
 /// Search tiers (first non-empty tier returns):
-/// 1. **ISSN pattern.** If `normalize_issn(query)` is non-empty, return rows
-///    whose `issn` or `eissn` matches.
-/// 2. **Exact name.** `LOWER(TRIM(journal_title)) = LOWER(TRIM(?))` (0 or 1).
-/// 3. **LIKE substring.** Only when the trimmed query is at least
-///    `MIN_LIKE_QUERY_LEN` chars; sorted by `LENGTH(journal_title) ASC` so the
-///    closest (shortest) title surfaces first.
+/// 1. ISSN match.
+/// 2. Exact name match.
+/// 3. LIKE substring (min `MIN_LIKE_QUERY_LEN` chars; shortest title first).
 ///
-/// Returns an empty vec for short non-ISSN queries or no hits.
+/// Returns empty vec for short non-ISSN queries or no hits.
 pub fn search_journal_index(
     conn: &Connection,
     query: &str,
@@ -334,10 +292,7 @@ fn collect_matches(
 }
 
 /// Full metadata + time-series for one `journal_index` row.
-///
-/// Returns `Ok(None)` when the id is unknown. Aggregates (`article_count`,
-/// `first_year`, `last_year`, `pubs_by_year`, `citations_total`) are computed
-/// over `included` articles linked to this journal.
+/// Returns `Ok(None)` for unknown id. Aggregates over `included` articles.
 pub fn get_journal_info(
     conn: &Connection,
     journal_index_id: &str,

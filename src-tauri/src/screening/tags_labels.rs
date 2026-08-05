@@ -1,28 +1,15 @@
 use crate::error::AppError;
 use rusqlite::Connection;
 
-/// Maximum character length for newly created tags or labels that don't match
-/// existing ones.
-///
-/// Tags and labels must be concise descriptors, not full justifications. The
-/// screening system prompt instructs the LLM to keep tags <= 35 chars; this is
-/// the backend enforcement that strips prefixes and truncates at word
-/// boundaries so a too-long name never silently loses context (e.g.
-/// `"inclusion: this is a very long cr"` -> `"this-is-a-very-long"`).
+/// Max chars for newly created tags/labels. LLM prompt instructs ≤35; backend
+/// enforces + strips prefixes + truncates at word boundaries.
 pub const MAX_NEW_TAG_LABEL_LEN: usize = 35;
 
-/// Prefixes the LLM sometimes erroneously adds to tags/labels despite the
-/// system prompt instruction not to. Stripped before storage so the tag/label
-/// is a clean descriptor.
+/// Prefixes the LLM erroneously adds to tags/labels. Stripped before storage.
 pub const TAG_LABEL_PREFIXES: &[&str] = &["inclusion:", "exclusion:", "inclusion -", "exclusion -"];
 
-/// Sanitize a tag or label name before storage:
-/// 1. Strip any `inclusion:`/`exclusion:` prefix the LLM may have added.
-/// 2. Lowercase + trim.
-/// 3. Replace spaces/underscores with hyphens.
-/// 4. Truncate at a word boundary (hyphen) so the name is never cut mid-word.
-///
-/// Pure function (`#[must_use]`) so it can be unit-tested independently.
+/// Sanitize tag/label name: strip known prefixes, lowercase, replace spaces/underscores
+/// with hyphens, collapse repeats, truncate at word boundary.
 #[must_use]
 pub fn sanitize_tag_or_label_name(raw: &str, max_len: usize) -> String {
     // 1. Strip known prefixes (case-insensitive).
@@ -63,11 +50,7 @@ pub fn sanitize_tag_or_label_name(raw: &str, max_len: usize) -> String {
     }
 }
 
-/// Truncate at a word boundary (hyphen) so the result is at most `max_len`
-/// chars.
-///
-/// Pure helper (`#[must_use]`) used by `create_or_match_tag`/
-/// `create_or_match_label` to avoid cutting names mid-word.
+/// Truncate at last hyphen within `max_len` (word boundary). Hard-truncates if no hyphen.
 #[must_use]
 pub fn truncate_at_word_boundary(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {

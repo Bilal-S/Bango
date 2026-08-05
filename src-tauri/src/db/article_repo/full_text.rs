@@ -39,13 +39,9 @@ pub fn set_ai_summary(
     Ok(())
 }
 
-/// Update the full text and file attachment info for an article.
-///
-/// `has_figures_or_tables` is computed at attach time by
-/// `commands::full_text::attach_full_text_inner` via
-/// `utils::sections::extract_captions` (the same detector
-/// `generate_figure_descriptions` validates against), so the persisted flag
-/// matches the generation path's own precondition.
+/// Update full text and file attachment info. `has_figures_or_tables` is computed
+/// at attach time via `extract_captions` (same detector `generate_figure_descriptions`
+/// validates against).
 pub fn update_full_text(
     conn: &Connection,
     article_id: &str,

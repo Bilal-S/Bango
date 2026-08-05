@@ -1,19 +1,11 @@
-/**
- * Pure helpers for organizing an AI summary's `structured_extraction` record
- * into named display groups, and for ordering `section_summaries` cards.
+/* Pure helpers for organizing AI summary `structured_extraction` into named
+ * display groups and ordering `section_summaries` cards.
  *
- * The extraction prompt (`ai_article_summary_prompt.md`) has 5 field-specific
- * templates (STEM / Social Sciences / Business / Medicine / Humanities), each
- * emitting a different subset of keys. This module unions all documented keys
- * into 5 stable display groups so the view renders consistently regardless of
- * which field path the model took. Undocumented keys (forward-compat for
- * future extraction fields) are bucketed into a trailing "Other details"
- * group, which is omitted entirely when empty.
- *
- * Values may be a scalar string OR an array of strings (the prompt's templates
- * mix both shapes); the grouping logic is shape-agnostic and the view handles
- * rendering per value.
- */
+ * The extraction prompt has 5 field-specific templates (STEM/Social Sciences/
+ * Business/Medicine/Humanities), each emitting different keys. This module
+ * unions all documented keys into 5 stable groups. Undocumented keys
+ * (forward-compat) go into a trailing "Other details" group (omitted when empty).
+ * Values may be scalar or array; grouping is shape-agnostic. */
 
 import type { SectionSummary } from '@/composables/use-ai-summary';
 
@@ -23,24 +15,9 @@ export interface ExtractionGroup {
 }
 
 /**
- * The 5 named display groups, in display order. Keys are matched
- * case-insensitively against the (underscore-normalized) extraction key.
- *
- * Coverage verified against `ai_article_summary_prompt.md`:
- * - STEM: research_problem, motivation, methods_models, data_sources,
- *   experiments_evaluation, key_results, contributions, limitations, future_work
- * - Social Sciences: research_questions, theoretical_framework, hypotheses,
- *   methodology, statistical_methods, key_findings, interpretation, implications
- * - Business: domain, research_question, model_theory, data_sample_period,
- *   empirical_strategy, main_results, managerial_policy_implications
- * - Medicine: clinical_area, study_type, population, intervention_exposure,
- *   comparator, outcomes, statistical_results, safety_adverse_events, conclusions
- * - Humanities: topic, thesis_argument, theoretical_lens, evidence_sources,
- *   interpretation, contribution
- *
- * Note: `motivation`, `research_question` (singular), `evidence_sources`, and
- * `contribution` (singular) are also routed below; they are covered by the
- * unions even though they appear in only one template each.
+ * The 5 named display groups. Keys matched case-insensitively against the
+ * extraction key (underscore-normalized). Coverage verified against
+ * `ai_article_summary_prompt.md` and its 5 field-specific templates.
  */
 const EXTRACTION_GROUPS: Array<{ name: string; keys: string[] }> = [
   {
@@ -107,35 +84,22 @@ const EXTRACTION_GROUPS: Array<{ name: string; keys: string[] }> = [
 
 const OTHER_DETAILS_GROUP_NAME = 'Other details';
 
-/**
- * Normalize an extraction key for matching: lowercase, underscores → spaces,
- * trimmed. The LLM may emit keys in either `snake_case` (per prompt) or
- * `Title Case` (some models ignore the schema), so the matcher is tolerant.
- */
+/** Normalize extraction key for matching: lowercase, underscores→spaces, trimmed. */
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/_/g, ' ').trim();
 }
 
-/**
- * True when a value is non-empty (a non-empty string, or a non-empty array).
- * Empty strings and empty arrays are skipped so the view never renders an
- * empty `<p></p>` or an empty `<ul></ul>`.
- */
+/** True when value is non-empty (non-empty string or non-empty array). */
 function isNonEmptyValue(value: string | string[]): boolean {
   if (Array.isArray(value)) return value.length > 0;
   return typeof value === 'string' && value.trim().length > 0;
 }
 
 /**
- * Group a `structured_extraction` record into ordered display groups.
- *
- * - Each of the 5 named groups appears (in the order above) ONLY when at least
- *   one of its keys has a non-empty value in the record.
- * - Unmatched keys with non-empty values are collected into a trailing
- *   "Other details" group, which is omitted entirely when empty.
- * - Within a group, entries preserve their first-seen order in the record
- *   (stable across runs; not HashMap-dependent).
- * - Empty values (empty string or empty array) are skipped silently.
+ * Group `structured_extraction` into ordered display groups. Each named group
+ * appears only when at least one key has a non-empty value. Unmatched keys
+ * land in "Other details" (omitted when empty). Entries preserve first-seen
+ * order. Empty values are skipped silently.
  */
 export function groupExtractionFields(
   record: Record<string, string | string[]>
@@ -143,7 +107,6 @@ export function groupExtractionFields(
   const groups: ExtractionGroup[] = [];
   const matchedKeys = new Set<string>();
 
-  // Pre-compute the normalized record (skip empty values once).
   const normalizedEntries: Array<[string, string | string[]]> = Object.entries(record).filter(
     ([, value]) => isNonEmptyValue(value)
   );
@@ -162,7 +125,7 @@ export function groupExtractionFields(
     }
   }
 
-  // "Other details" bucket: any non-empty key not matched above.
+  // "Other details": any non-empty key not matched above
   const otherEntries: Array<[string, string | string[]]> = normalizedEntries.filter(
     ([key]) => !matchedKeys.has(key)
   );
@@ -174,19 +137,14 @@ export function groupExtractionFields(
 }
 
 /**
- * Preferred display order for `section_summaries` cards. Sections present in
- * this list appear first (in this order); any other section labels follow in
- * their original (first-seen) order. This stabilizes the card layout so
- * Methods/Results/Discussion always appear in the same positions regardless
- * of HashMap iteration order or the order the model emitted them.
+ * Preferred display order for `section_summaries` cards. Sections in this
+ * list appear first; others follow in original order. Stabilizes card layout
+ * regardless of HashMap iteration order.
  */
 const SECTION_PREFERRED_ORDER = ['methods', 'results', 'discussion', 'conclusion', 'introduction'];
 
-/**
- * Sort `section_summaries` by the preferred order; unrecognized sections
- * (e.g., "Author summary", custom headings) follow in their original order.
- * Pure: returns a new array; does not mutate the input.
- */
+/** Sort `section_summaries` by preferred order; unrecognized sections follow
+ *  in original order. Pure: returns new array, does not mutate input. */
 export function sortSectionSummaries(sections: SectionSummary[]): SectionSummary[] {
   const rankOf = (label: string): number => {
     const normalized = label.toLowerCase().trim();

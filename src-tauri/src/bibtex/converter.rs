@@ -25,8 +25,8 @@ fn map_entry_type(entry_type: &str) -> String {
     }
 }
 
-/// Splits a BibTeX pages field (e.g., "12--23" or "635-639") into start/end pages.
-/// Returns (start_page, end_page) as Option<String>.
+/// Splits "12--23" or "635-639" into (start, end). Single-dash splits
+/// only when both parts parse as `i32`.
 #[must_use]
 pub fn split_pages(pages: &str) -> (Option<String>, Option<String>) {
     let pages = pages.trim();
@@ -63,12 +63,9 @@ pub fn split_pages(pages: &str) -> (Option<String>, Option<String>) {
     (Some(pages.to_string()), None)
 }
 
-/// Cleans an ISSN/ISBN string for storage. Delegates to the shared
-/// `journal_repo::normalize_issn` so BibTeX and RIS imports use identical
-/// normalization rules (strips `; Print`/`(ISSN)` suffixes, inserts the hyphen
-/// in unhyphenated 8-digit values, rejects invalid ISBN-length garbage).
-/// Returns the cleaned ISSN or an empty string when the input is not a valid
-/// ISSN; callers store the result only when non-empty.
+/// Delegates to `journal_repo::normalize_issn` for consistent BibTeX/RIS
+/// normalization (strips `; Print`/`(ISSN)` suffixes, hyphenates 8-digit
+/// values). Returns "" for invalid input.
 #[must_use]
 pub fn clean_issn(issn: &str) -> String {
     crate::db::journal_repo::normalize_issn(issn)
@@ -175,10 +172,10 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
         record.keywords = split_keywords(kw_str);
     }
 
-    // Affiliation extraction with priority:
-    // 1. institution → use directly
-    // 2. organization → use directly
-    // 3. affiliation → if contains comma, extract last comma part; otherwise use as-is
+    /* Affiliation extraction priority:
+    1. institution → use directly
+    2. organization → use directly
+    3. affiliation → if comma, extract last part; otherwise as-is */
     if let Some(inst) = field_map.get("institution") {
         record.affiliation = Some(inst.trim().to_string());
     } else if let Some(org) = field_map.get("organization") {
@@ -207,11 +204,9 @@ pub fn bibtex_to_ris_record(entry: &BibtexEntry) -> RisRecord {
     record.num_references =
         field_map.get("number-of-cited-references").and_then(|v| v.trim().parse::<i32>().ok());
 
-    // Normalize BibTeX "cited-references" field to "CR" for CR parser compatibility.
-    // WoS BibTeX stores each cited reference on its own line inside braces.
-    // The BibTeX parser preserves newlines within brace-delimited values.
-    // Each line ends with a period '.' - we split on newlines, not periods,
-    // to avoid breaking DOIs like "10.1016/j.foreco.2017.04.005".
+    /* Normalize BibTeX "cited-references" → "CR" for CR parser compat.
+    WoS stores each reference on its own line inside braces. Split on
+    newlines (not periods) to preserve DOIs like "10.1016/j.foreco..." */
     if let Some(cr_text) = field_map.get("cited-references") {
         let lines: Vec<String> = cr_text
             .split('\n')

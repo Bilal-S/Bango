@@ -29,12 +29,9 @@ import ReferencesView from '@/components/references-view.vue';
 import OpenAlexSearch from '@/components/openalex-search.vue';
 import BatchRefProgress from '@/components/batch-ref-progress.vue';
 
-// Name the component so <keep-alive :include="['WikiView', 'ArticleList']"> in
-// app-shell.vue can cache it across navigation. Vue 3 <script setup> components
-// are anonymous by default. Mirrors the WikiView pattern: UI state (filters,
-// sort, page, opened detail panel, fullscreen) survives navigation away and
-// back, while `onActivated` refreshes the underlying data so rows + badges
-// reflect changes that happened elsewhere.
+/* Named so <keep-alive :include="['WikiView', 'ArticleList']"> in app-shell
+ * can cache across navigation. UI state survives navigation; `onActivated`
+ * refreshes underlying data. */
 defineOptions({ name: 'ArticleList' });
 
 const route = useRoute();
@@ -131,9 +128,8 @@ function handleNavigateToArticleWithRef(articleId: string, paperId?: string): vo
 }
 
 /**
- * Read the route deep-link query params used by the Articles view. Shared by
- * `onMounted` (initial mount) and `onActivated` (keep-alive re-activation) so
- * the parsing logic stays in one place.
+ * Read route deep-link query params. Shared by `onMounted` and `onActivated`
+ * so parsing logic stays in one place.
  */
 function readRouteDeepLinkParams(): {
   status?: string;
@@ -145,10 +141,8 @@ function readRouteDeepLinkParams(): {
   author?: string;
   filterCollapsed: boolean;
   /**
-   * When true, clear any preserved filter/query state in the cached
-   * ArticleList before applying the deep-link params (decision D5). Set by
-   * the bibliometric deep-link envelope (`buildBiblioArticleQuery`) so a
-   * fresh biblio filter does not overlay stale filters.
+   * When true, clear preserved filter/query state in cached ArticleList before
+   * applying deep-link params (decision D5). Set by `buildBiblioArticleQuery`.
    */
   resetFilters: boolean;
   articleId?: string;
@@ -163,13 +157,11 @@ function readRouteDeepLinkParams(): {
   const yearTo = typeof route.query.yearTo === 'string' ? Number(route.query.yearTo) : undefined;
   const journal = typeof route.query.journal === 'string' ? route.query.journal : undefined;
   const author = typeof route.query.author === 'string' ? route.query.author : undefined;
-  // filterCollapsed=1 → keep the filter panel collapsed (filters still applied)
+  // filterCollapsed=1 → keep filter panel collapsed (filters still applied)
   const filterCollapsed = route.query.filterCollapsed === '1';
-  // resetFilters=1 → clear any preserved filter/query state before applying
-  // the deep-link params (decision D5; set by `buildBiblioArticleQuery`).
+  // resetFilters=1 → clear preserved filter/query before applying (decision D5)
   const resetFilters = route.query.resetFilters === '1';
-  // articleId deep-link from the dashboard "Go to article" dot: load the All
-  // articles view and select the specific article so the detail panel opens.
+  // articleId deep-link (dashboard "Go to article"): opens detail panel
   const articleId = typeof route.query.articleId === 'string' ? route.query.articleId : undefined;
   const hasFilterParams = !!(
     status ||
@@ -196,10 +188,8 @@ function readRouteDeepLinkParams(): {
 }
 
 /**
- * Apply deep-link params when present: filter params go through
- * `applyRouteParams`, then the articleId is selected if provided. Returns true
- * when any deep-link param was applied (caller skips the plain-refresh path);
- * false when there is nothing to apply.
+ * Apply deep-link params: filter params -> `applyRouteParams`, then select
+ * articleId if provided. Returns true when any param was applied.
  */
 function applyDeepLinkParams(params: ReturnType<typeof readRouteDeepLinkParams>): boolean {
   const { hasFilterParams, articleId } = params;
@@ -219,8 +209,7 @@ function applyDeepLinkParams(params: ReturnType<typeof readRouteDeepLinkParams>)
       if (articleId) void selectArticle(articleId);
     });
   } else if (articleId) {
-    // Only an articleId deep-link (e.g. dashboard "Go to article" with no
-    // filter params) - just select it.
+    // Only articleId deep-link (dashboard "Go to article" with no filter params)
     void selectArticle(articleId);
   }
   return true;
@@ -230,8 +219,7 @@ onMounted(() => {
   const params = readRouteDeepLinkParams();
   const applied = applyDeepLinkParams(params);
   if (!applied) {
-    // No deep-link params - run the initial search. selectArticle is still
-    // called if an articleId happened to be present without filter params.
+    // No deep-link params - run initial search
     void search().then(() => {
       if (params.articleId) void selectArticle(params.articleId);
     });
@@ -239,29 +227,16 @@ onMounted(() => {
 });
 
 /**
- * Keep-alive re-activation. Preserves all UI state (status tab, filters, sort,
- * page, opened detail panel, fullscreen, multi-select) and refreshes the
- * underlying data so the view reflects changes that happened while away:
- *
- *  - Tab badges + article rows re-fetch via `search()` (which also calls
- *    `fetchCounts`), reusing the preserved `query` so filters/sort/page are
- *    kept.
- *  - The open article detail + audit trail re-fetch so AI summaries,
- *    translations, full-text attaches, status changes, etc. are picked up.
- *  - When the route carries deep-link params that differ from current state
- *    (dashboard "Go to article" dot, biblio deep-link, tag/label deep-link),
- *    those override the preserved state - explicit navigation wins.
- *
- * Note: Vue fires `onActivated` on the initial mount too (right after
- * `onMounted`), so the first call must be a no-op to avoid a duplicate search.
- * `isFirstActivation` is set to false *after* the skip check so the very first
- * call is the one that short-circuits.
+ * Keep-alive re-activation. Preserves UI state, refreshes underlying data.
+ * Tab badges + rows re-fetch via `search()` (reuses preserved query). Open
+ * detail + audit trail re-fetch. Deep-link params override preserved state.
+ * First call (right after `onMounted`) is a no-op to avoid duplicate search.
  */
 let isFirstActivation = true;
 
 onActivated(() => {
-  // Skip the very first activation (fires right after onMounted on the initial
-  // mount). onMounted already did the initial fetch + deep-link application.
+  /* Skip first activation (fires right after onMounted). onMounted already
+   * did the initial fetch + deep-link application. */
   if (isFirstActivation) {
     isFirstActivation = false;
     return;
@@ -270,19 +245,17 @@ onActivated(() => {
   const params = readRouteDeepLinkParams();
   const articleIdDiffers = !!params.articleId && selectedArticle.value?.id !== params.articleId;
 
-  // Deep-link wins: re-apply filter params and/or select the deep-linked
-  // article when they differ from the current state. This handles the
-  // dashboard "Go to article" dot clicking /articles?articleId=X while the
-  // cached view shows a different article, and biblio/tag/label deep-links
-  // arriving while the view is cached.
+  /* Deep-link wins: re-apply filter params and/or select deep-linked article
+   * when they differ from current state. Handles dashboard "Go to article",
+   * biblio/tag/label deep-links arriving while view is cached. */
   if (params.hasFilterParams || articleIdDiffers) {
     applyDeepLinkParams(params);
     return;
   }
 
-  // Plain navigation (sidebar click on "Articles" with no query): preserve all
-  // UI state and just refresh the data layer. Skip search() for the References
-  // and Search tabs - those child components own their data.
+  /* Plain navigation (sidebar click on "Articles" with no query): preserve
+   * all UI state and just refresh the data layer. Skip search() for
+   * References/Search tabs - those child components own their data. */
   const tab = activeStatusTab.value;
   if (tab === 'references' || tab === 'search') {
     // Refresh the tab badges so they reflect imports / screening / bulk edits
@@ -549,12 +522,9 @@ function handleBulkAddToChat(): void {
   void router.push('/chat');
 }
 
-// ── Bulk export ────────────────────────────────────────────────────
-// Sole entry point for "export selected": opens the OS save dialog and writes
-// the RIS for exactly the checked articles (not the whole tab/status). The
-// toolbar Export button + ExportDialog keep their tab/included behavior, so
-// the two export surfaces are cleanly separated: toolbar = tab/status, bulk
-// bar = selected rows only.
+/* Bulk export: sole entry point for "export selected." Opens OS save dialog
+ * and writes RIS for exactly checked articles. Toolbar Export = tab/status,
+ * bulk bar = selected rows only. */
 const { exportRisForIds, error: exportError } = useExport();
 
 async function handleBulkExport(): Promise<void> {
@@ -570,11 +540,8 @@ async function handleBulkExport(): Promise<void> {
   }
 }
 
-// ── Full text handlers ────────────────────────────────────────────
-// UI orchestration (file dialog + toasts) is centralized in
-// `useFullTextAttachment`; the auto-summarize branch is preserved via the
-// `onAttached` hook so behavior is byte-identical to the previous inline
-// implementation.
+/* Full text orchestration centralized in `useFullTextAttachment`; auto-summarize
+ * branch preserved via `onAttached` hook. */
 const { handleAttachFullText } = useFullTextAttachment({
   attachFullText,
   onAttached: (articleId) => {
@@ -582,9 +549,8 @@ const { handleAttachFullText } = useFullTextAttachment({
     if (localStorage.getItem('bango-full-text-summaries') === 'true') {
       const article = articles.value.find((a) => a.id === articleId);
       if (article) {
-        // Pass a completion callback so the detail panel refreshes when the
-        // summary finishes (even across navigation). Guarded so we don't
-        // yank the user back if they navigated away during the LLM call.
+        /* Pass completion callback so detail panel refreshes when summary
+         * finishes. Guarded to avoid yanking user back if they navigated away. */
         requestArticleAiSummary(articleId, article.title, handleAiSummaryComplete);
       }
     }
@@ -603,10 +569,9 @@ async function handleDeleteFullText(articleId: string): Promise<void> {
   }
 }
 
-// Article delete UI orchestration is centralized in `useArticleDelete`
-// (shared with the other detail-panel host views), mirroring
-// `useFullTextAttachment`. The composable owns the toast + post-delete hook;
-// `useArticleSearch.deleteArticle` owns the IPC + list/panel teardown.
+/* Article delete orchestration centralized in `useArticleDelete`. Composable
+ * owns toast + post-delete hook; `useArticleSearch.deleteArticle` owns IPC +
+ * list/panel teardown. */
 const { handleDeleteArticle } = useArticleDelete({
   deleteArticle,
   onDeleted: () => {
@@ -616,9 +581,8 @@ const { handleDeleteArticle } = useArticleDelete({
   },
 });
 
-// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
-// (shared with the other detail-panel host views). The composable owns the
-// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+/* AI-reasoning clear orchestration centralized in `useClearAiReasoning`.
+ * Composable owns toast; `useArticleSearch.clearAiReasoning` owns IPC + refresh. */
 const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 
 async function handleReadFullText(articleId: string): Promise<string | null> {
@@ -677,22 +641,15 @@ async function handleBatchScrapeRefs(): Promise<void> {
   });
 }
 
-// ── Keyboard navigation ────────────────────────────────────────────
-// Context-dependent arrow-key shortcuts:
-//  - Detail panel OPEN: ArrowLeft / ArrowRight -> previous / next article
-//    (reuses the same `navigatePrev` / `navigateNext` the footer chevrons use,
-//    including cross-page behavior).
-//  - Detail panel CLOSED (table focused): ArrowUp / ArrowDown -> select the
-//    previous / next row (same navigation functions; the table auto-scrolls to
-//    keep the selected row visible); ArrowLeft / ArrowRight -> simulate clicks
-//    on the horizontal-scroll chevrons that flank the table (only when the
-//    corresponding direction is available).
-//
-// The listener is wired on `onActivated` and removed on `onDeactivated`
-// because this view is keep-alive cached: `onMounted` fires only once for the
-// component's lifetime, so a listener added there would keep firing while the
-// user is on another view (Wiki, Settings). The paired activation hooks are
-// the correct lifecycle for keep-alive components.
+/* Keyboard navigation: context-dependent arrow-key shortcuts.
+ * Detail panel OPEN: ArrowLeft/Right -> prev/next article (reuses `navigatePrev`
+ * / `navigateNext` including cross-page behavior).
+ * Detail panel CLOSED (table focused): ArrowUp/Down -> select prev/next row;
+ * ArrowLeft/Right -> simulate horizontal scroll chevrons.
+ *
+ * Listener wired on `onActivated`, removed on `onDeactivated` because this
+ * view is keep-alive cached: `onMounted` fires once for component lifetime,
+ * so a listener there would fire while user is on another view. */
 const articleTableRef = ref<InstanceType<typeof ArticleTable> | null>(null);
 
 function isTypingTarget(target: EventTarget | null): boolean {

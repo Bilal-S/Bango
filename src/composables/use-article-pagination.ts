@@ -34,11 +34,9 @@ export function useArticlePagination(deps: PaginationDeps) {
   });
 
   const totalPages = computed(() => {
-    // When the view is filtered, the backend returns only the matching
-    // articles (capped at `pageSize`), so the page count is driven by the
-    // filtered result length, NOT the unfiltered tab total. Using
-    // `activeTotalCount` here would over-report pages (e.g. "Page 1 of 3"
-    // when only 5 articles match out of 25).
+    /* When filtered, the backend returns only matching articles (capped at
+    `pageSize`), so page count is driven by filtered length, NOT unfiltered
+    total. Using `activeTotalCount` would over-report pages. */
     const total = isFiltered.value ? resultCount.value : activeTotalCount.value;
     return Math.max(1, Math.ceil(total / pageSize.value));
   });
@@ -55,9 +53,8 @@ export function useArticlePagination(deps: PaginationDeps) {
   /** 1-based global position of the selected article across all pages. */
   const selectedGlobalIndex = computed(() => {
     if (selectedIndex.value < 0) return 0;
-    // When filtered, the loaded page IS the entire filtered result set (no
-    // offset math); the position is the 1-based index within it. The
-    // unfiltered branch keeps the multi-page global-position math.
+    /* When filtered, the loaded page IS the entire result set (no offset
+    math); position is 1-based within it. Unfiltered keeps multi-page math. */
     if (isFiltered.value) return selectedIndex.value + 1;
     return (currentPage.value - 1) * pageSize.value + selectedIndex.value + 1;
   });

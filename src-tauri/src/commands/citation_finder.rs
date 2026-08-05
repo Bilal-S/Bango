@@ -1,16 +1,10 @@
 //! Tauri commands for the Citation Finder (`citation_finder/AGENTS.md`).
 //!
-//! Three commands:
-//! - `find_citations`: the one-button entry point. Spawns a background task
-//!   that runs Phase A (readiness) → Phase B (auto-prepare embeddings if
-//!   coverage <100%) → Phase C (search). Emits `citation:progress` /
-//!   `citation:done` / `citation:error` events.
-//! - `cancel_citation_search`: sets the cancel token.
-//! - `get_citation_finder_readiness`: returns the coverage payload for toggle
-//!   visibility + tooltip hint.
-//!
-//! The `CitationFinderState` mirrors `BatchImportState`: `Arc<AtomicBool>`
-//! cancel token + `Arc<Mutex<CitationFinderProgress>>` snapshot.
+//! `find_citations`: one-button entry - spawns Phase A (readiness) → Phase B
+//! (auto-prepare embeddings if coverage <100%) → Phase C (search). Emits
+//! `citation:progress` / `citation:done` / `citation:error`.
+//! `cancel_citation_search` / `get_citation_finder_readiness` mirror
+//! `CitationFinderState`: `Arc<AtomicBool>` cancel + `Arc<Mutex<Progress>>` snapshot.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -28,10 +22,8 @@ use crate::citation_finder::search::{
     find_citations_inner, FindCitationsContext, HttpCitationLlmSender,
 };
 
-/// Managed state: cancel token + progress snapshot. The cancel token uses
-/// `AtomicBool` (not `Mutex<bool>`) to match the embedding runner's contract
-/// - `generate_embeddings_inner` takes `Option<Arc<AtomicBool>>` and the
-///   token must cover both Phase B and Phase C.
+/// Managed state: cancel token (`Arc<AtomicBool>`) + progress snapshot.
+/// Token covers both Phase B (embedding runner) and Phase C.
 pub struct CitationFinderState {
     cancel_token: Arc<AtomicBool>,
     progress: Arc<Mutex<CitationFinderProgress>>,
@@ -60,12 +52,8 @@ impl CitationFinderState {
     }
 }
 
-/// One-button entry point. Returns immediately after spawning the background
-/// task; the frontend tracks progress via events.
-///
-/// The command serializes `CitationFinderMode` from the frontend's
-/// `'whole_block' | 'per_statement'` (snake_case via serde rename - the
-/// frontend `CitationFinderMode` type mirrors these exact tokens).
+/// One-button entry. Returns immediately after spawning the background task;
+/// frontend tracks progress via events.
 #[tauri::command]
 pub async fn find_citations(
     app_handle: tauri::AppHandle,
@@ -75,13 +63,9 @@ pub async fn find_citations(
     mode: CitationFinderMode,
     status_filter: Vec<String>,
 ) -> Result<CitationFinderProgress, AppError> {
-    // ── Concurrent-start guard + reset (atomic under ONE lock) ──
-    // The guard check and the `is_running = true` reset MUST run under the
-    // same lock acquire. The previous shape released the lock between them,
-    // so two rapid `find_citations` calls could both pass the guard before
-    // either spawned task set `is_running` (TOCTOU race). Setting the flag
-    // here - before the lock is released and before the task is spawned -
-    // closes the window entirely.
+    /* Concurrent-start guard + reset (atomic under ONE lock). The guard check
+     * and `is_running = true` reset MUST run under the same lock to close the
+     * TOCTOU race where two rapid calls both pass the guard. */
     let cancel_handle = cf_state.cancel_handle();
     cancel_handle.store(false, Ordering::Relaxed);
     {
@@ -124,8 +108,8 @@ pub async fn find_citations(
         let progress_snapshot = Arc::clone(&progress_for_task);
         let app_handle_for_emit = app_handle_for_task.clone();
         let emit = move |p: CitationFinderProgress| {
-            // Update the shared snapshot (so `cancel_citation_search` + future
-            // polling see the latest state) + emit the event.
+            /* Update shared snapshot (so cancel_citation_search + polling see
+             * latest state) and emit the event. */
             if let Ok(mut guard) = progress_snapshot.lock() {
                 *guard = p.clone();
             }
@@ -142,10 +126,9 @@ pub async fn find_citations(
                 status_filter: statuses_for_task,
                 cancel_token: Arc::clone(&cancel_for_task),
                 emit_progress: &emit,
-                // Thread the app_handle so Phase B can forward the embedding
-                // runner's `embedding:progress` events to the frontend (the
-                // `use-citation-finder.ts` listener translates each into a
-                // `citation:progress` update). The clone is cheap (Arc-backed).
+                /* Thread app_handle so Phase B forwards embedding progress
+                 * events to the frontend (use-citation-finder.ts translates
+                 * each into a citation:progress update). */
                 app_handle: Some(app_handle_for_task.clone()),
             },
         )
@@ -164,12 +147,9 @@ pub async fn find_citations(
                 let _ = app_handle_for_task.emit("citation:done", &results);
             }
             Err(e) => {
-                // Strip the `AppError::Import` `"Import error: "` prefix so the
-                // frontend receives a clean user-facing message. The prefix is
-                // an artifact of the `thiserror` `#[error("Import error: {0}")]`
-                // format; the citation-finder uses `AppError::Import` because
-                // it's the only variant that takes a free-form `String`, not
-                // because the errors are import-related.
+                /* Strip `AppError::Import`'s `"Import error: "` prefix (a
+                 * thiserror artifact). Citation Finder uses Import because it's
+                 * the only free-form String variant, not due to import errors. */
                 let raw = format!("{e}");
                 let msg = raw.strip_prefix("Import error: ").unwrap_or(&raw).to_string();
                 let _ = app_handle_for_task.emit("citation:error", &msg);
@@ -204,6 +184,6 @@ pub async fn get_citation_finder_readiness(
     compute_readiness(&conn, &status_filter)
 }
 
-// (No trailing unused-import shim needed: `CitationResult` is re-exported by
-// the search module and reaches the frontend via the `citation:done` event
-// serialization, not via a direct command return.)
+/* `CitationResult` is re-exported by the search module and reaches the
+ * frontend via `citation:done` event serialization, not via a direct
+ * command return. */

@@ -1,10 +1,5 @@
-/**
- * Search Strategy Builder types (mirrors the Rust `models::search_strategy`
- * structs). Used by the criteria Pinia store + `search-strategy-card.vue`.
- *
- * The result is session-scoped (Pinia store), NOT persisted to the DB.
- * Spec: `docs/bango-v4-spec.md` §8.4.
- */
+/* Search Strategy Builder types. Session-scoped (Pinia store), not persisted.
+ * Spec: docs/bango-v4-spec.md §8.4. */
 
 export interface SearchStrategyResult {
   picoBreakdown: PicoBreakdown;

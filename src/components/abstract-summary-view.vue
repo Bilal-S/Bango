@@ -47,14 +47,9 @@ async function onGenerateFigureDescriptions(): Promise<void> {
   });
 }
 
-/** Regenerate the AI summary for this article. The backend
- *  `generate_article_ai_summary` command merges the fresh summary into the
- *  existing blob (preserving `figures`/`tables`), so regeneration is
- *  non-destructive: the summary fields are overwritten in place while the
- *  figure/table descriptions survive. Emits `refreshArticle` on completion so
- *  the parent re-fetches the article and the new summary renders. The
- *  `includeSections` param is left unset so the user's persisted
- *  `bango-section-summaries` preference is respected. */
+/** Regenerate AI summary. Backend merges into existing blob (preserving
+ *  figures/tables), so regeneration is non-destructive. Section summaries
+ *  param left unset so persisted `bango-section-summaries` is respected. */
 async function onRegenerateSummary(): Promise<void> {
   await requestArticleAiSummary(props.article.id, props.article.title, async (id) => {
     emit('refreshArticle', id);
@@ -76,15 +71,13 @@ const abstractTab = ref<'abstract' | 'aiSummary'>(defaultTab());
 const expandedSections = ref<Set<string>>(new Set());
 const sectionsExpanded = ref(false);
 
-// Per-group expand/collapse state for the Detailed Extraction block.
-// Groups are collapsed by default; the user expands them individually, or via
-// the "Expand all" toggle.
+/* Per-group expand/collapse state for Detailed Extraction. Groups are
+   collapsed by default; user expands individually or via "Expand all". */
 const expandedGroups = ref<Set<string>>(new Set());
 const groupsExpanded = ref(false);
 
-// Figures/Tables blocks are collapsed by default (same UX as section cards and
-// extraction groups). The user expands them to see the per-figure/per-table
-// description cards.
+/* Figures/Tables collapsed by default (same UX as section cards). User expands
+   to see per-figure/per-table description cards. */
 const figuresExpanded = ref(false);
 const tablesExpanded = ref(false);
 

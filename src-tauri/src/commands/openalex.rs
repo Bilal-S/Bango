@@ -1,12 +1,5 @@
-//! Tauri commands for the OpenAlex search integration.
-//!
-//! - `search_openalex`: search the OpenAlex catalog and return results with
-//!   reconstructed abstracts + 200-char snippets + `already_in_library` flags.
-//! - `import_openalex_articles`: map + insert + dedup + audit selected works.
-//!   Reuses the exact same pipeline as `import_ris_file`.
-//! - `check_dois_in_library`: batch-check which DOIs already exist in the library.
-//! - `get_openalex_settings` / `set_openalex_settings`: read/write the API key +
-//!   mailto + retrieve-references toggle.
+//! Tauri commands for OpenAlex search. `search_openalex`, `import_openalex_articles`
+//! (reuses same pipeline as RIS import), `check_dois_in_library`, smart search, settings.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -107,21 +100,14 @@ struct ImportDbResult {
     api_key: Option<String>,
 }
 
-/// Import selected OpenAlex works into the article library.
-///
-/// Three-phase pipeline:
-/// 1. **Sync DB work** (`spawn_blocking`): insert, classify, resolve, audit,
+/// Import selected OpenAlex works. Three-phase pipeline:
+/// 1. Sync DB (spawn_blocking): insert, classify, resolve journals, audit,
 ///    mark staleness, enqueue translations.
-/// 2. **Reference harvest** (async, if `retrieve_references` is enabled):
-///    fetch full work data via `fetch_works_by_ids` to get `referenced_works`,
-///    then batch-insert them as `reference_papers` + `article_reference_links`.
-/// 3. **PDF download** (async, for each imported article with an OA URL):
-///    download + `attach_full_text_inner`. Non-fatal: failures are logged to
-///    the article's audit trail (not the generic diagnostic log) so the user
-///    can see them in the Audit Timeline. When `auto_summarize` is true and
-///    the LLM is configured, the AI summary pipeline runs after a successful
-///    attach (mirrors the `bango-full-text-summaries` localStorage behavior
-///    from the manual attach path).
+/// 2. Reference harvest (async, if `retrieve_references`): fetch
+///    `referenced_works` + `cites:`, insert as `reference_papers` + links.
+/// 3. PDF download (async, per article with OA URL): download + attach full
+///    text. Non-fatal: failures logged to article's audit trail (not generic
+///    Diagnostics) so they surface in the Audit Timeline.
 #[tauri::command]
 pub async fn import_openalex_articles(
     app: AppHandle,
@@ -383,9 +369,7 @@ pub async fn import_openalex_articles(
 }
 
 /// Write an article-scoped audit entry (action = "error") so the failure
-/// surfaces in the article's Audit Timeline, not just the generic Diagnostics
-/// feed. Acquires the DB lock tolerantly; if the mutex is poisoned the failure
-/// is swallowed because the caller is already on an error/non-fatal path.
+/// surfaces in the Audit Timeline, not just generic Diagnostics.
 fn log_article_error(
     db_state: &State<'_, DbState>,
     article_id: &str,
@@ -474,9 +458,8 @@ pub fn set_openalex_settings(
     Ok(())
 }
 
-/// Download a PDF from an OpenAlex OA URL and attach it as full text for the
-/// given article. Gracefully handles CAPTCHA/paywall pages by returning an
-/// error message instead of crashing.
+/// Download a PDF from an OpenAlex OA URL and attach as full text for the
+/// given article. Gracefully handles CAPTCHA/paywall pages.
 #[tauri::command]
 pub async fn download_and_attach_openalex_pdf(
     db_state: State<'_, DbState>,
@@ -520,8 +503,8 @@ pub async fn download_and_attach_openalex_pdf(
 
 // ── Smart Search command ───────────────────────────────────────────────────
 
-/// Generate an OpenAlex Boolean query from the research aims + inclusion/exclusion
-/// criteria via the LLM. The user reviews the query before executing it.
+/// Generate an OpenAlex Boolean query from research aims + criteria via the LLM.
+/// The user reviews the query before executing it.
 #[tauri::command]
 pub async fn smart_search_openalex(
     db_state: State<'_, DbState>,

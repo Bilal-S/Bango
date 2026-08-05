@@ -9,9 +9,7 @@ export interface Article {
   publicationYear: number | null;
   doi: string | null;
   journal: string | null;
-  /** `journal_index.id` FK (resolved at import/edit time via ISSN/eISSN/title).
-   *  `null` when the journal name is not in the local index (the UI shows an
-   *  "(unrecognized)" annotation next to the Journal label in this case). */
+  /** `journal_index.id` FK. `null` → "(unrecognized)" annotation in UI. */
   journalIndexId: string | null;
   volume: string | null;
   issue: string | null;
@@ -65,13 +63,9 @@ export interface Article {
   hasFullText: boolean;
   /** Name of the attached full text file */
   fullTextFileName: string | null;
-  /** Whether the attached full text contains figure/table captions.
-   * Computed once at attach time (backend `extract_captions`) and persisted on
-   * the row so the "Describe Figures & Tables" button gate is cheap. */
+  /** Whether attached full text has figure/table captions (cheap gate stored on row). */
   hasFiguresOrTables: boolean;
-  /** True when the working text (title/abstract/full_text/chunks) has been
-   * permanently rewritten to English (Plan-A translation). Originals are
-   * preserved in `article_original_content` / `article_original_chunks`. */
+  /** Working text rewritten to English. Originals preserved in article_original_*. */
   isTranslated: boolean;
   /** DB-backed queue progress: 'none' | 'queued' | 'running' | 'succeeded' | 'failed'. */
   translationStatus: TranslationStatus;
@@ -177,12 +171,8 @@ export interface LabelWithCount extends Label {
   articleCount: number;
 }
 
-/**
- * Result of a tag/label merge (`merge_tag` / `merge_label` commands). The
- * precise counts are computed inside the destructive merge; the pre-confirm
- * dialog shows an honest upper bound (`from.articleCount`), and these values
- * surface in the success toast.
- */
+/** Tag/label merge result. Pre-confirm dialog shows `from.articleCount` as
+ *  upper bound; real counts surface in the success toast. */
 export interface MergeResult {
   fromName: string;
   intoName: string;
@@ -262,14 +252,11 @@ export interface ScreeningProgress {
   included: number;
   rejected: number;
   errors: number;
-  /** Articles deferred due to transient LLM errors (429/5xx/timeout/transport).
-   *  Not counted in `completed` or `errors` - left unscreened for the next run. */
+  /** Articles deferred due to transient LLM errors. Not counted in completed/errors. */
   deferred?: number;
-  /** Fatal error that stopped the run (e.g. auth failure, consecutive transient
-   *  failures). When set, `isRunning` is false and the UI shows a red banner. */
+  /** Fatal error that stopped the run. Shows red banner. */
   fatalError?: string | null;
-  /** Non-fatal warning (e.g. "LLM responding slowly"). When set, the UI shows a
-   *  yellow banner. The run continues. Cleared on next success. */
+  /** Non-fatal warning. Shows yellow banner. Cleared on next success. */
   warning?: string | null;
   isRunning: boolean;
   currentArticleTitles: string[];
@@ -279,10 +266,7 @@ export interface ScreeningProgress {
   stage?: string | null;
   /** Tier 3 two-stage: per-stage total (borderline article count). */
   stageTotal?: number | null;
-  /** Coarse run-phase label for the progress-bar sub-line so the UI shows
-   *  *which* phase is in flight, not just a frozen percentage. Values:
-   *  `"preparing:translating"`, `"preparing:chunking"`, `"screening"`,
-   *  `"stage2"`. `null` when no run is active. Diagnostics-only. */
+  /** Coarse run-phase label for progress-bar sub-line. Diagnostics-only. */
   phase?: string | null;
 }
 
@@ -363,11 +347,7 @@ export interface BatchRefScrapingProgress {
   currentArticleTitle: string;
 }
 
-/**
- * A single `journal_index` hit returned by the `search_journal_index` command.
- * Powers the article-metadata journal autocomplete. Distinct from any
- * bibliometric aggregate type.
- */
+/** Journal-index search hit for article-metadata autocomplete. */
 export interface JournalIndexMatch {
   id: string;
   journalTitle: string;
@@ -376,13 +356,8 @@ export interface JournalIndexMatch {
   publisherName: string | null;
 }
 
-/**
- * A structured suggestion row consumed by `suggest-input.vue` in its
- * `options` mode. When provided, the component renders `label` (bold) +
- * optional `sublabel` (muted) + optional `badge` (mono pill), and emits the
- * full object as the second `select` argument so the parent can read the
- * `id`. Used by the journal autocomplete.
- */
+/** Structured suggestion for `suggest-input.vue` `options` mode. Renders
+ *  label (bold) + optional sublabel (muted) + optional badge (pill). */
 export interface SuggestOption {
   id: string;
   label: string;

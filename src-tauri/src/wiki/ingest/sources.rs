@@ -1,4 +1,6 @@
-//! External-document source pages (Layer 1: pre-seed for uploaded documents).
+//! External-document source pages (Layer 1: pre-seed for Add Documents uploads).
+//! Pre-seeds `wiki/sources/{slug}.md` so `[[user-slug]]` / `[^art-user-slug]` resolve to
+//! navigable pages. Mirrors synthesis pre-seed: slug = user-slug, type = source.
 
 use std::path::Path;
 
@@ -16,9 +18,8 @@ pub struct UserDocRow {
     pub source_file: Option<String>,
 }
 
-/// Collect user-uploaded documents from `raw/*.md` (files with `source_kind`
-/// starting `user_`). Article exports (type `source` but no `source_kind`) are
-/// skipped - they are corpus articles, not external documents.
+/// Collect user-uploaded documents from `raw/*.md` (source_kind starts `user_`).
+/// Article exports (type source, no source_kind) are skipped.
 fn collect_user_documents(root: &Path) -> Result<Vec<UserDocRow>, AppError> {
     let raw_files = raw_export::list_raw_files(root)?;
     let mut out = Vec::new();
@@ -37,21 +38,9 @@ fn collect_user_documents(root: &Path) -> Result<Vec<UserDocRow>, AppError> {
     Ok(out)
 }
 
-/// Pre-seed `wiki/sources/{slug}.md` for every user-uploaded document in
-/// `raw/`. Each page is a first-class wiki node for the external document so
-/// `[[user-slug]]` wikilinks and `[^art-user-slug]` footnote references the
-/// LLM emits resolve to a navigable page instead of "Page not found".
-///
-/// This mirrors how included articles get pre-seeded synthesis pages (slug =
-/// article UUID): uploaded documents get pre-seeded source pages (slug =
-/// `user-...`). The two on-ramps are symmetric - every raw source has a
-/// corresponding wiki node.
-///
-/// Reviewed (user-edited) source pages are preserved. Documents without a
-/// recognized `source_kind` (not starting `user_`) are skipped - they are
-/// corpus articles handled by the synthesis pre-seeder.
-///
-/// Returns the count of pages written.
+/// Pre-seed `wiki/sources/{slug}.md` for every user-uploaded document in `raw/`. Each page
+/// is a wiki node so `[[user-slug]]` / `[^art-user-slug]` resolve. Reviewed pages preserved.
+/// Skips corpus articles (no `source_kind: user_*`). Returns count written.
 pub fn preseed_document_source_pages(root: &Path) -> Result<usize, AppError> {
     let sources_dir = root.join("wiki").join("sources");
     std::fs::create_dir_all(&sources_dir)?;
@@ -72,8 +61,7 @@ pub fn preseed_document_source_pages(root: &Path) -> Result<usize, AppError> {
     Ok(written)
 }
 
-/// Render the frontmatter + body for an external-document source page.
-/// Pure function (no I/O) so it is trivially testable.
+/// Render frontmatter + body for an external-document source page. Pure function.
 fn render_document_source_page(doc: &UserDocRow) -> (Frontmatter, String) {
     let mut fm = Frontmatter::default();
     fm.set("id", &doc.slug);
@@ -82,10 +70,8 @@ fn render_document_source_page(doc: &UserDocRow) -> (Frontmatter, String) {
     fm.set("slug", &doc.slug);
     fm.set("summary", &format!("Imported document: {}.", doc.title));
     fm.set("status", "draft");
-    // Self-reference: the source_articles field is the document's own slug so
-    // the wiki-page-viewer "Sources" footer + provenance chain resolve. The
-    // `[^art-{slug}]` footnote ref renderer (Layer 4 routing) also uses this
-    // to link the citation back to this page.
+    /* Self-reference: source_articles = own slug so viewer's Sources footer +
+    provenance chain resolves. `[^art-{slug}]` renderer also resolves via this. */
     fm.set("source_articles", &format!("[\"{}\"]", doc.slug));
     fm.set("content_source", &doc.source_kind);
     if let Some(ref source_file) = doc.source_file {
@@ -93,10 +79,8 @@ fn render_document_source_page(doc: &UserDocRow) -> (Frontmatter, String) {
     }
     fm.set("links", "[]");
 
-    // NOTE: do NOT emit `# {title}` as the first body line. The page title
-    // lives in frontmatter and is rendered separately by the wiki viewer's
-    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
-    // show the title twice on the rendered page.
+    /* Title in frontmatter, rendered by viewer header. Duplicating as
+    `# {title}` would show the title twice on the rendered page. */
     let mut body = String::new();
     body.push_str("Imported document added via Add Documents. ");
     body.push_str("The extracted text lives in the corresponding `raw/` companion `.md` ");

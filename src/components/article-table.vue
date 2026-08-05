@@ -60,10 +60,9 @@ function formatDate(dateStr: string | null): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-// Status-colored selection bar: the left border on the `#` column matches the
-// article's status pill color when the row is selected, so the user can see at
-// a glance which list the open article belongs to. Defaults to indigo for any
-// unrecognized status.
+/* Status-colored selection bar: left border on the `#` column matches article
+   status pill color when selected so user can see which list owns the open
+   article at a glance. Defaults to indigo for unrecognized status. */
 function statusBorderColor(status: ArticleStatus): string {
   switch (status) {
     case 'working':
@@ -79,11 +78,8 @@ function statusBorderColor(status: ArticleStatus): string {
   }
 }
 
-// Flash animation on status change: when an article's status changes (e.g. the
-// user moves it from working to rejected), the row briefly flashes in the new
-// status color so the update is visually confirmed. We track the previous
-// status per article ID and flag rows whose status just changed; the flag is
-// cleared after the CSS animation duration (~1.2s).
+/* Flash animation on status change: row briefly flashes the new status color.
+   Previous status tracked per article ID; flag cleared after ~1.2s animation. */
 const recentlyChangedIds = ref<Set<string>>(new Set());
 const previousStatusById = ref<Map<string, ArticleStatus>>(new Map());
 
@@ -161,12 +157,9 @@ watch(
   () => void nextTick(updateScrollState)
 );
 
-// Expose the horizontal-scroll controls + the availability flags so the
-// Articles view can drive them from the keyboard (ArrowLeft / ArrowRight
-// simulate clicks on the flank chevrons). The parent reads
-// `articleTableRef.value.canScrollLeft.value` and calls
-// `articleTableRef.value.scrollTable('left')`. The refs are exposed as-is
-// (readonly consumers); only this component mutates them via updateScrollState.
+/* Expose horizontal-scroll controls so the Articles view drives them via
+   keyboard (ArrowLeft/ArrowRight simulate flank chevron clicks). The parent
+   reads `canScrollLeft.value` / `canScrollRight.value` and calls `scrollTable`. */
 defineExpose({ scrollTable, canScrollLeft, canScrollRight });
 </script>
 

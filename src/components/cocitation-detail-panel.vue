@@ -144,12 +144,8 @@ const maxCoCiteWeight = computed(() => {
   return Math.max(...weights, 0.001);
 });
 
-/**
- * Status-aware badge for the matched library article. Renders the article's
- * status alongside "In Library" so users can see at a glance whether a matched
- * paper is included, rejected, working, or a duplicate. Papers without a match
- * show "Reference Only".
- */
+/** Status-aware badge: shows article status + "In Library" for matched papers,
+ *  "Reference Only" for unmatched. */
 const statusBadge = computed<{ text: string; classes: string }>(() => {
   const status = props.paper?.matchedArticleStatus;
   if (!props.paper?.matchedArticleId) {

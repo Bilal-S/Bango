@@ -17,12 +17,9 @@ function toggleAutoNavigate(): void {
   );
 }
 
-// ── Tier 3: Screening Mode (abstract | enhanced | two_stage) ────────────────
-// Persisted in app_settings (not localStorage) so it survives across devices
-// via project backup. All three modes are always selectable; the engine
-// applies Enhanced / Two-stage evidence retrieval only to articles that have
-// full text attached and silently falls back to abstract-only screening for
-// the rest (and for the whole run while no full text exists).
+/* Screening Mode: persisted in app_settings (not localStorage) so it survives
+   project backup. All three modes always selectable; engine applies Enhanced /
+   Two-stage evidence only to articles with full text and falls back silently. */
 const screeningMode = ref<ScreeningMode>('abstract');
 const fullTextArticleCount = ref(0);
 const modeLoading = ref(false);

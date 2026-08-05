@@ -1,13 +1,7 @@
-//! Embedding provider client.
+//! Per-provider HTTP shapes for embedding generation.
 //!
-//! Per-provider HTTP shapes for embedding generation. Routes through
-//! `client::shared_client()` for HTTP keep-alive but does NOT go through
-//! `send_chat_completion` (embeddings use a different endpoint + response
-//! shape).
-//!
-//! Provider model resolution is automatic + transparent: try a provider-default
-//! embedding model first, fall back to the configured chat model, disable with
-//! a toast if both fail. See `.worktrees/embed-plan.md` §5.
+//! Routes through `client::shared_client()` (NOT `send_chat_completion`). Model resolution:
+//! provider default → chat model → disabled. See `.worktrees/embed-plan.md` §5.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,9 +19,7 @@ struct EmbeddingRequest {
 #[derive(Debug, Deserialize)]
 struct EmbeddingResponse {
     data: Vec<EmbeddingData>,
-    // `usage` is deserialized for future diagnostics (token accounting) but
-    // not currently read. Allowed dead-code rather than removed so the field
-    // stays available without a schema-shape change later.
+    /* Deserialized for future token accounting; not currently read. */
     #[serde(default)]
     #[allow(dead_code)]
     usage: Option<EmbeddingUsage>,
@@ -91,8 +83,8 @@ struct GoogleEmbeddingValues {
 
 // ── Model resolution ────────────────────────────────────────────────────────
 
-/// The provider-default embedding model. Returns `None` when the provider has
-/// no canonical default (the probe then uses the configured chat model).
+/// Provider-default embedding model. Returns `None` when the provider has
+/// no canonical default (probe falls back to the configured chat model).
 #[must_use]
 pub fn default_embedding_model(provider: &LlmProvider) -> Option<&'static str> {
     match provider {
@@ -108,9 +100,7 @@ pub fn default_embedding_model(provider: &LlmProvider) -> Option<&'static str> {
     }
 }
 
-/// Whether a provider has a known embedding API. Anthropic and Z.AI are
-/// known-unsupported; all others are tried at runtime (404/405 handled as a
-/// disabled outcome by the probe).
+/// Known-unsupported providers return `false`; all others tried at runtime.
 #[must_use]
 pub fn check_embedding_support(provider: &LlmProvider) -> bool {
     !matches!(provider, LlmProvider::Anthropic | LlmProvider::ZAi)
@@ -118,11 +108,10 @@ pub fn check_embedding_support(provider: &LlmProvider) -> bool {
 
 // ── v2: per-provider batch + token limits ───────────────────────────────────
 
-/// Per-provider limits that govern how [`split_text_by_token_budget`] +
-/// `send_embedding_batch_parallel` chunk + dispatch embedding requests.
+/// Per-provider limits for chunking + dispatching embedding requests.
 ///
 /// All three caps must be respected simultaneously: a sub-batch is closed when
-/// ANY of the three would be exceeded by adding one more input.
+/// ANY would be exceeded by adding one more input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmbeddingLimits {
     /// Max input strings per single `/embeddings` request. OpenAI: 2048,
@@ -138,9 +127,8 @@ pub struct EmbeddingLimits {
     pub max_tokens_per_batch: usize,
 }
 
-/// Conservative defaults for unknown / Custom providers. Kept small enough
-/// that any reasonable local server accepts the request; production users on
-/// OpenAI/Mistral get the larger per-model overrides below.
+/// Conservative defaults for unknown / Custom providers (small enough that any
+/// reasonable local server accepts).
 const DEFAULT_LIMITS: EmbeddingLimits = EmbeddingLimits {
     max_inputs_per_batch: 32,
     max_tokens_per_input: 512,
@@ -155,22 +143,15 @@ const OPENAI_COMPATIBLE_LIMITS: EmbeddingLimits = EmbeddingLimits {
     max_tokens_per_batch: 300_000,
 };
 
-/// Resolve the per-provider + per-model limits used by the v2 batch pipeline.
+/// Per-provider + per-model limits for the v2 batch pipeline.
 ///
-/// The model name is consulted for known OpenAI/Mistral variants with smaller
-/// per-input caps (e.g. some older OpenAI models had 2046-token limits). For
-/// Ollama we conservatively assume a small-context embedding model unless the
-/// model name matches a known large-context family (`nomic-embed-text`:
-/// 8192; `mxbai-embed-large`: 512).
-///
-/// Pure `#[must_use]` so it is unit-testable in isolation.
+/// Model name consulted for known variants (e.g. `nomic-embed-text`: 8192 tokens;
+/// `mxbai-embed-large`: 512). Pure `#[must_use]` for unit-test isolation.
 #[must_use]
 pub fn embedding_limits(provider: &LlmProvider, model: &str) -> EmbeddingLimits {
     match provider {
         LlmProvider::Openai => {
-            // All current OpenAI embedding models (3-small, 3-large, ada-002)
-            // share the 8191 per-input cap. Override only if a future smaller
-            // model is detected by name.
+            /* All current models share 8191 per-input cap. */
             EmbeddingLimits {
                 max_inputs_per_batch: 2048,
                 max_tokens_per_input: 8191,
@@ -183,9 +164,7 @@ pub fn embedding_limits(provider: &LlmProvider, model: &str) -> EmbeddingLimits 
             max_tokens_per_batch: 300_000,
         },
         LlmProvider::Google => EmbeddingLimits {
-            // Google's `embedContent` is one-text-per-call; `batchEmbedContents`
-            // (deferred per plan §5.1) accepts up to 100 inputs. We use the
-            // single-call shape, so max_inputs_per_batch = 1.
+            /* `embedContent` is one-text-per-call; single-call shape used. */
             max_inputs_per_batch: 1,
             max_tokens_per_input: 2048, // text-embedding-004
             max_tokens_per_batch: 2048,
@@ -208,10 +187,8 @@ pub fn embedding_limits(provider: &LlmProvider, model: &str) -> EmbeddingLimits 
         }
         LlmProvider::Custom => OPENAI_COMPATIBLE_LIMITS,
         LlmProvider::Anthropic | LlmProvider::ZAi => {
-            // Unsupported; the probe flips to Disabled before this is reached.
-            // Return conservative defaults so a misconfigured call still splits
-            // conservatively rather than sending a huge batch the provider
-            // can't handle.
+            /* Unsupported; probe would disable before reaching this. Conservative
+            defaults so a misconfigured call splits safely. */
             DEFAULT_LIMITS
         }
     }
@@ -219,15 +196,14 @@ pub fn embedding_limits(provider: &LlmProvider, model: &str) -> EmbeddingLimits 
 
 // ── Embedding call ──────────────────────────────────────────────────────────
 
-/// Embed one or more texts via the provider's embedding endpoint.
+/// Embed texts via the provider's embedding endpoint.
 ///
-/// Providers with batch support (OpenAI-compatible) send `input: [...]` in one
-/// request and return `Vec<Vec<f32>>` in input order. Ollama and Google lack
-/// batch endpoints, so this function issues one request per text (still
-/// bounded by the orchestrator's semaphore when called through `send_embedding`).
+/// OpenAI-compatible providers send `input: [...]` in one batch request. Ollama/Google
+/// issue one request per text (still bounded by the orchestrator's semaphore via
+/// `send_embedding`).
 ///
-/// Returns `(vectors, dimensions)`. The dimensions are taken from the first
-/// vector; the caller validates the rest match.
+/// Returns `(vectors, dimensions)`. Dimensions taken from the first vector;
+/// caller validates the rest match.
 pub async fn embed_texts(
     config: &LlmConfig,
     texts: &[String],
@@ -322,7 +298,7 @@ pub async fn embed_texts(
 
 // ── Capability probe ────────────────────────────────────────────────────────
 
-/// The outcome of probing a provider for embedding support.
+/// Embedding capability probe result.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProbeOutcome {
@@ -334,17 +310,14 @@ pub struct ProbeOutcome {
     pub reason: String,
 }
 
-/// Probe a provider for embedding capability. Resolution order:
-/// 1. Anthropic -> `disabled` immediately.
-/// 2. User override (if set + non-empty) -> try first. On failure, fall through
-///    to auto-detection so a bad override never hard-disables embeddings.
-/// 3. Try provider-default embedding model with a tiny probe text.
-/// 4. On failure, retry with the configured chat model.
-/// 5. All fail -> `disabled`.
+/// Probe provider embedding capability. Resolution order:
+/// 1. Anthropic → `disabled` immediately.
+/// 2. User override (premium, if non-empty) → try first; on failure fall through.
+/// 3. Provider-default embedding model with tiny probe text.
+/// 4. Configured chat model.
+/// 5. All fail → `disabled`.
 ///
-/// `override_model` is the premium user's pinned embedding model name (read
-/// from `app_settings.embedding_model_override`). Pass `None` for the
-/// historical auto-detection-only behavior (used by all non-premium callers).
+/// `override_model`: premium pinned model name from `app_settings`. `None` = auto-detection.
 pub async fn probe_embedding_support(
     config: &LlmConfig,
     override_model: Option<&str>,
@@ -358,9 +331,8 @@ pub async fn probe_embedding_support(
         };
     }
 
-    // Try the user's override first (if set). A failure here is non-fatal -
-    // fall through to auto-detection so a stale/incorrect override never
-    // hard-disables embeddings.
+    /* Try user override first. Failure is non-fatal — fall through to auto-detection
+    so a stale/incorrect override never hard-disables embeddings. */
     if let Some(ov) = override_model.map(str::trim).filter(|s| !s.is_empty()) {
         match embed_texts(config, &["probe".to_string()], ov).await {
             Ok((vectors, dims)) if !vectors.is_empty() => {

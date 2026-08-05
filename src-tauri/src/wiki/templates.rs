@@ -1,8 +1,5 @@
-//! Seed templates written into `wiki-root/templates/` on `wiki_init`.
-//!
-//! Templates are reference skeletons the LLM follows when generating
-//! `/wiki/{type}/{slug}.md` pages. They are also useful for users adding
-//! pages by hand. These are written once; users may edit them afterwards.
+//! Seed templates for `wiki-root/templates/`. Reference skeletons the LLM follows when
+//! generating pages. Also useful for users adding pages by hand. Written once; overwritten on `wiki_init`.
 
 use std::path::Path;
 
@@ -17,9 +14,7 @@ const TEMPLATES: &[(&str, &str)] = &[
     ("source.md", SOURCE_TEMPLATE),
 ];
 
-/// Write all seed templates into `wiki-root/templates/`.
-/// Idempotent: overwrites existing template files so the schema stays current
-/// with the binary. (Templates are reference skeletons, not user content.)
+/// Write all seed templates into `wiki-root/templates/`. Idempotent: overwrites existing.
 pub fn write_all(templates_dir: &Path) -> Result<(), AppError> {
     std::fs::create_dir_all(templates_dir).map_err(|e| {
         AppError::Import(format!(

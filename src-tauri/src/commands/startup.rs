@@ -1,25 +1,16 @@
 //! Startup upgrade orchestration.
 //!
-//! Exposes the schema-status probe and the one-shot legacy upgrade command to
-//! the frontend. The upgrade backs up the legacy DB to `app_data_dir`, rebuilds
-//! the schema, reloads the bundled journal index, and restores user data via
-//! `project::import_project`. The backup file is intentionally never deleted so
-//! the user can recover if anything goes wrong.
+//! Exposes the schema-status probe and the one-shot legacy upgrade command.
+//! The upgrade backs up the legacy DB to `app_data_dir`, rebuilds the schema,
+//! reloads the bundled journal index, and restores user data via
+//! `project::import_project`. The backup file is never deleted.
 //!
 //! Loop-safety (1.0.26 -> 2.x upgrade): a webview `window.location.reload()`
-//! runs in the SAME Rust process, so managed state is NOT recomputed. Earlier,
-//! `get_startup_status` returned a snapshot frozen at setup time, so after a
-//! successful upgrade the snapshot still said `Legacy` and the frontend
-//! re-triggered the upgrade on every reload -> endless loop. The snapshot is
-//! now kept honest by two independent layers:
-//!
-//! 1. `get_startup_status` re-probes the LIVE schema on every call (falling
-//!    back to the snapshot only if the live probe errors).
-//! 2. `perform_legacy_upgrade` updates the managed snapshot after a successful
-//!    rebuild.
-//!
-//! Either layer alone breaks the loop; both together make it structurally
-//! impossible.
+//! runs in the SAME Rust process, so managed state is NOT recomputed.
+//! `get_startup_status` re-probes the LIVE schema on every call (falling back
+//! to the snapshot only if the live probe errors), and `perform_legacy_upgrade`
+//! updates the managed snapshot after a successful rebuild. Either layer alone
+//! breaks the loop; both together make it structurally impossible.
 
 use std::fs;
 use std::io::Write;
@@ -35,11 +26,11 @@ use crate::export::legacy_project::export_legacy_project;
 use crate::export::project::import_project;
 
 /// Startup schema classification captured in `lib.rs` setup so the frontend
-/// has a snapshot available before any command runs. The field is wrapped in a
-/// `Mutex` so `perform_legacy_upgrade` can keep it honest after rebuilding the
-/// schema (layer 2 of loop-safety).
+/// has a snapshot before any command runs. Wrapped in `Mutex` so
+/// `perform_legacy_upgrade` can keep it honest after rebuilding the schema
+/// (layer 2 of loop-safety).
 ///
-/// `get_startup_status` does NOT rely on this snapshot as the source of truth
+/// `get_startup_status` does NOT rely on this snapshot as source of truth
 /// at query time: it re-probes the live schema. The snapshot exists only as a
 /// fallback (if the live probe fails) and as observability.
 #[derive(Debug)]
@@ -71,12 +62,11 @@ pub struct StartupStatusResponse {
 }
 
 /// Decide whether the legacy upgrade is needed, given a live DB probe result
-/// and the setup-time snapshot fallback. Extracted as a pure function so it can
-/// be unit-tested without a Tauri runtime.
+/// and the setup-time snapshot fallback. Pure function for unit testing without
+/// a Tauri runtime.
 ///
-/// - Returns `true` only if the live probe says `Legacy`, OR (only when the
-///   live probe itself errored) the snapshot said `Legacy`.
-/// - Returns `false` for `Current`/`FreshDb` from the live probe.
+/// Returns `true` only if the live probe says `Legacy`, OR (only when the
+/// live probe itself errored) the snapshot said `Legacy`.
 #[must_use]
 pub fn legacy_upgrade_needed(live: Result<SchemaStatus, AppError>, fallback: SchemaStatus) -> bool {
     match live {
@@ -123,9 +113,9 @@ pub struct LegacyUpgradeResult {
 /// 6. Update the managed `StartupStatus` snapshot so the post-reload
 ///    `get_startup_status` call agrees with the live schema.
 ///
-/// The backup file is never deleted by this command. If any step fails, the
-/// returned `AppError` includes the backup path in its message when one was
-/// already written, so the user can locate their data.
+/// The backup file is never deleted. If any step fails, the returned
+/// `AppError` includes the backup path in its message when one was already
+/// written, so the user can locate their data.
 #[tauri::command]
 pub fn perform_legacy_upgrade(
     app: AppHandle,

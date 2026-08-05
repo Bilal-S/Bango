@@ -4,16 +4,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useToast } from './use-toast';
 
 /**
- * Translation queue UI orchestration (language-plan-v2 Phase 5).
- *
- * Owns the confirmation-dialog state, the Tauri `enqueueArticleTranslation`
- * invoke, the immediate toast feedback, and the global `translation:complete`
- * event listener that refreshes the article + shows a success/error toast.
- *
- * Mirrors the `use-ai-summary.ts` pattern: the composable holds shared
- * singleton state so any host component (article-detail-panel, article-list,
- * biblio-citations, chat-view, wiki-view) can trigger a translation with one
- * call and the toasts + event-driven refresh work uniformly.
+ * Translation queue UI orchestration. Mirrors `use-ai-summary.ts` pattern.
  */
 
 /** Article IDs with a translation currently queued or running. */
@@ -53,15 +44,9 @@ async function ensureGlobalListener(
 }
 
 export interface UseTranslationOptions {
-  /** Called when a translation completes (success or failure) so the host
-   * can refresh its article state. */
+  /** Called on translation completion (success or failure). */
   onTranslationComplete?: (articleId: string, success: boolean, error?: string) => void;
-  /** Called immediately after a translation is successfully enqueued (the
-   * backend has written `translation_status = 'queued'`) so the host can
-   * refresh its article state and the status badge flips to the
-   * "Translation Queued" spinner chip right away. Without this the badge
-   * stays stale until the worker eventually emits `translation:complete`
-   * (which can take minutes for full-text translations). */
+  /** Called immediately after translation is enqueued so the status badge updates. */
   onTranslationQueued?: (articleId: string) => void;
 }
 
@@ -97,11 +82,9 @@ export function useTranslation(options: UseTranslationOptions = {}) {
         triggerSource: 'manual',
       });
       show(`Translation queued for: ${translateArticleTitle.value}`, 'info');
-      // Notify the host so it can refresh the article state immediately. The
-      // backend has just written `translation_status = 'queued'`, so a refresh
-      // flips the status badge to the "Translation Queued" spinner chip right
-      // away - without this the badge stays stale until `translation:complete`
-      // fires (which can take minutes for full-text translations).
+      /* Notify the host so it can refresh article state immediately. Backend
+      has written `translation_status = 'queued'`, so a refresh flips the badge
+      right away - without this it stays stale until `translation:complete`. */
       options.onTranslationQueued?.(articleId);
     } catch (e) {
       pendingTranslations.value.delete(articleId);

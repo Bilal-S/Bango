@@ -31,19 +31,15 @@ const {
 const articlesStore = useArticlesStore();
 const criteriaStore = useCriteriaStore();
 
-/** Active output mode: Literature Review (existing) or Research Gaps (new).
- *  Defaults to the literature review so the existing UX is unchanged. Set
- *  implicitly by which generate button is clicked; no toggle UI. */
+/** Output mode: Literature Review or Research Gaps. Default is review. Set
+ *  implicitly by which generate button is clicked. */
 const mode = ref<'review' | 'gaps'>('review');
 
 const copied = ref(false);
 
-/** Switch-vs-regenerate dialog state. When the user clicks a generate button
- *  whose target report already has content, we open this dialog instead of
- *  regenerating blindly. The user can either view the existing report
- *  (instant, no LLM call) or regenerate it (overwrites the persisted report).
- *  `pendingKind` records which report the user clicked; `showSwitchDialog`
- *  controls the overlay visibility. */
+/** Switch-vs-regenerate dialog. When target report already has content, open
+ *  this instead of regenerating blindly. User can view existing or regenerate.
+ *  `pendingKind` records which report was clicked. */
 const pendingKind = ref<'review' | 'gap' | null>(null);
 const showSwitchDialog = ref(false);
 
@@ -57,15 +53,11 @@ const CITATION_STYLES: CitationStyle[] = ['APA', 'MLA', 'Chicago', 'IEEE', 'AMA'
 const includedCount = computed(() => articlesStore.byStatus.included);
 const hasAims = computed(() => criteriaStore.aims.length > 0);
 // Canonical LLM-configured gate (wraps `useLlmConfigStore().isConfigured`).
-// The composable mirrors the backend `llm_config_repo::has_config` contract
-// (local providers like LM Studio / Ollama / llama.cpp do not need a key) and
-// defensively pre-warms the store via `fetchIfNeeded()`.
 const hasLlmConfig = useLlmConfigured();
 
 const canGenerate = computed(() => includedCount.value > 0 && hasAims.value && hasLlmConfig.value);
 
-/** Any generation in flight (either mode). Used to cross-disable the two
- *  generate buttons so only one report can run at a time. */
+/** Any generation in flight. Cross-disables both generate buttons. */
 const anyLoading = computed(() => summaryLoading.value || gapLoading.value);
 
 /** Active error is mode-specific. */
@@ -93,13 +85,7 @@ const missingRequirements = computed<string[]>(() => {
   return missing;
 });
 
-/** Rendered HTML of the active report. Kept as a `ref` driven by an explicit
- *  `watch(activeText)` (NOT a computed) so the DOM re-renders in the same tick
- *  the underlying `gapText`/`summaryText` singleton ref mutates after an LLM
- *  call returns. The computed form occasionally failed to trigger a repaint on
- *  live LLM completion (the test suite passed but the running app did not
- *  update until a route change forced `onMounted` to re-read); the explicit
- *  watch sidesteps that scheduler edge case. */
+/** Rendered HTML of active report. Watch-driven to repaint after live LLM completion. */
 const renderedHtml = ref<string>('');
 
 watch(

@@ -105,9 +105,9 @@ const hoveredNode = ref<CitationNode | null>(null);
 const tooltipX = ref(0);
 const tooltipY = ref(0);
 
-// Guard against async callbacks (rAF, worker results) firing after unmount.
-// Without this, a pending requestAnimationFrame can call initRenderer() on a
-// detached container during route transitions, causing crashes.
+/* Guard against async callbacks (rAF, worker results) firing after unmount.
+   Without this, a pending rAF can call initRenderer() on a detached container
+   during route transitions, causing crashes. */
 let isUnmounted = false;
 let pendingFrame: number | null = null;
 
@@ -159,13 +159,8 @@ watch(
   }
 );
 
-/**
- * Centralized visual state dispatcher.
- *
- * Isolation takes precedence over focus mode, which takes precedence over
- * cluster highlight.  When none are active, the default full-brightness state
- * is restored.
- */
+/** Centralized visual state dispatch. Isolation > focus > cluster highlight.
+ *  None active → default full-brightness restored. */
 function applyVisualState() {
   if (!props.graph) return;
   const g = props.graph;

@@ -1,8 +1,7 @@
-//! Response types for the Search Strategy Builder (spec §8.4).
-//!
-//! Produced by `commands::search_strategy::suggest_search_strategy` and
-//! consumed by the frontend `src/components/search-strategy-card.vue`. The
-//! result is session-scoped (Pinia store), NOT persisted to the DB.
+/*! Response types for the Search Strategy Builder (spec §8.4).
+Produced by `commands::search_strategy::suggest_search_strategy` and
+consumed by the frontend `src/components/search-strategy-card.vue`. The
+result is session-scoped (Pinia store), NOT persisted to the DB. */
 
 use serde::{Deserialize, Serialize};
 
@@ -17,9 +16,9 @@ pub struct SearchStrategyResult {
     pub warnings: Vec<StrategyWarning>,
 }
 
-/// PICO concept decomposition of the research aims/criteria. Each arm is
-/// optional; the LLM may omit arms that do not apply (e.g., observational
-/// reviews often have no `Comparison`).
+/** PICO concept decomposition of the research aims/criteria. Each arm is
+optional; the LLM may omit arms that do not apply (e.g., observational
+reviews often have no `Comparison`). */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PicoBreakdown {
@@ -43,9 +42,9 @@ pub struct ConceptBlock {
     pub synonyms: Vec<String>,
 }
 
-/// One Boolean strategy string per supported database (8 total). All eight
-/// fields are populated by the LLM in a single response. Semantic Scholar is
-/// intentionally absent because it does not support Boolean operators.
+/** One Boolean strategy string per supported database (8 total). All eight
+fields are populated by the LLM in a single response. Semantic Scholar is
+intentionally absent because it does not support Boolean operators. */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategiesByDatabase {
@@ -74,9 +73,9 @@ pub struct DatabaseStrategy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StrategyWarning {
-    /// Free-form category tag. Common values: `sensitivity_concern`,
-    /// `missing_concept`, `non_boolean_database`. Not enum-typed so the LLM
-    /// can introduce new categories without a schema change.
+    /** Free-form category tag. Common values: `sensitivity_concern`,
+    `missing_concept`, `non_boolean_database`. Not enum-typed so the LLM
+    can introduce new categories without a schema change. */
     pub warning_type: String,
     pub message: String,
 }

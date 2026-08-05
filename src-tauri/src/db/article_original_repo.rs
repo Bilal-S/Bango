@@ -1,11 +1,6 @@
-//! Repository for the `article_original_content` and `article_original_chunks`
-//! tables (Plan-A translation originals archive).
-//!
-//! Populated once at translation time, before the working `articles` row is
-//! rewritten to English. `source_language` captures the `articles.language`
-//! value at translation time. After translation, re-chunking produces new
-//! indices in `article_chunks`; the chunk coordinate spaces must not be
-//! compared or joined directly.
+//! Repository for `article_original_content` + `article_original_chunks`
+//! (Plan-A translation originals archive). Populated at translation time before
+//! the working row is rewritten to English.
 
 use rusqlite::{params, Connection};
 
@@ -23,11 +18,8 @@ pub struct OriginalContent {
     pub stored_at: String,
 }
 
-/// Persist the original-language content for an article.
-///
-/// `INSERT OR REPLACE` so the row is (re)written each time a translation runs.
-/// Phase 2 callers pass `original_full_text = None`; Phase 3 (full-text
-/// translation) populates it.
+/// Persist the original-language content. `INSERT OR REPLACE` — rewritten each
+/// time a translation runs. Phase 2 passes `original_full_text = None`; Phase 3 populates it.
 pub fn insert_original_content(
     conn: &Connection,
     article_id: &str,
@@ -76,9 +68,8 @@ pub fn get_original_content(
     }
 }
 
-/// Replace all original chunks for one article with the given set. Idempotent:
-/// deletes existing rows first, then inserts the new set. Mirrors
-/// `chunk_repo::replace_chunks_for_article`.
+/// Replace all original chunks for an article. Idempotent (delete + re-insert).
+/// Mirrors `chunk_repo::replace_chunks_for_article`.
 pub fn replace_original_chunks(
     conn: &Connection,
     article_id: &str,

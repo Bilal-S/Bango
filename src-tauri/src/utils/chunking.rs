@@ -1,11 +1,9 @@
-//! Semantic chunking of classified sections into FTS5-indexable chunks.
-//!
-//! Pure functions that walk `Section`s and emit `Chunk`s bounded by target word
-//! counts. Used by `wiki::fts::collect_page_rows` to produce row-per-chunk FTS5
-//! entries so Wiki Chat BM25 retrieval returns the *relevant passage* instead of
-//! truncating a whole page.
-//!
-//! No I/O, no DB. All functions are `#[must_use]` pure.
+/*! Semantic chunking of classified sections into FTS5-indexable chunks.
+
+Walks `Section`s and emits `Chunk`s bounded by target word counts. Used by
+`wiki::fts::collect_page_rows` so Wiki Chat BM25 returns the relevant passage.
+
+Pure, `#[must_use]`, no I/O, no DB. */
 
 use crate::utils::sections::{Section, SectionKind};
 
@@ -31,23 +29,13 @@ pub struct Chunk {
     pub word_count: usize,
 }
 
-/// Split a list of `Section`s into `Chunk`s.
-///
-/// Algorithm:
-/// - Walk `Section`s in order, skipping `SectionKind::References` entirely
-///   (and any empty-body section).
-/// - Each section becomes one or more chunks:
-///   - If the section body has <= `target_words` words, it is one chunk.
-///   - If it is longer, split at sentence boundaries (`(?<=[.!?])\s+`) into
-///     pieces of <= `target_words` words, then merge any trailing piece shorter
-///     than `MIN_CHUNK_WORDS` into the previous piece.
-///   - Hard-cap at `MAX_CHUNK_WORDS`: a piece longer than the cap is emitted as
-///     multiple `target_words`-sized word slices (last-resort, when the section
-///     has no sentence boundaries, e.g. a long table blob).
-/// - `chunk_index` is contiguous across the whole document (0-based).
-/// - `section` carries the origin section's heading text (for
-///   `SectionKind::Methods` etc.) so the FTS5 row and the chat citation can
-///   render `(§Methods)`.
+/** Split `Section`s into `Chunk`s, skipping References and empty bodies.
+
+Sections <= `target_words` become one chunk. Longer sections are split at
+sentence boundaries, with tiny tails (< `MIN_CHUNK_WORDS`) merged into the
+previous piece. Hard-cap at `MAX_CHUNK_WORDS`: overlong pieces without sentence
+breaks get word-sliced. `chunk_index` is contiguous across the document.
+`section` carries provenance for `(§Methods)` FTS5 citations. */
 #[must_use]
 pub fn chunk_sections(sections: &[Section], target_words: usize) -> Vec<Chunk> {
     let target = target_words.clamp(1, MAX_CHUNK_WORDS);
@@ -108,13 +96,9 @@ pub fn chunk_sections(sections: &[Section], target_words: usize) -> Vec<Chunk> {
     chunks
 }
 
-/// Resolve the section label carried by a chunk derived from this section.
-///
-/// - `Methods` / `Results` / `Discussion` / `Conclusion` / `Introduction` /
-///   `Abstract` -> the kind name (so citations render `(§Methods)`).
-/// - `Heading` -> the heading text (if any), so a numbered heading like
-///   `2.1 Study Design` is preserved.
-/// - `Text` -> `None` (no provenance).
+/** Resolve the section label carried by a chunk.
+Known sections return the kind name (so citations render `(§Methods)`).
+`Heading` returns the heading text. `Text`/`References` → `None`. */
 fn section_label_for(section: &Section) -> Option<String> {
     match section.kind {
         SectionKind::Methods => Some("Methods".to_string()),
@@ -233,14 +217,9 @@ fn hard_slice_words(text: &str, target: usize) -> Vec<String> {
     words.chunks(target.max(1)).map(|chunk| chunk.join(" ")).collect()
 }
 
-/// Merge a trailing chunk shorter than `MIN_CHUNK_WORDS` into the previous one.
-/// Only merges the very last chunk (not every short chunk) to keep the logic
-/// predictable.
-///
-/// Guards the `MAX_CHUNK_WORDS` bound: if merging would push the previous chunk
-/// over the cap, the tiny tail is left as its own chunk instead. Without this
-/// guard, a near-MAX chunk + a tiny tail (e.g. 1182 + 19 = 1201) would exceed
-/// the hard cap by a few words.
+/** Merge a trailing chunk shorter than `MIN_CHUNK_WORDS` into the previous one.
+Only merges the very last chunk. Respects `MAX_CHUNK_WORDS`: if merging would
+push the previous chunk over the cap, the tiny tail is left as-is. */
 fn merge_tiny_tail(chunks: &mut Vec<Chunk>) {
     if chunks.len() < 2 {
         return;

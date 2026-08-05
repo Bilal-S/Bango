@@ -1,26 +1,8 @@
 //! Article repository: CRUD + queries + mutations for the `articles` table.
 //!
-//! Directory module split (refactor v6, see `.worktrees/refactor6.md`):
-//! - `mod.rs` (this file) - shared constants (`MAX_ARTICLES`,
-//!   `ARTICLE_SELECT_BASE`), shared row mapper + helpers (`pub(super)`),
-//!   module declarations, and comprehensive `pub use` re-exports so every
-//!   historical `crate::db::article_repo::*` import path keeps resolving.
-//! - `screening_queries.rs` - counts + unscreened-working batch fetches +
-//!   capacity helpers.
-//! - `insert.rs` - `insert_article`, `insert_articles_batch`.
-//! - `query.rs` - `ArticleQuery` + `query_articles` + the read-many fns.
-//! - `mutations.rs` - status / dedup / tags / labels / notes / AI decision /
-//!   criteria / field-count mutations.
-//! - `metadata.rs` - `ArticleMetaField` + `ArticleMetaValue` +
-//!   `update_article_metadata_field`.
-//! - `bulk_ops.rs` - bulk status + bulk tag/label add/remove + resets.
-//! - `full_text.rs` - full text + AI summary helpers.
-//! - `translation.rs` - `TranslationStatusInfo` + the translation-status helpers.
-//! - `doi_journal.rs` - DOI/journal/counts helpers + `rematch_all_journals`.
-//! - `delete.rs` - the hard-delete cascade.
-//!
-//! Public API unchanged: `bango_lib::db::article_repo::*` import paths work
-//! identically to the pre-split single-file module.
+//! Directory module (refactor v6): `mod.rs` holds shared constants + row mapper +
+//! re-exports; submodules own insert/query/mutations/metadata/bulk_ops/full_text/
+//! translation/doi_journal/delete/screening_queries. Public API unchanged.
 
 mod bulk_ops;
 mod delete;
@@ -33,8 +15,7 @@ mod query;
 mod screening_queries;
 mod translation;
 
-// Re-export every public symbol so callers continue to use
-// `crate::db::article_repo::<name>` without caring about the submodule split.
+// Re-export every public symbol so historical `crate::db::article_repo::*` paths keep resolving.
 pub use bulk_ops::{
     bulk_add_label_to_articles, bulk_add_tag_to_articles, bulk_remove_label_from_articles,
     bulk_remove_tag_from_articles, bulk_update_article_status, reset_screening_errors,
@@ -77,19 +58,12 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::models::article::{AiDecision, Article, ArticleStatus};
 
-/// Project-wide hard cap on the number of articles a single project may hold
-/// (see `docs/bango-v4-spec.md` §3.1 - 10,000 total article project limit).
+/// Project-wide hard cap (see `docs/bango-v4-spec.md` §3.1).
 pub(super) const MAX_ARTICLES: usize = 10_000;
 
-/// Shared SELECT base for the `articles` table.
-///
-/// Includes the `tags` and `labels` correlated subqueries as `tags_json` /
-/// `labels_json` so every article fetch returns the joined data in one shot.
-/// All article read functions (`get_article_by_id`, `get_all_articles`,
-/// `get_articles_by_status`, `get_articles_for_export`, `get_duplicate_articles`,
-/// `get_working_articles`, `query_articles`) compose their SQL by appending a
-/// WHERE / ORDER BY clause to this constant. Keeps the column list in one place
-/// so a schema change is a single edit, not ten.
+/// Shared SELECT base for the `articles` table. Includes `tags`/`labels` correlated
+/// subqueries as JSON. All article read functions compose their SQL by appending a
+/// WHERE/ORDER BY clause to this — single edit on schema change.
 pub(super) const ARTICLE_SELECT_BASE: &str = "\
 SELECT articles.*, \
 (SELECT json_group_array(t.name) FROM tags t JOIN article_tags at ON t.id = at.tag_id \
@@ -98,17 +72,14 @@ SELECT articles.*, \
  WHERE al.article_id = articles.id) AS labels_json \
 FROM articles";
 
-/// Compute the next auto-incrementing `sequence_id` for a new article.
-/// Shared by `insert_article` and `insert_articles_batch`.
+/// Compute the next auto-incrementing `sequence_id`.
 pub(super) fn next_sequence_id(conn: &Connection) -> Result<i64, AppError> {
     let max_id: i64 =
         conn.query_row("SELECT COALESCE(MAX(sequence_id), 0) FROM articles", [], |row| row.get(0))?;
     Ok(max_id + 1)
 }
 
-/// Transaction-scoped variant of [`get_article_by_id`]. Used by
-/// `insert_articles_batch` to read back each freshly-inserted article within
-/// the same transaction so the batch is atomic.
+/// Transaction-scoped variant of [`get_article_by_id`] for batch inserts.
 pub(super) fn get_article_by_id_tx(
     tx: &rusqlite::Transaction<'_>,
     id: &str,
@@ -122,9 +93,8 @@ pub(super) fn get_article_by_id_tx(
     })
 }
 
-/// Shared row mapper: decodes one `articles` row (+ the `tags_json` /
-/// `labels_json` correlated-subquery columns) into an [`Article`] struct.
-/// Every read fn in `query.rs` and `screening_queries.rs` routes through here.
+/// Shared row mapper: decodes one `articles` row (+ `tags_json`/`labels_json`).
+/// Every read fn in `query.rs` and `screening_queries.rs` routes here.
 pub(super) fn row_to_article(row: &rusqlite::Row<'_>) -> rusqlite::Result<Article> {
     let status_str: String = row.get("status")?;
     let status = match status_str.as_str() {

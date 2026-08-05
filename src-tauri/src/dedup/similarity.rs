@@ -1,11 +1,7 @@
 /// Minimum character length for a title to participate in title-based matching.
 const MIN_TITLE_LENGTH: usize = 10;
 
-/// Normalizes a title for comparison:
-/// 1. Lowercase
-/// 2. Strip all punctuation
-/// 3. Collapse whitespace
-/// 4. Trim
+/// Lowercase, strip punctuation, collapse whitespace, trim.
 #[must_use]
 pub fn normalize_title(title: &str) -> String {
     let lower = title.to_lowercase();

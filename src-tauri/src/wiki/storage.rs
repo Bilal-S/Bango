@@ -1,20 +1,5 @@
-//! Wiki storage resolution.
-//!
-//! Resolves the `wiki-root/` directory as a subdirectory of the project's
-//! Bango documents root (`storage_root` in `app_settings`, with a one-time
-//! lazy migration from the legacy `fulltext_storage_dir` key - see
-//! [`crate::db::app_settings_repo::get_storage_root`]).
-//!
-//! Default layout:
-//! ```text
-//! ~/Documents/Bango/
-//! ├── fulltext/      <- article PDFs + text extracts
-//! ├── ris/           <- Citation Chaser output
-//! └── wiki-root/     <- LLM wiki (this module)
-//! ```
-//!
-//! An optional explicit override (`wiki_root_dir` in `app_settings`) lets
-//! power users place the wiki outside the storage root.
+//! Wiki storage: resolves `wiki-root/` under the project storage root (`{storage_root}/wiki-root`),
+//! with an optional `wiki_root_dir` override. Default layout: `fulltext/`, `ris/`, `wiki-root/`.
 
 use std::path::{Path, PathBuf};
 
@@ -32,10 +17,7 @@ pub const WIKI_ROOT_DIR_NAME: &str = "wiki-root";
 pub const SUBDIRS: &[&str] =
     &["raw", "wiki/concepts", "wiki/authors", "wiki/methods", "wiki/synthesis", "templates"];
 
-/// Resolve the effective wiki-root directory.
-///
-/// Order: explicit `wiki_root_dir` setting -> `{storage_root}/wiki-root`.
-/// Ensures the directory exists.
+/// Resolve the effective wiki-root: explicit override → `{storage_root}/wiki-root`. Creates dir if needed.
 pub fn resolve_root(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
     let explicit = app_settings_repo::get_setting(conn, WIKI_ROOT_DIR_KEY)?;
     let root = if let Some(p) = explicit.filter(|p| !p.is_empty()) {
@@ -67,8 +49,7 @@ pub fn ensure_root_exists(root: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Scaffold the full standard directory tree under `wiki-root/`.
-/// Idempotent: existing directories are kept.
+/// Scaffold the standard directory tree under `wiki-root/`. Idempotent.
 pub fn scaffold_tree(root: &Path) -> Result<(), AppError> {
     ensure_root_exists(root)?;
     for sub in SUBDIRS {
@@ -81,18 +62,14 @@ pub fn scaffold_tree(root: &Path) -> Result<(), AppError> {
 }
 
 /// Compute the default wiki-root path from the storage root.
-///
-/// `compute_default_root("~/Documents/Bango")` ->
-/// `"~/Documents/Bango/wiki-root"`.
+/// `compute_default_root("~/Documents/Bango")` -> `"~/Documents/Bango/wiki-root"`.
 #[must_use]
 pub fn compute_default_root(storage_root: &Path) -> PathBuf {
     storage_root.join(WIKI_ROOT_DIR_NAME)
 }
 
-/// Delete the entire wiki-root directory tree (including `AGENTS.md`,
-/// `templates/`, `raw/`, and `wiki/`). Used by `reset_project` (Delete All
-/// Data) so a full project reset also clears the on-disk wiki. Unlike
-/// `wipe_generated`, nothing is preserved.
+/// Delete the entire wiki-root directory tree including `AGENTS.md`, `templates/`, `raw/`, `wiki/`.
+/// Used by `reset_project` (Delete All Data). Unlike `wipe_generated`, nothing is preserved.
 pub fn delete_wiki_root(root: &Path) -> Result<(), AppError> {
     if root.exists() {
         std::fs::remove_dir_all(root).map_err(|e| {
@@ -106,8 +83,8 @@ pub fn delete_wiki_root(root: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Wipe the generated content (`raw/` + `wiki/`), keeping the root, `AGENTS.md`,
-/// `templates/`, and `log.md`. Used by `wiki_delete_wiki`.
+/// Wipe generated content (`raw/` + `wiki/`), keeping root, `AGENTS.md`, `templates/`, `log.md`.
+/// Used by `wiki_delete_wiki`.
 pub fn wipe_generated(root: &Path) -> Result<(), AppError> {
     for target in ["raw", "wiki"] {
         let path = root.join(target);
@@ -122,8 +99,8 @@ pub fn wipe_generated(root: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Count `.md` files under a subdirectory (non-recursive top level for `raw`,
-/// recursive for `wiki`). Returns 0 if the dir does not exist yet.
+/// Count `.md` files under a subdirectory (non-recursive for `raw`, recursive for `wiki`).
+/// Returns 0 if the dir does not exist.
 pub fn count_markdown(root: &Path, subdir: &str, recursive: bool) -> usize {
     let base = root.join(subdir);
     if !base.exists() {

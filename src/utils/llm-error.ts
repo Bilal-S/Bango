@@ -1,6 +1,4 @@
-/**
- * Utility for formatting LLM provider errors with troubleshooting links.
- */
+/** Format LLM provider errors with troubleshooting links. */
 
 export interface LlmErrorInfo {
   /** True when we matched a known error pattern */
@@ -146,9 +144,7 @@ const UNMATCHED_PREFIX = 'This is a response from your LLM provider.';
 
 const TROUBLESHOOT_BASE = '/#/help?tab=troubleshoot';
 
-/**
- * Analyse an LLM error message and return structured info for display.
- */
+/** Analyse LLM error message and return structured info for display. */
 export function formatLlmError(rawMessage: string): LlmErrorInfo {
   for (const { pattern, data } of ERROR_PATTERNS) {
     if (pattern.test(rawMessage)) {

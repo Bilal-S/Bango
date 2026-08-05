@@ -1,9 +1,4 @@
-//! Search URL construction for the OpenAlex `/works` endpoint.
-//!
-//! The `build_search_url` function is pure (`#[must_use]`) and uses
-//! `reqwest::Url::parse_with_params` so all query parameters are
-//! automatically percent-encoded. This prevents breakage from Boolean
-//! operators, quoted phrases, and special characters.
+//! URL construction for OpenAlex `/works`. Pure (`#[must_use]`), params percent-encoded.
 
 use super::OpenAlexFilters;
 
@@ -11,11 +6,7 @@ const BASE_URL: &str = "https://api.openalex.org/works";
 const SELECT_FIELDS: &str =
     "id,doi,title,authorships,publication_year,publication_date,primary_location,abstract_inverted_index,biblio,cited_by_count,language,keywords,type,open_access,is_retracted";
 
-/// Build the filter string from user-controllable filters plus the
-/// always-on `has_abstract:true` and the default-on `is_retracted:false`.
-///
-/// `has_abstract:true` is always appended. `is_retracted:false` is appended
-/// by default and omitted when `show_retracted` is true.
+/// Build filter string. `has_abstract:true` always-on. `is_retracted:false` by default.
 #[must_use]
 pub fn build_filter_string(filters: &OpenAlexFilters) -> String {
     let mut parts: Vec<String> = vec!["has_abstract:true".to_string()];
@@ -48,12 +39,7 @@ pub fn build_filter_string(filters: &OpenAlexFilters) -> String {
     parts.join(",")
 }
 
-/// Build the complete OpenAlex `/works` search URL.
-///
-/// All query parameters are percent-encoded by `reqwest::Url::parse_with_params`.
-/// The `select` parameter limits the response payload to only the fields we need.
-/// `referenced_works` is deliberately excluded from the search `select` to keep
-/// payloads small.
+/// Build the complete `/works` search URL. All params percent-encoded.
 #[must_use]
 pub fn build_search_url(
     query: &str,
@@ -80,8 +66,7 @@ pub fn build_search_url(
         params.push(("api_key", key.to_string()));
     }
 
-    // `parse_with_params` on a constant base URL with valid string params
-    // cannot fail in practice, but we fall back gracefully to avoid panics.
+    // `parse_with_params` on a constant base URL with valid string params cannot fail.
     match reqwest::Url::parse_with_params(BASE_URL, &params) {
         Ok(url) => url.to_string(),
         Err(_) => format!(

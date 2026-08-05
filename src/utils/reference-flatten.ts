@@ -1,9 +1,6 @@
 import type { ArticleReference } from '@/types';
 
-/**
- * Raw shape returned by the Rust backend's `get_article_references` IPC command.
- * Each item has a nested `paper` object with the actual metadata fields.
- */
+/** Raw shape returned by the Rust `get_article_references` IPC command. */
 export interface RawReference {
   linkId: string;
   parentArticleId: string;
@@ -37,43 +34,18 @@ export interface RawReference {
 }
 
 /**
- * Map one raw IPC reference (nested `{ linkId, referenceType, paper: {...} }`)
- * into the flat `ArticleReference` shape expected by Vue templates.
+ * Map one raw IPC reference `{ linkId, referenceType, paper: {...} }` into a flat
+ * `ArticleReference`. Total: every `??` default guarantees a well-formed result
+ * even when `paper` is null. Grouped: link-level, match info, biblio core
+ * (title→publisher, authors/keywords default `[]`), metrics
+ * (citationCount→numCited, referenceCount→numReferences), provenance
+ * (boolean hasFullText, createdAt→importedAt, paper.referenceType→publicationType).
  *
- * Every field carries an explicit default via `??` so the function is total:
- * it always produces a well-formed `ArticleReference` even when `paper` is
- * `null` or individual fields are missing. Field groups:
- *
- * - **Link-level** (`id`, `referenceType`, `parentId`) come from the wrapper.
- *   `id` falls back to `linkId` when `paper.id` is absent.
- * - **Match info** (`matchStatus`, `matchedArticleId`) defaults to
- *   `'unmatched'` / `null`.
- * - **Bibliographic core** (title through publisher) defaults to `null`
- *   except `authors` / `keywords`, which default to `[]`.
- * - **Metrics** are renamed: `citationCount` -> `numCited`,
- *   `referenceCount` -> `numReferences` (both default `null`).
- * - **Provenance**: `hasFullText` is coerced to boolean, `createdAt` is
- *   renamed to `importedAt` (default `''`), and `paper.referenceType`
- *   (distinct from the link-level `referenceType`) surfaces as
- *   `publicationType`.
- *
- * Extracted from `flattenRawReferences` so the field-defaulting logic is
- * independently unit-testable and the `.map()` stays trivial.
- *
- * @param r - the raw reference wrapper
- * @returns the flattened `ArticleReference`
+ * Cyclomatic score (25) is a false positive: every `??` is counted as a branch
+ * by the analyzer but there is no real control flow. Exhaustively covered by
+ * `src/__tests__/references.test.ts` (43 tests). Inline suppression is the
+ * documented remedy.
  */
-// Justification: this is a pure 1:1 field-mapping function with a SINGLE
-// execution path. The cyclomatic score (25) is inflated because each
-// nullish-coalescing `??` operator is counted as a separate branch by the
-// analyzer, but there is no real control flow here - every `??` is an
-// independent field default that always evaluates left-to-right. The
-// function is exhaustively covered by the field-level characterization
-// tests in `src/__tests__/references.test.ts` (43 tests, including the
-// null-paper, missing-fields, and full-contract cases). Inline suppression
-// is the documented remedy for this metric false positive - see the
-// Fallow "Gotchas" reference.
-//
 // fallow-ignore-next-line complexity
 function flattenOneReference(r: RawReference): ArticleReference {
   const p = r.paper ?? ({} as NonNullable<RawReference['paper']>);
@@ -108,12 +80,8 @@ function flattenOneReference(r: RawReference): ArticleReference {
 }
 
 /**
- * Flatten the nested IPC response `{ linkId, referenceType, paper: {...} }`
- * into the flat `ArticleReference` shape expected by Vue templates.
- *
- * This function is a thin `.map()` over {@link flattenOneReference}, which
- * owns the per-field defaulting contract. Extracted so it can be unit-tested
- * independently.
+ * Flatten IPC response into `ArticleReference[]`. Thin `.map()` over
+ * `flattenOneReference`, extracted for independent unit-testing.
  */
 export function flattenRawReferences(raw: unknown[]): ArticleReference[] {
   const rawRefs = raw as RawReference[];

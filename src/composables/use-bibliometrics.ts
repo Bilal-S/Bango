@@ -83,13 +83,7 @@ export function useBibliometrics() {
     }
   }
 
-  /**
-   * Unified normalization flow:
-   * 1. Show progress overlay (normalizing = true)
-   * 2. Run biblio_normalize (generic, extensible)
-   * 3. Fetch fresh KPIs
-   * 4. Hide overlay
-   */
+  /** Run full normalization, show progress, fetch fresh KPIs. */
   async function runNormalization() {
     normalizing.value = true;
     error.value = null;
@@ -138,10 +132,8 @@ export function useBibliometrics() {
     // This ensures the page renders with spinners BEFORE any IPC calls execute.
     setTimeout(async () => {
       await fetchKpis();
-      // Start the normalization/refresh cycle when the persisted stale flag is on.
-      // Mutations that affect bibliometrics (imports, references/citations, tag
-      // and label edits, status changes, AI screening) set this flag on the
-      // backend; biblio_normalize clears it once the transaction commits.
+      /* Start normalization when the persisted stale flag is on. Mutations that
+        affect bibliometrics set this flag; biblio_normalize clears it. */
       const needsRefresh = await fetchNeedsRefresh();
       if (kpis.value.includedCount > 0 && needsRefresh) {
         runNormalization(); // not awaited - UI stays responsive

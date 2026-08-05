@@ -42,9 +42,8 @@ function scale(
 function buildGraph(data: CitationNetworkData): Graph {
   const g = new Graph({ type: 'directed', multi: false });
 
-  // Determine min/max citation counts for node size scaling.
-  // Only consider matched (real article) nodes for the scale range so that
-  // unmatched leaves (always 0 citations) don't compress the scale.
+  /* Determine min/max citation counts for node size scaling. Only matched
+  (real article) nodes contribute, so unmatched leaves don't compress scale. */
   const matchedCited = data.nodes.filter((n) => !n.unmatched).map((n) => n.numCited);
   const minCited = Math.min(...matchedCited, 0);
   const maxCited = Math.max(...matchedCited, 1);
@@ -79,9 +78,8 @@ function buildGraph(data: CitationNetworkData): Graph {
     g.addDirectedEdge(edge.source, edge.target, {
       weight: edge.weight,
       thickness: isUnmatched ? 0.5 : 1.0,
-      // Sigma's edge/arrow programs read `size` (not `thickness`) for the
-      // stroke width. Unmatched leaves get a thinner stroke so their arrows
-      // stay visually subordinate to real citation edges.
+      /* Sigma's edge/arrow programs read `size` (not `thickness`) for stroke
+        width. Unmatched leaves get thinner strokes. */
       size: isUnmatched ? 0.8 : 2,
       // Unmatched edges are faint dashed lines; real citation edges are solid.
       color: isUnmatched ? '#e2e8f0' : '#cbd5e1', // slate-200 : slate-300

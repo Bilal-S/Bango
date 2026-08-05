@@ -5,12 +5,7 @@ import { exportNetworkPng, exportNetworkGexf } from '../utils/network-export';
 import type { NetworkExportFormat } from '../utils/network-export';
 
 /**
- * Minimal structural type for a network graph component ref. Each concrete
- * graph component (`network-graph.vue`, `citation-network-graph.vue`, etc.)
- * exposes `locateNode`, `resetZoom`, and `refresh` via `defineExpose`. The
- * `renderer` (Sigma instance) is not included here because its complex generic
- * type does not transpose cleanly across component boundaries; the view passes
- * it to {@link onExportImage} directly when needed.
+ * Minimal structural type for a network graph component ref.
  */
 export interface NetworkGraphHandle {
   locateNode: (nodeId: string) => void;
@@ -18,49 +13,28 @@ export interface NetworkGraphHandle {
   refresh: () => void;
 }
 
-/**
- * Configuration for {@link useNetworkView}.
- */
+/** Configuration for {@link useNetworkView}. */
 export interface NetworkViewOptions {
-  /** The reactive graph ref (from the data-layer composable). */
+  /** The reactive graph ref. */
   graph: Ref<Graph | null>;
-  /**
-   * Which node attribute holds the publication year, for the temporal color
-   * gradient's year range. Co-author/keyword networks use `'avgYear'`;
-   * citation/co-citation networks use `'year'`. Defaults to `'year'`.
-   */
+  /** Node attribute holding the publication year. Co-author/keyword: `'avgYear'`; citation/cocitation: `'year'`. */
   yearAttribute?: 'year' | 'avgYear';
-  /**
-   * Graph type for the recalculate subgraph build. Citation networks are
-   * directed; the others are undirected. Defaults to `'undirected'`.
-   */
+  /** Graph type for subgraph build. Citation networks: `'directed'`. */
   graphType?: 'directed' | 'undirected';
   /** Filename prefix for exports, e.g. `'coauthor-network'`. */
   exportPrefix: string;
-  /** Fallback year range when the graph has no year data. Defaults to 2000-2024. */
+  /** Fallback year range when the graph has no year data. */
   defaultYearRange?: { min: number; max: number };
-  /**
-   * ForceAtlas2 iteration count for `onRecalculate`. Co-author uses 100;
-   * keyword/co-citation use 150. Defaults to 100.
-   */
+  /** ForceAtlas2 iteration count for `onRecalculate`. */
   recalculateIterations?: number;
 }
 
 /**
- * Shared view-state logic for the four bibliometric network views
- * (`biblio-coauthors`, `biblio-keywords`, `biblio-cocitations`,
- * `biblio-citations`).
+ * Shared view-state for the four bibliometric network views.
  *
- * This composable owns the cross-cutting view state (selection focus, visible
- * counts, color/layout modes, cluster selection, sidebar collapse) and the
- * handlers that are identical across all four views (cluster toggle, layout
- * mode switch, image export, subgraph recalculation).
- *
- * Each view still owns its own node-selection logic (building the
- * view-specific selection object from graph attributes) and its own
- * params/filter handlers, since those differ per network type.
- *
- * @param options - configuration bound to the calling view.
+ * Owns cross-cutting state (focus, counts, color/layout modes, cluster
+ * selection, sidebar) and identical handlers (cluster toggle, layout mode
+ * switch, image export, subgraph recalculation).
  */
 export function useNetworkView(options: NetworkViewOptions) {
   const {
@@ -138,11 +112,7 @@ export function useNetworkView(options: NetworkViewOptions) {
   });
 
   // ── Selection focus ─────────────────────────────────────────────
-  /**
-   * Set or clear the focused node. Call with `null` to clear (e.g. on
-   * background click or detail-panel close). The calling view wraps this in
-   * its own `onNodeClick` to also build its view-specific selection object.
-   */
+  /** Set or clear the focused node. Call with `null` to clear. */
   function focusNode(nodeId: string | null): void {
     focusedNodeId.value = nodeId;
   }
@@ -199,11 +169,6 @@ export function useNetworkView(options: NetworkViewOptions) {
   // ── Image export ────────────────────────────────────────────────
   /**
    * Export the network as PNG (via renderer) or GEXF (via graph).
-   *
-   * @param format - `'png'` or `'gexf'`.
-   * @param renderer - The Sigma renderer instance (from the graph component's
-   *   `defineExpose`). Required for PNG; ignored for GEXF. The view obtains
-   *   this from its typed `graphRef` and passes it here.
    */
   async function onExportImage(
     format: NetworkExportFormat,

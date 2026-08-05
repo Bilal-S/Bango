@@ -1,9 +1,6 @@
-//! Author pre-seeding (Phase 1, multi-batch + single-batch).
-//!
-//! Builds a canonical author manifest from `biblio_authors` and pre-seeds rich
-//! author hub pages (metrics, publications, research areas, collaborators) so
-//! independent parallel ingest batches link to the same author slugs instead of
-//! inventing their own.
+//! Author pre-seeding (Phase 1). Builds canonical author manifest from `biblio_authors`,
+//! pre-seeds rich author hub pages (metrics, publications, research areas, collaborators)
+//! so independent parallel ingest batches link to the same author slugs.
 
 use std::path::Path;
 
@@ -14,21 +11,16 @@ use crate::wiki::frontmatter::{self, Frontmatter};
 
 use super::slugs::author_slug;
 
-/// A manifest of canonical author slugs, derived deterministically from the
-/// `biblio_authors` table (or the raw sources when that table is empty).
-///
-/// Injected into every batch prompt so independent parallel batches link to the
-/// same canonical author slugs instead of inventing their own. This eliminates
-/// the worst class of cross-batch duplication: fragmented author pages
-/// (`jane-doe` vs `j-doe`).
+/// Canonical author manifest from `biblio_authors`. Injected into every batch prompt so
+/// independent parallel batches link to the same author slugs instead of inventing their own.
+/// Eliminates the worst cross-batch duplication: fragmented author pages.
 #[derive(Debug, Clone, Default)]
 pub struct AuthorManifest {
     /// One entry per canonical author.
     pub entries: Vec<AuthorManifestEntry>,
 }
 
-/// One row in the manifest: a raw name variant and its canonical slug plus
-/// the rich bibliometric data that makes the pre-seeded author page useful.
+/// One manifest row: raw name variant + canonical slug + rich bibliometric data.
 #[derive(Debug, Clone, Default)]
 pub struct AuthorManifestEntry {
     /// Canonical author page slug (e.g. `author-smith-j`).
@@ -55,7 +47,7 @@ pub struct AuthorManifestEntry {
     pub productivity_rate: Option<f64>,
 }
 
-/// A publication by an author, rendered in the author page's Publications section.
+/// A publication by an author, rendered in the Publications section of their page.
 #[derive(Debug, Clone)]
 pub struct AuthorArticle {
     pub id: String,
@@ -76,20 +68,9 @@ pub struct CoauthorLink {
 }
 
 impl AuthorManifest {
-    /// Render the manifest as a prompt section with a two-part directive:
-    ///
-    /// 1. **Known authors** (in the manifest) → "link to their pre-seeded page using the
-    ///    EXACT slug - do NOT create a duplicate page for them."
-    /// 2. **Unknown authors** (mentioned in uploaded documents but NOT in the manifest) →
-    ///    "you SHOULD create a new author page" with slug `author-{lastname}-{initial}`,
-    ///    linked to the uploaded document.
-    ///
-    /// This split prevents the blanket "DO NOT create author pages" from blocking
-    /// legitimate new-author pages derived from user-uploaded documents (Add Documents).
-    ///
-    /// Returns an empty string when the manifest is empty (so it can be unconditionally
-    /// interpolated). When empty, there are no pre-seeded author pages to protect, so the
-    /// LLM is free to create author pages normally.
+    /// Render manifest as prompt section. Known authors → "link, DON'T duplicate."
+    /// Unknown authors (from uploaded docs) → "create new author page" with `author-lastname-initial`.
+    /// Empty string when manifest is empty (LLM creates authors normally).
     pub(super) fn to_prompt_section(&self) -> String {
         if self.entries.is_empty() {
             return String::new();
@@ -129,12 +110,8 @@ impl AuthorManifest {
     }
 }
 
-/// Build an `AuthorManifest` from the `biblio_authors` table.
-///
-/// The caller is expected to run `normalize_authors_from_articles(conn)` first
-/// so the table is populated; this function treats the DB as the single source
-/// of truth. Returns an empty manifest when there are no authors (e.g. a
-/// corpus with no author metadata), which the caller treats as "no manifest".
+/// Build `AuthorManifest` from `biblio_authors` table. Caller runs normalization first.
+/// Empty when no authors (corpus lacks author metadata).
 pub fn build_author_manifest_from_db(conn: &Connection) -> Result<AuthorManifest, AppError> {
     let authors = crate::db::biblio_repo::get_all_authors(conn)?;
     if authors.is_empty() {
@@ -281,11 +258,8 @@ pub fn build_author_manifest(conn: &Connection) -> Result<AuthorManifest, AppErr
     build_author_manifest_from_db(conn)
 }
 
-/// Pre-seed the `wiki/authors/` directory with rich author pages built from
-/// the manifest. Each page includes a metrics line, a publications list with
-/// `[^art-id]` source references, deduplicated research-area keywords, and
-/// co-author `[[wikilinks]]`. Skips authors whose pages already exist with
-/// `status: reviewed` (user-edited). Returns the count of pages written.
+/// Pre-seed `wiki/authors/` with rich author pages (metrics, publications, keywords,
+/// co-author wikilinks). Skips `status: reviewed` pages. Returns count written.
 pub fn preseed_authors(root: &Path, manifest: &AuthorManifest) -> Result<usize, AppError> {
     let authors_dir = root.join("wiki").join("authors");
     std::fs::create_dir_all(&authors_dir)?;
@@ -305,8 +279,7 @@ pub fn preseed_authors(root: &Path, manifest: &AuthorManifest) -> Result<usize, 
     Ok(written)
 }
 
-/// Render the frontmatter + body for a single author page from the manifest
-/// entry's rich data. Pure function (no I/O) so it is trivially testable.
+/// Render frontmatter + body for an author page. Pure function (no I/O).
 pub fn render_author_page(entry: &AuthorManifestEntry) -> (Frontmatter, String) {
     // Frontmatter.
     let mut fm = Frontmatter::default();
@@ -337,10 +310,8 @@ pub fn render_author_page(entry: &AuthorManifestEntry) -> (Frontmatter, String) 
     fm.set("content_source", "metadata");
 
     // Body.
-    // NOTE: do NOT emit `# {title}` as the first body line. The page title
-    // lives in frontmatter and is rendered separately by the wiki viewer's
-    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
-    // show the title twice on the rendered page.
+    /* Page title lives in frontmatter, rendered by the viewer header.
+    Do NOT emit `# {title}` as first body line - would show the title twice. */
     let mut body = String::new();
 
     // Metrics line (only include metrics that have meaningful values).
@@ -363,14 +334,9 @@ pub fn render_author_page(entry: &AuthorManifestEntry) -> (Frontmatter, String) 
         body.push_str(&format!("{}\n\n", stats.join(" | ")));
     }
 
-    // Publications section.
-    // Each entry links to its source article via a `[^art-{uuid}]` reference.
-    // The `art-` prefix is required by the wiki Markdown renderer
-    // (`src/utils/wiki-markdown.ts` step 1) to convert the ref into a
-    // clickable green `.art-ref` chip that opens the article detail panel.
-    // No footnote definition block is emitted: the renderer resolves the ref
-    // from the in-memory `sources` map, and emitting `/raw/...` definition
-    // lines caused duplicate/triplicate clutter in the rendered output.
+    /* Publications: each entry links to source article via `[^art-{uuid}]`.
+    The `art-` prefix required by wiki Markdown renderer for green `.art-ref` chips.
+    No footnote definition block emitted: renderer resolves from in-memory sources map. */
     body.push_str("## Publications\n\n");
     for article in &entry.articles {
         let year_str = article.year.map(|y| y.to_string()).unwrap_or_else(|| "n.d.".to_string());

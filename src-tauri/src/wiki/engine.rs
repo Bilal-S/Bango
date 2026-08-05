@@ -1,9 +1,5 @@
-//! Deterministic wiki lint engine.
-//!
-//! Walks `wiki/**/*.md`, parses frontmatter + `[[wikilinks]]`, builds a link
-//! graph, and detects issues. No LLM required. Used by the `wiki_lint`
-//! command (Phase 4) and to support orphan-companion detection for
-//! user-added raw files (Phase 2B follow-up).
+//! Deterministic wiki lint engine. Walks `wiki/**/*.md`, parses frontmatter + `[[wikilinks]]`,
+//! builds a link graph, detects issues. No LLM required. Used by `wiki_lint` (Phase 4).
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -41,10 +37,8 @@ pub enum LintKind {
     MissingFrontmatter,
     MissingField,
     StalePage,
-    /// The page is LLM-generated but has no provenance: either no
-    /// `source_articles` frontmatter or no `[^art-` footnote citations in the
-    /// body. Author/source pages are exempt (they are pre-seeded with a
-    /// different provenance shape).
+    /// LLM-generated page without provenance: no `source_articles` frontmatter or no `[^art-`
+    /// citations in the body. Author/source pages are exempt (different provenance shape).
     UngroundedPage,
 }
 
@@ -139,11 +133,9 @@ pub fn lint(root: &Path) -> Result<LintReport, AppError> {
             }
         }
 
-        // Broken wikilinks: extract [[target]] from body, check slug set.
-        // Comparison is case-insensitive (Obsidian convention): a link like
-        // `[[Sugar-Reduction]]` resolves to a page whose slug is
-        // `sugar-reduction`. This avoids false-positive broken links when the
-        // LLM emits Title-Cased wikilinks.
+        /* Broken wikilinks: extract [[target]] from body, check slug set.
+        Case-insensitive (Obsidian convention): [[Sugar-Reduction]] resolves to
+        `sugar-reduction`. Avoids false positives when the LLM uses Title-Case. */
         let slug_set_lower: std::collections::HashSet<String> =
             slug_to_path.keys().map(|s| s.to_lowercase()).collect();
         for target in extract_wikilinks(body) {
@@ -158,10 +150,9 @@ pub fn lint(root: &Path) -> Result<LintReport, AppError> {
             }
         }
 
-        // Tier A1 grounding gate: LLM-generated pages (concept/method/synthesis)
-        // must carry provenance. Author and source pages are exempt (pre-seeded
-        // with a different provenance shape). The deterministic pre-seeds all
-        // set `source_articles`, so this gate catches only LLM fabrications.
+        /* Tier A1 grounding gate: LLM-generated concept/method/synthesis pages must carry
+        provenance. Author/source pages exempt (pre-seeded, different provenance shape).
+        Deterministic pre-seeds all set `source_articles`, so only LLM fabrications trip this. */
         let page_type = fm.get("type").unwrap_or("");
         let is_grounded_type = matches!(page_type, "concept" | "method" | "synthesis");
         if is_grounded_type {
@@ -246,9 +237,7 @@ pub struct GraphNode {
     pub page_type: String,
     pub inbound: usize,
     pub outbound: usize,
-    /// Page summary from frontmatter, for the graph hover tooltip.
-    /// Empty string when absent (serde serializes it, but the frontend treats
-    /// empty as "no summary").
+    /// Page summary from frontmatter, for graph hover tooltip. Empty = "no summary".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub summary: String,
 }
@@ -384,9 +373,8 @@ fn collect_pages(
         if path.is_dir() {
             collect_pages(&path, out)?;
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            // Skip the system audit log (wiki/log.md). It is a bookkeeping file
-            // appended by `ingest::finalize_ingest`, not a knowledge-base page;
-            // it has no frontmatter, so linting it produces 7 spurious errors.
+            /* Skip system audit log `wiki/log.md` - it's a bookkeeping file appended by
+            ingest::finalize_ingest, not a knowledge-base page. No frontmatter → 7 spurious errors. */
             if path.file_name().and_then(|n| n.to_str()) == Some("log.md") {
                 continue;
             }

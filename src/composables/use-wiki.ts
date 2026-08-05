@@ -20,9 +20,7 @@ import type {
 } from '@/types/wiki';
 
 /**
- * Wiki composable.
- *
- * Wraps the Tauri wiki commands and exposes reactive state for the wiki view.
+ * Wiki composable. Wraps Tauri wiki commands and exposes reactive state.
  */
 // ── Module-level singleton state (shared by all useWiki() callers) ──
 const status = ref<WikiStatus | null>(null);
@@ -32,9 +30,8 @@ const initializing = ref(false);
 const progress = ref<WikiProgress | null>(null);
 let progressUnlisten: (() => void) | null = null;
 
-// Debounce for the on-demand drift check (`checkForUpdates`). Auto-triggers
-// (Wiki/Chat view onMounted) respect the cooldown so navigation back-and-forth
-// doesn't re-check; the manual toolbar button bypasses it via `force: true`.
+/* Debounce for on-demand drift checks. Auto-triggers respect the cooldown;
+manual toolbar button bypasses via `force: true`. */
 const CHECK_DEBOUNCE_MS = 30_000;
 let lastCheckAt = 0;
 
@@ -228,30 +225,14 @@ export function useWiki() {
     return report;
   }
 
-  /**
-   * Cancel any in-flight wiki ingest (rebuild / export-and-ingest / plain
-   * ingest). Signals the backend cancel token so the pipeline aborts between
-   * pre-seed steps or between LLM batch completions. Safe to call when no
-   * ingest is running (no-op). The progress bar clears when the backend
-   * returns the cancelled report.
-   *
-   * @returns void (the backend cancel command never fails)
-   */
+  /** Cancel in-flight wiki ingest. Safe no-op when idle. */
   async function cancelIngest(): Promise<void> {
     await tauriCommand<void>('cancel_wiki_ingest');
   }
 
   /**
-   * On-demand drift check: detect external edits to wiki .md files and
-   * re-index them transparently without re-running the LLM ingest.
-   *
-   * Runs entirely on the backend tokio runtime (lock-free file work + brief
-   * SQLite writes), so the UI never freezes. The caller drives the toast UX:
-   * show "Checking for Wiki updates..." before calling, then surface result.
-   *
-   * `force` bypasses the 30s debounce. Auto-triggers (Wiki / Chat view
-   * onMounted) pass false; the manual toolbar button passes true.
-   * Returns the CheckUpdatesResult, or null when debounced (skipped).
+   * Detect external edits to wiki .md files and re-index them. `force`
+   * bypasses the 30s debounce. Returns null when debounced.
    */
   async function checkForUpdates(force = false): Promise<CheckUpdatesResult | null> {
     const now = Date.now();

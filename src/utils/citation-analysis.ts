@@ -1,23 +1,10 @@
-/**
- * Pure graph-analysis utilities for citation networks.
- *
- * These functions operate on a graphology directed graph instance but contain
- * no Vue reactivity, making them trivial to unit-test in isolation.
- *
- * Edge convention: `source cites target`. Therefore:
- * - Out-edges from a paper → papers it cites (its references / ancestry).
- * - In-edges to a paper → papers that cite it (its progeny / citing papers).
- */
+/* Pure graph-analysis utilities for citation networks.
+ * Edge convention: source cites target. Out-edges = references (ancestry),
+ * in-edges = citing papers (progeny). */
 
 import type Graph from 'graphology';
 
-/**
- * Compute the **ancestry** of a node: every paper that the given paper
- * transitively *cites* (BFS over out-edges).
- *
- * The returned set does NOT include `nodeId` itself - callers that need the
- * node included should add it explicitly.
- */
+/** Compute ancestry of a node (transitive out-edges BFS). Excludes `nodeId`. */
 export function computeAncestry(graph: Graph, nodeId: string): Set<string> {
   if (!graph.hasNode(nodeId)) return new Set();
 
@@ -46,12 +33,7 @@ export function computeAncestry(graph: Graph, nodeId: string): Set<string> {
   return visited;
 }
 
-/**
- * Compute the **progeny** of a node: every paper that transitively *cites*
- * the given paper (BFS over in-edges).
- *
- * The returned set does NOT include `nodeId` itself.
- */
+/** Compute progeny of a node (transitive in-edges BFS). Excludes `nodeId`. */
 export function computeProgeny(graph: Graph, nodeId: string): Set<string> {
   if (!graph.hasNode(nodeId)) return new Set();
 
@@ -80,15 +62,8 @@ export function computeProgeny(graph: Graph, nodeId: string): Set<string> {
   return visited;
 }
 
-/**
- * Return the set of node IDs whose `year` attribute falls within `range`
- * (inclusive), or whose year is null/undefined (always included - we cannot
- * evaluate them).
- *
- * @param graph     A graphology graph with optional `year` node attributes.
- * @param range     `[minYear, maxYear]` inclusive, or `null` to return all nodes.
- * @returns         Set of node IDs that pass the year filter.
- */
+/** Return nodes whose `year` is within [min, max] (inclusive), or null/undefined
+ *  (always included). Pass `null` range to return all nodes. */
 export function filterNodesByYearRange(graph: Graph, range: [number, number] | null): Set<string> {
   if (!range) return new Set(graph.nodes());
 
@@ -107,12 +82,7 @@ export function filterNodesByYearRange(graph: Graph, range: [number, number] | n
   return result;
 }
 
-/**
- * Derive the edge set that connects all pairs of nodes within `nodeSet`.
- *
- * Useful for highlight/styling operations where we want to brighten edges
- * whose both endpoints belong to the isolated subgraph.
- */
+/** Derive edge set connecting all pairs within `nodeSet`. For highlight/styling. */
 export function computeSubgraphEdges(graph: Graph, nodeSet: Set<string>): Set<string> {
   const edges = new Set<string>();
   for (const node of nodeSet) {
@@ -125,21 +95,11 @@ export function computeSubgraphEdges(graph: Graph, nodeSet: Set<string>): Set<st
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 - Main Path Analysis (SPC: Search Path Count)
+// Main Path Analysis (SPC: Search Path Count)
 // ---------------------------------------------------------------------------
 
-/**
- * Identify **back-edges** that violate temporal ordering.
- *
- * An edge `source → target` (source cites target) is a back-edge when
- * `year(target) > year(source)` - the cited paper is *newer* than the citing
- * paper, which is temporally impossible and indicates a data error.
- *
- * Edges where either endpoint has a null/undefined year are never flagged
- * (we cannot evaluate them).
- *
- * @returns Set of edge IDs to exclude from DAG-based algorithms.
- */
+/** Identify back-edges: year(target) > year(source), temporally impossible.
+ *  Null-year endpoints are never flagged. Returns edges to exclude from DAG algorithms. */
 export function findBackEdges(graph: Graph): Set<string> {
   const back = new Set<string>();
   graph.forEachEdge((edge, _attrs, source, target) => {
@@ -152,17 +112,8 @@ export function findBackEdges(graph: Graph): Set<string> {
   return back;
 }
 
-/**
- * Topological sort using Kahn's algorithm.
- *
- * Nodes involved in cycles (not reachable to in-degree 0 after excluding
- * `skipEdges`) are omitted from the result.  This means the returned array
- * may be shorter than `graph.nodes()` when the graph still contains cycles
- * after back-edge removal - those nodes simply don't participate in the DP.
- *
- * @param skipEdges  Edge IDs to ignore (e.g. back-edges from `findBackEdges`).
- * @returns           Node IDs in topological order (sources first).
- */
+/** Topological sort via Kahn's algorithm. Nodes in cycles (after excluding `skipEdges`)
+ *  are omitted. Returns sources-first order. */
 export function topologicalSort(graph: Graph, skipEdges?: Set<string>): string[] {
   const inDegree = new Map<string, number>();
 
@@ -194,21 +145,10 @@ export function topologicalSort(graph: Graph, skipEdges?: Set<string>): string[]
   return result;
 }
 
-/**
- * Compute **Search Path Count (SPC)** traversal weights for every edge.
- *
- * SPC measures the number of source-to-sink paths that traverse each edge.
- * The algorithm:
- *
- * 1. Remove back-edges (enforce DAG by year heuristic).
- * 2. Topological sort.
- * 3. Forward pass: `n_s(v) = Σ n_s(u)` over incoming edges; sources start at 1.
- * 4. Backward pass: `n_t(u) = Σ n_t(v)` over outgoing edges; sinks start at 1.
- * 5. Edge weight: `w(u→v) = n_s(u) * n_t(v)`.
- *
- * @returns Map of edge ID → SPC weight.  Back-edges and edges in cycles
- *          are absent from the map (weight 0).
- */
+/** Compute Search Path Count (SPC) weights for every edge.
+ * Algorithm: remove back-edges → topo sort → forward pass (n_s) → backward
+ * pass (n_t) → w(u→v) = n_s(u) * n_t(v). Back-edges/cycle edges are absent
+ * (weight 0). */
 export function computeSPC(graph: Graph): Map<string, number> {
   const backEdges = findBackEdges(graph);
   const topoOrder = topologicalSort(graph, backEdges);
@@ -257,16 +197,8 @@ export function computeSPC(graph: Graph): Map<string, number> {
   return weights;
 }
 
-/**
- * Trace the **main path** by greedily following the highest-SPC-weight
- * outgoing edge from each source to a sink.
- *
- * Produces *connected* paths, not scattered edge fragments.  If multiple
- * sources exist, each is traced independently and the results are unioned.
- *
- * @param weights  SPC weights from `computeSPC`.
- * @returns         `{ nodes, edges }` - the node and edge IDs on the main path.
- */
+/** Trace main path: greedily follow highest-SPC-weight outgoing edge from each
+ *  source to sink. Multiple sources traced independently, results unioned. */
 export function traceMainPath(
   graph: Graph,
   weights: Map<string, number>
@@ -326,14 +258,7 @@ export function traceMainPath(
   return { nodes: resultNodes, edges: resultEdges };
 }
 
-/**
- * Convenience: compute the main path in a single call.
- *
- * Combines `computeSPC` + `traceMainPath`.  The graph is not mutated.
- *
- * @returns `{ nodes, edges }` - the node and edge IDs on the main path,
- *          or empty sets if no path exists.
- */
+/** Convenience: compute main path in a single call (computeSPC + traceMainPath). */
 export function computeMainPath(graph: Graph): { nodes: Set<string>; edges: Set<string> } {
   const weights = computeSPC(graph);
   return traceMainPath(graph, weights);

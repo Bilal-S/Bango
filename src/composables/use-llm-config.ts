@@ -54,18 +54,9 @@ export function useLlmConfig() {
     saving.value = true;
     try {
       await tauriCommand('save_llm_config', { config: store.config });
-      // Re-fetch the persisted config so the in-memory store reflects the
-      // post-save DB state. The backend encrypts `api_key_encrypted`, so the
-      // plaintext the user typed is replaced by the encrypted blob. This
-      // keeps `isConfigured` + every `useLlmConfigured()` consumer in sync
-      // with the actual persisted state after every save.
-      //
-      // The debounced Parameters auto-save path (`scheduleParamSave`) also
-      // routes through `save()`. Re-fetching after a param-only save is safe:
-      // the backend does not transform the param fields (concurrency, delay,
-      // context tokens, temperature), so the re-fetched values match what the
-      // user just edited. The cost is one extra DB read per save; saves are
-      // infrequent (manual button or 600ms trailing-edge on param edits).
+      /* Re-fetch so the in-memory store reflects the post-save DB state
+      (the backend encrypts `api_key_encrypted`, replacing the user's
+      plaintext). Keeps `isConfigured` accurate after every save. */
       await store.fetch();
       lastSavedAt.value = Date.now();
     } finally {
@@ -73,21 +64,12 @@ export function useLlmConfig() {
     }
   }
 
-  // ── Debounced auto-save for the Parameters fields ───────────────────────
-  //
-  // The Parameters card (concurrency / context tokens / request delay /
-  // temperature) has no Save button. Without auto-save, edits live only in
-  // the in-memory Pinia store: they never reach `save_llm_config` (so the
-  // orchestrator's `update_settings` is never called and the next LLM call
-  // uses stale concurrency/delay) and are lost on navigation (the next view
-  // triggers a fresh `fetch()` that overwrites them).
-  //
-  // `scheduleParamSave` debounces `save()` by `delayMs` (default 600ms) so
-  // dragging the Context Tokens slider (which fires many intermediate values)
-  // only produces one save per pause. `cancelScheduledParamSave` lets callers
-  // (Revert, Test Connection) drop a pending save so it doesn't fight with
-  // their own save/fetch. `lastSavedAt` bumps on every successful save so the
-  // UI can react (e.g. invalidate the cached screening-readiness estimate).
+  /* Debounced auto-save for Parameters fields (concurrency/context tokens/
+  request delay/temperature). Without it, edits never reach `save_llm_config`
+  so the orchestrator uses stale values, and navigation loses edits.
+  `scheduleParamSave` debounces `save()` by `delayMs` so slider drags only
+  produce one save per pause. `cancelScheduledParamSave` drops pending saves
+  (Revert, Test Connection). `lastSavedAt` bumps on save for UI reactivity. */
   const paramSaveTimer = ref<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedAt = ref(0);
   const PARAM_SAVE_DELAY_MS = 600;
@@ -145,9 +127,9 @@ export function useLlmConfig() {
   }
 
   function isLocalProvider(): boolean {
-    // Delegate to the canonical `LOCAL_PROVIDERS` Set exported from the store
-    // so there is exactly one copy of the local-provider set in the frontend
-    // (mirrors the backend `is_local` match in `llm_config_repo::has_config`).
+    /* Delegate to the canonical `LOCAL_PROVIDERS` Set exported from the store
+    so there is exactly one copy of the local-provider set in the frontend
+    (mirrors the backend `is_local` match). */
     return LOCAL_PROVIDERS.has(store.config.provider);
   }
 

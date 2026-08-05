@@ -1,27 +1,13 @@
 //! Embedding runner: executes a `WorkList` under correct lock discipline.
 //!
-//! The runner is the callable flow that ties the director (work-list
-//! computation) to the orchestrator (provider embedding calls) and the repo
-//! (storage). It follows the 3-burst lock pattern so the DB mutex is never
-//! held across an `.await` (the orchestrator call is the only long operation
-//! and runs after the work-list lock is dropped).
+//! v2: outer `JoinSet` (one task per article). Each task calls
+//! [`EmbeddingBatchSender::send_embedding_batch_parallel`] (per-text splitting +
+//! sub-batch grouping + parallel HTTP + pooling), then writes rows under brief
+//! DB lock burst. Cancel via `abort_all` — no DB writes from cancelled tasks.
 //!
-//! v2 redesign: the per-article loop is now an OUTER `tokio::task::JoinSet`
-//! (one task per article) instead of a sequential `for` loop. Each task calls
-//! [`EmbeddingBatchSender::send_embedding_batch_parallel`] (the v2 orchestrator
-//! primitive that handles per-text splitting + sub-batch grouping + parallel
-//! HTTP dispatch + pooling), then writes its rows under a brief DB lock burst.
-//! Cancellation is via `JoinSet::abort_all`: a cancel click between
-//! `join_next()` completions aborts all in-flight tasks, dropping their vectors
-//! (no DB writes from cancelled tasks).
-//!
-//! The [`EmbeddingBatchSender`] trait mirrors `IngestLlmSender`: production
-//! wires [`HttpEmbeddingBatchSender`] (wrapping `Arc<LlmOrchestrator>`); tests
-//! inject a fake. This makes the runner's parallel + cancel behavior
-//! unit-testable without a live LLM provider.
-//!
-//! Progress is emitted via the caller-supplied `app_handle` so the frontend can
-//! render a live progress bar (`embedding:progress` / `embedding:done` events).
+//! [`EmbeddingBatchSender`] trait mirrors `IngestLlmSender` (production:
+//! [`HttpEmbeddingBatchSender`]; tests: fake). Progress via `embedding:progress` /
+//! `embedding:done` events.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -40,37 +26,17 @@ use crate::llm::embedding::probe_embedding_support;
 use crate::llm::orchestrator::{send_embedding_batch_parallel, LlmOrchestrator};
 use crate::models::llm_config::LlmConfig;
 
-/// Decide whether a single returned vector should be stored.
-///
-/// Returns `true` if the vector's length matches the effective dimension
-/// (so it is safe to persist), `false` if it should be skipped + counted as
-/// an error (truncated/mismatched vector that would corrupt recall if stored
-/// with a wrong `dimensions` column).
-///
-/// Pure `#[must_use]` so the per-row guard is unit-testable in isolation.
+/// `true` if vector length matches `effective_dim` (safe to persist).
+/// `false` → skipped + counted as error (truncated/mismatched vector would corrupt recall).
 #[must_use]
 pub fn vector_matches_dim(vector: &[f32], effective_dim: i32) -> bool {
     vector.len() == effective_dim as usize
 }
 
-/// Resolve the effective embedding dimensionality for a batch.
+/// Resolve effective embedding dimensionality.
 ///
-/// The runner calls this with the probe-time `probe_dim` (read from
-/// `app_settings` when the run started) and the `returned_dim` reported by the
-/// provider alongside the current batch of vectors. Returns the dimensionality
-/// that should govern storage + the per-row length check.
-///
-/// Rules:
-/// - If the provider reports a positive `returned_dim` that DISAGREES with the
-///   probe value, trust the provider (the probe is stale - e.g. the model was
-///   swapped between the probe and the call). The runner logs the drift + the
-///   caller persists the corrected value back to `app_settings`.
-/// - Otherwise (returned_dim == 0, or agrees with probe), keep the probe value
-///   so a provider that reports `0` (a sentinel for "unknown") doesn't blow
-///   away a known-good dimensionality.
-///
-/// Pure `#[must_use]` so the dimension-decision logic is unit-testable in
-/// isolation without spinning up the async runner + Tauri runtime.
+/// `returned_dim > 0` and disagrees with `probe_dim` → trust provider (stale probe).
+/// Otherwise → keep `probe_dim` (providers using `0` as "unknown" don't blow away good dim).
 #[must_use]
 pub fn resolve_effective_dim(probe_dim: i32, returned_dim: i32) -> i32 {
     if returned_dim > 0 && returned_dim != probe_dim {
@@ -80,12 +46,8 @@ pub fn resolve_effective_dim(probe_dim: i32, returned_dim: i32) -> i32 {
     }
 }
 
-/// Injectable sender so the runner's outer-JoinSet + cancel behavior is
-/// unit-testable without a live LLM provider. Mirrors `IngestLlmSender`.
-///
-/// Production wires [`HttpEmbeddingBatchSender`] (wrapping
-/// `Arc<LlmOrchestrator>`); tests inject a fake that returns deterministic
-/// vectors.
+/// Injectable sender (mirrors `IngestLlmSender`). Production: [`HttpEmbeddingBatchSender`];
+/// tests: fake with deterministic vectors.
 #[async_trait]
 pub trait EmbeddingBatchSender: Send + Sync {
     /// Embed `texts`, returning ONE vector per input in input order, plus the
@@ -99,8 +61,7 @@ pub trait EmbeddingBatchSender: Send + Sync {
     ) -> Result<(Vec<Vec<f32>>, i32), AppError>;
 }
 
-/// Production sender: delegates to the shared `Arc<LlmOrchestrator>` via the
-/// v2 free function [`send_embedding_batch_parallel`].
+/// Production sender delegating to `Arc<LlmOrchestrator>` via [`send_embedding_batch_parallel`].
 pub struct HttpEmbeddingBatchSender {
     orchestrator: Arc<LlmOrchestrator>,
 }
@@ -136,23 +97,12 @@ pub struct EmbeddingRunReport {
     pub skip_reason: Option<String>,
 }
 
-/// The core embedding-generation flow (no Tauri `State` so it is callable from
-/// command handlers and batch-import phases alike).
+/// Core embedding-generation flow (no `State` — callable from commands + batch phases).
 ///
-/// v2 lock discipline (non-blocking guarantee):
-/// 1. Brief lock to read the work list + config + status. Release.
-/// 2. If `embedding_status == Unknown`, probe (no lock held during the HTTP
-///    call), then brief lock to persist the outcome. Release.
-/// 3. Outer `JoinSet`: one task per article. Each task calls
-///    `sender.send_embedding_batch_parallel` (no lock held), then takes a brief
-///    DB lock burst to `INSERT OR REPLACE` its rows. Release.
-///
-/// The DB mutex is held only for millisecond-scale SQLite reads/writes and is
-/// **never held across an `.await`**.
-///
-/// `emit_events` controls whether `embedding:progress` / `embedding:done` are
-/// emitted (the batch-import Phase 5 emits its own `batch-import:progress`
-/// instead). When `app_handle` is `None` (test mode), no events are emitted.
+/// v2 lock: 1) brief lock → read work list + config; 2) probe (no lock); 3) outer
+/// `JoinSet` per article → `send_embedding_batch_parallel` (no lock) → brief lock →
+/// `INSERT OR REPLACE` rows. DB mutex **never held across `.await`**.
+/// `emit_events` controls progress events (batch Phase 5 suppresses). `app_handle: None` = test mode.
 pub async fn generate_embeddings_inner(
     db_state: &State<'_, DbState>,
     sender: Arc<dyn EmbeddingBatchSender>,
@@ -306,9 +256,8 @@ pub async fn generate_embeddings_inner(
     let cfg_arc = Arc::new(cfg.clone());
     let model_arc = Arc::new(model.clone());
 
-    // Type alias to keep the JoinSet declaration readable (clippy
-    // `type_complexity`). Carries the per-article result back to the main loop
-    // for the brief DB-write burst.
+    /* Type alias to keep the JoinSet declaration readable. Carries the
+    per-article result back to the main loop for the brief DB-write burst. */
     type ArticleEmbedResult =
         Result<(String, Vec<crate::embedding::director::EmbedTask>, Vec<Vec<f32>>, i32), AppError>;
 
@@ -326,9 +275,9 @@ pub async fn generate_embeddings_inner(
         });
     }
 
-    // 4. Collect completions, writing rows under brief DB lock bursts. Check
-    //    cancel between completions; on cancel, abort_all + break (in-flight
-    //    vectors are dropped - no DB writes from cancelled tasks).
+    /* 4. Collect completions, writing rows under brief DB lock bursts.
+    Cancel between completions → abort_all + break (in-flight vectors
+    dropped; no DB writes from cancelled tasks). */
     let mut cancelled = false;
     while let Some(joined) = set.join_next().await {
         // Check cancellation before processing each completion.
@@ -343,9 +292,7 @@ pub async fn generate_embeddings_inner(
         let result = match joined {
             Ok(r) => r,
             Err(join_err) => {
-                // Task panicked. Count its tasks as errors (we don't know which
-                // article it was for from the join error, so attribute to the
-                // whole pending set as a rough estimate).
+                /* Task panicked. Count as single error (unknown article from join err). */
                 eprintln!("[embedding] article task panicked: {join_err}");
                 processed += 1;
                 if emit_events {
@@ -367,11 +314,8 @@ pub async fn generate_embeddings_inner(
 
         match result {
             Ok((_article_id, tasks, vectors, returned_dims)) => {
-                // Dimension validation: a provider may return vectors of an
-                // unexpected length (model swap between probe and call, a
-                // truncated batch vector, a misbehaving local server). Delegate
-                // to the pure `resolve_effective_dim` helper so the
-                // dimension-decision logic stays unit-testable in isolation.
+                /* Dimension validation: unexpected vector length (model swap, truncated
+                batch, misbehaving server). Delegate to pure resolve_effective_dim. */
                 let effective_dim = resolve_effective_dim(dimensions, returned_dims);
                 if effective_dim != dimensions {
                     eprintln!(
@@ -381,9 +325,8 @@ pub async fn generate_embeddings_inner(
                 }
                 let expected_len = effective_dim as usize;
 
-                // If the provider returned fewer vectors than tasks (e.g. a
-                // batch endpoint that silently dropped one), count the missing
-                // ones as errors so the report is accurate.
+                /* If the provider returned fewer vectors than tasks (silently
+                dropped by batch endpoint), count missing as errors. */
                 if vectors.len() < tasks.len() {
                     let missing = tasks.len() - vectors.len();
                     eprintln!(
@@ -398,9 +341,8 @@ pub async fn generate_embeddings_inner(
                 // Brief lock to write the rows.
                 let conn = lock_conn(&db_state.conn)?;
                 for (task, vector) in tasks.iter().zip(vectors.iter()) {
-                    // Per-row dimension guard: skip + count as error so a
-                    // single truncated/mismatched vector never stores a wrong
-                    // `dimensions` column (which would silently corrupt recall).
+                    /* Per-row dimension guard: skip truncated/mismatched vectors so
+                    a wrong dimensions column never corrupts recall. */
                     if vector.len() != expected_len {
                         eprintln!(
                             "[embedding] skipping row (article {}, chunk_index {}): vector length \
@@ -430,10 +372,8 @@ pub async fn generate_embeddings_inner(
                     }
                 }
 
-                // If the effective dimension drifted from the probe value,
-                // persist the corrected value back to `app_settings` so the
-                // next run + recall use the real dimensionality. Best-effort:
-                // a failure here is logged and never blocks the embedding write.
+                /* If effective dimension drifted from probe, persist correction
+                to app_settings. Best-effort: failure logged, never blocks write. */
                 if effective_dim != dimensions && effective_dim > 0 {
                     if let Ok(conn) = lock_conn(&db_state.conn) {
                         if let Err(e) = app_settings_repo::set_embedding_status(
@@ -451,10 +391,8 @@ pub async fn generate_embeddings_inner(
             }
             Err(e) => {
                 eprintln!("[embedding] failed for article batch: {e}");
-                // We don't know the exact task count for this article from the
-                // error alone; attribute a single error (the article's tasks
-                // will be re-queued by the director's staleness check on the
-                // next run because no rows were written for them).
+                /* Unknown task count from error alone; attribute single error.
+                Tasks re-queued by director's staleness check on next run. */
                 errors += 1;
             }
         }

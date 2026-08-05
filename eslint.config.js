@@ -47,6 +47,7 @@ export default tseslint.config(
       'vue/component-name-in-template-casing': ['error', 'PascalCase'],
       'vue/multi-word-component-names': 'off',
       'no-console': ['warn', { allow: ['warn', 'error'] }],
+      'spaced-comment': ['error', 'always', { markers: ['/'] }],
     },
   },
   // Re-disable no-unused-vars for Vue files - must come AFTER the general

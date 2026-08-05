@@ -1,16 +1,8 @@
-//! Shared slug utilities for the wiki ingest pipeline.
-//!
-//! `author_slug` and `concept_slug` previously each inlined a near-identical
-//! dash-squeezing loop (collapse consecutive separators, trim leading/trailing
-//! dashes). Both now delegate to the pure `squeeze_slug` helper here so the
-//! squeezing logic lives in exactly one place.
+//! Shared slug utilities. Single `squeeze_slug` helper used by `author_slug` and `concept_slug`
+//! (both previously inlined near-identical dash-squeezing loops).
 
-/// Squeeze a raw string into a kebab-case slug: lowercase ASCII alphanumerics
-/// are preserved, every other char becomes a single `-`, consecutive dashes
-/// collapse, and leading/trailing dashes trim to empty.
-///
-/// Returns the cleaned middle (no prefix). Callers add their own prefix
-/// (`author-`, etc.) and handle the empty case.
+/// Squeeze raw text to kebab-case: lowercase alphanumerics preserved, every other char → `-`,
+/// consecutive dashes collapsed, leading/trailing dashes trimmed. Returns clean middle (no prefix).
 #[must_use]
 pub fn squeeze_slug(raw: &str) -> String {
     let lowercased: String = raw
@@ -34,9 +26,8 @@ pub fn squeeze_slug(raw: &str) -> String {
     squeezed.trim_matches('-').to_string()
 }
 
-/// Derive a deterministic, kebab-case slug for an author from their normalized
-/// name. Prefixed with `author-` to avoid collisions with concept pages
-/// (e.g. a researcher named "Author" vs a concept page about authors).
+/// Derive kebab-case slug for an author from normalized name. Prefixed `author-` to avoid
+/// collisions with concept pages.
 #[must_use]
 pub fn author_slug(normalized_name: &str) -> String {
     let squeezed = squeeze_slug(normalized_name);
@@ -47,8 +38,7 @@ pub fn author_slug(normalized_name: &str) -> String {
     }
 }
 
-/// Derive a deterministic, kebab-case slug for a concept from its term text.
-/// No prefix - concept slugs are bare kebab-case.
+/// Derive kebab-case slug for a concept from term text. No prefix - bare kebab-case.
 #[must_use]
 pub fn concept_slug(term: &str) -> String {
     let squeezed = squeeze_slug(term);
@@ -59,9 +49,7 @@ pub fn concept_slug(term: &str) -> String {
     }
 }
 
-/// Sanitize a slug for use as a filename. Unlike `author_slug` / `concept_slug`,
-/// this preserves the original casing and only replaces special characters
-/// (used when writing parsed LLM pages to disk).
+/// Sanitize a slug for use as a filename. Preserves original casing, replaces special chars with `-`.
 #[must_use]
 pub fn sanitize_slug(slug: &str) -> String {
     let cleaned: String =

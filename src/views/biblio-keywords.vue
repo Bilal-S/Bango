@@ -117,27 +117,15 @@ function onNavigateToKeyword(nodeId: string) {
 }
 
 /**
- * Deep-link to the article list filtered by the selected keyword (Gap 1a).
- *
- * Source-aware routing: the keyword network draws nodes from multiple
- * sources (`metadata | ai_extracted | user_added | tags | labels`). Only
- * `tags`/`labels`-sourced nodes can be matched by the existing
- * `ArticleQuery.tags` / `ArticleQuery.labels` filters (the node label is the
- * tag/label name). The detail panel gates the "View articles" button to
- * those sources via `canViewArticles`, so this handler only fires for them.
- * `metadata`/`ai_extracted`/`user_added`-sourced nodes are deferred to
- * Gap 1b (backend `ArticleQuery.keywords` + `json_each()`).
- *
- * Routes through `buildBiblioArticleQuery`, which enforces
- * `status: 'included'` (decision D1) in one place - the keyword network is
- * scoped to included articles.
+ * Deep-link to article list filtered by selected keyword. Source-aware:
+ * only `tags`/`labels`-sourced nodes can be matched by existing filters.
+ * Routes through `buildBiblioArticleQuery` which enforces `status: 'included'`.
  */
 function viewKeywordArticles(): void {
   const keyword = selectedKeyword.value;
   if (!keyword) return;
-  // Defensive: the detail panel gates the button to these sources, but guard
-  // here too so a future caller cannot route a deferred source through the
-  // wrong filter.
+  /* Defensive: detail panel gates button to these sources, but guard here
+   * too so future caller cannot route deferred source through wrong filter. */
   if (keyword.source !== 'tags' && keyword.source !== 'labels') return;
   const filter =
     keyword.source === 'tags' ? { tags: [keyword.label] } : { labels: [keyword.label] };

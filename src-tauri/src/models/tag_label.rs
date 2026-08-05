@@ -1,11 +1,11 @@
 use serde::Serialize;
 
-/// Result of a tag/label merge. Returned by both `merge_tag` and `merge_label`.
-///
-/// The counts are computed BEFORE the destructive `UPDATE OR IGNORE` so the
-/// co-occurrence overlap signal is preserved. The pre-confirm dialog can only
-/// show an honest upper bound (`from.articleCount`); these precise counts
-/// surface in the success toast after the merge commits.
+/** Result of a tag/label merge. Returned by both `merge_tag` and `merge_label`.
+
+The counts are computed BEFORE the destructive `UPDATE OR IGNORE` so the
+co-occurrence overlap signal is preserved. The pre-confirm dialog can only
+show an honest upper bound (`from.articleCount`); these precise counts
+surface in the success toast after the merge commits. */
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MergeResult {

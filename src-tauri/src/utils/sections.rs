@@ -1,15 +1,10 @@
-//! Section-aware text classification for full-text extraction.
-//!
-//! Pure functions that split flat extracted text into `Section`s by detecting
-//! heading lines (markdown `##`, numbered `2.1 Study Design`, or keyword
-//! headings like `Methods` / `Results`). The result feeds:
-//! - `chunking::chunk_sections` (T1.2) for FTS5 row-per-chunk indexing.
-//! - `commands::summary::generate_section_summaries` (T1.3) for per-section
-//!   LLM summaries.
-//! - `pdf_extract::strip_abstract` / `strip_references` (refactored to consume
-//!   `classify_sections` so the stripping is robust to formatting variance).
-//!
-//! No I/O, no DB. All functions are `#[must_use]` pure.
+/*! Section-aware text classification for full-text extraction.
+
+Splits flat extracted text into `Section`s by detecting heading lines
+(markdown `##`, numbered, keyword). Feeds `chunking::chunk_sections`,
+per-section LLM summaries, and `pdf_extract` stripping.
+
+Pure, `#[must_use]`, no I/O, no DB. */
 
 use std::path::Path;
 
@@ -18,12 +13,10 @@ use regex::Regex;
 
 use crate::utils::pdf_extract;
 
-/// The kind of section a block of text belongs to.
+/// Section classification for text blocks.
 ///
-/// `Table` / `Figure` variants were added in Tier 2 Phase 1 (caption + table
-/// detection). T1.1 only classified heading-derived sections; T2 adds these
-/// structural-element kinds so chunking and the FTS index treat tables/figures
-/// uniformly.
+/// `Table`/`Figure` variants (Tier 2 Phase 1) add structural-element kinds
+/// so chunking and FTS treat tables/figures uniformly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SectionKind {
     /// A detected heading that does not map to a known semantic section.
@@ -82,18 +75,12 @@ pub struct Section {
 }
 
 // ─── Detection regexes (compiled once) ──────────────────────────────────────
-//
-// `Regex::new` on a static, hand-validated pattern cannot fail in practice.
-// clippy forbids `.expect()` in library code, so we use `.unwrap_or_else` with
-// a fallback that compiles a trivial always-matching-safe pattern. The fallback
-// is never reached for these static patterns; it exists purely to satisfy the
-// "no panics" rule without `expect`.
+/* `Regex::new` on a static, hand-validated pattern cannot fail in practice.
+Clippy forbids `.expect()` in library code, so we use `.unwrap_or_else` with
+a fallback that compiles a trivial always-matching-safe pattern. */
 
-/// Compile a static, hand-validated regex pattern.
-///
-/// `clippy::expect_used` is denied across the crate, but these patterns are
-/// compile-time constants that cannot fail. The `allow` scopes the exception to
-/// this one helper; the fallback pattern `^$` is a literal that is always valid.
+/** Compile a static regex pattern. Uses a trivial fallback to satisfy the
+no-panics rule without `expect`; the actual patterns cannot fail. */
 #[allow(clippy::expect_used)]
 pub(crate) fn compile_static_regex(pattern: &str) -> Regex {
     Regex::new(pattern).unwrap_or_else(|_| Regex::new(r"^$").expect("fallback regex is valid"))
@@ -102,37 +89,25 @@ pub(crate) fn compile_static_regex(pattern: &str) -> Regex {
 /// Markdown headings: `# Methods`, `## 2.1 Study Design`, etc.
 static MARKDOWN_HEADING_RE: Lazy<Regex> = Lazy::new(|| compile_static_regex(r"^#{1,6}\s+(.+)$"));
 
-/// Numbered headings like `2.1 Study Design`, `3 Methods`, `1.2.3 Results`,
-/// `1 Введение` (Russian), `2 Обзор связанных работ`.
-///
-/// Tightened to avoid false-positive sentence matches: requires a capitalised
-/// short phrase (<=60 chars) with no trailing sentence punctuation and no
-/// lowercase body words, so `3. The results showed` does not match.
-///
-/// Phase 3 (multilingual sectioning expansion): the pattern
-/// is Unicode-aware (`\p{Lu}` for any uppercase letter, `\p{L}`/`\p{N}` for any
-/// letter/digit) so Cyrillic, CJK, Arabic, etc. numbered headings are detected.
-/// ASCII letters are a subset of `\p{L}`, so existing English behavior is
-/// preserved (additive change).
+/** Numbered headings like `2.1 Study Design`, `3 Methods`, `1.2.3 Results`,
+`1 Введение` (Russian).
+
+Avoids false-positive sentence matches: requires a capitalised short phrase
+(<=60 chars) with no trailing sentence punctuation.
+
+Phase 3: pattern is Unicode-aware (`\p{Lu}`, `\p{L}`/`\p{N}`) so Cyrillic,
+CJK, Arabic, etc. numbered headings are detected. */
 static NUMBERED_HEADING_RE: Lazy<Regex> =
     Lazy::new(|| compile_static_regex(r"^\d+(?:\.\d+){0,2}\.?\s+\p{Lu}[\p{L}\p{N}\s\-:']{2,60}$"));
 
 // ─── Keyword → SectionKind mapping ──────────────────────────────────────────
-//
-// Each entry is `(case-insensitive keyword, SectionKind)`. A heading line is
-// classified by the first matching keyword (order matters: more specific
-// phrases like "Materials and Methods" must come before "Methods").
+/* Each entry is `(case-insensitive keyword, SectionKind)`. Classified by the
+first matching keyword (order matters: "Materials and Methods" before "Methods"). */
 
-/// Keyword groups, in priority order. Each group maps to one `SectionKind`.
-/// A heading matches a group if any keyword in the group equals the heading
-/// (case-insensitive, trimmed).
-///
-/// Phase 3 (multilingual sectioning expansion): localized
-/// keywords for French, Spanish, Japanese, Chinese, German, Russian,
-/// Portuguese, Italian, Arabic, and Turkish. Order within a group does not
-/// matter (exact-match); order across groups still matters only when a heading
-/// could match multiple groups (e.g. "Materials and Methods" must stay in the
-/// Methods group).
+/** Keyword groups in priority order, case-insensitive exact-match.
+Phase 3 adds localized keywords for French, Spanish, Japanese, Chinese, German,
+Russian, Portuguese, Italian, Arabic, Turkish. Order within groups does not
+matter; order across groups matters (e.g. "Materials and Methods" before "Methods"). */
 const KEYWORD_GROUPS: &[(&[&str], SectionKind)] = &[
     (
         &[
@@ -276,13 +251,9 @@ fn classify_heading(line: &str) -> SectionKind {
     SectionKind::Heading
 }
 
-/// `true` if a line is a heading line. Three detection paths:
-/// 1. Markdown heading (`## Methods`).
-/// 2. Numbered heading (`2.1 Study Design`).
-/// 3. Bare keyword line - a line that is exactly one of the section keywords
-///    (e.g. `METHODS`, `Introduction`, `Results`) with optional surrounding
-///    whitespace. This catches PDFs where the section title stands alone on its
-///    line without a `#` or number prefix.
+/** Three detection paths: markdown heading (`## Methods`), numbered heading
+(`2.1 Study Design`), or bare keyword line. Bare keywords catch PDFs where
+the section title stands alone without a `#` or number prefix. */
 #[must_use]
 fn is_heading_line(line: &str) -> bool {
     let trimmed = line.trim();
@@ -297,15 +268,11 @@ fn is_heading_line(line: &str) -> bool {
     KEYWORD_GROUPS.iter().any(|(keywords, _)| keywords.iter().any(|kw| lower == *kw))
 }
 
-/// Classify flat text into a list of `Section`s bounded by detected headings.
-///
-/// - Text before the first heading becomes a `SectionKind::Text` section (the
-///   "preamble" - often the abstract, but we let the keyword match decide if an
-///   `Abstract` heading is present).
-/// - When no headings are detected at all, the entire text becomes a single
-///   `SectionKind::Text` section (graceful degrade: chunking still works on
-///   plain text).
-/// - Empty / whitespace-only text yields an empty `Vec`.
+/** Classify flat text into `Section`s bounded by detected headings.
+
+Text before the first heading becomes `SectionKind::Text` (preamble). When no
+headings are detected, the entire text becomes a single `Text` section.
+Empty/whitespace-only yields an empty `Vec`. */
 #[must_use]
 pub fn classify_sections(text: &str) -> Vec<Section> {
     if text.trim().is_empty() {
@@ -353,11 +320,9 @@ pub fn classify_sections(text: &str) -> Vec<Section> {
     sections
 }
 
-/// Extract sections from a file (PDF or TXT) using the same header/footer +
-/// abstract/references stripping pipeline as `extract_pdf_text` /
-/// `extract_txt_text`, then classifying the result into `Section`s.
-///
-/// Returns an empty `Vec` on extraction failure (graceful degrade).
+/** Extract sections from a file (PDF/TXT) via the same header/footer +
+abstract/references pipeline as `extract_pdf_text`/`extract_txt_text`,
+then classify into `Section`s. Returns empty `Vec` on failure. */
 pub fn extract_sections(file_path: &Path) -> Result<Vec<Section>, String> {
     let extension = file_path
         .extension()
@@ -383,10 +348,8 @@ pub fn extract_sections(file_path: &Path) -> Result<Vec<Section>, String> {
 }
 
 // ─── Tier 2 Phase 1: structural-element extraction ──────────────────────────
-//
-// These pure functions extract figures/tables WITHOUT perturbing the proven
-// `classify_sections` (T1.1) chunking pipeline. `extract_sections_with_tables`
-// composes them together.
+/* Pure figure/table extraction functions, composed by `extract_sections_with_tables`.
+Do not perturb the proven `classify_sections` (T1.1) chunking pipeline. */
 
 /// The kind of caption detected by `extract_captions`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,14 +399,12 @@ static CAPTION_START_RE: Lazy<Regex> = Lazy::new(|| {
     compile_static_regex(r"(?i)^\s*(figure|fig\.?|table|tab\.?)\s+(\d+[a-z]?)[:.]?\s*(.*)$")
 });
 
-/// Extract figure/table captions from flat text, merging multi-line caption
-/// bodies. Pure: no I/O.
-///
-/// Algorithm: walk line-by-line. When a line matches `CAPTION_START_RE`, collect
-/// it as the first caption line, then greedily consume subsequent non-empty
-/// lines until one of: a blank line, another caption start line, a
-/// markdown/numbered/keyword heading. The first line after the caption block
-/// (if non-empty, non-heading, non-caption) is captured as `following_sentence`.
+/** Extract figure/table captions from flat text, merging multi-line bodies.
+Pure: no I/O.
+
+Walks line-by-line: matches `CAPTION_START_RE`, greedily consumes continuation
+lines until blank/new-caption/heading, captures the next non-heading line as
+`following_sentence`. */
 #[must_use]
 pub fn extract_captions(text: &str) -> Vec<Caption> {
     let lines: Vec<&str> = text.lines().collect();
@@ -509,15 +470,12 @@ fn parse_caption_at(lines: &[&str], idx: &mut usize) -> Option<Caption> {
     Some(Caption { kind, number, caption, following_sentence })
 }
 
-/// Detect consecutive lines forming a table and return the text with tables
-/// replaced by `<!-- TABLE:N -->` placeholders plus the extracted table
-/// sections. Pure: no I/O.
-///
-/// A table block is `MIN_TABLE_LINES`+ consecutive non-empty lines where either:
-/// (a) one line uses `|` as a separator (strong signal; a single pipe line is
-/// sufficient on its own), OR (b) each line has 2+ column-separator runs (2+
-/// spaces/tabs) and the separator positions overlap within
-/// `COLUMN_ALIGN_TOLERANCE` characters across the consecutive lines.
+/** Detect consecutive lines forming a table and return text with
+`<!-- TABLE:N -->` placeholders plus the extracted table sections. Pure.
+
+A table block is `MIN_TABLE_LINES`+ consecutive non-empty lines where either
+a pipe `|` separator is present (strong signal), or 2+ whitespace column
+separators overlap across lines within `COLUMN_ALIGN_TOLERANCE`. */
 #[must_use]
 pub fn detect_markdown_tables(text: &str) -> (String, Vec<Section>) {
     let lines: Vec<&str> = text.lines().collect();
@@ -743,11 +701,9 @@ fn render_gfm_rows(rows: &[Vec<String>]) -> String {
     out.trim_end().to_string()
 }
 
-/// Compose table detection + section classification. Keeps `classify_sections`
-/// (T1.1) untouched so the proven chunking pipeline is not perturbed.
-///
-/// Tables are appended as `SectionKind::Table` sections after the heading-derived
-/// sections (tables are high-value regardless of their original position).
+/** Compose table detection + section classification. Keeps `classify_sections`
+(T1.1) untouched so the proven chunking pipeline is not perturbed.
+Tables are appended after heading-derived sections. */
 #[must_use]
 pub fn extract_sections_with_tables(text: &str) -> Vec<Section> {
     let (text_without_tables, table_sections) = detect_markdown_tables(text);

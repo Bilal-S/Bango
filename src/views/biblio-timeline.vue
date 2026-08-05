@@ -26,9 +26,8 @@ const rangeMax = computed(
   () => allYears.value[allYears.value.length - 1] ?? new Date().getFullYear()
 );
 
-// Re-sync range bounds whenever the underlying dataset changes year span
-// (e.g. after a re-normalization). Not immediate - initial range is set
-// in onMounted after the first fetchKpis() call completes.
+/* Re-sync range bounds when dataset year span changes (e.g. after
+ * re-normalization). Initial range set in onMounted after fetchKpis(). */
 watch([rangeMin, rangeMax, () => kpis.value.includedCount], ([mn, mx, count]) => {
   if (count > 0) state.setRange(mn, mx);
 });
@@ -115,22 +114,17 @@ const avgPerYear = computed(() =>
 // ── ApexCharts series & options ────────────────────────────────
 const chartRef = ref<InstanceType<typeof VueApexCharts> | null>(null);
 
-// ApexCharts requires a NUMERIC pixel height. We base the chart heights on the
-// viewport so the charts fill the available space without needing ResizeObserver
-// (which had timing issues with conditional v-if rendering). `viewportHeight`
-// is a reactive ref from useViewport so charts recompute on resize.
+/* ApexCharts requires NUMERIC pixel height. Base chart heights on viewport
+ * so charts fill available space without ResizeObserver (timing issues with
+ * conditional v-if). `viewportHeight` is reactive from useViewport. */
 const primaryChartHeight = computed(() => Math.max(280, Math.floor(viewportHeight.value * 0.42)));
 const secondaryChartHeight = computed(() => Math.max(140, Math.floor(viewportHeight.value * 0.22)));
 
 /**
- * Minimum viewport height (px) at which the secondary "Top Journals" chart is
- * worth showing. Below this, vertical space is too tight for two charts, so we
- * hide the secondary chart and let the primary chart expand to fill the area.
- *
- * Space budget at the cutoff: dashboard header (~60px) + KPI strip (~80px) +
- * primary chart (~42% of viewport ≈ 294px @ 700) + secondary chart (256px) +
- * paddings/gaps. 700px keeps both charts usable; below it the primary chart
- * would be crushed.
+ * Min viewport height (px) at which the secondary "Top Journals" chart is
+ * shown. Below this, vertical space is too tight; primary chart expands.
+ * Space budget: header (~60px) + KPI strip (~80px) + primary (~42% @ 700) +
+ * secondary (256px) + gaps. 700px keeps both charts usable.
  */
 const SECONDARY_CHART_MIN_VIEWPORT_HEIGHT = 700;
 
@@ -154,11 +148,8 @@ const OTHER_COLOR = '#c7c4d8';
 
 const xCategories = computed(() => filteredPubs.value.map((yc) => String(yc.year)));
 
-/**
- * Shorten journal names for legend display by stripping common leading
- * articles/prefixes (JOURNAL OF, ZEITSCHRIFT FUR, etc.), then truncating
- * to 25 characters. The full name is preserved for tooltips and data lookups.
- */
+/** Shorten journal names for legend: strip common leading articles/prefixes,
+ *  truncate to 25 chars. Full name preserved for tooltips. */
 function normalizeJournalName(name: string): string {
   const cleaned = name
     .replace(/^(THE|A|AN)\s+/i, '')
@@ -432,10 +423,9 @@ const journalChartOptions = computed<ApexOptions>(() => ({
     fontFamily: 'inherit',
     background: 'transparent',
     events: {
-      // Click a Top-Journals bar to deep-link into the article list filtered
-      // by that journal. The timeline summarizes included articles only, so
-      // the filter-based deep-link routes through `buildBiblioArticleQuery`,
-      // which enforces `status: 'included'` (decision D1) in one place.
+      /* Click a Top-Journals bar to deep-link into article list filtered by
+       * that journal. Timeline summarizes included articles only; routes
+       * through `buildBiblioArticleQuery` which enforces `status: 'included'`. */
       dataPointSelection: (_e: unknown, _c: unknown, opts?: { dataPointIndex?: number }) => {
         const idx = opts?.dataPointIndex;
         if (idx === undefined || idx < 0 || idx >= journalTotals.value.length) return;
@@ -541,9 +531,8 @@ const yearPanelData = computed(() => {
   return { yc, rows, citationCount: cit?.count ?? null, growth };
 });
 
-// ── Bar / data-point click → year detail ───────────────────────
-// Defensive: ApexCharts emits dataPointIndex = -1 on empty-space clicks and
-// can exceed bounds on edge hovers. Guard every access.
+/* Bar/data-point click → year detail. Defensive: ApexCharts emits
+ * dataPointIndex = -1 on empty-space clicks and can exceed bounds. */
 function handleDataPointClick(
   _event: unknown,
   _config: unknown,
@@ -556,9 +545,8 @@ function handleDataPointClick(
   state.selectedYear.value = state.selectedYear.value === entry.year ? null : entry.year;
 }
 
-// ── Legend click → open Journal Info Card ──────────────────────
-// When user clicks a legend item in stacked mode, open the journal info card
-// for that journal (in addition to the default toggle behavior).
+/* Legend click → open Journal Info Card. When user clicks legend item in
+ * stacked mode, open the journal info card for that journal. */
 function handleLegendClick(_chart: unknown, seriesIndex?: number): void {
   if (seriesIndex === undefined || seriesIndex < 0) return;
   // Get the series name (normalized) and look up the full journal name
@@ -589,10 +577,8 @@ function closeJournalCard(): void {
   selectedJournalIndexId.value = null;
 }
 
-// ── Deep links ─────────────────────────────────────────────────
-// The timeline summarizes included articles only, so the filter-based
-// deep-link routes through `buildBiblioArticleQuery`, which enforces
-// `status: 'included'` (decision D1) in one place.
+/* Deep links: timeline summarizes included articles only; routes through
+ * `buildBiblioArticleQuery` which enforces `status: 'included'`. */
 function viewYearArticles(year: number): void {
   void router.push(buildBiblioArticleQuery('timeline', { yearFrom: year, yearTo: year }));
 }
@@ -630,10 +616,8 @@ async function handleExportPng(): Promise<void> {
 
 async function handleExportSvg(): Promise<void> {
   try {
-    // ApexCharts dataURI({ fileExt: 'svg' }) has reliability issues in
-    // vue3-apexcharts (returns incomplete data). Instead, serialize the
-    // chart's SVG DOM element directly via XMLSerializer - reliable and
-    // produces the full SVG markup.
+    /* ApexCharts dataURI({ fileExt: 'svg' }) is unreliable in vue3-apexcharts.
+     * Serialize the chart's SVG DOM element directly via XMLSerializer. */
     const chartEl = document.querySelector('.chart-primary svg');
     if (!chartEl) {
       console.error('SVG export failed: chart SVG element not found');
@@ -671,9 +655,9 @@ function resetFilters(): void {
   closeJournalCard();
 }
 
-// Capture unhandled promise rejections from ApexCharts internal SVG.js
-// operations (Element not found during chart destroy/update cycles).
-// These are non-fatal but noisy - log them once for diagnostics.
+/* Capture unhandled promise rejections from ApexCharts SVG.js operations
+ * (Element not found during chart destroy/update cycles). Non-fatal but
+ * noisy - log once for diagnostics. */
 onMounted(async () => {
   const rejectionHandler = (e: PromiseRejectionEvent) => {
     const reason = e.reason instanceof Error ? e.reason.message : String(e.reason);

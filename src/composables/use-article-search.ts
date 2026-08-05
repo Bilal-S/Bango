@@ -17,23 +17,15 @@ export interface ArticleFilter {
   yearFrom: number | null;
   yearTo: number | null;
   journal: string;
-  /**
-   * Case-insensitive partial-match DOI text. Empty string filters nothing.
-   * Mutually exclusive with `doiEmpty`: when `doiEmpty` is true the backend
-   * ignores this text and matches only empty/NULL DOIs.
-   */
+  /** Case-insensitive partial-match DOI. Mutually exclusive with `doiEmpty`. */
   doiText: string;
-  /** When true, restrict to articles with no DOI (`doi IS NULL OR doi = ''`). */
+  /** Restrict to articles with no DOI. */
   doiEmpty: boolean;
   tags: string[];
   labels: string[];
-  /**
-   * Tags the article must NOT have (NOT-filter). The Article list filter
-   * panel toggles a tag pill between inclusion (`tags`) and exclusion
-   * (`excludedTags`); the backend emits a `NOT IN` clause for these.
-   */
+  /** Tags the article must NOT have. Toggled from inclusion to exclusion in the filter panel. */
   excludedTags: string[];
-  /** Labels the article must NOT have (NOT-filter). See {@link excludedTags}. */
+  /** Labels the article must NOT have. */
   excludedLabels: string[];
 }
 
@@ -48,12 +40,9 @@ interface ArticleQuery {
   screeningErrorsOnly: boolean;
   author: string | null;
   journal: string | null;
-  /**
-   * Partial-match DOI text sent to the backend (`doi` field). Null/empty
-   * filters nothing. Mutually exclusive with `doiEmpty` at the UI layer.
-   */
+  /** Partial-match DOI. Null/empty filters nothing. */
   doi: string | null;
-  /** When true, restrict to articles with no DOI. */
+  /** Restrict to articles with no DOI. */
   doiEmpty: boolean;
   tags: string[];
   labels: string[];
@@ -78,11 +67,7 @@ const STATUS_TABS: readonly (ArticleStatus | 'all' | 'error' | 'references' | 's
 
 type StatusTab = (typeof STATUS_TABS)[number];
 
-/**
- * Route params accepted by {@link applyRouteParams}. Extracted as an
- * interface so the helper functions below can reference a shared shape
- * without re-declaring it inline.
- */
+/** Accepted route params for {@link applyRouteParams}. */
 interface RouteParams {
   status?: string;
   tags?: string[];
@@ -91,15 +76,11 @@ interface RouteParams {
   yearTo?: number;
   journal?: string;
   author?: string;
-  /** When true, keep the filter panel collapsed even though filters are applied. */
+  /** Keep the filter panel collapsed even with filters applied (deep-links). */
   filterCollapsed?: boolean;
   /**
-   * When true, clear all existing `filter.*` + `query.*` filter fields to
-   * defaults before applying the incoming params (decision D5). Used by the
-   * bibliometric deep-links (`buildBiblioArticleQuery` envelope) so the
-   * cached ArticleList does not overlay stale filters on the fresh
-   * deep-link. Default `false` preserves the overlay behavior for existing
-   * callers (dashboard, tag/label deep-links, status deep-links).
+   * When true, clear all `filter.*` + `query.*` fields to defaults before
+   * applying incoming params. Used by bibliometric deep-links.
    */
   resetFilters?: boolean;
 }
@@ -111,16 +92,9 @@ interface IdNameResolver {
 }
 
 /**
- * D5 reset block: clear all `filter.*` + `query.*` filter fields to their
- * defaults, plus the toolbar `searchText`, then reset pagination. Runs
- * BEFORE the param-application helpers so incoming params overwrite the
- * freshly-cleared defaults. Mirrors the field list in `clearFilters`
- * (minus the `search()` call, which `applyRouteParams` performs at the end).
- *
- * @param filter   - reactive display filter state
- * @param query    - reactive search query state
- * @param searchText - toolbar search ref (cleared so a stale search does not survive)
- * @param resetPage - pagination reset callback
+ * D5 reset: clear all filter + query fields to defaults before applying
+ * incoming params. Runs BEFORE param-application so incoming params overwrite
+ * the cleared defaults.
  */
 function resetFilterState(
   filter: ArticleFilter,
@@ -156,15 +130,9 @@ function resetFilterState(
 
 /**
  * Apply the `status` route param: resolve the active tab and set
- * `query.status` + `screeningErrorsOnly` accordingly. The `"error"` tab is
- * special-cased to `status='working'` + `screeningErrorsOnly=true`; `"all"`
- * maps to `null`; any other named status maps to itself.
- *
+ * `query.status` + `screeningErrorsOnly`. The `"error"` tab is
+ * special-cased to `status='working'` + `screeningErrorsOnly=true`.
  * No-op when `status` is not a recognized {@link StatusTab} value.
- *
- * @param status          - the raw status param string
- * @param activeStatusTab - ref to the active tab (mutated)
- * @param query           - reactive search query (mutated)
  */
 function applyStatusParam(
   status: string,
@@ -183,21 +151,8 @@ function applyStatusParam(
 }
 
 /**
- * Apply the `tags` + `labels` route params. Each ID is resolved to its
- * display name via the corresponding store; unresolved IDs are filtered
- * out. Both the display `filter` and the search `query` are synced with
- * the resolved names. When `showPanel` is true, `showFilters` is set to
- * `true` so the filter panel expands to reveal the active filters.
- *
- * No-op when the tags/labels arrays are empty or absent.
- *
- * @param params       - route params (only `tags` + `labels` are read)
- * @param filter       - reactive display filter state (mutated)
- * @param query        - reactive search query state (mutated)
- * @param tagsStore    - provides `tags: IdNameResolver[]` for ID to name resolution
- * @param labelsStore  - provides `labels: IdNameResolver[]` for ID to name resolution
- * @param showPanel    - when false, do not expand the filter panel
- * @param showFilters  - ref controlling filter-panel visibility (mutated)
+ * Apply `tags` + `labels` route params. Each ID is resolved to its display
+ * name via the corresponding store. No-op when arrays are empty.
  */
 function applyTagLabelParams(
   params: Pick<RouteParams, 'tags' | 'labels'>,
@@ -227,17 +182,8 @@ function applyTagLabelParams(
 }
 
 /**
- * Apply the `yearFrom`, `yearTo`, `journal`, and `author` route params.
+ * Apply `yearFrom`, `yearTo`, `journal`, and `author` route params.
  * Each is synced to both the display `filter` and the search `query`.
- * When `showPanel` is true, `showFilters` is set to `true` so the panel
- * expands. Year params use a `Number.isFinite` guard; journal/author use
- * truthiness (empty string is a no-op).
- *
- * @param params      - route params (yearFrom/yearTo/journal/author read)
- * @param filter      - reactive display filter state (mutated)
- * @param query       - reactive search query state (mutated)
- * @param showPanel   - when false, do not expand the filter panel
- * @param showFilters - ref controlling filter-panel visibility (mutated)
  */
 function applyNumericAndTextParams(
   params: Pick<RouteParams, 'yearFrom' | 'yearTo' | 'journal' | 'author'>,
@@ -504,13 +450,7 @@ export function useArticleSearch() {
 
   /**
    * Auto-open the detail panel when a filter application yields exactly one
-   * result. Fires for both the manual "Apply Filters" path and the
-   * route-deep-link path (e.g. clicking the filter button on a Tags & Labels
-   * entry that is assigned to a single article). No-op otherwise.
-   *
-   * Defined as a named function (not inline) so tests can assert the behavior
-   * through the public `applyFilters`/`applyRouteParams` APIs without needing
-   * direct access to the closure.
+   * result. No-op otherwise.
    */
   function autoSelectSingleResult(): Promise<void> {
     if (articles.value.length === 1) {
@@ -523,11 +463,9 @@ export function useArticleSearch() {
   }
 
   /**
-   * Gate for {@link autoSelectSingleResult} on the route-deep-link path.
-   * Auto-select is desirable when the user explicitly filtered by a tag/label
-   * (e.g. from the Tags & Labels screen) or by year/journal/author. It is NOT
-   * desirable for a bare status-only deep-link or an empty-params call, which
-   * should just load the list without surprising the user by opening a detail.
+   * Gate for {@link autoSelectSingleResult}: only fire when the user
+   * explicitly filtered by tag/label/year/journal/author. NOT for a bare
+   * status-only deep-link.
    */
   function routeHasFilterDimensions(params: RouteParams): boolean {
     return Boolean(
@@ -580,13 +518,9 @@ export function useArticleSearch() {
 
   /**
    * Refresh the article detail + table row after an operation that changes the
-   * article without going through the explicit status-move path (e.g. AI
-   * screening completion, AI summary generation, translation). Mirrors what
-   * `moveArticle` does for the table: re-fetch the article (updates
-   * `selectedArticle`), patch the articles list row so the table redraws (e.g.
-   * the status color bar updates), and refresh status tab counts in the
-   * background. Falls back to `selectArticle` if the article is no longer in
-   * the list (e.g. status changed + filter excludes it).
+   * article without going through the status-move path (e.g. AI screening,
+   * AI summary, translation). Falls back to `selectArticle` if the article is
+   * no longer in the list.
    */
   async function refreshArticle(id: string): Promise<void> {
     await selectArticle(id);
@@ -622,13 +556,9 @@ export function useArticleSearch() {
   }
 
   /**
-   * Permanently delete an article and all of its related records. The
-   * confirmation dialog is owned by `article-detail-panel.vue`; this function
-   * runs only after the user has confirmed. It invokes the backend
-   * `delete_article` command, removes the row from the articles list, refreshes
-   * the status-tab counts (the corpus changed), and closes the detail panel.
-   *
-   * Re-throws the backend error so the caller can surface a toast.
+   * Permanently delete an article. The confirmation dialog is owned by
+   * `article-detail-panel.vue`. Re-throws the backend error so the caller can
+   * surface a toast.
    */
   async function deleteArticle(id: string): Promise<void> {
     await tauriCommand('delete_article', { id });
@@ -651,7 +581,7 @@ export function useArticleSearch() {
     void search();
   }
 
-  /** Patch the articles list row with the latest selectedArticle data so the table redraws. */
+  /** Patch the articles list row with the latest selectedArticle data. */
   function syncArticleToList(id: string): void {
     if (!selectedArticle.value || selectedArticle.value.id !== id) return;
     const idx = articles.value.findIndex((a) => a.id === id);
@@ -667,15 +597,8 @@ export function useArticleSearch() {
   }
 
   /**
-   * Update a single metadata field (Authors, Affiliation, Journal, Year, Lang,
-   * DOI, Keywords) on an article via the in-place editor in the Metadata card.
-   * Mirrors `updateNotes`: invoke -> re-fetch -> patch the table row.
-   *
-   * `field` is the snake_case DB column name (e.g. `"publication_year"`); the
-   * backend `ArticleMetaField` enum (`#[serde(rename_all = "camelCase")]`)
-   * expects `"publicationYear"` so we forward the camelCase key the editor
-   * emits. The `value` is a scalar string for the text fields, or a `string[]`
-   * for the array fields (`authors`, `keywords`).
+   * Update a single metadata field on an article via the in-place editor.
+   * `field` is the snake_case DB column name (e.g. `"publication_year"`).
    */
   async function updateMetadata(
     id: string,
@@ -712,15 +635,8 @@ export function useArticleSearch() {
   }
 
   /**
-   * Clear the AI reasoning text + confidence for an article via the
-   * `clear_ai_reasoning` backend command. Only `ai_reasoning` + `ai_confidence`
-   * are nulled; `ai_decision`, `status`, `screened_at`, and `manual_override`
-   * are preserved. After the IPC call, re-fetch the article so the card
-   * updates live (reasoning paragraph disappears, confidence pill flips to
-   * `---`) and patch the table row. Mirrors `updateNotes` /
-   * `updateMetadata`: invoke -> re-fetch -> patch the list.
-   *
-   * Re-throws the backend error so the caller can surface a toast.
+   * Clear AI reasoning text + confidence. Nulls `ai_decision`, `ai_reasoning`,
+   * `ai_confidence`. `status`, `screened_at`, and `manual_override` are preserved.
    */
   async function clearAiReasoning(id: string): Promise<void> {
     await tauriCommand('clear_ai_reasoning', { id });
@@ -801,12 +717,7 @@ export function useArticleSearch() {
     await search();
   }
 
-  /**
-   * Bulk add a tag to multiple articles.
-   *
-   * @returns the number of articles that actually received the tag (articles
-   * that already had it are skipped by the backend `INSERT OR IGNORE`).
-   */
+  /** @returns number of articles that actually received the tag. */
   async function bulkAddTag(ids: string[], tagName: string): Promise<number> {
     const affected = await tauriCommand<number>('bulk_add_tag_to_articles', {
       articleIds: ids,
@@ -818,11 +729,7 @@ export function useArticleSearch() {
     return affected;
   }
 
-  /**
-   * Bulk add a label to multiple articles.
-   *
-   * @returns the number of articles that actually received the label.
-   */
+  /** @returns number of articles that actually received the label. */
   async function bulkAddLabel(ids: string[], labelName: string): Promise<number> {
     const affected = await tauriCommand<number>('bulk_add_label_to_articles', {
       articleIds: ids,
@@ -834,13 +741,7 @@ export function useArticleSearch() {
     return affected;
   }
 
-  /**
-   * Bulk remove a tag from multiple articles.
-   *
-   * @returns the number of articles from which the tag was actually removed
-   * (0 means the tag was not present on any selected article, or the named
-   * tag does not exist at all).
-   */
+  /** @returns number of articles from which the tag was removed (0 = not present). */
   async function bulkRemoveTag(ids: string[], tagName: string): Promise<number> {
     const affected = await tauriCommand<number>('bulk_remove_tag_from_articles', {
       articleIds: ids,
@@ -852,11 +753,7 @@ export function useArticleSearch() {
     return affected;
   }
 
-  /**
-   * Bulk remove a label from multiple articles.
-   *
-   * @returns the number of articles from which the label was actually removed.
-   */
+  /** @returns number of articles from which the label was removed. */
   async function bulkRemoveLabel(ids: string[], labelName: string): Promise<number> {
     const affected = await tauriCommand<number>('bulk_remove_label_from_articles', {
       articleIds: ids,
@@ -902,34 +799,16 @@ export function useArticleSearch() {
   }
 
   /**
-   * Apply an initial filter state derived from route query parameters.
-   * Sets the active status tab and/or tag/label/year/journal filters, then searches.
+   * Apply route query params as article-list filters, then search.
    *
-   * Year and journal params are used by the Bibliometrics timeline deep-links
-   * ("View articles from YYYY" and "View this journal's articles"). Both the
-   * display `filter` and the search `query` are synced so the filter panel
-   * reflects the active state.
-   *
-   * When `resetFilters` is true (decision D5), ALL existing `filter.*` +
-   * `query.*` filter fields are cleared to defaults before the incoming params
-   * are applied. This prevents the keep-alive-cached ArticleList from
-   * overlaying stale filters on top of a fresh bibliometric deep-link (e.g.
-   * landing on `author="Bob" AND yearFrom=2020` when the user clicked the
-   * Co-Authorship Papers box while a year filter was still active). The
-   * bibliometric summarized the included corpus with no extra filters, so the
-   * list must reflect exactly the deep-link's filter. Sort (`sortBy`/`sortDir`)
-   * and page-size are intentionally preserved (display preferences, not
-   * filters). Status is reset by the incoming `status` param itself.
-   *
-   * Behavior is composed from module-private helpers (`resetFilterState`,
-   * `applyStatusParam`, `applyTagLabelParams`, `applyNumericAndTextParams`)
-   * to keep this orchestrator thin; see their JSDoc for per-field contracts.
+   * When `resetFilters` is true, ALL filter fields are cleared before
+   * applying incoming params (keeps keep-alive-cached ArticleList from
+   * overlaying stale filters on a bibliometric deep-link).
    */
   async function applyRouteParams(params: RouteParams): Promise<void> {
-    // Compute the filter-panel visibility flag once so every helper honors
-    // `filterCollapsed` consistently. When `filterCollapsed` is true (e.g.
-    // navigating from the Tags & Labels screen or Bibliometrics deep-links),
-    // the panel stays collapsed even though filters are applied.
+    /* Compute filter-panel visibility once so every helper honors
+    `filterCollapsed`. When true, the panel stays collapsed even with applied
+    filters. */
     const showPanel = !params.filterCollapsed;
 
     // D5: optional reset-before-apply. Runs BEFORE the param-application
@@ -944,9 +823,9 @@ export function useArticleSearch() {
     applyTagLabelParams(params, filter, query, tagsStore, labelsStore, showPanel, showFilters);
     applyNumericAndTextParams(params, filter, query, showPanel, showFilters);
     await search();
-    // Auto-open the detail panel when a deep-link with a filter dimension
-    // (tag/label/year/journal/author) yields exactly one result. Status-only
-    // deep-links and empty-params calls just load the list without surprise.
+    /* Auto-open the detail panel when a deep-link with a filter dimension
+    (tag/label/year/journal/author) yields exactly one result. Status-only
+    deep-links just load the list. */
     if (routeHasFilterDimensions(params)) {
       await autoSelectSingleResult();
     }

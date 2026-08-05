@@ -1,23 +1,18 @@
-//! Phase 2: Scan the `ris/` directory and import Citation Chaser RIS files
-//! (and BibTeX files) into the articles that match by DOI.
+//! Phase 2: Scan `ris/` and import Citation Chaser RIS / BibTeX files into
+//! articles matched by DOI. Naming conventions (keyed on
+//! [`clean_doi_filename`]):
+//! - `{cleaned_doi}_references.ris` (skip if `has_reference_details`)
+//! - `{cleaned_doi}_citations.ris` (skip if `has_citation_details`)
+//! - `{cleaned_doi}.ris` / `.bib` (generic, skip if `has_reference_details`)
 //!
-//! Recognized naming conventions (all keyed on `clean_doi_filename(doi)`):
-//! - `{cleaned_doi}_references.ris` - backward references (skip if
-//!   `has_reference_details`)
-//! - `{cleaned_doi}_citations.ris` - forward citations (skip if
-//!   `has_citation_details`)
-//! - `{cleaned_doi}.ris` / `{cleaned_doi}.bib` - generic reference file (skip
-//!   if `has_reference_details`)
-//!
-//! Files are parsed via [`crate::commands::references::import_references_inner`]
-//! which auto-detects RIS vs BibTeX by extension.
+//! Files parsed via [`crate::commands::references::import_references_inner`]
+//! (auto-detects RIS vs BibTeX).
 //!
 //! # Lock scope (Concern 3)
 //!
-//! The DB mutex is held only for the brief initial discovery (build the match
-//! map + resolve the `ris/` dir) and for the short per-file import burst.
-//! RIS parsing is fast but the same short-lock principle applies so other IPC
-//! commands stay responsive during a large import.
+//! DB mutex held only for brief discovery + short per-file import burst.
+//! RIS parsing is fast but the short-lock principle keeps other IPC commands
+//! responsive.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -28,20 +23,17 @@ use crate::error::AppError;
 
 use super::{full_text_phase::build_fulltext_match_map, BatchImportPhaseResult, DoiMatchMap};
 
-/// Recognized RIS-like extensions (BibTeX `.bib` is also accepted by
-/// `import_references_inner`).
+/// Recognized RIS/BibTeX extensions.
 const CITATION_EXTENSIONS: &[&str] = &["ris", "bib"];
 
-/// A discovered citation/reference file pending import, paired with the
-/// matched article ID and the reference-type label (`"reference"` or
-/// `"citation"`).
+/// Pending citation/reference file to import.
 struct PendingImport {
     path: PathBuf,
     article_id: String,
     ref_type: &'static str,
 }
 
-/// Resolve the `ris/` directory under the storage root, creating it if needed.
+/// Resolve `ris/` under storage root, creating if needed.
 fn resolve_ris_dir(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
     let root = crate::db::app_settings_repo::get_storage_root(conn)?;
     let ris = PathBuf::from(root).join("ris");
@@ -51,10 +43,8 @@ fn resolve_ris_dir(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
     Ok(ris)
 }
 
-/// Discover all importable citation/reference files in `ris/`.
-///
-/// For each article DOI, checks for the three naming patterns and skips files
-/// whose target article already has the corresponding detail flag set.
+/// Discover importable citation files in `ris/`. For each article DOI, checks
+/// naming patterns and skips if target already has the detail flag.
 fn discover_importable_files(ris_dir: &Path, match_map: &DoiMatchMap) -> Vec<PendingImport> {
     let mut importable: Vec<PendingImport> = Vec::new();
 
@@ -103,14 +93,13 @@ fn discover_importable_files(ris_dir: &Path, match_map: &DoiMatchMap) -> Vec<Pen
     importable
 }
 
-/// Discovery payload returned by the brief initial lock burst.
+/// Discovery payload from the brief initial lock burst.
 pub(crate) struct CitationsDiscovery {
     importable: Vec<PendingImport>,
 }
 
-/// Brief initial lock burst: resolve the `ris/` dir, build the DOI match map,
-/// discover importable files. The lock is released before this function
-/// returns, so the per-file import loop runs WITHOUT holding the mutex.
+/// Brief lock burst: resolve `ris/`, build match map, discover files.
+/// Lock released before return; per-file import runs without mutex.
 pub(crate) fn discover(conn: &rusqlite::Connection) -> Result<CitationsDiscovery, AppError> {
     let ris_dir = resolve_ris_dir(conn)?;
     let articles = article_repo::get_articles_with_doi_info(conn)?;
@@ -119,12 +108,8 @@ pub(crate) fn discover(conn: &rusqlite::Connection) -> Result<CitationsDiscovery
     Ok(CitationsDiscovery { importable })
 }
 
-/// Run Phase 2: import each discovered citation/reference file.
-///
-/// Calls [`import_references_inner`] per file under a short DB lock burst
-/// (released between files so other IPC commands stay responsive). The
-/// caller's `is_cancelled` closure is checked before each file so the runner
-/// can abort mid-phase.
+/// Run Phase 2: import each discovered citation/reference file with short
+/// DB lock bursts. `is_cancelled` checked before each file.
 pub async fn run_citations_phase<F, P>(
     conn_mutex: &Mutex<rusqlite::Connection>,
     is_cancelled: &F,

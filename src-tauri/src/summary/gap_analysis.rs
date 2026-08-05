@@ -1,23 +1,14 @@
-//! Research Gap Analysis prompt builder.
-//!
-//! Pure functions that compose the user prompt for the corpus-wide gap report.
-//! The system prompt lives in `gap_analysis_prompt.md` (loaded via
-//! `include_str!`). This module owns the user-prompt assembler plus the
-//! `BiblioContext` and `GapPromptInput` shapes the command + engine consume.
-//!
-//! Design: the article block reuses the exact renderer from
-//! `build_summary_prompt` (Shape-A `evidence` included) so the gap prompt is
-//! byte-consistent with the literature-review prompt on the article axis and
-//! an evidence-enriched corpus feeds both.
+//! Research Gap Analysis prompt builder. Pure functions for corpus-wide gap report user prompts.
+//! Article block reuses `build_summary_prompt` renderer (Shape-A evidence included)
+//! for byte-consistency with the literature-review prompt.
 
 use crate::summary::prompt::ArticleSummary;
 
 /// System prompt: expert research analyst, Markdown-only output, no em dashes.
 pub const GAP_ANALYSIS_SYSTEM_PROMPT: &str = include_str!("gap_analysis_prompt.md");
 
-/// Compact bibliometric context derived from `biblio_repo` KPIs/terms/
-/// institutions. Threaded into the prompt so the model can ground claims about
-/// the corpus's temporal, topical, and geographic distribution.
+/// Compact bibliometric context from `biblio_repo`. Grounds claims about temporal,
+/// topical, and geographic distribution of the corpus.
 #[derive(Debug, Clone, Default)]
 pub struct BiblioContext {
     /// `(first_year, last_year)` span of included articles; `None` when empty.
@@ -35,25 +26,18 @@ pub struct BiblioContext {
 /// Inputs to the gap-analysis user prompt builder.
 pub struct GapPromptInput {
     pub aims: Vec<String>,
-    /// Pre-rendered screening methodology summary (reuse
-    /// `format_screening_summary` so the gap prompt and the literature-review
-    /// prompt stay consistent).
+    /// Pre-rendered screening methodology summary (consistency with literature-review prompt).
     pub screening_summary: String,
     pub citation_style: String,
     pub articles: Vec<ArticleSummary>,
     pub biblio_context: BiblioContext,
-    /// Full inclusion criterion definitions (same role as in the summary
-    /// prompt: lets the model name the actual eligibility rules).
+    /// Full inclusion criteria. Same role as summary prompt.
     pub inclusion_criteria: Vec<String>,
     /// Full exclusion criterion definitions.
     pub exclusion_criteria: Vec<String>,
 }
 
-/// Render the gap-analysis user prompt.
-///
-/// Pure function: no I/O. Mirrors the structure of `build_summary_prompt`:
-/// aims -> screening methodology -> citation style -> included articles (with
-/// Shape-A `Evidence:`) -> bibliometric aggregates -> instructions.
+/// Render gap-analysis user prompt. Pure, no I/O. Mirrors `build_summary_prompt` structure.
 #[must_use]
 pub fn build_gap_analysis_prompt(input: &GapPromptInput) -> String {
     let aims_list = if input.aims.is_empty() {
@@ -119,10 +103,7 @@ Do not use em dashes. Never invent references."#,
     )
 }
 
-/// Render the included-articles block.
-///
-/// Byte-consistent with the article renderer in `build_summary_prompt` so an
-/// evidence-enriched corpus feeds both prompts identically on the article axis.
+/// Render included-articles block. Byte-consistent with `build_summary_prompt`.
 fn render_articles_block(articles: &[ArticleSummary]) -> String {
     articles
         .iter()
@@ -152,8 +133,7 @@ fn render_articles_block(articles: &[ArticleSummary]) -> String {
         .join("\n")
 }
 
-/// Render the bibliometric context block. Empty sections are omitted so small
-/// corpora do not produce a wall of "(no data)" lines.
+/// Render bibliometric context. Empty sections omitted.
 fn render_biblio_context(ctx: &BiblioContext) -> String {
     let mut lines: Vec<String> = Vec::new();
 
@@ -225,11 +205,8 @@ fn render_criteria(inclusion: &[String], exclusion: &[String]) -> String {
     lines.join("\n")
 }
 
-/// Render the user prompt for the synthesis step that merges two partial gap
-/// reports into one coherent document.
-///
-/// Used by the engine when the corpus exceeds 80% of the context window and is
-/// split into two batches. Pure function: no I/O.
+/// Render user prompt for merging two partial gap reports. Used when corpus >80%
+/// context window. Pure, no I/O.
 #[must_use]
 pub fn build_gap_synthesis_prompt(
     aims: &[String],

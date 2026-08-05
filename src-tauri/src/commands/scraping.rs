@@ -101,25 +101,24 @@ fn resolve_ris_dir(conn: &rusqlite::Connection) -> PathBuf {
 
 /// Classify a rendered `ScrapeError` string as a "skip" (NoData / Cancelled)
 /// rather than a true error. The frontend uses the same prefix check to route
-/// the toast into the batch's `skipped` counter and show an info (not error)
-/// toast.
+/// the toast into the batch's `skipped` counter and show an info toast.
 ///
-/// Kept in sync with the `#[error("...")]` formats on `ScrapeError::NoData`
-/// ("No data: ...") and `ScrapeError::Cancelled` ("Cancelled").
+/// Kept in sync with `ScrapeError::NoData` ("No data: ...") and
+/// `ScrapeError::Cancelled` ("Cancelled").
 fn is_skip_message(err_str: &str) -> bool {
     err_str.starts_with("No data:") || err_str == "Cancelled"
 }
 
 /// Scrape Citation Chaser for references and/or citations of a given DOI.
 ///
-/// RIS files are saved to `{storage_root}/ris/` (default `~/Documents/Bango/ris/`).
-/// Logs errors to the audit table so they appear in the Audit Timeline.
+/// RIS files are saved to `{storage_root}/ris/`. Logs errors to the audit
+/// table so they appear in the Audit Timeline.
 ///
-/// **Shortcut**: If the expected RIS files already exist in the output directory,
+/// Shortcut: if the expected RIS files already exist in the output directory,
 /// they are returned immediately without launching the headless browser.
 ///
-/// This command is `async` and runs the heavy scraping work on a blocking thread
-/// via `spawn_blocking` so the Tauri main thread stays responsive.
+/// This command is `async` and runs the heavy scraping work on a blocking
+/// thread via `spawn_blocking` so the Tauri main thread stays responsive.
 #[tauri::command]
 pub async fn scrape_citation_chaser_cmd(
     app: AppHandle,

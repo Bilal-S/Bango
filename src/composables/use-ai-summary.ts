@@ -23,9 +23,7 @@ export interface FigureDescription {
   description?: string;
 }
 
-/** Tier 4.2/4.3: one LLM-described table caption with the optional `markdown`
- * GFM column for tables-as-GFM rendering. Extends FigureDescription with the
- * preserved GFM rows extracted from the full text (T2.2). */
+/** Tier 4.2/4.3: LLM-described table caption with optional GFM markdown. */
 export interface TableDescription {
   /** The table number as a string ("1", "2a"). */
   number: string;
@@ -43,10 +41,8 @@ export interface AiSummaryData {
   schema_version?: number;
   field: string;
   subfield: string;
-  // Values may be a scalar string (e.g., `study_type`, `population`) OR an
-  // array of strings (e.g., `key_results`, `methods_models`, `limitations`).
-  // The extraction prompt's 5 field-specific templates each emit a mix of both
-  // shapes; the renderer must handle `string | string[]` per value.
+  // Values may be scalar (e.g. `study_type`, `population`) or array (e.g.
+  // `key_results`, `methods_models`). The renderer must handle both shapes.
   structured_extraction: Record<string, string | string[]>;
   summary_150_250_words: string;
   key_insights: string[];
@@ -61,12 +57,7 @@ export interface AiSummaryData {
   tables?: TableDescription[];
 }
 
-/**
- * Tier 4.3: True when the blob is the v2 superset (enriched view). False for
- * legacy v1/absent schema_version blobs. Drives view branching in
- * `abstract-summary-view.vue` so a v2 blob with an empty `section_summaries`
- * array still renders the enriched shell.
- */
+/** True when the blob has schema_version >= 2 (enriched view). */
 export function isUnifiedSummary(data: AiSummaryData | null): boolean {
   return (data?.schema_version ?? 0) >= 2;
 }
@@ -133,13 +124,8 @@ void ensureGlobalListeners();
 // ── Public API ──────────────────────────────────────────────────────
 
 /**
- * Request an AI summary for an article's full text.
- * Shows a toast immediately and processes asynchronously.
- * @param onComplete - Optional callback invoked when summary completes (even
- *   across navigation). Automatically cleaned up after firing.
- * @param includeSections - When true, also generate per-section summaries
- *   (Methods/Results/Discussion) in the same LLM call. Reads the
- *   `bango-section-summaries` localStorage toggle when omitted.
+ * Request an AI summary for an article's full text. Fire-and-forget - the
+ * command emits an event on completion.
  */
 export async function requestArticleAiSummary(
   articleId: string,
@@ -190,12 +176,9 @@ export function parseAiSummary(raw: string | null | undefined): AiSummaryData | 
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
-    // Tier 2 lenient fallback (T4 E2E 2026-07-01): accept any blob that has at
-    // least ONE substantive field, not just `summary_150_250_words`. This
-    // prevents the all-or-nothing failure where a reasoning model returns
-    // `{"schema_version":2}` (no summary text) and the view shows "No AI
-    // summary" even though the command ran successfully. With lenient parsing,
-    // a partial response still renders with whatever fields the model produced.
+    /* Lenient fallback: accept any blob with at least one substantive field.
+    Prevents all-or-nothing failure where a reasoning model returns just
+    `{"schema_version":2}` and the view shows "No AI summary". */
     const hasDigest = typeof parsed.summary_150_250_words === 'string';
     const hasField = typeof parsed.field === 'string' && parsed.field.length > 0;
     const hasExtraction =
@@ -272,12 +255,7 @@ async function ensureFigureListeners(): Promise<void> {
 
 void ensureFigureListeners();
 
-/**
- * Request LLM descriptions for an article's figure/table captions (T2 Phase 4).
- * One batched orchestrator call per article, grounded in the extracted caption
- * text. Shows a toast immediately and processes asynchronously. The result is
- * merged into the existing `full_text_ai_summary` blob under `figures`/`tables`.
- */
+/** Request LLM descriptions for figure/table captions (T2 Phase 4). */
 export async function requestFigureDescriptions(
   articleId: string,
   articleTitle: string,

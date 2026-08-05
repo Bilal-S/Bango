@@ -1,9 +1,8 @@
-//! Coverage / readiness check for the Citation Finder (`citation_finder/AGENTS.md`).
+//! Coverage / readiness check for the Citation Finder.
 //!
-//! Counts articles in the filtered statuses vs. articles with ≥1 embedding row
-//! of the current model's dimensions. Powers:
-//! - `get_citation_finder_readiness` command (toggle visibility + tooltip hint)
-//! - The Phase A gate inside `find_citations` (decides whether Phase B runs)
+//! Counts articles in filtered statuses vs. articles with ≥1 embedding row
+//! of the current model's dimensions. Powers `get_citation_finder_readiness`
+//! and the Phase A gate inside `find_citations`.
 
 use rusqlite::{params_from_iter, Connection};
 
@@ -15,36 +14,20 @@ use crate::llm::embedding::check_embedding_support;
 
 /// Compute the readiness payload for the given status filter.
 ///
-/// `provider_supports_embeddings` is `embedding_status != Disabled`
-/// (cf2.md §2.1): the toggle is hidden only on a *known-unsupported* provider
-/// (Anthropic, Z.AI). `Unknown` shows the toggle - Phase B's first run probes
-/// via `generate_embeddings_inner` and resolves it to `Enabled`/`Disabled`.
-/// `Enabled` shows the toggle (unchanged). `dimensions` is still loaded so
-/// `coverage_pct` can filter same-dimension rows; it is NOT part of the
-/// toggle-visibility gate (a probe has not necessarily run yet when the toggle
-/// is first shown).
+/// `provider_supports_embeddings` is `embedding_status != Disabled`.
+/// **Static-override (authoritative)**: when the configured provider is
+/// statically known-unsupported (Anthropic, Z.AI via
+/// `check_embedding_support`), the returned `embedding_status` is ALWAYS
+/// overridden to `"disabled"` — regardless of the persisted status. This
+/// catches un-probed `Unknown`, stale `Enabled` (left over from a previous
+/// OpenAI session), and save-debounce timing races. The persisted
+/// `app_settings.embedding_status` is NOT mutated here (read-only
+/// derivation); the probe + runner read the persisted value directly.
 ///
-/// **Static-override for known-unsupported providers (authoritative)**: when
-/// the configured provider is statically known to not support embeddings
-/// (`check_embedding_support` returns `false` for `Anthropic` / `ZAi`), the
-/// returned `embedding_status` is ALWAYS overridden to `"disabled"` -
-/// regardless of the persisted status value. This is authoritative (not just
-/// a fallback for un-probed `Unknown` state) so it catches un-probed
-/// `Unknown` (probe has not run), stale `Enabled` (left over from a previous
-/// OpenAI session), and save-debounce timing races.
-///
-/// The persisted `app_settings.embedding_status` is NOT mutated here
-/// (read-only derivation for the readiness payload); the probe + runner keep
-/// reading the persisted value directly so they're unaffected. The persisted
-/// triple-state is the canonical signal for the probe/runner; this payload
-/// derivation is purely for toggle visibility and reflects the static truth
-/// when it is stronger than the persisted signal.
-///
-/// `coverage_pct` is `embedded_count / total_articles * 100`. The Phase A
-/// check inside `find_citations` runs Phase B (prepare) when `coverage_pct <
-/// 100.0`. Phase B is best-effort - the search proceeds regardless of the
-/// post-prepare coverage (no 100% gate); see `search.rs` + the module
-/// `AGENTS.md` for why partial coverage is tolerated.
+/// `coverage_pct` is `embedded_count / total_articles * 100`. Phase A
+/// inside `find_citations` runs Phase B when `coverage_pct < 100.0`.
+/// Phase B is best-effort — the search proceeds regardless of post-prepare
+/// coverage (no 100% gate).
 pub fn compute_readiness(
     conn: &Connection,
     status_filter: &[String],
@@ -53,13 +36,11 @@ pub fn compute_readiness(
     let dimensions = app_settings_repo::get_embedding_dimensions(conn)?;
     let embedding_model = app_settings_repo::get_embedding_model(conn)?;
 
-    // Static-override (authoritative): when the configured provider is
-    // statically known-unsupported (Anthropic, Z.AI), override the REPORTED
-    // status to Disabled regardless of the persisted value. This catches
-    // un-probed Unknown, stale Enabled (left over from a previous OpenAI
-    // session), and save-debounce timing races. The persisted value is NOT
-    // mutated - this is a read-only derivation for the readiness payload; the
-    // probe + runner keep reading the persisted value directly.
+    /* Static-override (authoritative): when the configured provider is
+    statically known-unsupported (Anthropic, Z.AI), override the REPORTED
+    status to Disabled regardless of the persisted value. The persisted
+    value is NOT mutated — this is a read-only derivation for the readiness
+    payload; the probe + runner read the persisted value directly. */
     if let Some(cfg) = llm_config_repo::get_config(conn)? {
         if !check_embedding_support(&cfg.provider) {
             status = EmbeddingStatus::Disabled;
@@ -83,11 +64,8 @@ pub fn compute_readiness(
     })
 }
 
-/// Pure percentage helper: `embedded / total * 100`, with division-by-zero →
-/// 100.0 (an empty corpus trivially has full coverage).
-///
-/// `#[must_use]` so the boundary cases (empty corpus, partial, full) are
-/// unit-testable in isolation.
+/// Pure: `embedded / total * 100`, div-by-zero → 100.0 (empty corpus = full
+/// coverage). `#[must_use]`.
 #[must_use]
 pub fn coverage_percentage(total_articles: i64, embedded_count: i64) -> f64 {
     if total_articles == 0 {

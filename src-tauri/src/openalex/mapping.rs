@@ -1,7 +1,4 @@
-//! Field mapping: OpenAlex Work to Bango `NewArticle`.
-//!
-//! All functions are pure (`#[must_use]`) so they can be unit-tested
-//! without any I/O or Tauri state.
+//! OpenAlex Work -> Bango `NewArticle` mapping. All pure (`#[must_use]`).
 
 use std::collections::HashMap;
 
@@ -9,8 +6,7 @@ use crate::models::article::NewArticle;
 
 use super::OpenAlexWork;
 
-/// Reconstruct an abstract from OpenAlex's inverted index representation.
-/// Returns an empty string if the index is null or empty.
+/// Reconstruct abstract from OpenAlex's inverted index. Returns `""` if empty/null.
 #[must_use]
 pub fn reconstruct_abstract(inverted_index: &Option<HashMap<String, Vec<i32>>>) -> String {
     let Some(index) = inverted_index else {
@@ -31,9 +27,7 @@ pub fn reconstruct_abstract(inverted_index: &Option<HashMap<String, Vec<i32>>>) 
 
 const SNIPPET_MAX_CHARS: usize = 200;
 
-/// Truncate to 200 chars at the last word boundary.
-/// If the abstract is already <= 200 chars, return it as-is (no ellipsis).
-/// If truncated, append "...".
+/// Truncate to 200 chars at last word boundary. Append `"..."` if truncated.
 #[must_use]
 pub fn truncate_snippet(abstract_text: &str) -> String {
     if abstract_text.chars().count() <= SNIPPET_MAX_CHARS {
@@ -45,15 +39,14 @@ pub fn truncate_snippet(abstract_text: &str) -> String {
         snippet.push_str("...");
         snippet
     } else {
-        // No space found (single long word) - hard-truncate at 200 + ellipsis
+        // Single long word - hard-truncate at 200 + ellipsis
         let mut snippet = truncated;
         snippet.push_str("...");
         snippet
     }
 }
 
-/// Strip the `https://doi.org/` prefix from a DOI URL and lowercase it.
-/// Returns `None` if the input is `None` or empty.
+/// Strip `https://doi.org/` prefix, lowercase. Returns `None` if empty/absent.
 #[must_use]
 pub fn normalize_doi(doi: &Option<String>) -> Option<String> {
     doi.as_ref().filter(|s| !s.is_empty()).map(|s| {
@@ -64,7 +57,7 @@ pub fn normalize_doi(doi: &Option<String>) -> Option<String> {
     })
 }
 
-/// Map an OpenAlex work type to a Bango RIS-equivalent `reference_type`.
+/// Map OpenAlex work type to RIS-equivalent `reference_type`.
 #[must_use]
 pub fn map_work_type_to_reference_type(work_type: &Option<String>) -> Option<String> {
     work_type.as_ref().map(|t| {
@@ -82,17 +75,13 @@ pub fn map_work_type_to_reference_type(work_type: &Option<String>) -> Option<Str
     })
 }
 
-/// Extract the ISSN-L (linking ISSN) from an OpenAlex source, normalized to the
-/// canonical `dddd-ddddX` form via `normalize_issn`. Returns `None` if absent
-/// or invalid.
+/// Extract ISSN-L from source, normalized via `normalize_issn`. Returns `None` if absent/invalid.
 #[must_use]
 pub fn extract_issn_l(source: &super::OpenAlexSource) -> Option<String> {
     source.issn_l.as_deref().map(crate::db::journal_repo::normalize_issn).filter(|s| !s.is_empty())
 }
 
-/// Extract the eISSN: the first ISSN in the array that differs from `issn_l`,
-/// normalized to the canonical form via `normalize_issn`. Returns `None` if no
-/// such ISSN exists.
+/// Extract the eISSN: first ISSN in the array differing from `issn_l`, normalized.
 #[must_use]
 pub fn extract_eissn(source: &super::OpenAlexSource) -> Option<String> {
     let issn_l = source.issn_l.as_deref();
@@ -104,22 +93,19 @@ pub fn extract_eissn(source: &super::OpenAlexSource) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Extract the author display names from the authorships array.
-/// Returns an empty vector if no authors are present.
+/// Extract author display names from the authorships array.
 #[must_use]
 pub fn extract_authors(work: &OpenAlexWork) -> Vec<String> {
     work.authorships.iter().filter_map(|a| a.author.display_name.clone()).collect()
 }
 
-/// Extract the keyword display names from the keywords array.
-/// Returns an empty vector if no keywords are present.
+/// Extract keyword display names from the keywords array.
 #[must_use]
 pub fn extract_keywords(work: &OpenAlexWork) -> Vec<String> {
     work.keywords.iter().map(|k| k.display_name.clone()).collect()
 }
 
-/// Map a single OpenAlex Work to a Bango `NewArticle`.
-/// All fields are derived purely from the Work object; no I/O.
+/// Map a single OpenAlex Work to a Bango `NewArticle`. Pure, no I/O.
 #[must_use]
 pub fn map_work_to_new_article(work: &OpenAlexWork) -> NewArticle {
     let title = work.title.clone().unwrap_or_default();
@@ -202,15 +188,13 @@ pub fn map_works_to_new_articles(works: &[OpenAlexWork]) -> Vec<NewArticle> {
     works.iter().map(map_work_to_new_article).collect()
 }
 
-/// Extract the DOI from a work as a normalized string (lowercase, no prefix).
-/// Returns `None` if the work has no DOI.
+/// Extract DOI from a work as normalized string (lowercase, no prefix).
 #[must_use]
 pub fn work_doi_normalized(work: &OpenAlexWork) -> Option<String> {
     normalize_doi(&work.doi)
 }
 
 /// Map an OpenAlex Work to a `NewReferencePaper` for the reference harvest.
-/// Similar to `map_work_to_new_article` but targets the `reference_papers` table.
 #[must_use]
 pub fn map_work_to_reference_paper(
     work: &OpenAlexWork,

@@ -1,15 +1,12 @@
-//! The Citation Finder search pipeline (`citation_finder/AGENTS.md`).
+//! Citation Finder search pipeline.
 //!
-//! `find_citations_inner` is the spawn-safe core (no `tauri::State`). The
-//! `commands::citation_finder::find_citations` Tauri command wraps it.
-//!
-//! Three-phase one-button flow (`citation_finder/AGENTS.md`):
-//! - **Phase A:** readiness check (brief lock). Decide whether Phase B runs.
-//! - **Phase B:** (conditional) auto-prepare embeddings by reusing
+//! `find_citations_inner` is the spawn-safe core (no `tauri::State`).
+//! Three-phase one-button flow:
+//! - Phase A: readiness check (brief lock) → decide whether Phase B runs.
+//! - Phase B: (conditional) auto-prepare embeddings via
 //!   `generate_embeddings_inner` with the same cancel token.
-//! - **Phase C:** the search pipeline - claim-split (per-statement only) →
-//!   recall (reuse) → containment passage → LLM classify → merge into
-//!   `CitationResult[]`.
+//! - Phase C: claim-split (per-statement only) → recall → containment
+//!   passage → LLM classify → merge into `CitationResult[]`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,24 +38,21 @@ use crate::embedding::runner::{generate_embeddings_inner, EmbeddingBatchSender};
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 
-/// Injectable sender so the search pipeline's LLM call is unit-testable
-/// without a live provider. Mirrors `EmbeddingBatchSender`.
+/// Injectable sender trait (mirrors `EmbeddingBatchSender`).
 #[async_trait::async_trait]
 pub trait CitationLlmSender: Send + Sync {
-    /// Run the main classification call. Returns the prepared JSON string
-    /// (already passed through `prepare_llm_json`).
+    /// Run the main classification call. Returns prepared JSON string
+    /// (already through `prepare_llm_json`).
     async fn send_classification(
         &self,
         system_prompt: &str,
         user_prompt: &str,
     ) -> Result<String, AppError>;
 
-    /// Run the claim-split call (per-statement mode only). Returns the
-    /// prepared JSON string.
+    /// Run the claim-split call (per-statement only). Returns prepared JSON.
     async fn send_claim_split(&self, text: &str) -> Result<String, AppError>;
 
-    /// Run a single embedding recall for one query text. Returns the top-K
-    /// article hits with their cosine scores.
+    /// Run embedding recall for one query text. Returns top-K hits with cosine scores.
     async fn recall(
         &self,
         query: &str,
@@ -129,46 +123,35 @@ impl CitationLlmSender for HttpCitationLlmSender {
     }
 }
 
-/// One input claim (text + cosine recall hits + per-candidate best passage).
+/// One input claim: text + recall hits + per-candidate best passage.
 struct ClaimWork {
     text: String,
     hits: Vec<EmbeddingHit>,
-    /// (article_id, passage, section, containment_score) per hit that had a
-    /// usable passage. Articles whose best passage scored below
-    /// `MIN_PASSAGE_SCORE` are absent.
+    /// (article_id, passage, section, containment_score) per hit with a usable
+    /// passage. Articles below `MIN_PASSAGE_SCORE` are absent.
     passages: Vec<(String, String, Option<String>, f64)>,
 }
 
-/// The pooled finalists across one or more claims: the union of article IDs
-/// + the per-claim passage lists (used to build the prompt + merge LLM output).
+/// Pooled finalists across claims: union of article IDs + per-claim passages.
 struct Finalists {
     article_ids: Vec<String>,
     per_claim: Vec<ClaimWork>,
 }
 
-/// Bundles the user input + runtime params so `find_citations_inner` stays
-/// under the clippy `too_many_arguments` threshold (8/7). Mirrors the
-/// `RunSyncContext` pattern used by the screening engine.
+/// Bundles input + runtime params (mirrors screening's `RunSyncContext`).
 pub struct FindCitationsContext<'a> {
     pub text: String,
     pub mode: CitationFinderMode,
     pub status_filter: Vec<String>,
     pub cancel_token: Arc<AtomicBool>,
     pub emit_progress: &'a (dyn Fn(CitationFinderProgress) + Send + Sync),
-    /// `Some(app_handle)` in production so Phase B can forward the embedding
-    /// runner's per-article `embedding:progress` events. The frontend listens
-    /// for `embedding:progress` during Phase B + re-emits as
-    /// `citation:progress`. `None` in tests (no events).
     pub app_handle: Option<tauri::AppHandle>,
 }
 
-/// The core spawn-safe search pipeline.
-///
-/// Returns `Vec<CitationResult>` - one entry per claim (per-statement) or a
-/// single entry with `claim: None` (whole-block).
-///
-/// `ctx.emit_progress` is called with phase-appropriate payloads; the caller
-/// owns the event-emission plumbing.
+/// The core spawn-safe search pipeline. Returns `Vec<CitationResult>` —
+/// one entry per claim (per-statement) or single entry with `claim: None`
+/// (whole-block). `ctx.emit_progress` is called with phase-appropriate
+/// payloads; the caller owns event-emission plumbing.
 pub async fn find_citations_inner(
     db_state: &State<'_, DbState>,
     embedding_sender: Arc<dyn EmbeddingBatchSender>,
@@ -177,11 +160,9 @@ pub async fn find_citations_inner(
 ) -> Result<Vec<CitationResult>, AppError> {
     let FindCitationsContext { text, mode, status_filter, cancel_token, emit_progress, app_handle } =
         ctx;
-    // Apply the status whitelist at the command boundary. The backend does NOT
-    // assume a default - if the caller supplies no valid statuses, the search
-    // returns the "No articles match the selected filters." empty result
-    // rather than silently searching all articles. `duplicate` is always
-    // dropped (never a citation candidate); typos/injection are filtered too.
+    /* Apply the status whitelist at the command boundary. The backend does NOT
+    assume a default — an empty filter returns "No articles match the selected
+    filters." `duplicate` is always dropped (never a citation candidate). */
     let status_filter = filter_valid_statuses(&status_filter);
     // ═══════════════════════════════════════════════════════════════════
     //  Phase A: readiness check (brief lock)
@@ -262,21 +243,15 @@ pub async fn find_citations_inner(
             return Err(AppError::Import("Cancelled".to_string()));
         }
 
-        // NOTE: deliberately NO post-prepare 100%-coverage re-check. The
-        // previous gate hard-failed whenever coverage stayed below 100%, but
-        // coverage can legitimately plateau below 100% when some articles have
-        // no embeddable content: `expected_rows` (embedding/text.rs) returns
-        // zero rows for an article with an empty title + empty abstract + no
-        // full-text chunks, so the director never produces an `EmbedTask` for
-        // them and they permanently sit outside the numerator. That left the
-        // search dead-ended ("Embedding preparation incomplete (87% coverage,
-        // 13/15 articles). Retry.") even though the runner had done its job
-        // correctly. The recall layer naturally handles partial coverage -
-        // articles with no embedding rows are simply absent from the candidate
-        // pool, which is the correct outcome (they have no semantic signal).
-        // The standalone `generate_embeddings` command (Settings) has the same
-        // no-gate behavior. Real errors (DB lock failures, provider outage)
-        // still propagate via the `?` on `generate_embeddings_inner` above.
+        /* Deliberately NO post-prepare 100%-coverage re-check. The previous
+        gate hard-failed when coverage stayed below 100%, but coverage can
+        legitimately plateau: articles with no embeddable content (empty
+        title + empty abstract + no full-text chunks) produce zero
+        `EmbedTask`s, permanently staying outside the numerator. The recall
+        layer naturally handles this — articles without embedding rows are
+        absent from the candidate pool (correct: they have no semantic
+        signal). Real errors (DB lock failures, provider outage) still
+        propagate via the `?` on `generate_embeddings_inner` above. */
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -337,9 +312,8 @@ async fn run_whole_block(
     emit_progress(searching_progress("classifying", "Classifying…"));
     let finalists = pool_finalists(vec![work]);
     let metadata = load_metadata(db_state, &finalists.article_ids).await?;
-    // Build one CandidatePassage per finalist (best passage per article).
-    // Inlined here (mirrors the per-statement path) so the two modes share
-    // one passage-building pattern.
+    /* Build one CandidatePassage per finalist (best passage per article).
+    Inlined here (mirrors per-statement path) — one passage-building pattern. */
     let passages: Vec<CandidatePassage> = finalists
         .per_claim
         .iter()
@@ -353,16 +327,14 @@ async fn run_whole_block(
         })
         .collect();
     let user_prompt = build_whole_block_prompt(text, &passages, &metadata);
-    // Cancel check before the (up to 120s) classification call. Confines the
-    // wait window to the actual HTTP round-trip: a Cancel during
-    // `load_metadata`'s yields proceeds no further.
+    /* Cancel check before the (up to 120s) classification call. Confines
+    the wait window to the actual HTTP round-trip. */
     if cancel_token.load(Ordering::Relaxed) {
         return Err(AppError::Import("Cancelled".to_string()));
     }
     let json = llm_sender.send_classification(CITATION_FINDER_SYSTEM_PROMPT, &user_prompt).await?;
-    // Lenient parse: accepts snake_case (prompt contract) + camelCase (LLM
-    // drift) field names, object-wrapped arrays, and isolates per-element
-    // faults so one bad entry doesn't drop the whole batch.
+    /* Lenient parse: snake_case + camelCase, object-wrapped arrays, per-element
+    fault isolation (one bad entry doesn't drop the whole batch). */
     let llm_outputs = parse_citation_outputs(&json)
         .map_err(|e| AppError::Import(format!("Citation Finder LLM returned invalid JSON: {e}")))?;
 
@@ -431,16 +403,14 @@ async fn run_per_statement(
         }
     }
     let user_prompt = build_per_statement_prompt(&claims, &passages, &metadata);
-    // Cancel check before the (up to 120s) classification call (mirrors the
-    // whole-block guard). Confines the wait window to the actual HTTP
-    // round-trip.
+    /* Cancel check before the (up to 120s) classification call
+    (mirrors whole-block guard). */
     if cancel_token.load(Ordering::Relaxed) {
         return Err(AppError::Import("Cancelled".to_string()));
     }
     let json = llm_sender.send_classification(CITATION_FINDER_SYSTEM_PROMPT, &user_prompt).await?;
-    // Lenient parse: accepts snake_case (prompt contract) + camelCase (LLM
-    // drift) field names, object-wrapped arrays, and isolates per-element
-    // faults so one bad entry doesn't drop the whole batch.
+    /* Lenient parse: snake_case + camelCase, object-wrapped arrays, per-element
+    fault isolation (one bad entry doesn't drop the whole batch). */
     let llm_outputs = parse_citation_outputs(&json)
         .map_err(|e| AppError::Import(format!("Citation Finder LLM returned invalid JSON: {e}")))?;
 
@@ -453,17 +423,11 @@ async fn run_per_statement(
     Ok(results)
 }
 
-/// Normalize a claim string for use as a lookup key in `merge_outputs`.
+/// Normalize a claim string for lookup: trim + collapse internal whitespace
+/// + lowercase. Makes the `(article_id, claim)` score lookup robust to
+///   cosmetic LLM drift (whitespace, case) between splitter and classifier.
 ///
-/// Trim + collapse internal whitespace runs + lowercase. This makes the
-/// `(article_id, claim)` score lookup robust to the LLM lightly reformatting
-/// the claim text (trailing punctuation drift, collapsed whitespace, case
-/// changes) when it echoes the claim in its JSON output. Without this, a
-/// cosmetic claim drift between the splitter and the classifier causes the
-/// cosine-score lookup to miss and `confidence` silently falls back to 0.5
-/// (the `(0+1)/2` midpoint of an unset cosine).
-///
-/// Pure `#[must_use]`. Public so the pipeline tests can pin the contract.
+/// Pure `#[must_use]`.
 #[must_use]
 pub fn normalize_claim_key(claim: &str) -> String {
     let mut out = String::with_capacity(claim.len());
@@ -484,18 +448,12 @@ pub fn normalize_claim_key(claim: &str) -> String {
     out
 }
 
-/// Build one `ClaimWork` from a claim's recall hits: load chunks per article,
-/// run `find_best_passage`, drop articles whose passage scored below
-/// `MIN_PASSAGE_SCORE`.
+/// Build one `ClaimWork`: load chunks per article, run
+/// `find_best_passage`, drop articles below `MIN_PASSAGE_SCORE`.
 ///
-/// **Lock discipline**: each candidate's chunk + metadata read takes a brief
-/// `lock_conn` burst, releasing between articles. This avoids holding the
-/// `DbState` mutex across up to 30 chunk reads (150 in per-statement mode with
-/// 5 claims), which would freeze every other DB-touching IPC command for the
-/// whole pass - the same mutex-starvation anti-pattern the root `AGENTS.md`
-/// flags for screening. The per-article cost is one short lock acquire +
-/// release; `tokio::task::yield_now()` between articles lets the runtime
-/// flush progress events + give queued commands a turn.
+/// **Lock discipline**: brief `lock_conn` per article, releasing between.
+/// `tokio::task::yield_now()` between articles prevents mutex starvation
+/// across up to 30 chunk reads.
 async fn build_claim_work(
     user_tokens: &[String],
     claim_text: &str,
@@ -504,8 +462,8 @@ async fn build_claim_work(
 ) -> Result<ClaimWork, AppError> {
     let mut passages: Vec<(String, String, Option<String>, f64)> = Vec::new();
     for hit in &hits {
-        // Brief lock burst per article: read chunks (and synthesize the
-        // abstract fallback if needed), then release before the next article.
+        /* Brief lock burst per article: read chunks (synthesize abstract
+        fallback if needed), then release. */
         let best = {
             let conn = lock_conn(&db_state.conn)?;
             let chunks = chunk_repo::list_chunks_for_article(&conn, &hit.article_id)?;
@@ -519,10 +477,10 @@ async fn build_claim_work(
                     format!("{}\n\n{}", article.title, article.abstract_text)
                 };
                 let tokens = tokenize_and_stem(&text);
-                // Containment (query coverage), NOT Jaccard: the abstract is
-                // typically much longer than the query, so Jaccard would be
-                // diluted and drop exact-quote matches. Containment is
-                // length-insensitive on the document side. See `similarity.rs`.
+                /* Containment (query coverage), NOT Jaccard: the abstract is
+                typically much longer than the query, so Jaccard would be
+                diluted and drop exact-quote matches. Containment is
+                length-insensitive on the document side. */
                 let score = super::similarity::containment(user_tokens, &tokens);
                 if score < super::similarity::MIN_PASSAGE_SCORE {
                     None
@@ -562,11 +520,9 @@ fn pool_finalists(works: Vec<ClaimWork>) -> Finalists {
     Finalists { article_ids, per_claim: works }
 }
 
-/// Load metadata (title, authors, year, journal, doi) for the finalist IDs.
-///
-/// **Lock discipline**: each article read takes a brief `lock_conn` burst,
-/// releasing between articles. This mirrors `build_claim_work` so the `DbState`
-/// mutex is never held across the full ≤15-read loop.
+/// Load metadata (title, authors, year, journal, doi) per finalist ID.
+/// Brief `lock_conn` per article, releasing between. Mirrors
+/// `build_claim_work`'s lock discipline.
 async fn load_metadata(
     db_state: &State<'_, DbState>,
     article_ids: &[String],
@@ -607,18 +563,15 @@ fn merge_outputs(
     metadata: &HashMap<String, CandidateMetadata>,
     claim_filter: Option<&str>,
 ) -> Vec<CitationMatch> {
-    // Build a lookup: (article_id, normalized_claim_key) → cosine score (from
-    // recall) + best passage. The claim key is NORMALIZED so cosmetic drift
-    // between the splitter's claim text and the classifier's echoed claim
-    // (punctuation, whitespace, case) does not cause a score-lookup miss.
-    //
-    // `ArticleBest::cosine` is seeded at `NEG_INFINITY` (NOT `Default::default`
-    // = 0.0) so a hit with a negative cosine is recorded as the article's best
-    // score instead of being silently discarded by the `> 0.0` guard. This
-    // mirrors `embedding::recall::recall`'s own max-pool, which seeds with
-    // `NEG_INFINITY` for the same reason. Without this, a true negative
-    // cosine would be recorded as 0.0 and the user-facing confidence would be
-    // 0.5 (neutral) instead of 0.0 (opposite direction).
+    /* Build a lookup: (article_id, normalized_claim_key) → cosine score +
+    best passage. The claim key is NORMALIZED so cosmetic drift (punctuation,
+    whitespace, case) does not cause a score-lookup miss.
+
+    `ArticleBest::cosine` is seeded at `NEG_INFINITY` (NOT `Default::default`
+    = 0.0) so a hit with a negative cosine is recorded as the article's best
+    score instead of being silently discarded. Mirrors
+    `embedding::recall::recall`'s own max-pool. Without this, a true negative
+    cosine surfaces as 0.5 (neutral) instead of 0.0 (opposite). */
     #[derive(Clone)]
     struct ArticleBest {
         cosine: f32,
@@ -649,20 +602,18 @@ fn merge_outputs(
         }
     }
 
-    // Pre-normalize the claim_filter once so the per-output grouping filter
-    // is also drift-tolerant. Without this, an LLM that lightly reformats the
-    // claim text would have its output dropped by the raw `!=` filter before
-    // the normalized score lookup ever ran - the exact drift the normalized
-    // key is supposed to tolerate.
+    /* Pre-normalize claim_filter once so the per-output grouping filter is
+    also drift-tolerant. Without this, a cosmetic LLM reformat would drop
+    the output by the raw `!=` filter before the normalized score lookup
+    ever ran. */
     let normalized_filter = claim_filter.map(normalize_claim_key);
 
     let mut matches: Vec<CitationMatch> = Vec::new();
     for out in llm_outputs {
         if let Some(ref norm_filter) = normalized_filter {
-            // Result grouping uses the NORMALIZED claim text on both sides so
-            // cosmetic drift (whitespace, case) does not drop the output. The
-            // raw claim text is preserved on the `CitationResult.claim` field
-            // upstream (so the user's claim headings stay readable).
+            /* Result grouping uses NORMALIZED claim text on both sides so
+            cosmetic drift does not drop the output. The raw claim text is
+            preserved on `CitationResult.claim` upstream. */
             if normalize_claim_key(&out.claim) != *norm_filter {
                 continue;
             }
@@ -682,9 +633,9 @@ fn merge_outputs(
             .get(&(out.article_id.clone(), claim_key))
             .cloned()
             .unwrap_or_else(ArticleBest::new);
-        // Normalize cosine from [-1, 1] → [0, 1] for the user-facing %. A
-        // NEG_INFINITY seed (article in metadata but absent from recall hits)
-        // maps to 0.0 via the `is_finite` guard.
+        /* Normalize cosine from [-1, 1] → [0, 1] for the user-facing %.
+        NEG_INFINITY seed (article in metadata but absent from recall hits)
+        maps to 0.0 via the `is_finite` guard. */
         let confidence = if best.cosine.is_finite() {
             (best.cosine as f64 + 1.0) / 2.0
         } else {
@@ -692,10 +643,9 @@ fn merge_outputs(
                 // its claim-score was below the Jaccard threshold, OR an LLM
                 // returned an article_id the recall layer never surfaced).
         };
-        // Ground the LLM's justifying sentences against the actual passage so
-        // paraphrases/hallucinations are dropped before display. Empty when
-        // the LLM omitted the field or none grounded (UI falls back to the
-        // full passage).
+        /* Ground the LLM's justifying_sentences against the actual passage.
+        Paraphrases/hallucinations are dropped before display. Empty when
+        none grounded (UI falls back to full passage). */
         let highlighted_sentences = ground_quotes(&out.justifying_sentences, &best.passage);
         matches.push(CitationMatch {
             article_id: out.article_id.clone(),
@@ -717,24 +667,16 @@ fn merge_outputs(
     matches
 }
 
-/// Phase B occupies the 0-90% range of the overall progress bar (Phase C uses
-/// 90-100). Used by both the initial Phase B snapshot + the frontend's
-/// `embedding:progress` listener (which translates each `{processed, total}`
-/// into the same range).
+/// Phase B: 0-90% of the overall bar. Phase C uses 90-100%.
 const PHASE_B_MAX_PERCENT: usize = 90;
 
-/// Phase-C fixed offsets within the 90-100% tail. `embedding_query` starts
-/// where Phase B left off; `ranking` bumps 3%; `classifying` bumps another 3%.
+/// Phase-C offsets within the 90-100% tail.
 const PHASE_C_EMBED_QUERY_PERCENT: usize = 90;
 const PHASE_C_RANKING_PERCENT: usize = 93;
 const PHASE_C_CLASSIFYING_PERCENT: usize = 96;
 
-/// Map a Phase-B (done, total) pair to the overall 0-90% range.
-///
-/// Pure `#[must_use]`. `total == 0` → 0 (avoids division by zero; the caller
-/// has already gated on `total_articles > 0` in Phase A, but this is
-/// defense-in-depth for the frontend listener which may receive a stale
-/// payload).
+/// Map a Phase-B (done, total) pair to the 0-90% range. `total == 0` → 0.
+/// Pure `#[must_use]`.
 #[must_use]
 pub fn phase_b_overall_percent(done: usize, total: usize) -> usize {
     if total == 0 {
@@ -746,11 +688,7 @@ pub fn phase_b_overall_percent(done: usize, total: usize) -> usize {
     pct.min(PHASE_B_MAX_PERCENT)
 }
 
-/// Map a Phase-C stage name to its fixed overall-percent offset.
-///
-/// Pure `#[must_use]`. The Phase-C stages have no item-counted operations
-/// (each is a single LLM call or a pure in-memory pass), so fixed offsets
-/// within the 90-100% tail communicate progress without a denominator.
+/// Map a Phase-C stage to its fixed overall-percent offset. Pure `#[must_use]`.
 #[must_use]
 pub fn phase_c_overall_percent(stage: &str) -> usize {
     match stage {

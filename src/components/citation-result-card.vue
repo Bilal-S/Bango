@@ -1,29 +1,11 @@
 <script setup lang="ts">
-/**
- * CitationResultCard - renders one `CitationMatch` from the Citation Finder
- * (spec §8.7).
+/** CitationResultCard: renders one CitationMatch (spec §8.7).
  *
- * Layout: metadata line (authors, year, journal, DOI) + Copy/View buttons +
- * the matched passage + the classification badge (Validating green /
- * Opposing amber) + the cosine confidence as `NN%` + the 1-2 sentence AI
- * explanation.
+ * Progressive passage disclosure: when `highlightedSentences` is present,
+ * card collapses to grounded snippets by default with a "Show full passage"
+ * toggle. Falls back to full-passage display when empty.
  *
- * **Progressive passage disclosure** (`highlightedSentences`): when the
- * backend supplies grounded justifying sentences, the card collapses to
- * showing only those snippets by default (one tinted block per sentence).
- * A "Show full passage" toggle expands the full `matchedPassage` with the
- * highlighted sentences rendered inline (`<mark>`-style). When
- * `highlightedSentences` is empty (LLM omitted the field or none grounded),
- * the card falls back to the legacy full-passage display with no toggle.
- *
- * The Citation Style is a per-bubble prop (one value for every card in the
- * bubble), frozen at submit time. The card uses it for the Copy button's
- * plain-text output via the pure `formatCitation` helper. IEEE `[N]` is
- * assigned by the caller via `ieeeIndex` (1-based position in the bubble).
- *
- * v1 does NOT render `misrepresentsSource`; it is a latent field reserved
- * for a future "passage misrepresents the source" warning chip.
- */
+ * `misrepresentsSource` is latent - reserved for future warning chip. */
 import { computed, ref } from 'vue';
 import { formatCitation } from '@/composables/use-citation-finder';
 import type { CitationMatch, CitationStyle } from '@/types/citation-finder';
@@ -72,18 +54,9 @@ function toggleExpanded() {
   expanded.value = !expanded.value;
 }
 
-/**
- * The full passage split into segments with the highlighted sentences marked,
- * so the expanded view renders them inline with `<mark>` styling. Each
- * segment is `{ text, highlight }`. Locates each highlighted sentence via a
- * case-insensitive search on a whitespace-normalized basis (PDF extraction
- * produces irregular spacing); if a sentence can't be located in the raw
- * passage, it is silently skipped (the collapsed view still shows it as its
- * own snippet).
- *
- * Returns `null` when there are no highlights (caller renders the plain
- * passage verbatim instead).
- */
+/** Passage split into `{ text, highlight }` segments. Highlights located via
+ *  case-insensitive whitespace-normalized search. Silently skips un-locatable
+ *  sentences. Returns null when no highlights (caller renders plain passage). */
 interface PassageSegment {
   text: string;
   highlight: boolean;
@@ -101,17 +74,15 @@ const passageSegments = computed<PassageSegment[] | null>(() => {
     if (!needle) continue;
     let idx = lowerPassage.indexOf(needle);
     if (idx === -1) {
-      // Fallback: whitespace-normalized search. Collapse whitespace runs in
-      // both the passage and the needle to a single space, then map the
-      // match back to the original text. This handles PDF-extraction spacing
-      // irregularities that would otherwise defeat an exact substring match.
+      /* Fallback: whitespace-normalized search. Collapse whitespace in both
+         passage and needle, then map match back to original. Handles PDF-
+         extraction spacing irregularities that defeat exact substring match. */
       const normPassage = passage.replace(/\s+/g, ' ');
       const normNeedle = needle.replace(/\s+/g, ' ');
       const normIdx = normPassage.toLowerCase().indexOf(normNeedle);
       if (normIdx === -1) continue; // can't locate → skip the inline mark
-      // Map the normalized offset back to the original passage by walking
-      // the original and consuming whitespace runs. This is O(n) per
-      // sentence; passages are bounded (~chunk size), so this is fine.
+      /* Map normalized offset back to original passage by walking and consuming
+         whitespace runs. O(n) per sentence; passages bounded (~chunk size). */
       let origIdx = 0;
       let normConsumed = 0;
       while (normConsumed < normIdx && origIdx < passage.length) {

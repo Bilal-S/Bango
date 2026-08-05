@@ -1,14 +1,9 @@
-//! Embedding pipeline for semantic article search.
+//! Embedding pipeline for semantic article search (see `.worktrees/embed-plan.md`).
 //!
-//! Three layers (see `.worktrees/embed-plan.md`):
-//!
-//! 1. **Provider client** (`llm::embedding`) - per-provider HTTP shapes,
-//!    model resolution, capability probe.
-//! 2. **Runner + director** (`embedding::director`, `embedding::runner`) - the
-//!    callable flow that computes the work list and executes it under correct
-//!    lock discipline with orchestrator-bounded parallelism.
-//! 3. **Storage + recall** (`db::embedding_repo`, `embedding::recall`) - CRUD
-//!    for `article_embeddings` and the bounded cosine recall.
+//! 1. Provider client (`llm::embedding`) - HTTP shapes, model resolution, capability probe.
+//! 2. Runner + director (`embedding::director`, `embedding::runner`) - work-list computation
+//!    and execution with correct lock discipline + orchestrator-bounded parallelism.
+//! 3. Storage + recall (`db::embedding_repo`, `embedding::recall`) - CRUD + bounded cosine recall.
 
 pub mod batching;
 pub mod director;

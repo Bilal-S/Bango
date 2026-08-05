@@ -1,21 +1,17 @@
-/**
- * Web Worker for computing the main path (SPC) off the main thread.
- *
- * The graph is serialized to plain arrays for structured-clone transfer.
- * The worker reconstructs a minimal graphology instance, runs the analysis,
- * and posts back the node/edge ID sets as arrays.
- */
+/* Computes the main path (SPC) off the main thread. Graph serialized to
+ * plain arrays for structured-clone transfer; worker reconstructs graphology,
+ * runs analysis, posts back node/edge ID sets. */
 
 import Graph from 'graphology';
 import { computeMainPath } from '../utils/citation-analysis';
 
-/** Serializable graph payload sent to the worker. */
+/* Serializable graph payload sent to the worker. */
 export interface MainPathRequest {
   nodes: { id: string; year?: number | null }[];
   edges: { id: string; source: string; target: string }[];
 }
 
-/** Result payload posted back from the worker. */
+/* Result payload posted back from the worker. */
 export interface MainPathResponse {
   nodes: string[];
   edges: string[];

@@ -3,12 +3,9 @@ use super::types::{RisParseError, RisParseResult, RisRecord};
 use crate::error::AppError;
 use crate::ris::n1_parser::parse_n1_citation_data;
 
-/// Normalize RIS reference type (TY tag) to canonical 2–4 letter codes.
-///
-/// Different exporters use different names for the same type:
-/// e.g. "JOUR", "Journal", "Journal Article" should all become "JOUR".
-///
-/// See: https://en.wikipedia.org/wiki/RIS_(file_format)#Tags
+/// Normalizes RIS reference type (TY tag) to canonical 2–4 letter codes.
+/// e.g. "JOUR", "Journal", "Journal Article" → "JOUR".
+/// See: <https://en.wikipedia.org/wiki/RIS_(file_format)#Tags>
 pub fn normalize_reference_type(raw: &str) -> String {
     let key = raw.trim().to_lowercase();
     match key.as_str() {
@@ -252,9 +249,8 @@ fn append_last_vec(vec: &mut [String], text: &str) {
     }
 }
 
-/// Extracts all RIS tag-value pairs from a single line.
-/// A line may contain concatenated tags (e.g., "AD  - fooC3  - bar").
-/// Returns a vector of (tag, value) pairs.
+/// Extracts all RIS tag-value pairs from a line which may contain
+/// concatenated tags (e.g. "AD  - fooC3  - bar").
 fn parse_line_tags(line: &str) -> Vec<(&str, &str)> {
     let mut pairs = Vec::new();
     let mut remaining = line;
@@ -299,8 +295,7 @@ fn parse_line_tags(line: &str) -> Vec<(&str, &str)> {
     pairs
 }
 
-/// Finds the position of the next RIS tag pattern ("XX  - ") in the string.
-/// Returns the byte offset or None.
+/// Byte offset of the next RIS tag pattern ("XX  - "), or `None`.
 fn find_next_tag_start(s: &str) -> Option<usize> {
     let bytes = s.as_bytes();
     let len = bytes.len();

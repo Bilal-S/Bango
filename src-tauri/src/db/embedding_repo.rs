@@ -1,21 +1,16 @@
-//! Repository for the `article_embeddings` table.
+//! Repository for the `article_embeddings` table (v007 migration).
 //!
-//! Stores per-article, per-chunk embedding vectors for semantic search. The
-//! table is created by migration `v007_audit_clear_and_embeddings`. The
-//! title+abstract row uses the sentinel `chunk_index = -1`; per-chunk rows use
-//! the matching `article_chunks.chunk_index` (`>= 0`).
-//!
-//! Regenerable derived artifact: excluded from project backups, cleared on
-//! `reset_project` (via `rebuild::DROP_TABLES`), and `ON DELETE CASCADE`
-//! removes rows when an article is hard-deleted.
+//! Stores per-article, per-chunk embedding vectors for semantic search.
+//! Title+abstract row uses sentinel `chunk_index = -1`; per-chunk rows use
+//! `article_chunks.chunk_index` (>= 0). Regenerable derived artifact: excluded
+//! from backups, cleared on `reset_project`, cascade-deleted with articles.
 
 use rusqlite::{params, Connection};
 
 use crate::error::AppError;
 
-/// One stored embedding row (read shape). `chunk_index ==
-/// TITLE_ABSTRACT_CHUNK_INDEX (-1)` is the title+abstract row; `>= 0` is a
-/// per-chunk row.
+/// One stored embedding row. `chunk_index == TITLE_ABSTRACT_CHUNK_INDEX (-1)` is the
+/// title+abstract row; `>= 0` is a per-chunk row.
 #[derive(Debug, Clone)]
 pub struct EmbeddingRow {
     pub article_id: String,
@@ -28,10 +23,7 @@ pub struct EmbeddingRow {
     pub provider: String,
 }
 
-/// Write shape for [`insert_embedding`]. Grouping the fields into a struct
-/// keeps the function arity under the clippy `too_many_arguments` threshold
-/// and makes call sites self-documenting (`row.article_id` vs. positional
-/// `&str`). `embedding.len() as i32` MUST equal `dimensions`.
+/// Write shape for [`insert_embedding`]. `embedding.len() as i32` MUST equal `dimensions`.
 #[derive(Debug, Clone)]
 pub struct NewEmbeddingRow<'a> {
     pub article_id: &'a str,
@@ -46,13 +38,9 @@ pub struct NewEmbeddingRow<'a> {
     pub generated_at: i64,
 }
 
-/// Insert (or replace) one embedding row. Idempotent on the composite primary
-/// key `(article_id, chunk_index)` via `INSERT OR REPLACE`.
-///
-/// Pass `TITLE_ABSTRACT_CHUNK_INDEX` (-1) for the title+abstract row, or the
-/// matching `article_chunks.chunk_index` (>= 0) for a chunk row. The
-/// `embedding` slice is serialized to a little-endian f32 byte stream by
-/// `embedding::text::serialize_embedding`.
+/// Insert (or replace) one embedding row. Idempotent on `(article_id, chunk_index)`
+/// via `INSERT OR REPLACE`. Pass `TITLE_ABSTRACT_CHUNK_INDEX` (-1) for the
+/// title+abstract row.
 pub fn insert_embedding(conn: &Connection, row: &NewEmbeddingRow<'_>) -> Result<(), AppError> {
     let bytes = crate::embedding::text::serialize_embedding(row.embedding);
     conn.execute(
@@ -73,20 +61,15 @@ pub fn insert_embedding(conn: &Connection, row: &NewEmbeddingRow<'_>) -> Result<
     Ok(())
 }
 
-/// Delete all embedding rows for an article. Called when an article's chunks
-/// are rebuilt (so the embeddings are regenerated against the new chunk set)
-/// or when an article is hard-deleted (though `ON DELETE CASCADE` already
-/// handles the latter).
+/// Delete all embedding rows for an article. Called on chunk rebuild or hard-delete
+/// (though `ON DELETE CASCADE` already handles the latter).
 pub fn delete_embeddings_for_article(conn: &Connection, article_id: &str) -> Result<(), AppError> {
     conn.execute("DELETE FROM article_embeddings WHERE article_id = ?1", params![article_id])?;
     Ok(())
 }
 
-/// Look up a single stored row by `(article_id, chunk_index)` and return its
-/// `input_hash` if present. Used by the director to detect staleness without
-/// loading the full embedding blob.
-///
-/// Pass `TITLE_ABSTRACT_CHUNK_INDEX` for the title+abstract row.
+/// Look up `input_hash` for `(article_id, chunk_index)` — used by the director to
+/// detect staleness without loading the full embedding blob.
 pub fn get_input_hash(
     conn: &Connection,
     article_id: &str,
@@ -103,10 +86,8 @@ pub fn get_input_hash(
     Ok(row.filter(|s| !s.is_empty()))
 }
 
-/// The set of `(chunk_index, input_hash)` rows currently stored for an
-/// article. The director compares these against the freshly-computed expected
-/// hashes to decide which rows need (re)embedding. `chunk_index == -1` is the
-/// title+abstract row.
+/// `(chunk_index, input_hash)` rows currently stored for an article.
+/// `chunk_index == -1` is the title+abstract row.
 pub fn list_hashes_for_article(
     conn: &Connection,
     article_id: &str,
@@ -125,15 +106,10 @@ pub fn list_hashes_for_article(
     Ok(out)
 }
 
-/// One stored row's staleness-relevant fields: `(chunk_index, input_hash,
-/// model_name)`. The director uses this richer shape (vs.
-/// [`list_hashes_for_article`]) to detect a **model mismatch**: when the
-/// stored `model_name` differs from the current `embedding_model` setting,
-/// the row is treated as stale regardless of the input_hash so Phase B
-/// regenerates it. Without this check, switching embedding models (e.g.
-/// `text-embedding-3-small` → `text-embedding-3-large`, or switching provider
-/// entirely) leaves all rows "fresh" by hash but invisible to recall (which
-/// filters by the new dimensions), producing a silent zero-results bug.
+/// `(chunk_index, input_hash, model_name)` for an article. Richer than
+/// [`list_hashes_for_article`]: detects model mismatches so switching models
+/// (e.g. `text-embedding-3-small` → `text-embedding-3-large`) marks all rows stale,
+/// avoiding a silent zero-results bug from the dimensions filter.
 pub fn list_hashes_and_model_for_article(
     conn: &Connection,
     article_id: &str,
@@ -154,21 +130,17 @@ pub fn list_hashes_and_model_for_article(
     Ok(out)
 }
 
-/// Count all embedding rows in the table (across all articles). Used by the
-/// search-time gate to decide whether semantic search is even possible
-/// (empty table => LIKE fallback).
+/// Count all embedding rows. Gates semantic search: empty table → LIKE fallback.
 pub fn count_embeddings(conn: &Connection) -> Result<i64, AppError> {
     let count: i64 =
         conn.query_row("SELECT COUNT(*) FROM article_embeddings", [], |row| row.get(0))?;
     Ok(count)
 }
 
-/// The set of distinct `model_name` values currently stored across all
-/// embedding rows. Used by the Citation Finder's model-mismatch detection
-/// (`get_embedding_model_mismatch`) so the frontend can warn the user before
-/// searching with a different embedding model than the rows were generated
-/// with (which would silently exclude all rows from recall via the dimensions
-/// filter). Returns an empty vec when the table is empty.
+/// Distinct `model_name` values across all embedding rows. Used by Citation Finder's
+/// model-mismatch detection (`get_embedding_model_mismatch`) so the frontend warns
+/// before searching with a different model (which would silently exclude all rows
+/// via the dimensions filter). Empty vec when table is empty.
 pub fn list_distinct_model_names(conn: &Connection) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT model_name FROM article_embeddings WHERE model_name IS NOT NULL AND model_name != ''",
@@ -181,12 +153,9 @@ pub fn list_distinct_model_names(conn: &Connection) -> Result<Vec<String>, AppEr
     Ok(out)
 }
 
-/// Delete ALL embedding rows in the table. Used by the "regenerate on model
-/// switch" path (`regenerate_embeddings` command): a clean delete + re-embed
-/// is clearer than `force=true` re-embed because the latter leaves orphan rows
-/// when the per-article chunk count shrinks (e.g. an article's full text was
-/// edited down to a shorter form). `ON DELETE CASCADE` does not apply here
-/// because no article is being deleted.
+/// Delete ALL embedding rows. Used by the "regenerate on model switch" path:
+/// a clean delete + re-embed is clearer than `force=true` because the latter
+/// leaves orphans when chunk counts shrink.
 pub fn delete_all_embeddings(conn: &Connection) -> Result<(), AppError> {
     conn.execute("DELETE FROM article_embeddings", [])?;
     Ok(())
@@ -202,25 +171,10 @@ pub fn count_embeddings_for_article(conn: &Connection, article_id: &str) -> Resu
     Ok(count)
 }
 
-/// Load all embedding rows matching the given dimensionality and an optional
-/// article status filter (JOIN `articles`). Used by recall to score the
-/// candidate pool.
-///
-/// Rows whose `dimensions` differ from `dimensions` are excluded so a provider
-/// / model switch (which changes the dimension count) does not mix incompatible
-/// vectors into the same cosine scoring pass. The user rebuilds to clear the
-/// stale-dimension rows.
-///
-/// `status_filter` is a slice of status strings (e.g. `&["included".to_string(),
-/// "working".to_string()]`). When non-empty, the candidate pool is scoped to
-/// articles in any of those statuses (SQL `status IN (?, ?, ?)`) so recall is
-/// bounded by the active corpus rather than the whole DB. When empty, no
-/// status filter is applied (all articles regardless of status).
-///
-/// The multi-status shape (extended for the Citation Finder, which needs
-/// `working + included` while excluding `duplicate`/`rejected`) replaces the
-/// former `Option<&str>` single-status signature. The previous single-status
-/// behavior is preserved by passing a one-element slice.
+/// Load embedding rows matching the given dimensionality. Optionally scopes to
+/// articles in `status_filter` (JOIN `articles`). Rows with mismatched `dimensions`
+/// are excluded so a model switch doesn't mix incompatible vectors. `status_filter`
+/// empty = no status filter (all articles).
 pub fn list_for_recall(
     conn: &Connection,
     dimensions: i32,
@@ -264,10 +218,8 @@ pub fn list_for_recall(
     Ok(out)
 }
 
-/// Row mapper shared by `list_for_recall`. Decodes the little-endian BLOB into
-/// `Vec<f32>` via `embedding::text::deserialize_embedding`; a corrupt/short
-/// blob is skipped (filtered out) rather than failing the whole query, so one
-/// bad row never breaks recall.
+/// Row mapper for `list_for_recall`. Decodes the little-endian BLOB; a corrupt blob
+/// falls back to an empty vec (zero-signal) rather than failing the whole query.
 fn row_to_embedding(row: &rusqlite::Row<'_>) -> rusqlite::Result<EmbeddingRow> {
     let article_id: String = row.get(0)?;
     let ci: i64 = row.get(1)?;

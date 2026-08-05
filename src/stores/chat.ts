@@ -15,29 +15,18 @@ import {
   stopCitationListeners,
 } from '@/composables/use-citation-finder';
 
-/** Which retrieval source backs the next outgoing message.
- *  Mutually exclusive: `'articles'` routes through `send_chat_message`;
- *  `'wiki'` through `wiki_chat`; `'citation-finder'` through
- *  `find_citations` + the `citation:*` event listeners. */
+/** Retrieval source for next outgoing message. Mutually exclusive. */
 type ChatSource = 'articles' | 'wiki' | 'citation-finder';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
-  /** Which source produced / was paired with this message. Lets the UI badge
-   * bubbles and route clicks to the right slide-over (wiki vs. article vs.
-   * citation cards). */
+  /** Which source produced this message. Lets UI route clicks to right slide-over. */
   source?: ChatSource;
-  /** Structured citation results. Present only when `source ===
-   *  'citation-finder'` AND `role === 'assistant'`. The bubble template
-   *  branches on this: when present it renders `<CitationResultCard>`s,
-   *  otherwise it falls back to the Markdown renderer. */
+  /** Structured citation results. Present only on citation-finder assistant messages. */
   citations?: CitationResult[];
-  /** The citation style captured at submit time + frozen on the bubble so
-   *  each bubble renders all its cards with the style that was active when
-   *  the search ran (per-bubble, not per-card). Present only on citation-
-   *  finder assistant bubbles. */
+  /** Citation style captured at submit time, frozen per bubble. */
   citationStyle?: CitationStyle;
 }
 
@@ -47,58 +36,31 @@ export const useChatStore = defineStore('chat', () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  /** Active retrieval source. Mutually exclusive: 'wiki' routes sends through
-   *  `wiki_chat` (BM25 FTS5 RAG); 'articles' routes through `send_chat_message`
-   *  with the explicit selected-article context; 'citation-finder' routes
-   *  through `find_citations` + the `citation:*` event listeners. */
+  /** Active retrieval source. Mutually exclusive. */
   const source = ref<ChatSource>('articles');
 
-  /** Whether the wiki is available for chat (initialized AND has at least one
-   *  page). Populated by `chat-view.vue` from `wiki_get_status`. When false the
-   *  wiki toggle is hidden. */
+  /** Wiki available for chat (initialized AND has pages). */
   const wikiReady = ref(false);
 
-  /** Whether the citation finder toggle should be visible. Populated by
-   *  `chat-view.vue` from `get_citation_finder_readiness`. When false (e.g.
-   *  Anthropic provider, or embeddings not yet enabled) the toggle is hidden.
-   *
-   *  DEPRECATED: kept for backward compat with existing `chat-view` watchers +
-   *  the welcome-card hint, but the toggle's visible/disabled/hidden state is
-   *  now driven by `citationReadiness.embeddingStatus` via the
-   *  `citationToggleState` computed. New callers should prefer
-   *  `citationToggleState`. */
+  /** Citation finder toggle visibility. @deprecated Use `citationReadiness` +
+   *  `citationToggleState` instead. Kept for backward-compat. */
   const citationFinderReady = ref(false);
 
-  /** Full readiness payload (drives the toggle's visible/disabled/hidden
-   *  state via `citationToggleState`). `null` until the first
-   *  `get_citation_finder_readiness` IPC completes. Refreshed reactively by
-   *  `chat-view`'s `watch(() => llmConfigStore.config, ...)` so a Settings
-   *  provider switch updates the toggle live (the same reactivity contract as
-   *  `useLlmConfigured()`). */
+  /** Full readiness payload (drives toggle state via `citationToggleState`).
+   *  `null` until first IPC completes. Refreshed reactively on LLM config
+   *  changes via view watcher. */
   const citationReadiness = ref<CitationFinderReadiness | null>(null);
 
-  /** Tracks whether the user has dismissed the model-mismatch dialog for the
-   *  current stored model. The key is the `storedModel` string; when the user
-   *  clicks "Continue anyway" we record the key so the dialog does not nag on
-   *  every subsequent search. Cleared on `clearChat` (new session = new
-   *  chance to warn). `null` = no mismatch has been dismissed yet. */
+  /** Stored-model key for dismissed model-mismatch dialog. `null` = no dismissal. */
   const mismatchDismissedFor = ref<string | null>(null);
 
-  /** Citation Finder mode (`whole_block` vs `per_statement`). Default
-   *  `whole_block`. Persisted only in-memory for the session (not in
-   *  app_settings - it's a UI toggle, not a project-wide preference).
-   *  Snake_case wire token - matches the Rust enum's
-   *  `#[serde(rename_all = "snake_case")]`. */
+  /** Citation Finder mode. Session-scoped, not persisted. */
   const citationFinderMode = ref<CitationFinderMode>('whole_block');
 
-  /** Citation style. Lives ONLY in the citation-finder input area (spec §8.7);
-   *  captured at submit time + frozen per-bubble via
-   *  `ChatMessage.citationStyle`. Reuses the 5-style LLM-hint list (no second
-   *  source of truth, no `@citation-js`). */
+  /** Citation style. Captured at submit, frozen per-bubble. */
   const citationStyle = ref<CitationStyle>('APA');
 
-  /** Live progress snapshot from the `citation:progress` event. Drives the
-   *  progress bar + Cancel button in citation-finder mode. */
+  /** Live progress from `citation:progress` event. */
   const citationProgress = ref<CitationFinderProgress | null>(null);
 
   /** True while a cancel is in flight (set by `cancelCitationSearch`, cleared
@@ -157,10 +119,7 @@ export const useChatStore = defineStore('chat', () => {
     citationFinderReady.value = ready;
   }
 
-  /** Set the full readiness payload (drives the toggle's
-   *  visible/disabled/hidden state via the view's `citationToggleState`
-   *  computed). Also updates the legacy `citationFinderReady` bool for
-   *  backward-compat with the welcome-card hint. */
+  /** Set full readiness payload. Also updates legacy `citationFinderReady` for backward-compat. */
   function setCitationReadiness(r: CitationFinderReadiness | null) {
     citationReadiness.value = r;
     // Mirror the derived bool so the welcome card's `citationFinderReady`
@@ -199,22 +158,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * Send a citation search. The status filter is REQUIRED (the backend does
-   * not apply a default - an empty array returns the "No articles match the
-   * selected filters." empty result). The view owns the checkbox state and
-   * passes the live array here; `sendMessage` is no longer used for the
-   * citation-finder source.
-   *
-   * Async-event-driven: the command returns immediately with an initial
-   * progress snapshot, and the assistant bubble is pushed onto `messages` by
-   * the `citation:done` listener (the store stays the single owner of the
-   * message list).
-   *
-   * @param text          The pasted prose to find citations for.
-   * @param statusFilter  Article statuses to include (e.g.
-   *                      `['working','included']`). The backend filters this
-   *                      against the whitelist `['working','included',
-   *                      'rejected']`; `duplicate` is always excluded.
+   * Send a citation search. Async-event-driven: command returns initial
+   * snapshot, assistant bubble pushed by `citation:done` listener.
+   * @param statusFilter Required; backend whitelist is
+   *   `['working','included','rejected']` (duplicate always excluded).
    */
   async function sendCitationSearch(text: string, statusFilter: string[]) {
     if (!text.trim()) return;
@@ -294,14 +241,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * Send a message through the active source (articles or wiki). This is a
-   * synchronous RPC: the assistant response arrives as the awaited return
-   * value. The `'citation-finder'` source is handled by the dedicated
-   * [`sendCitationSearch`](#sendCitationSearch) method (async-event-driven),
-   * so if `sendMessage` is called while the source is citation-finder it
-   * forwards to that method with an empty filter (which the backend rejects
-   * with the "No articles match" empty result - the view should call
-   * `sendCitationSearch` directly instead).
+   * Send message through active source (articles or wiki). Synchronous RPC.
+   * Citation-finder source forwards to `sendCitationSearch` (async-event-driven).
    */
   async function sendMessage(text: string) {
     if (!text.trim()) return;

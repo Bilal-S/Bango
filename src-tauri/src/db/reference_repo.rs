@@ -10,8 +10,8 @@ use crate::ris::doi::normalize_doi;
 
 // ─── Reference Paper operations ────────────────────────────────
 
-/// Insert a reference paper, or find an existing one by DOI or title+authors+year.
-/// Returns the (paper, was_created) tuple.
+/// Insert a reference paper, or find an existing one by DOI → title+authors+year.
+/// Returns `(paper, was_created)`.
 pub fn insert_or_find_paper(
     conn: &Connection,
     new_paper: &NewReferencePaper,
@@ -71,8 +71,7 @@ pub fn insert_or_find_paper(
     }
 }
 
-/// Insert a new reference paper.
-/// Normalizes empty DOI to NULL to avoid unique constraint violations.
+/// Insert a new reference paper. Normalizes empty DOI to NULL.
 fn insert_paper(
     conn: &Connection,
     new_paper: &NewReferencePaper,
@@ -729,15 +728,10 @@ fn update_parent_flags_tx(
 
 // ─── References Tab queries ────────────────────────────────────
 
-/// Search reference papers with pagination.
-/// Searches across title, authors, abstract_text, and journal using LIKE.
-/// Optionally filters by match_status.
-/// Returns (papers, total_count).
-///
-/// Both `search` and `match_status_filter` are bound via `?N` parameters (not interpolated),
-/// per CLAUDE.md ("Never interpolate user input into SQL"). The `match_status` value comes
-/// from a `MatchStatus::as_str()` (enum-controlled, trusted) but is still bound for rule
-/// compliance and defense-in-depth.
+/// Search reference papers with pagination. Searches title, authors, abstract_text,
+/// journal via LIKE. Optionally filters by `match_status`. Both search term and status
+/// are bound as `?N` parameters (not interpolated), per CLAUDE.md.
+/// Returns `(papers, total_count)`.
 pub fn query_reference_papers(
     conn: &Connection,
     search: Option<&str>,

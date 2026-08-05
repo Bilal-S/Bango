@@ -30,9 +30,8 @@ const {
 } = useCocitationNetwork();
 
 /**
- * Article detail panel (opened via "open linked record" from the co-citation
- * detail panel). Mirrors the citation-network pattern so the user stays in
- * context instead of routing away from the heatmap + selected node.
+ * Article detail panel (opened via "open linked record" from co-citation
+ * detail). Mirrors citation-network pattern.
  */
 const {
   selectedArticle: detailArticle,
@@ -107,9 +106,8 @@ const normalization = ref<'raw' | 'cosine' | 'jaccard' | 'pearson'>('cosine');
 const minCitationCount = ref(2);
 const minCoCitation = ref(2);
 /**
- * When true, hide nodes whose matched article has status 'rejected'. Applied
- * client-side (no backend round-trip) by toggling the graphology `hidden`
- * attribute, mirroring the search filter pattern.
+ * Hide nodes whose matched article has status 'rejected'. Client-side only
+ * (toggles graphology `hidden` attribute).
  */
 const hideRejectedMatches = ref(false);
 const selectedPaper = ref<CocitationNode | null>(null);
@@ -249,10 +247,8 @@ async function onParamsChange() {
 
 function onFilterChange(filters: { search: string }) {
   if (!graph.value) return;
-  // Co-citation nodes lack a `weight` attribute (they carry coCitationCount /
-  // citationCount), so the keyword filter cannot be reused - its
-  // `weight >= minOccurrences` check would hide every node. Use the dedicated
-  // co-citation search filter instead.
+  /* Co-citation nodes lack `weight` (carry coCitationCount/citationCount),
+   * so keyword filter can't be reused. Use dedicated co-citation search. */
   const result = applyCocitationGraphFilters(graph.value, { search: filters.search });
   visibleNodeCount.value = result.visibleNodes;
   applyHideRejectedFilter();
@@ -274,10 +270,8 @@ function applyHideRejectedFilter(): void {
     if (isRejected && hideRejectedMatches.value) {
       attrs.hidden = true;
     } else if (attrs.hidden === true && !isRejected) {
-      // Only un-hide if the search filter didn't hide it for another reason.
-      // The search filter re-runs on every keystroke and sets `hidden`, so we
-      // only clear our own rejected-flag here when the toggle is off.
-      // To avoid clobbering the search filter, we re-run it via onFilterChange.
+      /* Only un-hide if the search filter didn't hide for another reason.
+       * To avoid clobbering the search filter, re-run via onFilterChange. */
       attrs.hidden = false;
     }
     if (attrs.hidden !== true) visible++;

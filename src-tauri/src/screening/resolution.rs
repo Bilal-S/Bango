@@ -15,13 +15,9 @@ pub struct ScreeningInput {
     pub exclusion_matches: Vec<CriterionMatch>,
 }
 
-/// Applies deterministic priority conflict resolution.
-///
-/// 1. Find the single highest-priority inclusion criterion that matches.
-/// 2. Find the single highest-priority exclusion criterion that matches.
-/// 3. The higher-priority side wins.
-/// 4. If tied, favor inclusion.
-/// 5. If no criteria match at all, exclude.
+/// Deterministic priority conflict resolution:
+/// 1. Highest-priority inclusion vs exclusion wins.
+/// 2. Tie = favor inclusion. No criteria = exclude.
 #[must_use]
 pub fn resolve_decision(input: &ScreeningInput) -> &'static str {
     let highest_inclusion = input.inclusion_matches.iter().max_by_key(|m| m.priority);
@@ -42,27 +38,9 @@ pub fn resolve_decision(input: &ScreeningInput) -> &'static str {
     }
 }
 
-/// Finalize the screening decision for one article.
-///
-/// When the user has authored **Custom Screening Instructions**
-/// (`has_custom_logic == true`), those combinatorial rules are the supreme
-/// authority: the LLM applies them strictly (per the system prompt) and its
-/// decision must not be second-guessed by the generic §4.1 priority resolver,
-/// which has no understanding of AND/OR gates or hard exclusions. The LLM's
-/// decision is returned verbatim in that case.
-///
-/// When no custom logic is present, the deterministic §4.1 priority resolver
-/// runs unchanged (preserving historical behavior for projects that rely on
-/// priority levels + the tie-favors-inclusion fallback).
-///
-/// `llm_decision` must already be lowercased and validated as one of
-/// `"include"` / `"exclude"` by the caller (the engine normalizes
-/// `"error"` decisions upstream and never reaches this function for them).
-///
-/// Returns `&str` (with lifetime tied to `llm_decision` when custom logic
-/// governs, or the `'static` slice from `resolve_decision` otherwise) so it
-/// is a drop-in replacement for `resolve_decision` at the engine call sites -
-/// no `String` allocation, no callsite borrow fixups needed.
+/// Finalize screening decision. Custom logic → LLM verbatim (combinatorial rules
+/// transcend priority resolver). No custom logic → §4.1 priority resolver.
+/// Returns `&str` tied to `llm_decision` (custom) or `'static` (resolver).
 #[must_use]
 pub fn finalize_decision<'a>(
     llm_decision: &'a str,

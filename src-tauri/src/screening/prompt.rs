@@ -47,11 +47,9 @@ pub struct CriterionEntry {
     pub id: String,
     pub text: String,
     pub priority: Priority,
-    /// Globally unique 1-based number (inclusion `1..N`, exclusion continues
-    /// `N+1..N+M`) matching the Criteria screen. The prompt formats each line
-    /// as `{global_number}. [{id}] {text}` so user-authored combinatorial
-    /// rules ("criterion 3 AND 5") resolve identically across the UI, the
-    /// prompt, and the LLM's reasoning.
+    /// Globally unique 1-based number (inclusion 1..N, exclusion N+1..N+M).
+    /// Prompt formats as `{global_number}. [{id}] {text}` so combinatorial
+    /// rules reference criteria unambiguously.
     pub global_number: usize,
 }
 
@@ -61,15 +59,13 @@ pub struct ArticleEntry {
     pub authors: String,
     pub year: Option<i32>,
     pub abstract_text: String,
-    /// Tier 3: retrieved full-text chunks (enhanced / two-stage mode), formatted as
-    /// `[§Methods] ...` / `[§Results] ...` lines. `None` in abstract mode (the
-    /// evidence block is omitted entirely so abstract-mode prompts are unchanged).
+    /// Retrieved full-text evidence (`[§Methods] ...` lines). `None` in abstract mode
+    /// (evidence block omitted → byte-identical to pre-Tier-3 prompts).
     pub full_text_evidence: Option<String>,
 }
 
 impl ArticleEntry {
-    /// Build an `ArticleEntry` without full-text evidence (the abstract-mode shape).
-    /// Convenience constructor keeping existing call sites concise.
+    /// Abstract-mode constructor (no full-text evidence).
     pub fn new(title: String, authors: String, year: Option<i32>, abstract_text: String) -> Self {
         Self { title, authors, year, abstract_text, full_text_evidence: None }
     }
@@ -82,16 +78,13 @@ pub struct ScreeningPromptInput {
     pub articles: Vec<ArticleEntry>,
     pub existing_tags: Vec<String>,
     pub existing_labels: Vec<String>,
-    /// Optional free-text combinatorial rules the LLM applies strictly
-    /// (AND/OR gates, hard exclusions, conditional inclusion). References
-    /// criteria by their `global_number`. `None` or whitespace-only omits the
-    /// `## Custom Screening Instructions` section entirely (byte-identical to
-    /// pre-feature prompts → backward-compatible).
+    /// Optional combinatorial rules (AND/OR gates, hard exclusions). References
+    /// criteria by `global_number`. Absent/whitespace = section omitted (byte-identical
+    /// to pre-feature prompts).
     pub custom_logic: Option<String>,
 }
 
-/// Returns true when all criteria (both inclusion and exclusion) share the same priority,
-/// or when there are zero or one criteria total.
+/// True when all criteria share same priority, or 0-1 criteria total.
 fn all_same_priority(inclusion: &[CriterionEntry], exclusion: &[CriterionEntry]) -> bool {
     let all_priorities: Vec<Priority> =
         inclusion.iter().chain(exclusion.iter()).map(|c| c.priority).collect();
@@ -118,7 +111,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
 
     let same_priority = all_same_priority(&input.inclusion_criteria, &input.exclusion_criteria);
 
-    // Sort criteria by priority descending when priorities differ
+    /* Sort criteria by priority descending when priorities differ */
     let sorted_inclusion: Vec<&CriterionEntry> = if same_priority {
         input.inclusion_criteria.iter().collect()
     } else {
@@ -175,9 +168,8 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
             .to_string()
     };
 
-    // Custom Screening Instructions section. Omitted entirely when the setting
-    // is absent or trims to empty → byte-identical to pre-feature prompts
-    // (backward-compat for existing prompt tests + cost).
+    /* Custom Screening Instructions section. Omitted when absent/empty →
+    byte-identical to pre-feature prompts (backward compat). */
     let custom_logic_section = match input.custom_logic.as_deref().map(str::trim) {
         Some(text) if !text.is_empty() => {
             format!("\n## Custom Screening Instructions\n{text}\n", text = text)
@@ -206,10 +198,9 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         format!("[\n{}\n]", entries.join(",\n"))
     };
 
-    // Build the supporting-evidence section. Only articles carrying
-    // `full_text_evidence = Some(...)` contribute; in abstract mode every entry
-    // is `None`, the section is empty, and the prompt is byte-identical to the
-    // pre-Tier-3 shape (backward compat for existing prompt tests + cost).
+    /* Supporting-evidence section: only articles with `full_text_evidence =
+    Some(...)` contribute. In abstract mode every entry is None → section empty
+    → prompt byte-identical to pre-Tier-3 shape (backward compat). */
     let evidence_blocks: Vec<String> = input
         .articles
         .iter()
@@ -225,7 +216,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         )
     };
 
-    // Build existing tags/labels section
+    /* Existing tags/labels section */
     let existing_tags_section = if input.existing_tags.is_empty() {
         String::new()
     } else {
@@ -284,7 +275,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
     )
 }
 
-/// Escape a string for embedding inside a JSON string value (without surrounding quotes).
+/// Escape string for embedding inside JSON string value (without surrounding quotes).
 fn escape_json_str(s: &str) -> String {
     format!(
         "\"{}\"",

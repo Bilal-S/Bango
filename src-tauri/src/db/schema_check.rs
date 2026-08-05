@@ -1,27 +1,21 @@
 //! Startup schema detection.
-//!
-//! The legacy v1 build (commit 665ec93) shipped a single `article_references`
-//! table. The current v1 migration creates `reference_papers` +
-//! `article_reference_links` + `journal_index` instead. Because both old and
-//! new builds register `user_version = 1`, `migration::run_migrations` silently
-//! skips the new DDL on an existing legacy install. We therefore detect the
-//! legacy schema by inspecting `sqlite_master` rather than relying on the
-//! version pragma.
+//! Legacy v1 (commit 665ec93) shipped `article_references`; current v1 creates
+//! `reference_papers` + `article_reference_links` + `journal_index`. Both register
+//! `user_version=1`, so we detect the legacy schema via `sqlite_master`, not the pragma.
 
 use rusqlite::Connection;
 
 use crate::error::AppError;
 
-/// Result of the startup schema probe.
+/// Startup schema probe result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchemaStatus {
-    /// Schema matches the current migration set (has `reference_papers`,
-    /// `article_reference_links`, and `journal_index`).
+    /// Current: has `reference_papers`, `article_reference_links`, and `journal_index`.
     Current,
-    /// Legacy schema detected (has `article_references` and/or is missing the
-    /// current reference/journal tables). Requires a backup + rebuild upgrade.
+    /// Legacy: has `article_references` and/or missing the current reference/journal tables.
+    /// Requires a backup + rebuild upgrade.
     Legacy,
-    /// Brand-new database with no user tables yet (migrations will create them).
+    /// Fresh: no user tables yet (migrations will create them).
     FreshDb,
 }
 
@@ -35,14 +29,11 @@ fn table_exists(conn: &Connection, name: &str) -> Result<bool, AppError> {
     Ok(count > 0)
 }
 
-/// Probe the live schema and classify it.
-///
-/// Classification rules (checked in order):
-/// 1. If the legacy `article_references` table is present -> `Legacy`.
-/// 2. If the current `reference_papers` table is absent but `articles` is
-///    present -> `Legacy` (partial/older install missing new tables).
-/// 3. If none of the data tables exist -> `FreshDb`.
-/// 4. Otherwise -> `Current`.
+/// Classify the live schema. Rules (checked in order):
+/// 1. Legacy `article_references` present → `Legacy`.
+/// 2. `articles` present but `reference_papers` absent → `Legacy`.
+/// 3. No data tables → `FreshDb`.
+/// 4. Otherwise → `Current`.
 pub fn check_schema(conn: &Connection) -> Result<SchemaStatus, AppError> {
     let has_article_references = table_exists(conn, "article_references")?;
     let has_reference_papers = table_exists(conn, "reference_papers")?;
@@ -52,8 +43,7 @@ pub fn check_schema(conn: &Connection) -> Result<SchemaStatus, AppError> {
         return Ok(SchemaStatus::Legacy);
     }
 
-    // An older install that has articles but none of the current reference
-    // tables is also legacy.
+    // Older install with `articles` but none of the current reference tables → legacy.
     if has_articles && !has_reference_papers {
         return Ok(SchemaStatus::Legacy);
     }

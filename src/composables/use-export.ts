@@ -16,10 +16,7 @@ import { useWiki } from './use-wiki';
 import { generateWikiExport, zipWikiExport } from '@/utils/wiki-site-export';
 import type { GenerateExportResult } from '@/types/wiki';
 
-/** The result of the last wiki generation (export dir + index path).
- *  Module-level so it survives component re-mounts when the user navigates
- *  away from the wiki toolbar and back. Used to enable the "Open in Browser"
- *  and "Download as Zip" actions after generation. */
+/** Get the module-level wiki export result (survives remount). */
 const wikiExportResult = ref<GenerateExportResult | null>(null);
 
 export function useExport() {
@@ -102,12 +99,7 @@ export function useExport() {
     }
   }
 
-  /** Export a specific set of articles (by UUID) to an RIS file. The sole
-   *  entry point for the "Export Selected" bulk action in the Article list
-   *  bulk action bar - distinct from the toolbar Export, which exports by
-   *  tab/status. Mirrors `exportRisForTab` (save dialog -> IPC -> error/loading
-   *  handling). The RIS bytes are produced by the same backend pipeline as the
-   *  tab export, so the output is byte-identical for the same article set. */
+  /** Export a specific set of articles (by UUID) to RIS. */
   async function exportRisForIds(ids: string[]): Promise<boolean> {
     exporting.value = true;
     error.value = null;
@@ -165,12 +157,9 @@ export function useExport() {
         await refreshAllStores();
         useSummary().clearSummary();
       });
-      // Land on the Dashboard so the user sees a clean "fresh start" view of
-      // the freshly imported project, then reload to wipe ALL cached view state
-      // (keep-alive components + module-level singletons like useArticleSearch,
-      // useBibliometrics, useDashboard, the network graphs, useReferencesSearch,
-      // etc.). The app re-bootstraps via main.ts (store pre-warm). Same-process
-      // reload keeps the Rust backend (and the just-written DB) alive.
+      /* Land on Dashboard, then reload to wipe all cached view state
+      (keep-alive components + module-level singletons). Same-process
+      reload keeps the Rust backend alive. */
       window.location.hash = '#/';
       window.location.reload();
       return true;
@@ -191,18 +180,10 @@ export function useExport() {
       await tauriCommand('reset_project');
       invalidateAllStores();
       useSummary().clearSummary();
-      // Delete All Data also wipes the on-disk Wiki (backend deletes the
-      // wiki-root directory). Reset the wiki singleton state and the chat
-      // store's wiki readiness flag so the UI reflects the empty state
-      // (wiki toggle hidden, wiki view shows the first-visit gate).
+      // Wipe wiki singleton state + chat store's wiki readiness flag.
       useWiki().resetState();
       useChatStore().setWikiReady(false);
-      // Land on the Dashboard so the user sees a clean "fresh start" view of
-      // the empty project, then reload to wipe ALL cached view state
-      // (keep-alive components + module-level singletons like useArticleSearch,
-      // useBibliometrics, useDashboard, the network graphs, useReferencesSearch,
-      // etc.). The app re-bootstraps via main.ts (store pre-warm). Same-process
-      // reload keeps the Rust backend (and the just-reset DB) alive.
+      // Land on Dashboard, then reload to wipe cached view state.
       window.location.hash = '#/';
       window.location.reload();
       return true;
@@ -214,8 +195,7 @@ export function useExport() {
     }
   }
 
-  /** Default project title for the wiki export: the first research aim, or a
-   *  fallback when no aims exist yet. */
+  /** Default project title for wiki export: first aim text, or fallback. */
   function defaultWikiTitle(): string {
     const aims = useCriteriaStore().aims;
     if (aims.length > 0 && aims[0]?.text) {
@@ -243,7 +223,7 @@ export function useExport() {
     }
   }
 
-  /** Open the generated `index.html` in the OS default browser for testing. */
+  /** Open the generated index.html in the OS default browser. */
   async function openWikiExport(): Promise<boolean> {
     if (!wikiExportResult.value) return false;
     try {
@@ -255,11 +235,7 @@ export function useExport() {
     }
   }
 
-  /** Step 2: Zip the `wiki-export/` directory into a user-chosen `.zip` file.
-   *  Returns the destination path on success, or null when the user cancels
-   *  the save dialog.
-   *  @param projectTitle Used to derive the default zip filename:
-   *  `bango-wiki-{normalized-title}.zip`. */
+  /** Zip the wiki-export directory into a user-chosen .zip file. */
   async function downloadWikiZip(projectTitle: string): Promise<string | null> {
     exporting.value = true;
     error.value = null;

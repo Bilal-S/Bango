@@ -6,8 +6,7 @@ pub fn estimate_tokens(text: &str) -> usize {
     text.chars().count() / 4
 }
 
-/// Estimates whether a screening run might exceed the context window.
-/// Returns a warning message if per-article tokens exceed 80% of context_window_tokens.
+/// Warning when worst-case per-article tokens exceed 80% of context window.
 #[must_use]
 pub fn check_context_window(
     template_tokens: usize,
@@ -28,32 +27,11 @@ pub fn check_context_window(
     }
 }
 
-/// Tier 3 Gap 5 + Tier 4.1: compute the mode-aware worst-case per-article token
-/// footprint.
-///
-/// Per `docs/bango-v4-spec.md` §4.3 (Readiness Check): the worst-case footprint
-/// is recomputed by the active screening mode.
-/// - **Abstract**: `abstract_tokens + template_tokens` (today's abstract-only
-///   estimate).
-/// - **Enhanced**: adds the per-article chunk budget converted to tokens
-///   (`chunk_budget_words / 4`).
-/// - **TwoStage**: adds the chunk budget scaled by the expected borderline
-///   fraction (only borderline articles pay the second-pass cost).
-///
-/// **Tier 4.1 note (formula unchanged):** the complementarity evidence path
-/// (AI summary + top-1 chunk, ~400 tokens) is _cheaper_ than the chunks-only
-/// path (~600 tokens) it replaces when a summary exists. The worst case per
-/// article remains the chunks-only path (article has no summary), which is
-/// already bounded by `chunk_budget_words / 4`. So the formula stays correct
-/// and conservative; the readiness dialog remains truthful. The typical case
-/// improves (articles with summaries cost ~400 not ~600), but the worst case
-/// does not, so the readiness check (which guards the worst case) is unchanged.
-///
-/// Pure helper extracted so it can be unit-tested independently of the command
-/// shims. `chunk_budget_words` is the per-article word budget (default 2400);
-/// `two_stage_borderline_fraction` is the expected share of borderline articles
-/// (default 0.15). The `/ 4` factor mirrors the `chars / 4` heuristic used by
-/// `estimate_tokens`.
+/// Mode-aware worst-case per-article token footprint (§4.3 Readiness Check).
+/// Abstract: `abstract + template`. Enhanced: adds `chunk_budget/4`.
+/// TwoStage: adds `chunk_budget/4 * borderline_fraction` (only borderline articles
+/// pay second-pass cost). Tier 4.1 complementarity is cheaper than chunks-only but
+/// worst case unchanged, so formula stays conservative.
 #[must_use]
 pub fn worst_case_per_article_tokens(
     mode: ScreeningMode,

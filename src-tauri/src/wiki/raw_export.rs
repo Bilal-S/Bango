@@ -1,21 +1,8 @@
-//! Raw source preparation for the wiki.
+//! Raw source preparation for the wiki. Two on-ramps feed `wiki-root/raw/`:
+//! 1. Article exports: included articles → `raw/{article_id}.md` (full_text > ai_summary > abstract).
+//! 2. User-added files: PDF/TXT/HTML/RTF/CSV/MD/JSON/XML/code → companion `.md` (pdf_extract + regex).
 //!
-//! Two on-ramps feed `wiki-root/raw/` with Markdown the LLM can ingest:
-//!
-//! 1. **Article exports** (`export_included_articles`): query the DB for
-//!    `status = 'included'` articles and write one `raw/{article_id}.md` per
-//!    article using the content fallback `full_text` -> `full_text_ai_summary`
-//!    -> `abstract_text`. Only included articles are ever touched - files in
-//!    the `fulltext/` attachment dir for rejected/working articles are ignored.
-//!
-//! 2. **User-added files** (`process_user_files`): scan `raw/` for non-`.md`
-//!    files the user dropped in (or added via `wiki_add_raw_file`) and extract
-//!    them to companion `.md` files. Supports PDF/TXT/HTML/RTF/CSV/MD/JSON/XML/
-//!    source-code without new dependencies (reuses `pdf_extract`, `regex`,
-//!    `sha2`, `std`).
-//!
-//! Both paths are idempotent: a `source_hash` in the companion frontmatter lets
-//! us skip unchanged sources on re-runs.
+//! Both idempotent via `source_hash` in companion frontmatter.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,8 +42,7 @@ pub struct RawExportReport {
 // Article export (Phase 2a)
 // ---------------------------------------------------------------------------
 
-/// Resolve which content to use for an article and a label for `content_source`.
-/// Order: full_text -> full_text_ai_summary -> abstract_text.
+/// Resolve article content: full_text → ai_summary `summary_150_250_words` → abstract_text.
 #[must_use]
 pub fn article_content(article: &Article) -> (String, &'static str) {
     if let Some(ref ft) = article.full_text {
@@ -74,7 +60,7 @@ pub fn article_content(article: &Article) -> (String, &'static str) {
     (article.abstract_text.clone(), "abstract")
 }
 
-/// Pull `summary_150_250_words` out of a stored AI summary JSON blob, if present.
+/// Pull `summary_150_250_words` from stored AI summary JSON. Returns `None` on parse failure.
 fn extract_ai_summary_field(raw: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(raw).ok()?;
     value.get("summary_150_250_words")?.as_str().map(str::to_string)
@@ -104,10 +90,9 @@ fn article_frontmatter(article: &Article, content_source: &str) -> Frontmatter {
     if let Some(ref d) = article.doi {
         fm.set("doi", d);
     }
-    // Store the abstract in frontmatter so the static-site exporter can render
-    // metadata-only article stub pages without a second DB query. The body
-    // carries the full content (full_text/ai_summary/abstract fallback); the
-    // abstract is kept separately here for the copyright-safe stub.
+    /* Store abstract in frontmatter so static-site exporter can render metadata-only
+    article stub pages without a second DB query. Body carries full content
+    (full_text/ai_summary/abstract); abstract stays separate for copyright-safe stub. */
     if !article.abstract_text.is_empty() {
         fm.set("abstract_text", &article.abstract_text);
     }
@@ -139,13 +124,9 @@ fn fmt_list(items: &[String]) -> String {
     format!("[{}]", inner.join(", "))
 }
 
-/// Build the Markdown body for an article raw page.
-///
-/// When `content_source == "full_text"`, the content is re-emitted as structured
-/// Markdown (T2.4 Phase 2): `## Methods` / `## Results` headings from
-/// `extract_sections_with_tables`, preserved GFM tables, and `**Figure N:**`
-/// caption lines from `extract_captions`. Other sources (`abstract`, `ai_summary`)
-/// pass through unchanged (no structured re-emit).
+/// Build the Markdown body for an article raw page. Full-text sources run through
+/// `structure_full_text` (## Methods/Results headings + GFM tables + figure captions via T2.4 Phase 2).
+/// Other sources (`abstract`, `ai_summary`) pass through unchanged.
 fn article_body(article: &Article, content: &str, content_source: &str) -> String {
     let year =
         article.publication_year.map(|y| y.to_string()).unwrap_or_else(|| "Unknown".to_string());
@@ -167,17 +148,10 @@ fn article_body(article: &Article, content: &str, content_source: &str) -> Strin
     format!("# {}\n\n{}\n\n## Content\n\n{}", article.title, meta_line, body_content)
 }
 
-/// Re-emit flat full-text as structured Markdown (T2.4 Phase 2).
-///
-/// - Runs `extract_sections_with_tables` to detect GFM tables (preserved as
-///   `SectionKind::Table`) and split the prose into heading-bounded sections.
-/// - Emits `## {SectionLabel}` headings for high-value sections (Methods,
-///   Results, Discussion, Conclusion, Introduction, Abstract).
-/// - Appends preserved GFM tables under their own `## Table N` heading.
-/// - Appends `**Figure N:** caption` lines for detected captions.
-///
-/// Low-value section kinds (`Heading`, `Text`) are emitted as plain body
-/// paragraphs without a synthetic heading (graceful degrade).
+/// Re-emit flat full-text as structured Markdown (T2.4 Phase 2). Detects GFM tables
+/// (preserved as SectionKind::Table), splits prose into heading-bounded sections, emits
+/// `## {Section}` headings for high-value sections, appends `**Figure N:**` caption lines.
+/// Low-value sections (Heading/Text/References) emit as plain paragraphs.
 #[must_use]
 fn structure_full_text(text: &str) -> String {
     let sections = extract_sections_with_tables(text);
@@ -237,14 +211,14 @@ fn structure_full_text(text: &str) -> String {
     out
 }
 
-/// Hash a string for idempotency checks.
+/// Hash a string for content-based idempotency checks.
 fn hash_str(s: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(s.as_bytes());
     hex_encode(&hasher.finalize())
 }
 
-/// Hash raw bytes for idempotency checks.
+/// Hash raw bytes for content-based idempotency checks.
 fn hash_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -268,37 +242,21 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Progress callback for `write_article_exports`. Mirrors `ChunkProgressCb`
-/// in `commands/full_text.rs`: `(index, total, article_id)`. The caller emits
-/// `wiki:progress` events in the 0-15% range so the user sees per-article
-/// progress during the "Preparing raw sources..." phase instead of a silent
-/// freeze.
+/// Progress callback `(index, total, article_id)` for `write_article_exports`. Mirrors
+/// `ChunkProgressCb`. Caller emits `wiki:progress` events in the 0-15% range.
 pub type ArticleExportProgressCb<'a> = Option<&'a dyn Fn(usize, usize, &str)>;
 
-/// Load all `status = 'included'` articles from the DB. This is the only phase
-/// that needs the DB lock; the returned `Vec<Article>` carries `full_text` in
-/// memory so the subsequent `write_article_exports` phase can run lock-free.
-/// Splitting the load from the write is the batch-import Phase 1 lesson
-/// (`attach_full_text_split`): hold the lock only for the row read, run the
-/// CPU-bound `structure_full_text` extraction without the lock so other
-/// DB-touching IPC commands are not blocked.
+/// Load all `status = 'included'` articles. Only phase needing DB lock; returned
+/// `Vec<Article>` carries `full_text` in memory so `write_article_exports` runs lock-free.
+/// Splitting load from write follows the `attach_full_text_split` pattern.
 pub fn load_included_articles(conn: &Connection) -> Result<Vec<Article>, AppError> {
     article_repo::get_articles_by_status(conn, "included")
 }
 
-/// Write loaded articles to `raw/{article_id}.md`. Idempotent: skips articles
-/// whose content hash is unchanged since last export. The `progress_cb` fires
-/// after each article so the caller can emit `wiki:progress` events in the
-/// 0-15% range.
-///
-/// This function does NOT touch the DB - the `Article` struct carries
-/// `full_text` in memory - so the caller can release the DB lock before
-/// calling it.
-///
-/// `cancel` is checked at the top of each iteration. On signal the function
-/// returns `Ok(report)` with `report.cancelled = true` (the articles already
-/// written are preserved). Pass `None` when no cancel token is threaded in
-/// (e.g. synchronous `wiki_export_raw` or tests).
+/// Write loaded articles to `raw/{article_id}.md`. Idempotent: skips when content hash is
+/// unchanged. Does NOT touch DB - `Article` carries `full_text` in memory. `cancel` checked
+/// at each iteration; on signal returns `Ok(report)` with `report.cancelled = true`.
+/// Prefer `load_included_articles` + `write_article_exports` in new callers.
 pub fn write_article_exports(
     root: &Path,
     articles: &[Article],
@@ -312,9 +270,9 @@ pub fn write_article_exports(
     let mut report = RawExportReport::default();
 
     for (idx, article) in articles.iter().enumerate() {
-        // Phase A cancel: checked before each article so Stop works during
-        // "Preparing raw sources..." (0-15%). Already-written files are
-        // preserved; a cancelled report surfaces via `report.cancelled`.
+        /* Phase A cancel: checked before each article so Stop works during
+        "Preparing raw sources..." (0-15%). Already-written files preserved;
+        cancelled report surfaces via `report.cancelled`. */
         if cancel.is_some_and(|t| t.load(Ordering::SeqCst)) {
             report.cancelled = true;
             return Ok(report);
@@ -349,12 +307,8 @@ pub fn write_article_exports(
     Ok(report)
 }
 
-/// Export all `status = 'included'` articles to `raw/{article_id}.md`.
-/// Idempotent: skips articles whose content hash is unchanged since last export.
-///
-/// This is the legacy single-call wrapper. Prefer `load_included_articles` +
-/// `write_article_exports` in new callers so the lock is released during the
-/// CPU-bound extraction and cancel can be threaded through.
+/// Export all included articles to `raw/{article_id}.md`. Legacy single-call wrapper.
+/// Prefer `load_included_articles` + `write_article_exports` in new callers.
 pub fn export_included_articles(
     conn: &Connection,
     root: &Path,
@@ -367,7 +321,7 @@ pub fn export_included_articles(
 // User-added files (Phase 2b)
 // ---------------------------------------------------------------------------
 
-/// Classification of a user-added file by its extension.
+/// Classification of a user-added file by extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RawSourceKind {
     UserPdf,
@@ -613,12 +567,8 @@ fn sanitize_filename(s: &str) -> String {
     }
 }
 
-/// Try to read a PDF's embedded title from its Info dictionary via `lopdf`.
-///
-/// Returns `Some(title)` when the PDF has a non-empty `/Title` entry, `None`
-/// otherwise (including unparseable or image-only PDFs). The caller falls back
-/// to the filename stem when this returns `None`, preserving the prior
-/// behavior for PDFs without metadata.
+/// Try to read a PDF's embedded `/Title` from its Info dictionary via `lopdf`.
+/// Returns `None` when absent, empty, or unparseable (caller falls back to stem).
 fn extract_pdf_title(path: &Path) -> Option<String> {
     let doc = LopdfDocument::load(path).ok()?;
     let info = doc.trailer.get(b"Info").ok()?;
@@ -638,13 +588,8 @@ fn extract_pdf_title(path: &Path) -> Option<String> {
     }
 }
 
-/// Resolve the effective title + slug for a user file.
-///
-/// For PDFs, prefers the embedded `/Title` from the Info dictionary when it is
-/// non-empty (gives a much cleaner title than the filename stem - e.g.
-/// "You Can't Build an AI Workforce..." instead of "user-youcantbuild"). Falls
-/// back to the filename stem for PDFs without metadata and for all other file
-/// types.
+/// Resolve title + slug for a user file. PDFs: prefer embedded `/Title` from Info dictionary.
+/// Falls back to filename stem for PDFs without metadata and for all other file types.
 fn resolve_user_file_title(stem: &str, path: &Path, kind: RawSourceKind) -> (String, String) {
     if kind == RawSourceKind::UserPdf {
         if let Some(pdf_title) = extract_pdf_title(path) {
@@ -659,10 +604,8 @@ fn resolve_user_file_title(stem: &str, path: &Path, kind: RawSourceKind) -> (Str
     (stem.to_string(), slug)
 }
 
-/// Process all non-`.md` files in `raw/`: extract each to a companion `.md`.
-/// Idempotent via `source_hash`. For PDFs, the embedded `/Title` (when
-/// present) is used as the frontmatter `title` and slug source, giving cleaner
-/// wiki source-page names than the raw filename stem.
+/// Process non-`.md` files in `raw/`: extract to companion `.md`. Idempotent via `source_hash`.
+/// PDFs use embedded `/Title` for cleaner wiki source-page names.
 pub fn process_user_files(root: &Path) -> Result<RawExportReport, AppError> {
     let raw_dir = root.join("raw");
     std::fs::create_dir_all(&raw_dir)?;
@@ -716,8 +659,8 @@ pub fn process_user_files(root: &Path) -> Result<RawExportReport, AppError> {
     Ok(report)
 }
 
-/// Copy a user-selected file into `raw/` and extract its companion `.md` immediately.
-/// Returns the companion `.md` path.
+/// Copy a user-selected file into `raw/` and immediately extract its companion `.md`.
+/// Returns the companion path.
 pub fn add_user_file(root: &Path, source_path: &Path) -> Result<PathBuf, AppError> {
     let raw_dir = root.join("raw");
     std::fs::create_dir_all(&raw_dir)?;
@@ -754,8 +697,7 @@ pub fn add_user_file(root: &Path, source_path: &Path) -> Result<PathBuf, AppErro
     Ok(companion)
 }
 
-/// Add raw text content directly (e.g. from a fetched URL) as a companion `.md` file.
-/// Returns the path to the companion file.
+/// Add raw text content (e.g. from fetched URL) as a companion `.md` file. Returns the companion path.
 pub fn add_raw_content(
     root: &Path,
     title: &str,
@@ -776,7 +718,7 @@ pub fn add_raw_content(
     Ok(companion)
 }
 
-/// List all `.md` files in `raw/` with their parsed frontmatter.
+/// List all `.md` files in `raw/` with parsed frontmatter, sorted by title.
 pub fn list_raw_files(root: &Path) -> Result<Vec<(PathBuf, Frontmatter)>, AppError> {
     let raw_dir = root.join("raw");
     if !raw_dir.exists() {

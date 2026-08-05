@@ -23,41 +23,27 @@ interface PreviewResult {
   errors: string[];
 }
 
-/** Result from scrape_citation_chaser_cmd (camelCase via serde) */
+/** Result from scrape_citation_chaser_cmd. */
 interface ScrapeCitationChaserResult {
   referencesRis: string | null;
   citationsRis: string | null;
 }
 
 /**
- * Classify a rendered scrape-error string as a "skip" (the article had no
- * references/citations on record, or the user cancelled) rather than a true
- * error. Mirrors `is_skip_message` in `src-tauri/src/commands/scraping.rs`:
- * the backend surfaces `NoData` as "No data: ..." and `Cancelled` as exactly
- * "Cancelled".
- *
- * Used by the batch loop and the single-article auto-download path so skips
- * show an info toast (not error) and are routed into a `skipped` counter.
+ * Classify a scrape-error string as "skip" (NoData / Cancelled) vs true error.
+ * Mirrors `is_skip_message` in `src-tauri/src/commands/scraping.rs`.
  */
 function isScrapeSkipMessage(message: string): boolean {
   return message.startsWith('No data:') || message === 'Cancelled';
 }
 
-/**
- * Signal the backend to cancel any in-flight Citation Chaser scrape.
- *
- * Fire-and-forget: the backend's `cancel_scraping` command flips the active
- * `CancelToken`, so the `spawn_blocking` scrape returns `ScrapeError::Cancelled`
- * within ~1s (one poll tick). Safe to call when no scrape is running (no-op).
- */
+/** Signal the backend to cancel an in-flight Citation Chaser scrape. Fire-and-forget. */
 async function cancelInFlightScrape(): Promise<void> {
   try {
     await tauriCommand('cancel_scraping');
   } catch {
-    // Swallow: best-effort cancel. The backend may have already finished or no
-    // scrape may be running. The between-articles `batchCancelled` flag is the
-    // authoritative batch-loop stop signal; this IPC just shortens the wait for
-    // the current in-flight article.
+    /* Best-effort cancel. The between-articles `batchCancelled` flag is the
+    authoritative stop signal; this IPC shortens the in-flight wait. */
   }
 }
 
@@ -72,15 +58,7 @@ export function isAutoDownloading(articleId: string): boolean {
   return autoDownloadMap.value.get(articleId) === true;
 }
 
-/**
- * Auto-download references/citations via Citation Chaser and import them.
- *
- * Runs in the background - fire-and-forget from the caller's perspective.
- * Double-submit is prevented by the module-level reactive `autoDownloadMap`.
- *
- * @param reloadFn  Called after successful import so the caller can refresh its list.
- * @param onComplete  Called with `true` on success or `false` on error (after toast).
- */
+/** Double-submit is prevented by `autoDownloadMap`. Fire-and-forget. */
 export function autoDownloadReferences(
   articleId: string,
   doi: string,
@@ -126,9 +104,7 @@ export function autoDownloadReferences(
       onComplete?.(true);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      // A NoData/Cancelled outcome is a skip, not an error: show an info toast
-      // (not error) so the user understands there was nothing to download (or
-      // that they cancelled) rather than a real failure.
+      /* A NoData/Cancelled outcome is a skip (info toast), not an error. */
       if (isScrapeSkipMessage(msg)) {
         toast.show(`Skipped: ${msg}`, 'info');
         onComplete?.(true);
@@ -326,11 +302,7 @@ const batchProgress = ref<BatchRefScrapingProgress>({
 const batchCancelled = ref(false);
 
 /**
- * Composable for batch reference scraping across all included articles.
- *
- * Uses module-level reactive state so all components share the same
- * progress singleton. The batch loop runs entirely on the frontend,
- * reusing existing Tauri commands for scraping and importing.
+ * Composable for batch reference scraping. Module-level singleton state.
  */
 export function useBatchReferenceScraping() {
   const toast = useToast();
@@ -425,11 +397,8 @@ export function useBatchReferenceScraping() {
           scraped: batchProgress.value.scraped + 1,
         };
       } catch (e: unknown) {
-        // A NoData outcome (article has no references/citations on record in
-        // Lens.org) or a Cancelled outcome is a skip, not an error: route it
-        // into the `skipped` counter so the summary toast distinguishes "had
-        // nothing to download" from a real failure. The error-string prefix
-        // check mirrors the backend's `is_skip_message`.
+        /* NoData or Cancelled is a skip, not an error: route to `skipped`
+        counter. Mirrors the backend's `is_skip_message`. */
         const msg = e instanceof Error ? e.message : String(e);
         if (isScrapeSkipMessage(msg)) {
           batchProgress.value = {
@@ -471,15 +440,7 @@ export function useBatchReferenceScraping() {
     await onComplete();
   }
 
-  /** Cancel the running batch.
-   *
-   * Sets the between-articles `batchCancelled` flag (so the loop stops after
-   * the current article) AND signals the backend to abort the in-flight
-   * `scrape_citation_chaser_cmd` via `cancel_scraping`, so the user does not
-   * wait up to 120s for the current article's poll loop to time out. The
-   * backend cancel is best-effort (fire-and-forget); the flag is the
-   * authoritative stop signal.
-   */
+  /** Cancel the running batch: sets flag + signals backend to abort in-flight scrape. */
   function cancelBatchScraping(): void {
     batchCancelled.value = true;
     void cancelInFlightScrape();

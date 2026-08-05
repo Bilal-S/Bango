@@ -1,14 +1,9 @@
-//! Embedding director: computes the work list for (re)embedding.
+//! Embedding director: computes the (re)embedding work list from a scope.
 //!
-//! Given a scope (`article_ids` OR `status_filter`, plus a `force` flag), the
-//! director:
-//! 1. Resolves the target article set.
-//! 2. Gates on base conditions (LLM configured, embeddings enabled).
-//! 3. For each article, computes the expected `(chunk_index, text)` rows and
-//!    their `input_hash`.
-//! 4. Compares each expected row against the stored row's hash (missing or
-//!    mismatch => needs embedding; match => skip).
-//! 5. Returns a `WorkList` the runner consumes.
+//! 1. Resolve target articles. 2. Gate on LLM-configured + embeddings enabled.
+//! 3. Compute expected `(chunk_index, text)` rows + `input_hash` per article.
+//! 4. Compare against stored hashes (missing/mismatch → embed; match → skip).
+//! 5. Return `WorkList` for the runner.
 
 use rusqlite::Connection;
 
@@ -20,47 +15,38 @@ use crate::db::llm_config_repo;
 use crate::embedding::text::{expected_rows, hash_text, ChunkInput};
 use crate::error::AppError;
 
-/// The scope passed to [`compute_work_list`].
+/// Scope controlling [`compute_work_list`].
 #[derive(Debug, Clone, Default)]
 pub struct EmbeddingScope {
-    /// Explicit article IDs. When non-empty, takes precedence over
-    /// `status_filter`.
+    /// Explicit IDs (non-empty → overrides `status_filter`).
     pub article_ids: Option<Vec<String>>,
-    /// Status filter (e.g. `"included"`). Ignored when `article_ids` is
-    /// non-empty. Defaults to `"included"`.
+    /// Status filter (default: `"included"`). Ignored when `article_ids` is set.
     pub status_filter: Option<String>,
-    /// When `true`, every expected row is marked for embedding regardless of
-    /// the stored hash (used by the "Rebuild text chunks" cascade).
+    /// Force re-embed all rows regardless of stored hash.
     pub force: bool,
 }
 
-/// One row that needs embedding.
+/// One row needing embedding. `chunk_index`: `-1` = title+abstract; `>= 0` = chunk.
 #[derive(Debug, Clone)]
 pub struct EmbedTask {
     pub article_id: String,
-    /// `-1` for the title+abstract row; `>= 0` for a per-chunk row.
     pub chunk_index: i32,
     pub text: String,
     pub input_hash: String,
 }
 
-/// Why the director produced an empty work list (for the runner's report).
+/// Why the director returned an empty work list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkipReason {
-    /// LLM is not configured.
     LlmNotConfigured,
-    /// Embeddings are disabled (`embedding_status == "disabled"`).
     Disabled,
-    /// `embedding_status == "unknown"` and the caller did not probe first.
-    /// The runner probes + retries; if this propagates, the probe failed.
+    /// `embedding_status == "unknown"` and caller didn't probe. Runner probes then retries.
     UnknownNotProbed,
-    /// No target articles matched the scope.
     NoTargets,
-    /// All rows are fresh (hashes match) and `force` is false.
     AllFresh,
 }
 
-/// The output of [`compute_work_list`].
+/// Output of [`compute_work_list`].
 #[derive(Debug, Clone)]
 pub struct WorkList {
     pub rows: Vec<EmbedTask>,
@@ -72,13 +58,8 @@ pub struct WorkList {
     pub skip_reason: Option<SkipReason>,
 }
 
-/// Compute the set of rows that need (re)embedding under `scope`.
-///
-/// Base-condition gates return an empty `WorkList` with a `SkipReason`:
-/// - LLM unconfigured -> `SkipReason::LlmNotConfigured`.
-/// - `embedding_status == Disabled` -> `SkipReason::Disabled`.
-/// - `embedding_status == Unknown` -> `SkipReason::UnknownNotProbed` (the
-///   runner should probe first, then call this again).
+/// Compute rows needing (re)embedding. Base-condition gates return empty
+/// `WorkList` with `SkipReason`. (`UnknownNotProbed` → runner probes first.)
 pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<WorkList, AppError> {
     // Base-condition gate 1: LLM configured.
     if !llm_config_repo::has_config(conn)? {
@@ -130,11 +111,9 @@ pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<Wo
         });
     }
 
-    // The current embedding model name (used for the model-mismatch staleness
-    // check). Read once outside the per-article loop so we don't re-query
-    // `app_settings` for every article. `None` means the probe has not run yet
-    // (the gate above already returned `SkipReason::UnknownNotProbed` in that
-    // case, so this branch is unreachable when `status == Unknown`).
+    /* Current embedding model name for model-mismatch staleness. Read once
+    outside the per-article loop. `None` when `UnknownNotProbed` was already
+    returned (this branch unreachable when `status == Unknown`). */
     let current_model = app_settings_repo::get_embedding_model(conn)?;
 
     let total_articles = target_ids.len();
@@ -160,13 +139,11 @@ pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<Wo
         let expected =
             expected_rows(&article.title, &article.abstract_text, &chunks, article.has_full_text);
 
-        // Load stored (chunk_index → (input_hash, model_name)) once per
-        // article. The model_name is tracked alongside the hash so a model
-        // switch (e.g. `text-embedding-3-small` → `text-embedding-3-large`)
-        // marks every row stale even when the input text (and therefore the
-        // hash) is unchanged. Without this, switching models leaves all rows
-        // "fresh" by hash but invisible to recall (which filters by the new
-        // dimensions), producing a silent zero-results bug.
+        /* Load stored (chunk_index → (input_hash, model_name)) per article.
+        Tracking model_name alongside hash ensures model switches (e.g.
+        small→large) mark rows stale even with unchanged hash. Without this,
+        rows appear "fresh" but are invisible to recall (dimension mismatch),
+        producing a silent zero-results bug. */
         let stored: std::collections::HashMap<i32, (String, String)> = if scope.force {
             std::collections::HashMap::new()
         } else {
@@ -178,20 +155,15 @@ pub fn compute_work_list(conn: &Connection, scope: &EmbeddingScope) -> Result<Wo
 
         for (chunk_index, text) in expected {
             let input_hash = hash_text(&text);
-            // Stale when: force | hash mismatch | model mismatch.
-            // The model-mismatch arm compares the stored `model_name` against
-            // the current `embedding_model` setting. An empty stored model
-            // (pre-feature rows, or a corrupt row) is treated as a mismatch
-            // so the row is regenerated + the model column backfilled.
+            /* Stale when: force | hash mismatch | model mismatch. Empty stored
+            model (pre-feature/corrupt) treated as mismatch → regenerated. */
             let needs = scope.force
                 || match stored.get(&chunk_index) {
-                    None => true, // no stored row
+                    None => true,
                     Some((stored_hash, stored_model)) => {
-                        // ASCII case-insensitive model comparison is sufficient
-                        // because embedding model names are ASCII (e.g.
-                        // `text-embedding-3-small`). A stored empty model name
-                        // (pre-feature row, or corrupt) is a mismatch so the
-                        // row is regenerated + the column backfilled.
+                        /* ASCII case-insensitive model comparison (embedding model
+                        names are ASCII, e.g. text-embedding-3-small). Empty stored
+                        model = mismatch → regenerated + backfilled. */
                         let model_mismatch = !stored_model
                             .eq_ignore_ascii_case(current_model.as_deref().unwrap_or(""))
                             || (current_model.is_some() && stored_model.is_empty());

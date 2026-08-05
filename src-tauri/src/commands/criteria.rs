@@ -340,11 +340,10 @@ pub struct CheckRulesResult {
     pub critique: String,
 }
 
-/// Run an LLM consistency review of the whole screening ruleset: both
-/// inclusion + exclusion criteria (with global numbering so the model sees the
-/// same numbers the user sees on the Criteria screen) PLUS any custom screening
-/// instructions. Returns plain-text critique; non-fatal errors are logged to
-/// the audit trail (mirrors `critique_criteria`).
+/// LLM consistency review of the whole screening ruleset: inclusion + exclusion
+/// criteria (global numbering matching the Criteria screen) + custom
+/// instructions. Returns plain-text critique; errors logged to audit trail
+/// (mirrors `critique_criteria`).
 #[tauri::command]
 pub async fn check_rules(
     db_state: State<'_, DbState>,

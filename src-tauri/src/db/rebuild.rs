@@ -1,21 +1,15 @@
-//! Shared schema rebuild: drop every user table (preserving only
-//! `journal_index`), reset `user_version`, and re-run all migrations.
-//!
-//! Used by both `reset_project` (settings: delete all data) and the startup
-//! legacy upgrade path. Keeping the drop list in one place prevents the two
-//! callers from drifting when new tables are added.
+//! Shared schema rebuild: drop every user table (preserving `journal_index`),
+//! reset `user_version`, and re-run migrations. Used by both `reset_project`
+//! and the startup legacy upgrade path — a single drop list prevents drift.
 
 use rusqlite::Connection;
 
 use super::migration;
 use crate::error::AppError;
 
-/// All tables that hold user/project data, plus the legacy `article_references`
-/// table from the old v1 schema. Dropped before migrations rebuild the schema.
-///
-/// `journal_index` is intentionally NOT listed here: it is system-distributed
-/// reference data that survives reset/upgrade and is (re)populated from the
-/// bundled portal DB.
+/// All user/project-data tables plus legacy `article_references`. `journal_index`
+/// is intentionally excluded — it's system-distributed reference data that survives
+/// reset/upgrade and is (re)populated from the bundled portal DB.
 const DROP_TABLES: &[&str] = &[
     // Current schema
     "article_reference_links",
@@ -35,9 +29,7 @@ const DROP_TABLES: &[&str] = &[
     "app_settings",
     // Article chunk storage (T1.2/T3.1)
     "article_chunks",
-    // Article embedding storage for semantic search (regenerable derived
-    // artifact, like `article_chunks`). Cleared by reset_project and rebuilt
-    // by the embedding runner.
+    // Article embeddings (regenerable derived artifact, like `article_chunks`)
     "article_embeddings",
     // Translation originals (Plan-A permanent rewrite)
     "article_original_chunks",
@@ -54,16 +46,11 @@ const DROP_TABLES: &[&str] = &[
     "biblio_authors",
     // Legacy v1 schema (single-table references model)
     "article_references",
-    // Wiki FTS5 virtual table. Created lazily by `wiki::fts::ensure_table`
-    // (not by migrations), so it must be dropped here explicitly. It is
-    // recreated on demand by `ensure_index_populated` (self-heal) when wiki
-    // pages are next read. Safe for the legacy upgrade path: the wiki
-    // directory on disk is preserved, so the index is rebuilt from it.
+    // Wiki FTS5 virtual table (lazy-created by `wiki::fts::ensure_table`; not in
+    // migrations, so dropped explicitly). Self-heals via `ensure_index_populated`.
     "wiki_pages_fts",
-    // Wiki index manifest: per-file content hashes used by
-    // `wiki_check_for_updates` to detect external edits. A derived cache
-    // (created by migration v002) that self-heals from disk on the next
-    // check, exactly like `wiki_pages_fts`.
+    // Wiki index manifest (per-file content hashes, created by v002). A derived
+    // cache that self-heals from disk on the next `wiki_check_for_updates`.
     "wiki_index_manifest",
 ];
 
@@ -107,13 +94,11 @@ const DROP_INDEXES: &[&str] = &[
     "idx_article_references_match_status",
 ];
 
-/// Drop all user tables and indexes, reset `user_version` to 0, and re-run
+/// Drop all user tables and indexes, reset `user_version` to 0, re-run
 /// migrations from scratch. `journal_index` is preserved.
-///
-/// Safe to call on legacy, current, or fresh databases.
+/// Safe on legacy, current, or fresh databases.
 pub fn rebuild_schema(conn: &mut Connection) -> Result<(), AppError> {
-    // PRAGMA foreign_keys cannot be changed inside a transaction; set it on the
-    // connection before starting one.
+    // PRAGMA foreign_keys cannot change inside a transaction; set it before opening one.
     conn.execute("PRAGMA foreign_keys = OFF", [])?;
 
     {

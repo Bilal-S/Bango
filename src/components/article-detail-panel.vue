@@ -57,23 +57,17 @@ const emit = defineEmits<{
   articlePromoted: [articleId: string];
   readerOpened: [];
   referencesUpdated: [];
-  /** Emitted after the user confirms the delete-article dialog. The parent
-   *  invokes the backend `delete_article` command and closes the detail
-   *  panel. The dialog itself is owned by this component so the parent does
-   *  not need to render a second confirmation. */
+  /** Parent invokes `delete_article` + closes panel after user confirms. Dialog owned here. */
   deleteArticle: [id: string];
-  /** Emitted after the user confirms the clear-AI-reasoning dialog. The
-   *  parent invokes the backend `clear_ai_reasoning` command and refreshes
-   *  the article. The dialog itself is owned by this component. */
+  /** Parent invokes `clear_ai_reasoning` + refreshes article after user confirms. Dialog owned here. */
   clearAiReasoning: [id: string];
 }>();
 
 const screeningStore = useScreeningStore();
 
-// Canonical LLM-configured gate (wraps `useLlmConfigStore().isConfigured`).
-// The composable mirrors the backend `llm_config_repo::has_config` contract
-// (local providers like LM Studio / Ollama / llama.cpp do not need a key) and
-// defensively pre-warms the store via `fetchIfNeeded()`.
+/* Canonical LLM-configured gate: mirrors the backend `has_config` contract.
+   Local providers (LM Studio / Ollama / llama.cpp) do not need an API key.
+   Pre-warms the store via `fetchIfNeeded()`. */
 const isLlmConfigured = useLlmConfigured();
 
 // Parsed AI summary data
@@ -94,12 +88,11 @@ const canRequestAiSummary = computed(
 // Whether an AI summary is pending for this article
 const isAiSummaryPending = computed(() => pendingSummaries.value.has(props.article.id));
 
-// ---- Translation eligibility (mirrors the canRequestAiSummary pattern) ----
-// Parent owns the full determination: article eligibility + LLM configured.
-// The child (DetailHeader) receives two props so it can render the enabled
-// button, the disabled-with-tooltip placeholder (eligible but no LLM), or
-// hide the action entirely (English / already translated / in-flight).
-const ENGLISH_LANGUAGE_VALUES = new Set(['english', 'en']);
+/* Translation eligibility: parent owns eligibility + LLM-configured determination.
+   DetailHeader receives two props so it can render the enabled button, the
+   disabled-with-tooltip placeholder (eligible but no LLM), or hide the
+   action entirely (English / already translated / in-flight). */
+const ENGLISH_LANGUAGE_VALUES = new Set(['english', 'en', 'eng', 'engl']);
 
 const isEnglishLanguage = (language: string | null | undefined): boolean => {
   if (!language) return true; // absent/blank treated as English (no translation)
@@ -116,9 +109,8 @@ const canRequestTranslation = computed(() => {
   return isLlmConfigured.value;
 });
 
-// Whether an article is eligible for translation ignoring the LLM gate. Used
-// by the child to decide between "hide entirely" (not eligible) and
-// "disabled with configure-LLM tooltip" (eligible but no LLM).
+/* Article translation eligibility ignoring LLM gate. Used by child to decide
+   "hide entirely" vs "disabled with configure-LLM tooltip". */
 const isTranslationEligible = computed(() => {
   const a = props.article;
   if (a.isTranslated) return false;
@@ -127,37 +119,28 @@ const isTranslationEligible = computed(() => {
   return true;
 });
 
-// Whether this article is currently being screened according to the global
-// screening store. The store's progress events carry the titles of the
-// articles in the current batch in `currentArticleTitles`; we match against
-// the current article's title to detect the in-flight state.
+/* Article is being screened per the global store. We match the article title
+   against `currentArticleTitles` in the progress event payload. */
 const isArticleBeingScreened = computed(
   () =>
     screeningStore.progress?.isRunning === true &&
     screeningStore.progress.currentArticleTitles.includes(props.article.title)
 );
 
-// Local in-flight flag: set synchronously on click (before any progress event
-// arrives) and cleared only once the article prop reflects the post-screening
-// state (status changed / screenedAt set / screeningError set). This closes
-// two gaps in the title-match-only approach:
-//   1. At click time the optimistic progress has `currentArticleTitles: []`,
-//      so without this flag the button would briefly look enabled + spinnerless
-//      until the backend's first progress event arrives with the title.
-//   2. After the run completes (isRunning flips false) but before the parent's
-//      refresh IPC resolves, `props.article` still shows the old (working,
-//      unscreened) state. Without this flag the button would briefly look
-//      enabled during that refresh gap.
+/* Local in-flight flag set synchronously on click (before progress events arrive)
+   and cleared once the article prop reflects post-screening state. Closes two
+   gaps: (1) click-time optimistic progress has empty `currentArticleTitles` so
+   the button would flash enabled; (2) after run completes but before
+   `refreshArticle` resolves, `props.article` still shows the pre-screening
+   state so the button would briefly re-enable. */
 const isScreening = ref(false);
 
 // The combined disabled/spinner state: true from the click moment until the
 // article prop is confirmed updated post-screening.
 const isScreeningInProgress = computed(() => isScreening.value || isArticleBeingScreened.value);
 
-// Whether the Screen button should be shown (article is in the working list,
-// unscreened, not in error state, and LLM is configured). The button auto-hides
-// when screening completes because the article's status changes or `screenedAt`
-// gets set, flipping the `status === 'working'` condition to false.
+/* Screen button shown when: article is working, unscreened, no error, LLM configured.
+   Auto-hides when screening completes (status changes or `screenedAt` is set). */
 const canScreenArticle = computed(
   () =>
     props.article.status === 'working' &&
@@ -166,9 +149,8 @@ const canScreenArticle = computed(
     isLlmConfigured.value
 );
 
-// Reset the local flag once the article prop reflects a post-screening state.
-// This is the primary completion trigger and fires after the parent's
-// `refreshArticle` IPC resolves and updates `props.article`.
+/* Reset local flag when article prop reflects post-screening state. This is
+   the primary completion trigger, fired after `refreshArticle` resolves. */
 watch(
   () => [props.article.status, props.article.screenedAt, props.article.screeningError] as const,
   ([status, screenedAt, screeningError]) => {
@@ -178,10 +160,9 @@ watch(
   }
 );
 
-// Backup completion trigger: if the global screening run ends but the article
-// prop hasn't updated yet (e.g. the refresh IPC is slow or fails), re-emit
-// `refreshArticle` so the parent retries the fetch. When the article prop
-// eventually updates, the watcher above clears `isScreening`.
+/* Backup trigger: if the global screening run ends but the article prop hasn't
+   updated yet (e.g. refresh IPC is slow), re-emit `refreshArticle`. The watcher
+   above clears `isScreening` once the prop eventually updates. */
 watch(
   () => screeningStore.progress?.isRunning ?? false,
   (isRunning, wasRunning) => {
@@ -194,17 +175,10 @@ watch(
 // Determine the file type icon based on filename
 const fullTextFileIcon = computed(() => getFullTextFileIcon(props.article.fullTextFileName));
 
-// Refresh the article when its screening run completes so the status, AI
-// decision, reasoning, and audit trail update live without requiring the user
-// to navigate away and back. The transition we care about is `true → false`:
-// the article was being screened, and now screening is done (the backend has
-// written the new status + ai_decision to the DB). Emitting `refreshArticle`
-// triggers the parent's existing handler, which calls `selectArticle(id)` to
-// re-fetch the article + audit trail and update `selectedArticle`.
-//
-// This precisely targets the article that was screened (not every screening
-// completion), so it does not cause unnecessary refreshes when navigating
-// between articles during an unrelated batch run.
+/* Refresh the article when its screening run completes so status, AI decision,
+   reasoning, and audit trail update live. Targets only the article that was
+   screened, not every screening completion, so navigating between articles
+   during an unrelated batch run does not cause unnecessary refreshes. */
 watch(isArticleBeingScreened, (beingScreened, wasBeingScreened) => {
   if (wasBeingScreened === true && beingScreened === false) {
     emit('refreshArticle', props.article.id);
@@ -218,12 +192,8 @@ function handleRequestAiSummary(): void {
   });
 }
 
-/**
- * Screen button click handler: set the local in-flight flag synchronously so
- * the button disables + shows the spinner immediately (before any progress
- * event arrives), then emit `screenArticle` for the parent to invoke the
- * backend command.
- */
+/** Set the local in-flight flag synchronously so the spinner appears immediately,
+ *  then emit `screenArticle` for the parent to invoke the backend command. */
 function handleScreenClick(): void {
   isScreening.value = true;
   emit('screenArticle', props.article.id);
@@ -232,24 +202,11 @@ function handleScreenClick(): void {
 // Audit trail expand/collapse state
 const auditExpanded = ref(false);
 
-// Panel resizing logic.
-//
-// The drag-shield overlay (rendered in the template when `isResizing` is true)
-// sits above the FullTextReader's PDF <iframe> during an active resize. An
-// <iframe> owns a separate document and swallows mouse events that land on it,
-// so without the shield a drag that crosses the iframe area would stop
-// delivering `mousemove`/`mouseup` to this window - the `mouseup` listener
-// would never fire, the resize would get permanently stuck, and the panel
-// would track every subsequent mouse movement (including clicks in the article
-// table). The shield forces the events to the parent document instead.
-//
-// Two defense-in-depth guards prevent a stuck resize even if an event is lost
-// outside the shield's coverage:
-//  1. `doResize` ends the drag when a `mousemove` arrives with `buttons === 0`
-//     (no button pressed). This catches a lost `mouseup` (mouse left the
-//     window, OS-level interruption, etc.).
-//  2. `stopResize` is idempotent - it removes the listeners and restores the
-//     cursor, and a `stopped` flag prevents double-invocation.
+/* Panel resizing: the drag-shield overlay sits above the FullTextReader's PDF
+   <iframe> during an active resize. Without it, an iframe swallows mouse events,
+   `mouseup` never fires, and the resize gets permanently stuck. Two guards:
+   1. `doResize` ends the drag on `mousemove` with `buttons === 0` (lost mouseup).
+   2. `stopResize` is idempotent (stopped flag prevents double-invocation). */
 const panelWidth = ref(parseInt(localStorage.getItem('bango-detail-panel-width') || '480'));
 const isResizing = ref(false);
 
@@ -270,9 +227,8 @@ function startResize(e: MouseEvent): void {
   }
 
   function doResize(moveEvent: MouseEvent): void {
-    // Safety net: if the mouse button is no longer pressed but we never saw
-    // the mouseup (e.g. the cursor left the window mid-drag), end the resize
-    // immediately so the listener does not stay permanently active.
+    /* Safety net: if mouse button is no longer pressed but we never saw mouseup
+       (e.g. cursor left window mid-drag), end resize so listener doesn't stay active. */
     if (moveEvent.buttons === 0) {
       stopResize();
       return;
@@ -291,18 +247,12 @@ function startResize(e: MouseEvent): void {
 // Full-text reader ref for programmatic open
 const fullTextReaderRef = ref<InstanceType<typeof FullTextReader> | null>(null);
 
-// Translation UI orchestration (language-plan-v2 Phase 5): owns the
-// confirmation-dialog state, the enqueue invoke, the immediate toast, and the
-// global `translation:complete` listener that refreshes this article.
-// Delete-article confirmation dialog visibility. Owned here (not in the
-// parent) so the parent only needs to handle the final `deleteArticle` emit
-// after the user confirms; the parent never has to render its own dialog.
+/* Translation UI orchestration + article-delete confirmation dialog.
+   Both dialogs owned here so the parent only handles the final emit. */
 const showDeleteDialog = ref(false);
 
-// Clear-AI-reasoning confirmation dialog visibility. Owned here (mirrors the
-// delete-article pattern): the AiDecisionCard emits `clearReasoning`, this
-// component shows the confirmation, and on user confirmation it emits
-// `clearAiReasoning` for the parent to invoke the backend command + refresh.
+/* Clear-AI-reasoning confirmation dialog. AiDecisionCard emits `clearReasoning`,
+   this component shows confirmation, on confirm emits `clearAiReasoning`. */
 const showClearReasoningDialog = ref(false);
 
 const {
@@ -313,9 +263,8 @@ const {
   cancelTranslation,
 } = useTranslation({
   onTranslationQueued: (articleId) => {
-    // Refresh immediately after enqueue so the badge flips to the
-    // "Translation Queued" spinner chip without waiting for
-    // `translation:complete` (which can take minutes for full-text jobs).
+    /* Refresh immediately after enqueue so badge flips to "Translation Queued"
+       without waiting for `translation:complete` (can take minutes for FT jobs). */
     emit('refreshArticle', articleId);
   },
   onTranslationComplete: (articleId) => {

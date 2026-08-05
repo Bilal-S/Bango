@@ -25,12 +25,11 @@ pub struct ClassificationResult {
 }
 
 /// After import, classify newly inserted articles:
-/// - Run dedup against ALL existing articles
 /// - Exact duplicates → mark `duplicate_of`, keep in `duplicate` status
 /// - Fuzzy matches → keep in `duplicate` for manual review
 /// - No match → move to `working`
 ///
-/// **Key rule**: existing articles (working/included/rejected) are NEVER modified.
+/// Existing articles (working/included/rejected) are never modified.
 pub fn classify_imported_articles(
     conn: &rusqlite::Connection,
     new_articles: &[Article],

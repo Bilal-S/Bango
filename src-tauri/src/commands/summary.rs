@@ -170,11 +170,10 @@ pub fn get_saved_summary(
     summary_repo::get_summary(&conn)
 }
 
-/// Generate an AI summary for a single article based on its full text.
+/// Generate an AI summary for a single article from its full text.
 /// Calls the LLM, parses the JSON response, stores it in the database,
-/// and emits a Tauri event with the result.
-/// On success, records an `ai_summary` entry in the article's audit trail.
-/// On error, logs the failure to the general diagnostic audit and emits an error event.
+/// and emits a Tauri event. Records `ai_summary` audit entry on success;
+/// logs to diagnostic audit + emits error event on failure.
 #[tauri::command]
 pub async fn generate_article_ai_summary(
     db_state: State<'_, DbState>,
@@ -194,14 +193,10 @@ pub async fn generate_article_ai_summary(
     .await
 }
 
-/// Reusable summary-generation core (no Tauri state). Extracted from the
-/// `generate_article_ai_summary` command so the batch-import Phase 3 runner
-/// can call it per-article without re-implementing the LLM call + parse + store
-/// pipeline. Emits the same `article-ai-summary-complete` / `-error` events so
-/// the article detail panel and `useAiSummary` composable work unchanged.
-///
-/// The caller MUST pass the LLM orchestrator (from Tauri managed state) and
-/// the `DbState` mutex (so this fn can lock it briefly for reads/writes).
+/// Reusable summary-generation core (no Tauri state). Extracted so the
+/// batch-import runner can call it per-article without re-implementing the
+/// LLM call + parse + store pipeline. Emits the same
+/// `article-ai-summary-complete` / `-error` events.
 pub async fn generate_article_ai_summary_inner(
     db_state: &State<'_, DbState>,
     app_handle: &tauri::AppHandle,
@@ -218,13 +213,13 @@ pub async fn generate_article_ai_summary_inner(
         (t, ft, cfg)
     }; // conn lock released
 
-    // 2. Build user prompt with article title and full text.
-    // When `include_section_summaries` is true AND the full text has detectable
-    // high-value sections (Methods/Results/Discussion), we swap to the
-    // section-aware system prompt and append a delimited section block so the
-    // model returns `section_summaries` alongside the standard fields. When the
-    // flag is false OR no sections are detected, behavior is identical to the
-    // pre-T1.3 path (backward compatible).
+    /* Build user prompt with article title and full text.
+    When `include_section_summaries` is true AND the full text has detectable
+    high-value sections (Methods/Results/Discussion), we swap to the
+    section-aware system prompt and append a delimited section block so the
+    model returns `section_summaries` alongside the standard fields. When
+    false OR no sections are detected, behavior is identical to the
+    pre-T1.3 path (backward compatible). */
     let want_sections = include_section_summaries;
     let high_value = if want_sections {
         filter_high_value_sections(&classify_sections(&full_text))
@@ -285,13 +280,12 @@ pub async fn generate_article_ai_summary_inner(
         }
     };
 
-    // 4. Validate the response is valid JSON - strip markdown code fences if
-    //    present. NOTE: use `strip_code_fences`, NOT `screening_engine::extract_json`.
-    //    The screening helper assumes a top-level JSON array and unwraps the
-    //    first nested array-of-objects out of a JSON object - which corrupts a
-    //    valid summary object (whose `section_summaries` is an array-of-objects)
-    //    into just that array, breaking all top-level field access downstream.
-    // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+    /* Validate JSON - use `strip_code_fences`, NOT `screening_engine::extract_json`.
+    The screening helper assumes a top-level JSON array and unwraps the
+    first nested array-of-objects out of a JSON object - which corrupts a
+    valid summary object (whose `section_summaries` is an array-of-objects)
+    into just that array, breaking all top-level field access downstream.
+    `send_json` already ran strip_code_fences + escape_control_chars_in_json. */
     let mut parsed: serde_json::Value = match serde_json::from_str(&response_text) {
         Ok(v) => v,
         Err(e) => {
@@ -308,20 +302,19 @@ pub async fn generate_article_ai_summary_inner(
         }
     };
 
-    // Per the T1.3 contract, the backend MUST guarantee `schema_version: 2`
-    // when the section-aware path runs, regardless of whether the model
-    // emitted the field. This keeps frontend `parseAiSummary` gating reliable
-    // (schema_version >= 2 -> enriched view; absent/1 -> legacy view).
+    /* Per T1.3 contract: the backend MUST guarantee `schema_version: 2` when the
+    section-aware path runs, regardless of whether the model emitted the
+    field. This keeps frontend `parseAiSummary` gating reliable
+    (schema_version >= 2 -> enriched view; absent/1 -> legacy view). */
     if used_section_path {
         ensure_schema_version_v2(&mut parsed);
     }
 
-    // Tier 1 fallback (T4 E2E 2026-07-01): if the model returned an empty or
-    // near-empty JSON object (a known failure mode for reasoning models that
-    // consume their output budget on thinking tokens), retry once with the
-    // simpler markdown fallback prompt. The markdown response is parsed by
-    // `parse_markdown_summary` into the same JSON blob shape. This guarantees
-    // the user gets *some* summary content instead of an empty blob.
+    /* Tier 1 fallback (T4 E2E 2026-07-01): if the model returned an empty or
+    near-empty JSON object (a known failure mode for reasoning models that
+    consume their output budget on thinking tokens), retry once with the
+    simpler markdown fallback prompt. The markdown response is parsed by
+    `parse_markdown_summary` into the same JSON blob shape. */
     let has_substantive_content = parsed
         .get("summary_150_250_words")
         .and_then(|v| v.as_str())
@@ -366,20 +359,19 @@ pub async fn generate_article_ai_summary_inner(
                 }
             }
         }
-        // If the fallback also failed, `parsed` stays as the original empty blob.
-        // The user sees "No AI summary" but the command doesn't crash.
+        /* If the fallback also failed, `parsed` stays as the original empty blob.
+        The user sees "No AI summary" but the command doesn't crash. */
     }
 
-    // Phase 0 footgun fix: merge the freshly-generated summary into the existing
-    // blob so `figures`/`tables` (from `generate_figure_descriptions`) survive a
-    // summary regen. The previous direct `set_ai_summary(&summary_json)` overwrote
-    // the entire column, wiping any figures/tables that existed. The merge helper
-    // preserves all existing keys the summary path does not produce.
+    /* Phase 0 footgun fix: merge the freshly-generated summary into the existing
+    blob so `figures`/`tables` (from `generate_figure_descriptions`) survive a
+    summary regen. The previous direct `set_ai_summary` overwrote the entire
+    column, wiping any figures/tables. The merge helper preserves all existing
+    keys the summary path does not produce. */
     let summary_json = parsed.to_string();
 
-    // 5. Store in database. The block returns `preserved_json` (the merged
-    //    blob) so the command can return it to the frontend with figures/tables
-    //    intact. NOTE: no trailing `;` on the block - it is an expression.
+    /* Store in database. The block returns `preserved_json` (the merged blob)
+    so the command can return it to the frontend with figures/tables intact. */
     let preserved_json = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         // Read the existing blob so the merge can preserve `figures`/`tables`.
@@ -603,29 +595,14 @@ pub async fn generate_figure_descriptions(
 }
 
 /// Tier 4.2: Generate a unified AI summary for an article in a single merge
-/// write. Pipeline:
-/// 1. `extract_sections` (T1.1) from full text.
-/// 2. For each high-value section (Methods/Results/Discussion): focused LLM call
-///    via the section-aware summary prompt (T1.3).
-/// 3. `extract_captions` (T2.1) -> one batched orchestrator call for figure/table
-///    descriptions (T2.1 Phase 4).
-/// 4. **Synthesis call:** send the per-section summaries back to the LLM to
-///    synthesize an upgraded `summary_150_250_words` digest consistent with the
-///    section data.
-/// 5. **Single merge write:** `merge_unified_blob` composes the per-section
-///    summaries, figure/table descriptions, and synthesis digest into one
-///    `set_ai_summary` write so there is no intermediate state where keys are
-///    missing.
+/// write. Pipeline: section-aware summary (T1.3) per high-value section →
+/// figure/table descriptions from captions (T2.1) → synthesis call to upgrade
+/// `summary_150_250_words` → single `merge_unified_blob` write (no intermediate
+/// state with missing keys). Falls back to monolithic
+/// `ARTICLE_SUMMARY_SYSTEM_PROMPT` (T4.4) when no sections are detectable.
 ///
-/// **Fallback (no detectable sections):** the command falls back to the
-/// monolithic `ARTICLE_SUMMARY_SYSTEM_PROMPT` path (T4.4 generation-path
-/// selection folded into the command itself). This is T4.4's contract: the
-/// button label stays "Generate AI Summary" and the user does not need to know
-/// which path ran.
-///
-/// Emits `article-ai-summary-complete` on success and
-/// `article-ai-summary-error` on failure (same events as the legacy command so
-/// the frontend `useAiSummary` composable works unchanged).
+/// Emits `article-ai-summary-complete` / `-error` (same events as the legacy
+/// command).
 #[tauri::command]
 pub async fn generate_unified_summary(
     db_state: State<'_, DbState>,
@@ -685,11 +662,11 @@ pub async fn generate_unified_summary(
                 return Err(e);
             }
         };
-        // Parse + store via the Phase 0 preserve-on-write guard so existing
-        // figures/tables survive the monolithic regen. Use `strip_code_fences`
-        // (NOT `screening_engine::extract_json`) - see the legacy command for
-        // why the screening helper corrupts object-shaped summary responses.
-        // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+        /* Parse + store via Phase 0 preserve-on-write guard so existing
+        figures/tables survive the monolithic regen. Use `strip_code_fences`
+        (NOT `screening_engine::extract_json`) - the screening helper corrupts
+        object-shaped summary responses. `send_json` already ran
+        strip_code_fences + escape_control_chars_in_json. */
         let parsed: serde_json::Value = serde_json::from_str(&response_text)
             .map_err(|e| AppError::Import(format!("Invalid JSON response from LLM: {e}")))?;
         let fresh_json = parsed.to_string();
@@ -716,11 +693,10 @@ pub async fn generate_unified_summary(
         return Ok(merged);
     }
 
-    // 3. Unified path: section calls (T1.3 reuse) + figure call (T2.1 reuse)
-    //    + synthesis call (T4.2 new). Each is a separate orchestrator round-trip.
-    //
-    // The section-aware path uses the same system prompt + delimited-section
-    // block as `generate_article_ai_summary(include_section_summaries=true)`.
+    /* Unified path: section calls (T1.3) + figure/table descriptions (T2.1) +
+    synthesis call (T4.2). Each is a separate orchestrator round-trip.
+    The section-aware path uses the same system prompt + delimited-section
+    block as `generate_article_ai_summary(include_section_summaries=true)`. */
     let section_context = build_section_context(&high_value);
     let section_overhead = section_context.len() + 200;
     let max_chars =
@@ -752,12 +728,11 @@ pub async fn generate_unified_summary(
             return Err(e);
         }
     };
-    // Parse the section-aware response; extract the `section_summaries` array
-    // and the top-level `field` for the synthesis prompt input. Use
-    // `strip_code_fences` (NOT `screening_engine::extract_json`) - see the
-    // legacy command for why the screening helper corrupts object-shaped
-    // summary responses (it would discard everything except `section_summaries`).
-    // `send_json` already ran strip_code_fences + escape_control_chars_in_json.
+    /* Parse the section-aware response; extract `section_summaries` array and
+    `field` for the synthesis prompt. Use `strip_code_fences`
+    (NOT `screening_engine::extract_json`) - the screening helper corrupts
+    object-shaped summary responses. `send_json` already ran
+    strip_code_fences + escape_control_chars_in_json. */
     let mut section_value: serde_json::Value = serde_json::from_str(&section_text)
         .map_err(|e| AppError::Import(format!("Invalid section response JSON: {e}")))?;
     ensure_schema_version_v2(&mut section_value);
@@ -767,14 +742,12 @@ pub async fn generate_unified_summary(
         section_value.get("section_summaries").cloned().unwrap_or(serde_json::Value::Array(vec![]));
     let section_summaries_json = section_summaries.to_string();
 
-    // 4. Figure/table descriptions (T2.1 Phase 4 reuse) + GFM table markdown
-    //    (T2.2 reuse via `detect_markdown_tables`). Skipped when no captions.
-    //
-    //    The GFM rows extracted by `detect_markdown_tables` are correlated to
-    //    their corresponding table captions by table number, so the frontend
-    //    can render the table natively (`TableDescription.markdown`) instead of
-    //    showing only the caption + description text. Tables without a matching
-    //    caption are still emitted (numbered by detection order as a fallback).
+    /* Figure/table descriptions (T2.1 Phase 4) + GFM table markdown (T2.2 via
+    `detect_markdown_tables`). Skipped when no captions.
+    GFM rows extracted by `detect_markdown_tables` are correlated to their
+    corresponding table captions by number, so the frontend can render the
+    table natively (`TableDescription.markdown`). Tables without a matching
+    caption are still emitted (numbered by detection order as a fallback). */
     let captions = extract_captions(&full_text);
     // Detect GFM tables once; the (text_without_tables, table_sections) pair is
     // used below to populate `TableDescription.markdown` by detection order.
@@ -948,11 +921,9 @@ const GAP_TOP_N: i32 = 10;
 /// handles batching + synthesis when the corpus exceeds 80% of the context
 /// window.
 ///
-/// The report is persisted in the single-row `gap_analysis` table (mirrors
-/// `summary`) and returned as a Markdown string. On success no audit row is
-/// written (matching `generate_summary`); on error a generic `error` audit
-/// entry is logged via `log_error_best_effort` so no `audit_entries` CHECK
-/// migration is needed.
+/// The report is persisted in the single-row `gap_analysis` table and returned
+/// as Markdown. On success no audit row is written; on error logged via
+/// `log_error_best_effort` (no CHECK migration needed).
 #[tauri::command]
 pub async fn analyze_research_gaps(
     db_state: State<'_, DbState>,

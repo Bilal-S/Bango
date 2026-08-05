@@ -7,21 +7,10 @@ use rusqlite::{params, Connection};
 
 use crate::error::AppError;
 
-/// Whitelist of article metadata fields that the UI can edit in-place via the
-/// `update_article_metadata` Tauri command. Each variant maps to exactly one
-/// validated `articles` column so SQLite column names are **never** derived
-/// from user input (per CLAUDE.md "Never interpolate user input into SQL").
-///
-/// Variants cover the Title (edited in the detail header via double-click)
-/// plus the seven fields surfaced in the Article Detail "Metadata" card:
-/// Authors, Affiliation, Journal, Year, Lang, DOI, Keywords. Adding a new
-/// editable metadata field means adding a variant here AND extending
-/// [`ArticleMetaField::column`] + the value-binding arm in
-/// [`update_article_metadata_field`].
-///
-/// Note: `Title` is the only field whose `articles` column is `TEXT NOT NULL`,
-/// so its binding arm rejects empty/whitespace input with [`AppError`] instead
-/// of clearing to NULL like the other scalar fields.
+/// Whitelist of editable metadata fields. Each variant maps to exactly one
+/// validated `articles` column — column names are **never** derived from user
+/// input (per CLAUDE.md). `Title` is `TEXT NOT NULL` and rejects empty input;
+/// all other scalar fields clear to NULL on empty.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ArticleMetaField {
@@ -67,11 +56,9 @@ impl ArticleMetaField {
     }
 }
 
-/// Payload for the `update_article_metadata` Tauri command. The scalar fields
-/// arrive as a string (empty string means "clear to NULL"); the two JSON-array
-/// fields (`authors`, `keywords`) arrive as `Vec<String>`. The frontend always
-/// sends the appropriate variant so the `#[serde(untagged)]` deserialization
-/// picks the right one without a discriminator field.
+/// Payload for `update_article_metadata`. Scalars arrive as `Option<String>`
+/// (empty = clear to NULL); JSON-array fields (`authors`, `keywords`) as `Vec<String>`.
+/// `#[serde(untagged)]` picks the right variant without a discriminator.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(untagged)]
 pub enum ArticleMetaValue {
@@ -87,16 +74,9 @@ pub enum ArticleMetaValue {
 const MIN_PUBLICATION_YEAR: i32 = 1800;
 const MAX_PUBLICATION_YEAR: i32 = 2100;
 
-/// Update a single metadata field on an article. The `field` enum validates
-/// the column name (no string interpolation); `value` is bound as a parameter.
-/// `authors` and `keywords` are serialized to JSON; `publication_year` parses
-/// to `Option<i32>` (empty/invalid/out-of-range -> NULL).
-///
-/// When the `Journal` field changes, `journal_index_id` is re-resolved via
-/// `journal_repo::resolve_journal_id` (using the article's existing ISSN/eISSN
-/// and the new journal name) so the bibliometric pipelines stay in sync
-/// without a manual "Rematch Journals" round-trip. An unrecognized journal
-/// name clears `journal_index_id` to `NULL`.
+/// Update a single metadata field. `field` validates the column name; `value` is bound
+/// as a parameter. `authors`/`keywords` → JSON; `publication_year` parses to `Option<i32>`
+/// (out-of-range → NULL). When `Journal` changes, `journal_index_id` is re-resolved.
 pub fn update_article_metadata_field(
     conn: &Connection,
     article_id: &str,
@@ -108,10 +88,7 @@ pub fn update_article_metadata_field(
 
     match (field, value) {
         (ArticleMetaField::Title, ArticleMetaValue::Scalar(s)) => {
-            // `title` is `TEXT NOT NULL`, so unlike the other scalar fields
-            // an empty/whitespace-only value is rejected (not cleared to
-            // NULL). The frontend inline editor also blocks empty commits
-            // with a visible error; this is defense-in-depth.
+            // `title` is NOT NULL — reject empty/whitespace instead of clearing to NULL.
             let owned = s.unwrap_or_default();
             let trimmed = owned.trim();
             if trimmed.is_empty() {
@@ -148,12 +125,8 @@ pub fn update_article_metadata_field(
             let bound: Option<&str> =
                 s.as_deref().and_then(|v| if v.trim().is_empty() { None } else { Some(v) });
             conn.execute(&sql, params![bound, article_id])?;
-            // Re-resolve journal_index_id using ONLY the new journal name (not
-            // the article's existing ISSN/eISSN). When the user manually edits
-            // the journal name, the old ISSN belongs to the OLD journal - using
-            // it to resolve the new name would keep the stale link alive even
-            // for a completely different journal. Matching on the typed name
-            // only means an unrecognized name correctly clears the link to NULL.
+            // Re-resolve journal_index_id using ONLY the new journal name (not the
+            // article's old ISSN/eISSN — the old ISSN belongs to the old journal).
             let journal_id = crate::db::journal_repo::resolve_journal_id(conn, None, None, bound);
             conn.execute(
                 "UPDATE articles SET journal_index_id = ?1, changed_at = datetime('now') \

@@ -19,10 +19,9 @@ function toggleSectionSummaries(): void {
   localStorage.setItem('bango-section-summaries', String(sectionSummaries.value));
 }
 
-// ── Auto Translate (experimental) ─────────────────────────────────────────
-// Unlike the two toggles above, this is persisted in the database
-// (`app_settings.auto_translate`) so backend processing stages can read it
-// directly. Defaults to enabled (true) when the key is absent.
+/* Auto Translate (experimental): persisted in `app_settings.auto_translate`
+   so backend processing stages can read it directly. Defaults enabled when
+   key is absent. */
 const autoTranslate = ref(true);
 const autoTranslateError = ref<string | null>(null);
 

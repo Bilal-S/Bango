@@ -13,18 +13,14 @@ type HelpTab = 'guide' | 'biblio' | 'troubleshoot' | 'local-ai' | 'zotero' | 're
 const route = useRoute();
 const activeTab = ref<HelpTab>('guide');
 
-// The current route hash, passed to the Reference tab so it can deep-link scroll.
-// Updated reactively so in-tab navigation while mounted still scrolls.
+// Current route hash, passed to Reference tab for deep-link scroll.
 const routeHash = ref<string>('');
 
 function syncHash(): void {
   routeHash.value = route.hash ?? '';
 }
 
-/**
- * Deep-link handler: `/help?tab=<id>` selects the tab; `#hash` is forwarded to
- * the active tab so it can deep-link scroll (Reference and Local AI tabs consume it).
- */
+/** Deep-link: `/help?tab=<id>` selects tab; `#hash` forwarded to active tab. */
 onMounted(() => {
   const tab = route.query.tab as string | undefined;
   if (
@@ -40,7 +36,7 @@ onMounted(() => {
   syncHash();
 });
 
-// Keep routeHash in sync whenever the route changes (e.g. programmatic navigation).
+// Keep routeHash in sync when route changes (e.g. programmatic navigation).
 watch(
   () => route.hash,
   () => syncHash()
@@ -75,12 +71,9 @@ watch(activeTab, () => {
 });
 
 /**
- * Switch to a help tab from a child component (e.g. the "Bibliometrics"
- * link inside the Reference tab). Behaves identically to clicking the tab button:
- * updates `activeTab` directly (no route navigation) so the existing watcher scrolls
- * the container to the top of the new tab's content. This keeps the action idempotent
- * across repeated clicks - unlike a `router-link`, it does not depend on the route
- * URL differing from the current one.
+ * Switch to a help tab from a child component (e.g. "Bibliometrics" link
+ * inside Reference tab). Updates `activeTab` directly (no route navigation),
+ * so existing watcher scrolls container to top. Idempotent across repeated clicks.
  */
 function handleSwitchTab(tab: string): void {
   if (

@@ -4,9 +4,8 @@ use crate::crypto::aes_gcm;
 use crate::error::AppError;
 use crate::models::llm_config::{LlmConfig, LlmProvider};
 
-/// Get config without decrypting the API key.
-/// Use this when only `context_window_tokens`, `request_delay_ms`, etc. are needed
-/// (e.g., screening readiness checks). Avoids the expensive PBKDF2 key derivation.
+/// Get config without decrypting the API key. Avoids the expensive PBKDF2 key
+/// derivation for screening readiness checks that only need window/delay settings.
 pub fn get_config_no_decrypt(conn: &Connection) -> Result<Option<LlmConfig>, AppError> {
     let result = conn.query_row(
         "SELECT provider, endpoint_url, model_name, temperature, \
@@ -99,21 +98,11 @@ pub fn has_config(conn: &Connection) -> Result<bool, AppError> {
     }
 }
 
-/// Flip just the `skip_temperature` flag on the saved config row (id = 1).
-///
-/// This is the targeted-write counterpart to [`save_config`]: instead of
-/// `DELETE` + `INSERT` (which clobbers the whole row and races with concurrent
-/// `save_config` calls from the UI), it runs a single `UPDATE` that touches
-/// only `skip_temperature`. Used by the orchestrator's post-call persistence
-/// when the client recovers from a temperature-rejection 400 - the LLM layer
-/// must not rewrite the entire config (concurrency, delay, endpoint, key) just
-/// to record that the model does not support `temperature`.
-///
-/// Returns `Ok(())` even when no row exists (`id = 1` absent) because the
-/// recovery is best-effort: the in-memory `config` passed to the next call
-/// already has `skip_temperature` set by the caller if it observed the
-/// rejection, so persistence is an optimization (skip the first-attempt
-/// failure on the next call), not a correctness requirement.
+/// Flip `skip_temperature` on the saved config row via a targeted `UPDATE` —
+/// avoids `DELETE`+`INSERT` clobbering the whole row and racing with concurrent
+/// `save_config` calls. Used by the orchestrator's post-call persistence when the
+/// client recovers from a temperature-rejection 400. Best-effort: returns `Ok(())`
+/// even with no row (the in-memory config already has `skip_temperature` set).
 pub fn set_skip_temperature(conn: &Connection, skip: bool) -> Result<(), AppError> {
     conn.execute("UPDATE llm_config SET skip_temperature = ?1 WHERE id = 1", params![skip as i32])?;
     Ok(())

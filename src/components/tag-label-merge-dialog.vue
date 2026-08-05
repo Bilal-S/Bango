@@ -3,26 +3,11 @@ import { computed, ref, watch } from 'vue';
 import SuggestInput from '@/components/suggest-input.vue';
 import type { SuggestOption } from '@/types';
 
-/**
- * "Replace with..." merge dialog for the Tags & Labels management screen.
+/** "Replace with..." merge dialog for Tags & Labels management.
  *
- * Built on the canonical `.dialog` + `.dialog-overlay` + `.dialog__actions`
- * pattern from `src/styles/forms.css` (same chrome as `export-dialog.vue`).
- * The body uses `suggest-input.vue`'s structured-options single-select mode
- * (same path the journal autocomplete takes), so it inherits keyboard nav,
- * matched-substring highlighting, and a11y for free. The user picks a
- * survivor from a searchable list, sees an honest-count confirmation panel,
- * then clicks "Confirm replace".
- *
- * Why generic text (not precise counts): the reassigned/overlap split is only
- * computable inside the destructive merge (`merge_tag` / `merge_label`).
- * `from.articleCount` is an accurate upper bound; the real counts surface in
- * the success toast. This avoids adding a `preview_merge` command.
- *
- * Buttons use the standard `.btn--secondary` (Cancel) and `.btn--primary`
- * (Confirm Replace) classes - the dialog body carries the destructive
- * warning text so the primary color reads as the affirmative action.
- */
+ * Uses `suggest-input.vue` structured-options single-select (same as journal
+ * autocomplete). Shows honest-count upper-bound confirmation; real counts
+ * surface in success toast (avoids a `preview_merge` IPC). */
 
 type Kind = 'tag' | 'label';
 

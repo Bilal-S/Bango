@@ -1,12 +1,6 @@
-//! FTS5 full-text search over wiki pages.
-//!
-//! Creates and maintains a `wiki_pages_fts` virtual table (FTS5, bundled in
-//! `rusqlite`'s `bundled` feature) for BM25-ranked retrieval. Used by:
-//! - Phase 5 `wiki_chat` (token-budgeted RAG retrieval).
-//! - Phase 3 `wiki_ingest` (the index is rebuilt after pages are generated).
-//!
-//! The index mirrors the frontmatter + body of every `.md` page under
-//! `wiki/` (not `raw/` - raw sources are ingested into wiki pages first).
+//! FTS5 full-text search over wiki pages. Creates `wiki_pages_fts` virtual table for
+//! BM25-ranked retrieval. Used by `wiki_chat` (RAG) and `wiki_ingest` (rebuilt after pages).
+//! Index mirrors frontmatter + body of every `.md` under `wiki/` (not `raw/`).
 
 use std::path::{Path, PathBuf};
 
@@ -20,24 +14,13 @@ use crate::wiki::frontmatter;
 /// The FTS5 virtual table name.
 pub const FTS_TABLE: &str = "wiki_pages_fts";
 
-/// The `app_settings` key holding the tier-1 directory fingerprint (stat-based
-/// hash over all wiki pages). Absent means "no baseline" → first check
-/// populates it.
+/// `app_settings` key for the tier-1 directory fingerprint (stat-based hash over wiki pages).
+/// Absent = "no baseline" → first check populates it.
 pub const WIKI_DIR_HASH_KEY: &str = "wiki_dir_hash";
 
-/// Ensure the FTS5 table exists with the chunk-aware schema. Idempotent.
-///
-/// The schema includes three `UNINDEXED` metadata columns added in migration
-/// v002 (T1.2) so BM25 retrieval can return passage-level chunks with section
-/// provenance:
-/// - `chunk_index` - 0-based chunk ordinal within the page (NULL = legacy
-///   whole-page row).
-/// - `section` - `"Methods"` / `"Results"` / NULL.
-/// - `parent_slug` - slug of the page this chunk belongs to (== slug for
-///   whole-page rows).
-///
-/// Migration v002 `DROP`s the old `wiki_pages_fts` so this `CREATE` runs on the
-/// first read after upgrade. On a fresh DB it creates the new shape directly.
+/// Ensure the FTS5 table exists with chunk-aware schema (T1.2). Idempotent.
+/// Three `UNINDEXED` metadata columns for passage-level chunks with section provenance:
+/// `chunk_index` (0-based, NULL = legacy whole-page), `section`, `parent_slug`.
 pub fn ensure_table(conn: &Connection) -> Result<(), AppError> {
     conn.execute_batch(&format!(
         "CREATE VIRTUAL TABLE IF NOT EXISTS {FTS_TABLE} USING fts5(
@@ -57,22 +40,11 @@ pub fn ensure_table(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Ensure the FTS5 table exists AND is in sync with the wiki pages on disk.
-/// Self-heals two desync cases:
+/// Ensure FTS5 table exists AND is in sync with wiki pages on disk. Self-heals:
+/// 1. Empty index with pages on disk (e.g. after schema rebuild).
+/// 2. Count mismatch: `DISTINCT parent_slug` rows ≠ disk `.md` count (pages added/removed).
 ///
-/// 1. **Empty index, pages on disk** - happens after a schema rebuild /
-///    `rebuild_schema` / DB reset that drops the FTS table while leaving the
-///    `wiki/*.md` files intact.
-/// 2. **Count mismatch** - the index has a different number of rows than there
-///    are `.md` pages on disk. Happens when pages were added/removed on disk
-///    by an ingest run that predates the rebuild-on-mutation fix, or any other
-///    path that wrote pages without touching the index. (Detects added OR
-///    removed pages via a cheap count comparison, not a full content diff.)
-///
-/// Returns `true` if a rebuild was performed, `false` if the index was already
-/// in sync (or there are no pages to index). Read paths (`wiki_chat`,
-/// `wiki_search`) call this instead of `ensure_table` so the first access after
-/// a desync transparently recovers with no user action.
+/// Returns `true` if rebuild performed, `false` if already in sync.
 pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, AppError> {
     ensure_table(conn)?;
     let row_count: i64 = conn
@@ -91,11 +63,9 @@ pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, Ap
         return Ok(false);
     }
 
-    // Case 2: index non-empty but the number of distinct pages differs from
-    // disk count. After T1.2 the index is row-per-chunk (N rows per long page),
-    // so a raw row-count comparison would false-positive on every call. We
-    // compare `COUNT(DISTINCT COALESCE(parent_slug, slug))` against the disk
-    // page count instead, so chunk rows do not desync the self-heal.
+    /* Case 2: index non-empty but distinct page count ≠ disk count.
+    After T1.2 the index is row-per-chunk, so raw COUNT would false-positive.
+    Compare COUNT(DISTINCT parent_slug) instead so chunk rows don't desync self-heal. */
     let distinct_pages: i64 = conn
         .query_row(
             &format!("SELECT COUNT(DISTINCT COALESCE(parent_slug, slug)) FROM {FTS_TABLE}"),
@@ -111,42 +81,30 @@ pub fn ensure_index_populated(conn: &Connection, root: &Path) -> Result<bool, Ap
     Ok(false)
 }
 
-/// Rebuild the index from scratch by scanning `wiki/` for `.md` files.
-/// Drops and recreates the FTS table, then inserts every page.
-///
-/// Uses `collect_wiki_pages` (which excludes top-level internal files like
-/// `log.md` / `index.md`) so the FTS search index matches the page list shown
-/// in the UI - internal infrastructure never surfaces in chat or search.
-///
-/// This is the thin wrapper that does both the file reads (filesystem) and the
-/// FTS5 inserts (DB) in one call. Callers that need to keep the DB lock window
-/// small (e.g. the on-demand drift check) should call `collect_page_rows`
-/// (no DB) followed by `insert_page_rows` (DB only) directly, then
-/// `write_manifest` + `set_dir_hash`.
+/// Rebuild index from scratch by scanning `wiki/` for `.md` files. Drops + recreates FTS table,
+/// inserts every page. Excludes internal files (log.md, index.md) via `collect_wiki_pages`.
+/// Thin wrapper; callers needing smaller DB lock bursts should use `collect_page_rows` + `insert_page_rows`.
 pub fn rebuild_index(conn: &Connection, root: &Path) -> Result<usize, AppError> {
     // Drop existing content and recreate.
     conn.execute_batch(&format!("DELETE FROM {FTS_TABLE};"))?;
     ensure_table(conn)?;
 
     let wiki_dir = root.join("wiki");
-    // Collect whole-page rows, then expand to chunk rows for insertion only.
-    // The manifest helpers (in `rebuild_index_with_manifest`) need the
-    // whole-page set; here we only insert into FTS so chunking is safe.
+    /* Collect whole-page rows, expand to chunk rows for FTS insertion only.
+    Manifest helpers need whole-page set; here we only insert into FTS. */
     let rows = collect_page_rows(root)?;
     let chunked_rows = chunk_page_rows(rows);
     insert_page_rows(conn, &chunked_rows, &wiki_dir)?;
     Ok(chunked_rows.len())
 }
 
-/// One wiki page parsed from disk, ready to insert into FTS5. Built by
-/// `collect_page_rows` (filesystem-only, no DB) so the drift check can do all
-/// file I/O without holding the DB lock.
+/// One wiki page parsed from disk, ready for FTS5 insert. Built by `collect_page_rows`
+/// (filesystem-only, no DB) so drift check can do file I/O without DB lock.
 #[derive(Debug, Clone)]
 pub struct PageRow {
     /// Absolute path to the `.md` file on disk.
     pub abs_path: PathBuf,
-    /// Relative path from the wiki-root (stable across wiki-root moves;
-    /// used as the manifest PK).
+    /// Relative path from wiki-root (stable across moves; manifest PK).
     pub rel_path: String,
     pub slug: String,
     pub title: String,
@@ -155,8 +113,7 @@ pub struct PageRow {
     pub page_type: String,
     pub source_articles: String,
     // ── Chunk metadata (T1.2). `None` for legacy whole-page rows. ──
-    /// 0-based chunk ordinal within the page. `None` = whole-page row (short
-    /// pages, concept/author hubs).
+    /// 0-based chunk ordinal within the page. `None` = whole-page row (short pages, concept/author hubs).
     pub chunk_index: Option<i32>,
     /// Section label, e.g. `"Methods"`. `None` for unstructured text.
     pub section: Option<String>,
@@ -164,19 +121,11 @@ pub struct PageRow {
     pub parent_slug: Option<String>,
 }
 
-/// Read every wiki page from disk into a `Vec<PageRow>` (one row per file).
-///
-/// **Filesystem-only - does not touch the DB.** This lets the on-demand drift
-/// check (`wiki_check_for_updates`) do all file I/O lock-free, then take the
-/// DB lock only for the fast SQLite writes (`insert_page_rows` + manifest).
-///
-/// Returns **whole-page rows** (`chunk_index = None`). This is intentional: the
-/// manifest helpers (`compute_file_hashes`, `compute_directory_fingerprint`)
-/// require one row per file so the `wiki_index_manifest` PRIMARY KEY
-/// (`file_path`) is not violated by duplicate chunk rows. Call
-/// `chunk_page_rows` to expand whole-page rows into chunk rows immediately
-/// before FTS insertion only (see `rebuild_index` /
-/// `rebuild_index_with_manifest`).
+/// Read every wiki page from disk into whole-page `Vec<PageRow>` (one per file).
+/// **Filesystem-only - no DB.** Drift check does all file I/O lock-free, then takes
+/// DB lock only for `insert_page_rows` + manifest. Returns whole-page rows
+/// (`chunk_index = None`); manifest helpers need one-row-per-file. Call
+/// `chunk_page_rows` before FTS insertion only.
 pub fn collect_page_rows(root: &Path) -> Result<Vec<PageRow>, AppError> {
     let pages = collect_wiki_pages(root)?;
     let mut rows = Vec::with_capacity(pages.len());
@@ -200,28 +149,15 @@ pub fn collect_page_rows(root: &Path) -> Result<Vec<PageRow>, AppError> {
     Ok(rows)
 }
 
-/// Expand whole-page rows into chunk rows for FTS5 insertion (T1.2).
-///
-/// Each whole-page `PageRow` is classified into sections and chunked; long
-/// pages produce multiple chunk rows (all sharing `parent_slug`), short pages
-/// produce a single row with `chunk_index = None`. This keeps the manifest at
-/// one-row-per-file (correct for the `wiki_index_manifest` PRIMARY KEY) while
-/// the FTS index gets passage-level granularity for BM25 retrieval + chat
-/// section labels.
-///
-/// **Apply this ONLY before `insert_page_rows`**, never before
-/// `compute_file_hashes` / `compute_directory_fingerprint` (those need the
-/// original one-row-per-file set to avoid PRIMARY KEY violations and
-/// redundant drift checks).
+/// Expand whole-page rows into chunk rows for FTS5 insertion (T1.2). Long pages produce
+/// multiple chunk rows sharing `parent_slug`; short pages produce single row (`chunk_index = None`).
+/// Apply ONLY before `insert_page_rows`, never before manifest helpers (which need one-row-per-file).
 #[must_use]
 pub fn chunk_page_rows(rows: Vec<PageRow>) -> Vec<PageRow> {
     let mut out = Vec::new();
     for row in rows {
-        // Use the table-aware composer so GFM tables are detected as
-        // `SectionKind::Table` (emitted atomically by `chunk_sections`)
-        // rather than being line-split as generic `Text`. The previous call
-        // to `classify_sections` missed tables entirely, defeating the
-        // atomic Table/Figure arm and chopping tables across chunks.
+        /* Use table-aware composer so GFM tables are detected as SectionKind::Table
+        (emitted atomically by chunk_sections) instead of line-split as generic Text. */
         let sections = crate::utils::sections::extract_sections_with_tables(&row.body);
         let chunks = crate::utils::chunking::chunk_sections(
             &sections,
@@ -229,16 +165,15 @@ pub fn chunk_page_rows(rows: Vec<PageRow>) -> Vec<PageRow> {
         );
 
         if chunks.len() <= 1 {
-            // Short page (or no headings): keep as a whole-page row. Strip
-            // any `<!-- TABLE:N -->` placeholder comments left by
-            // `detect_markdown_tables` so they don't pollute the FTS index.
+            /* Short page: keep as whole-page row. Strip TABLE:N placeholder comments
+            from body so markers don't pollute the FTS index. */
             let mut short = row;
             short.body = strip_table_placeholders(&short.body);
             out.push(short);
         } else {
-            // Long page: emit one chunk row per chunk, sharing parent_slug so
-            // `build_context` can dedupe and the self-heal distinct-count
-            // stays correct. Strip placeholder comments from each chunk body.
+            /* Long page: emit one chunk row per chunk, sharing parent_slug so
+            build_context can dedupe and self-heal distinct-count stays correct.
+            Strip placeholder comments from each chunk body. */
             let parent_slug = row.slug.clone();
             for chunk in &chunks {
                 out.push(PageRow {
@@ -254,17 +189,13 @@ pub fn chunk_page_rows(rows: Vec<PageRow>) -> Vec<PageRow> {
     out
 }
 
-/// Insert a batch of pre-collected page rows into the FTS5 table.
-///
-/// **DB-only - does no file I/O.** Pairs with `collect_page_rows` so callers
-/// can split the lock-free filesystem work from the DB work. The caller is
-/// responsible for `DELETE FROM {FTS_TABLE}` first (see `rebuild_index` /
-/// `rebuild_index_with_manifest`).
+/// Insert pre-collected page rows into FTS5. DB-only (no file I/O). Pairs with
+/// `collect_page_rows` so callers split lock-free filesystem work from DB work.
+/// Caller must `DELETE FROM {FTS_TABLE}` first.
 pub fn insert_page_rows(conn: &Connection, rows: &[PageRow], root: &Path) -> Result<(), AppError> {
     for row in rows {
-        // Store a relative path from the wiki dir for compactness (matches
-        // the original `index_single_file` behavior for back-compat with the
-        // `file_path` column the frontend already reads).
+        /* Store relative path from wiki dir for compactness, matching original
+        index_single_file behavior for back-compat with file_path column. */
         let file_path = row
             .abs_path
             .strip_prefix(root.parent().unwrap_or(Path::new("")))
@@ -294,31 +225,12 @@ pub fn insert_page_rows(conn: &Connection, rows: &[PageRow], root: &Path) -> Res
 }
 
 // ─── Two-tier drift detection (manifest + directory fingerprint) ───────────
-//
-// `wiki_check_for_updates` uses these to detect when external programs edit
-// `wiki/**/*.md` files without re-ingesting. Two tiers keep the common case
-// cheap:
-//
-// - **Tier 1 (directory fingerprint):** one SHA-256 over the sorted set of
-//   `(rel_path, mtime_sec, mtime_nsec, size)` tuples for every page. Stored
-//   in `app_settings` under `WIKI_DIR_HASH_KEY`. Equal -> nothing changed,
-//   return immediately (one stat walk, zero file reads).
-// - **Tier 2 (per-file content hashes):** the `wiki_index_manifest` table
-//   stores one SHA-256 per file. When tier-1 drifts, compare per-file hashes.
-//   If content is identical (e.g. `touch`) -> update only the dir hash. If
-//   any file's content hash differs (or the path set changed) -> rebuild
-//   FTS5 + rewrite the manifest.
+// wiki_check_for_updates detects external edits to wiki/**.md without re-ingesting.
+// Tier 1 (cheap): stat-only dir fingerprint (SHA-256 over sorted (rel_path, mtime, size)).
+// Tier 2 (expensive): per-file content hash via wiki_index_manifest when tier-1 drifts.
 
-/// Compute the tier-1 directory fingerprint: SHA-256 over the sorted
-/// `(rel_path, mtime_sec, mtime_nsec, size)` tuples for every page.
-///
-/// **Stat-only - does not read file contents.** This is the cheap fast path
-/// that lets `wiki_check_for_updates` skip tier-2 entirely when nothing
-/// changed on disk. The sort by `rel_path` makes the hash stable regardless
-/// of filesystem readdir order.
-///
-/// Returns `None` when there are no pages (so the caller can clear any stale
-/// stored hash and skip the check).
+/// Compute tier-1 directory fingerprint: SHA-256 over sorted (rel_path, mtime, size) tuples.
+/// **Stat-only - no file reads.** Returns `None` when no pages (caller clears stored hash).
 #[must_use]
 pub fn compute_directory_fingerprint(pages: &[PageRow]) -> Option<String> {
     if pages.is_empty() {
@@ -339,8 +251,8 @@ pub fn compute_directory_fingerprint(pages: &[PageRow]) -> Option<String> {
     let mut hasher = Sha256::new();
     for (rel, mtime, size) in &entries {
         hasher.update(rel.as_bytes());
-        // Durations since UNIX epoch; falls back to 0 if the mtime is before
-        // the epoch (shouldn't happen for real files, but keeps the hash total).
+        // Durations since UNIX epoch; fall back to 0 if mtime before epoch
+        // (shouldn't happen for real files but keeps the hash total).
         let dur = mtime.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         hasher.update(dur.as_secs().to_string().as_bytes());
         hasher.update(dur.subsec_nanos().to_string().as_bytes());
@@ -357,9 +269,8 @@ fn hash_file_contents(path: &Path) -> Result<String, AppError> {
     Ok(hex_encode(&hasher.finalize()))
 }
 
-/// Compute the tier-2 per-file content hash list: `(rel_path, sha256)` for
-/// every page. **Reads file contents** (the slower path); only called when the
-/// tier-1 directory fingerprint has already detected drift.
+/// Compute tier-2 per-file content hashes: (rel_path, sha256) for every page.
+/// **Reads file contents** - only called after tier-1 detects drift.
 pub fn compute_file_hashes(pages: &[PageRow]) -> Result<Vec<(String, String)>, AppError> {
     let mut out = Vec::with_capacity(pages.len());
     for p in pages {
@@ -368,9 +279,7 @@ pub fn compute_file_hashes(pages: &[PageRow]) -> Result<Vec<(String, String)>, A
     Ok(out)
 }
 
-/// Read the entire `wiki_index_manifest` table into a `{ rel_path -> hash }`
-/// map. Empty (not error) if the table is missing - `ensure_table` handles
-/// creation lazily.
+/// Read `wiki_index_manifest` into `{rel_path → hash}` map. Empty (not error) if table missing.
 pub fn read_manifest(
     conn: &Connection,
 ) -> Result<std::collections::HashMap<String, String>, AppError> {
@@ -400,13 +309,8 @@ pub fn write_manifest(conn: &Connection, rows: &[(String, String)]) -> Result<()
     Ok(())
 }
 
-/// Decide whether the FTS5 index needs a rebuild given the on-disk per-file
-/// hashes vs the stored manifest.
-///
-/// - Returns `true` if any file's content hash changed OR the path set
-///   changed (file added/removed).
-/// - Returns `false` if every path has the same content hash AND the path
-///   sets are identical (e.g. only `touch` changed mtimes).
+/// Whether FTS index needs rebuild given disk hashes vs stored manifest.
+/// `true` when content changed or path set changed. `false` when identical (e.g. only `touch`).
 #[must_use]
 pub fn manifest_drifted(
     stored: &std::collections::HashMap<String, String>,
@@ -418,45 +322,35 @@ pub fn manifest_drifted(
     disk.iter().any(|(path, hash)| stored.get(path).map(String::as_str) != Some(hash.as_str()))
 }
 
-/// Read the stored tier-1 directory fingerprint from `app_settings`.
-/// `None` means "no baseline yet" (first run, or the setting was cleared by a
-/// schema rebuild/reset).
+/// Read stored tier-1 directory fingerprint from `app_settings`. `None` = no baseline yet.
 #[must_use]
 pub fn get_dir_hash(conn: &Connection) -> Option<String> {
     app_settings_repo::get_setting(conn, WIKI_DIR_HASH_KEY).ok().flatten()
 }
 
-/// Write the tier-1 directory fingerprint to `app_settings`. Non-fatal: errors
-/// are logged to stderr but do not fail the caller (the next check re-derives
-/// it from disk).
+/// Write tier-1 directory fingerprint to `app_settings`. Non-fatal: errors logged to stderr.
 pub fn set_dir_hash(conn: &Connection, hash: Option<&str>) {
     if let Err(e) = app_settings_repo::set_setting(conn, WIKI_DIR_HASH_KEY, hash) {
         eprintln!("[wiki] warning: failed to persist wiki_dir_hash: {e}");
     }
 }
 
-/// Full rebuild of FTS5 + manifest + dir hash in one shot.
-///
-/// Use this from every internal mutation path (`wiki_update_page`,
-/// `wiki_delete_page`, `finalize_ingest`) so the manifest stays in sync with
-/// the index. Without it, the on-demand check would false-positive a drift on
-/// the next run after an internal edit.
-///
-/// Does both the file reads and the DB writes; safe to call from synchronous
-/// command handlers (the existing mutation paths already do this).
+/// Full rebuild of FTS5 + manifest + dir hash. Call from every internal mutation path
+/// (`wiki_update_page`, `wiki_delete_page`, `finalize_ingest`) so the on-demand drift
+/// check doesn't false-positive after an internal edit.
 pub fn rebuild_index_with_manifest(conn: &Connection, root: &Path) -> Result<usize, AppError> {
-    // Filesystem: collect whole-page rows + compute per-file hashes + dir hash.
-    // Manifest helpers MUST run on the whole-page set (one row per file) so the
-    // `wiki_index_manifest` PRIMARY KEY (`file_path`) is not violated by
-    // duplicate chunk rows sharing the same file_path.
+    /* Filesystem: collect whole-page rows + compute per-file hashes + dir hash.
+    Manifest helpers run on whole-page set (one row per file) so
+    wiki_index_manifest PRIMARY KEY (file_path) is not violated by
+    duplicate chunk rows sharing the same file_path. */
     let rows = collect_page_rows(root)?;
     let file_hashes = compute_file_hashes(&rows)?;
     let dir_hash = compute_directory_fingerprint(&rows);
 
-    // Expand to chunk rows for FTS insertion ONLY (not for the manifest).
+    /* Expand to chunk rows for FTS insertion only (not for manifest). */
     let chunked_rows = chunk_page_rows(rows);
 
-    // DB: wipe + rebuild FTS5, rewrite manifest, update dir hash.
+    /* DB: wipe + rebuild FTS5, rewrite manifest, update dir hash. */
     conn.execute_batch(&format!("DELETE FROM {FTS_TABLE};"))?;
     ensure_table(conn)?;
     let wiki_dir = root.join("wiki");
@@ -475,15 +369,8 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Strip `<!-- TABLE:N -->` placeholder comments from text before it enters
-/// the FTS index.
-///
-/// `detect_markdown_tables` replaces GFM table blocks with these placeholders
-/// in the linear text, then appends the actual table sections at the end. The
-/// placeholders are structural markers, not content; leaving them in the FTS
-/// body pollutes BM25 rows + chat context with markup that's useless for
-/// retrieval. This strips them (and the surrounding blank line) so only real
-/// prose + the appended table body are indexed.
+/// Strip `<!-- TABLE:N -->` placeholder comments from text before FTS index insertion.
+/// These structural markers would pollute BM25 rows + chat context.
 #[must_use]
 pub fn strip_table_placeholders(text: &str) -> String {
     use crate::utils::sections::compile_static_regex;
@@ -516,17 +403,9 @@ pub struct WikiPageHit {
     pub parent_slug: Option<String>,
 }
 
-/// BM25-ranked search over the FTS5 index. Returns up to `limit` hits.
-///
-/// The user query is converted to a safe FTS5 MATCH expression by
-/// `build_match_query`: tokens are split on whitespace/punctuation, stop words
-/// are dropped, and each remaining token is phrase-quoted (so FTS5 treats it
-/// as a literal string, never as an operator) and OR-joined. This retrieves
-/// any page containing any meaningful term, ranked by BM25 - the standard
-/// RAG-over-FTS5 pattern. (The previous implementation phrase-quoted the whole
-/// question, which only matched documents containing those exact words in that
-/// exact sequence, so natural-language questions like "Who is J Adams?"
-/// returned zero hits.)
+/// BM25-ranked search over FTS5 index. Splits query into tokens, drops stop words,
+/// phrase-quotes each, OR-joins. Any page containing any meaningful term is a candidate.
+/// Empty query (only stop words/punctuation) → no results, no error.
 pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<WikiPageHit>, AppError> {
     let safe_query = build_match_query(query);
     // Empty query (e.g. only stop words / punctuation) -> no results, no error.
@@ -576,23 +455,9 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<WikiPa
 /// working without touching each call site.
 pub use crate::utils::text_tokens::STOP_WORDS;
 
-/// Build a safe, effective FTS5 MATCH expression from a natural-language query.
-///
-/// - Splits on any non-alphanumeric character (so punctuation/whitespace both
-///   separate tokens).
-/// - Lowercases for stop-word comparison (FTS5's `unicode61` tokenizer is
-///   case-insensitive, so casing in the emitted query is irrelevant).
-/// - Drops stop words (`who`, `is`, `the`, ...).
-/// - Phrase-quotes each remaining token with embedded `"` doubled, so FTS5
-///   treats the token as a literal string (never an operator like `AND`/`OR`/
-///   `*`/`:`).
-/// - OR-joins the quoted tokens so any page containing any meaningful term is
-///   a candidate, BM25-ranked.
-/// - If stop-word stripping removes everything, falls back to OR-joining all
-///   literal tokens (so a query like "the and is" still searches rather than
-///   silently returning nothing).
-/// - Returns an empty `String` only when there are no alphanumeric tokens at
-///   all (e.g. `"???"`); callers treat that as "no results".
+/// Build a safe FTS5 MATCH expression: tokenize on non-alphanumeric, drop stop words,
+/// phrase-quote each token (literal, never operator), OR-join. Falls back to all tokens
+/// if stop-word stripping removes everything. Empty string on no alphanumeric input.
 #[must_use]
 pub fn build_match_query(query: &str) -> String {
     // Split on any run of non-alphanumeric characters.
@@ -605,8 +470,7 @@ pub fn build_match_query(query: &str) -> String {
         return String::new();
     }
 
-    // Prefer tokens that are not stop words; fall back to all tokens if that
-    // would leave nothing.
+    /* Prefer non-stop-word tokens; fall back to all tokens if that leaves nothing. */
     let stop = |t: &str| STOP_WORDS.contains(&t);
     let meaningful: Vec<&String> = raw_tokens.iter().filter(|t| !stop(t.as_str())).collect();
     let tokens: Vec<&String> =
@@ -615,8 +479,7 @@ pub fn build_match_query(query: &str) -> String {
     tokens
         .iter()
         .map(|t| {
-            // Phrase-quote each token, doubling any embedded double quote so
-            // FTS5 reads it literally.
+            /* Phrase-quote each token, doubling embedded " so FTS5 reads it literally. */
             let escaped = t.replace('"', "\"\"");
             format!("\"{escaped}\"")
         })
@@ -624,17 +487,12 @@ pub fn build_match_query(query: &str) -> String {
         .join(" OR ")
 }
 
-/// Top-level wiki `.md` files that are internal infrastructure (not wiki
-/// "pages"). These are excluded from the page list shown in the UI and from
-/// the FTS search index so they don't surface as navigable pages. A same-named
-/// file inside a subdirectory (e.g. `wiki/concepts/log.md`) is still listed -
-/// only direct children of `wiki/` are filtered.
+/// Top-level wiki `.md` infrastructure files excluded from page list + FTS index.
+/// Only direct children of `wiki/` filtered; subdirectory files of same name are listed.
 const INTERNAL_WIKI_FILES: &[&str] = &["log", "index"];
 
-/// Collect all wiki `.md` file paths (for listing in the UI).
-///
-/// Excludes top-level internal infrastructure files (`log.md`, `index.md`) so
-/// the audit trail and master catalog don't surface as navigable pages.
+/// Collect all wiki `.md` file paths for listing in UI. Excludes top-level internal
+/// infrastructure files (log.md, index.md). Sorted by filename stem.
 pub fn collect_wiki_pages(root: &Path) -> Result<Vec<PathBuf>, AppError> {
     let wiki_dir = root.join("wiki");
     if !wiki_dir.exists() {
@@ -642,10 +500,9 @@ pub fn collect_wiki_pages(root: &Path) -> Result<Vec<PathBuf>, AppError> {
     }
     let mut out = Vec::new();
     collect_md_recursive(&wiki_dir, &mut out)?;
-    // Exclude top-level internal infrastructure files (log.md, index.md) -
-    // they have no frontmatter slug/type and would surface as raw "log" /
-    // "index" entries in the sidebar. Only direct children of wiki/ are
-    // filtered; a wiki/concepts/log.md page is still listed.
+    /* Exclude top-level internal files (log.md, index.md) - they lack
+    frontmatter slug/type and would surface as raw "log"/"index" entries.
+    Only direct children of wiki/ filtered; wiki/concepts/log.md still listed. */
     out.retain(|path| {
         let is_top_level =
             path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) == Some("wiki");
@@ -678,7 +535,5 @@ fn collect_md_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), AppErr
     Ok(())
 }
 
-// All unit tests for this module live in `src-tauri/tests/wiki_fts_test.rs` per
-// `docs/CLAUDE.md` §Testing: "Avoid large inline unit tests in library source
-// files ... move them into standalone integration test files under
-// `src-tauri/tests/`."
+/* All unit tests live in `src-tauri/tests/wiki_fts_test.rs` per
+`docs/CLAUDE.md` §Testing: move large inline tests to standalone integration tests. */

@@ -85,18 +85,16 @@
 - Composables: prefixed with `use` (`useArticles.ts`, `useScreening.ts`).
 
 ### Comments
-- Use **JSDoc** (`/** ... */`) for all exported functions and composables.
-  Include `@param`, `@returns`, and other relevant tags (`@throws`, `@example`).
-  This is part of the function definition, not optional decoration.
-- For multi-line explanatory comments (more than 2 lines) inside function bodies or between
-  sections (more than two lines), use standard block comments (`/* ... */`),
-  NOT repeated `//` line comments.
-- Use single-line `//` comments only for short notes (one to two lines).
-- Never use the emdash (&mdash;) character. Use a plain dash (`-`) in all comments.
-- Keep comments compact. 
-- Don't over explain each step or change in the middle of function code. One line if possible. Larger reasons blocks should be placed on the function level.
-- For RUST multi-line (3 or more lines) comments use comment block marekers `/* ... */`.
-- For RUST do not repeat `///` for ordiantry comments, this reserved for comments that should be picked up by rustdoc
+- Keep all comments compact. Prefer 1 line when possible. Drop filler ("This function",
+  "Note that") and redundant restatements of the signature. Move rationale blocks to the
+  function level, not inline in the body.
+- Never use emdash (--). Use a plain dash (-).
+- **JSDoc** (`/** ... */`) for all exported functions/composables. Include `@param`,
+  `@returns`. Dense, no padding.
+- **TS/Vue**: multiline (3+ `//` lines) -> `/* */` block. Single `//` for 1-2 line notes.
+  Enforced by ESLint `spaced-comment`.
+- **Rust**: multiline (3+ `//` lines) -> `/* */` block. `///` only for rustdoc; ordinary
+  comments use `//` or `/* */`. Single `//` for 1-2 line notes.
 
 ### File Organization
 - `src/components/` - reusable Vue components.

@@ -1,4 +1,4 @@
-//! Abstraction over LLM HTTP calls, enabling integration tests with mock clients.
+//! LLM client abstraction (trait + production impl). Enables mock clients in integration tests.
 
 use std::sync::Arc;
 
@@ -6,23 +6,15 @@ use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::models::llm_config::LlmConfig;
 
-/// Trait abstracting a single chat-completion call.
-///
-/// The default `send` categorizes the request as `Screening` (stage-1 abstract
-/// screening). Tier 3 stage-2 calls (enhanced / two-stage) use `send_with_type`
-/// with `LlmRequestType::EnhancedScreening` so diagnostics can distinguish them.
-/// The default impl of `send_with_type` delegates to `send`, so existing test
-/// mocks are unaffected and only the production `HttpLlmClient` overrides it.
+/// Abstraction over a single chat-completion call. Default `send` is stage-1 `Screening`;
+/// `send_with_type` with `EnhancedScreening` for stage-2. Default impl delegates to `send`
+/// so mocks are unaffected.
 #[async_trait::async_trait]
 pub trait LlmClient: Send + Sync {
-    /// Send a chat completion request categorized as stage-1 `Screening`.
-    /// Returns `(response_text, total_tokens)`.
+    /// Send chat completion as stage-1 `Screening`. Returns `(response_text, total_tokens)`.
     async fn send(&self, system: &str, user: &str) -> Result<(String, usize), AppError>;
 
-    /// Send a chat completion request with an explicit `LlmRequestType`.
-    /// Default impl delegates to `send` (preserving backward compat for mocks
-    /// that don't care about the request type). Production overrides to route
-    /// the type through the orchestrator.
+    /// Send with explicit `LlmRequestType`. Default delegates to `send`.
     async fn send_with_type(
         &self,
         system: &str,
@@ -33,9 +25,7 @@ pub trait LlmClient: Send + Sync {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Real HTTP implementation (used in production)
-// ---------------------------------------------------------------------------
+// ── Production HTTP client ──────────────────────────────────────────────────
 
 /// Production client that routes through the `LlmOrchestrator`.
 pub struct HttpLlmClient {

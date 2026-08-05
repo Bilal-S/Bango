@@ -24,10 +24,7 @@ function formatDate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-/**
- * Clamps a custom date range to a maximum of 5 years (1825 days).
- * Slides the start date forward if the range exceeds 5 years.
- */
+/** Clamp custom date range to max 5 years (1825 days). Slides start forward if needed. */
 export function clampToFiveYearWindow(
   start: string,
   end: string
@@ -58,9 +55,7 @@ function getTodayUTC(date = new Date()): Date {
   return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0));
 }
 
-/**
- * Validates custom start and end date strings.
- */
+/** Validate custom start/end date strings. */
 export function isValidCustomRange(start: string, end: string): { ok: boolean; reason?: string } {
   if (!start || !end) {
     return { ok: false, reason: 'Dates must not be empty.' };
@@ -78,7 +73,6 @@ export function isValidCustomRange(start: string, end: string): { ok: boolean; r
   }
 
   const todayUTC = getTodayUTC();
-  // Clear times of endDate to prevent time components from failing the comparison
   const endDateUTC = new Date(
     Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(), 0, 0, 0, 0)
   );
@@ -96,10 +90,7 @@ export function isValidCustomRange(start: string, end: string): { ok: boolean; r
   return { ok: true };
 }
 
-/**
- * Derives a research range from dataset publication years.
- * Clamps to 5 years only as a fallback for pre-2002 datasets.
- */
+/** Derive research range from dataset publication years. Clamps to 5y only as pre-2002 fallback. */
 export function buildResearchRange(
   minYear: number,
   maxYear: number,
@@ -109,31 +100,26 @@ export function buildResearchRange(
   const todayUTC = getTodayUTC(today);
   const todayYear = todayUTC.getUTCFullYear();
 
-  // Rule 1: Research range after 2001 -> Use full range
   if (minYear > 2001) {
     const start = `${minYear}-01-01`;
     const clampEnd = Math.min(todayYear, maxYear);
     const end = `${clampEnd}-12-31`;
 
-    // Safety check if resolved end is in the future compared to today's date
     const endDate = new Date(end);
     const resolvedEnd = endDate > todayUTC ? formatDate(todayUTC) : end;
 
     return { start, end: resolvedEnd };
   }
 
-  // Rule 2: Earliest year is <= 2001, but peak/most active year is after 2001
   if (mostActiveYear > 2001) {
     let startYear = mostActiveYear - 2;
     let endYear = mostActiveYear + 2;
 
-    // Must start after 2001
     if (startYear < 2002) {
       startYear = 2002;
       endYear = 2006;
     }
 
-    // Clamp endYear to today's year
     if (endYear > todayYear) {
       endYear = todayYear;
       startYear = Math.max(2002, endYear - 4);
@@ -150,30 +136,24 @@ export function buildResearchRange(
     return { start, end };
   }
 
-  // Rule 3: pre-2002 fallback (no active years > 2001) -> default to last 5 years
+  // pre-2002 fallback: default to last 5 years
   const start = formatDate(new Date(todayUTC.getTime() - 5 * 365.25 * 24 * 60 * 60 * 1000));
   const end = formatDate(todayUTC);
   return { start, end };
 }
 
-/**
- * Cleans keyword labels to be search-safe for Google Trends.
- */
+/** Clean keyword labels for Google Trends: strip trailing punctuation + parentheticals. */
 export function sanitizeKeyword(keyword: string): string {
   if (!keyword) return '';
-  // Strip trailing punctuation
   let cleaned = keyword
     .trim()
     .replace(/[.,;:!?]+$/, '')
     .trim();
-  // Strip parentheses and brackets information (e.g. "machine learning (ml)" -> "machine learning")
   cleaned = cleaned.replace(/\s*[([][^)]*?[)\]]/g, '').trim();
   return cleaned;
 }
 
-/**
- * Builds the comparison items parameter for renderExploreWidget.
- */
+/** Build comparison items parameter for renderExploreWidget. */
 export function buildComparisonItems(keywords: string[], apiTime: string): string {
   const sanitized = keywords.map(sanitizeKeyword).filter(Boolean);
   const items = sanitized.map((kw) => ({
@@ -184,9 +164,7 @@ export function buildComparisonItems(keywords: string[], apiTime: string): strin
   return JSON.stringify(items);
 }
 
-/**
- * Builds the url-encoded exploreQuery parameter.
- */
+/** Build url-encoded exploreQuery parameter. */
 export function buildExploreQuery(
   type: 'TIMESERIES' | 'GEO_MAP',
   keywords: string[],
@@ -209,23 +187,11 @@ export function buildExploreQuery(
   }
 }
 
-/**
- * Builds the inline monitor script injected at the top of the widget iframe <head>.
- * Detects embed failures (429 rate limit, network errors, script load failures, timeouts)
- * and reports status back to the parent Vue app via postMessage.
- *
- * Multiple detection signals (defense in depth):
- * 1. Capture-phase 'error' listener - catches failed <script src> loads (e.g. loader 429).
- * 2. fetch / XHR patches - catches HTTP errors on data requests from the document.
- * 3. Watchdog timeout - backstop for silent failures.
- *
- * NOTE: The previous MutationObserver "success sentinel" was removed because it
- * reported success when Google injected its inner iframe - but that iframe can
- * itself go on to 429 invisibly (cross-origin). Success is now inferred solely
- * by the absence of any error signal plus watchdog survival.
- *
- * A `settled` flag ensures only the first signal is reported.
- */
+/** Build inline monitor script for the widget iframe <head>.
+ * Detects embed failures (429, network errors, script load failures, timeouts)
+ * and reports via postMessage. Multiple detection layers: error listener on
+ * <script>, fetch/XHR patches, watchdog timeout. Success is inferred from
+ * absence of errors + watchdog survival. `settled` flag ensures single report. */
 export function buildEmbedMonitorScript(): string {
   return `
 (function() {
@@ -289,9 +255,7 @@ export function buildEmbedMonitorScript(): string {
   `.trim();
 }
 
-/**
- * Builds the renderExploreWidget JS calls.
- */
+/** Build renderExploreWidget JS calls. */
 function buildTrendsSnippet(
   type: 'TIMESERIES' | 'GEO_MAP',
   keywords: string[],
@@ -314,9 +278,7 @@ function buildTrendsSnippet(
   `.trim();
 }
 
-/**
- * Wraps the script snippet inside a full isolated html document for srcdoc.
- */
+/** Wrap script snippet in full isolated html document for srcdoc. */
 export function buildWidgetSrcdoc(
   type: 'TIMESERIES' | 'GEO_MAP',
   keywords: string[],
@@ -397,9 +359,7 @@ export function buildWidgetSrcdoc(
   `.trim();
 }
 
-/**
- * Builds the URL for opening Google Trends in a standard web browser.
- */
+/** Build URL for opening Google Trends in a standard web browser. */
 export function buildExternalExploreUrl(keywords: string[], queryDate: string): string {
   const sanitized = keywords.map(sanitizeKeyword).filter(Boolean);
   const q = sanitized.join(',');
@@ -409,14 +369,9 @@ export function buildExternalExploreUrl(keywords: string[], queryDate: string): 
   return `https://trends.google.com/trends/explore?date=${encodedDate}&q=${q}&hl=en${legacyPart}`;
 }
 
-/**
- * Builds the embed URL that the iframe's inner loader will navigate to.
- * Used for preflight HTTP probes via the Rust `check_trends_url` command
- * so we can detect 429s *before* rendering the iframe.
- *
- * Mirrors the URL format that `trends.embed.renderExploreWidget` constructs
- * internally: `/trends/embed/explore/{TYPE}?req={json}&tz={tz}&eq={query}`.
- */
+/** Build embed URL for preflight HTTP probes. Mirrors
+ * `trends.embed.renderExploreWidget`'s internal URL format:
+ * `/trends/embed/explore/{TYPE}?req={json}&tz={tz}&eq={query}`. */
 export function buildEmbedUrl(
   type: 'TIMESERIES' | 'GEO_MAP',
   keywords: string[],
@@ -434,11 +389,7 @@ export function buildEmbedUrl(
   return `${base}${type}?req=${encodeURIComponent(JSON.stringify(req))}&tz=${-timezoneMinutes}&eq=${encodeURIComponent(eq)}`;
 }
 
-/**
- * Random delay between 2000ms and 3999ms - used to serialize Google Trends
- * embed requests so we stay well under their rate-limit threshold.
- * One chart request is followed by a 2–4s pause before the map request fires.
- */
+/** Random delay 2000-3999ms to serialize Google Trends embed requests under rate limit. */
 export function nextRequestDelay(): number {
   return 2000 + Math.floor(Math.random() * 2000);
 }

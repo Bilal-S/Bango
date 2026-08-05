@@ -26,29 +26,20 @@ app.use(createPinia());
 app.use(router);
 app.mount('#app');
 
-// Bootstrap entry point. Runs the silent legacy upgrade FIRST (if the backend
-// detected an outdated schema), then pre-warms all Pinia stores so navigating
-// to any view is instant.
+/* Runs silent legacy upgrade FIRST (if backend detected outdated schema),
+ * then pre-warms all Pinia stores. Loop-guard: `window.location.reload()`
+ * runs in the SAME Rust process, so managed state is not recomputed. Backend
+ * re-probes live schema on each `get_startup_status` call + updates its
+ * snapshot after success. `decideUpgrade` + sessionStorage is defense-in-depth:
+ * if both backend layers are bypassed, refuse to re-run upgrade. */
 async function bootstrap(): Promise<void> {
-  // 1. Startup schema upgrade (silent). Must complete before any store reads
-  //    from the DB, otherwise they would load from the pre-upgrade schema.
-  //
-  //    Loop-guard: a webview `window.location.reload()` runs in the SAME Rust
-  //    process, so managed backend state is not recomputed. The backend now
-  //    re-probes the live schema on each `get_startup_status` call (and
-  //    updates its snapshot after a successful upgrade), which alone breaks
-  //    the loop. The `decideUpgrade` + sessionStorage check below is the
-  //    defense-in-depth safety net: if both backend layers were ever
-  //    bypassed, we still refuse to re-run the upgrade in the same session
-  //    and instead surface a restart-required error.
+  /* Startup schema upgrade (silent). Must complete before any store reads. */
   const needsUpgrade = await getStartupStatus();
   const decision = decideUpgrade(needsUpgrade, getUpgradeAttempted());
 
   if (decision === 'stale') {
-    // Loop guard tripped: backend still reports Legacy after we already
-    // attempted the upgrade this session. Do NOT reload. Surface a clear
-    // error so the user can restart the app (which starts a fresh session
-    // and re-probes the schema cleanly).
+    /* Loop guard tripped: backend still reports Legacy after upgrade already
+     * attempted this session. Surface error so user can restart. */
     console.error(
       '[startup_upgrade] stale signal: upgrade still reported as needed after an attempt this session. Aborting to prevent a reload loop; a full app restart is required.'
     );
@@ -62,11 +53,8 @@ async function bootstrap(): Promise<void> {
 
   if (decision === 'run') {
     const toast = useToast();
-    // Persistent "in progress" toast (duration=0) so it stays visible during
-    // the upgrade; it is dismissed explicitly on completion.
     toast.show('Database upgrade in progress...', 'info', 0);
-    // Record the attempt BEFORE awaiting so a concurrent bootstrap cannot
-    // double-run the upgrade. Session-scoped, so a real app restart clears it.
+    /* Record attempt BEFORE awaiting so concurrent bootstrap cannot double-run. */
     markUpgradeAttempted();
     try {
       const result = await performLegacyUpgrade();
@@ -81,24 +69,17 @@ async function bootstrap(): Promise<void> {
         'error',
         0
       );
-      // On failure, reload so the user lands in a clean state (the backend
-      // keeps the backup file safe regardless). The loop-guard token is
-      // already set, so even if the failure left a stale Legacy signal the
-      // next bootstrap will take the `'stale'` branch and refuse to loop.
+      /* Loop-guard token is already set; reload for clean state. */
       window.location.reload();
       return;
     }
-    // Reload the webview so the app re-bootstraps against the freshly rebuilt
-    // schema. The loop-guard token is set; if the backend live-probe layer
-    // works as expected, getStartupStatus() will now return false (Current)
-    // and bootstrap will proceed normally. If it somehow still returns true,
-    // the guard takes the `'stale'` branch and stops.
+    /* Reload to re-bootstrap against freshly rebuilt schema. Loop-guard
+     * token is set; `getStartupStatus()` should return false now. */
     window.location.reload();
     return;
   }
 
-  // 2. Pre-warm all stores in parallel.
-  // Once complete, signal the loading overlay to dismiss.
+  /* Pre-warm all stores in parallel; signal loading overlay to dismiss on complete. */
   void Promise.all([
     useArticlesStore().fetchIfNeeded(),
     useCriteriaStore().fetchIfNeeded(),

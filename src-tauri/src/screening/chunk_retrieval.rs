@@ -1,18 +1,7 @@
-//! Criteria-targeted chunk retrieval for Tier 3 enhanced screening.
-//!
-//! Pure (no I/O, no DB). Given an article's chunks (from `chunk_repo`) and the
-//! project's inclusion/exclusion criteria, ranks the chunks by criteria-token
-//! overlap and returns the top-K as `ScoredChunk`s for the screening prompt's
-//! `## Supporting Evidence from Full Text` block.
-//!
-//! **Why TF scoring, not FTS5?** The retrieval is *per-article* over 5-10
-//! chunks. An in-memory term-frequency score is faster (microseconds), needs
-//! no index, and cannot leak across articles. FTS5's value is global search;
-//! here we want scoped ranking.
-//!
-//! Tokenization reuses `utils::text_tokens::tokenize_for_match` so the scorer
-//! and the Wiki FTS5 BM25 index agree on token boundaries + stop-word
-//! filtering (one source of truth).
+//! Per-article criteria-targeted chunk ranking via in-memory TF scoring.
+//! Pure (no I/O/DB). Uses `utils::text_tokens::tokenize_for_match` for token
+//! consistency with FTS5 BM25. Faster than FTS5 per-article (microseconds vs
+//! index overhead) and scoped per-article.
 
 use crate::utils::chunking::Chunk;
 use crate::utils::text_tokens::tokenize_for_match;
@@ -21,53 +10,29 @@ use std::collections::HashMap;
 /// Default number of chunks to return per article (Chunkr-style `top_k`).
 pub const DEFAULT_TOP_K: usize = 2;
 
-/// Hard cap: skip chunks larger than this (words) when ranking. Oversize chunks
-/// blow the per-article token budget without adding proportional signal.
+/// Hard cap: skip chunks larger than this (words) when ranking.
 pub const DEFAULT_MAX_CHUNK_WORDS: usize = 600;
 
-/// Section boost applied to Methods chunks (`+METHODS_BOOST`). Methods is the
-/// highest-signal section for screening - population, intervention, study
-/// design all live there.
+/// Methods-section score boost. Methods = highest-signal section for screening.
 pub const METHODS_BOOST: f64 = 0.25;
 
-/// Per-article chunk budget (words). If the top-K chunks' summed word count
-/// exceeds this, the lowest-ranked chunk is dropped until it fits. Guarantees
-/// no single article can blow the screening context window.
+/// Per-article chunk budget (words). Guarantees no single article blows the
+/// screening context window.
 pub const DEFAULT_CHUNK_BUDGET_PER_ARTICLE: usize = 2_400;
 
-/// A chunk ranked against the criteria, carrying its score.
+/// A chunk ranked against criteria, carrying its TF score.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScoredChunk {
-    /// Original 0-based chunk ordinal from `chunk_index`.
     pub chunk_index: usize,
-    /// Section label (e.g. `Some("Methods")`), carried for the `[§Methods]`
-    /// citation prefix in the evidence block.
+    /// Section label (e.g. `Some("Methods")`) for `[§Methods]` citation prefix.
     pub section: Option<String>,
-    /// The verbatim chunk text.
     pub content: String,
-    /// TF-based score: sum of criteria-token frequencies / chunk word count,
-    /// plus the Methods-section boost. Higher = more relevant.
+    /// TF score: sum of criteria-token frequencies / chunk word count + methods boost.
     pub score: f64,
 }
 
-/// Rank an article's chunks against the concatenated criteria text.
-///
-/// - Tokenizes inclusion + exclusion criteria into a query token set via the
-///   shared `tokenize_for_match` (lowercase, split on non-alphanumeric, drop
-///   stop words). This mirrors FTS5 `unicode61` tokenization.
-/// - For each chunk: score = (sum of criteria-token frequencies in chunk) /
-///   chunk word count. Methods-section chunks get `+METHODS_BOOST`.
-/// - Filters out chunks exceeding `max_chunk_words`.
-/// - Sorts descending by score, takes the top-K.
-/// - **Budget guard**: if the returned chunks' summed word count exceeds
-///   `chunk_budget_per_article`, drops the lowest-ranked chunk until it fits.
-///
-/// Empty criteria => all chunks tie at score 0.0 (returned in original order,
-/// up to top_k), so enhanced mode still sends *some* evidence even when the
-/// criteria are sparse. Empty chunks => empty result.
-///
-/// Pure: pass the parameters explicitly so callers (command shims, tests) can
-/// vary them without touching `app_settings`.
+/// Rank article chunks against criteria text. TF density scoring + methods boost;
+/// filters oversized chunks, enforces word budget. Empty criteria → all tie at 0.0.
 #[must_use]
 pub fn rank_chunks_by_criteria(
     chunks: &[Chunk],
@@ -129,10 +94,8 @@ fn score_chunk(chunk: &Chunk, query_tokens: &HashMap<String, usize>) -> f64 {
         }
     }
     let density = hits as f64 / chunk.word_count.max(1) as f64;
-    // The Methods boost is a tiebreaker among *matching* chunks, not a way to
-    // rank non-matching ones. Apply it only when the chunk has at least one
-    // criteria-token hit; otherwise an unmatched Methods chunk would outrank
-    // an unmatched Results chunk, which is meaningless when nothing matched.
+    /* Methods boost only when chunk has criteria-token hits; otherwise an unmatched
+    Methods would outrank an unmatched Results despite nothing matching. */
     let boost =
         if hits > 0 && chunk.section.as_deref() == Some("Methods") { METHODS_BOOST } else { 0.0 };
     density + boost
@@ -147,24 +110,15 @@ fn enforce_word_budget(chunks: &mut Vec<ScoredChunk>, budget: usize) {
         if total <= budget {
             return;
         }
-        // `sort_by` was stable-descending, so the last element is the
-        // lowest-ranked (or tied for lowest). Pop it.
+        /* Pop lowest-ranked from end (stable-descending sort) until budget fits.
+        Never drops below 1 chunk. */
         chunks.pop();
     }
 }
 
-/// Format scored chunks as the `## Supporting Evidence from Full Text` body for
-/// one article. Each chunk is prefixed with its section label
-/// (`[§Methods]`, `[§Results]`, or `[§Text]` when the section is unknown).
-///
-/// Returns `None` when the slice is empty so callers can leave
-/// `ArticleEntry.full_text_evidence = None` (keeping the prompt byte-identical
-/// to abstract-only mode). Pure: no I/O, no DB.
-///
-/// This is the single canonical implementation. `engine::format_chunks_as_evidence`
-/// (kept `pub` for backward compat with external tests) and `evidence::resolve_evidence`
-/// (the Tier 4.1 complementarity path) both delegate here so the chunks-only body
-/// stays byte-identical across all screening modes.
+/// Format scored chunks into `## Supporting Evidence from Full Text` block.
+/// Each chunk prefixed `[§Section]`. `None` when empty. Canonical impl; both
+/// `engine` and `evidence` delegate here for byte-identical output.
 #[must_use]
 pub fn format_chunks_as_evidence(chunks: &[ScoredChunk]) -> Option<String> {
     if chunks.is_empty() {

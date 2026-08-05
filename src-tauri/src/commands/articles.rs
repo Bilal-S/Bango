@@ -33,13 +33,9 @@ pub fn get_article(db_state: State<'_, DbState>, id: String) -> Result<Article, 
     article_repo::get_article_by_id(&conn, &id)
 }
 
-/// Permanently delete an article and all of its related data (full text,
-/// extracted chunks, AI summary, audit history, user notes, tag/label
-/// associations, translation archive, dedup links, and reference links to
-/// papers that no other article uses). The frontend MUST show a confirmation
-/// dialog before invoking this; the backend performs no second confirmation.
-///
-/// See [`article_repo::delete_article`] for the full cascade contract.
+/// Permanently delete an article and all related data (full text, chunks,
+/// AI summary, audit/notes, tags/labels, translations, dedup links). The
+/// frontend MUST confirm; see [`article_repo::delete_article`] for cascade.
 #[tauri::command]
 pub fn delete_article(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -170,13 +166,9 @@ pub fn override_ai_decision(
     Ok(())
 }
 
-/// Clear the AI decision, reasoning text, and confidence for a single article.
-/// Powers the trashcan icon in the AI Decision card's expanded header. The
-/// `ai_decision` + `ai_reasoning` + `ai_confidence` are all nulled so the
-/// entire card unmounts; the user's own Include/Exclude choice lives on the
-/// separate `status` field, which stays intact. `screened_at` is preserved so
-/// the screening history survives. Writes an `ai_screen_clear` audit entry so
-/// the action appears in the Audit Timeline.
+/// Null `ai_decision`, `ai_reasoning`, and `ai_confidence` for an article.
+/// The card unmounts; `status` (user's Include/Exclude) stays intact.
+/// Preserves `screened_at`. Writes an `ai_screen_clear` audit entry.
 #[tauri::command]
 pub fn clear_ai_reasoning(db_state: State<'_, DbState>, id: String) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -210,18 +202,10 @@ pub fn update_article_criteria(
 }
 
 /// Update a single metadata field (Title, Authors, Affiliation, Journal, Year,
-/// Lang, DOI, Keywords) on an article. Powers the double-click inline editing
-/// in the Article Detail header (Title) and the "Metadata" card (the rest).
-/// The `field` enum validates the column name (no string interpolation);
-/// `value` is a serde-untagged scalar-or-array payload (arrays for
-/// Authors/Keywords, scalar string for the rest).
-///
-/// Audit detail string:
-/// - For `Title`: captures the old → new transition
-///   (`"Title changed: \"<old>\" → \"<new>\""`, each side truncated to ~80
-///   chars) so the Audit Timeline shows what the title was changed from/to.
-/// - For all other fields: the generic `"Metadata edited: <Label>"` string
-///   (unchanged from the pre-Title behavior).
+/// Lang, DOI, Keywords). The `field` enum validates the column name; `value` is
+/// a serde-untagged scalar-or-array payload. For Title: captures old→new
+/// transition in the audit detail (truncated to ~80 chars). All other fields
+/// use generic `"Metadata edited: <Label>"`.
 #[tauri::command]
 pub fn update_article_metadata(
     db_state: State<'_, DbState>,
@@ -232,21 +216,17 @@ pub fn update_article_metadata(
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     // For Title edits, capture the old title BEFORE the update so the audit
-    // detail can record the from → to transition. Title is the only metadata
-    // field where recording the actual values is useful (the others are
-    // adequately described by "Metadata edited: <Label>").
+    // detail can record the from → to transition.
     let audit_detail: String = if field == ArticleMetaField::Title {
-        // Extract the new title from the payload (mirrors the repo's trim +
-        // empty-reject so the detail string matches what will be persisted).
+        /* Extract the new title from the payload (mirrors the repo's trim +
+         * empty-reject so the detail string matches what will be persisted). */
         let new_title = match &value {
             ArticleMetaValue::Scalar(Some(s)) => s.trim(),
             _ => "",
         };
         if new_title.is_empty() {
-            // The repo layer will reject this with AppError::Validation; no
-            // point building a detail string for a doomed update. Use the
-            // generic label so the audit shape stays consistent if the call
-            // ever relaxes the empty gate.
+            /* The repo layer rejects empty titles; use generic label so the
+             * audit shape stays consistent if the gate ever relaxes. */
             format!("Metadata edited: {}", field.label())
         } else {
             let old_title: String = conn
@@ -272,8 +252,7 @@ pub fn update_article_metadata(
         Some(&audit_detail),
         "user",
     )?;
-    // Metadata changes (title, authors, journal, year, language, keywords) feed
-    // both the bibliometric pipelines and the LLM Wiki knowledge base.
+    // Metadata changes feed bibliometric pipelines + the LLM Wiki.
     app_settings_repo::mark_biblio_needs_refresh(&conn);
     app_settings_repo::mark_wiki_needs_refresh(&conn);
     Ok(())
@@ -352,10 +331,8 @@ fn write_bulk_tag_label_audit(
     action: &str,
     name: &str,
 ) -> Result<(), AppError> {
-    // Delegate to the shared helper so the audit trail shape stays byte-identical
-    // across the bulk add/remove commands and the merge commands. Only the detail
-    // string is formatted here (bulk-specific prefix); the loop lives in the shared
-    // `audit_repo::write_tag_label_audit`.
+    /* Delegate to the shared audit_repo::write_tag_label_audit helper so
+     * bulk add/remove + merge commands share identical audit trail shape. */
     let detail = format!("Bulk {action}: \"{name}\"");
     audit_repo::write_tag_label_audit(conn, affected_ids, action, &detail)
 }

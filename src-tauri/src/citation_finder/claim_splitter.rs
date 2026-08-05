@@ -1,12 +1,9 @@
-//! LLM-based claim splitting for per-statement mode (`citation_finder/AGENTS.md`).
+//! LLM-based claim splitting for per-statement mode.
 //!
-//! The splitter asks the LLM to break the pasted prose into ≤5 distinct
+//! The splitter asks the LLM to break pasted prose into ≤5 distinct
 //! self-contained factual claims. Each claim is then embedded + matched
-//! independently.
-//!
-//! The actual LLM call lives in `search.rs` (it owns the orchestrator). This
-//! module owns the prompt template + the pure post-processing (max-5
-//! enforcement, trimming).
+//! independently. The actual LLM call lives in `search.rs`; this module
+//! owns the prompt template + pure post-processing.
 
 /// The system prompt for the claim-splitting call.
 pub const CLAIM_SPLITTER_SYSTEM_PROMPT: &str = "\

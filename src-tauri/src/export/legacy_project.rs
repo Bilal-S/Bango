@@ -1,13 +1,7 @@
-//! Legacy-schema backup exporter.
-//!
-//! Reads the old single-table `article_references` model (commit 665ec93 and
-//! earlier) and produces a `ProjectBackup` JSON document in the *current*
-//! format. The legacy table stored one denormalized row per (parent, reference)
-//! pair, so rows are de-duplicated into normalized `reference_papers` entries
-//! (by DOI -> title+authors+year) and re-emitted as `article_reference_links`.
-//!
-//! The resulting JSON is feedable straight into `project::import_project`, which
-//! rebuilds the current schema and re-links journals via ISSN/title matching.
+//! Reads the legacy `article_references` table and emits a current-format
+//! `ProjectBackup` JSON. Rows are de-duplicated into normalized
+//! `reference_papers` (by DOI → title+authors+year) and re-emitted as
+//! `article_reference_links`. Feeds directly into `project::import_project`.
 
 use std::collections::HashMap;
 
@@ -16,8 +10,7 @@ use rusqlite::Connection;
 use super::project::{ExportMetadata, ProjectBackup};
 use crate::error::AppError;
 
-/// Convert an `Option<String>` into a JSON value: `None` -> Null, `Some(s)` ->
-/// JSON string. Used to map legacy nullable text columns into backup objects.
+/// `Option<String>` to JSON: None → Null, Some(s) → string.
 #[inline]
 fn opt_str_to_value(opt: Option<String>) -> serde_json::Value {
     match opt {
@@ -85,9 +78,8 @@ pub fn export_legacy_project(conn: &Connection) -> Result<String, AppError> {
         article_original_content: Vec::new(),
         article_original_chunks: Vec::new(),
         llm_config: llm_backup,
-        // Legacy schema predates project-portable app_settings (screening
-        // rules, summary mode, auto-translate); emit empty so the upgrade
-        // path produces a backup the modern importer accepts.
+        /* Legacy schema predates project-portable app_settings (screening rules, summary
+        mode, auto-translate); emit empty so the modern importer accepts. */
         app_settings: Vec::new(),
     };
 
@@ -323,10 +315,7 @@ fn read_legacy_llm_config(
     }))
 }
 struct LegacyRefRow {
-    /// Legacy `article_references.id` PK. Intentionally unread: the dedup pass
-    /// mints fresh UUIDs for the normalized `reference_papers` rows, so the old
-    /// per-(parent,ref) id has no meaning in the new schema. Kept only so the
-    /// positional `row.get(0)` SELECT column lines up with the struct fields.
+    /// Intentionally unread: dedup mints fresh UUIDs. Kept for positional `row.get(0)` alignment.
     #[allow(dead_code)]
     id: String,
     parent_id: String,

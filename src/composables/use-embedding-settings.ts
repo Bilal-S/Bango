@@ -2,13 +2,8 @@ import { ref } from 'vue';
 import { tauriCommand } from './use-tauri-command';
 
 /**
- * The shape returned by the `get_embedding_status` backend command.
- *
- * `modelOverride` is the premium user's pinned embedding-model name
- * (`app_settings.embedding_model_override`). `undefined` when the key is absent
- * or empty (auto-detection active) - serialized as `null` by serde but kept
- * `undefined` here so the input can distinguish "not loaded yet" from
- * "explicitly cleared".
+ * Shape returned by `get_embedding_status`. `modelOverride` is the premium
+ * user's pinned embedding-model name (`undefined` when absent/empty).
  */
 export interface EmbeddingStatusInfo {
   status: string;
@@ -19,30 +14,13 @@ export interface EmbeddingStatusInfo {
 
 /**
  * Composable for loading + persisting the embedding-model override (premium).
- *
- * The override is a machine-local `app_settings` key that, when set, makes the
- * embedding probe try the user's pinned model first (ahead of the
- * provider-default + the configured chat model). See `.worktrees/setmodel.md`.
- *
- * Loads via `get_embedding_status` (which returns the full triple-state +
- * `modelOverride`) and saves via the premium-gated `set_embedding_model_override`
- * command. Saving resets the embedding capability to `unknown` so the next
- * probe (next embedding call or `Test Connection`) re-evaluates against the new
- * override.
- *
- * @returns `modelOverride` (reactive ref), `load()`, `save(value)`, and a
- * `saving` flag.
+ * Saves via the premium-gated `set_embedding_model_override` command.
  */
 export function useEmbeddingSettings() {
   const modelOverride = ref<string>('');
   const saving = ref(false);
 
-  /**
-   * Load the current embedding-model override from the backend.
-   *
-   * Sets `modelOverride` to the stored value (empty string when cleared). Safe
-   * to call outside Tauri (no-op when `isTauri()` is false).
-   */
+  /** Load the current embedding-model override from the backend. */
   async function load(): Promise<void> {
     try {
       const info = await tauriCommand<EmbeddingStatusInfo>('get_embedding_status');

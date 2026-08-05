@@ -201,16 +201,16 @@ pub async fn start_screening(
         ));
     }
 
-    // Tier 3: read the screening mode + params from `app_settings` and build
-    // the ScreeningConfig the engine consumes. Defaults preserve abstract-only
-    // behavior exactly when no mode key is set.
-    //
-    // NOTE: the chunk-backfill guard (`ensure_chunks_for_full_text_articles`)
-    // previously ran inside this synchronous block, holding the DbState mutex
-    // for the full PDF-parse + chunk-write pass and freezing the Tauri UI. It
-    // now runs inside the spawned background task below, before `run_sync`,
-    // so the IPC handler returns immediately and the lock is held only for the
-    // millisecond-scale SQLite writes the engine itself performs.
+    /* Tier 3: read screening mode + params from `app_settings` and build
+    the ScreeningConfig the engine consumes. Defaults preserve abstract-only
+    behavior exactly when no mode key is set.
+
+    NOTE: the chunk-backfill guard (`ensure_chunks_for_full_text_articles`)
+    previously ran inside this synchronous block, holding the DbState mutex
+    for the full PDF-parse + chunk-write pass and freezing the Tauri UI. It
+    now runs inside the spawned background task below, before `run_sync`,
+    so the IPC handler returns immediately and the lock is held only for the
+    millisecond-scale SQLite writes the engine itself performs. */
     let screening_config = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let mode = app_settings_repo::get_screening_mode(&conn)?;
@@ -225,21 +225,16 @@ pub async fn start_screening(
         }
     };
 
-    // Create and store engine in state. Batch size is honored as selected
-    // (1..=15, matching the frontend stepper's BATCH_MAX): the orchestrator's
-    // per-request-type timeout (SCREENING_TIMEOUT_SECS = 120) and the
-    // screening-engine auto-stop guards (consecutive transient failures,
-    // total timeouts) already surface slow/hung LLM providers as actionable
-    // errors, so we do NOT silently override the user's selection here. A
-    // previous v8.6 change clamped this to 5 on the assumption that large
-    // batches were the root cause of screening hangs; that assumption was
-    // unproven, and the clamp masked the real per-batch behavior from the
-    // `[screening:diag]` instrumentation (it forced batch_size=5 even when
-    // the user selected 10, so `orchestrator: LLM call END elapsed=Xms`
-    // reflected a 5-article batch, not a 10-article one). The clamp is
-    // reverted (Option B) so diagnostics show the true cost of the user's
-    // selected batch size; the root cause of any hang will be surfaced by
-    // the Layer-1 instrumentation + the existing timeout/auto-stop guards.
+    /* Create and store engine in state. Batch size honored as selected (1..=15,
+    matching the frontend stepper's BATCH_MAX): the orchestrator's per-request-type
+    timeout (SCREENING_TIMEOUT_SECS = 120) and the screening-engine auto-stop
+    guards (consecutive transient failures, total timeouts) surface slow/hung LLM
+    providers as actionable errors, so we do NOT silently override the user's
+    selection. A previous v8.6 change clamped this to 5 on the assumption that
+    large batches were the root cause of screening hangs; that assumption was
+    unproven, and the clamp masked the real per-batch behavior from the
+    `[screening:diag]` instrumentation. The clamp is reverted so diagnostics show
+    the true cost of the user's selected batch size. */
     let effective_batch_size = batch_size.unwrap_or(1).clamp(1, 15) as usize;
     let engine = Arc::new(ScreeningEngine::with_batch_size(effective_batch_size));
     let initial_progress = {
@@ -256,29 +251,28 @@ pub async fn start_screening(
         let db = app_handle.state::<DbState>();
         let screening = app_handle.state::<ScreeningState>();
 
-        // Tier 3: pre-screening translation step (decision b). When
-        // `auto_translate` is enabled, enqueue `MetadataOnly` translation
-        // jobs for unscreened working articles with a non-English `language`
-        // and wait for all to finish BEFORE screening runs, so the screening
-        // LLM reads English text. Emits `screening:progress` events with a
-        // translation sub-stage so the existing progress UI shows
-        // "Translating N/M articles..." before the normal screening stage.
+        /* Tier 3: pre-screening translation step (decision b). When
+        `auto_translate` is enabled, enqueue `MetadataOnly` translation
+        jobs for unscreened working articles with a non-English `language`
+        and wait for all to finish BEFORE screening runs, so the screening
+        LLM reads English text. Emits `screening:progress` events with a
+        translation sub-stage so the progress UI shows
+        "Translating N/M articles..." before the screening stage. */
         run_pre_screening_translation(&app_handle, &db.conn).await;
 
-        // Tier 3: for enhanced / two-stage, backfill chunks for any article
-        // with full text but no chunks (pure CPU, no LLM). Runs here in the
-        // background task - not in the IPC handler - so the DbState mutex is
-        // held only per-article during chunk write, not for the whole pass,
-        // and the UI stays responsive. `force=false` so already-chunked
-        // articles are skipped (the Settings "Rebuild" button uses `force=true`).
-        //
-        // DIAGNOSTICS (Phase B instrumentation): the chunk pass now emits
-        // `phase = "preparing:chunking"` progress events + `[screening:diag]`
-        // log lines per article so the UI + stderr show the backfill advancing
-        // instead of a silent 0% freeze. The lock pattern is UNCHANGED -
-        // `db.conn.lock()` is still held across the whole pass exactly as
-        // today; the callback only emits events between articles. Layer 2
-        // (deferred) will release the lock per article.
+        /* Tier 3: for enhanced / two-stage, backfill chunks for any article
+        with full text but no chunks (pure CPU, no LLM). Runs here in the
+        background task - not in the IPC handler - so the DbState mutex is
+        held only per-article during chunk write, not for the whole pass,
+        and the UI stays responsive. `force=false` so already-chunked
+        articles are skipped (the Settings "Rebuild" button uses `force=true`).
+
+        DIAGNOSTICS (Phase B instrumentation): the chunk pass emits
+        `phase = "preparing:chunking"` progress events + `[screening:diag]`
+        log lines per article. The lock pattern is UNCHANGED -
+        `db.conn.lock()` is held across the whole pass exactly as today;
+        the callback only emits events between articles. Layer 2
+        (deferred) will release the lock per article. */
         if screening_config.mode != ScreeningMode::Abstract {
             // Set the prep phase on the engine progress + emit, so the bar
             // shows "Preparing: extracting full-text chunks..." before the
@@ -483,15 +477,14 @@ pub fn get_full_text_article_count(db_state: State<'_, DbState>) -> Result<i64, 
     chunk_repo::count_articles_with_full_text(&conn)
 }
 
-/// Screen a single article by its UUID. Powers the per-article "Screen" button
-/// in the article detail panel.
+/// Screen a single article by its UUID. Powers the per-article "Screen" button.
 ///
 /// Unlike `start_screening` (which screens the next unscreened working article
-/// in `sequence_id` order), this command targets a specific article ID. The
-/// engine fetches that exact article via
-/// `get_unscreened_working_article_by_id`, builds a single-article prompt,
-/// sends one LLM call, and writes back the decision (tags/labels/audit/biblio
-/// flags) - identical to the batch path but scoped to one article.
+/// in `sequence_id` order), this targets a specific article ID. The engine
+/// fetches that exact article via `get_unscreened_working_article_by_id`, builds
+/// a single-article prompt, sends one LLM call, and writes back the decision
+/// (tags/labels/audit/biblio flags) - identical to the batch path but scoped to
+/// one article.
 ///
 /// Respects the active screening mode (abstract / enhanced / two-stage):
 /// Enhanced mode retrieves criteria-matched full-text chunks for the article
@@ -499,9 +492,8 @@ pub fn get_full_text_article_count(db_state: State<'_, DbState>) -> Result<i64, 
 /// band check and may fire a stage-2 full-text pass.
 ///
 /// Emits `screening:progress` events with `currentArticleTitles: [article.title]`
-/// so the frontend spinner on the "Screen" button (and any table-row spinners)
-/// drives off the same global progress store as batch screening. The store
-/// already invalidates the articles + audit stores when the run completes.
+/// so the frontend spinner drives off the same global progress store as batch
+/// screening.
 ///
 /// Uses the same concurrent-start guard as `start_screening`: if a batch run is
 /// already in progress, this command returns the current progress instead of
@@ -675,12 +667,10 @@ pub struct TranslationSubStage {
 /// When `auto_translate` is enabled, enqueues `MetadataOnly` translation jobs
 /// for unscreened working articles with a non-English `language` and waits for
 /// all to finish BEFORE the screening engine runs, so the screening LLM reads
-/// English text. Emits `screening:translation-progress` events with a
-/// per-article counter so the existing progress UI can surface
-/// "Translating 3/12 articles...".
+/// English text. Emits `screening:translation-progress` events.
 ///
-/// Skipped entirely when `auto_translate` is `false` (the new opt-in default),
-/// so screening starts immediately and reads whatever text is present
+/// Skipped entirely when `auto_translate` is `false` (the opt-in default):
+/// screening starts immediately and reads whatever text is present
 /// (original or previously-translated).
 async fn run_pre_screening_translation(
     app: &tauri::AppHandle,

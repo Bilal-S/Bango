@@ -13,7 +13,7 @@ use crate::export::project;
 use crate::export::ris_writer::{articles_to_ris, RisExportArticle};
 use crate::wiki::storage;
 
-/// Helper: convert articles into RIS string, resolving criteria labels.
+/// Convert articles to RIS string, resolving criteria labels.
 fn articles_to_ris_export(
     articles: &[crate::models::article::Article],
     criteria_map: &HashMap<String, String>,
@@ -88,17 +88,9 @@ pub fn export_ris_for_tab_to_file(
     std::fs::write(&path, content).map_err(AppError::Io)
 }
 
-/// Export a specific set of articles (by UUID) to an RIS file at the given
-/// path. The sole entry point for the "Export Selected" bulk action in the
-/// Article list bulk action bar - distinct from the toolbar Export, which
-/// exports by tab/status. The RIS bytes are byte-identical to what
-/// `export_ris_for_tab_to_file` would produce for the same article set (same
-/// `articles_to_ris_export` pipeline), so downstream reference managers see no
-/// difference between a tab export and a selected export of the same rows.
-///
-/// `ids` comes directly from the frontend's `Set<string>` of checked rows.
-/// Empty `ids` is a no-op success (the bar is only visible when at least one
-/// row is selected, so this is defense-in-depth).
+/// Export articles by UUID to an RIS file. Byte-identical to tab export for the
+/// same article set (same `articles_to_ris_export` pipeline). Empty `ids` is a
+/// no-op success (defense-in-depth: the bar only shows when ≥1 row is selected).
 #[tauri::command]
 pub fn export_ris_for_ids_to_file(
     db_state: State<'_, DbState>,
@@ -149,12 +141,9 @@ pub async fn import_project_backup(
     match &result {
         Ok(()) => {
             eprintln!("[import_project_backup] Import succeeded");
-            // Imported articles affect bibliometrics - mark the corpus as stale so
-            // the frontend auto-runs `biblio_normalize` when includedCount > 0.
-            // This mirrors the behavior of RIS import (`commands::import`) and
-            // status-change commands, which all call `mark_biblio_needs_refresh`.
-            // Non-fatal: if the settings write fails, the user can still trigger
-            // normalization manually from the bibliometrics dashboard.
+            /* Mark the bibliometrics corpus as stale after import, mirroring
+            RIS import + status-change commands. Non-fatal: the user can
+            still trigger normalization manually. */
             crate::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
         }
         Err(e) => eprintln!("[import_project_backup] Import failed: {:?}", e),
@@ -175,61 +164,45 @@ pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> 
     std::fs::write(path, bytes).map_err(AppError::Io)
 }
 
-/// Reset the project: rebuild the DB schema (dropping all user tables), delete
-/// the on-disk wiki-root directory, and `VACUUM` the database file so the freed
-/// pages are returned to the filesystem. `journal_index` is preserved by
-/// `rebuild_schema`. The wiki root must be resolved BEFORE the schema rebuild
-/// because `app_settings` (which holds `storage_root` and the optional
-/// `wiki_root_dir` override) is dropped by `rebuild_schema`.
+/// Rebuild the DB schema (drops all user tables), delete the on-disk wiki-root
+/// directory, and VACUUM the database file. `journal_index` is preserved.
+/// Wiki root MUST resolve before `rebuild_schema` because `app_settings` is
+/// dropped by it. Wiki deletion + VACUUM are non-fatal (stderr-logged); DB
+/// reset already committed, so cleanup errors don't undo it.
 ///
-/// Wiki deletion and VACUUM are both **non-fatal**: if resolving/deleting the
-/// wiki root or vacuuming fails, the DB reset still succeeds (the error is
-/// logged to stderr). The user's data has already been wiped by
-/// `rebuild_schema`, so surfacing a hard error for cleanup work would be
-/// misleading. The user can delete the wiki directory manually if needed.
+/// VACUUM runs post-rebuild to reclaim free pages from dropped tables (SQLite
+/// never auto-shrinks). The WAL is check-pointed first so both `bango.db` and
+/// `bango.db-wal` shrink.
 ///
-/// VACUUM runs after the schema rebuild so it reclaims the free pages left by
-/// the dropped tables. Without it, `bango.db` stays at its pre-reset size even
-/// though it is logically empty (SQLite never auto-shrinks the file). The
-/// helper also checkpoints the WAL (`bango.db-wal`) so both on-disk files
-/// shrink.
+/// Post-rebuild: `journal_index` is reloaded from the bundled portal DB if
+/// empty (heals Windows startup auto-load failures). Blocking: load failure
+/// writes an audit error and returns `Err` so the frontend Toasts, but does
+/// NOT undo the reset (the schema rebuild already committed).
 ///
-/// After the rebuild, `journal_index` is checked and reloaded from the bundled
-/// portal DB if empty (transparently heals the case where the startup auto-load
-/// silently failed on Windows). This reload is **blocking**: the schema rebuild
-/// has already committed, so a load failure does NOT undo the reset, but the
-/// error is written to the audit table and returned to the frontend so the user
-/// sees a Toast and knows journal matching is degraded.
-///
-/// Extracted from the `reset_project` command wrapper so it can be tested with
-/// a plain `&mut Connection` (no Tauri state required). The journal-index
-/// post-check is in the command wrapper because it needs the `AppHandle` to
-/// resolve the bundled resource path.
+/// Extracted from the command wrapper for testability with a plain
+/// `&mut Connection`. The post-check needs `AppHandle` (bundled resource path).
 pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppError> {
-    // 1. Resolve the wiki root while `app_settings` is still available.
-    //    `resolve_root` also ensures the dir exists (creating an empty one if
-    //    missing), which is harmless: we delete it next.
+    /* Resolve the wiki root while `app_settings` is still available.
+    `resolve_root` also ensures the dir exists (harmless: we delete it next). */
     let wiki_root = storage::resolve_root(conn).map_err(|e| {
         eprintln!("[reset_project] failed to resolve wiki root: {e}");
         e
     });
 
-    // 2. Rebuild the DB schema (drops all user tables + wiki_pages_fts,
-    //    resets user_version, re-runs migrations). journal_index is preserved.
+    /* Rebuild DB schema (drops all user tables + wiki_pages_fts, resets
+    user_version, re-runs migrations). journal_index is preserved. */
     rebuild::rebuild_schema(conn)?;
 
-    // 3. Delete the on-disk wiki-root directory (non-fatal on failure).
+    // Delete the on-disk wiki-root directory (non-fatal on failure).
     if let Ok(root) = &wiki_root {
         if let Err(e) = storage::delete_wiki_root(root) {
             eprintln!("[reset_project] failed to delete wiki root '{}': {e}", root.display());
         }
     }
 
-    // 4. VACUUM the database so the freed pages are returned to the filesystem.
-    //    Non-fatal: the user's data is already wiped by `rebuild_schema`, so a
-    //    VACUUM failure (e.g. transient disk-space issue during the file
-    //    rebuild) is logged but does not surface as a hard error. The helper
-    //    checkpoints the WAL first so both `bango.db` and `bango.db-wal` shrink.
+    /* VACUUM so freed pages return to the filesystem. Non-fatal: data already
+    wiped, so a VACUUM failure is stderr-logged but not a hard error.
+    Checkpoints the WAL first so both `bango.db` and `bango.db-wal` shrink. */
     if let Err(e) = crate::db::maintenance::vacuum_database(conn) {
         eprintln!("[reset_project] failed to vacuum database after reset: {e}");
     }
@@ -243,11 +216,10 @@ pub fn reset_project(app: tauri::AppHandle, db_state: State<'_, DbState>) -> Res
 
     reset_project_inner(&mut conn)?;
 
-    // Post-reset: ensure the journal_index is populated. If the startup
-    // auto-load silently failed (e.g. a Windows `resource_dir()` resolution
-    // bug), `rebuild_schema` preserved an empty table. Reload it now so the
-    // user starts the fresh project with a working journal index. Blocking;
-    // a failure writes an audit error and returns Err so the frontend Toasts.
+    /* Post-reset: ensure journal_index populated. Heals the case where startup
+    auto-load silently failed (e.g. Windows `resource_dir()` bug) and
+    `rebuild_schema` preserved an empty table. Blocking; failure returns `Err`
+    (audit + Toast). */
     if let Err(e) = crate::ensure_journal_index_populated(&conn, &app) {
         let msg = format!("Failed to reload journal index after reset: {e}");
         eprintln!("[reset_project] {msg}");

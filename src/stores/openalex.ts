@@ -26,14 +26,7 @@ export const useOpenAlexStore = defineStore('openalex', () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const smartSearchLoading = ref(false);
-  /**
-   * Reactive "Smart Search is available" gate, derived from the canonical
-   * LLM-configured composable. Smart Search requires an LLM to generate the
-   * OpenAlex Boolean query from aims + criteria, so this mirrors the same
-   * gate every other LLM-dependent feature uses. Replaces the former one-shot
-   * `has_llm_config` IPC probe (`checkSmartSearchAvailability`) which went
-   * stale on Settings edits.
-   */
+  /** Reactive Smart Search gate derived from canonical LLM-configured composable. */
   const smartSearchAvailable = useLlmConfigured();
   const hasSearched = ref(false);
 

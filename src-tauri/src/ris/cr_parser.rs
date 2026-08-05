@@ -1,28 +1,14 @@
 //! Parser for Web of Science `CR` (Cited References) tag values.
 //!
-//! WoS CR format (from BibTeX exports):
-//! `Author, Year, Journal/Title, [Vvol], [Ppage], [DOI ...].`
-//!
-//! Examples from actual WoS BibTeX exports:
-//! - Standard: `Alexander HD, 2017, FOREST ECOL MANAG, V396, P35, DOI 10.1016/j.foreco.2017.04.005.`
-//! - DOI array: `Alexander H. D., 2021, {*}{*}DATA OBJECT{*}{*}, DOI {[}10.6073/pasta/..., DOI 10.6073/PASTA/...].`
-//! - Book: `{[}Anonymous], 1978, Canadian System of Soil Classification.`
-//! - Minimal: `Barton Kamil, 2024, CRAN.`
-//! - No year: `Melvin A. M, ECISYSTEMS, V18, P1472.`
-//!
-//! Key parsing rules:
-//! - Each line is a separate reference ending with '.'
-//! - `{[}` and `]` are BibTeX escapes for `[` and `]` (used in DOI arrays)
-//! - `{*}` markers denote special formatting (stripped)
-//! - Minimum required: author and (year or identifiable fields)
-//! - 3rd field: ALL CAPS → journal, Mixed case → title/book
+//! Format: `Author, Year, Journal/Title, [Vvol], [Ppage], [DOI ...].`
+//! - `{[}`/`]` = BibTeX bracket escapes; `{*}` = formatting markers (stripped).
+//! - 3rd field: ALL CAPS → journal; mixed case → title/book.
+//! - Each line = one reference ending with `'.'`.
+//! - Minimum required: author + (year or identifiable fields).
 
 use crate::models::reference::NewReferencePaper;
 
-/// Clean WoS BibTeX escaping artifacts from a CR line.
-/// - `{[}` → `[`  (escaped bracket from WoS)
-/// - `{*}` → removed (special formatting marker)
-/// - Trailing `.` or `].` → removed
+/// Strips WoS escaping: `{[}` → `[`, `{*}` → removed, trailing `.`/`].` → removed.
 #[must_use]
 pub fn clean_wos_cr_line(line: &str) -> String {
     let mut s = line.trim().to_string();
@@ -46,12 +32,8 @@ pub fn clean_wos_cr_line(line: &str) -> String {
     s
 }
 
-/// Extract the first DOI from a potentially bracketed DOI array.
-/// Input examples:
-/// - `DOI 10.1016/j.foreco.2017.04.005` → `10.1016/j.foreco.2017.04.005`
-/// - `DOI {[}10.6073/pasta/7367d64e999c830a508a7e012ad0824c, DOI 10.6073/PASTA/7367D64E999C830A508A7E012AD0824C]`
-///   → `10.6073/pasta/7367d64e999c830a508a7e012ad0824c`
-/// - `10.1126/science.abf3903` → `10.1126/science.abf3903`
+/// Extracts the first DOI from a potentially bracketed DOI array.
+/// e.g. `DOI 10.1016/j.foreco.2017.04.005` → `10.1016/j.foreco.2017.04.005`
 #[must_use]
 pub fn extract_doi(text: &str) -> Option<String> {
     let text = text.trim();
@@ -101,9 +83,7 @@ pub fn looks_like_journal(text: &str) -> bool {
     (upper as f64 / alpha as f64) > 0.6
 }
 
-/// Parse a single CR line into a NewReferencePaper.
-/// Handles WoS BibTeX format with all its quirks.
-/// Returns None if the line is too short to be meaningful.
+/// Parse a CR line into a `NewReferencePaper`. Returns `None` if malformed.
 pub fn parse_cr_line(cr_line: &str) -> Option<NewReferencePaper> {
     let cleaned = clean_wos_cr_line(cr_line);
 

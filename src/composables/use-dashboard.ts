@@ -39,10 +39,9 @@ interface GroupedAuditEntry {
 export const initialDataLoaded = ref(false);
 
 /**
- * Dashboard CTA button state. The single primary button on the dashboard
- * adapts to the research workflow stage, in priority order:
- *   1. `connect_llm`    - LLM not configured yet (gate for everything else)
- *   2. `start_screening` - LLM ok AND working articles awaiting screening
+ * Dashboard CTA button state. Priority order:
+ *   1. `connect_llm`    - LLM not configured
+ *   2. `start_screening` - LLM ok AND working articles await screening
  *   3. `build_wiki`     - LLM ok, screening done, wiki not yet built
  *   4. `review_wiki`    - LLM ok, screening done, wiki exists
  */
@@ -67,10 +66,7 @@ export function useDashboard() {
   // ── CTA signals (fetched in refresh(), non-fatal) ───────────────────────
   /**
    * Reactive "is the LLM configured?" gate sourced from the canonical Pinia
-   * store via the shared `useLlmConfigured` composable. Replaces the former
-   * one-shot `has_llm_config` IPC probe so the dashboard CTA reacts instantly
-   * to Settings edits (e.g. clearing the API key flips the CTA back to
-   * "Connect LLM" without a manual refresh).
+   * store. Replaces the one-shot `has_llm_config` IPC probe.
    */
   const llmConfigured = useLlmConfigured();
   /**
@@ -139,8 +135,7 @@ export function useDashboard() {
   const hasArticles = computed(() => articlesStore.articles.length > 0);
 
   /**
-   * Resolved dashboard CTA state (priority order - see DashboardCtaState docs).
-   * Pure computed over `llmConfigured`, `counts.working`, and `wikiBuilt`.
+   * Resolved CTA state (pure computed over `llmConfigured`, `counts.working`, `wikiBuilt`).
    */
   const ctaState = computed<DashboardCtaState>(() => {
     if (!llmConfigured.value) return 'connect_llm';
@@ -149,14 +144,7 @@ export function useDashboard() {
     return 'review_wiki';
   });
 
-  /**
-   * The CTA button manifest (icon + label + route) for the current state.
-   * Lookup map keyed by DashboardCtaState; icons are reused from the existing
-   * codebase (no new Material Symbols added).
-   *   - `link`           - tag-label-management, reference panels, help-tab-reference
-   *   - `play_arrow`     - existing dashboard CTA
-   *   - `local_library`  - wiki icon (chat-view, nav-sidebar, help-tab-reference)
-   */
+  /** CTA button manifest (icon + label + route) by state. */
   const CTA_BY_STATE: Record<DashboardCtaState, DashboardCta> = {
     connect_llm: { icon: 'link', label: 'Connect LLM', route: '/settings', state: 'connect_llm' },
     start_screening: {
@@ -185,10 +173,7 @@ export function useDashboard() {
   const hasMoreActivities = computed(() => auditStore.hasMore);
   const error = computed(() => articlesStore.error);
 
-  /** Activity feed - the backend merges and sorts in one query; a
-   *  client-side sort is applied as a defense-in-depth safety net so
-   *  the display order is always newest-first regardless of the
-   *  underlying data order. */
+  /** Activity feed - client-side sort as defense-in-depth ensuring newest-first. */
   const groupedAudit = computed<GroupedAuditEntry[]>(() => {
     const items: GroupedAuditEntry[] = auditStore.feed.map((entry) => ({
       id: entry.id,
@@ -210,14 +195,8 @@ export function useDashboard() {
   }
 
   /**
-   * Force a full refresh of articles + audit + dashboard-CTA signals from the DB.
-   *
-   * The wiki CTA signal (`wiki_get_status`) is fetched in parallel with the
-   * article/audit loads. The LLM-configured signal is NOT probed here anymore:
-   * it is a reactive `ComputedRef` from `useLlmConfigured()` that tracks the
-   * Pinia store, so it updates instantly on Settings edits without a refresh.
-   * The wiki probe is non-fatal: on error it defaults to `false`, which
-   * correctly falls the button back to the `build_wiki` CTA.
+   * Full refresh of articles + audit + wiki CTA signals from the DB.
+   * The LLM-configured signal is reactive (Pinia store), not probed here.
    */
   async function refresh(): Promise<void> {
     articlesStore.invalidate();
@@ -230,11 +209,7 @@ export function useDashboard() {
     initialDataLoaded.value = true;
   }
 
-  /**
-   * Non-fatal `wiki_get_status` probe. Returns true only when the wiki is
-   * initialized AND has at least one generated page (the same readiness test
-   * `chat-view.vue` uses for the wiki-toggle visibility).
-   */
+  /** Non-fatal wiki readiness probe. Returns true when initialized + has pages. */
   async function probeWikiBuilt(): Promise<boolean> {
     try {
       const status = await tauriCommand<WikiStatus>('wiki_get_status');

@@ -1,17 +1,7 @@
-/**
- * Share Bango - pure helpers for composing share messages and platform URLs.
- *
- * Platform-aware composition:
- * - X / WhatsApp / Bluesky receive a single `text` param with the URL inline.
- * - Telegram / Reddit / LinkedIn / Email receive the URL as a separate param,
- *   so the message body omits the bare URL to avoid duplication.
- *
- * Attribution:
- * - Windows Store URL carries UTM tags (`utm_source=<platform>`,
- *   `utm_medium=app_share`, `utm_campaign=bango_app_share`) so in-app shares
- *   are distinguishable from landing-page clicks. The GitHub URL is bare
- *   (no attribution infrastructure on that side).
- */
+/* Share Bango: pure helpers for composing share messages and platform URLs.
+ * Platform-aware: X/WhatsApp/Bluesky receive URL inline in `text`;
+ * Telegram/Reddit/LinkedIn/Email receive URL as separate param.
+ * Windows Store URL carries UTM tags; GitHub URL is bare. */
 
 import { isWindowsPlatform } from './platform';
 
@@ -43,10 +33,7 @@ const SHARE_MEDIUM = 'app_share';
 const WINDOWS_STORE_BASE = 'https://apps.microsoft.com/detail/9np2bhgxt8h3';
 export const GITHUB_URL = 'https://github.com/Bilal-S/Bango';
 
-/**
- * Metadata for every supported share platform. Order is preserved in the
- * dropdown so the most reliable platforms appear first.
- */
+/** Metadata for supported share platforms, ordered by reliability. */
 export const SHARE_PLATFORMS: SharePlatformInfo[] = [
   {
     id: 'x',
@@ -99,7 +86,7 @@ export const SHARE_PLATFORMS: SharePlatformInfo[] = [
   },
 ];
 
-/** Look up platform metadata by id; throws if unknown (defensive). */
+/** Look up platform metadata by id. Throws if unknown (defensive). */
 export function getPlatformInfo(id: SharePlatformId): SharePlatformInfo {
   const info = SHARE_PLATFORMS.find((p) => p.id === id);
   if (!info) {
@@ -108,14 +95,7 @@ export function getPlatformInfo(id: SharePlatformId): SharePlatformInfo {
   return info;
 }
 
-/**
- * Returns the share target link for the active platform:
- * - Windows: Microsoft Store URL with per-platform UTM attribution.
- * - macOS / Linux / other: bare GitHub project URL.
- *
- * The UTM `utm_source` reflects the chosen platform so store-side analytics can
- * distinguish a share sourced from X vs. LinkedIn vs. email.
- */
+/** Share target link: Windows Store (with UTM) or GitHub (bare). */
 export function getShareLink(platform: SharePlatformId): string {
   if (isWindowsPlatform()) {
     const params = new URLSearchParams({
@@ -130,14 +110,8 @@ export function getShareLink(platform: SharePlatformId): string {
   return GITHUB_URL;
 }
 
-/**
- * Composes the message body for a given platform.
- *
- * For platforms where the URL is passed as a dedicated param
- * (`supportsSeparateUrl === true`), the body omits the bare URL to avoid
- * duplication. For platforms that only accept a single `text` param, the URL
- * is appended inline so the recipient can follow it.
- */
+/** Compose message body for a platform. Omits bare URL when platform supports
+ *  separate URL param; appends URL inline otherwise. */
 export function composeMessage(platform: SharePlatformId): string {
   const info = getPlatformInfo(platform);
   if (info.supportsSeparateUrl) {
@@ -147,12 +121,8 @@ export function composeMessage(platform: SharePlatformId): string {
   return `${SHARE_TITLE}\n\n${SHARE_BODY}\n\n${link}`;
 }
 
-/**
- * Builds the encoded share URL for the given platform, message, and link.
- *
- * `message` and `url` are passed already-composed so the dialog can hand the
- * user's textarea edits straight through without re-composing underneath them.
- */
+/** Build encoded share URL for a platform. `message` and `url` are pre-composed
+ *  so the dialog can pass user-edited text without re-composing underneath. */
 export function getShareUrl(platform: SharePlatformId, message: string, url: string): string {
   const encodedMsg = encodeURIComponent(message);
   const encodedUrl = encodeURIComponent(url);

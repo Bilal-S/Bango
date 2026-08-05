@@ -1,13 +1,10 @@
-//! LLM prompt builders for the Citation Finder (`citation_finder/AGENTS.md`).
+//! LLM prompt builders for the Citation Finder.
 //!
-//! Pure functions: no I/O, no DB, no orchestrator. `#[must_use]` so they are
-//! unit-testable in isolation.
-//!
-//! Two prompt shapes:
-//! - **Whole-block:** one claim (the whole pasted text), one or more
-//!   candidates, one classification per candidate.
+//! Pure `#[must_use]` functions, no I/O. Two prompt shapes:
+//! - **Whole-block:** one claim (the whole pasted text), candidates with best
+//!   passages, one classification per candidate.
 //! - **Per-statement:** multiple claims, candidates with per-claim passages;
-//!   the LLM returns one classification per `(article, claim)` pair.
+//!   LLM returns one classification per `(article, claim)` pair.
 
 use std::collections::HashMap;
 
@@ -158,52 +155,38 @@ fn format_candidates_section(
 
 /// One LLM output element (deserialized from the JSON array).
 ///
-/// **Lenient field-name contract** (`citation_finder/AGENTS.md`): the prompt
-/// requests snake_case field names (`article_id`, `relevance_explanation`,
-/// `misrepresents_source`), but LLMs are unreliable about casing and
-/// occasionally emit camelCase regardless. Every field accepts BOTH shapes
-/// via `#[serde(alias = "...")]`. The canonical (snake_case) name is the
-/// primary path; the camelCase alias is the tolerance path. This struct is
-/// `Deserialize`-only (never serialized to the frontend - the IPC-facing
-/// types are `CitationMatch`/`CitationResult`, which `Serialize`
-/// independently with their own `camelCase`), so dropping the struct-level
-/// `rename_all = "camelCase"` has zero IPC impact.
+/// **Lenient field-name contract**: the prompt requests snake_case, but LLMs
+/// are unreliable about casing. Every field accepts BOTH shapes via
+/// `#[serde(alias = "...")]`. This struct is `Deserialize`-only (never
+/// serialized to the frontend — the IPC types `CitationMatch`/`CitationResult`
+/// serialize independently with their own `camelCase`).
 ///
 /// `classification` + `relevance_explanation` carry `#[serde(default)]`
-/// (→ empty string). Downstream, `parse_classification("")` returns `None`
-/// and drops the entry, so a missing classification is naturally filtered
-/// rather than crashing the parse. `article_id` stays required at the field
-/// level, but `parse_citation_outputs` isolates per-element faults so a
-/// missing `article_id` on one element costs only that element (not the
-/// whole batch).
+/// (→ empty string). `parse_classification("")` returns `None` and drops the
+/// entry, so a missing classification is naturally filtered. `article_id`
+/// stays required, but `parse_citation_outputs` isolates per-element faults
+/// so one bad element costs only that element.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct CitationLlmOutput {
     #[serde(alias = "articleId")]
     pub article_id: String,
-    /// Empty string in whole-block mode; the claim text in per-statement mode.
-    /// Note: the lookup in `search::merge_outputs` normalizes the claim key
-    /// (trim + collapse whitespace + lowercase) before comparing, so light LLM
-    /// reformatting of the claim text does not cause a score-lookup miss.
+    /// Empty in whole-block mode; claim text in per-statement mode. The
+    /// lookup in `search::merge_outputs` normalizes before comparing,
+    /// so light LLM reformatting doesn't cause a score-lookup miss.
     #[serde(default, alias = "claimText")]
     pub claim: String,
     #[serde(default)]
     pub classification: String,
     #[serde(default, alias = "relevanceExplanation", alias = "explanation")]
     pub relevance_explanation: String,
-    /// `true` = passage misrepresents the source. The `fairlyParaphrased`
-    /// alias keeps deserialization backward-compatible with a stale prompt
-    /// template cached mid-rollout; `misrepresentsSource` covers the
-    /// camelCase variant some LLMs emit.
+    /// `true` = passage misrepresents the source. `fairlyParaphrased` alias
+    /// preserves backward-compat with a stale prompt template cached mid-rollout.
     #[serde(default, alias = "fairlyParaphrased", alias = "misrepresentsSource")]
     pub misrepresents_source: bool,
-    /// 1-3 EXACT verbatim sentences from the passage that justify the
-    /// classification. The prompt instructs the LLM to copy them
-    /// character-for-character; `ground_quotes` filters out any that are not
-    /// actually substrings of the passage (LLMs sometimes paraphrase despite
-    /// the instruction). The survivors populate
-    /// `CitationMatch.highlighted_sentences` for the UI's progressive-
-    /// disclosure rendering (collapsed = highlighted snippets; expanded =
-    /// full passage with inline `<mark>` highlights).
+    /// 1-3 EXACT verbatim sentences from the passage. The prompt instructs the
+    /// LLM to copy them character-for-character; `ground_quotes` filters out
+    /// paraphrases via a normalized-substring gate. Survivors populate
+    /// `CitationMatch.highlighted_sentences` for progressive-disclosure UI.
     #[serde(default, alias = "justifyingSentences")]
     pub justifying_sentences: Vec<String>,
 }
@@ -220,23 +203,16 @@ pub fn parse_classification(s: &str) -> Option<MatchClassification> {
     }
 }
 
-/// Grounding gate for LLM-extracted "justifying sentences" (quotes).
+/// Grounding gate: filters the LLM's `justifying_sentences` to only those
+/// that actually appear as substrings of `source` (the matched passage).
 ///
-/// LLMs are told to copy sentences verbatim from the passage, but they
-/// frequently paraphrase, merge, or invent. Displaying an ungrounded
-/// sentence as a "quote" would fabricate text the paper does not contain,
-/// so each candidate quote MUST pass a normalized-substring check against
-/// the real `source` (the matched passage) before it is shown.
+/// LLMs frequently paraphrase despite being told to copy verbatim. Displaying
+/// an ungrounded sentence as a "quote" would fabricate text the paper does
+/// not contain, so each quote MUST pass a normalized-substring check
+/// (lowercase + collapse whitespace + trim).
 ///
-/// Normalization: lowercase + collapse internal whitespace runs to a single
-/// space + trim. This makes the check robust to case differences and the
-/// irregular whitespace from PDF extraction while still rejecting paraphrases
-/// / merges / inventions (those change the word sequence, not just the
-/// whitespace).
-///
-/// Returns the grounded quotes in their original (un-normalized) form, in
-/// the order they first appear in `source`. Deduplicates exact dupes. Pure
-/// `#[must_use]`.
+/// Returns grounded quotes in their original form, ordered by first
+/// appearance in `source`. Deduplicates exact dupes. Pure `#[must_use]`.
 #[must_use]
 pub fn ground_quotes(quotes: &[String], source: &str) -> Vec<String> {
     let norm_source = normalize_for_grounding(source);
@@ -294,38 +270,30 @@ const WRAPPER_KEYS: &[&str] = &["results", "citations", "data", "matches", "item
 
 /// Lenient parser for the Citation Finder LLM's JSON response.
 ///
-/// Three layers of resilience beyond a bare `serde_json::from_str::<Vec<_>>`:
+/// Three layers of resilience:
+/// 1. **Object-wrapper tolerance**: accepts a bare array OR `{…}` with one of
+///    the known wrapper keys (`results`, `citations`, `data`, `matches`,
+///    `items`, `output`).
+/// 2. **Per-element fault isolation**: each element is deserialized
+///    independently; one bad element costs only that element (previously a
+///    single bad entry threw away every good result — the exact failure mode
+///    of the `missing field articleId` bug).
+/// 3. **Field-name aliases**: handled at the struct level — both snake_case
+///    and camelCase parse.
 ///
-/// 1. **Object-wrapper tolerance**: accepts a bare JSON array OR `{...}`
-///    with one of the known wrapper keys (`results`, `citations`, `data`,
-///    `matches`, `items`, `output`). The system prompt says "Return ONLY a
-///    JSON array", but LLMs sometimes wrap anyway.
-/// 2. **Per-element fault isolation**: each array element is deserialized
-///    independently. One malformed element (missing field, typo'd key,
-///    nested object where a string was expected) costs only that element -
-///    the rest of the batch survives. Previously a single bad element threw
-///    away every good result alongside it (the exact failure mode in the
-///    `missing field articleId` bug report: the whole response was valid
-///    except that serde wanted camelCase while the prompt asked for
-///    snake_case, so every element failed identically).
-/// 3. **Field-name aliases**: handled at the struct level - both snake_case
-///    (what the prompt asks for) and camelCase (what some LLMs emit) parse.
+/// # Errors
 ///
-/// **Error contract**: if zero elements parse successfully, the original
-/// `serde_json::Error` is returned so genuine LLM failures (total garbage,
-/// empty response, unknown wrapper key) surface rather than being masked as
-/// an empty result. A successfully-parsed empty array (`[]`) returns
-/// `Ok(vec![])` (the LLM obeyed the prompt and found no candidates).
-///
-/// Returns `Vec<CitationLlmOutput>`. Pure (no I/O).
+/// Returns the original `serde_json::Error` if ZERO elements parse (genuine
+/// LLM failure — not masked as an empty result). A valid `[]` returns
+/// `Ok(vec![])`. Pure (no I/O).
 pub fn parse_citation_outputs(raw: &str) -> Result<Vec<CitationLlmOutput>, serde_json::Error> {
     // Parse once to a `Value`, then either descend into a wrapper key or use
     // the value directly. This avoids re-parsing per code path.
     let value: serde_json::Value = serde_json::from_str(raw)?;
 
-    // Resolve to the array `Value` (unwrap a known wrapper object if present).
-    // `serde::de::Error` is imported `as _` above so `serde_json::Error::custom`
-    // resolves via trait method dispatch.
+    /* Resolve to the array `Value` (unwrap a known wrapper object if present).
+    `serde::de::Error` is imported `as _` above so `serde_json::Error::custom`
+    resolves via trait method dispatch. */
     let array_value = resolve_array(&value).ok_or_else(|| {
         serde_json::Error::custom(
             "expected a JSON array or an object with one of the keys: \
@@ -341,10 +309,9 @@ pub fn parse_citation_outputs(raw: &str) -> Result<Vec<CitationLlmOutput>, serde
         return Ok(Vec::new());
     }
 
-    // Per-element fault isolation: deserialize each element independently,
-    // keep successes, skip failures. Track the first error so that if EVERY
-    // element fails we can surface it (otherwise genuine LLM failures would
-    // be masked as an empty result).
+    /* Per-element fault isolation: deserialize each element independently,
+    keep successes, skip failures. Track the first error so that if EVERY
+    element fails we can surface it. */
     let mut outputs: Vec<CitationLlmOutput> = Vec::with_capacity(array.len());
     let mut first_error: Option<serde_json::Error> = None;
     for element in array {
@@ -356,13 +323,11 @@ pub fn parse_citation_outputs(raw: &str) -> Result<Vec<CitationLlmOutput>, serde
     }
 
     if outputs.is_empty() {
-        // Every element failed - surface the first error so the caller can
-        // report what went wrong instead of silently returning an empty vec.
-        // `first_error` is guaranteed `Some` here because `array` is
-        // non-empty (guarded above) and every element failed, but a
-        // `unwrap_or_else` (not `expect`) avoids the `expect_used` lint and
-        // keeps the impossible `None` arm total (synthetic error instead of
-        // a panic).
+        /* Every element failed — surface the first error so the caller can
+        report what went wrong. `first_error` is guaranteed `Some` here
+        because `array` is non-empty (guarded above) and every element failed.
+        `unwrap_or_else` (not `expect`) avoids the `expect_used` lint and
+        keeps the impossible `None` arm total. */
         Err(first_error.unwrap_or_else(|| {
             serde_json::Error::custom("failed to parse any elements of the JSON array")
         }))

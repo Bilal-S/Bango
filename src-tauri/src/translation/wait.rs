@@ -1,16 +1,8 @@
 //! Event-driven translation-completion waiters.
 //!
-//! Tier 1e + Tier 3 share these helpers so batch-import Phase 3 and the
-//! screening translation pre-step do not poll the DB every 2s per article.
-//!
-//! Two layers:
-//! - `TranslationDoneBus`: a `tokio::sync::broadcast` channel the worker emits
-//!   on after each job finishes (success or failure). One bus is created at
-//!   app startup and managed as Tauri state.
-//! - `wait_for_article_translation(app, db, article_id)`: resolves once the
-//!   article's `translation_status` leaves `'running'`/`'queued'`. Listens to
-//!   the bus AND falls back to a 60s sanity poll so a missed event (e.g. the
-//!   bus buffer dropping under burst load) never deadlocks the caller.
+//! `TranslationDoneBus`: broadcast channel the worker emits on after each job.
+//! `wait_for_article_translation`: resolves when status leaves `running`/`queued`,
+//! listening to the bus + a 60s sanity poll. Missed events never deadlock.
 
 use std::time::Duration;
 
@@ -20,10 +12,8 @@ use tokio::sync::broadcast;
 use crate::db::article_repo;
 use crate::db::connection::lock_conn;
 
-/// The managed-state broadcast bus the worker emits on after each job. The
-/// channel capacity is deliberately small (16): subscribers only need to
-/// observe the *latest* completion, and a full buffer degrades gracefully to
-/// the 60s fallback poll (the bus never blocks the worker).
+/// Managed-state broadcast bus for completion notifications. Capacity 16:
+/// subscribers only need the latest completion; full buffer degrades to 60s poll.
 #[derive(Clone)]
 pub struct TranslationDoneBus {
     tx: broadcast::Sender<String>,
@@ -42,9 +32,7 @@ impl TranslationDoneBus {
         self.tx.subscribe()
     }
 
-    /// Emit a completion notification for `article_id`. Called by the worker
-    /// after each job finishes. Non-fatal: if there are no subscribers the
-    /// send is a no-op (the broadcast channel returns `Err` which we ignore).
+    /// Emit a completion notification for `article_id`. Called by worker after each job.
     pub fn emit_done(&self, article_id: &str) {
         let _ = self.tx.send(article_id.to_string());
     }
@@ -56,26 +44,17 @@ impl Default for TranslationDoneBus {
     }
 }
 
-/// Per-article wait timeout for the sanity-poll fallback. Bounded so a stuck
-/// job does not block the caller indefinitely; the caller proceeds with
-/// whatever text exists (matches the batch-import Phase 3 contract).
+/// Per-article wait timeout for sanity-poll fallback.
 const WAIT_FALLBACK_TIMEOUT_SECS: u64 = 5 * 60;
 
-/// Sanity-poll interval when no event arrives (e.g. the bus buffer dropped).
-/// 60s matches the user-requested "overall polling every 60 seconds as backup
-/// as sanity check" cadence.
+/// Sanity-poll interval when no event arrives.
 const SANITY_POLL_INTERVAL_SECS: u64 = 60;
 
-/// Resolve once `translation_status` for `article_id` leaves `'running'`/
-/// `'queued'`. Returns:
-/// - `Ok(())` if the status becomes `'succeeded'`/`'failed'`/`'none'` or the
-///   article is `is_translated`.
-/// - `Err(msg)` if the article is still queued/running after
-///   [`WAIT_FALLBACK_TIMEOUT_SECS`].
+/// Resolve once translation_status for `article_id` leaves `running`/`queued`.
+/// Returns `Ok(())` on terminal status, `Err(msg)` on timeout.
 ///
-/// Listens to [`TranslationDoneBus`] for prompt notification AND falls back to
-/// a periodic DB poll every `SANITY_POLL_INTERVAL_SECS` seconds so a missed
-/// event never deadlocks the caller.
+/// Listens to `TranslationDoneBus` + periodic DB poll (60s) so missed events
+/// never deadlock.
 pub async fn wait_for_article_translation(
     app: &tauri::AppHandle,
     db: &std::sync::Mutex<rusqlite::Connection>,
@@ -87,7 +66,7 @@ pub async fn wait_for_article_translation(
     let deadline = std::time::Instant::now() + Duration::from_secs(WAIT_FALLBACK_TIMEOUT_SECS);
 
     loop {
-        // Fast path: check the live status first.
+        // Fast path: check live status first.
         if status_is_terminal(db, article_id) {
             eprintln!(
                 "[screening:diag] translation_wait: DONE article_id={article_id} (terminal status)"
@@ -105,7 +84,7 @@ pub async fn wait_for_article_translation(
             ));
         }
 
-        // Wait for either: a bus event, a sanity-poll tick, or the deadline.
+        // Wait for bus event, sanity-poll tick, or deadline.
         let remaining = deadline - now;
         let poll_delay = Duration::from_secs(SANITY_POLL_INTERVAL_SECS).min(remaining);
         let sleep = tokio::time::sleep(poll_delay);
@@ -119,19 +98,16 @@ pub async fn wait_for_article_translation(
                     recv = rx.recv() => {
                         match recv {
                             Ok(done_id) if done_id == article_id => {
-                                // The event matches; loop and verify the status
-                                // is actually terminal (the bus fires on both
-                                // success and failure).
+                                // Event matches; loop to verify status is terminal.
                             }
                             Ok(_) => {
                                 // Different article; keep waiting.
                             }
                             Err(broadcast::error::RecvError::Lagged(_)) => {
-                                // Missed some events; the sanity poll will catch up.
+                                // Missed events; sanity poll catches up.
                             }
                             Err(broadcast::error::RecvError::Closed) => {
-                                // Worker exited; drop the receiver and fall
-                                // back to pure polling for the remainder.
+                                // Worker exited; fall back to pure polling.
                                 tokio::time::sleep(poll_delay).await;
                             }
                         }
@@ -139,7 +115,7 @@ pub async fn wait_for_article_translation(
                 }
             }
             None => {
-                // No bus available (e.g. test harness without managed state).
+                // No bus available (e.g. test harness).
                 sleep.await;
             }
         }

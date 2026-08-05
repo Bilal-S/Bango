@@ -7,24 +7,14 @@ import { getColorScheme } from '@/utils/color';
 import { useTagLabelFilter, type FilterableItem } from '@/composables/use-tag-label-filter';
 import type { TagWithCount, LabelWithCount } from '@/types';
 
-/**
- * Shared panel for the Tags & Labels screen. Renders the header (with the
- * panel-level "Suggest with AI" action), the add-input row, the sticky
- * filter/sort sub-bar, and the chip list with inline edit / color / filter /
- * delete affordances.
+/** Shared panel for Tags & Labels management. Renders header ("Suggest" action),
+ *  add-input row, sticky filter/sort sub-bar, and chip list with inline edit /
+ *  color / delete. Both tag and label panels driven from one implementation;
+ *  `kind` selects chip component, accent, copy, tooltips.
  *
- * Extracted from `tag-label-management.vue` where the tag and label panels
- * were ~140 lines of near-identical markup. Both kinds are driven from one
- * implementation; `kind` selects the chip component, accent color, copy,
- * and tooltips.
- *
- * Filter/sort bar (Option A): a thin sticky sub-bar lives at the top of the
- * scrolling chip area. It carries a filter toggle, two sort buttons
- * (`alpha` = A-Z, `frequency` = 1-100), and a caret that expands/collapses a
- * filter input row (`ClearableInput`). Each panel owns its own state (the two
- * panels do not share filter/sort). State is not persisted. Default sort is
- * alpha A-Z ascending so the initial view matches the historical behavior.
- */
+ *  Filter/sort bar: thin sticky sub-bar at chip area top with filter toggle,
+ *  sort buttons (alpha/frequency), expandable filter input. Each panel owns
+ *  its own state (not shared; not persisted). Default sort: alpha A-Z. */
 
 type Kind = 'tag' | 'label';
 
@@ -80,15 +70,11 @@ const config = computed(() => {
   };
 });
 
-// ── Filter + sort bar state ────────────────────────────────────────────
-// Each panel owns its own instance; state is not persisted. `props.items`
-// flows through as the reactive source so displayItems stays in sync with
-// store mutations (create/rename/delete/merge/suggest). The explicit
-// `<FilterableItem>` type param unifies the `TagWithCount[] | LabelWithCount[]`
-// prop union onto the structural supertype both kinds satisfy (the union
-// itself is not assignable to either concrete array type). The template only
-// reads `id`/`name`/`color`/`articleCount`, all of which live on
-// `FilterableItem`, so the narrower `source` field is correctly irrelevant.
+/* Filter + sort bar: each panel owns its own instance; state not persisted.
+   `items` flows reactively so displayItems stays in sync with store mutations
+   (create/rename/delete/merge/suggest). `FilterableItem` unifies the union
+   type for the structural supertype both TagWithCount and LabelWithCount
+   satisfy. Template only reads id/name/color/articleCount. */
 const filter = useTagLabelFilter<FilterableItem>(() => props.items);
 
 // ── Add input ──────────────────────────────────────────────────────────
@@ -101,10 +87,8 @@ function commitCreate(): void {
   newName.value = '';
 }
 
-// ── Inline edit ────────────────────────────────────────────────────────
-// At most one item is edited at a time. We query the edit input by class
-// within the panel root rather than using a `ref` inside `v-for` (which
-// Vue 3 collects into an array, breaking `.focus()`).
+/* Inline edit: one item at a time. Query input by class within panel root
+   (not `ref` in `v-for`, which Vue 3 collects into an array breaking `.focus()`). */
 const rootEl = ref<HTMLElement | null>(null);
 const editingId = ref<string | null>(null);
 const editingName = ref('');
@@ -142,12 +126,9 @@ function onColorChange(id: string, event: Event): void {
   emit('updateColor', id, input.value);
 }
 
-// ── Delete confirmation ────────────────────────────────────────────────
-// Owns the confirmation-dialog state (mirrors the article-detail-panel
-// pattern). The delete button sets `pendingDelete` instead of emitting
-// immediately; the inline `.dialog` shows the name + a warning. On confirm,
-// emit `delete` and clear the state. This keeps the parent's `onDeleteTag`/
-// `onDeleteLabel` handlers unchanged - the confirmation gate lives here.
+/* Delete confirmation: dialog state owned here (mirrors article-detail-panel).
+   Delete button sets `pendingDelete` instead of emitting immediately; on
+   confirm, emit `delete` + clear state. Parent handlers stay unchanged. */
 interface PendingDelete {
   id: string;
   name: string;

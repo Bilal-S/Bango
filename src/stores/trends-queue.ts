@@ -18,13 +18,8 @@ export const useTrendsQueueStore = defineStore('trendsQueue', () => {
   const collapsed = ref<boolean>(false);
   const revision = ref<number>(0);
 
-  /**
-   * Queue orchestration state.
-   *
-   * When `halted` is true (set after any 429), widgets stop rendering until the
-   * user explicitly retries. Changing keywords/time-range also clears it so a
-   * fresh attempt can proceed.
-   */
+  /** When true (set after 429), widgets stop rendering until manual retry.
+   *  Changing keywords/time-range also clears it. */
   const halted = ref<boolean>(false);
 
   const hasKeywords = computed(() => keywords.value.length > 0);

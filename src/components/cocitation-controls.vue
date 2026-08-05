@@ -393,9 +393,8 @@ function selectFirstSuggestion() {
     searchQuery.value = first.display;
     showSuggestions.value = false;
     emit('locate-paper', first.label);
-    // Clear the live-hide filter so the focus dimming from locate-paper
-    // takes over on the full graph. Without this, the composite `display`
-    // string matches no node attributes and hides every node.
+    /* Clear live-hide filter so focus dimming from locate-paper takes over.
+       Without this the composite `display` string hides every node. */
     clearSearchFilter();
   }
 }
@@ -404,9 +403,8 @@ function selectSuggestion(s: { label: string; display: string; searchText: strin
   searchQuery.value = s.display;
   showSuggestions.value = false;
   emit('locate-paper', s.label);
-  // Clear the live-hide filter so the focus dimming from locate-paper
-  // takes over on the full graph. Without this, the composite `display`
-  // string matches no node attributes and hides every node.
+  /* Clear live-hide filter so focus dimming from locate-paper takes over.
+     Without this the composite `display` string hides every node. */
   clearSearchFilter();
 }
 

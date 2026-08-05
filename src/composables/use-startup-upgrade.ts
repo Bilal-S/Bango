@@ -12,43 +12,24 @@ export interface LegacyUpgradeResult {
 }
 
 /**
- * sessionStorage key recording that the legacy upgrade has already been
- * attempted in this webview session. Used as the loop-guard safety net so a
- * stale/stuck backend signal can never trigger an endless reload cycle.
- *
- * Scoped to `sessionStorage` (not `localStorage`) intentionally: a full app
- * restart starts a fresh session and should be able to retry the upgrade
- * cleanly. Within a single process/session, an upgrade only ever needs to run
- * once.
+ * sessionStorage key for the legacy-upgrade loop guard. Scoped to
+ * `sessionStorage` (not `localStorage`) so a full app restart can retry.
  */
 const UPGRADE_ATTEMPTED_KEY = 'bango:legacyUpgradeAttempted';
 
-/**
- * Outcome of {@link decideUpgrade}. The bootstrap() caller branches on this:
- *
- * - `'run'`: a legacy upgrade is genuinely required; run it then reload.
- * - `'skip'`: no upgrade needed; proceed with normal store pre-warming.
- * - `'stale'`: the backend reported an upgrade is needed, but we already
- *   attempted one this session. The reload loop guard has tripped. Do NOT
- *   reload again; surface a restart-required error instead.
- */
+/** {@link decideUpgrade} outcomes. */
 export type UpgradeDecision = 'run' | 'skip' | 'stale';
 
 /**
- * Pure decision function for the legacy-upgrade boot path. Extracted from
- * `main.ts` so it can be unit-tested without a Tauri runtime.
- *
- * @param needsUpgrade the live `get_startup_status` result from the backend.
- * @param alreadyAttempted whether the upgrade has already run this session
- *   (read from `sessionStorage` by the caller).
- * @returns the {@link UpgradeDecision} the caller should act on.
+ * Pure decision function for the legacy-upgrade boot path: `'run'` when an
+ * upgrade is genuinely needed, `'skip'` when not, `'stale'` when the loop
+ * guard has tripped (backend stuck reporting upgrade-needed).
  */
 export function decideUpgrade(needsUpgrade: boolean, alreadyAttempted: boolean): UpgradeDecision {
   if (!needsUpgrade) return 'skip';
-  // Backend says upgrade is needed, but we already tried this session. The
-  // schema rebuild should have flipped the live probe to Current; if it still
-  // reports Legacy, the backend signal is stale (or the rebuild silently
-  // failed). Break the loop either way and ask the user to restart.
+  /* Backend says upgrade needed, but we already tried this session. The
+  schema rebuild should have flipped the live probe to Current; if it still
+  reports Legacy, the signal is stale. Break the loop. */
   if (alreadyAttempted) return 'stale';
   return 'run';
 }

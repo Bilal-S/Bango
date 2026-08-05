@@ -41,21 +41,21 @@ pub enum AuditAction {
     /// A translation job failed (`translation_status = 'failed'`); the error
     /// message is stored in `details`.
     TranslationError,
-    /// Search Strategy Builder produced a database-ready Boolean search
-    /// strategy from the research aims + criteria (spec §8.4). System-level
-    /// audit row (`article_id = NULL`); the `details` field records a compact
-    /// summary ("Generated 8-database search strategy for N aim(s)").
+    /** Search Strategy Builder produced a database-ready Boolean search
+    strategy from the research aims + criteria (spec §8.4). System-level
+    audit row (`article_id = NULL`); the `details` field records a compact
+    summary ("Generated 8-database search strategy for N aim(s)"). */
     SearchStrategy,
-    /// A metadata field (Authors, Affiliation, Journal, Year, Lang, DOI,
-    /// Keywords) was edited in-place via the Article Detail "Metadata" card.
-    /// The `details` field records which field changed
-    /// (e.g. "Metadata edited: DOI").
+    /** A metadata field (Authors, Affiliation, Journal, Year, Lang, DOI,
+    Keywords) was edited in-place via the Article Detail "Metadata" card.
+    The `details` field records which field changed
+    (e.g. "Metadata edited: DOI"). */
     MetadataEdit,
-    /// The user cleared the AI reasoning text + confidence from an article
-    /// via the trashcan icon in the AI Decision card's expanded header. Only
-    /// `ai_reasoning` + `ai_confidence` are nulled; `ai_decision`, `status`,
-    /// `screened_at`, and `manual_override` are preserved so the decision
-    /// and screening history stay intact.
+    /** The user cleared the AI reasoning text + confidence from an article
+    via the trashcan icon in the AI Decision card's expanded header. Only
+    `ai_reasoning` + `ai_confidence` are nulled; `ai_decision`, `status`,
+    `screened_at`, and `manual_override` are preserved so the decision
+    and screening history stay intact. */
     AiScreenClear,
 }
 
@@ -118,9 +118,9 @@ pub struct ImportActivity {
     pub count: usize,
 }
 
-/// A unified activity-feed entry that merges individual audit rows and grouped
-/// import rows into a single timestamp-ordered stream. The frontend receives a
-/// flat, correctly paginated list - no client-side merge or re-sort needed.
+/** A unified activity-feed entry that merges individual audit rows and grouped
+import rows into a single timestamp-ordered stream. The frontend receives a
+flat, correctly paginated list - no client-side merge or re-sort needed. */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityFeedEntry {

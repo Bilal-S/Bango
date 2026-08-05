@@ -1,14 +1,8 @@
-// Deny `unwrap()`/`expect()`/`panic!()` in production library/application
-// code. The `cfg_attr(not(test), ...)` form keeps the rules active for normal
-// builds (escalated to errors by `cargo clippy -- -D warnings`) while
-// suspending them under `cfg(test)` so:
-//   - inline `#[cfg(test)] mod tests` blocks inside `src/*.rs` (same crate),
-//     AND
-//   - integration test crates in `tests/*.rs` (separate crates that depend on
-//     `bango_lib` and are never reached by this attribute anyway)
-// both remain idiomatic. The crate-wide `[lints.clippy]` table in `Cargo.toml`
-// intentionally does NOT set these lints either, so nothing re-escalates them
-// in the test profile.
+// Deny `unwrap()`/`expect()`/`panic!()` in production code.
+// `cfg_attr(not(test), ...)` suspends these under `cfg(test)` so inline
+// `#[cfg(test)] mod tests` blocks and integration test crates stay idiomatic.
+// The crate-wide `[lints.clippy]` in `Cargo.toml` intentionally does NOT set
+// these, so nothing re-escalates in test profile.
 #![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod batch_import;
@@ -76,12 +70,9 @@ pub fn run() {
                 }
             };
 
-            // ── Startup schema detection ──
-            // Probe the live schema BEFORE running migrations so we can flag a
-            // legacy install (old `article_references` table) that the migration
-            // system cannot upgrade by itself (both old and new are user_version=1).
-            // The result is published to the frontend via managed state; the
-            // frontend triggers `perform_legacy_upgrade` when needed.
+            // Probe live schema BEFORE migrations to flag legacy install (old
+            // `article_references` table, both old and new have user_version=1).
+            // The frontend triggers `perform_legacy_upgrade` when needed.
             let schema_status = match check_schema(&conn) {
                 Ok(s) => s,
                 Err(e) => {
@@ -102,10 +93,8 @@ pub fn run() {
             app.manage(DbState { conn: std::sync::Mutex::new(conn) });
             app.manage(StartupStatus { schema: std::sync::Mutex::new(schema_status) });
 
-            // ── Premium flag: synchronous (gates a bootstrap feature) ──
-            // The frontend reads `isPremium` once during bootstrap and uses it
-            // to gate the batch reference scraping feature, so this must be
-            // ready before any IPC call. The two queries are tiny (~1ms).
+            // Premium flag read synchronously (gates batch reference scraping;
+            // must be ready before any IPC call). The two queries are ~1ms.
             let args: Vec<String> = std::env::args().collect();
             let premium_from_cli = args.iter().any(|a| a == "--premium");
             let premium_from_env = std::env::var("BANGO_PREMIUM")
@@ -130,18 +119,10 @@ pub fn run() {
             };
             app.manage(AppFlags { premium });
 
-            // ── Defer non-critical init to a background thread ──
-            // Journal index auto-load, LLM orchestrator creation, and the
-            // translation worker are NOT needed during the initial dashboard
-            // render. The frontend `bootstrap()` fetches only touch `DbState`
-            // + `AppFlags`, both ready synchronously above. By the time the
-            // user clicks anything that needs the orchestrator or worker
-            // (screening, chat, translate), this background thread (a few DB
-            // reads + a channel spawn, ~50-200ms) has long finished.
-            //
-            // A dedicated OS thread is used (not `tauri::async_runtime::spawn`)
-            // because the work is entirely synchronous blocking I/O. Spawning
-            // it on the async runtime would stall an executor worker thread.
+            // Defer non-critical init to a dedicated OS thread because the work
+            // is entirely synchronous blocking I/O (must not occupy a tokio
+            // executor worker). Frontend bootstrap only touches DbState +
+            // AppFlags, both ready synchronously above.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 init_background_state(&handle);
@@ -369,32 +350,19 @@ pub fn run() {
     }
 }
 
-/// Production [`llm::orchestrator::TemperatureFlagPersister`] backed by the
-/// Tauri `AppHandle`.
-///
-/// `persist(skip)` locks `DbState` and runs the targeted
-/// `llm_config_repo::set_skip_temperature` `UPDATE`. Best-effort: errors are
-/// logged to stderr and swallowed so a DB hiccup never fails a successful LLM
-/// call (the next call will simply retry temperature-recovery again).
-///
-/// This struct is the single concrete bridge from the LLM layer to the DB layer
-/// for temperature-flag persistence. It deliberately does NOT use `save_config`
-/// (which `DELETE`s + `INSERT`s the whole row and would race with concurrent
-/// `save_llm_config` calls from the UI); the targeted `UPDATE` touches only
-/// `skip_temperature`.
-///
-/// The `AppHandle` is `Clone`-cheap (internally an `Arc`), so holding a copy
-/// here for the lifetime of the orchestrator is free.
+/// `TemperatureFlagPersister` backed by `AppHandle`. Persists `skip_temperature`
+/// via targeted `UPDATE` (not full `save_config`, which would race with UI saves).
+/// Best-effort; errors logged to stderr.
 struct AppHandleTemperaturePersister {
     handle: tauri::AppHandle,
 }
 
 impl llm::orchestrator::TemperatureFlagPersister for AppHandleTemperaturePersister {
     fn persist(&self, skip: bool) {
-        // Bind the lock result to a local before matching, mirroring the
-        // established pattern in `init_background_state`: inlining
-        // `match lock_conn(&db.conn)` keeps the `MutexGuard` temporary alive
-        // until after `db` is dropped, tripping E0597 under the borrow checker.
+        // Bind lock result to a local before matching, mirroring the
+        // established pattern in `init_background_state`. Inlining `match
+        // lock_conn(&db.conn)` keeps the `MutexGuard` temporary alive until
+        // after `db` is dropped, tripping E0597 under the borrow checker.
         let db = self.handle.state::<DbState>();
         let result = db::connection::lock_conn(&db.conn);
         match result {
@@ -414,9 +382,8 @@ impl llm::orchestrator::TemperatureFlagPersister for AppHandleTemperaturePersist
     }
 }
 
-/// `AppHandle`-based loader used by the legacy upgrade command after it
-/// rebuilds the schema. Looks up the bundled journal_index DB via the handle's
-/// resource path and bulk-copies records if the (newly recreated) table is empty.
+/// Load journal index from handle's resource path. Used by legacy upgrade
+/// after schema rebuild.
 pub(crate) fn load_journal_index_if_empty_handle(
     app: &tauri::AppHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -426,16 +393,10 @@ pub(crate) fn load_journal_index_if_empty_handle(
     load_journal_index_from_path(&conn, &resource_path)
 }
 
-/// Ensure the `journal_index` table is populated. If it is empty, resolve the
-/// bundled portal DB (via `resolve_journal_resource_path`) and bulk-copy its
-/// rows. Used after `reset_project` (blocking; an error is surfaced to the
-/// frontend so the user sees a Toast) and at startup (best-effort; the caller
-/// logs the audit error and continues so the app still starts).
-///
-/// Returns `Ok(())` when the table is already populated or after a successful
-/// load. Returns `Err` when the table is still empty after the load attempt so
-/// the caller can decide whether to surface the error (reset) or just log it
-/// (startup).
+/// Ensure `journal_index` is populated. Empty → copy from bundled DB.
+/// Returns `Ok(())` when already populated or after successful load.
+/// Used after `reset_project` (blocking, surfaced to frontend) and at startup
+/// (best-effort, logged).
 pub(crate) fn ensure_journal_index_populated(
     conn: &rusqlite::Connection,
     app: &tauri::AppHandle,
@@ -464,27 +425,10 @@ pub(crate) fn ensure_journal_index_populated(
     Ok(())
 }
 
-/// Background initialization: runs everything that does NOT need to block
-/// `.setup()` from returning. Runs on a dedicated OS thread
-/// (`std::thread::spawn`) because the work is entirely synchronous blocking
-/// I/O, so it must not occupy a tokio executor worker thread.
-///
-/// Operations (in order):
-/// 1. Journal index auto-load (first-startup bulk copy; no-op if populated).
-/// 2. LLM orchestrator creation from saved config (defaults if none).
-/// 3. Translation worker spawn + stranded-article crash recovery.
-///
-/// Each step is independent and logs + skips on error so a failure in one
-/// does not prevent the others from running.
+/// Background init: journal index load, LLM orchestrator creation, translation
+/// worker spawn + stranded recovery. Each step independent; errors logged + skipped.
 fn init_background_state(handle: &tauri::AppHandle) {
-    // Journal Index auto-load (best-effort: a failure is logged to the audit
-    // table + stderr but does not stop startup; journal matching will simply
-    // be degraded until the next reset/upgrade reloads the table).
-    //
-    // Bind the lock result to a local before matching (mirroring the LLM +
-    // stranded-recovery blocks below). Inlining `match lock_conn(&db.conn)`
-    // keeps the `MutexGuard` temporary alive until after `db` is dropped,
-    // which trips E0597 under the borrow checker.
+    // Journal index auto-load (best-effort; degraded matching on failure).
     {
         let db = handle.state::<DbState>();
         let result = db::connection::lock_conn(&db.conn);
@@ -500,7 +444,7 @@ fn init_background_state(handle: &tauri::AppHandle) {
         }
     }
 
-    // LLM orchestrator from saved config (defaults if no config saved yet).
+    // LLM orchestrator from saved config (defaults: max_conc=3, delay=500ms).
     let (max_conc, delay_ms) = {
         let db = handle.state::<DbState>();
         let result = db::connection::lock_conn(&db.conn);
@@ -519,25 +463,19 @@ fn init_background_state(handle: &tauri::AppHandle) {
     };
     let orchestrator = std::sync::Arc::new(LlmOrchestrator::new(max_conc, delay_ms));
 
-    // Wire the best-effort `skip_temperature` persister so that when the LLM
-    // client recovers from a temperature-rejection 400 (models that only
-    // support the default temperature), the flag is persisted once and future
-    // calls skip the wasteful first-attempt failure. The persister holds its
-    // own clone of the `AppHandle` so it can reach `DbState` from the detached
-    // persistence task without borrowing the orchestrator.
+    // Wire best-effort `skip_temperature` persister so the LLM client can
+    // persist the recovery flag after a temperature-rejection 400.
     orchestrator.set_temperature_persister(std::sync::Arc::new(AppHandleTemperaturePersister {
         handle: handle.clone(),
     }));
 
     handle.manage(orchestrator);
 
-    // Tier 1e: the in-process broadcast bus the worker emits on after each
-    // job. Managed BEFORE the worker spawns so the worker's first job can
-    // always find it.
+    // TranslationDoneBus managed BEFORE worker spawn so first job finds it.
     handle.manage(translation::TranslationDoneBus::new());
 
-    // Translation worker + stranded recovery. The worker is spawned after the
-    // orchestrator + bus are managed so it can fetch them per-job.
+    // Translation worker + stranded recovery. Spawned after orchestrator+bus
+    // are managed.
     let translation_handle = translation::worker::spawn_translation_worker(handle.clone());
     {
         let db = handle.state::<DbState>();
@@ -555,24 +493,15 @@ fn init_background_state(handle: &tauri::AppHandle) {
     handle.manage(translation_handle);
 }
 
-/// Show a native modal dialog when the database migrations fail at startup.
+/// Show native modal dialog when DB migrations fail at startup.
 ///
-/// Migrations run inside `.setup()` before the webview exists, so a native OS
-/// dialog is the only viable UX. The message shows the resolved `app_data_dir`
-/// path (so the user does not have to guess where the database files live),
-/// explains the most common cause (an interrupted update), and tells the user
-/// to back up or delete the database files and restart. The underlying error
-/// string is appended at the bottom so the user can copy-paste it into a
-/// support request.
-///
-/// The dialog is `blocking_show` because the caller (`run` setup hook) exits
-/// the process immediately after this returns.
+/// Runs inside `.setup()` before the webview exists. Shows `app_data_dir` path,
+/// the database files to delete, and the error string. `blocking_show`.
 fn show_migration_failure_dialog(app: &tauri::App, app_data_dir: &std::path::Path, error: &str) {
     let dir_display = app_data_dir.display();
 
-    // Build the platform-specific database file list. WAL journal mode
-    // (enabled in `create_connection_at`) creates two sidecar files; all
-    // three should be deleted together for a clean reset.
+    // WAL journal mode creates sidecar files; all three should be deleted
+    // for a clean reset.
     let db_files = ["bango.db", "bango.db-wal", "bango.db-shm"]
         .into_iter()
         .map(|f| format!("  - {f}"))
@@ -597,8 +526,7 @@ fn show_migration_failure_dialog(app: &tauri::App, app_data_dir: &std::path::Pat
         .blocking_show();
 }
 
-/// Resolve the path to the bundled `journal_index.db`, preferring the bundle
-/// resource dir and falling back to the source tree in dev mode.
+/// Resolve path to bundled `journal_index.db`: resource_dir → exe-relative → source tree.
 fn resolve_journal_resource_path(
     path: &tauri::path::PathResolver<tauri::Wry>,
 ) -> std::path::PathBuf {
@@ -616,12 +544,8 @@ fn resolve_journal_resource_path(
         return prod_path;
     }
 
-    // Tier 2: relative to the running executable
-    // (`<exe_dir>/resources/journal_index.db`). This is the reliable fallback
-    // for Tauri 2.x NSIS/MSI/Store deployments where `resource_dir()` can
-    // resolve incorrectly (paths with spaces, sandboxed dirs, stale dirs after
-    // an update, etc.). The bundled resources ship in a `resources/`
-    // subdirectory of the main executable's directory.
+    // Tier 2: exe-relative (`<exe_dir>/resources/`). Reliable for Tauri 2.x
+    // NSIS/MSI/Store where `resource_dir()` can resolve incorrectly.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             let exe_relative = exe_dir.join("resources").join("journal_index.db");
@@ -635,7 +559,7 @@ fn resolve_journal_resource_path(
         }
     }
 
-    // Tier 3: dev-mode source-tree fallback (only exists during `cargo run`).
+    // Tier 3: dev-mode source-tree fallback.
     let src_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("resources")
         .join("journal_index.db");
@@ -644,8 +568,8 @@ fn resolve_journal_resource_path(
         return src_path;
     }
 
-    // None found. Return prod_path so the caller has a concrete path to report;
-    // log every path tried so Windows diagnostics show what was searched.
+    // None found. Return prod_path for a concrete path in error messages;
+    // log every path tried for Windows diagnostics.
     eprintln!(
         "[journal_index] bundled portal DB not found. Tried: resource_dir={:?}, exe-relative, source-tree={:?}",
         prod_path, src_path
@@ -653,32 +577,18 @@ fn resolve_journal_resource_path(
     prod_path
 }
 
-/// Core loader: copy records from the bundled portal DB into the target's
-/// empty `journal_index` table using **two separate connections**.
-///
-/// IMPORTANT: journal_index is system-distributed reference data. It must
-/// survive project reset/upgrade and must not be exported/imported via backups.
+/// Core loader: copy bundled portal DB → target `journal_index` via two
+/// separate connections.
 ///
 /// # Why two connections instead of `ATTACH DATABASE`
 ///
-/// The previous implementation used `ATTACH DATABASE 'source' AS portal` on the
-/// target connection and then ran `INSERT INTO journal_index ... SELECT FROM
-/// portal.journal_index` inside a transaction. On Windows this fails when the
-/// bundled source DB is in WAL mode: SQLite cannot acquire the right
-/// cross-database lock within the target's transaction context, surfacing as an
-/// `ATTACH DATABASE` / `SQLITE_BUSY` / lock-acquisition error during a scripted
-/// first-run setup.
+/// The previous `ATTACH … AS portal` → `INSERT … SELECT FROM portal` pattern
+/// failed on Windows when the bundled source was WAL-mode: SQLite cannot
+/// acquire the cross-DB lock within the target's transaction. The fix: open a
+/// read-only source connection and stream rows into the target's own transaction.
+/// Each connection holds an independent lock on an independent file.
 ///
-/// The robust fix is to open a **separate, read-only** connection to the source
-/// and stream rows into the target via its own transaction. Each connection
-/// holds an independent lock against an independent file, so there is no
-/// cross-database lock acquisition inside the target's transaction. The source
-/// is opened `SQLITE_OPEN_READ_ONLY`, so SQLite never needs a write lock on the
-/// bundled file. This is the canonical SQLite recommendation for copying data
-/// between databases.
-///
-/// `pub` so integration tests in `tests/` can drive the loader directly
-/// (per the project convention: helpers tested externally are `pub`).
+/// `pub` so integration tests can drive the loader directly.
 pub fn load_journal_index_from_path(
     conn: &rusqlite::Connection,
     resource_path: &std::path::Path,
@@ -699,25 +609,20 @@ pub fn load_journal_index_from_path(
 
     eprintln!("[journal_index] loading from bundled portal DB: {:?}", resource_path);
 
-    // Open a READ-ONLY connection to the source DB. `READ_ONLY` guarantees the
-    // bundled file is never modified even if a stale `-wal`/`-shm` sidecar is
-    // present; SQLite's read-only WAL path reads the WAL'd data correctly.
+    // Open READ_ONLY connection to source. Guarantees bundled file never
+    // modified even if stale -wal/-shm sidecars present.
     let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
         | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
         | rusqlite::OpenFlags::SQLITE_OPEN_URI;
     let source = rusqlite::Connection::open_with_flags(resource_path, flags)?;
-    // Defensive busy_timeout so a stray writer on the source (shouldn't happen,
-    // but possible if two app instances race) returns SQLITE_BUSY_SNAPSHOT
-    // instead of an immediate error.
+    // Defensive busy_timeout: a stray writer on the source returns SQLITE_BUSY_SNAPSHOT.
     source.busy_timeout(std::time::Duration::from_secs(5))?;
 
-    // Stream rows from source -> target. CRITICAL: the SELECT is prepared on
-    // the SOURCE connection and the INSERT on the TARGET transaction. Both
-    // borrow their respective connections immutably; the borrows are
-    // independent so they can coexist in the same scope.
+    // Stream rows source → target. SELECT on SOURCE connection, INSERT on TARGET
+    // transaction. Borrows are independent, coexist in same scope.
     //
-    // `unchecked_transaction` matches the existing shared-ref signature and is
-    // correct here because we never mix it with `execute_batch`.
+    // `unchecked_transaction` matches existing shared-ref signature; correct
+    // because we never mix it with `execute_batch`.
     let tx = conn.unchecked_transaction()?;
 
     {

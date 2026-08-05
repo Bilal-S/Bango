@@ -1,13 +1,7 @@
-//! The verbatim `AGENTS.md` contract written into `wiki-root/AGENTS.md`.
-//!
-//! Kept in code (not as a bundled resource) so it is always in sync with the
-//! binary and trivially testable. The ingest prompt prepends this content so
-//! the LLM operates under a stable contract.
+//! Verbatim `AGENTS.md` contract for `wiki-root/AGENTS.md`. Inline to sync with binary.
+//! The ingest prompt prepends this content so the LLM operates under a stable contract.
 
-/// The full agent contract. Written to `wiki-root/AGENTS.md` on `wiki_init`.
-///
-/// Rules kept aligned with `docs/CLAUDE.md`
-/// (no em dashes, kebab-case slugs, mandatory frontmatter).
+/// Full agent contract for `wiki-root/AGENTS.md`. Rules: no em dashes, kebab-case slugs, mandatory frontmatter.
 #[must_use]
 pub fn agents_md_content() -> &'static str {
     "# Bango LLM Wiki - Agent Contract\n\

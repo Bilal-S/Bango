@@ -30,13 +30,9 @@ const {
 const router = useRouter();
 const resettingWorkingList = ref(false);
 
-/**
- * Reactive "is the LLM configured?" gate from the canonical composable. Used
- * to layer instant Settings-edit reactivity on top of the backend composite
- * `readiness.hasLlmConfig` field: the Start button + guardrails read this so
- * clearing the API key in Settings disables screening immediately, without
- * waiting for `screeningStore.fetchReadiness()` to re-run.
- */
+/** Reactive LLM-configured gate. Lays instant Settings-edit reactivity over
+ *  backend `readiness.hasLlmConfig`: Start button + guardrails read this so
+ *  clearing the API key disables screening immediately. */
 const llmConfigured = useLlmConfigured();
 
 const screeningErrorInfo = computed(() => {
@@ -198,10 +194,8 @@ onUnmounted(() => {
   stopListening();
 });
 
-/** Computed: can the user start screening?
- *  ANDs the backend composite readiness with the live `llmConfigured` gate
- *  so the Start button reacts instantly to Settings edits (clearing the API
- *  key disables screening without waiting for `readiness` to re-fetch). */
+/** Can start screening: ANDs backend composite readiness with live
+ *  `llmConfigured` gate so Start reacts instantly to Settings edits. */
 const canStart = computed(() => {
   const r = readiness.value;
   if (!r) return false;
@@ -215,7 +209,7 @@ const canStart = computed(() => {
   );
 });
 
-/** Computed: list of blocking reasons to show the user (cascading: prerequisites first). */
+/** Blocking reasons (cascading: prerequisites first). */
 const blockingReasons = computed((): string[] => {
   const r = readiness.value;
   if (!r) return []; // still loading - show spinner, not warnings
@@ -226,9 +220,9 @@ const blockingReasons = computed((): string[] => {
     prereqReasons.push('No inclusion criteria defined. Add criteria in the Criteria Editor.');
   if (!r.hasExclusion)
     prereqReasons.push('No exclusion criteria defined. Add criteria in the Criteria Editor.');
-  // Also surface the LLM message when the live gate is off even if the stale
-  // readiness snapshot still has `hasLlmConfig = true` (race: Settings edit
-  // happened after the last readiness fetch).
+  /* Surface LLM message when live gate is off even if stale readiness
+   * snapshot still has `hasLlmConfig = true` (race: Settings edit after
+   * last readiness fetch). */
   if (!r.hasLlmConfig || !llmConfigured.value)
     prereqReasons.push('LLM is not configured. Set up your LLM in Settings.');
 
@@ -239,9 +233,8 @@ const blockingReasons = computed((): string[] => {
   return prereqReasons;
 });
 
-/** Computed: true when all prerequisites are met but no unscreened articles
- *  exist. Includes the live `llmConfigured` gate so this stays accurate when
- *  the LLM is configured/deconfigured between readiness fetches. */
+/** True when all prerequisites are met but no unscreened articles exist.
+ *  Includes live `llmConfigured` gate. */
 const isWorkingListScreened = computed((): boolean => {
   const r = readiness.value;
   if (!r) return false;

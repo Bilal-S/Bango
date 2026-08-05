@@ -1,7 +1,4 @@
-//! HTTP client for the OpenAlex `/works` endpoint.
-//!
-//! Uses `reqwest::Client` (already in `Cargo.toml` with the `json` feature).
-//! Handles mailto/api_key injection, 429 backoff with retry, and 30s timeout.
+//! OpenAlex HTTP client: mailto/api_key injection, 429 backoff with retry, 30s timeout.
 
 use std::time::Duration;
 
@@ -18,12 +15,7 @@ const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF_MS: u64 = 1000;
 const MAX_BACKOFF_MS: u64 = 10_000;
 
-/// Search OpenAlex works with the given parameters.
-///
-/// Builds the URL, injects `mailto` + `api_key`, sends the GET request with
-/// a 30s timeout, and retries on 429 with exponential backoff + jitter.
-///
-/// Returns the parsed `OpenAlexApiResponse` on success.
+/// Search OpenAlex works. Retries on 429 with exponential backoff + jitter.
 pub async fn search_works(
     query: &str,
     filters: &OpenAlexFilters,
@@ -40,7 +32,6 @@ pub async fn search_works(
         .map_err(|e| AppError::Import(format!("Failed to build HTTP client: {e}")))?;
 
     let mut last_error: Option<String> = None;
-
     for attempt in 0..=MAX_RETRIES {
         let response = client
             .get(&url)
@@ -52,7 +43,6 @@ pub async fn search_works(
         let status = response.status();
 
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            // Retry with exponential backoff + jitter
             let backoff_ms = calculate_backoff(attempt);
             tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
             last_error = Some("OpenAlex rate limit reached (429)".to_string());
@@ -64,7 +54,6 @@ pub async fn search_works(
             return Err(AppError::Import(format!("OpenAlex request failed ({status}): {body}")));
         }
 
-        // Success - parse the JSON response
         let api_response: OpenAlexApiResponse = response
             .json()
             .await
@@ -78,7 +67,7 @@ pub async fn search_works(
     ))
 }
 
-/// Calculate exponential backoff with jitter: 1s, 2s, 4s (capped at 10s) + random 0-500ms.
+/// Exp backoff + jitter: 1s, 2s, 4s (capped 10s) + random 0-500ms.
 fn calculate_backoff(attempt: u32) -> u64 {
     let base = INITIAL_BACKOFF_MS * (1u64 << attempt);
     let capped = base.min(MAX_BACKOFF_MS);
@@ -90,12 +79,8 @@ fn calculate_backoff(attempt: u32) -> u64 {
 const HARVEST_SELECT_FIELDS: &str =
     "id,doi,title,authorships,publication_year,publication_date,primary_location,biblio,referenced_works,open_access";
 
-/// Batch-fetch works by OpenAlex IDs (used for reference harvest).
-///
-/// Fetches up to 50 works per call via the `/works?filter=openalex:W1|W2|...|W50`
-/// endpoint. Multiple batches are fetched sequentially with a 100ms pause between
-/// batches to stay within the free-tier rate limit (10 req/s). Returns an error
-/// on 429 so the caller can log it to the audit trail.
+/// Fetch works by OpenAlex IDs in chunks of 50 with 100ms inter-batch pause (10 req/s limit).
+/// Returns error on 429 so caller can log to audit trail.
 pub async fn fetch_works_by_ids(
     openalex_ids: &[String],
     mailto: &str,
@@ -112,9 +97,7 @@ pub async fn fetch_works_by_ids(
 
     let mut all_works = Vec::new();
 
-    // Process in chunks of 50 (OpenAlex filter limit).
     for chunk in openalex_ids.chunks(50) {
-        // Extract the OpenAlex ID from the full URL (e.g. "https://openalex.org/W123" -> "W123").
         let ids: Vec<&str> =
             chunk.iter().map(|url| url.rsplit('/').next().unwrap_or(url)).collect();
         let filter_value = ids.join("|");
@@ -165,23 +148,18 @@ pub async fn fetch_works_by_ids(
 
         all_works.extend(api_response.results);
 
-        // 100ms pause between batches to stay within the free-tier rate limit (10 req/s).
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
     Ok(all_works)
 }
 
-/// Fetch works that cite a given OpenAlex work (the "cited_by" direction).
-///
-/// Uses the `filter=cites:W12345` endpoint, paginating through `per_page=50`
-/// pages. Returns all citing works. Used for the citation harvest in Phase 2.
+/// Fetch works citing a given OpenAlex work via `filter=cites:` with pagination.
 pub async fn fetch_citing_works(
     openalex_work_id: &str,
     mailto: &str,
     api_key: Option<&str>,
 ) -> Result<Vec<super::OpenAlexWork>, AppError> {
-    // Extract the short ID from the full URL (e.g. "https://openalex.org/W123" -> "W123").
     let short_id = openalex_work_id.rsplit('/').next().unwrap_or(openalex_work_id);
 
     let client = reqwest::Client::builder()
@@ -243,12 +221,10 @@ pub async fn fetch_citing_works(
         let count = api_response.results.len();
         all_works.extend(api_response.results);
 
-        // If we got fewer than 50, we've reached the last page.
         if count < 50 {
             break;
         }
 
-        // 100ms pause between pages to stay within the free-tier rate limit.
         tokio::time::sleep(Duration::from_millis(100)).await;
         page += 1;
     }
@@ -256,15 +232,10 @@ pub async fn fetch_citing_works(
     Ok(all_works)
 }
 
-/// Download a PDF from a URL. Returns the raw bytes if the response is a valid
-/// PDF (checked via content-type header + magic bytes). Returns an error if the
-/// response is an HTML page (likely a CAPTCHA or paywall) or if the download fails.
+/// Download a PDF from `url`. Returns raw bytes if valid PDF (magic bytes check).
 ///
-/// Sends browser-like headers (`Accept`, `Accept-Language`, `Accept-Encoding`,
-/// `Sec-Fetch-*`) so publishers (MDPI, Elsevier, Springer, etc.) that 403 on
-/// the minimal `Bango/2.0` UA serve the PDF instead of a block page. The
-/// `Referer` is set to the PDF URL's origin so origin-based anti-leech checks
-/// pass.
+/// Sends browser-like headers so publishers that 403 on minimal UA serve the PDF.
+/// `Referer` is set to the URL origin for anti-leech checks.
 pub async fn download_pdf(url: &str) -> Result<Vec<u8>, AppError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -274,8 +245,6 @@ pub async fn download_pdf(url: &str) -> Result<Vec<u8>, AppError> {
             AppError::Import(format!("Failed to build HTTP client for PDF download: {e}"))
         })?;
 
-    // Derive the origin for the Referer header (origin-based anti-leech checks
-    // on publishers like MDPI 403 when the Referer is absent or mismatched).
     let referer = reqwest::Url::parse(url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(|host| format!("{}://{host}/", parsed.scheme())))
@@ -304,7 +273,7 @@ pub async fn download_pdf(url: &str) -> Result<Vec<u8>, AppError> {
         AppError::Import(format!("Failed to read PDF download response from {url}: {e}"))
     })?;
 
-    // Validate: must start with %PDF magic bytes.
+    // Validate PDF magic bytes.
     if bytes.len() < 4 || &bytes[..4] != b"%PDF" {
         return Err(AppError::Import(
             format!("Downloaded content from {url} is not a valid PDF (possible CAPTCHA or paywall page). The article was still imported - you can attach the full text manually."),

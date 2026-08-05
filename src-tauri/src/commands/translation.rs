@@ -41,14 +41,13 @@ fn choose_job_kind(conn: &rusqlite::Connection, article_id: &str) -> Translation
 /// - `translation_status` in `queued`/`running`/`succeeded` → skip.
 /// - `translation_status` in `none`/`failed` → write `queued` then send.
 ///
-/// The `kind` is chosen by the caller: `MetadataOnly` for imports without full
-/// text, `FullText` when full text is attached.
+/// `kind` is chosen by the caller: `MetadataOnly` for imports without full text,
+/// `FullText` when full text is attached.
 ///
-/// When `require_non_english` is true, the skip-policy gate
-/// (`should_skip_translation`) is applied so English OR absent/blank language
-/// articles are never enqueued. This is the safety gate the import/attach
-/// triggers rely on; the manual command wrapper does NOT auto-check so the
-/// user can retry if they believe the language metadata is wrong.
+/// When `require_non_english` is true, the `should_skip_translation` gate is
+/// applied so English OR absent/blank language articles are never enqueued.
+/// The manual command wrapper does NOT auto-check so the user can retry if
+/// they believe the language metadata is wrong.
 ///
 /// Returns `true` if the job was enqueued, `false` if skipped.
 pub fn enqueue_article_translation_inner(
@@ -80,9 +79,9 @@ pub fn enqueue_article_translation_inner(
 
 /// Enqueue a translation job for an article.
 ///
-/// The `trigger_source` parameter is recorded for diagnostics only ("manual",
-/// "retry", "import", "attach"). The enqueue gate is applied: only `none`/
-/// `failed` articles with `is_translated = 0` are enqueued; everything else is
+/// `trigger_source` is recorded for diagnostics only ("manual", "retry",
+/// "import", "attach"). The enqueue gate is applied: only `none`/`failed`
+/// articles with `is_translated = 0` are enqueued; everything else is
 /// silently skipped.
 ///
 /// The job kind is chosen from the article's `has_full_text` flag so a manual
@@ -136,16 +135,12 @@ pub fn retry_translation_job(
 /// Chooses `FullText` when the article has full text attached, else
 /// `MetadataOnly`.
 ///
-/// **Lock-free variant (Tier 1a/1b)**: takes `&Mutex<Connection>` and acquires
-/// the lock only for the filtered read + the bulk status write, then drops the
-/// guard before sending jobs to the worker channel. Callers that have finished
-/// their own transactional work must drop their own `MutexGuard` before calling
-/// this so the import lock is not held across the enqueue round-trip.
-///
-/// Replaces the per-article `get_article_by_id` + `update_translation_status`
-/// sequence with one filtered `get_translatable_import_ids` query + one
-/// `mark_translation_queued_batch` UPDATE, preserving the non-English
-/// `should_skip_translation` gate and the `has_full_text` job-kind rule.
+/// Lock-free: takes `&Mutex<Connection>`, acquires the lock only for the
+/// filtered read + bulk status write, then drops the guard before sending jobs
+/// to the worker channel. Replaces the per-article `get_article_by_id` +
+/// `update_translation_status` sequence with one filtered read + one bulk
+/// UPDATE, preserving the non-English gate and the `has_full_text` job-kind
+/// rule.
 pub fn try_enqueue_translations_for_import(
     app: &tauri::AppHandle,
     db: &Mutex<rusqlite::Connection>,

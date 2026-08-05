@@ -34,20 +34,12 @@ const toast = useToast();
 const chatStore = useChatStore();
 const llmConfigStore = useLlmConfigStore();
 
-/**
- * Reactive "is the LLM configured?" gate from the canonical composable.
- * Replaces the former local `isLlmConfigured` ref that was populated by a
- * one-shot `has_llm_config` IPC call in `onMounted` and went stale on
- * Settings edits. Now any Settings change (e.g. clearing the API key)
- * instantly re-evaluates this gate and the empty-state card below.
- */
+/** Reactive LLM-configured gate from canonical composable. Replaces former
+ *  local ref populated by one-shot `has_llm_config` that went stale on
+ *  Settings edits. */
 const isLlmConfigured = useLlmConfigured();
-/**
- * True while the LLM config store is loading for the very first time so the
- * "Checking LLM configuration..." spinner shows instead of flashing the
- * unconfigured card before bootstrap resolves the store. Reactive over the
- * store's `initialized` flag.
- */
+/** True while LLM config store is loading for the first time. Prevents
+ *  flashing the unconfigured card before bootstrap resolves. */
 const checkingLlm = computed(() => !llmConfigStore.initialized);
 const articles = ref<Article[]>([]);
 const showSelector = ref(false);
@@ -59,24 +51,21 @@ const isDetailFullScreen = ref(false);
 
 // Wiki-mode UI state.
 const checkingWiki = ref(true);
-/** Wiki reader slide-over navigation stack. The last entry is the visible page;
- *  popping back to empty closes the panel. Keeping a stack lets inner
- *  [[wikilink]] clicks chain while preserving the chat thread underneath. */
+/** Wiki reader slide-over nav stack. Last entry is visible page; popping
+ *  back to empty closes the panel. Stack lets [[wikilink]] clicks chain. */
 const wikiNavStack = ref<string[]>([]);
 const wikiPanelOpen = computed(() => wikiNavStack.value.length > 0);
 const wikiSlug = computed(() => wikiNavStack.value[wikiNavStack.value.length - 1] ?? null);
 
-/** Wiki page slug-to-title map. Loaded once when the wiki is ready so that
- *  bare UUIDs in wiki-sourced chat bubbles can render as synthesis-styled
- *  chips with human-readable titles instead of raw UUIDs. */
+/** Wiki page slug-to-title map. Loaded once so bare UUIDs in wiki-sourced
+ *  chat bubbles render with human-readable titles instead of raw UUIDs. */
 const wikiPageTitles = ref<Map<string, string>>(new Map());
 const { listPages: wikiListPages, checkForUpdates: wikiCheckForUpdates } = useWiki();
 
 /**
  * Derived source-metadata map (article id -> WikiSourceInfo) built reactively
- * from the loaded `articles` list. Passed to `renderWikiMarkdown` so bare
- * article UUIDs in wiki-sourced chat prose render as green `.art-ref` chips
- * that open the article detail panel, instead of pink wiki chips.
+ * from loaded `articles`. Passed to `renderWikiMarkdown` so bare article UUIDs
+ * in wiki-sourced chat render as green `.art-ref` chips.
  */
 const wikiSources = computed(() => {
   const map = new Map<string, WikiSourceInfo>();
@@ -112,11 +101,9 @@ const {
 } = useArticleSearch();
 const { screenArticle } = useScreening();
 
-// Article delete UI orchestration is centralized in `useArticleDelete`
-// (shared with the other detail-panel host views), mirroring
-// `useFullTextAttachment`. The composable nulls `selectedArticle` (aliased as
-// `detailArticle`), which reactively hides the panel via `v-if="detailArticle"`;
-// the `onDeleted` hook resets the fullscreen flag.
+/* Article delete orchestration centralized in `useArticleDelete`. Composable
+ * nulls `detailArticle` (hides panel via `v-if`); `onDeleted` hook resets
+ * fullscreen flag. */
 const { handleDeleteArticle } = useArticleDelete({
   deleteArticle,
   onDeleted: () => {
@@ -214,12 +201,9 @@ async function checkCitationFinderReadiness() {
   }
 }
 
-// Reactively re-check readiness when the LLM config changes (e.g. the user
-// switches provider in Settings, or runs Test Connection which probes
-// embeddings + updates `embedding_status`). This mirrors the canonical
-// `useLlmConfigured()` pattern - the previous one-shot `onMounted` check went
-// stale until the user navigated away and back. Deep watch because the config
-// object is mutated in place by the Settings auto-save watcher.
+/* Reactively re-check readiness when LLM config changes (provider switch,
+ * Test Connection). Mirrors canonical `useLlmConfigured()` pattern. Deep
+ * watch because config object is mutated in place by Settings auto-save. */
 watch(
   () => llmConfigStore.config,
   () => {
@@ -228,18 +212,12 @@ watch(
   { deep: true }
 );
 
-// ── Model-mismatch confirmation dialog ──────────────────────────────────
-//
-// Before each submit we check `get_embedding_model_mismatch`: if stored
-// embeddings were generated with a different model than the current
-// `embedding_model` setting, `recall` would silently return zero hits (it
-// filters by the new dimensions). Rather than letting the user discover this
-// via an empty result, we pop a confirmation dialog with three options:
-//   1. Regenerate  - delete all + re-embed (the correct path).
-//   2. Continue    - proceed anyway (partial recall; the user knows).
-//   3. Cancel      - abort the search entirely.
-// The dialog only fires once per stored-model key per session
-// (`mismatchDismissedFor`) so it doesn't nag on every subsequent search.
+/* Model-mismatch confirmation dialog. Before each submit, checks
+ * `get_embedding_model_mismatch`: if stored embeddings were generated with a
+ * different model, `recall` would silently return zero hits (filters by new
+ * dimensions). Three options: Regenerate (delete all + re-embed), Continue
+ * (proceed with partial recall), Cancel. Dialog fires once per stored-model
+ * key per session (`mismatchDismissedFor`). */
 
 /** The active model-mismatch payload when the dialog is open; `null` when
  *  closed. Set by `handleCitationSend` before dispatching the search. */
@@ -288,9 +266,8 @@ function onToggleCitationFinder() {
  * filters." empty result.
  */
 async function handleCitationSend() {
-  // The Find button is `:disabled` when the prose is empty, but Ctrl/Cmd+Enter
-  // bypasses the disabled button, so we must guard here + show the toast
-  // (NEW-7: the old second guard was unreachable because the first returned).
+  /* The Find button is `:disabled` when prose is empty, but Ctrl/Cmd+Enter
+   * bypasses disabled button, so guard here + show toast. */
   if (!citationProse.value.trim()) {
     toast.show('Please paste text to search.', 'info');
     return;
@@ -299,11 +276,9 @@ async function handleCitationSend() {
   const text = citationProse.value;
   citationProse.value = '';
 
-  // Cheap pre-check: detect a stored-model mismatch before searching. The
-  // check is one `SELECT DISTINCT model_name` + one `COUNT(*)` (sub-ms on a
-  // local SQLite), so it's safe to run on every submit. When a mismatch is
-  // detected AND the user has not already dismissed it for this stored-model
-  // key, pop the dialog + hold the prose text for the continue path.
+  /* Cheap pre-check: detect stored-model mismatch before searching. One
+   * SELECT DISTINCT + COUNT(*) (sub-ms), safe to run on every submit. When
+   * mismatch detected AND not dismissed for this key, pop the dialog. */
   try {
     const mismatch = await getModelMismatch();
     if (
@@ -346,9 +321,8 @@ async function confirmMismatchRegenerate() {
   if (!mismatchDialog.value || regenerating.value) return;
   regenerating.value = true;
   try {
-    // Scope the regeneration to the same statuses the search uses so we don't
-    // wipe embeddings the user generated for other statuses via the
-    // standalone Settings command.
+    /* Scope regeneration to same statuses the search uses so we don't wipe
+     * embeddings generated for other statuses via standalone Settings. */
     const scope = citationStatusFilter.value.join(',');
     await regenerateEmbeddings(scope);
     toast.show(
@@ -358,9 +332,8 @@ async function confirmMismatchRegenerate() {
     // Restore the held prose so the user can re-submit after the regenerate.
     citationProse.value = pendingSearchText.value;
     pendingSearchText.value = '';
-    // Mark this mismatch as resolved so the dialog doesn't re-fire for the
-    // same stored model if the user searches again before the regenerate
-    // completes.
+    /* Mark mismatch resolved so dialog doesn't re-fire for same stored model
+     * if user searches again before regenerate completes. */
     chatStore.setMismatchDismissed(mismatchDialog.value.storedModel);
     mismatchDialog.value = null;
     // Re-fetch readiness so the toggle + coverage reflect the regeneration
@@ -428,14 +401,9 @@ function flattenForIeee(results: CitationResult[]): Array<{
   return out;
 }
 
-// ── Per-statement claim-group collapse state ────────────────────────────
-//
-// Each claim heading is a caret toggle that collapses/expands its cards.
-// Default: expanded (results visible on first paint; the user collapses the
-// claims they want to tuck away). Keyed by `${msgIdx}::${claim}` so the same
-// claim text in different bubbles (re-searches) stays independent, and the
-// state survives as long as the message list is append-only (which it is -
-// messages are never reordered, only appended).
+/* Per-statement claim-group collapse state. Each claim heading is a caret
+ * toggle. Default expanded. Keyed by `${msgIdx}::${claim}` so re-searches
+ * stay independent; state survives as long as message list is append-only. */
 const collapsedClaims = ref<Set<string>>(new Set());
 
 /** Build the per-bubble key for a claim's collapse state. */
@@ -470,9 +438,8 @@ function claimCardCount(results: CitationResult[], claim: string): number {
 }
 
 onMounted(async () => {
-  // The LLM-configured gate is reactive (no IPC probe needed). Still kick
-  // off the wiki status + citation readiness loads so the toggle visibility
-  // is correct on first paint; the LLM gate itself is read reactively.
+  /* LLM-configured gate is reactive (no IPC probe needed). Kick off wiki
+   * status + citation readiness loads so toggle visibility is correct. */
   await Promise.all([loadArticles(), checkWikiStatus(), checkCitationFinderReadiness()]);
   scrollToBottom();
 });
@@ -514,9 +481,8 @@ async function checkWikiStatus() {
     checkingWiki.value = false;
   }
 
-  // When the wiki is ready, proactively run the on-demand drift check so
-  // wiki-mode chat answers reflect any external edits made since the last
-  // visit. Runs lock-free on the backend; debounced 30s via useWiki.
+  /* When wiki is ready, proactively run on-demand drift check so wiki-mode
+   * chat reflects external edits since last visit. Debounced 30s via useWiki. */
   if (chatStore.wikiReady) {
     try {
       const result = await wikiCheckForUpdates(false);
@@ -622,9 +588,8 @@ function renderMessage(msg: { role: string; content: string; source?: string }):
     return renderWikiMarkdown(msg.content, {
       sources: wikiSources.value,
       pageTitles: wikiPageTitles.value,
-      // Chat view: articles win over wiki pages for bare UUID resolution, so
-      // an article UUID renders as a green art-ref (article detail) even when
-      // a synthesis wiki page exists for the same UUID.
+      /* Chat view: articles win over wiki pages for bare UUID resolution.
+       * Article UUID renders as green art-ref even when synthesis page exists. */
       articlePriority: true,
     });
   }
@@ -697,9 +662,8 @@ async function openArticleDetail(articleId: string) {
 // `useFullTextAttachment` (shared with the other detail-panel host views).
 const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
 
-// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
-// (shared with the other detail-panel host views). The composable owns the
-// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+/* AI-reasoning clear orchestration centralized in `useClearAiReasoning`.
+ * Composable owns toast; `useArticleSearch.clearAiReasoning` owns IPC + refresh. */
 const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 </script>
 

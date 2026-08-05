@@ -23,9 +23,8 @@ import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { useLlmConfigStore } from '@/stores/llm-config';
 import { openPath } from '@tauri-apps/plugin-opener';
 
-// Name the component so <keep-alive include="WikiView"> in app-shell.vue
-// can cache it across navigation. Vue 3 <script setup> components are
-// anonymous by default.
+// Named so <keep-alive include="WikiView"> in app-shell.vue can cache across
+// navigation. Vue 3 <script setup> components are anonymous by default.
 defineOptions({ name: 'WikiView' });
 
 const router = useRouter();
@@ -67,12 +66,9 @@ const llmConfigStore = useLlmConfigStore();
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
 
-// Article delete UI orchestration is centralized in `useArticleDelete`
-// (shared with the other detail-panel host views), mirroring
-// `useFullTextAttachment`. The composable nulls `selectedArticle` (aliased as
-// `detailArticle`), which reactively hides the panel via
-// `v-if="showArticleDetail && detailArticle"`; the `onDeleted` hook resets the
-// fullscreen flag + the local `showArticleDetail` gate.
+/* Article delete orchestration centralized in `useArticleDelete`. Composable
+ * nulls `detailArticle` (hides panel via `v-if`); `onDeleted` hook resets
+ * fullscreen flag + local `showArticleDetail` gate. */
 const { handleDeleteArticle } = useArticleDelete({
   deleteArticle,
   onDeleted: () => {
@@ -81,30 +77,18 @@ const { handleDeleteArticle } = useArticleDelete({
   },
 });
 
-/**
- * Reactive "is the LLM configured?" gate from the canonical composable.
- * Replaces the former local `isLlmConfigured` ref that was populated by a
- * one-shot `has_llm_config` IPC call and went stale on Settings edits.
- * Because the store is reactive, clearing the API key in Settings instantly
- * flips this gate + collapses the empty-state cards below.
- */
+/** Reactive LLM-configured gate. Replaces former local `isLlmConfigured` ref
+ *  that went stale on Settings edits. */
 const isLlmConfigured = useLlmConfigured();
-/**
- * True while the LLM config store is loading for the very first time so the
- * "Checking LLM configuration..." spinner shows instead of flashing the
- * unconfigured card before bootstrap resolves the store. Reactive over the
- * store's `initialized` flag.
- */
+/** True while LLM config store is loading for the first time. Prevents
+ *  flashing the unconfigured card before bootstrap resolves. */
 const checkingLlm = computed(() => !llmConfigStore.initialized);
 const llmBannerDismissed = ref(false);
 
 const pages = ref<WikiPageSummary[]>([]);
 
-// -- Full-text sidebar search ----------------------------------------------
-// The sidebar search unions two sources:
-// 1. Client-side filter (instant, per keystroke): title/summary/slug.
-// 2. FTS5 BM25 search (debounced 250ms, backend): searches body content too.
-// The index is kept fresh by the drift-detection feature.
+/* Sidebar search unions two sources: client-side instant filter on metadata
+ * (title/summary/slug), and debounced FTS5 BM25 backend search on body content. */
 const searchHits = ref<Set<string> | null>(null);
 const isSearching = ref(false);
 
@@ -127,17 +111,14 @@ const runSearch = debounce(async (query: string) => {
   }
 }, 250);
 
-// Browser-like page navigation history (back/forward). `selectedSlug` is a
-// read-only computed alias over the history's current entry so the template
-// reads stay unchanged; all mutations go through `navHistory.navigate()` /
-// `goBack()` / `goForward()` / `clear()`.
+/* Browser-like page navigation history. `selectedSlug` is a read-only computed
+ * alias; mutations go through `navHistory.navigate()`/`goBack()`/`goForward()`. */
 const navHistory = useNavHistory<string>();
 const selectedSlug = navHistory.current;
 const canGoBack = navHistory.canGoBack;
 const canGoForward = navHistory.canGoForward;
-// Platform detection is computed once (the OS does not change at runtime).
-// `isMac` is passed to `classifyWikiNavigationKey` so the pure helper stays
-// free of `navigator` reads and is trivially unit-testable.
+/* Platform detection is computed once. `isMac` is passed to
+   `classifyWikiNavigationKey` so the pure helper stays free of `navigator` reads. */
 const isMac = isMacPlatform();
 // Platform-specific shortcut labels shown in the button tooltips.
 const backShortcutLabel = isMac ? 'Cmd+[' : 'Alt+Left';
@@ -145,9 +126,8 @@ const forwardShortcutLabel = isMac ? 'Cmd+]' : 'Alt+Right';
 const mode = ref<'view' | 'edit'>('view');
 const searchQuery = ref('');
 const viewTab = ref<'pages' | 'graph'>('pages');
-// Authors is collapsed by default - it's a long list (one page per corpus
-// author) that dominates the sidebar when expanded. Concepts / Sources /
-// Methods / Synthesis start expanded.
+/* Authors section collapsed by default - long list (one page per corpus
+ * author) that dominates sidebar when expanded. Others start expanded. */
 const collapsedSections = ref<Set<string>>(new Set(['author']));
 
 function toggleSection(type: string): void {
@@ -213,9 +193,8 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeyDown);
   await startProgressListener();
   await runReadinessChecks();
-  // On-demand drift check: detect external edits to wiki .md files and
-  // re-index transparently. Runs lock-free on the backend; the toast drives
-  // the UX. Debounced 30s so navigation back-and-forth doesn't re-check.
+  /* On-demand drift check: detect external edits to wiki .md files and
+   * re-index transparently. Debounced 30s. */
   await checkForUpdatesOnMount();
 });
 
@@ -269,9 +248,8 @@ async function checkForUpdatesOnMount(): Promise<void> {
       graphPanelRef.value?.refresh();
     }
   } catch (e) {
-    // Non-fatal, but surface the message so a persistent backend failure is
-    // not silently hidden. The manual "Check for Updates" toolbar button
-    // remains available for retry.
+    /* Non-fatal; surface message so persistent backend failure isn't silently
+     * hidden. Manual "Check for Updates" toolbar button available for retry. */
     const msg = e instanceof Error ? e.message : String(e);
     toast.show(`Wiki update check failed: ${msg}`, 'error');
   }
@@ -414,9 +392,8 @@ function onCloseArticleDetail(): void {
 // `useFullTextAttachment` (shared with the other detail-panel host views).
 const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
 
-// AI-reasoning clear UI orchestration is centralized in `useClearAiReasoning`
-// (shared with the other detail-panel host views). The composable owns the
-// toast; `useArticleSearch.clearAiReasoning` owns the IPC + article refresh.
+/* AI-reasoning clear orchestration centralized in `useClearAiReasoning`.
+ * Composable owns toast; `useArticleSearch.clearAiReasoning` owns IPC + refresh. */
 const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 
 async function onIngested(): Promise<void> {

@@ -240,12 +240,8 @@ const onMainPath = computed(
   () => !!props.paper && !!props.mainPathNodes && props.mainPathNodes.has(props.paper.id)
 );
 
-/**
- * Number of reference papers (outgoing) that exist on the article but are not
- * rendered as in-graph edges (because they aren't matched to other included
- * articles). Only applies to matched (real article) nodes; unmatched leaves
- * always show "(no details available)" since they have no linked papers.
- */
+/** Outgoing references on the article not rendered as in-graph edges (unmatched
+ *  to other included articles). Unmatched leaves show "(no details)". */
 const hiddenReferenceCount = computed(() => {
   if (!props.paper || props.paper.unmatched) return 0;
   return Math.max(0, props.paper.numReferences - props.citedPapers.length);
@@ -257,11 +253,8 @@ const hiddenCitationCount = computed(() => {
   return Math.max(0, props.paper.numCited - props.citingPapers.length);
 });
 
-/**
- * True when the selected matched article has reference/citation papers that
- * aren't visible in the graph (they exist in the DB but weren't matched to
- * other included articles, so no edge was drawn).
- */
+/** True when matched article has reference/citation papers not visible in graph
+ *  (exist in DB but weren't matched to other included articles). */
 const hasHiddenDetails = computed(
   () => hiddenReferenceCount.value > 0 || hiddenCitationCount.value > 0
 );
@@ -311,13 +304,7 @@ const emit = defineEmits<{
   (e: 'open-linked-record', articleId: string): void;
 }>();
 
-/**
- * Handle an isolation button click.
- *
- * If the clicked direction is already active, toggle off (emit `clear-isolation`).
- * Otherwise, emit `isolate` with the new direction - the parent replaces the
- * isolation mode, which implicitly clears any previously-active direction.
- */
+/** Isolation button: toggle off if direction already active, else emit `isolate`. */
 function onIsolateClick(direction: IsolationDirection) {
   const isActive = direction === 'ancestry' ? isAncestryActive.value : isProgenyActive.value;
   if (isActive) {

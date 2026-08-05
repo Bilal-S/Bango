@@ -18,11 +18,9 @@ const { dbVersion, dbMaxVersion } = useFeatureFlags();
 const showVersion = computed(() => dbMaxVersion.value > 0);
 
 /**
- * On mount, if the route carries `?focus=project-management` (set by the
- * Dashboard's "Start New Project" dialog), smooth-scroll the Project
- * Management card into view so the user lands directly on it instead of the
- * top of the Settings page. Wrapped in `nextTick` + `requestAnimationFrame`
- * so the card's DOM node exists before we query it.
+ * On mount, if `?focus=project-management`, smooth-scroll the Project
+ * Management card into view. Uses `nextTick` + `requestAnimationFrame`
+ * so the DOM node exists before querying it.
  */
 onMounted(() => {
   if (route.query.focus !== 'project-management') return;

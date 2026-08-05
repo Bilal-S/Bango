@@ -182,11 +182,11 @@ pub struct YearCount {
     pub count: i32,
 }
 
-/// One journal's article count for a single publication year.
-///
-/// `journal` carries the canonical `journal_index.journal_title` when
-/// `journal_index_id` is `Some`; otherwise it carries the normalized raw title
-/// (`UPPER(TRIM(articles.journal))`).
+/** One journal's article count for a single publication year.
+
+`journal` carries the canonical `journal_index.journal_title` when
+`journal_index_id` is `Some`; otherwise it carries the normalized raw title
+(`UPPER(TRIM(articles.journal))`). */
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalYearData {

@@ -1,17 +1,16 @@
 //! Search Strategy Builder (spec §8.4).
 //!
-//! `suggest_search_strategy` reads the research aims + inclusion/exclusion
-//! criteria from the DB, asks the LLM to produce database-specific Boolean
-//! search strings for 8 academic databases, parses the JSON response, writes
-//! a system-level `search_strategy` audit row on success, and returns the
-//! structured result.
+//! `suggest_search_strategy` reads aims + inclusion/exclusion criteria, asks
+//! the LLM to produce database-specific Boolean search strings for 8 academic
+//! databases, parses the JSON response, writes a system-level audit row, and
+//! returns the structured result.
 //!
-//! The result is NOT persisted (session-scoped Pinia store, like the
-//! inclusion/exclusion AI critiques). Copy-only: no database API execution.
+//! Result is NOT persisted (session-scoped Pinia store, like the AI critiques).
+//! Copy-only: no database API execution.
 //!
-//! The non-trivial logic is extracted as pure `pub fn`s (`build_search_strategy_prompt`,
-//! `parse_search_strategy_response`) so `tests/search_strategy_test.rs` can
-//! exercise them without `State<DbState>` (per `docs/CLAUDE.md` §Testing).
+//! Pure helpers (`build_search_strategy_prompt`, `parse_search_strategy_response`)
+//! are extracted as `pub fn`s so `tests/search_strategy_test.rs` can exercise
+//! them without `State<DbState>` (per `docs/CLAUDE.md` §Testing).
 
 use std::sync::Arc;
 

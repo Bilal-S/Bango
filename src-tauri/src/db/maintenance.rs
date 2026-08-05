@@ -1,77 +1,39 @@
 //! Database maintenance: reclaim disk space after bulk deletions.
 //!
-//! [`vacuum_database`] is the single entry point for shrinking the on-disk
-//! SQLite files (`bango.db` + `bango.db-wal`) after a large wipe such as
-//! `reset_project`. SQLite never auto-shrinks the database file: dropped tables
-//! leave free pages that are reused for future writes but never returned to the
-//! filesystem. `VACUUM` rebuilds the file so the space is reclaimed.
+//! [`vacuum_database`] shrinks the SQLite files after `reset_project`. SQLite never
+//! auto-shrinks: dropped tables leave free pages reused for future writes but never
+//! returned to the filesystem; `VACUUM` rebuilds the file so space is reclaimed.
 //!
-//! ## WAL-mode interaction
-//!
-//! The database runs in WAL mode (`PRAGMA journal_mode=WAL`). A plain `VACUUM`
-//! on a WAL-mode database writes the compacted pages to the WAL rather than
-//! rewriting the main file in place, so the main `.db` file keeps its old size
-//! and the total on-disk footprint does not shrink (it can even grow from
-//! VACUUM overhead accumulating in the WAL).
-//!
-//! To actually shrink the file, the helper temporarily switches to DELETE
-//! journal mode, which forces a full checkpoint and removes the `-wal`/`-shm`
-//! files. `VACUUM` then runs in rollback-journal mode, definitively rewriting
-//! and shrinking the main file. WAL mode is restored afterward so the
-//! connection returns to its normal operating mode with fresh, empty sidecar
-//! files.
-//!
-//! ## When to call
-//!
-//! Only at coarse, infrequent, destructive boundaries - primarily
-//! `reset_project_inner` (Delete All Data). `VACUUM` is `O(n)` over the whole
-//! database file (it rewrites every page), so it must NOT be called on
-//! per-article deletes or other hot paths.
+//! **WAL-mode interaction**: a plain `VACUUM` on a WAL DB writes compacted pages to the
+//! WAL, not the main file. This helper temporarily switches to DELETE journal mode
+//! (forcing a full checkpoint + removing `-wal`/`-shm`), runs `VACUUM` in rollback mode
+//! (definitively shrinking the main file), then restores WAL. Call only at coarse,
+//! destructive boundaries — `VACUUM` is `O(n)` over the whole file.
 
 use rusqlite::Connection;
 
 use crate::error::AppError;
 
-/// Reclaim disk space by rebuilding the database file with `VACUUM`.
+/// Reclaim disk space via `VACUUM`. Sequence:
+/// 1. Switch to DELETE journal mode (forces WAL checkpoint, removes `-wal`/`-shm`).
+/// 2. `VACUUM` — rebuilds the main file in rollback mode, definitively shrinking it.
+/// 3. Restore WAL mode (fresh empty sidecar files).
 ///
-/// The sequence is:
-/// 1. `PRAGMA journal_mode=DELETE` - switch out of WAL mode. This forces a
-///    full checkpoint of the WAL into the main db file and deletes the
-///    `bango.db-wal` and `bango.db-shm` sidecar files.
-/// 2. `VACUUM` - rebuild the main db file (now in rollback-journal mode) so
-///    free pages from dropped tables are returned to the filesystem.
-/// 3. `PRAGMA journal_mode=WAL` - restore WAL mode, recreating fresh empty
-///    sidecar files.
-///
-/// Each step runs **outside any transaction**: `VACUUM` cannot run inside a
-/// transaction, and `journal_mode` changes cannot happen inside one either.
-/// The caller (`reset_project_inner`) has already committed the schema rebuild
-/// by the time this is invoked.
-///
-/// On an in-memory test connection, `journal_mode=DELETE` is a no-op (the mode
-/// stays `memory`) and `VACUUM` is a harmless no-op for size, so the helper is
-/// safe to call from in-memory test fixtures.
+/// Each step runs outside any transaction (`VACUUM` + `journal_mode` changes don't
+/// support transactions). On in-memory DBs step 1 is a no-op (mode stays `memory`).
 ///
 /// # Errors
 ///
-/// Returns [`AppError::Database`] on any SQL failure. Callers wrapping
-/// destructive operations (e.g. `reset_project_inner`) are expected to treat a
-/// failure here as non-fatal: the data wipe has already happened, so a VACUUM
-/// failure should be logged, not surfaced as a hard error.
+/// `AppError::Database` on SQL failure. Callers of destructive operations should treat
+/// this as non-fatal (data wipe has already happened).
 pub fn vacuum_database(conn: &Connection) -> Result<(), AppError> {
-    // 1. Switch to DELETE journal mode. On a WAL database this forces a full
-    //    checkpoint and removes the -wal / -shm sidecar files so the VACUUM
-    //    operates directly on the main file. On an in-memory DB the mode stays
-    //    "memory" (the pragma is a no-op there).
+    // 1. Switch to DELETE journal mode — forces WAL checkpoint, removes sidecar files.
     conn.query_row("PRAGMA journal_mode=DELETE", [], |_row| Ok(()))?;
 
-    // 2. Rebuild the database file, reclaiming the free pages left by the
-    //    dropped tables. In rollback-journal mode this definitively shrinks
-    //    the main file.
+    // 2. Rebuild the database file, reclaiming free pages.
     conn.execute("VACUUM", [])?;
 
-    // 3. Restore WAL mode so the connection returns to its normal operating
-    //    mode. This recreates fresh, empty -wal / -shm sidecar files.
+    // 3. Restore WAL mode with fresh empty sidecar files.
     conn.query_row("PRAGMA journal_mode=WAL", [], |_row| Ok(()))?;
 
     Ok(())

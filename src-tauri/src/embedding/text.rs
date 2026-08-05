@@ -1,38 +1,22 @@
-//! Pure helpers for the embedding pipeline.
+//! Pure, `#[must_use]` helpers for the embedding pipeline (no I/O).
 //!
-//! These functions are pure (no I/O) and `#[must_use]` so they can be
-//! unit-tested in isolation without a database or LLM connection.
-//!
-//! - [`format_embedding_text`] builds the text that gets embedded for one row.
-//! - [`hash_text`] computes the SHA-256 hex digest used for staleness checks.
-//! - [`expected_rows`] computes the `(chunk_index, text)` pairs for an article.
-//! - [`cosine_similarity`] scores two vectors (max-pool recall ranking).
-//! - [`serialize_embedding`] / [`deserialize_embedding`] convert between
-//!   `Vec<f32>` and the little-endian byte stream stored in the BLOB column.
+//! [`format_embedding_text`], [`hash_text`], [`expected_rows`], [`cosine_similarity`],
+//! [`serialize_embedding`]/[`deserialize_embedding`], [`split_text_by_token_budget`],
+//! [`pool_vectors`].
 
 use sha2::{Digest, Sha256};
 
-/// The title+abstract row uses the sentinel `chunk_index = -1`. Per-chunk rows
-/// use the matching `article_chunks.chunk_index` (`>= 0`).
+/// Sentinel `chunk_index = -1` for title+abstract rows. Per-chunk rows use `>= 0`.
 ///
-/// We use `-1` instead of `NULL` because SQLite treats `NULL` values as
-/// **distinct** in a composite PRIMARY KEY, so `INSERT OR REPLACE` with
-/// `chunk_index = NULL` would never replace a prior title+abstract row (each
-/// NULL is a new key). The `-1` sentinel is a real value that participates in
-/// PK uniqueness correctly, and it can never collide with a genuine chunk
-/// index (`article_chunks.chunk_index` is always `>= 0`).
+/// `-1` not `NULL` because SQLite treats NULLs as distinct in composite PKs,
+/// defeating `INSERT OR REPLACE`. `-1` can never collide with a real chunk index (`>= 0`).
 pub const TITLE_ABSTRACT_CHUNK_INDEX: i32 = -1;
 
-/// Build the text that gets embedded for one row.
+/// Build embedded text for one row.
 ///
-/// - Title+abstract row (`chunk_body = None`): `title + "\n\n" + abstract`.
-///   If the abstract is empty, the title alone is used (still meaningful for
-///   short records).
-/// - Per-chunk row (`chunk_body = Some(body)`): `title + "\n\n" + body`. The
-///   title prefix is included so each chunk vector carries article-identity
-///   signal, not just the chunk's local content.
-///
-/// A whitespace-only title is treated as empty to avoid a leading blank line.
+/// Title+abstract (`chunk_body = None`): `title + "\n\n" + abstract`.
+/// Per-chunk (`chunk_body = Some(body)`): `title + "\n\n" + body` (title prefix
+/// carries article-identity signal). Whitespace-only title treated as empty.
 #[must_use]
 pub fn format_embedding_text(title: &str, abstract_text: &str, chunk_body: Option<&str>) -> String {
     let title_trimmed = title.trim();
@@ -57,11 +41,8 @@ pub fn format_embedding_text(title: &str, abstract_text: &str, chunk_body: Optio
     }
 }
 
-/// Compute the SHA-256 hex digest of the exact text that was embedded.
-///
-/// Used as the per-row `input_hash` so the director can detect staleness:
-/// when the title, abstract, or chunk body changes, the hash changes, and the
-/// row is re-embedded on the next pipeline run.
+/// SHA-256 hex digest of the embedded text. `input_hash` for staleness detection:
+/// when source text changes → hash changes → row re-embedded next run.
 #[must_use]
 pub fn hash_text(text: &str) -> String {
     let mut hasher = Sha256::new();
@@ -78,24 +59,15 @@ pub fn hash_text(text: &str) -> String {
 /// A chunk body paired with its `article_chunks.chunk_index`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChunkInput {
-    /// The `article_chunks.chunk_index` (`>= 0`).
     pub chunk_index: i32,
-    /// The chunk body text (without the title prefix; the prefix is added by
-    /// [`format_embedding_text`]).
+    /// Chunk body text (title prefix added by [`format_embedding_text`]).
     pub body: String,
 }
 
-/// Compute the `(chunk_index, text)` pairs that should be embedded for one
-/// article.
+/// Compute `(chunk_index, text)` pairs for one article.
 ///
-/// - Row 0 is always the title+abstract row (`chunk_index = -1` sentinel).
-/// - When `has_full_text = true` AND `chunks` is non-empty, one row per chunk
-///   is appended (title prefix + chunk body).
-/// - When `has_full_text = false` OR `chunks` is empty, only the title+abstract
-///   row is produced (abstract-only articles still participate in recall).
-///
-/// Returns the empty vec only when both the title and abstract are empty/blank
-/// AND there are no chunks (nothing meaningful to embed).
+/// Always: title+abstract row (`-1`). Full-text: + one row per chunk. Empty only when
+/// no text and no chunks exist.
 #[must_use]
 pub fn expected_rows(
     title: &str,
@@ -127,11 +99,8 @@ pub fn expected_rows(
 
 /// Cosine similarity between two f32 vectors.
 ///
-/// Returns `0.0` on length mismatch (the caller is responsible for filtering
-/// out dimension-mismatched rows before scoring). Returns `0.0` when either
-/// vector has zero magnitude (no signal). Range: `[-1.0, 1.0]`; identical
-/// vectors score `1.0`; orthogonal vectors score `0.0`; opposite vectors score
-/// `-1.0`.
+/// Returns `0.0` on length mismatch, zero magnitude, or empty input.
+/// Range `[-1.0, 1.0]`.
 #[must_use]
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
@@ -153,10 +122,8 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Serialize an f32 vector into a little-endian byte stream for BLOB storage.
-///
-/// The byte length is `vec.len() * 4`. The dimensions are stored in a separate
-/// column so the reader can validate the blob length matches.
+/// Serialize f32 vector → little-endian BLOB (`vec.len() * 4` bytes).
+/// Dimensions stored separately for length validation.
 #[must_use]
 pub fn serialize_embedding(vec: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(vec.len() * 4);
@@ -166,10 +133,8 @@ pub fn serialize_embedding(vec: &[f32]) -> Vec<u8> {
     bytes
 }
 
-/// Deserialize a little-endian byte stream back into an f32 vector.
-///
-/// Returns `None` when the byte length is not a multiple of 4 (corrupt blob).
-/// The caller passes the stored `dimensions` to validate the decoded length.
+/// Deserialize little-endian BLOB → f32 vector. Returns `None` on corrupt blob
+/// or dimension mismatch.
 #[must_use]
 pub fn deserialize_embedding(bytes: &[u8], dimensions: i32) -> Option<Vec<f32>> {
     if dimensions <= 0 {
@@ -189,11 +154,8 @@ pub fn deserialize_embedding(bytes: &[u8], dimensions: i32) -> Option<Vec<f32>> 
 
 // ── v2: arbitrary-length text splitting + vector pooling ────────────────────
 
-/// One piece produced by [`split_text_by_token_budget`].
-///
-/// `token_count` is the weight used by [`pool_vectors`] when re-assembling
-/// multiple piece vectors into one (token-weighted mean: a 1000-token piece
-/// outweighs a 100-token piece).
+/// One text piece from [`split_text_by_token_budget`]. `token_count` is the
+/// weight for [`pool_vectors`] token-weighted mean.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextPiece {
     /// The piece text.
@@ -202,23 +164,12 @@ pub struct TextPiece {
     pub token_count: usize,
 }
 
-/// Split a single text into pieces that each fit within `max_tokens`.
+/// Split text into pieces ≤ `max_tokens`. Token estimation via
+/// [`crate::utils::text_tokens::tokenize`].
 ///
-/// Strategy (in priority order):
-/// 1. If the whole text fits, return a single piece.
-/// 2. Split at sentence boundaries (`. `, `! `, `? `) and greedily pack
-///    sentences into pieces under the budget.
-/// 3. For a sentence that alone exceeds the budget, fall back to word
-///    boundaries: greedily pack words into pieces under the budget.
-/// 4. For a single word that alone exceeds the budget, hard-split by character
-///    count (rare; only for pathologically long tokens with no whitespace).
-///
-/// Token estimation uses the shared [`crate::utils::text_tokens::tokenize`]
-/// counter (whitespace-split, consistent with screening + FTS5). Each returned
-/// piece carries its `token_count` so the caller can pass it as the weight to
-/// [`pool_vectors`].
-///
-/// Returns at least one piece (possibly empty when the input is empty).
+/// Priority: 1) whole text fits → one piece; 2) sentence-boundary greedy pack;
+/// 3) word-boundary fallback for oversized sentences; 4) character hard-split
+/// (rare, pathologically long tokens). Always returns ≥1 piece.
 #[must_use]
 pub fn split_text_by_token_budget(text: &str, max_tokens: usize) -> Vec<TextPiece> {
     if max_tokens == 0 {
@@ -292,11 +243,9 @@ pub fn split_text_by_token_budget(text: &str, max_tokens: usize) -> Vec<TextPiec
     }
 }
 
-/// Naive sentence splitter: splits on `. `, `! `, `? ` boundaries, preserving
-/// the trailing punctuation with each sentence. Whitespace-only sentences are
-/// dropped. This is intentionally simple (no NLP) - good enough for embedding
-/// piece boundaries where exactness doesn't matter, only that splits avoid
-/// landing mid-word.
+/// Naive sentence splitter on `.`, `!`, `?` boundaries. Simple (no NLP) --
+/// good enough for embedding piece boundaries where exactness doesn't matter.
+/// Whitespace-only sentences dropped.
 fn split_into_sentences(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
@@ -348,24 +297,11 @@ fn split_word_pack(text: &str, max_tokens: usize) -> Vec<TextPiece> {
     pieces
 }
 
-/// Token-weighted mean-pool + L2-normalize a set of piece vectors into ONE
-/// representative vector.
+/// Token-weighted mean-pool + L2-normalize piece vectors into one vector.
 ///
-/// Used by [`crate::llm::orchestrator::LlmOrchestrator::send_embedding_batch_parallel`]
-/// when [`split_text_by_token_budget`] produced more than one piece for a
-/// single input text - each piece was embedded separately, then this fn merges
-/// the resulting vectors back into a single per-input vector so the storage
-/// contract `(article_id, chunk_index) -> 1 vector` is preserved.
-///
-/// Semantics:
-/// - Empty input → empty output.
-/// - Single piece → returned verbatim (no normalization; the provider's
-///   vector is already in the right shape).
-/// - Multiple pieces → weighted mean (weights = `piece_tokens`), then
-///   L2-normalized so the result has unit magnitude (matches the scale of
-///   non-pooled vectors from the same provider).
-/// - Length mismatch across pieces → empty output (defense-in-depth; the
-///   caller's per-row guard skips the slot).
+/// Preserves storage contract: `(article_id, chunk_index) → 1 vector`.
+/// Empty input → empty. Single piece → verbatim. Multiple pieces → weighted mean
+/// (weights = `piece_tokens`), then L2-normalized. Length mismatch → empty.
 #[must_use]
 pub fn pool_vectors(pieces: &[Vec<f32>], weights: &[usize]) -> Vec<f32> {
     if pieces.is_empty() {

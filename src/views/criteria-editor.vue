@@ -20,9 +20,7 @@ const toast = useToast();
 const criteriaStore = useCriteriaStore();
 
 // Canonical LLM-configured gate (wraps `useLlmConfigStore().isConfigured`).
-// The composable mirrors the backend `llm_config_repo::has_config` contract
-// (local providers like LM Studio / Ollama / llama.cpp do not need a key) and
-// defensively pre-warms the store via `fetchIfNeeded()`.
+// Mirrors backend `llm_config_repo::has_config` contract; pre-warms store.
 const llmConfigured = useLlmConfigured();
 
 // Read directly from store - pre-warmed at startup, no onMounted fetch needed.
@@ -146,10 +144,8 @@ async function updateCriterionText(id: string, text: string, priority: Priority)
   await refetch();
 }
 
-// ── Inline edit controllers ───────────────────────────────────────────
-// One controller for aims, one for criteria (covers both inclusion and
-// exclusion; criterion ids are globally-unique UUIDs so a single controller
-// can track which one is being edited without cross-section confusion).
+/* Inline edit controllers. One for aims, one for criteria (covers both
+ * inclusion and exclusion; criterion ids are globally-unique UUIDs). */
 const aimEdit = useInlineEdit<ResearchAim>({
   saveItem: async (item, newText) => {
     await updateAim(item.id, newText);
@@ -171,18 +167,16 @@ const criterionEdit = useInlineEdit<Criterion>({
 });
 
 /**
- * Character offset (within the read-only text) where the user double-clicked,
- * captured BEFORE the input swaps in. Used to place the edit caret at the click
- * point so typing inserts at the cursor instead of replacing a select-all.
- * `null` means "no offset captured -> default to position 0".
+ * Character offset where user double-clicked in read-only text, captured
+ * BEFORE input swaps in. Places edit caret at click point. `null` = default
+ * to position 0.
  */
 const pendingCaretOffset = ref<number | null>(null);
 
 /**
- * Compute the character offset of a text node under a (clientX, clientY) point.
- * Uses the standard `caretPositionFromPoint` when available (Firefox) and the
- * widely-supported WebKit/Chromium `caretRangeFromPoint` fallback. Returns `null`
- * if neither API is available or the point is not over a text node.
+ * Compute character offset of text node under (clientX, clientY). Uses
+ * standard `caretPositionFromPoint` (Firefox) or WebKit/Chromium
+ * `caretRangeFromPoint` fallback.
  */
 function caretOffsetAtPoint(x: number, y: number): number | null {
   // Standard (Firefox): returns { offsetNode, offset }.
@@ -206,10 +200,9 @@ function caretOffsetAtPoint(x: number, y: number): number | null {
 }
 
 /**
- * Double-click handler wrapper: capture the caret offset at the click point
- * (computed against the read-only text element that was clicked) BEFORE entering
- * edit mode, then defer to `controller.startEdit`. The stored offset is consumed
- * by `focusInlineInput` once the <input> mounts.
+ * Dbl-click handler: capture caret offset at click point (against read-only
+ * text element) BEFORE entering edit mode. Offset consumed by `focusInlineInput`
+ * once the &lt;input&gt; mounts.
  */
 function handleInlineDblClick<T extends { id: string }>(
   item: T,
@@ -221,12 +214,9 @@ function handleInlineDblClick<T extends { id: string }>(
 }
 
 /**
- * Plain template ref for whichever inline-edit <textarea> is currently mounted.
- * At most one is visible at a time (only the editing row renders a textarea), so
- * a single shared ref is sufficient. Deliberately NOT a function ref: a
- * function ref would re-run on every render (including the re-render triggered
- * by `v-model` on each keystroke) and re-focus / re-set the caret, which would
- * jump the caret back to position 0 while the user is typing.
+ * Plain template ref for whichever inline-edit &lt;textarea&gt; is mounted.
+ * At most one is visible at a time. NOT a function ref: it would re-run on
+ * every render (including `v-model` keystrokes) and jump the caret to 0.
  */
 const inlineInputEl = ref<HTMLTextAreaElement | null>(null);
 
@@ -338,9 +328,8 @@ function priorityLabel(priority: Priority): string {
 // ── AI assistant logic ──────────────────────────────────────────────
 
 const hasAims = computed(() => aims.value.length > 0);
-// Use the canonical gate so local providers (LM Studio / Ollama / llama.cpp)
-// enable the AI buttons. Re-deriving from `apiKeyEncrypted` would wrongly
-// disable them - see `isConfigured` docstring in `llm-config.ts`.
+/* Use canonical gate so local providers (LM Studio / Ollama / llama.cpp)
+ * enable AI buttons. Re-deriving from `apiKeyEncrypted` would disable them. */
 const canUseAi = computed(() => hasAims.value && llmConfigured.value);
 
 const canGenerateStrategy = computed(() => hasAims.value && llmConfigured.value);
@@ -433,10 +422,9 @@ function dismissExclusionCritique(): void {
   criteriaStore.exclusionCritiqueExpanded = true;
 }
 
-// ── Custom Screening Instructions + Check Rules ────────────────────────
-// Local draft mirrors the persisted store value while the user edits. We
-// load on mount and seed the draft from the store so navigation away and
-// back preserves unsaved edits within the session.
+/* Custom Screening Instructions + Check Rules. Local draft mirrors persisted
+ * store value while user edits. Load on mount from store so navigation
+ * away-and-back preserves unsaved session edits. */
 const customLogicDraft = ref('');
 const showHelpPopover = ref(false);
 let helpPopoverTimeout: ReturnType<typeof setTimeout> | null = null;

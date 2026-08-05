@@ -45,13 +45,10 @@ const helpItem: NavItem = { label: 'Help Guide', icon: 'help', route: '/help' };
 
 const showShareDialog = ref(false);
 
-// --- Share Bango startup attention animation ---
-// Two-stage sequence, both fire at most once per app session:
-//   Stage 1 (6s after data-ready): zoom pulse (Option B)
-//   Stage 2 (2 minutes after data-ready): soft glow pulse (Option C)
-// Both no-op when prefers-reduced-motion: reduce is set.
-// Stage 1 is delayed so it does not compete with other startup activity
-// (loading overlay dismiss, store pre-warming, wiki drift check, etc.).
+/* Share Bango startup attention animation - two-stage, fires at most once per
+   app session. Stage 1 (6s after data-ready): zoom pulse. Stage 2 (2 min after
+   data-ready): soft glow pulse. Both no-op when prefers-reduced-motion is set.
+   Stage 1 delayed to avoid competing with startup activity. */
 const STAGE_1_DELAY_MS = 3 * 1000; // 6 seconds
 const ZOOM_PULSE_MS = 700;
 const GLOW_PULSE_MS = 1400;
@@ -102,9 +99,8 @@ watch(
 
     if (prefersReducedMotion()) return;
 
-    // Stage 1: zoom pulse after a short delay so it does not compete with
-    // other startup activity (loading overlay dismiss, store pre-warming,
-    // wiki drift check, etc.).
+    /* Stage 1: zoom pulse after short delay so it does not compete with
+       other startup activity (loading overlay, store pre-warming, wiki drift). */
     stage1DelayTimer = setTimeout(() => {
       stage1DelayTimer = null;
       runStage1();

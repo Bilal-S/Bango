@@ -112,10 +112,9 @@ const filteredRankings = computed(() => {
 
 // ── Selected author for detail panel ─────────────────────────────
 const selectedAuthorId = ref<string | null>(null);
-// Ref on the scrollable ranking table container so `selectCollaborator` can
-// scroll the newly-selected row into view (Gap 2). Without this the row
-// highlights via CSS but a collaborator off-screen in a long table shows no
-// visible change.
+/* Ref on scrollable ranking table container so `selectCollaborator` can
+ * scroll newly-selected row into view (Gap 2). Without this the row
+ * highlights via CSS but off-screen collaborator shows no visible change. */
 const tableContainerRef = ref<HTMLElement | null>(null);
 
 watch(selectedAuthorId, (id) => {
@@ -267,24 +266,16 @@ function scholarTooltip(displayName: string): string {
 }
 
 // ── Deep link to filtered article list ───────────────────────────
-// The author productivity view summarizes included articles only, so the
-// filter-based deep-link routes through `buildBiblioArticleQuery`, which
-// enforces `status: 'included'` (decision D1) in one place.
+/* The author productivity view summarizes included articles only; routes
+ * through `buildBiblioArticleQuery` which enforces `status: 'included'`. */
 function viewAuthorArticles(displayName: string): void {
   void router.push(buildBiblioArticleQuery('authors', { author: displayName }));
 }
 
 /**
- * Select the author matching a Top Collaborator name, if present in the
- * rankings. `selectAuthor` takes the whole `AuthorRank` object (not an id
- * string), so the lookup must resolve the name to the rank object first.
- * Stays on the Authors view (no routing).
- *
- * After selecting, scrolls the matching table row into view so the user
- * gets visible feedback even when the row is off-screen in a long table
- * (Gap 2). When no ranking matches (name mismatch, filtered out by
- * current sidebar settings, or missing from the dataset), shows an
- * informational toast instead of failing silently (Gap 3).
+ * Select the author matching a Top Collaborator name in the rankings.
+ * Scrolls the matching row into view (Gap 2). Shows info toast when no
+ * ranking matches (Gap 3).
  */
 function selectCollaborator(name: string): void {
   const found = resolveCollaboratorAuthor(rankings.value, name);
@@ -293,9 +284,8 @@ function selectCollaborator(name: string): void {
     return;
   }
   selectAuthor(found);
-  // Wait for the `.ranking-table__row--active` class to re-render on the
-  // matching row, then scroll it into view. `block: 'nearest'` avoids
-  // jumping when the row is already partially visible.
+  /* Wait for active row class to re-render then scroll into view. `block:
+   'nearest'` avoids jumping when row is already partially visible. */
   void nextTick(() => {
     const container = tableContainerRef.value;
     if (!container) return;
@@ -307,8 +297,7 @@ function selectCollaborator(name: string): void {
 }
 
 /**
- * Open an article directly in the article list detail panel via the
- * `articleId` deep-link (handled by `applyRouteParams`).
+ * Open an article in the article list detail panel via `articleId` deep-link.
  */
 function openArticle(articleId: string): void {
   void router.push({

@@ -1,13 +1,6 @@
-//! Wiki chat - token-budgeted RAG over the FTS5 index.
-//!
-//! Given a user question:
-//! 1. BM25-search the `wiki_pages_fts` index for the top matches.
-//! 2. Build a context string from the hits, respecting a token budget
-//!    (approximate: 1 token ~= 4 chars). Higher-ranked hits are included first.
-//! 3. Send to the LLM via `LlmOrchestrator` with `LlmRequestType::WikiChat`.
-//!
-//! The system prompt instructs the model to answer from the wiki context, cite
-//! pages by slug, and admit when the wiki does not cover the question.
+//! Wiki chat: token-budgeted RAG over the FTS5 index. BM25-search wiki pages, build context
+//! respecting a ~3k token budget, send to LLM as `LlmRequestType::WikiChat`. System prompt
+//! instructs the model to answer from context, cite by slug, admit gaps.
 
 use std::sync::Arc;
 
@@ -20,15 +13,11 @@ use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
 use crate::wiki::fts;
 
-/// Approximate character budget for the wiki context (1 token ~= 4 chars).
-/// Conservative to leave room for the system prompt + user question + history.
+/// Approximate char budget for wiki context (1 token ~= 4 chars). ~3k tokens.
 const CONTEXT_CHAR_BUDGET: usize = 12_000; // ~3000 tokens
 
-/// The maximum number of FTS5 hits to consider for context.
-///
-/// Raised from 8 to 16 in T1.2 because chunk rows are smaller than whole-page
-/// rows, so more fit the char budget. `build_context` dedupes by `parent_slug`
-/// so multiple chunks of the same page do not crowd out other pages.
+/// Max FTS5 hits to consider. 16 since T1.2 (chunk rows are smaller than whole-page rows).
+/// `build_context` dedupes by `parent_slug` so one paper doesn't crowd out others.
 const MAX_HITS: usize = 16;
 
 /// Send a wiki-grounded chat message. Returns the assistant response text.
@@ -44,10 +33,9 @@ pub async fn wiki_chat(
         crate::wiki::storage::resolve_root(&conn)?
     };
 
-    // 2. BM25 search for the most relevant wiki pages. `ensure_index_populated`
-    //    self-heals the desync where pages exist on disk but the FTS table is
-    //    empty (e.g. after a schema rebuild / DB reset that dropped the table
-    //    but left the wiki/*.md files intact).
+    /* Self-heal: BM25 search for relevant wiki pages. `ensure_index_populated`
+    recovers from desync where pages exist on disk but FTS table is empty
+    (e.g. after schema rebuild/DB reset that dropped table). */
     let hits = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         fts::ensure_index_populated(&conn, &root)?;
@@ -77,8 +65,7 @@ pub async fn wiki_chat(
     Ok(response)
 }
 
-/// The wiki-chat system prompt (static). Returned by `build_wiki_prompts` and
-/// exposed for tests so the prompt contract is documented alongside its tests.
+/// Wiki-chat system prompt. Exposed for tests alongside the prompt contract.
 #[must_use]
 pub fn wiki_chat_system_prompt() -> &'static str {
     "You are a research wiki assistant. Answer the researcher's question using \
@@ -131,25 +118,16 @@ pub fn build_wiki_prompts(
     (wiki_chat_system_prompt(), user_prompt)
 }
 
-/// Build a token-budgeted context string from BM25 hits.
-///
-/// T1.2 chunk-aware behavior:
-/// - Dedupe by `parent_slug`: when multiple chunks of the same page match,
-///   keep the top-ranked chunk and append "(+N more passages from this page)"
-///   so one paper does not crowd out other pages.
-/// - Include the section label in the entry header when present, e.g.
-///   `## [[slug]] - Title (§Methods)`, so the model can cite the passage.
-///
-/// Higher-ranked hits are included first; once the char budget is exhausted,
-/// remaining hits are skipped (their titles are still listed as "see also").
+/// Build a token-budgeted context string from BM25 hits. Dedupes by `parent_slug` (T1.2):
+/// keeps the top-ranked chunk, appends "(+N more passages)". Includes §Section label in header.
+/// Higher-ranked hits first; over-budget hits are "see also" with summary-only fallback.
 fn build_context(hits: &[fts::WikiPageHit]) -> String {
     if hits.is_empty() {
         return String::new();
     }
 
-    // Dedupe by parent_slug (falls back to slug for legacy whole-page rows).
-    // Keep the first (highest-ranked) hit per page; count the rest as "more
-    // passages".
+    /* Dedupe by parent_slug (falls back to slug for legacy whole-page rows).
+    Keep the first (highest-ranked) hit per page; count rest as "more passages". */
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut deduped: Vec<&fts::WikiPageHit> = Vec::new();
     let mut extra_by_page: std::collections::HashMap<String, usize> =
@@ -202,8 +180,7 @@ fn build_context(hits: &[fts::WikiPageHit]) -> String {
     out
 }
 
-/// Format a single hit as a context entry, including the section label when the
-/// hit carries chunk metadata.
+/// Format a single hit as a context entry, with §Section label when chunk metadata is present.
 fn format_entry(hit: &fts::WikiPageHit) -> String {
     let mut s = String::new();
     // Header: include (§Section) when the chunk metadata carries a section.

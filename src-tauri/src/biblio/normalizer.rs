@@ -9,9 +9,8 @@ use rust_stemmers::{Algorithm, Stemmer};
 
 static STEMMER: Lazy<Stemmer> = Lazy::new(|| Stemmer::create(Algorithm::English));
 
-/// Snowball-stem a phrase. Each whitespace-delimited token is stemmed
-/// independently and the results joined. Keeps multi-word phrases atomic
-/// as a node while still normalizing inflections ("networks" → "network").
+/// Stem each whitespace-delimited token independently via Snowball.
+/// Keeps multi-word phrases atomic while normalizing inflections.
 pub fn stem_phrase(text: &str) -> String {
     text.split_whitespace().map(|w| STEMMER.stem(w).to_string()).collect::<Vec<_>>().join(" ")
 }
@@ -33,14 +32,7 @@ pub struct ParsedAffiliation {
 }
 
 /// Split an author string into individual authors.
-///
-/// Handles common formats:
-/// - JSON array: `["Smith, J", "Doe, A"]`
-/// - JSON objects: `[{"name":"Smith, J"},{"name":"Doe, A"}]`
-/// - Semicolon-delimited: `Smith, J; Doe, A`
-/// - "and"-delimited: `Smith, J and Doe, A`
-/// - Newline-delimited: `Smith, J\nDoe, A`
-///
+/// Handles JSON arrays, JSON objects, semicolon, "and", and newline delimiters.
 /// Strips empty entries and trims whitespace.
 pub fn split_authors(authors_str: &str) -> Vec<String> {
     if authors_str.trim().is_empty() {
@@ -134,14 +126,9 @@ pub fn split_authors(authors_str: &str) -> Vec<String> {
     authors.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
-/// Normalize an author name for deduplication.
-///
-/// Strategy:
-/// - Lowercase
-/// - Remove punctuation (commas, periods, hyphens → spaces)
-/// - Collapse whitespace
-/// - Take first letter of each word (to handle "Smith John" vs "Smith J" vs "Smith, J.")
-/// - Actually: keep last name + first initial for best matching
+/// Lowercase, remove punctuation, collapse whitespace.
+/// Keeps last name + first initial(s) for best matching
+/// (handles "Smith John" vs "Smith J" vs "Smith, J.").
 pub fn normalize_author_name(raw: &str) -> String {
     let cleaned: String = raw
         .to_lowercase()
@@ -216,11 +203,8 @@ pub fn parse_authors(authors_str: &str) -> Vec<ParsedAuthor> {
         .collect()
 }
 
-/// Normalize a term (keyword or noun phrase) for deduplication.
-///
-/// - Lowercase
-/// - Strip trailing punctuation
-/// - Collapse whitespace
+/// Lowercase, strip trailing punctuation, collapse whitespace.
+/// Returns empty string for empty/bracket-only input.
 pub fn normalize_term(term: &str) -> String {
     let t_trim = term.trim();
     if t_trim.is_empty() || t_trim == "[]" || t_trim == "[\"\"]" {
@@ -259,15 +243,8 @@ pub fn normalize_term(term: &str) -> String {
 }
 
 /// Split a keywords string into individual keywords.
-///
-/// Handles common storage formats:
-/// - JSON array (the canonical storage form in the `articles.keywords` column):
-///   `["Allura Red", "tartrazine"]`
-/// - Semicolon-delimited: `Allura Red; tartrazine`
-/// - Comma-delimited: `Allura Red, tartrazine`
-///
-/// Strips empty entries and trims whitespace. Falls back to delimiter-based
-/// splitting when the input is not a valid JSON array.
+/// Handles JSON arrays (canonical `articles.keywords` column), semicolon, and comma delimiters.
+/// Falls back to delimiter splitting when JSON parse fails. Strips empty entries.
 pub fn split_keywords(keywords_str: &str) -> Vec<String> {
     let trimmed = keywords_str.trim();
     if trimmed.is_empty() {
@@ -275,9 +252,9 @@ pub fn split_keywords(keywords_str: &str) -> Vec<String> {
     }
 
     // ── JSON array detection ──────────────────────────────────────
-    // The `articles.keywords` column is a JSON array of strings (written via
-    // `serde_json::to_string`). Splitting it on `,` would produce broken
-    // fragments like `["Allura Red"` - so parse JSON first.
+    /* The `articles.keywords` column is a JSON array of strings (written via
+    `serde_json::to_string`). Splitting it on `,` would produce broken
+    fragments like `["Allura Red"` - so parse JSON first. */
     if trimmed.starts_with('[') {
         if let Ok(arr) = serde_json::from_str::<serde_json::Value>(trimmed) {
             if let Some(items) = arr.as_array() {
@@ -309,10 +286,8 @@ pub fn split_keywords(keywords_str: &str) -> Vec<String> {
 }
 
 /// Sanitize a raw term for storage in `biblio_terms.raw_term`.
-///
-/// Strips brackets, quotes, and stray JSON artifacts so the stored display
-/// value contains only the human-readable word(s). Defense-in-depth against
-/// malformed input - the canonical cleaning happens in `split_keywords`.
+/// Strips brackets, quotes, and JSON artifacts. Defense-in-depth —
+/// canonical cleaning happens in `split_keywords`.
 pub fn sanitize_raw_term(term: &str) -> String {
     let trimmed = term.trim();
     if trimmed.is_empty() {
@@ -449,11 +424,7 @@ fn is_department_part(part: &str) -> bool {
 }
 
 /// Parse an affiliation string into institution, city, and country.
-///
-/// Common formats:
-/// - "MIT, Cambridge, MA, USA"
-/// - "Department of CS, Stanford University, Stanford, CA"
-/// - "University of Oxford, Oxford, United Kingdom"
+/// Handles formats like "MIT, Cambridge, MA, USA" and "University of Oxford, Oxford, United Kingdom".
 #[must_use]
 pub fn parse_affiliation(affiliation: &str) -> ParsedAffiliation {
     parse_affiliation_with_extractor(affiliation, None)

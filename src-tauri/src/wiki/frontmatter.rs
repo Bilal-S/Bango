@@ -1,10 +1,5 @@
-//! Tiny YAML frontmatter parser/serializer for wiki pages.
-//!
-//! Scope: parse the subset of YAML we emit (scalar `key: value`, `key: "quoted"`,
-//! and inline `[a, b, c]` lists). This avoids adding a `serde_yaml` dependency.
-//! The schema is controlled by us (see `templates.rs`), so a permissive parser
-//! is sufficient.
-//!
+//! Minimal YAML frontmatter parser/serializer for wiki pages. Parses the subset we emit:
+//! scalar `key: value`, `key: "quoted"`, inline `[a, b, c]` lists. Avoids `serde_yaml` dep.
 //! A wiki Markdown file is `---\n<frontmatter>\n---\n<body>`.
 
 use std::collections::BTreeMap;
@@ -13,17 +8,15 @@ use crate::error::AppError;
 
 const FM_DELIM: &str = "---";
 
-/// Parsed frontmatter: ordered key/value pairs (values are raw strings,
-/// with list members preserved as the inner `[a, b]` text).
+/// Parsed frontmatter: ordered key/value pairs (raw strings; lists preserved as `[a, b]`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Frontmatter {
     pub fields: BTreeMap<String, String>,
 }
 
 impl Frontmatter {
-    /// Parse a full Markdown file into `(frontmatter, body)`.
-    /// If there is no leading `---` block, returns an empty frontmatter and
-    /// the whole input as body.
+    /// Parse a full Markdown file into `(frontmatter, body)`. Empty frontmatter + full input as body
+    /// when no leading `---` block is present.
     #[must_use]
     pub fn split_markdown(input: &str) -> (Self, String) {
         let trimmed = input.strip_prefix(FM_DELIM);
@@ -86,12 +79,11 @@ impl Frontmatter {
         self.fields.insert(key.to_string(), value.to_string());
     }
 
-    /// Serialize to a YAML block (without the surrounding `---` fences).
+    /// Serialize to a YAML block (without `---` fences). Fields in canonical order, then alphabetical extras.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         let mut out = String::new();
-        // Stable, human-friendly order: write fields in insertion order of the
-        // canonical schema when present, otherwise alphabetical.
+        // Stable, human-friendly order: canonical schema then alphabetical extras.
         let canonical = [
             "id",
             "title",
@@ -167,8 +159,7 @@ fn format_line(key: &str, value: &str) -> String {
     }
 }
 
-/// Parse a list-looking value (`[a, b, c]`) into trimmed members.
-/// Returns an empty vec for non-list values.
+/// Parse a list-looking value `[a, b, c]` into trimmed members. Empty vec for non-list values.
 #[must_use]
 pub fn parse_list(value: &str) -> Vec<String> {
     let v = value.trim();
@@ -192,8 +183,7 @@ pub fn parse_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-/// Append a run entry to a `wiki/log.md` body and return the new body.
-/// Creates the header if the body is empty.
+/// Append a run entry to `wiki/log.md`. Creates the `# Wiki Audit Log` header if the body is empty.
 #[must_use]
 pub fn append_log_entry(body: &str, entry: &str) -> String {
     let mut out = if body.trim().is_empty() {

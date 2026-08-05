@@ -1,26 +1,7 @@
-//! Method page pre-seed.
-//!
-//! Pre-seeds `wiki/methods/{method-slug}.md` for research methodologies found
-//! in the corpus. Mirrors `preseed_concept_hubs` but groups by study design
-//! instead of keyword.
-//!
-//! ## Data sources (two on-ramps)
-//!
-//! 1. **Primary** (when AI summaries exist): the typed `study_design` field on
-//!    each included article's `section_summaries[].study_design` (the
-//!    section-aware AI summary schema). The richest signal - exact study design
-//!    strings like "Randomized Controlled Trial", "Difference-in-Differences".
-//! 2. **Fallback** (abstracts-only corpora): the `biblio_terms` keyword index,
-//!    which is mined from `keywords + title + abstract_text` by
-//!    `biblio_repo::normalization`. We intersect with a small study-design
-//!    lexicon so non-methodological terms ("obesity", "sugar-tax") are
-//!    filtered out.
-//!
-//! Both paths converge on the same `MethodRow` shape and the same
-//! `render_method_hub` renderer. When neither yields any rows (e.g. a corpus
-//! with no method-related signal at all), the pre-seed gracefully writes zero
-//! pages - the LLM ingest, running on the same abstracts via the `raw_export`
-//! content fallback, can still create method pages from the prompt directive.
+//! Method page pre-seed (Phase 4). Pre-seeds `wiki/methods/{method-slug}.md` for research
+//! methodologies. Two data sources: (1) AI-summary `study_design` (Methods section, richest),
+//! (2) `biblio_terms` fallback (abstracts-only, filtered through study-design lexicon).
+//! When neither yields rows, zero pages written - LLM can still create from prompt directive.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,15 +14,8 @@ use crate::wiki::frontmatter::{self, Frontmatter};
 use super::slugs::squeeze_slug;
 use super::synthesis::parse_ai_summary;
 
-/// A canonical study-design lexicon. Each entry maps a recognized method label
-/// (the page title) to the synonyms/variations that should fold into it. The
-/// keys are the human-readable titles; the values are lowercased substrings
-/// that, when found in either a free-text `study_design` field or a
-/// `biblio_terms` row, resolve to the canonical entry.
-///
-/// Kept deliberately small + curated so the methods layer stays high-signal
-/// (mirrors the concept-hub "cap at 25" rationale). Adding a new entry here is
-/// the only change needed to teach the pre-seed a new study design.
+/// Canonical study-design lexicon. Key = display title, values = lowercase synonyms/substrings
+/// that resolve to this design. Adding a new entry here teaches the pre-seed a new design.
 const STUDY_DESIGN_LEXICON: &[(&str, &[&str])] = &[
     (
         "Randomized Controlled Trial",
@@ -69,8 +43,7 @@ const STUDY_DESIGN_LEXICON: &[(&str, &[&str])] = &[
     ("Mixed Methods", &["mixed methods", "mixed-methods"]),
 ];
 
-/// A method row: the canonical design label, its slug, the articles using it,
-/// and the co-occurring designs (for the "Related Methods" section).
+/// A method row: canonical design label, slug, articles using it, co-occurring designs.
 struct MethodRow {
     label: String,
     slug: String,
@@ -78,12 +51,8 @@ struct MethodRow {
     co_methods: Vec<String>,
 }
 
-/// Resolve a free-text study-design string to a canonical `(label, slug)`
-/// pair from the lexicon. Returns `None` when the text does not match any
-/// recognized design.
-///
-/// Matching is case-insensitive substring: `"Parallel-group RCT"` resolves to
-/// `Randomized Controlled Trial` because it contains `"rct"`.
+/// Resolve free-text study-design to canonical `(label, slug)` via case-insensitive substring matching.
+/// `"Parallel-group RCT"` → `(Randomized Controlled Trial, ...)`. Returns `None` on no match.
 #[must_use]
 fn canonicalize_study_design(raw: &str) -> Option<(&'static str, String)> {
     let lower = raw.to_lowercase();
@@ -105,11 +74,8 @@ fn term_to_study_design(normalized_term: &str) -> Option<(&'static str, String)>
     canonicalize_study_design(normalized_term)
 }
 
-/// Fetch method rows from AI-summary `study_design` fields.
-///
-/// Iterates the included articles that have an AI summary, parses each blob,
-/// extracts the `study_design` from the Methods section summary (when present),
-/// canonicalizes it via the lexicon, and aggregates articles per design.
+/// Fetch method rows from AI-summary `study_design` (Methods section). Aggregates articles per
+/// canonicalized design. Returns empty when no articles have AI summaries with Methods sections.
 fn fetch_methods_from_summaries(conn: &Connection) -> Result<Vec<MethodRow>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, full_text_ai_summary \
@@ -149,13 +115,8 @@ fn fetch_methods_from_summaries(conn: &Connection) -> Result<Vec<MethodRow>, App
     Ok(build_method_rows(by_slug))
 }
 
-/// Fetch method rows from `biblio_terms` (the abstracts-only fallback).
-///
-/// Mines the top-N terms by frequency (capped by `limit`), canonicalizes each
-/// via the lexicon, and aggregates articles per design. Terms that don't match
-/// any study design are skipped (so "obesity" / "sugar-tax" never produce
-/// method pages). Uses the existing `concepts::fetch_top_terms` query so the
-/// shape stays identical.
+/// Fetch method rows from `biblio_terms` (abstracts-only fallback). Intersects keyword index
+/// with study-design lexicon; non-methodological terms filtered out. Reuses `fetch_top_terms`.
 fn fetch_methods_from_terms(conn: &Connection, limit: usize) -> Result<Vec<MethodRow>, AppError> {
     let terms = super::concepts::fetch_top_terms(conn, limit)?;
     // Reuse the lexicon to filter to method-related terms only.
@@ -198,7 +159,7 @@ fn build_method_rows(by_slug: HashMap<String, (String, Vec<String>)>) -> Vec<Met
     rows
 }
 
-/// Render the frontmatter + body for a method hub page. Pure function.
+/// Render frontmatter + body for a method hub page. Pure function (no I/O).
 fn render_method_hub(method: &MethodRow) -> (Frontmatter, String) {
     let mut fm = Frontmatter::default();
     fm.set("id", &method.slug);
@@ -218,10 +179,8 @@ fn render_method_hub(method: &MethodRow) -> (Frontmatter, String) {
         method.co_methods.iter().map(|s| format!("\"[[{}]]\"", s)).collect();
     fm.set("links", &format!("[{}]", co_links.join(", ")));
 
-    // NOTE: do NOT emit `# {title}` as the first body line. The page title
-    // lives in frontmatter and is rendered separately by the wiki viewer's
-    // header (`<h1>{{ page.title }}</h1>`); repeating it in the body would
-    // show the title twice on the rendered page.
+    /* Title in frontmatter, rendered by viewer header. Duplicating as
+    `# {title}` would show the title twice on the rendered page. */
     let mut body = String::new();
     body.push_str(&format!("Used in {} included articles.\n", method.article_ids.len()));
     body.push_str("\n## Relevant Studies\n\n");
@@ -237,22 +196,8 @@ fn render_method_hub(method: &MethodRow) -> (Frontmatter, String) {
     (fm, body)
 }
 
-/// Pre-seed `wiki/methods/{method-slug}.md` for research methodologies found
-/// in the corpus.
-///
-/// Two on-ramps (first non-empty wins):
-/// 1. **AI-summary `study_design`** (when articles have AI summaries with a
-///    Methods section). The richest, most accurate signal.
-/// 2. **`biblio_terms` fallback** (abstracts-only corpora). Intersects the
-///    keyword index with a curated study-design lexicon so non-methodological
-///    terms are filtered out.
-///
-/// When neither yields any rows, the pre-seed writes zero pages - the LLM
-/// ingest can still create method pages from the prompt directive, and the
-/// grounding gate catches any ungrounded LLM fabrications.
-///
-/// Reviewed (user-edited) method pages are preserved. Returns the count of
-/// pages written.
+/// Pre-seed `wiki/methods/{method-slug}.md`. Primary: AI-summary study_design (richest).
+/// Fallback: biblio_terms intersected with lexicon (abstracts-only). Returns pages written.
 pub fn preseed_methods(conn: &Connection, root: &Path, limit: usize) -> Result<usize, AppError> {
     let methods_dir = root.join("wiki").join("methods");
     std::fs::create_dir_all(&methods_dir)?;

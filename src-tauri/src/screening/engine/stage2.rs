@@ -1,15 +1,8 @@
-//! Tier 3 two-stage: re-screen borderline articles with full-text evidence.
+//! Two-stage borderline re-screening with full-text evidence.
 //!
-//! `run_stage2_borderline` is extracted from `run_sync` to keep the main loop
-//! focused. The stage-2 decision overrides stage 1 and passes through
-//! `resolve_article_decision` again; stage-2 writes `ai_screen_enhanced`
-//! audit entries.
-//!
-//! **Cancel-polling contract**: the `tokio::select!` LLM-call wrapper stays
-//! inline inside `run_stage2_borderline`. Always poll `notified()`, check the
-//! token inside the branch body - never use an `if` precondition on the select
-//! branch (an unregistered waiter makes `notify_waiters()` a no-op and silently
-//! loses the cancel signal).
+//! `run_stage2_borderline` overrides stage-1 decision for borderline articles.
+//! **Cancel contract**: always poll `notified()`, check token inside branch body -
+//! never use `if` precondition on select branch (unregistered waiter = lost signal).
 
 use std::time::Duration;
 
@@ -29,11 +22,7 @@ use crate::screening::tags_labels::{create_or_match_label, create_or_match_tag};
 
 impl ScreeningEngine {
     /// Re-screen borderline articles with full-text evidence.
-    ///
-    /// Returns `Ok(true)` when cancelled (caller MUST `return Ok(())` so no
-    /// further batches process); `Ok(false)` on normal completion. The two
-    /// cancel-exit sites (mid-LLM-call + inter-article delay) set final
-    /// progress here before returning `true`.
+    /// Returns `Ok(true)` when cancelled (caller returns immediately); `Ok(false)` on completion.
     pub(crate) async fn run_stage2_borderline(
         &self,
         conn_mutex: &std::sync::Mutex<Connection>,
@@ -59,7 +48,7 @@ impl ScreeningEngine {
             return Ok(false);
         }
 
-        // Stage-2 progress sub-line.
+        /* Stage-2 progress sub-line. */
         let borderline_len = borderline.len();
         self.update_progress(ctx.app_handle, |p| {
             p.stage_total = Some(borderline_len);
@@ -68,7 +57,7 @@ impl ScreeningEngine {
         .await;
 
         for (stage2_done, (article, _stage1)) in borderline.iter().enumerate() {
-            // Cancel/pause gate between stage-2 articles.
+            /* Cancel/pause gate between stage-2 articles. */
             if *self.cancel_token.lock().await {
                 break;
             }

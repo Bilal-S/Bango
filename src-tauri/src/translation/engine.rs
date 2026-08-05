@@ -1,24 +1,8 @@
-//! Translation engine: owns the `TranslationLlmClient` and the per-article
-//! translation pipeline.
+//! Translation engine: `TranslationLlmClient` + per-article pipeline.
 //!
-//! Two paths:
-//! - `translate_metadata_only`: title + abstract translation (for articles
-//!   without full text attached).
-//! - `translate_full_text`: title + abstract + per-chunk full-text translation
-//!   followed by re-chunking of the English text.
-//!
-//! Per the translation pipeline design and the module `AGENTS.md`:
-//! - Originals are persisted to `article_original_content` (and
-//!   `article_original_chunks` for the full-text path) BEFORE the working row
-//!   is rewritten.
-//! - Write-back is a single `rusqlite::Transaction`: update `articles`, write
-//!   `translation` audit entry, commit. On any error the transaction rolls
-//!   back; no partial rows reach `articles` or `article_chunks`.
-//!
-//! The engine takes a `&Mutex<Connection>` (mirroring
-//! `commands::summary::generate_article_ai_summary_inner`) so the worker can
-//! release the lock across the async LLM call - the `MutexGuard` is `!Send`
-//! and cannot be held across `.await` inside a `tokio::spawn`ed task.
+//! Two paths: `translate_metadata_only` and `translate_full_text` (batched chunks).
+//! Originals persisted to `article_original_content`/`article_original_chunks`
+//! before rewrite. Write-back is a single `rusqlite::Transaction`.
 
 use std::sync::{Arc, Mutex};
 
@@ -40,16 +24,8 @@ citations. Output EXACTLY two sections using these markers on their own line:\n\
 TITLE:\n<translated English title>\n\nABSTRACT:\n<translated English abstract>\n\
 Do not add any commentary before or after these sections.";
 
-/// The diagnostic `TranslationLlmClient`.
-///
-/// Mirrors `screening::llm_client::HttpLlmClient` but logs the `job_id`
-/// (article UUID) before each delegated orchestrator call, and routes through
-/// `send_with_type(LlmRequestType::Translation)`. The `LlmClient` trait and
-/// `send_with_type` default method are not widened (per plan §LLM Orchestrator
-/// and Translation Client). Per-chunk identification (`part_id={idx}`) lives
-/// in the `translate_full_text` dispatch log line, not here - the trait
-/// signature carries no part_id, so hardcoding one would be wrong for chunk
-/// calls (see the note in `send`).
+/// `TranslationLlmClient`: wraps LlmOrchestrator, logs job_id, routes through
+/// `LlmRequestType::Translation`. Implements `screening::llm_client::LlmClient`.
 pub struct TranslationLlmClient {
     pub config: LlmConfig,
     pub orchestrator: Arc<LlmOrchestrator>,
@@ -59,13 +35,6 @@ pub struct TranslationLlmClient {
 #[async_trait::async_trait]
 impl LlmClient for TranslationLlmClient {
     async fn send(&self, system: &str, user: &str) -> Result<(String, usize), AppError> {
-        // NOTE: this method is called for BOTH the metadata (title + abstract)
-        // call and each per-chunk call. The per-chunk dispatch log line in
-        // `translate_full_text` (`part_id={idx} translating chunk`) is the
-        // source of truth for identifying which chunk is in flight; this line
-        // only confirms the orchestrator delegation. Do NOT hardcode a part_id
-        // or a "(metadata-only)" label here - it would be wrong for chunk calls
-        // and floods the log under parallel dispatch.
         eprintln!("[translation] job_id={} delegating via orchestrator", self.job_id);
         self.orchestrator.send(&self.config, system, user, LlmRequestType::Translation).await
     }
@@ -76,8 +45,7 @@ impl LlmClient for TranslationLlmClient {
         user: &str,
         request_type: LlmRequestType,
     ) -> Result<(String, usize), AppError> {
-        // See the note in `send`: do not hardcode part_id or a metadata-only
-        // label here - this method serves both metadata and per-chunk calls.
+        // See note in `send`: do not hardcode part_id/metadata label here.
         eprintln!(
             "[translation] job_id={} delegating via orchestrator ({:?})",
             self.job_id, request_type
@@ -93,29 +61,17 @@ pub struct TranslatedMetadata {
     pub abstract_text: String,
 }
 
-/// Find a marker (e.g. `"TITLE:"`) case-insensitively in `response`, returning
-/// the byte index of the match in the **original** string. This avoids the
-/// Unicode-expansion index-shift bug that `response.to_uppercase().find(...)`
-/// would introduce: `to_uppercase()` can change byte lengths (e.g. ligatures
-/// like `ﬁ` → `FI`), so an index found in the uppercased copy may not land on a
-/// char boundary in the original, causing `str::get()` to return `None` and the
-/// parse to fail silently. Searching the original string keeps indices
-/// byte-stable.
+/// Case-insensitive marker finder matching on original string to avoid
+/// Unicode byte-shift bugs (e.g. `ﬁ` ligature → `FI` expansion).
 fn find_marker_ci(haystack: &str, needle: &str) -> Option<usize> {
     let needle_lower = needle.to_ascii_lowercase();
     haystack.to_ascii_lowercase().find(&needle_lower).filter(|&idx| haystack.is_char_boundary(idx))
 }
 
-/// Parse the `TITLE:` / `ABSTRACT:` marker format from the LLM response.
+/// Parse `TITLE:` / `ABSTRACT:` marker format from LLM response.
 ///
-/// Tolerant of leading/trailing whitespace and model preamble: scans for the
-/// markers case-insensitively and splits on the first occurrence of each. If
-/// either marker is missing, returns `None` (the caller treats this as a
-/// translation failure).
-///
-/// A response where either the title OR the abstract section is empty is also
-/// treated as a parse failure (`None`), so a malformed response cannot
-/// overwrite the article's title or abstract with an empty string.
+/// Case-insensitive, tolerant of preamble. Returns `None` if either marker
+/// missing or either section empty.
 #[must_use]
 pub fn parse_metadata_translation(response: &str) -> Option<TranslatedMetadata> {
     let title_idx = find_marker_ci(response, "TITLE:")?;
@@ -127,8 +83,7 @@ pub fn parse_metadata_translation(response: &str) -> Option<TranslatedMetadata> 
     let title_raw = response.get(title_start..abstract_idx)?.trim();
     let abstract_start = abstract_idx + "ABSTRACT:".len();
     let abstract_raw = response.get(abstract_start..).unwrap_or("").trim();
-    // Strict: either field empty is a parse failure. Prevents overwriting the
-    // working title/abstract with an empty string when the model misbehaves.
+    // Strict: either field empty = parse failure. Prevents empty-string overwrite.
     if title_raw.is_empty() || abstract_raw.is_empty() {
         return None;
     }
@@ -138,11 +93,8 @@ pub fn parse_metadata_translation(response: &str) -> Option<TranslatedMetadata> 
     })
 }
 
-/// Mark a translation job failed: write `translation_status='failed'` +
-/// `translation_error` + a `'translation_error'` audit entry. Used by both
-/// engine paths (metadata-only + full-text) so the error-handling boilerplate
-/// lives in one place. Non-fatal - errors are ignored (the caller already has
-/// an error to propagate and the DB write is best-effort bookkeeping).
+/// Mark translation job failed: write `translation_status='failed'` +
+/// `translation_error` + audit entry. Best-effort, non-fatal.
 fn mark_translation_failed(db: &Mutex<rusqlite::Connection>, article_id: &str, err_msg: &str) {
     let Ok(conn) = crate::db::connection::lock_conn(db) else {
         return;
@@ -159,19 +111,12 @@ fn mark_translation_failed(db: &Mutex<rusqlite::Connection>, article_id: &str, e
     );
 }
 
-/// Translate the metadata (title + abstract) of a non-English article to
-/// English and write the result back in a single transaction.
+/// Translate metadata (title + abstract) to English.
 ///
-/// Implements plan §F steps F.1-F.6 + F.10-F.11 for the metadata-only case.
-///
-/// The `db: &Mutex<Connection>` is locked in three bursts so the lock is never
-/// held across the async LLM `.await` (the `MutexGuard` is `!Send`):
-/// 1. Read article + language; mark `running`; persist originals.
-/// 2. (lock released) Make the LLM call if the abstract needs translation.
-/// 3. Single-transaction write-back: `UPDATE articles` + `translation` audit.
-///
-/// On LLM error or parse failure: write `translation_status='failed'` +
-/// `translation_error` + `translation_error` audit entry, then return Err.
+/// DB mutex locked in 3 bursts so guard not held across `.await`:
+/// 1. Read article + language; mark running; persist originals.
+/// 2. LLM call (lock released).
+/// 3. Single-transaction write-back.
 pub async fn translate_metadata_only(
     db: &Mutex<rusqlite::Connection>,
     article_id: &str,
@@ -180,22 +125,17 @@ pub async fn translate_metadata_only(
     // ── Burst 1: read + mark running + persist originals ──
     let (article, source_language, needs_llm_call) = {
         let conn = crate::db::connection::lock_conn(db)?;
-        // F.1: read article + language.
         let article = article_repo::get_article_by_id(&conn, article_id)?;
         if article.is_translated {
-            // Idempotent: already translated, nothing to do.
             return Ok(());
         }
-        // Skip-policy gate: English OR absent/blank language → skip (plan §F.2/§G).
         if should_skip_translation(article.language.as_deref()) {
             return Ok(());
         }
         let source_language = article.language.clone();
 
-        // F.3: mark running.
         article_repo::update_translation_status(&conn, article_id, "running")?;
 
-        // F.4 + F.5: persist originals (metadata-only path: no full text / chunks).
         article_original_repo::insert_original_content(
             &conn,
             article_id,
@@ -205,13 +145,13 @@ pub async fn translate_metadata_only(
             source_language.as_deref(),
         )?;
 
-        // F.6: decide whether an LLM call is needed.
+        // Decide whether LLM call needed.
         let needs_llm_call =
             !article.abstract_text.is_empty() && !is_english_abstract(&article.abstract_text);
         (article, source_language, needs_llm_call)
-    }; // lock released before the async LLM call.
+    }; // lock released before async LLM call.
 
-    // ── Burst 2 (no lock held): the LLM call ──
+    // ── Burst 2 (no lock): LLM call ──
     let translated = if needs_llm_call {
         match translate_metadata_text(
             client,
@@ -224,13 +164,12 @@ pub async fn translate_metadata_only(
         {
             Ok(t) => t,
             Err(e) => {
-                // mark_translation_failed already ran inside the helper.
+                // `mark_translation_failed` already ran inside helper.
                 return Err(e);
             }
         }
     } else {
-        // No LLM call needed: keep title/abstract as-is (they are either empty
-        // or already English). The originals row still records the source text.
+        // No LLM call needed: keep as-is. Originals row still records source.
         TranslatedMetadata {
             title: article.title.clone(),
             abstract_text: article.abstract_text.clone(),
@@ -258,7 +197,7 @@ pub async fn translate_metadata_only(
             "Metadata-only translation: no abstract translation required (empty or already English)"
                 .to_string()
         };
-        // Audit entry inside the same transaction so it rolls back atomically.
+        // Audit entry inside same transaction for atomicity.
         let audit_id = uuid::Uuid::new_v4().to_string();
         let audit_ts = chrono::Utc::now().to_rfc3339();
         tx.execute(
@@ -275,18 +214,11 @@ pub async fn translate_metadata_only(
 // ---------------------------------------------------------------------------
 // Batched chunk translation (translation-3-plan.md)
 // ---------------------------------------------------------------------------
-//
-// Full-text translation packs multiple chunks into a single LLM call sized to
-// the configured context window, then parses the JSON-map response and resends
-// any chunks the model skipped or truncated. This mirrors the proven
-// `wiki/ingest/batching.rs::build_ingest_prompt_batches` pattern and reduces a 46-chunk
-// article from 46 per-chunk calls to ~2-3 batched calls.
+// Packs chunks into context-window-sized batches (mirroring wiki/ingest/batching.rs).
+// Reduces a 46-chunk article from 46 calls to ~2-3.
 
-/// Fraction of the context window reserved for the input side (system prompt +
-/// batched chunks + JSON wrapper). Mirrors the Wiki ingest's conservative
-/// split so the model has ample room for output + overhead. The 20% remainder
-/// covers the system prompt, JSON keys/escaping, and a safety buffer for
-/// response drift.
+/// Fraction of context window for input (system prompt + batches + JSON wrapper).
+/// 60% remaining for output + overhead.
 const INPUT_BUDGET_FRACTION: f64 = 0.4;
 
 /// Hard floor on the input character budget per batch. Ensures tiny context
@@ -297,14 +229,10 @@ const MIN_BATCH_INPUT_CHARS: usize = 4_000;
 /// pathological single-call payloads regardless of the configured window.
 const MAX_BATCH_INPUT_CHARS: usize = 80_000;
 
-/// Fallback input character budget when the configured context window is
-/// unusable (zero / negative). Matches the Wiki ingest's `MAX_SOURCE_CHARS`.
+/// Fallback input budget when context window is unusable (≤0).
 const FALLBACK_BATCH_INPUT_CHARS: usize = 48_000;
 
-/// Maximum resend iterations for missing chunks before the job fails. After
-/// this many rounds, any still-missing chunks cause a job failure with a clear
-/// audit entry. Prevents infinite loops on a model that persistently ignores
-/// the JSON contract.
+/// Max resend iterations for missing chunks before job failure.
 const MAX_RESEND_ITERATIONS: usize = 2;
 
 /// System prompt for batched chunk translation. Asks for a JSON object mapping
@@ -324,10 +252,8 @@ fn estimate_tokens(text: &str) -> usize {
     text.len() / 4
 }
 
-/// Compute the input character budget for one batch from the configured context
-/// window. Falls back to `FALLBACK_BATCH_INPUT_CHARS` when the configured
-/// window is unusable (zero / negative), then clamps to
-/// `[MIN_BATCH_INPUT_CHARS, MAX_BATCH_INPUT_CHARS]`.
+/// Compute input char budget from context window. Falls back to default when ≤0.
+/// Clamped to `[MIN_BATCH_INPUT_CHARS, MAX_BATCH_INPUT_CHARS]`.
 #[must_use]
 fn batch_input_char_budget(context_window_tokens: i32) -> usize {
     if context_window_tokens <= 0 {
@@ -349,14 +275,7 @@ pub struct ChunkBatch {
     pub prompt: String,
 }
 
-/// Greedily pack `chunks` into batches sized to the configured context window.
-///
-/// Sequential fill in `chunk_index` order: keep adding chunks to the current
-/// batch until the next chunk would exceed the input budget, then flush.
-/// Guarantees every chunk lands in exactly one batch and the stitched output is
-/// in input order. Mirrors `wiki/ingest/batching.rs::build_ingest_prompt_batches`.
-///
-/// Returns an empty `Vec` when `chunks` is empty.
+/// Greedily pack chunks into context-window-sized batches. Returns `[]` when empty.
 #[must_use]
 pub fn build_chunk_batches(
     chunks: &[crate::utils::chunking::Chunk],
@@ -366,13 +285,8 @@ pub fn build_chunk_batches(
     build_chunk_batches_for_indices(chunks, &all_indices, context_window_tokens)
 }
 
-/// Greedily pack a SUBSET of chunks (identified by `indices` into the `chunks`
-/// slice) into batches, using the ORIGINAL indices in both the prompt keys and
-/// the returned `ChunkBatch.chunk_indices`. This is the resend-round helper:
-/// the model responds with the original chunk IDs so `translated_slots` fills
-/// without remapping.
-///
-/// Returns an empty `Vec` when `indices` is empty.
+/// Pack a SUBSET of chunks (resend round). Uses ORIGINAL indices in prompt keys
+/// + returned `chunk_indices` so `translated_slots` fills without remapping.
 #[must_use]
 pub fn build_chunk_batches_for_indices(
     chunks: &[crate::utils::chunking::Chunk],
@@ -383,8 +297,8 @@ pub fn build_chunk_batches_for_indices(
         return Vec::new();
     }
     let budget = batch_input_char_budget(context_window_tokens);
-    // Reserve room for the system prompt + JSON wrapper + per-chunk JSON
-    // overhead (keys, braces, escaping). 600 tokens ~ 2400 chars of overhead.
+    // Reserve room for system prompt + JSON wrapper + per-chunk overhead.
+    // 600 tokens ~ 2400 chars overhead.
     let overhead_chars = (estimate_tokens(CHUNK_BATCH_SYSTEM_PROMPT) + 600).saturating_mul(4);
     let usable_budget = budget.saturating_sub(overhead_chars).max(MIN_BATCH_INPUT_CHARS);
 
@@ -394,8 +308,7 @@ pub fn build_chunk_batches_for_indices(
 
     for &idx in indices {
         let chunk = &chunks[idx];
-        // One JSON line: `{"<idx>": "<escaped-text>"}\n`. Escape quotes +
-        // backslashes conservatively (the model parses this back to a string).
+        // One JSON line: `{"<idx>": "<escaped-text>"}\n`.
         let escaped = escape_json_string(&chunk.text);
         let line_len = escaped.len() + idx.to_string().len() + 8; // `{"": ""}\n` overhead
         if !current_indices.is_empty() && current_len + line_len > usable_budget {
@@ -415,9 +328,7 @@ pub fn build_chunk_batches_for_indices(
     batches
 }
 
-/// Build the JSON-lines user prompt for one batch. Each chunk is a single-key
-/// JSON object on its own line; the response is one combined JSON object keyed
-/// by chunk_id. Pure helper (no I/O).
+/// Build JSON-lines user prompt for one batch.
 fn build_batch_user_prompt(indices: &[usize], chunks: &[crate::utils::chunking::Chunk]) -> String {
     let mut out = String::new();
     out.push_str("Translate the following chunks. Return JSON: {\"<chunk_id>\": \"<english>\", ...}\n\nChunks:\n");
@@ -428,11 +339,8 @@ fn build_batch_user_prompt(indices: &[usize], chunks: &[crate::utils::chunking::
     out
 }
 
-/// Escape a string for embedding inside a JSON string literal. Escapes
-/// backslash, double-quote, and the control chars that most JSON parsers
-/// reject (newline, tab, carriage return). Other bytes (including UTF-8) are
-/// passed through unchanged - `serde_json` handles UTF-8 fine on the parse
-/// side, and we only need the output to be unambiguous to the model.
+/// Escape for JSON string literal: `\\`, `\"`, `\n`, `\r`, `\t`. Other bytes
+/// (incl. UTF-8) pass through - `serde_json` handles UTF-8 on parse side.
 #[must_use]
 fn escape_json_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -461,16 +369,8 @@ pub struct BatchParseResult {
     pub missing: Vec<usize>,
 }
 
-/// Parse a batch-translation LLM response into a `BatchParseResult`.
-///
-/// Tolerant of markdown fences (```` ```json ... ``` ````) and leading/trailing
-/// preamble. If the whole-string JSON parse fails, attempts to extract the
-/// outermost `{...}` block via regex before giving up. For each expected
-/// `chunk_id`, a missing key or an empty-string value is recorded as `missing`
-/// so the caller can resend just those chunks.
-///
-/// A completely malformed response records ALL expected ids as missing (the
-/// caller treats this as a full-batch resend, bounded by `MAX_RESEND_ITERATIONS`).
+/// Parse batch response into translated + missing ids. Tolerant of markdown
+/// fences. On malformed response: all expected ids → missing (full-batch resend).
 #[must_use]
 pub fn parse_batch_translation_response(
     response: &str,
@@ -484,15 +384,14 @@ pub fn parse_batch_translation_response(
         };
     }
 
-    // Strip markdown fences if present (models sometimes wrap JSON in
-    // ```json ... ```).
+    // Strip markdown fences if present.
     let fence_stripped = strip_markdown_fences(trimmed);
 
-    // Try a direct parse first.
+    // Try direct parse first.
     let parsed_map: Option<std::collections::HashMap<String, String>> =
         serde_json::from_str(&fence_stripped).ok();
 
-    // Fallback: extract the outermost {...} block via regex and retry.
+    // Fallback: extract outermost {...} via regex.
     let parsed_map = parsed_map.or_else(|| {
         let re = regex::Regex::new(r"(?s)\{.*\}").ok()?;
         let captured = re.find(&fence_stripped)?;
@@ -500,8 +399,7 @@ pub fn parse_batch_translation_response(
     });
 
     let Some(map) = parsed_map else {
-        // Malformed: treat every expected id as missing so the caller resends
-        // the whole batch (bounded by MAX_RESEND_ITERATIONS).
+        // Malformed: treat all expected ids as missing (bounded by MAX_RESEND_ITERATIONS).
         return BatchParseResult {
             translated: std::collections::HashMap::new(),
             missing: expected_ids.to_vec(),
@@ -521,21 +419,19 @@ pub fn parse_batch_translation_response(
     BatchParseResult { translated, missing }
 }
 
-/// Strip a single pair of markdown code fences (` ```json ... ``` ` or
-/// ` ``` ... ``` `) from around a JSON body. Returns the input unchanged when
-/// no fences are present. Pure helper.
+/// Strip markdown code fences (` ```json ... ``` ` or ` ``` ... ``` `) from JSON body.
 #[must_use]
 fn strip_markdown_fences(s: &str) -> String {
     let trimmed = s.trim();
     if !trimmed.starts_with("```") {
         return s.to_string();
     }
-    // Drop the opening fence line (including an optional `json` tag).
+    // Drop opening fence line (including optional `json` tag).
     let after_open = match trimmed.find('\n') {
         Some(idx) => &trimmed[idx + 1..],
         None => return s.to_string(),
     };
-    // Drop the closing fence if present.
+    // Drop closing fence if present.
     if let Some(close) = after_open.rfind("```") {
         after_open[..close].to_string()
     } else {
@@ -543,36 +439,14 @@ fn strip_markdown_fences(s: &str) -> String {
     }
 }
 
-/// Translate the full text (metadata + chunks) of a non-English article to
-/// English and write the result back in a single transaction.
+/// Translate full text (metadata + chunks) to English with batched LLM calls.
 ///
-/// Implements plan §F steps F.1-F.11 for the full-text case + the
-/// batched-chunk optimization from translation-3-plan.md.
+/// Pipeline: read+mark+persist → metadata LLM call → batched chunk dispatch
+/// (concurrent via `join_all`, bounded by orchestrator semaphore) → parse+resend
+/// missing chunks (capped at `MAX_RESEND_ITERATIONS`) → stitch+re-chunk →
+/// single-transaction write-back.
 ///
-/// Pipeline:
-/// 1. Read article + language; gate on English/absent and `is_translated`.
-/// 2. Mark `running`; persist originals (title, abstract, full_text, chunks).
-/// 3. Translate title + abstract as one metadata LLM call.
-/// 4. Pack original chunks into context-window-sized batches and dispatch them
-///    concurrently via `futures::future::join_all`. Each batch is one LLM call
-///    carrying a JSON-lines payload; the model returns a single JSON object
-///    mapping each chunk_id to its English translation.
-/// 5. Parse each batch response, fill a slot per chunk_id, and collect any
-///    missing ids into a resend round (reusing the same packing/dispatch/parse
-///    flow, bounded by `MAX_RESEND_ITERATIONS`). After the cap, any
-///    still-missing chunk fails the job with a clear audit detail.
-/// 6. Stitch translated chunks into a single English `full_text`, then re-run
-///    `classify_sections` + `chunk_sections` over the English text.
-/// 7. Single-transaction write-back: `DELETE` + `INSERT` English chunks,
-///    `UPDATE articles`, write `translation` audit entry, commit.
-///
-/// On any LLM error mid-translation: discard the in-memory partial, write
-/// `failed` + `translation_error` audit, return Err. No partial rows.
-///
-/// `context_window_tokens` is plumbed from the caller (the worker reads
-/// `LlmConfig.context_window_tokens`). It cannot be read from `client` because
-/// the `LlmClient` trait has no config accessor, and widening the trait would
-/// pollute `screening::llm_client`.
+/// `context_window_tokens` plumbed from caller (can't read from `dyn LlmClient` trait).
 pub async fn translate_full_text(
     db: &Mutex<rusqlite::Connection>,
     article_id: &str,
@@ -590,7 +464,6 @@ pub async fn translate_full_text(
         if article.is_translated {
             return Ok(());
         }
-        // Skip-policy gate: English OR absent/blank language → skip (plan §F.2/§G).
         if should_skip_translation(article.language.as_deref()) {
             return Ok(());
         }
@@ -608,8 +481,7 @@ pub async fn translate_full_text(
             source_language.as_deref(),
         )?;
 
-        // Persist original chunks. If none are stored, derive them from the
-        // original full text so per-chunk translation has input to work with.
+        // Persist original chunks. Derive from full_text if none stored.
         let mut chunks = chunk_repo::list_chunks_for_article(&conn, article_id)?;
         if chunks.is_empty() {
             if let Some(ft) = article.full_text.as_deref() {
@@ -624,14 +496,11 @@ pub async fn translate_full_text(
     }; // lock released.
 
     // ── Burst 2 (no lock): metadata + batched chunk LLM calls ──
-    // Metadata call (title + abstract).
     let translated_metadata =
         translate_metadata_text(client, &article.title, &article.abstract_text, db, article_id)
             .await?;
 
-    // Per-chunk translation, now BATCHED. Slots are pre-sized by index so a
-    // truncated batch response can be detected and resent without losing the
-    // chunk's place in the stitched output.
+    // Per-chunk translation, BATCHED. Slots pre-sized by index.
     let total_chunks = original_chunks.len();
     let mut translated_slots: Vec<Option<String>> = vec![None; total_chunks];
 
@@ -642,8 +511,6 @@ pub async fn translate_full_text(
 
     while !pending_indices.is_empty() {
         if iterations > MAX_RESEND_ITERATIONS {
-            // Cap reached: any still-missing chunks fail the job so no silent
-            // gaps reach the stitched `full_text`.
             let missing_count = pending_indices.len();
             let sample: Vec<String> =
                 pending_indices.iter().take(5).map(ToString::to_string).collect();
@@ -666,9 +533,7 @@ pub async fn translate_full_text(
             &pending_indices,
             context_window_tokens,
         );
-        // No batches means no pending chunks (empty-pending short-circuit
-        // above). Defensive: avoid an infinite loop if packing produced
-        // nothing usable.
+        // Defensive: avoid infinite loop if packing produces nothing.
         if batches.is_empty() {
             break;
         }
@@ -680,9 +545,7 @@ pub async fn translate_full_text(
             pending_indices.len()
         );
 
-        // Dispatch all batches in this round concurrently. Each `client.send()`
-        // routes through the LlmOrchestrator's semaphore, so real parallelism
-        // is bounded by `max_concurrent_requests` from LlmConfig.
+        // Dispatch all batches concurrently. Bounded by orchestrator semaphore.
         let batch_futures = batches.iter().map(|batch| {
             let batch_indices = batch.chunk_indices.clone();
             async move {
@@ -694,16 +557,13 @@ pub async fn translate_full_text(
         });
         let batch_results = futures::future::join_all(batch_futures).await;
 
-        // Parse each batch response, fill slots, collect the next round's
-        // missing indices.
+        // Parse each batch, fill slots, collect next-round missing indices.
         let mut still_missing: Vec<usize> = Vec::new();
         for result in batch_results {
             match result {
                 Err(e) => {
-                    // An LLM error on a batch fails the whole job (mirrors the
-                    // previous fail-on-first-error semantics). Record the
-                    // first error; remaining batches in this round complete
-                    // harmlessly (bounded by the orchestrator).
+                    // LLM error on batch fails the whole job. Record first error;
+                    // remaining batches complete harmlessly (bounded by orchestrator).
                     if first_error.is_none() {
                         first_error = Some(e);
                     }
@@ -717,10 +577,7 @@ pub async fn translate_full_text(
                         }
                     }
                     still_missing.extend(parsed.missing.iter().copied().filter(|id| {
-                        // Only keep missing ids that belong to this batch (a
-                        // malformed-response fallback reports ALL expected ids
-                        // as missing; parse_batch_translation_response already
-                        // scoped them to `batch_indices`).
+                        // Only keep missing ids belonging to this batch.
                         batch_indices.contains(id)
                     }));
                 }
@@ -734,15 +591,13 @@ pub async fn translate_full_text(
             return Err(e);
         }
 
-        // Next round retranslates ONLY the still-missing chunks, using their
-        // original chunk_ids so the slots fill correctly.
+        // Resend round retranslates ONLY missing chunks with original ids.
         pending_indices = still_missing;
         iterations += 1;
     }
 
-    // Flatten slots into ordered strings. Any leftover `None` is a bug (the
-    // loop above either fills every slot or returns Err on cap exhaustion),
-    // but defensively fail rather than write a partial stitched text.
+    // Flatten slots. Any leftover None is a bug (loop fills or returns Err), but
+    // defensively fail rather than write partial stitched text.
     let mut translated_chunks: Vec<String> = Vec::with_capacity(total_chunks);
     for (idx, slot) in translated_slots.iter().enumerate() {
         match slot {
@@ -757,7 +612,7 @@ pub async fn translate_full_text(
         }
     }
 
-    // Stitch + re-chunk the English text.
+    // Stitch + re-chunk English text.
     let english_full_text = translated_chunks.join("\n\n");
     let english_sections = classify_sections(&english_full_text);
     let rechunked: Vec<Chunk> = chunk_sections(&english_sections, DEFAULT_CHUNK_WORDS);
@@ -767,7 +622,7 @@ pub async fn translate_full_text(
     {
         let conn = crate::db::connection::lock_conn(db)?;
         let tx = conn.unchecked_transaction()?;
-        // Delete + insert English chunks inside the transaction.
+        // Delete + insert English chunks inside transaction.
         tx.execute(
             "DELETE FROM article_chunks WHERE article_id = ?1",
             rusqlite::params![article_id],
@@ -816,9 +671,7 @@ pub async fn translate_full_text(
     Ok(())
 }
 
-/// Mark a translation job failed with a custom audit detail message (used by
-/// the full-text per-chunk error path so the audit entry identifies which
-/// chunk failed). Same DB writes as [`mark_translation_failed`].
+/// Mark translation failed with custom audit detail. Used by full-text path.
 fn mark_translation_failed_with_detail(
     db: &Mutex<rusqlite::Connection>,
     article_id: &str,
@@ -840,13 +693,8 @@ fn mark_translation_failed_with_detail(
     );
 }
 
-/// Helper: translate the metadata (title + abstract) text via a single LLM
-/// call. Returns the parsed `TranslatedMetadata`, or marks the job failed and
-/// returns `Err` on LLM error / parse failure.
-///
-/// Shared by both `translate_metadata_only` (metadata-only path) and
-/// `translate_full_text` (full-text path) so the LLM-call + parse + error
-/// handling logic lives in exactly one place.
+/// Translate metadata (title + abstract) via single LLM call. Returns
+/// `TranslatedMetadata` or marks job failed + returns Err. Shared by both paths.
 async fn translate_metadata_text(
     client: &dyn LlmClient,
     title: &str,

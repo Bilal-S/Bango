@@ -16,12 +16,8 @@ const props = defineProps<{
   allAuthors: string[];
   allTags: string[];
   allLabels: string[];
-  /**
-   * Article count from the last applied query. When paired with
-   * `isFiltered`, drives the centered "Filter active: n article(s) found."
-   * notice in the action row so the user sees they are operating on a
-   * filtered list. Undefined before the first apply.
-   */
+  /** Article count from last applied query. Drives "Filter active: n article(s) found."
+   *  Undefined before first apply. */
   resultCount?: number;
   /** True when any filter dimension is currently active. */
   isFiltered?: boolean;
@@ -41,12 +37,8 @@ const MATCH_TYPES: { value: TitleMatchType; label: string }[] = [
   { value: 'exact', label: 'Exact' },
 ];
 
-/**
- * Validation bounds for the Year-range filter. Both From and To must fall in
- * `[YEAR_MIN, YEAR_MAX]` individually, and when both are set From must be <= To.
- * Each year field gets its own invalid flag so the red border + hint target the
- * specific field at fault; `yearRangeInvalid` is the union (gates Apply/Enter).
- */
+/** Year-range bounds. Both fields must be in [1850, 2100]; From <= To when both set. */
+
 const YEAR_MIN = 1850;
 const YEAR_MAX = 2100;
 
@@ -69,11 +61,7 @@ const yearToInvalid = computed((): boolean => {
 /** Union flag: disables Apply/Enter while either year field is invalid. */
 const yearRangeInvalid = computed((): boolean => yearFromInvalid.value || yearToInvalid.value);
 
-/**
- * Field-aware validation message. Names the specific problem so the user knows
- * which field to fix, instead of the single generic hint that fired for any
- * year issue.
- */
+/** Field-aware validation hint naming the specific problem + which field to fix. */
 const yearHint = computed((): string => {
   const from = props.filter.yearFrom;
   const to = props.filter.yearTo;
@@ -99,26 +87,15 @@ function updateField(key: keyof ArticleFilter, value: unknown): void {
   emit('update:filter', key, value);
 }
 
-/**
- * Apply the filter on Enter. Skipped while the year range is invalid so the
- * user sees the validation hint instead of a no-op apply. The parent (the
- * Article list view) maps `@apply` to `applyFilters`, which runs the query.
- *
- * Wired onto every text input in the panel (Title, Author, Year From/To,
- * Journal, DOI). The title match-type `<select>` is a dropdown and is
- * intentionally excluded - selecting a new match type alone should not fire.
- */
+/** Apply filter on Enter. Skipped while year range invalid (user sees hint).
+ *  Wired on every text input; match-type `<select>` excluded. */
 function onEnterApply(): void {
   if (yearRangeInvalid.value) return;
   emit('apply');
 }
 
-/**
- * Clear a single filter field and immediately re-submit the query. Used by the
- * clearable-input "x" buttons. The `emptyValue` is field-specific: `''` for
- * text fields, `null` for the numeric Year fields (matching their
- * `number | null` types so the backend doesn't see an empty string).
- */
+/** Clear single filter field and re-submit query. Used by clearable-input "x".
+ *  `emptyValue`: `''` for text, `null` for numeric year fields. */
 function clearField(key: keyof ArticleFilter, emptyValue: unknown): void {
   emit('update:filter', key, emptyValue);
   emit('apply');
@@ -143,12 +120,8 @@ function toggleLabel(label: string): void {
   updateField('labels', updated);
 }
 
-/**
- * Remove an excluded tag entirely (from `excludedTags`), without moving it
- * anywhere. This is the `x` handler on an excluded (NOT:) pill; the inclusion
- * `x` handler (`toggleTag`) would wrongly re-add the name to `tags` because it
- * is absent there, so excluded pills need their own remover.
- */
+/** Remove excluded tag entirely (NOT: pill `x` handler). Separate from toggleTag
+    which would wrongly re-add the name to `tags`. */
 function removeExcludedTag(tag: string): void {
   updateField(
     'excludedTags',
@@ -164,13 +137,8 @@ function removeExcludedLabel(label: string): void {
   );
 }
 
-/**
- * Toggle a tag between inclusion (`tags`) and exclusion (`excludedTags`).
- * Called when the user clicks the pill body (not the `x` remove button).
- * A pill can be in three states: absent, included (default), or excluded
- * (NOT-filter, rendered with a bold `NOT:` prefix). Clicking the pill body
- * flips included <-> excluded; the `x` button removes it entirely.
- */
+/** Toggle tag between inclusion/exclusion. Pill body click: absent → included
+    → excluded → absent. `x` button removes entirely. */
 function toggleTagNegation(tag: string): void {
   if (props.filter.tags.includes(tag)) {
     // included -> excluded

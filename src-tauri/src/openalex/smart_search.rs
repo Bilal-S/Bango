@@ -1,7 +1,4 @@
-//! Smart Search: LLM-generated OpenAlex Boolean query from research aims + criteria.
-//!
-//! Reuses the `build_search_strategy_prompt` pattern from §8.4 but targets
-//! OpenAlex syntax (which supports `AND`, `OR`, `NOT`, quoted phrases).
+//! LLM-generated OpenAlex Boolean query from research aims + criteria.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +7,7 @@ use crate::error::AppError;
 use crate::models::criterion::{Criterion, CriterionType, ResearchAim};
 use crate::utils::json_repair::prepare_llm_json;
 
-/// The LLM's parsed response: an OpenAlex Boolean query + suggested filters.
+/// The LLM's parsed response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmartSearchQuery {
@@ -26,7 +23,7 @@ pub struct SmartSearchFilters {
     pub r#type: Vec<String>,
 }
 
-/// Pure: build the (system, user) prompt pair from aims + criteria.
+/// Build (system, user) prompt pair from aims + criteria.
 #[must_use]
 pub fn build_smart_search_prompt(
     aims: &[ResearchAim],
@@ -102,7 +99,7 @@ Return ONLY a JSON object matching this schema (no prose, no markdown fences):
     (system, user)
 }
 
-/// Pure: parse + lightly validate the LLM JSON response.
+/// Parse + validate the LLM JSON response.
 pub fn parse_smart_search_response(raw: &str) -> Result<SmartSearchQuery, AppError> {
     let prepared = prepare_llm_json(raw);
     let parsed: SmartSearchQuery = serde_json::from_str(&prepared)
@@ -110,7 +107,7 @@ pub fn parse_smart_search_response(raw: &str) -> Result<SmartSearchQuery, AppErr
     Ok(parsed)
 }
 
-/// Read aims + criteria from the DB, grouped by type. Returns `(aims, inclusion, exclusion)`.
+/// Read aims + criteria from DB, grouped by type.
 #[allow(clippy::type_complexity)]
 pub fn read_aims_and_criteria(
     conn: &rusqlite::Connection,

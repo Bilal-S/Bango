@@ -100,9 +100,8 @@ async function doImportProject(): Promise<void> {
   await importProject(importFile.value);
   showImportDialog.value = false;
   importFile.value = null;
-  // On success, importProject() triggers a full window.location.reload() so
-  // ALL cached view state (keep-alive + module singletons) is wiped and the
-  // app re-bootstraps against the freshly imported DB. No navigation needed.
+  /* On success, importProject() triggers `window.location.reload()` so ALL
+     cached view state is wiped and the app re-bootstraps against the fresh DB. */
 }
 
 async function doExportProject(): Promise<void> {
@@ -116,9 +115,8 @@ async function doDeleteProject(): Promise<void> {
   if (success) {
     showDeleteDialog.value = false;
     deleteConfirmText.value = '';
-    // On success, resetProject() triggers a full window.location.reload() so
-    // ALL cached view state (keep-alive + module singletons) is wiped and the
-    // app re-bootstraps against the freshly reset DB. No navigation needed.
+    /* On success, resetProject() triggers `window.location.reload()` so ALL
+       cached view state is wiped and the app re-bootstraps against the fresh DB. */
   }
 }
 </script>

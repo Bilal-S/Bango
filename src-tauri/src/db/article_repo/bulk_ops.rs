@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::error::AppError;
 
-/// Reset screening errors: clear `screened_at` and `screening_error` for all working articles
-/// that were screened but didn't get a status change, so they can be re-screened.
+/// Reset screening errors: clear `screened_at` + `screening_error` for all working
+/// articles that were screened but didn't get a status change.
 pub fn reset_screening_errors(conn: &Connection) -> Result<usize, AppError> {
     let rows = conn.execute(
         "UPDATE articles SET screened_at = NULL, screening_error = 0, changed_at = datetime('now') \
@@ -19,22 +19,14 @@ pub fn reset_screening_errors(conn: &Connection) -> Result<usize, AppError> {
     Ok(rows)
 }
 
-/// Reset the working list: semantically identical to `reset_screening_errors` (both clear
-/// `screened_at` and `screening_error` for previously-screened working articles). Kept as a
-/// thin delegate so the two Tauri command endpoints (`reset_screening_errors` /
-/// `reset_working_list` in `commands::screening`) can keep their distinct frontend contracts
-/// while sharing one implementation.
+/// Thin delegate over [`reset_screening_errors`] so the two Tauri command endpoints
+/// keep distinct contracts while sharing one implementation.
 pub fn reset_working_list(conn: &Connection) -> Result<usize, AppError> {
     reset_screening_errors(conn)
 }
 
-/// Bulk update status for multiple articles in a single transaction.
-///
-/// When moving articles back to 'working', reset the screening flags
-/// (`screened_at`, `screening_error`) so the articles become eligible for
-/// re-screening on the next run. This mirrors the single-article
-/// `update_article_status` behavior - see the state-machine note there and
-/// in `docs/bango-v4-spec.md` §4.2.
+/// Bulk update status for multiple articles. Moving back to `working` resets
+/// screening flags (mirrors single-article `update_article_status`, §4.2).
 pub fn bulk_update_article_status(
     conn: &Connection,
     ids: &[String],
@@ -65,16 +57,9 @@ pub fn bulk_update_article_status(
     Ok(count)
 }
 
-/// Bulk add a tag to multiple articles (by tag name).
-/// Creates the tag if it doesn't exist.
-///
-/// Returns the IDs of articles that actually received the tag. Articles that
-/// already had the tag are skipped (`INSERT OR IGNORE`), so the returned vec
-/// may be shorter than `article_ids`. Each article touched by the insert has
-/// its `changed_at` bumped so sort-by-modified and the bibliometric/wiki
-/// staleness flags reflect the change. The caller (command layer) uses the
-/// returned IDs to write per-article audit entries and to report the accurate
-/// affected count in the UI toast.
+/// Bulk add a tag to multiple articles (creates tag if missing).
+/// Returns IDs of articles that actually received the tag (`INSERT OR IGNORE`
+/// skips already-tagged). Each affected article's `changed_at` is bumped.
 pub fn bulk_add_tag_to_articles(
     conn: &Connection,
     article_ids: &[String],
@@ -103,8 +88,7 @@ pub fn bulk_add_tag_to_articles(
             params![article_id, tag_id],
         )?;
         if rows > 0 {
-            // Bump changed_at only when the tag was newly linked (matches the
-            // single-article `update_article_tags` behavior).
+            // Bump changed_at only when the tag was newly linked (matches single-article behavior).
             conn.execute(
                 "UPDATE articles SET changed_at = datetime('now') WHERE id = ?1",
                 [article_id],
@@ -115,11 +99,8 @@ pub fn bulk_add_tag_to_articles(
     Ok(affected)
 }
 
-/// Bulk add a label to multiple articles (by label name).
-/// Creates the label if it doesn't exist.
-///
-/// Returns the IDs of articles that actually received the label. See
-/// [`bulk_add_tag_to_articles`] for the partial-application semantics.
+/// Bulk add a label to multiple articles (creates label if missing).
+/// See [`bulk_add_tag_to_articles`] for partial-application semantics.
 pub fn bulk_add_label_to_articles(
     conn: &Connection,
     article_ids: &[String],
@@ -160,14 +141,8 @@ pub fn bulk_add_label_to_articles(
 }
 
 /// Bulk remove a tag from multiple articles (by tag name).
-///
-/// Returns the IDs of articles from which the tag was actually removed.
-/// If the named tag does not exist in the `tags` table at all, returns an
-/// empty vec (nothing to remove). Each article that lost the link has its
-/// `changed_at` bumped. This is the bulk counterpart to the remove-half of
-/// the single-article `update_article_tags` flow and pairs with the
-/// `bulk_add_tag_to_articles` add action so the "Change Tag of N articles"
-/// dialog can both add and remove.
+/// Returns IDs of articles from which the tag was actually removed.
+/// Missing tag → empty vec. Each affected article's `changed_at` is bumped.
 pub fn bulk_remove_tag_from_articles(
     conn: &Connection,
     article_ids: &[String],
@@ -200,10 +175,7 @@ pub fn bulk_remove_tag_from_articles(
 }
 
 /// Bulk remove a label from multiple articles (by label name).
-///
-/// Returns the IDs of articles from which the label was actually removed.
-/// See [`bulk_remove_tag_from_articles`] for the partial-application and
-/// missing-label semantics.
+/// See [`bulk_remove_tag_from_articles`] for semantics.
 pub fn bulk_remove_label_from_articles(
     conn: &Connection,
     article_ids: &[String],

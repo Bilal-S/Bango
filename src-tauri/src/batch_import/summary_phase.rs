@@ -1,18 +1,13 @@
-//! Phase 4: Generate AI summaries for articles that got full text attached
-//! in Phase 1 (and don't already have a summary).
-//!
-//! Reuses [`crate::commands::summary::generate_article_ai_summary_inner`] so the
-//! behavior is identical to clicking the "Generate AI Summary" button in the
-//! article detail panel (same prompt, same section-aware path, same events).
+//! Phase 4: Generate AI summaries for articles newly attached in Phase 1
+//! (without existing summaries). Reuses
+//! [`crate::commands::summary::generate_article_ai_summary_inner`] (identical
+//! to the "Generate AI Summary" button).
 //!
 //! # Parallel dispatch (Concern 1)
 //!
-//! The summaries are generated concurrently via a `tokio::task::JoinSet`. The
-//! orchestrator's `max_concurrent_requests` semaphore bounds the real
-//! concurrency; Phase 4 simply dispatches all article IDs up front and lets the
-//! orchestrator gate the actual LLM calls. This mirrors the
-//! `wiki::ingest::batching::run_chunked_ingest` pattern and replaces the
-//! previous sequential `for` loop that left the configured concurrency unused.
+//! Concurrent via `tokio::task::JoinSet`; the orchestrator's
+//! `max_concurrent_requests` semaphore bounds real concurrency. Mirrors
+//! `wiki::ingest::batching::run_chunked_ingest`.
 
 use std::sync::Arc;
 
@@ -26,20 +21,10 @@ use crate::llm::orchestrator::LlmOrchestrator;
 
 use super::BatchImportPhaseResult;
 
-/// Run Phase 4: generate an AI summary for each article ID in `article_ids`
-/// (the newly-attached articles from Phase 1).
-///
-/// Each summary is generated via [`generate_article_ai_summary_inner`], which
-/// emits the standard `article-ai-summary-complete` / `-error` events so the
-/// article detail panel and `useAiSummary` composable refresh automatically.
-///
-/// Articles are dispatched concurrently via a `JoinSet`; the orchestrator's
-/// semaphore bounds real LLM concurrency. The caller's `is_cancelled` async
-/// closure is polled before each spawn and on every completion; on cancel the
-/// remaining tasks are aborted via `JoinSet::abort_all`.
-///
-/// `include_section_summaries` is forwarded to the summary core so the section-
-/// aware path runs when the user has enabled "Section Summaries" in Settings.
+/// Run Phase 4: generate AI summaries concurrently via `JoinSet`. Each task
+/// calls [`generate_article_ai_summary_inner`]; orchestrator semaphore bounds
+/// concurrency. `is_cancelled` polled before each spawn and on completion;
+/// remaining tasks aborted on cancel via `JoinSet::abort_all`.
 pub async fn run_summary_phase<F, Fut, P>(
     db_state: &State<'_, DbState>,
     app_handle: &tauri::AppHandle,
@@ -55,10 +40,8 @@ where
 {
     let total = article_ids.len();
 
-    // Pre-flight: if LLM is not configured, skip the phase entirely with a
-    // clear message + system audit record rather than failing per-article.
-    // Mirrors the Phase 3 (Translations) pre-flight check so both LLM-gated
-    // phases surface the same actionable message in Diagnostics.
+    /* Pre-flight: if LLM not configured, skip with audit record (mirrors
+    Phase 3). */
     if !llm_configured_with_audit(db_state) {
         return BatchImportPhaseResult {
             total,
@@ -69,9 +52,7 @@ where
         };
     }
 
-    // If there is nothing to summarize, exit early without emitting the
-    // batch-level "done" event (matches the previous behavior for the empty
-    // case, though the loop below handles it correctly too).
+    /* Exit early when nothing to summarize (matches previous behavior). */
     if total == 0 {
         return BatchImportPhaseResult {
             total,
@@ -151,9 +132,8 @@ where
         }
     }
 
-    // Emit a final batch-level event so the frontend can show a completion toast
-    // even if the user navigated away from the settings view (the per-article
-    // events still fire too).
+    // Emit batch-level event so frontend shows completion toast even if user
+    // navigated away (per-article events still fire).
     let _ = app_handle.emit(
         "batch-import-summary-phase-done",
         serde_json::json!({ "succeeded": succeeded, "failed": failed, "total": total }),
@@ -162,24 +142,13 @@ where
     BatchImportPhaseResult { total, processed, succeeded, failed, errors }
 }
 
-/// Pre-flight LLM configuration check for Phase 4.
-///
-/// Returns `true` when an LLM is configured (the phase should proceed
-/// normally). Returns `false` when no LLM is configured, after writing a
-/// system-level audit record (`article_id = NULL`, `action = 'error'`) so the
-/// skip surfaces in Diagnostics with an actionable explanation.
-///
-/// Mirrors [`super::translations_phase::check_llm_configured_or_skip`] so both
-/// LLM-gated phases report consistently.
+/// Pre-flight LLM check for Phase 4. Returns `true` when configured (proceed);
+/// `false` when not, after writing a system-level audit record so the skip
+/// surfaces in Diagnostics. Mirrors Phase 3.
 pub fn llm_configured_with_audit(db_state: &State<'_, DbState>) -> bool {
     let conn = match db_state.conn.lock() {
         Ok(c) => c,
-        Err(_) => {
-            // Defer the error to the caller via the early-return path; here we
-            // just return false so the caller emits its skip result. The
-            // lock-error variant is reported by the caller's own skip message.
-            return false;
-        }
+        Err(_) => return false, // lock-error surfaced by caller's skip message
     };
     if llm_config_repo::has_config(&conn).unwrap_or(false) {
         return true;

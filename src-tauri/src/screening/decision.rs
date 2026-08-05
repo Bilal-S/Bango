@@ -4,54 +4,30 @@ use crate::models::criterion::{Criterion, CriterionType};
 use crate::screening::engine::LlmScreeningResponse;
 use crate::screening::resolution::{self, CriterionMatch};
 
-/// The finalized per-article decision + the data the caller needs to write it
-/// to the DB and update progress.
-///
-/// Produced by `resolve_article_decision` (pure, no I/O). Both stage-1 and
-/// stage-2 call it so the criterion-match -> finalize -> augment ->
-/// override-annotate -> auto-label pipeline lives in exactly one place.
+/// Finalized per-article decision + data needed by caller for DB write + progress update.
+/// Pure; produced by `resolve_article_decision`. Both stage-1 and stage-2 call it.
 #[derive(Debug, Clone)]
 pub struct ArticleDecision {
-    /// The final `"include"` / `"exclude"` string after the priority resolver
-    /// (or the LLM's verbatim decision when custom logic governs).
+    /// Final `"include"` / `"exclude"` after priority resolver (or LLM verbatim when custom logic governs).
     pub final_decision: String,
-    /// The reasoning text, with the `[App override: ...]` annotation appended
-    /// when the resolver disagreed with the LLM. Kept raw (with UUIDs) - the
-    /// frontend replaces UUIDs dynamically at display time.
+    /// Reasoning text; `[App override: ...]` appended when resolver disagreed with LLM.
     pub reasoning: String,
     /// Inclusion criterion UUIDs (LLM-matched + augmented from reasoning).
     pub augmented_inc: Vec<String>,
     /// Exclusion criterion UUIDs (LLM-matched + augmented from reasoning).
     pub augmented_exc: Vec<String>,
-    /// `(prefix, text)` pairs for auto-labelling (`"Inclusion"` / `"Exclusion"`
-    /// + the criterion text). The caller formats as `"Inclusion: {text}"`.
+    /// `(prefix, text)` pairs for auto-labelling (`"Inclusion"` / `"Exclusion"` + criterion text).
     pub auto_label_criteria: Vec<(String, String)>,
-    /// Evidence-sections label captured during retrieval (the sections that
-    /// *actually* matched), or `None` for abstract-mode screening. Stage-2
-    /// overrides this with its local `evidence.sections_label` after calling
-    /// `resolve_article_decision`.
+    /// Evidence-sections label from retrieval (sections that *actually* matched),
+    /// or `None` for abstract mode. Stage-2 overrides with its local label.
     pub evidence_sections: Option<String>,
 }
 
-/// Resolve one screening response into a final decision.
+/// Resolve one screening response into a final decision. Pure.
 ///
-/// Pure (no I/O, no locks). Extracts the criterion-matching + resolution +
-/// augmentation + override-annotation + auto-label-collection that was
-/// previously inlined in both the stage-1 and stage-2 per-article loops of
-/// `run_sync`, eliminating the verbatim duplication.
-///
-/// # Parameters
-///
-/// - `screening`: The parsed LLM response for one article.
-/// - `article_id`: The article UUID (used for the evidence-sections lookup).
-/// - `criteria`: All criteria (inclusion + exclusion), for match-by-UUID/text.
-/// - `inclusion_criteria`: Inclusion-criterion references (used only for its
-///   length to drive the augment-from-reasoning split).
-/// - `global_numbering`: UUID -> 1-based global index map.
-/// - `has_custom_logic`: When `true`, the LLM decision is final (custom
-///   screening rules govern); when `false`, the §4.1 priority resolver runs.
-/// - `enhanced_evidence_labels`: Article UUID -> evidence-sections label map
-///   (Tier 3 Gap 7: the sections that *actually* matched).
+/// Extracts criterion-matching + resolution + augmentation + override-annotation +
+/// auto-label-collection. When `has_custom_logic`, LLM decision is final;
+/// otherwise §4.1 priority resolver runs.
 #[must_use]
 pub fn resolve_article_decision(
     screening: &LlmScreeningResponse,
@@ -85,7 +61,7 @@ pub fn resolve_article_decision(
         })
         .collect();
 
-    // Collect auto-label info before the matches are moved into resolution.
+    /* Collect auto-label info before matches are moved into resolution. */
     let auto_label_criteria: Vec<(String, String)> = inc_matches
         .iter()
         .chain(exc_matches.iter())
@@ -108,13 +84,12 @@ pub fn resolve_article_decision(
         inclusion_matches: inc_matches,
         exclusion_matches: exc_matches,
     };
-    // When custom screening rules are present, they govern the process: the
-    // LLM's decision is final and the generic priority resolver is not applied.
+    /* Custom logic: LLM decision final; priority resolver not applied. */
     let final_decision =
         resolution::finalize_decision(&screening.decision, &resolution_input, has_custom_logic);
 
-    // Augment matched arrays with any criteria UUIDs mentioned in reasoning
-    // but missing from the LLM's matched arrays.
+    /* Augment matched arrays with criteria UUIDs mentioned in reasoning
+    but missing from the LLM's matched arrays. */
     let inclusion_count = inclusion_criteria.len();
     let (augmented_inc, augmented_exc) = augment_matched_from_reasoning(
         &screening.reasoning,
@@ -124,8 +99,8 @@ pub fn resolve_article_decision(
         inclusion_count,
     );
 
-    // Keep raw reasoning with UUIDs - frontend replaces dynamically at display
-    // time. Append the override annotation when the resolver disagreed.
+    /* Raw reasoning kept with UUIDs - frontend replaces at display time.
+    Append override annotation when resolver disagreed. */
     let mut reasoning = screening.reasoning.clone();
     if screening.decision.as_str() != final_decision {
         reasoning.push_str(&format!(
@@ -134,9 +109,8 @@ pub fn resolve_article_decision(
         ));
     }
 
-    // Tier 3 Gap 7: use the precise evidence-sections label captured during
-    // retrieval (the sections that *actually* matched), not the configured
-    // allow-list.
+    /* Use evidence-sections label from retrieval (sections that actually matched),
+    not the configured allow-list. */
     let evidence_sections = enhanced_evidence_labels.get(article_id).cloned();
 
     ArticleDecision {
@@ -149,11 +123,7 @@ pub fn resolve_article_decision(
     }
 }
 
-/// Build a global criterion numbering map: UUID -> 1-based index.
-///
-/// Inclusion criteria are numbered `[1]..[N]`, then exclusion criteria continue
-/// `[N+1]..[N+M]`. This ensures `[3]` always refers to the same criterion
-/// regardless of which article is displayed.
+/// UUID -> 1-based global index map. Inclusion `[1]..[N]`, exclusion `[N+1]..[N+M]`.
 #[must_use]
 pub fn build_global_criterion_numbering(
     inclusion_criteria: &[&Criterion],
@@ -172,16 +142,8 @@ pub fn build_global_criterion_numbering(
     map
 }
 
-/// Scan reasoning text for criterion UUIDs mentioned but missing from matched
-/// arrays, and return augmented (inclusion, exclusion) tuples.
-///
-/// The LLM sometimes references criteria in reasoning without listing them in
-/// the matched arrays. This ensures every referenced criterion appears in the
-/// UI table.
-///
-/// `inclusion_count` is the number of inclusion criteria in the global
-/// numbering, used to distinguish inclusion UUIDs (indices 1..N) from exclusion
-/// UUIDs (N+1..M).
+/// Scan reasoning for criterion UUIDs missing from matched arrays, return augmented tuples.
+/// `inclusion_count` distinguishes inclusion UUIDs (indices 1..N) from exclusion (N+1..M).
 #[must_use]
 pub fn augment_matched_from_reasoning(
     reasoning: &str,

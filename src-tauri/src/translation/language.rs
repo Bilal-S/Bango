@@ -1,37 +1,23 @@
-//! Language detection helpers for the translation pipeline.
+//! Language detection for translation pipeline. Pure (`#[must_use]`).
 //!
-//! Per the language-detection strategy:
-//! - Body/full-text language is read directly from `articles.language` (set at
-//!   import time from RIS/BibTeX). It is immutable after translation.
-//! - Abstract translation qualifier: a hybrid two-step heuristic (ASCII range +
-//!   top-20 English-stopword ratio). No external language-detection crate.
-//!
-//! All helpers are pure and `#[must_use]` per CLAUDE.md.
+//! Body/full-text language from `articles.language` (set at import, immutable
+//! after translation). Abstract heuristic: ASCII range + top-20 English-stopword
+//! ratio. No external crate.
 
-/// Top-21 English stopwords used by the abstract heuristic (§G step 2).
-/// Includes `or` per the plan's stopword list.
+/// Top-21 English stopwords (includes `or`).
 const ENGLISH_STOPWORDS: [&str; 21] = [
     "the", "of", "and", "to", "a", "in", "is", "for", "with", "on", "by", "this", "that", "from",
     "are", "was", "as", "be", "it", "an", "or",
 ];
 
-/// Stopword ratio at/above which the abstract is treated as English (§G).
+/// Stopword ratio threshold: >= 8% → treated as English.
 const ENGLISH_STOPWORD_RATIO_THRESHOLD: f64 = 0.08;
 
-/// ASCII-range non-whitespace fraction above which the abstract is considered
-/// non-English (§G step 1). I.e. if more than 90% of non-whitespace chars fall
-/// outside U+0000-U+00FF, the abstract is non-English.
+/// Non-latin fraction threshold: >90% non-whitespace chars outside Latin-1 → non-English.
 const NON_LATIN_FRACTION_THRESHOLD: f64 = 0.90;
 
-/// Returns true when the `articles.language` metadata value indicates English.
-///
-/// Matches `"English"`, `"EN"`, and `"en"` case-insensitively. Absent or blank
-/// values return `false` (the language is unknown, not English). This helper
-/// answers the narrow question "is this value an English-language marker?" and
-/// does NOT decide translation skip-policy on its own.
-///
-/// For the skip-policy decision (English OR absent/blank → skip translation),
-/// use [`should_skip_translation`].
+/// Returns true when `language` indicates English (matches `"English"`, `"EN"`,
+/// `"en"`). Absent/blank → `false`. For skip-policy, use [`should_skip_translation`].
 #[must_use]
 pub fn is_english_language(language: Option<&str>) -> bool {
     match language.map(str::trim).filter(|s| !s.is_empty()) {
@@ -43,19 +29,10 @@ pub fn is_english_language(language: Option<&str>) -> bool {
     }
 }
 
-/// Translation skip-policy gate (plan §F.2 + §G).
+/// Skip-policy gate: returns `true` when article should NOT be translated.
 ///
-/// Returns `true` when an article with the given `language` metadata should
-/// **not** be translated. Per the plan: "Skip translation entirely if `language`
-/// is English ... or absent/blank" and "If the field is absent or blank, treat
-/// as unknown and skip translation for this article."
-///
-/// This is the gate all enqueue/engine call sites must use: absent/blank
-/// language must NOT trigger a translation job (it wastes LLM tokens on articles
-/// that may already be English, and the language is genuinely unknown).
-///
-/// Returns `false` only when `language` is a non-English value (e.g. `"French"`,
-/// `"ja"`), meaning translation should proceed.
+/// Per plan §F.2 + §G: skip if language is English OR absent/blank (unknown).
+/// Returns `false` only for non-English values (e.g. `"French"`, `"ja"`).
 #[must_use]
 pub fn should_skip_translation(language: Option<&str>) -> bool {
     match language.map(str::trim).filter(|s| !s.is_empty()) {
@@ -68,24 +45,14 @@ pub fn should_skip_translation(language: Option<&str>) -> bool {
     }
 }
 
-/// Hybrid ASCII-range + English-stopword heuristic for abstract language.
+/// Hybrid heuristic for abstract language. True = English (skip), false = translate.
 ///
-/// Returns `true` when the abstract should be treated as English (skip
-/// translation), `false` when it should be translated.
-///
-/// Steps (§G):
-/// 1. ASCII range: if more than 90% of non-whitespace characters fall outside
-///    U+0000-U+00FF (Basic Latin + Latin-1 Supplement), the abstract is
-///    non-English → return `false` (translate).
-/// 2. Stopword ratio: tokenize lowercase whitespace-delimited words and compute
-///    the ratio of top-20 English stopwords to total words. If the ratio is
-///    >= 8%, treat as English → return `true` (skip translation); otherwise return `false` (translate).
-///
-/// An empty abstract returns `false` (nothing to translate; the engine treats
-/// this as "no LLM call needed").
+/// Step 1: if >90% non-whitespace chars outside U+0000-U+00FF → non-English.
+/// Step 2: top-21 stopword ratio ≥ 8% → English.
+/// Empty abstract → false (no LLM call needed).
 #[must_use]
 pub fn is_english_abstract(abstract_text: &str) -> bool {
-    // Collect non-whitespace characters.
+    // Collect non-whitespace chars.
     let non_whitespace: Vec<char> = abstract_text.chars().filter(|&c| !c.is_whitespace()).collect();
     if non_whitespace.is_empty() {
         return false;

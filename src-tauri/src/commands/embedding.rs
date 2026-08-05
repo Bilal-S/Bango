@@ -1,10 +1,9 @@
 //! Tauri commands for the embedding feature.
 //!
-//! - `generate_embeddings`: the primary parameterized runner (article_ids OR
-//!   status_filter, default `included`; optional `force`).
-//! - `recall_articles`: bounded cosine recall for the citation-finding feature.
-//! - `get_embedding_status`: returns the triple-state + model + dimensions.
-//! - `probe_embeddings`: explicitly probes the provider (used by Test Connection).
+//! `generate_embeddings`: parameterized runner (article_ids or status_filter).
+//! `recall_articles`: bounded cosine recall (Citation Finder).
+//! `get_embedding_status`: triple-state + model + dimensions.
+//! `probe_embeddings`: explicit probe (Test Connection).
 
 use std::sync::Arc;
 
@@ -30,41 +29,29 @@ pub struct EmbeddingStatusInfo {
     pub status: String,
     pub model: String,
     pub dimensions: i32,
-    /// The user's pinned embedding-model override (premium). `None` when the
-    /// key is absent or empty (auto-detection active). Surfaced so the Settings
-    /// UI can pre-fill the `EMBEDDING MODEL` input for premium users.
+    /// User's pinned embedding-model override (premium). `None` = auto-detection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_override: Option<String>,
 }
 
-/// Model-mismatch payload returned by `get_embedding_model_mismatch`. `None`
-/// (serialized as `null`) when there is no mismatch (or no embeddings stored).
-/// `Some` when stored rows were generated with a different `model_name` than
-/// the current `embedding_model` setting, so the user gets a confirmation
-/// dialog before searching (which would silently return zero hits because
-/// `recall` filters by the new dimensions).
+/// Model-mismatch payload. `None` (serialized as `null`) when stored rows match
+/// the current model. `Some` when rows were generated with a different model,
+/// triggering a confirmation dialog before search (since `recall` filters by
+/// the new dimensions and would silently return zero hits).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddingModelMismatch {
-    /// The model name currently set in `app_settings.embedding_model` (set by
-    /// the probe). Empty when the probe has not run yet.
+    /// Current model from `app_settings.embedding_model`. Empty when probe hasn't run.
     pub current_model: String,
-    /// One of the stored model names that differs from `current_model`. When
-    /// multiple distinct stored models exist (e.g. the user switched models
-    /// twice without regenerating), the first non-matching one is reported -
-    /// the dialog's CTA ("regenerate to be consistent") is the same regardless.
+    /// First stored model that differs from current (case-insensitive ASCII).
     pub stored_model: String,
-    /// Total embedding rows currently stored (context for the dialog's
-    /// "this will re-embed N rows" message).
+    /// Total embedding rows stored.
     pub stored_row_count: i64,
 }
 
-/// Pure helper: given the distinct stored model names + the current model,
-/// return the first stored name that does not match (case-insensitive ASCII).
-/// `None` when there is no mismatch or nothing is stored.
-///
-/// Extracted as `#[must_use]` so the mismatch-detection logic is unit-testable
-/// in isolation without a DB.
+/// Given stored model names + the current model, return the first stored name
+/// that does not match (case-insensitive ASCII). `None` when aligned or empty.
+/// `#[must_use]` for unit-testing without a DB.
 #[must_use]
 pub fn first_mismatched_model(stored: &[String], current: Option<&str>) -> Option<String> {
     let current_str = current.unwrap_or("");
@@ -86,12 +73,11 @@ pub fn first_mismatched_model(stored: &[String], current: Option<&str>) -> Optio
 }
 
 /// Generate (or regenerate) embeddings for a set of articles.
-///
 /// - `article_ids`: when non-empty, embeds exactly those articles (overrides
-///   `status_filter`). Used by the post-summary hook + batch import.
-/// - `status_filter`: when `article_ids` is empty, embeds all articles with
-///   this status (default `"included"`).
-/// - `force`: when true, re-embeds every row regardless of the stored hash.
+///   `status_filter`). Used by post-summary hook + batch import.
+/// - `status_filter`: when `article_ids` is empty, scoped to this status
+///   (default `"included"`).
+/// - `force`: when true, re-embeds every row regardless of stored hash.
 #[tauri::command]
 pub async fn generate_embeddings(
     _db_state: State<'_, DbState>,
@@ -101,16 +87,14 @@ pub async fn generate_embeddings(
     force: Option<bool>,
 ) -> Result<EmbeddingRunReport, AppError> {
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
-    // Wrap the orchestrator into the v2 HttpEmbeddingBatchSender (the runner
-    // takes `Arc<dyn EmbeddingBatchSender>` so its parallel + cancel behavior
-    // is unit-testable without a live LLM provider).
+    /* Wrap the orchestrator into HttpEmbeddingBatchSender so the runner's
+     * parallel + cancel behavior is unit-testable without a live LLM. */
     let sender: Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
         Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
     let scope = EmbeddingScope { article_ids, status_filter, force: force.unwrap_or(false) };
-    // Spawn onto a background task so the IPC handler returns immediately and
-    // the frontend listens to `embedding:progress` / `embedding:done` events.
-    // The runner re-derives `DbState` from the `AppHandle` inside the task
-    // (the `State` borrow cannot cross the spawn boundary).
+    /* Spawn background task so IPC returns immediately. Frontend listens to
+     * `embedding:progress`/`embedding:done`. Runner re-derives DbState from
+     * AppHandle inside the task (State borrow cannot cross spawn boundary). */
     let handle = app_handle.clone();
     tokio::task::spawn(async move {
         let st = handle.state::<DbState>();
@@ -131,16 +115,9 @@ pub async fn generate_embeddings(
     })
 }
 
-/// Recall the top-K articles semantically related to `query`.
-///
-/// `status_filter` is a vec of status strings. When non-empty, the candidate
-/// pool is scoped to articles in any of those statuses. When empty (or
-/// omitted), no filter is applied. The previous `Option<String>` signature was
-/// extended to `Vec<String>` for the Citation Finder, which needs `working +
-/// included` while excluding `duplicate`/`rejected`.
-///
-/// Returns an empty vec when embeddings are disabled or the table is empty
-/// (the citation-feature caller falls back).
+/// Recall top-K articles semantically related to `query`.
+/// `status_filter`: when non-empty scopes the candidate pool to those statuses.
+/// Returns empty vec when embeddings are disabled/empty (caller falls back).
 #[tauri::command]
 pub async fn recall_articles(
     db_state: State<'_, DbState>,
@@ -176,9 +153,8 @@ pub fn get_embedding_status(db_state: State<'_, DbState>) -> Result<EmbeddingSta
     })
 }
 
-/// Explicitly probe the provider for embedding support. Sets the triple-state
-/// flag + model + dimensions. Used by `Test Connection` and any UI that wants
-/// to re-evaluate after a config change.
+/// Probe the provider for embedding support. Sets triple-state + model +
+/// dimensions. Used by `Test Connection` and after config changes.
 #[tauri::command]
 pub async fn probe_embeddings(db_state: State<'_, DbState>) -> Result<ProbeOutcome, AppError> {
     // Read config (brief lock), release, then probe (HTTP), then persist (brief lock).
@@ -213,16 +189,9 @@ pub async fn probe_embeddings(db_state: State<'_, DbState>) -> Result<ProbeOutco
 }
 
 /// Detect whether stored embeddings were generated with a different model
-/// than the current `embedding_model` setting. Returns `None` (serialized as
-/// `null`) when there is no mismatch (rows are fresh or the table is empty).
-/// Returns `Some(EmbeddingModelMismatch)` when the user switched embedding
-/// models since the last `generate_embeddings` run - in that case the Citation
-/// Finder shows a confirmation dialog before searching because `recall`
-/// filters by the new dimensions and would silently return zero hits.
-///
-/// The check is intentionally cheap (one `SELECT DISTINCT model_name` + one
-/// `COUNT(*)`) so it can run on every Citation Finder submit without a
-/// perceptible delay.
+/// than the current `embedding_model`. Returns `None` when aligned/empty.
+/// Cheap (`SELECT DISTINCT model_name` + `COUNT(*)`) so it runs on every
+/// Citation Finder submit.
 #[tauri::command]
 pub fn get_embedding_model_mismatch(
     db_state: State<'_, DbState>,
@@ -242,44 +211,29 @@ pub fn get_embedding_model_mismatch(
 }
 
 /// Regenerate ALL embeddings from scratch. Deletes every row in
-/// `article_embeddings` then re-runs `generate_embeddings_inner` (which probes
-/// + embeds every article in the scope). Used by the Citation Finder's
-/// model-mismatch confirmation dialog ("Regenerate" button) and as a future
-/// standalone "Regenerate embeddings" Settings affordance.
+/// `article_embeddings` then re-runs `generate_embeddings_inner`. Used by the
+/// Citation Finder's model-mismatch dialog and standalone Settings.
 ///
-/// The delete-then-regenerate path is clearer than `force=true` re-embed
-/// because the latter leaves orphan rows when the per-article chunk count
-/// shrinks (e.g. an article's full text was edited down). A clean delete
-/// guarantees the table reflects only the current corpus + current model.
-///
-/// `status_filter` scopes the regeneration (default `"included"` - the
-/// Citation Finder's default candidate pool). The delete is ALSO scoped to
-/// those statuses so a regenerate-from-Citation-Finder does not wipe
-/// embeddings the user may have generated for other statuses via the
-/// standalone Settings command. Pass an empty filter to delete + regenerate
-/// across all statuses.
-///
-/// Returns immediately after spawning the background task; the frontend
-/// listens to `embedding:progress` / `embedding:done` for the real result.
+/// Delete-then-regenerate is clearer than `force=true` (no orphan rows when
+/// chunk counts shrink). `status_filter` scopes both delete + regenerate;
+/// empty = all statuses. Returns immediately; real result via events.
 #[tauri::command]
 pub async fn regenerate_embeddings(
     _db_state: State<'_, DbState>,
     app_handle: tauri::AppHandle,
     status_filter: Option<String>,
 ) -> Result<EmbeddingRunReport, AppError> {
-    // Phase 1: scoped delete (brief lock). The delete must run BEFORE the
-    // runner re-derives its work list so the director sees an empty table and
-    // produces full work. We scope the delete to the same status filter the
-    // runner will use so a Citation-Finder regenerate does not wipe rows the
-    // user generated for other statuses via the standalone command.
+    /* Phase 1: scoped delete (brief lock). Must run BEFORE the runner re-derives
+     * its work list so the director sees an empty table. Scoped to the same
+     * status filter the runner uses, so a Citation-Finder regenerate doesn't
+     * wipe rows generated for other statuses. */
     {
         let db = app_handle.state::<DbState>();
         let conn = lock_conn(&db.conn)?;
         if let Some(ref filter) = status_filter {
-            // Build `status IN (?, ?, ?)` - split the comma-joined filter the
-            // runner uses (matches `EmbeddingScope.status_filter`'s single-
-            // string contract). Every status is bound as a parameter so no
-            // SQL injection.
+            /* Build `status IN (?, ?, ?)` from comma-joined filter (matches
+             * `EmbeddingScope.status_filter`'s single-string contract). All
+             * statuses are bound as params - no SQL injection. */
             let statuses: Vec<&str> =
                 filter.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
             if statuses.is_empty() {
@@ -304,10 +258,9 @@ pub async fn regenerate_embeddings(
     let orchestrator = app_handle.state::<Arc<LlmOrchestrator>>().inner().clone();
     let sender: Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
         Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
-    // `force=false` is correct here because the delete above emptied the
-    // relevant rows, so the director's hash-comparison naturally produces full
-    // work. (force=true would also work but would bypass the model-mismatch
-    // signal in the director's report.)
+    /* `force=false` is correct: the delete above emptied relevant rows, so the
+     * director's hash-comparison naturally produces full work. (force=true
+     * would work but bypass the model-mismatch signal in the report.) */
     let scope = EmbeddingScope { article_ids: None, status_filter, force: false };
     let handle = app_handle.clone();
     tokio::task::spawn(async move {
@@ -328,17 +281,10 @@ pub async fn regenerate_embeddings(
     })
 }
 
-/// Set the embedding-model override (premium-only).
-///
-/// When set to a non-empty model name, the probe tries this model first. When
-/// set to `None`/empty, the override is cleared and auto-detection is restored.
-/// On save, the embedding triple-state is reset to `unknown` so the next probe
-/// (next embedding call or `Test Connection`) re-evaluates against the new
-/// override.
-///
-/// Premium enforcement is defense-in-depth: the frontend hides the input for
-/// non-premium users, and this command rejects the save with `AppError::Validation`
-/// when `AppFlags.premium` is false.
+/// Set the embedding-model override (premium-only). Non-empty: probe tries
+/// this model first. None/empty: clear, restore auto-detection. Resets
+/// embedding triple-state to `unknown` so next probe re-evaluates.
+/// Premium gate is defense-in-depth (frontend hides input + command rejects).
 #[tauri::command]
 pub fn set_embedding_model_override(
     db_state: State<'_, DbState>,

@@ -31,8 +31,7 @@ const {
   loadMoreActivities,
 } = useDashboard();
 
-/* Project name: dblclick h1 or pencil -> ClearableInput; Enter/blur commits,
-   Esc cancels, "x" clears (empty reverts to fallback). */
+/** Project name: dblclick h1 or pencil -> ClearableInput; Enter/blur commits, Esc cancels. */
 const {
   displayName,
   projectName,
@@ -44,24 +43,22 @@ const {
 
 const toast = useToast();
 
-/** True while the inline edit input is shown (replaces the read-mode h1). */
+/** Inline edit input shown instead of read-mode h1. */
 const isEditingProjectName = ref(false);
-/** The editable draft bound to the `ClearableInput`. */
+/** Editable draft bound to ClearableInput. */
 const projectNameDraft = ref('');
-/** True while a save is in flight (disables the input + shows a saving hint). */
+/** Save in flight, disables input + shows saving hint. */
 const projectNameSaving = ref(false);
 
-/** Start inline edit: seed the draft with the current custom name (or empty
- *  when none is set so the placeholder shows). */
+/** Seed draft with current custom name (or empty for placeholder). */
 function startEditProjectName(): void {
   if (projectNameSaving.value) return;
   projectNameDraft.value = projectName.value ?? '';
   isEditingProjectName.value = true;
 }
 
-/** Commit the draft. Trim; if empty -> clear (revert to fallback); if changed
- *  -> save; if unchanged -> no-op exit. Errors surface a toast and leave the
- *  edit state intact so the user can retry without losing the draft. */
+/** Commit draft. Trim; empty -> clear; changed -> save; unchanged -> no-op.
+ *  Errors surface toast + leave edit state intact for retry. */
 async function commitProjectName(): Promise<void> {
   if (!isEditingProjectName.value || projectNameSaving.value) return;
   const trimmed = projectNameDraft.value.trim();
@@ -91,7 +88,7 @@ async function commitProjectName(): Promise<void> {
   }
 }
 
-/** Discard the draft and exit edit mode without saving or clearing. */
+/** Discard draft and exit edit mode without saving or clearing. */
 function cancelEditProjectName(): void {
   if (projectNameSaving.value) return;
   isEditingProjectName.value = false;
@@ -112,18 +109,17 @@ const newBatchStart = computed<number>(() => {
   return sorted[0]!;
 });
 
-// Re-fetch data every time dashboard is mounted (e.g. after import + invalidation).
-// Load the project name in parallel (single-row SELECT; safe to re-run on every
-// mount since dashboard is not keep-alive cached).
+/* Re-fetch data on every mount (e.g. after import + invalidation). Load
+ * project name in parallel (single-row SELECT; safe since dashboard is not
+ * keep-alive cached). */
 onMounted(() => {
   refresh();
   void loadProjectName();
 });
 
 /**
- * Load more activities while preserving the scroll position so the user sees
- * the newly appended records. New entries always land at the end of the
- * sorted feed, so prevCount reliably identifies the batch boundary.
+ * Load more activities while preserving scroll position. New entries land at
+ * the end of the sorted feed; prevCount identifies the batch boundary.
  */
 async function handleLoadMore(): Promise<void> {
   const el = activityListEl.value;
@@ -224,7 +220,7 @@ function navigateToArticlesWithStatus(status: string): void {
   router.push({ path: '/articles', query: { status } });
 }
 
-/** Navigate to a specific article in the All articles view. */
+/** Navigate to article in All articles view. */
 function navigateToArticle(articleId: string): void {
   router.push({ path: '/articles', query: { articleId } });
 }
@@ -232,10 +228,9 @@ function navigateToArticle(articleId: string): void {
 const { demoLoading, demoError, loadDemo } = useDemo(router);
 const { importProject } = useExport();
 
-/** Wrap `loadDemo` so the project name refreshes after a successful demo
- *  import. The demo backup has no `project_name` (created before the feature),
- *  so the backend clears any existing name; without this refresh the stale
- *  pre-demo name would show until the user navigates away and back. */
+/** Wrap `loadDemo` so project name refreshes after demo import. Demo backup
+ *  has no `project_name`, so backend clears any existing name; this refresh
+ *  prevents the stale pre-demo name showing until navigate-away-and-back. */
 async function handleLoadDemo(): Promise<void> {
   await loadDemo();
   if (!demoError.value) {
@@ -243,21 +238,18 @@ async function handleLoadDemo(): Promise<void> {
   }
 }
 
-// --- Start New Project info dialog (shown when a project is loaded) ---
-// Single-project model: surfaces the export → delete → begin-fresh workflow
-// without hiding it behind Settings discovery.
+// Start New Project info dialog - surfaces the export → delete → begin-fresh
+// workflow for the single-project model.
 const showStartNewProjectDialog = ref(false);
 
-/** Navigate to the Project Management settings card. The `focus` query param
- *  tells the Settings view to scroll the Project Management card into view on
- *  arrival, since it sits further down the page (after AI Summaries, Screening,
- *  Storage, and Reprocessing). */
+/** Navigate to Project Management settings card. `focus` query param scrolls
+ *  that card into view on arrival. */
 function goToProjectManagement(): void {
   showStartNewProjectDialog.value = false;
   router.push('/settings?focus=project-management');
 }
 
-/** Open the Help Guide's "Starting Points" anchor. */
+/** Open Help Guide's "Starting Points" anchor. */
 function openHelpGuideStartingPoints(): void {
   showStartNewProjectDialog.value = false;
   router.push('/help?tab=guide#starting-points');

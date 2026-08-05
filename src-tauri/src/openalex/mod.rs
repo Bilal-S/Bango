@@ -1,9 +1,4 @@
-//! OpenAlex search integration.
-//!
-//! Provides search, import, and DOI-check capabilities against the OpenAlex
-//! open catalog of scholarly works. All HTTP, mapping, and reconstruction
-//! live in Rust (consistent with all other external API integration in the
-//! codebase). The frontend is a thin renderer.
+//! OpenAlex search integration: types, HTTP, mapping.
 
 pub mod client;
 pub mod mapping;
@@ -151,8 +146,7 @@ pub struct OpenAlexMeta {
     pub per_page: i64,
 }
 
-/// A single search result item with reconstructed abstract + snippet +
-/// library-membership flag. This is what the frontend renders.
+/// A single result item sent to the frontend.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAlexResultItem {
@@ -165,7 +159,7 @@ pub struct OpenAlexResultItem {
     pub already_in_library: bool,
 }
 
-/// The search command's return type sent to the frontend.
+/// Search return type sent to the frontend.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAlexSearchResponse {
@@ -202,9 +196,7 @@ fn default_page() -> u32 {
     1
 }
 
-/// User-controllable filters. `has_abstract:true` is always-on and not
-/// represented here; `is_retracted:false` is default-on and removed only
-/// when `show_retracted` is true.
+/// User-controllable filters. `has_abstract:true` always-on, `is_retracted:false` default-on.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAlexFilters {
@@ -219,8 +211,7 @@ pub struct OpenAlexFilters {
     pub show_retracted: bool,
 }
 
-/// Read the `openalex_api_key` from app_settings, decrypting if present.
-/// Returns `None` if not set.
+/// Read + decrypt the `openalex_api_key` from app_settings.
 pub fn get_api_key(conn: &rusqlite::Connection) -> Result<Option<String>, AppError> {
     let encrypted = crate::db::app_settings_repo::get_setting(conn, "openalex_api_key")?;
     match encrypted {
@@ -240,8 +231,7 @@ pub fn get_api_key(conn: &rusqlite::Connection) -> Result<Option<String>, AppErr
     }
 }
 
-/// Encrypt and store the `openalex_api_key` in app_settings.
-/// Pass `None` or an empty string to clear it.
+/// Encrypt and store the `openalex_api_key`. Pass `None` or empty to clear.
 pub fn set_api_key(conn: &rusqlite::Connection, key: Option<&str>) -> Result<(), AppError> {
     let value = match key {
         Some(k) if !k.is_empty() => {
@@ -255,8 +245,7 @@ pub fn set_api_key(conn: &rusqlite::Connection, key: Option<&str>) -> Result<(),
     crate::db::app_settings_repo::set_setting(conn, "openalex_api_key", value.as_deref())
 }
 
-/// Read the `openalex_mailto` from app_settings, falling back to the app
-/// default so we always get the polite-pool rate limit.
+/// Read `openalex_mailto`, falling back to `"research@bango.app"`.
 pub fn get_mailto(conn: &rusqlite::Connection) -> Result<String, AppError> {
     let mailto = crate::db::app_settings_repo::get_setting(conn, "openalex_mailto")?;
     Ok(mailto.filter(|s| !s.is_empty()).unwrap_or_else(|| "research@bango.app".to_string()))

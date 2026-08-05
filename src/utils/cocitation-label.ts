@@ -1,22 +1,9 @@
-/**
- * Pure helpers for co-citation paper label formatting.
- *
- * Extracted from `cocitation-heatmap.vue` so the JSON-array parsing logic is
- * unit-testable without mounting the ApexCharts heatmap component.
- */
+/* Pure helpers for co-citation paper label formatting.
+ * Extracted from `cocitation-heatmap.vue` for unit-testability. */
 import type { CocitationNode } from '@/types/biblio-cocitation';
 
-/**
- * Build a short axis/category label for a co-citation paper.
- *
- * Prefers the backend-preformatted `node.label` (already JSON-aware via the
- * Rust `format_paper_label`), and falls back to parsing the JSON-array
- * `authors` field safely so the axis never leaks array brackets like
- * `["Rejeb ` (the bug that occurred when assuming `;`-delimited authors).
- *
- * @param node - The co-citation node to label.
- * @returns The short label string (e.g. `"Rejeb et al. (2024)"`).
- */
+/** Build short axis label for a co-citation paper. Prefers `node.label`, falls
+ *  back to parsing JSON-array `authors` field (never leaks array brackets). */
 export function shortPaperLabel(node: CocitationNode): string {
   // 1. Backend-preformatted label is the source of truth (matches the graph nodes).
   if (node.label) return node.label;

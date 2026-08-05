@@ -2,25 +2,13 @@ import { shallowRef, computed, readonly } from 'vue';
 
 /**
  * Generic browser-like navigation history (back / forward).
+ * Pure reactive logic - no DOM/Tauri deps.
  *
- * Extracted as pure reactive logic so it can be unit-tested without any DOM or
- * Tauri dependencies, following the project pattern (see `use-network-view.ts`,
- * `use-startup-upgrade.ts`). The owning view is responsible for routing user
- * actions (sidebar clicks, `[[wikilink]]` clicks, keyboard shortcuts) through
- * `navigate()` / `goBack()` / `goForward()` / `clear()`.
- *
- * `shallowRef` is used (not `ref`) because entries are immutable identifiers
- * (e.g. wiki page slugs); we only need reactivity on the array and the cursor,
- * not deep reactivity on the entries themselves. This also sidesteps Vue's
- * `UnwrapRefSimple<T>` generic-unwrapping constraints.
- *
- * Semantics mirror a browser's history stack:
- * - `navigate(item)` pushes `item`, truncating any forward history, and skips
- *   when `item` equals the current entry (no duplicate back-to-back entries).
- * - `goBack()` / `goForward()` move the cursor; they are no-ops at the bounds.
- * - `clear()` wipes the whole stack.
- *
- * @typeParam T - The kind of entry tracked (e.g. a wiki page slug `string`).
+ * Uses `shallowRef` (not `ref`) because entries are immutable identifiers.
+ * Semantics mirror a browser:
+ * - `navigate(item)` pushes `item`, truncating forward history, skipping duplicates.
+ * - `goBack()` / `goForward()` are no-ops at bounds.
+ * - `clear()` wipes the stack.
  */
 export function useNavHistory<T>() {
   const history = shallowRef<T[]>([]);
@@ -32,11 +20,7 @@ export function useNavHistory<T>() {
 
   const canGoForward = computed(() => index.value >= 0 && index.value < history.value.length - 1);
 
-  /**
-   * Push a new entry. Truncates any forward history (browser parity) and skips
-   * when the entry equals the current one to avoid duplicate back-to-back
-   * entries (e.g. clicking the already-active sidebar item).
-   */
+  /** Push entry, truncating forward history. Skips duplicates. */
   function navigate(item: T): void {
     const cur = current.value;
     if (cur !== null && Object.is(cur, item)) return;

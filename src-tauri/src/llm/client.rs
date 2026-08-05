@@ -40,8 +40,7 @@ struct ChatResponse {
 struct Choice {
     message: ChatMessage,
     /// "stop" = normal completion; "length" = truncated by output token limit.
-    /// `send_openai_compatible` checks this against `"length"` to surface
-    /// reasoning-model truncation in diagnostics.
+    /// Checked in `send_openai_compatible` to surface reasoning-model truncation in diagnostics.
     #[serde(default)]
     finish_reason: Option<String>,
 }
@@ -206,17 +205,13 @@ const LLM_MAX_RETRIES: u32 = 3;
 const LLM_INITIAL_BACKOFF_MS: u64 = 1000;
 const LLM_MAX_BACKOFF_MS: u64 = 10_000;
 
-/// Side-channel metadata returned by [`send_chat_completion`].
+/// Side-channel metadata from [`send_chat_completion`].
 ///
-/// `temperature_was_rejected` is set to `true` when the provider rejected the
-/// request because of a non-default `temperature` value (HTTP 400 with a body
-/// matching [`is_temperature_error`]), and the client recovered by re-issuing
-/// the request with `temperature` omitted. The orchestrator inspects this flag
-/// to persist `skip_temperature = true` so future calls skip the wasteful
-/// first-attempt failure.
+/// When `temperature_was_rejected` is `true`, the call recovered from a provider
+/// temperature-rejection 400 by re-issuing with `temperature` omitted. The
+/// orchestrator inspects this to persist `skip_temperature = true`.
 ///
-/// On the normal success path (no rejection), this is
-/// `CallMeta::default()` (`temperature_was_rejected = false`).
+/// Normal success path returns `CallMeta::default()` (`false`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CallMeta {
     /// `true` iff the call recovered from a temperature-rejection 400 by
@@ -226,14 +221,11 @@ pub struct CallMeta {
 
 /// Lazily-built shared HTTP client. Reusing one `reqwest::Client` enables
 /// HTTP keep-alive so repeated LLM calls reuse a single TLS session instead of
-/// performing a fresh handshake on every request. This matters on Windows
-/// (SChannel), where per-request TLS setup is materially more failure-prone
-/// under concurrency and is a strong fit for the Windows-only intermittent
-/// "insufficient permissions" gateway errors that succeed on resubmit.
+/// a fresh handshake per request. Matters on Windows (SChannel), where
+/// per-request TLS is more failure-prone under concurrency.
 ///
 /// Only connect/pool timeouts are set here; the per-request wall-clock cap is
-/// owned by the orchestrator's `tokio::time::timeout` (600s) wrapper, which now
-/// also bounds the full retry sequence.
+/// owned by the orchestrator's `tokio::time::timeout`.
 pub(crate) fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
@@ -245,12 +237,9 @@ pub(crate) fn shared_client() -> &'static reqwest::Client {
     })
 }
 
-/// Normalize text bound for an LLM payload: drop carriage returns and coerce
-/// non-breaking spaces (`\u{00A0}`) to ASCII spaces. This is defense-in-depth
-/// hygiene - NBSP slips in easily from PDF extraction, and `\r` can appear in
-/// Windows-edited text. `reqwest::json` already escapes JSON control chars, so
-/// this is NOT required for request correctness; it keeps payloads clean and
-/// deterministic. Fast path returns `Cow::Borrowed` when no change is needed.
+/// Normalize text for LLM payload: drop `\r`, coerce NBSP (`\u{00A0}`) to ASCII space.
+/// Defense-in-depth hygiene — NBSP enters from PDF extraction, `\r` from Windows-edited
+/// text. Fast path returns `Cow::Borrowed` when no change needed.
 #[must_use]
 fn normalize_llm_text<'a>(input: &'a str) -> Cow<'a, str> {
     if !input.contains('\r') && !input.contains('\u{00A0}') {
@@ -264,13 +253,13 @@ fn normalize_llm_text<'a>(input: &'a str) -> Cow<'a, str> {
     Cow::Owned(cleaned)
 }
 
-/// Decide whether a non-success response should be retried. Classic transient
-/// statuses (429, 408, 5xx) always retry. Additionally, OpenAI/Cloudflare
-/// occasionally emit 401/403 with the exact body `"...insufficient permissions
-/// for this operation."` as a project/org-scope transient that succeeds on
-/// resubmit - empirically observed on Windows. That signature is gated narrowly
-/// on the body string so real auth failures (wrong/revoked key, wrong org)
-/// fail fast instead of burning retry budget.
+/// Decide whether a non-success response should be retried.
+///
+/// Classic transients (429, 408, 5xx) always retry. Additionally, 401/403 with
+/// body `"...insufficient permissions for this operation."` retries — this is an
+/// empirically-observed OpenAI/Cloudflare project-scope transient on Windows that
+/// succeeds on resubmit. Gated on the body string so real auth failures (wrong/
+/// revoked key, wrong org) fail fast.
 #[must_use]
 fn is_retryable_response(status: reqwest::StatusCode, body: &str) -> bool {
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS
@@ -287,27 +276,19 @@ fn is_retryable_response(status: reqwest::StatusCode, body: &str) -> bool {
     false
 }
 
-/// Decide whether an error string reflects a provider's rejection of a
-/// non-default `temperature` value. Models that only support the default
-/// temperature (typically `1`) return HTTP 400 with a body whose `message`
-/// mentions `temperature` plus a synonym of "unsupported" / "not supported".
+/// Detect provider rejection of a non-default `temperature` value.
 ///
-/// Mirrors the inline check in `test_llm_connection`
-/// (`commands/llm_config.rs`), extracted as a pure helper so both the
-/// client-recovery path and the test-connection path share the same
-/// definition.
+/// Models supporting only the default temperature (typically `1`) return HTTP 400
+/// mentioning `temperature` + `unsupported`/`does not support`/`not supported`.
 ///
-/// Examples matched:
-/// - OpenAI: `"Unsupported value: 'temperature' does not support 0.2 with
-///   this model. Only the default (1) value is supported."`
-/// - Google: `"temperature does not support ... not supported"`.
+/// Mirrors the inline check in `test_llm_connection` (`commands/llm_config.rs`);
+/// extracted as a pure helper so both paths share one definition.
 ///
-/// Examples rejected:
-/// - `"Invalid model"` (no `temperature` token).
-/// - `"max_tokens is not supported"` (no `temperature` token).
-/// - `"temperature parameter is invalid"` (out-of-range, NOT an unsupported
-///   feature - retrying without temperature would mask a genuine parameter
-///   error).
+/// Matched: `"Unsupported value: 'temperature' does not support..."` (OpenAI),
+/// `"temperature does not support ... not supported"` (Google).
+/// Rejected: `"Invalid model"` (no `temperature` token), `"max_tokens is not supported"`
+/// (wrong field), `"temperature parameter is invalid"` (out-of-range — retrying
+/// without temperature would mask a genuine parameter error).
 #[must_use]
 pub fn is_temperature_error(err_msg: &str) -> bool {
     let lower = err_msg.to_lowercase();
@@ -319,8 +300,7 @@ pub fn is_temperature_error(err_msg: &str) -> bool {
         || lower.contains("not supported")
 }
 
-/// Exponential backoff with jitter, mirroring `openalex::client::calculate_backoff`:
-/// 1s, 2s, 4s (capped at 10s) + random 0-500ms.
+/// Exponential backoff: 1s, 2s, 4s (capped at 10s) + 0-500ms jitter.
 fn calculate_backoff(attempt: u32) -> u64 {
     let base = LLM_INITIAL_BACKOFF_MS * (1u64 << attempt);
     let capped = base.min(LLM_MAX_BACKOFF_MS);
@@ -329,9 +309,8 @@ fn calculate_backoff(attempt: u32) -> u64 {
     capped + jitter
 }
 
-/// Parse the `Retry-After` header (delta-seconds form) as milliseconds.
-/// Honored up to `LLM_MAX_BACKOFF_MS` so a misconfigured server header cannot
-/// stall the UI indefinitely.
+/// Parse `Retry-After` header (delta-seconds) as milliseconds.
+/// Capped at `LLM_MAX_BACKOFF_MS` so a misconfigured server can't stall indefinitely.
 fn parse_retry_after_ms(resp: &reqwest::Response) -> Option<u64> {
     resp.headers()
         .get("retry-after")
@@ -341,9 +320,8 @@ fn parse_retry_after_ms(resp: &reqwest::Response) -> Option<u64> {
 }
 
 /// Extract OpenAI/Cloudflare trace identifiers (`x-request-id`, `CF-Ray`) for
-/// diagnostics. These are the exact IDs OpenAI support and Cloudflare need to
-/// trace a transient failure. Returned as a bracketed annotation
-/// (e.g. ` [req=req_abc..., cf-ray=...]`) or empty when neither is present.
+/// diagnostics. Returns a bracketed annotation (e.g. ` [req=..., cf-ray=...]`)
+/// or empty when neither is present.
 fn extract_trace_ids(resp: &reqwest::Response) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(v) = resp.headers().get("x-request-id").and_then(|h| h.to_str().ok()) {
@@ -360,21 +338,17 @@ fn extract_trace_ids(resp: &reqwest::Response) -> String {
 }
 
 /// Send a `RequestBuilder` with bounded retry on transient failures
-/// (`is_retryable_response`) and on transport errors. Returns the raw response
-/// body text on success. Each retry logs a trace with the request/cf-ray IDs so
-/// a Windows user can confirm the fix is engaging and paste `req_...` /
-/// `cf-ray=...` into an OpenAI support ticket.
+/// (`is_retryable_response`) and transport errors. Returns raw response body on
+/// success. Each retry logs trace IDs so users can confirm the fix is engaging
+/// and paste `req_...` / `cf-ray=...` into an OpenAI support ticket.
 pub(crate) async fn send_with_retry(
     builder: &reqwest::RequestBuilder,
     label: &str,
 ) -> Result<String, AppError> {
-    // `RequestBuilder::send` takes `self` (ownership), but this helper receives
-    // `&RequestBuilder`. `RequestBuilder` does not implement `Clone` (the body
-    // may be non-cloneable), but it exposes `try_clone()`. Our builders always
-    // carry a serializable `.json()` body, so `try_clone()` returns `Some` and
-    // each retry attempt re-issues an identical request. If a builder ever
-    // cannot be cloned, we fail fast with a clear error rather than silently
-    // skipping retry or panicking.
+    /* `RequestBuilder::send` takes ownership but this helper receives `&RequestBuilder`.
+    `try_clone()` is `Some` because our builders always carry serializable `.json()`
+    bodies. Each retry re-issues an identical request. If a builder can't be cloned,
+    fail fast with a clear error. */
     if builder.try_clone().is_none() {
         return Err(AppError::Import(
             "LLM request body is not retryable (non-cloneable RequestBuilder)".to_string(),
@@ -555,20 +529,14 @@ pub async fn list_models(
     }
 }
 
-/// Send a chat completion request, returning the response text, the
-/// prompt+completion token total, and side-channel [`CallMeta`] indicating
-/// whether the call recovered from a temperature-rejection 400.
+/// Send a chat completion request. Returns `(response_text, token_total, CallMeta)`.
 ///
-/// This is the single entry point used by `LlmOrchestrator::send`. The
-/// orchestrator inspects `CallMeta.temperature_was_rejected` to persist
-/// `skip_temperature = true` so future calls skip the wasteful first-attempt
-/// failure.
+/// Single entry point used by `LlmOrchestrator::send`. The orchestrator inspects
+/// `CallMeta.temperature_was_rejected` to persist `skip_temperature = true`.
 ///
 /// Temperature-rejection recovery runs INSIDE this function (one extra
-/// `send_with_retry` call), so it is bounded by the orchestrator's single
-/// outer `tokio::time::timeout` wrapper. There is no doubling of the timeout
-/// budget relative to a pre-retry implementation: the recovery call shares
-/// whatever time remains in the orchestrator's envelope.
+/// `send_with_retry` call), bounded by the orchestrator's single outer
+/// `tokio::time::timeout` — no doubling of the timeout budget.
 pub async fn send_chat_completion(
     config: &LlmConfig,
     system_prompt: &str,
@@ -605,17 +573,15 @@ async fn send_google(
         format!("{}/models/{}:generateContent", base_url, config.model_name)
     };
 
-    // Convert the normalized `Cow<str>` prompts to owned `String`s so the
-    // retry closure (an `Fn`, callable up to twice) can cheaply clone them
-    // into each attempt's `async move` block without moving out of the
-    // captured environment.
+    /* Convert normalized prompts to owned `String`s so the retry closure
+    (an `Fn`, up to 2 calls) can clone them cheaply into each `async move`
+    block without moving out of captured environment. */
     let system_text = system_prompt.into_owned();
     let user_text = user_prompt.into_owned();
 
-    // Build + send, then recover from a temperature-rejection 400 by rebuilding
-    // with `temp = None`. When `config.skip_temperature` is already `true`, the
-    // first attempt omits temperature and there is nothing to recover from, so
-    // the closure returns immediately without a second attempt.
+    /* Build + send, then recover from temperature-rejection 400 by retrying with
+    `temp = None`. When `config.skip_temperature` is already `true`, the first
+    attempt omits temperature and there's nothing to recover from. */
     send_with_temperature_recovery(config.skip_temperature, config.temperature, move |temp| {
         // Clone per-call: the outer closure is `Fn` (up to 2 calls), so each
         // invocation must produce its own owned prompt strings.
@@ -666,14 +632,11 @@ async fn send_openai_compatible(
     let system_prompt = normalize_llm_text(system_prompt);
     let user_prompt = normalize_llm_text(user_prompt);
     let client = shared_client();
-    // Note: `max_tokens` is intentionally NOT sent. Some newer OpenAI-compatible
-    // models (e.g. o-series reasoning models) reject `max_tokens` with a 400
-    // "Unsupported parameter" error and require `max_completion_tokens` instead.
-    // Sending neither is the provider-portable default: the server applies its
-    // own model-specific output budget. The summary command's markdown-fallback
-    // retry handles the empty-content failure mode that reasoning models can
-    // produce when their thinking phase exhausts a server-side budget.
-
+    /* `max_tokens` is intentionally NOT sent. Some newer OpenAI-compatible models
+    (e.g. o-series reasoning) reject it with 400 and need `max_completion_tokens`
+    instead. Sending neither is provider-portable: the server applies its own
+    output budget. The summary markdown-fallback retry handles the empty-content
+    failure mode reasoning models can produce. */
     let api_key = config.api_key_encrypted.as_deref().unwrap_or("").to_string();
 
     let base_url = config.endpoint_url.trim_end_matches('/');
@@ -705,9 +668,8 @@ async fn send_openai_compatible(
     let system_text = system_prompt.to_string();
     let user_text = user_prompt.to_string();
 
-    // Build + send, then recover from a temperature-rejection 400 by rebuilding
-    // with `temp = None`. Same envelope as `send_google`; the closure captures
-    // the OpenAI-compatible request shape + response parsing.
+    /* Build + send, then recover from temperature-rejection 400. Same envelope
+    as `send_google`; the closure captures the OpenAI-compatible request shape. */
     send_with_temperature_recovery(config.skip_temperature, config.temperature, move |temp| {
         // Clone per-call: the outer closure is `Fn` (up to 2 calls), so each
         // invocation must produce its own owned prompt + api_key strings.
@@ -730,10 +692,9 @@ async fn send_openai_compatible(
                 .header("Content-Type", "application/json")
                 .bearer_auth(&api_key)
                 .json(&request);
-            // `send_with_retry` owns transient retry (429 / 408 / 5xx + transport
-            // errors + the OpenAI "insufficient permissions" 401/403 transient) and
-            // captures `x-request-id` / `CF-Ray` into the error string for
-            // diagnostics.
+            /* `send_with_retry` owns transient retry (429/408/5xx + transport +
+            OpenAI "insufficient permissions" 401/403 transient) and captures
+            `x-request-id` / `CF-Ray` into the error string for diagnostics. */
             let body_text = send_with_retry(&builder, "OpenAI-compatible").await?;
 
             // Strategy 1: Try standard ChatResponse (OpenAI format)
@@ -743,10 +704,8 @@ async fn send_openai_compatible(
                     .into_iter()
                     .next()
                     .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
-                // Surface reasoning-model truncation: "length" means the server hit
-                // its output-token budget before the model finished, so the content
-                // may be a cut-off mid-sentence. This is the diagnostic the `Choice`
-                // doc-comment promises; without it, truncation is silently swallowed.
+                /* Surface reasoning-model truncation: "length" means the server hit
+                its output-token budget before the model finished. */
                 if choice.finish_reason.as_deref() == Some("length") {
                     eprintln!(
                     "[LlmClient] response truncated by output-token limit (finish_reason=length); \
@@ -776,23 +735,15 @@ async fn send_openai_compatible(
     .await
 }
 
-/// Run `make_request(temp)` once. If it fails with a temperature-rejection 400
-/// (`is_temperature_error`), retry once with `temp = None` and report
-/// `temperature_was_rejected = true` via [`CallMeta`] on success.
+/// Run `make_request(temp)` once. On temperature-rejection 400, retry with
+/// `temp = None`, returning `temperature_was_rejected = true` in [`CallMeta`].
 ///
-/// Recovery is skipped entirely when `skip_temperature` is already `true`:
-/// the first attempt already omits `temperature`, so a 400 cannot be a
-/// temperature rejection, and retrying would just repeat the same failure.
+/// Skipped when `skip_temperature` is already `true` (first attempt already omits
+/// `temperature`). On second-attempt failure, the ORIGINAL first-attempt error is
+/// returned (the actionable temperature message, not a fluky second error).
 ///
-/// On the second-attempt failure, the ORIGINAL first-attempt error is returned
-/// so the caller sees the temperature-specific message (which is the actionable
-/// one) rather than a generic "model not found" from a fluky second attempt.
-/// On the first-attempt success, returns `(content, tokens, CallMeta::default())`.
-///
-/// The recovery happens INSIDE this function, so when the orchestrator wraps
-/// the outer `send_chat_completion` in a single `tokio::time::timeout`, the
-/// retry shares whatever time remains in that envelope rather than doubling the
-/// wall-clock budget.
+/// Recovery happens INSIDE this function, sharing the orchestrator's single outer
+/// `tokio::time::timeout` envelope.
 async fn send_with_temperature_recovery<F, Fut>(
     skip_temperature: bool,
     temperature: f64,
@@ -807,9 +758,8 @@ where
     match make_request(first_temp).await {
         Ok(tuple) => Ok((tuple.0, tuple.1, CallMeta::default())),
         Err(e) => {
-            // Only retry if the first attempt actually SENT a temperature. If
-            // skip_temperature was already true, there is nothing to recover
-            // from; surface the error immediately.
+            /* Only retry if temperature was actually sent. If skip_temperature
+            was already true, surface the error immediately. */
             if skip_temperature || !is_temperature_error(&format!("{e}")) {
                 return Err(e);
             }
@@ -826,12 +776,11 @@ where
     }
 }
 
-/// Attempt to extract text content from an arbitrary LLM response JSON value.
+/// Extract text content from an arbitrary LLM response JSON.
 ///
-/// Handles:
-/// - Standard OpenAI: `choices[0].message.content` (string)
-/// - z.ai / non-standard: `message.content` (string or array of text objects)
-/// - Any provider with a `content` key at the first two levels
+/// Handles: standard OpenAI `choices[0].message.content`, z.ai `message.content`
+/// (string or array of text objects), and any provider with a `content` key at
+/// the first two levels.
 fn extract_content_from_response(value: &serde_json::Value) -> Option<String> {
     // Level 0: is value itself a string?
     if let Some(s) = value.as_str() {

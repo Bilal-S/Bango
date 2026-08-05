@@ -87,9 +87,8 @@ async function startBatchImport(): Promise<void> {
   // Reveal the progress bar now that the user has explicitly started a run.
   batchStarted.value = true;
   try {
-    // The command returns the initial progress snapshot; assign it so the bar
-    // appears immediately. Subsequent updates arrive via the
-    // `batch-import:progress` event listener registered on mount.
+    /* Assign initial progress snapshot so the bar appears immediately.
+       Subsequent updates arrive via `batch-import:progress` event. */
     const initial = await invoke<BatchImportProgress>('start_batch_import', {
       autoSummarize: readAutoSummarize(),
       includeSectionSummaries: readSectionSummaries(),
@@ -135,10 +134,8 @@ function phaseSkipMessage(phase: BatchImportPhaseResult | null): string | null {
 onMounted(async () => {
   await loadFullTextCount();
   await refreshBatchProgress();
-  // Only reveal the bar on mount if a run is already in progress (e.g. the
-  // user navigated to Settings, started an import, left, and came back). A
-  // fresh mount with an idle/empty snapshot keeps the bar hidden until the
-  // user clicks Start.
+  /* Only reveal bar on mount if a run is already in progress (user navigated
+     away and back). Fresh mount with idle snapshot keeps bar hidden. */
   batchStarted.value = batchProgress.value?.isRunning === true;
   // Listen for progress events so the bar updates live.
   batchUnlisten = await listen<BatchImportProgress>('batch-import:progress', (event) => {

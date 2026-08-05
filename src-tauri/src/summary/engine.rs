@@ -16,9 +16,7 @@ pub struct SummaryInput {
     pub articles: Vec<ArticleSummary>,
     pub screening_data: ScreeningData,
     pub citation_style: String,
-    /// Full inclusion criterion definitions (Shape 0). Threaded into each
-    /// batch's prompt so the Methodology narrative can name the actual
-    /// eligibility rules.
+    /// Full inclusion criteria (Shape 0). Threaded into each batch's prompt.
     pub inclusion_criteria: Vec<String>,
     /// Full exclusion criterion definitions (Shape 0).
     pub exclusion_criteria: Vec<String>,
@@ -57,11 +55,9 @@ pub async fn generate_summary(
     // Check if batching is needed (80% of context window)
     let context_limit = (input.config.context_window_tokens as f64 * 0.8) as usize;
 
-    // Simple heuristic: estimate tokens for all articles combined.
-    // Includes the Shape A `evidence` field length (per `summary-improvements.md`
-    // §5 - the estimator MUST see any new field or batching silently underflows
-    // the context window on large projects). Criteria text is added once per
-    // batch (not per article).
+    /* Token heuristic: title + abstract + authors + keywords + evidence + criteria chars, /4.
+    MUST see every field or batching silently underflows the context window on large projects.
+    Criteria text is added once per batch (not per article). */
     let criteria_chars: usize = input
         .inclusion_criteria
         .iter()
@@ -243,8 +239,8 @@ Return only the plain text of the literature review. Do not wrap it in code fenc
 // exceeds 80% of the context window). Same token heuristic so the two paths
 // do not diverge on the article axis.
 
-/// Input for the gap-analysis engine. Same fields as `SummaryInput` plus the
-/// pre-rendered screening summary and the `BiblioContext` aggregate.
+/// Gap-analysis engine input. Mirrors `SummaryInput` + pre-rendered screening summary
+/// + `BiblioContext`.
 pub struct GapAnalysisInput {
     pub config: LlmConfig,
     pub aim_texts: Vec<String>,
@@ -281,12 +277,8 @@ impl GapAnalysisInput {
     }
 }
 
-/// Generate the Research Gap Analysis report over the included corpus.
-///
-/// Returns a single Markdown document. When the estimated token footprint
-/// exceeds 80% of the context window, the corpus is split in half, each half
-/// is analyzed separately, and the two partial gap reports are synthesized
-/// into one coherent document (mirrors `generate_summary`'s batching strategy).
+/// Generate Research Gap Analysis report. Returns Markdown. Batches when estimated
+/// tokens >80% context window (mirrors `generate_summary`).
 pub async fn generate_gap_analysis(
     orchestrator: &LlmOrchestrator,
     input: GapAnalysisInput,
@@ -297,10 +289,8 @@ pub async fn generate_gap_analysis(
 
     let context_limit = (input.config.context_window_tokens as f64 * 0.8) as usize;
 
-    // Same heuristic as `generate_summary`: title + abstract + authors +
-    // keywords + evidence + criteria chars, /4. The estimator MUST see every
-    // field threaded into the prompt or batching silently underflows the
-    // window on large projects.
+    /* Same heuristic as `generate_summary`: title + abstract + authors + keywords +
+    evidence + criteria chars, /4. MUST see every field or batching silently underflows. */
     let criteria_chars: usize = input
         .inclusion_criteria
         .iter()
@@ -399,9 +389,8 @@ async fn gap_batch(
     biblio_context: &BiblioContext,
     articles: &[ArticleSummary],
 ) -> Result<String, AppError> {
-    // Pre-render the screening summary once per batch (reuses the shared
-    // `format_screening_summary` so the gap prompt and the literature-review
-    // prompt stay consistent on the methodology axis).
+    /* Pre-render screening summary once per batch. Reuses `format_screening_summary`
+    so the gap prompt and the literature-review prompt stay consistent. */
     let screening_summary =
         prompt::format_screening_summary(screening, inclusion_criteria, exclusion_criteria);
 

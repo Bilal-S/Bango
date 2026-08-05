@@ -1,65 +1,41 @@
-//! Pre-parser for LLM-emitted JSON responses.
-//!
-//! LLMs occasionally place **raw control characters** (most commonly `0x0A`
-//! newlines, but also tabs / form-feeds / NULs) inside JSON string values
-//! instead of escaping them as `\n` / `\t`. The outer OpenAI envelope is
-//! well-formed JSON, so `llm::client` can decode `choices[0].message.content`
-//! into a Rust `String` - but the inner summary/schema JSON, when re-parsed by
-//! `serde_json::from_str`, fails with:
-//!
-//! ```text
-//! control character (\u0000-\u001F) found while parsing a string at line N column M
-//! ```
-//!
-//! because RFC 8259 forbids literal control bytes inside JSON string literals.
-//!
-//! [`escape_control_chars_in_json`] repairs this **non-destructively**: it walks
-//! the document tracking whether the cursor is inside a `"..."` string literal,
-//! and re-emits any raw control char it finds *inside* a string as the
-//! equivalent JSON escape (`\n`, `\t`, `\u0000`, etc.). Structural whitespace
-//! between tokens is preserved unchanged. A well-formed JSON document passes
-//! through byte-identical; only otherwise-unparseable payloads are normalized.
-//!
-//! This is the project-wide fix for the recurring "AI summary failed: Invalid
-//! JSON response from LLM: control character" class of errors. It is a strict
-//! superset of correctness vs. the (rejected) alternative of *stripping*
-//! control chars, which would silently corrupt user-facing content such as
-//! `summary_150_250_words` paragraph breaks or screening `reasoning`.
+/*! Pre-parser for LLM-emitted JSON responses.
+
+LLMs occasionally place raw control characters (most commonly `0x0A` newlines)
+inside JSON string values instead of escaping them. The outer OpenAI envelope
+is well-formed, but `serde_json::from_str` fails because RFC 8259 forbids
+literal control bytes inside JSON string literals.
+
+[`escape_control_chars_in_json`] repairs non-destructively: walks the document
+tracking `"..."` state, re-emits raw control chars as JSON escapes. Structural
+whitespace between tokens is preserved. Valid JSON passes through byte-
+identical.
+
+Project-wide fix for the recurring "control character" class of errors. Strict
+superset of correctness vs. stripping (which would corrupt paragraph breaks
+in summaries and screening reasoning). */
 
 /// Escape raw control characters (`0x00`–`0x1F`) that appear **inside JSON
-/// string literals**, so `serde_json::from_str` accepts LLM responses whose
-/// string values contain literal newlines / tabs / form-feeds / NULs instead
-/// of the proper `\n` / `\t` escapes.
+/// string literals**, so `serde_json::from_str` accepts otherwise-valid LLM
+/// responses whose string values contain literal newlines/tabs/NULs.
 ///
 /// # What it does
 ///
-/// Walks the input char-by-char, tracking:
-/// - `in_string`: are we inside a `"..."` literal?
-/// - `escape_next`: was the previous char an unescaped `\`?
-///
-/// - **Inside a string literal**: a char in `0x00..=0x1F` is emitted as its
-///   JSON escape (`\n`, `\r`, `\t`, `\b`, `\f`, or `\u00XX` for the rest).
-///   Everything else passes through verbatim. Crucially, a `"` preceded by an
-///   unescaped `\` does **not** flip `in_string` off, so escaped quotes inside
-///   the value are handled correctly.
-/// - **Outside a string literal** (structural JSON): whitespace newlines/tabs
-///   are already legal JSON insignia between tokens - pass through unchanged.
+/// Walks the input char-by-char, tracking `in_string` and `escape_next`.
+/// Inside a string literal, control chars are emitted as JSON escapes
+/// (`\n`, `\r`, `\t`, `\b`, `\f`, or `\u00XX`). Outside strings, whitespace
+/// passes through unchanged.
 ///
 /// # Why escape, not strip
 ///
-/// Stripping control chars (`s.retain(|c| !c.is_control())`) would collapse
-/// paragraph breaks in `summary_150_250_words`, run together multi-line
-/// `reasoning`, and damage `key_insights` bullets - silent content corruption
-/// in user-facing text. Escaping preserves the logical content; only the JSON
-/// representation is normalized, matching what the LLM *should* have emitted.
+/// Stripping would collapse paragraph breaks, run together multi-line
+/// reasoning, and damage bullet lists — silent content corruption in
+/// user-facing text. Escaping preserves the logical content.
 ///
 /// # Idempotence
 ///
-/// A document that is already valid JSON (no raw control chars in strings)
-/// passes through byte-identical. Safe to call on any LLM response.
+/// Already-valid JSON passes through byte-identical. Safe on any LLM response.
 ///
-/// Pure function: no I/O, no panics. Tested inline + via the regression case
-/// in `tests/json_repair_test.rs`.
+/// Pure: no I/O, no panics.
 #[must_use]
 pub fn escape_control_chars_in_json(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
@@ -103,32 +79,22 @@ pub fn escape_control_chars_in_json(raw: &str) -> String {
         }
     }
 
-    // If the document ended mid-string with a dangling `\`, we've already
-    // emitted the backslash above; the caller's `serde_json::from_str` will
-    // report a clean "EOF while parsing a string" error. We do not attempt
-    // further repair here - that is `balance_braces`'s job (screening path)
-    // and out of scope for control-char normalization.
+    /* If the document ended mid-string with a dangling `\`, we've already
+    emitted the backslash above; the caller's `serde_json::from_str` will
+    report a clean "EOF" error. Further repair is `balance_braces`'s job. */
     out
 }
 
-/// Strip markdown code fences (```` ```json ```` / ```` ``` ````) from an LLM
-/// response and trim whitespace.
-///
-/// **Why this exists (not `screening_engine::extract_json`):** `extract_json`
-/// was written for the screening prompt, whose schema is a top-level JSON
-/// **array**. Its Strategy 3 (`extract_array_from_object`) actively unwraps the
-/// first nested array-of-objects it finds inside a JSON object. The article
-/// summary schema is a top-level JSON **object** that legitimately contains
-/// arrays-of-objects (e.g. `section_summaries`, figure descriptions). Feeding a
-/// valid summary object through `extract_json` silently corrupts it into just
-/// the `section_summaries` array, which then fails the substantive-content
-/// check and triggers a spurious markdown-fallback retry.
-///
-/// This helper does ONE thing: strip code fences. It does not attempt any
-/// array/object shape normalization. The caller's `serde_json::from_str` is the
-/// single source of truth for JSON validity.
-///
-/// Pure function: no I/O.
+/** Strip markdown code fences (```` ```json ```` / ```` ``` ````) and trim.
+
+Unlike `screening_engine::extract_json` (which unwraps first nested array for
+the top-level-array screening schema), this does ONE safe thing: strip fences.
+It does not attempt array/object shape normalization — the caller's
+`serde_json::from_str` is the source of truth for JSON validity.
+
+Rationale: the summary schema is a top-level JSON **object** containing
+legitimate arrays (`section_summaries`, figure descriptions). Feeding it
+through `extract_json` would corrupt it into just the first nested array. */
 #[must_use]
 pub fn strip_code_fences(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -151,47 +117,25 @@ pub fn strip_code_fences(raw: &str) -> String {
     }
 }
 
-/// The combined pre-parser used by [`crate::llm::orchestrator::LlmOrchestrator::send_json`]
-/// and by JSON-parsing call sites that go through the orchestrator directly.
-///
-/// Runs the two repairs in the correct order:
-/// 1. [`strip_code_fences`] - MUST run first because the fence strippers match
-///    against the raw response (a leading ```` ``` ```` inside an already-escaped
-///    JSON string value would be a false positive).
-/// 2. [`escape_control_chars_in_json`] - sanitizes raw control chars the LLM may
-///    have placed inside JSON string values.
-///
-/// Pure function: no I/O. Composable with further shape-specific repair
-/// (e.g. screening's `extract_json` brace-balance pass).
+/** Combined pre-parser used by `LlmOrchestrator::send_json` and by
+JSON-parsing call sites. Runs fences-first then control-char escape.
+Pure, composable with further shape-specific repair. */
 #[must_use]
 pub fn prepare_llm_json(raw: &str) -> String {
     escape_control_chars_in_json(&strip_code_fences(raw))
 }
 
-/// Whether `ch` is a JSON control character (U+0000 through U+001F) that RFC
-/// 8259 requires to be escaped inside a string literal.
-///
-/// `0x7F` (DEL) and C1 controls (U+0080–U+009F) are intentionally NOT included:
-/// they are not in the RFC 8259 "control character" range and `serde_json`
-/// accepts them as-is inside strings, so escaping them would be a gratuitous
-/// change to otherwise-valid input.
+/** Whether `ch` is a JSON control character (U+0000–U+001F).
+`0x7F` (DEL) and C1 controls (U+0080–U+009F) are intentionally excluded:
+`serde_json` accepts them as-is inside strings. */
 #[inline]
 fn is_json_control_char(ch: char) -> bool {
     ('\u{0000}'..='\u{001F}').contains(&ch)
 }
 
-/// Push the canonical JSON escape sequence for an RFC 8259 control char into
-/// `out`.
-///
-/// The two-char escapes (`\n`, `\t`, etc.) are the same ones `serde_json`
-/// emits on serialization, so a round-trip through this helper + `to_string`
-/// produces byte-identical output to a hand-correct document. The remaining
-/// 27 codepoints in `0x00..=0x1F` (NUL, SOH, STX, …, US) use the
-/// lowercase-hex `\u00XX` form that `serde_json` also accepts.
-///
-/// Pushing directly into the caller's buffer avoids the awkward
-/// `&'static str` vs owned-`String` return type - the rare-control-char branch
-/// can allocate a small 6-byte string without leaking.
+/** Push the canonical JSON escape sequence for a control char into `out`.
+Uses the same two-char escapes (`\n`, `\t`, …) that `serde_json` emits;
+remaining 27 codepoints use `\u00XX`. */
 #[inline]
 fn push_json_escape(out: &mut String, ch: char) {
     match ch {

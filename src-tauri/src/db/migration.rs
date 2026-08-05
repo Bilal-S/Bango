@@ -1,36 +1,22 @@
 //! Database migration runner.
 //!
-//! Migrations run on every app startup ([`crate::lib::run`] setup hook). The
-//! runner is **transactional** and **self-healing**:
-//!
-//! - **Transactional**: each migration's `up_sql` + `user_version` bump are
-//!   committed atomically in a single transaction. A crash between the DDL and
-//!   the version bump cannot leave a partial state - the entire migration
-//!   rolls back and retries cleanly on the next launch.
-//! - **Self-healing pre-pass** ([`heal_partial_migrations`]): detects databases
-//!   left in a half-applied state by older non-transactional builds (e.g. v003
-//!   schema columns exist but `user_version` is still 2 because the app was
-//!   force-closed between `execute_batch` and `pragma_update`). It advances
-//!   `user_version` to the highest fully-applied migration without re-running
-//!   the dangerous `ALTER TABLE ADD COLUMN` statements, which have no
-//!   `IF NOT EXISTS` guard in SQLite.
-//!
-//! The heal pre-pass is a one-time bridge for installs corrupted by pre-fix
-//! builds. Once every install has the transactional runner, no new partial
-//! states can be created, but the pre-pass is kept as a cheap safety net.
+//! **Transactional**: each migration's `up_sql` + `user_version` bump commit atomically.
+//! **Self-healing** ([`heal_partial_migrations`]): detects half-applied states from
+//! older non-transactional builds (v003 columns exist but `user_version` is stale),
+//! advances the version without re-running the dangerous `ALTER TABLE ADD COLUMN`
+//! statements (SQLite has no `IF NOT EXISTS` for ADD COLUMN).
+//! Kept as a permanent safety net even though the transactional runner prevents new
+//! partial states.
 
 use rusqlite::Connection;
 
 use super::migrations;
 use crate::error::AppError;
 
-/// Run all pending migrations in version order.
-///
-/// Each migration runs inside a single transaction so the schema DDL and the
-/// `user_version` bump commit atomically. If a migration fails, the
-/// transaction rolls back, `user_version` stays at the last successful value,
-/// and the caller can surface the error to the user without leaving the
-/// database in a half-migrated state.
+/// Run all pending migrations in version order. Each migration runs inside a
+/// single transaction so DDL + `user_version` bump commit atomically.
+/// On failure the transaction rolls back and `user_version` stays at the last
+/// successful value.
 pub fn run_migrations(conn: &Connection) -> Result<(), AppError> {
     // First, heal any partial state left by older non-transactional builds.
     heal_partial_migrations(conn)?;
@@ -42,9 +28,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), AppError> {
 
     for migration in migrations {
         if migration.version > current_version {
-            // `unchecked_transaction` borrows `&Connection` (not `&mut`),
-            // matching this function's signature and avoiding churn across the
-            // 40+ call sites of `run_migrations`.
+            // `unchecked_transaction` borrows `&Connection`, matching our fn signature.
             let tx = conn.unchecked_transaction()?;
             tx.execute_batch(migration.up_sql)?;
             tx.pragma_update(None, "user_version", migration.version)?;
@@ -67,33 +51,20 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, A
     Ok(false)
 }
 
-/// Detect and heal databases left in a half-applied migration state by
-/// pre-transactional-runner builds.
+/// Detect and heal databases left half-applied by pre-transactional-runner builds.
 ///
-/// ## Background
-///
-/// Older builds ran `execute_batch(up_sql)` and `pragma_update(user_version)`
-/// as two separate autocommit statements. A crash or force-quit between them
-/// left the schema changed but `user_version` stale, so the next launch
-/// re-ran the migration and crashed on the non-idempotent `ALTER TABLE ADD
-/// COLUMN` statements (SQLite has no `ADD COLUMN IF NOT EXISTS`).
-///
-/// This pre-pass detects that state for v003 (the only migration carrying
-/// `ALTER TABLE ADD COLUMN` on `articles`) by checking whether
-/// `articles.is_translated` exists while `user_version < 3`. If so, it
-/// advances `user_version` to 3 and logs the recovery, letting the main loop
-/// skip the dangerous re-run.
-///
-/// Once all installs run the transactional runner, no new partial states are
-/// created. This pre-pass remains as a permanent, cheap safety net for the
-/// existing corrupted installs.
+/// Older builds ran `execute_batch` + `pragma_update` as two autocommit statements.
+/// A crash between them left the schema changed but `user_version` stale, causing
+/// the next launch to re-run non-idempotent `ALTER TABLE ADD COLUMN` statements.
+/// This pre-pass detects that state for v003 (the only migration carrying such ALTERs)
+/// by checking whether `articles.is_translated` exists while `user_version < 3`.
+/// If so, advances the version to 3 so the main loop skips the dangerous re-run.
 fn heal_partial_migrations(conn: &Connection) -> Result<(), AppError> {
     let current_version: i32 =
         conn.pragma_query_value(None, "user_version", |row| row.get(0)).unwrap_or(0);
 
-    // v003 marker: `articles.is_translated`. If the column exists but the
-    // version pragma is stale, the v003 DDL already committed - advance the
-    // version so the main loop skips it.
+    // v003 marker: `articles.is_translated`. If present while user_version < 3, the DDL
+    // already committed — advance the version so the main loop skips the re-run.
     if current_version < 3 && column_exists(conn, "articles", "is_translated")? {
         eprintln!(
             "[migrations] heal: detected partially-applied v003 \

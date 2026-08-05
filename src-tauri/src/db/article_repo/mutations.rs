@@ -60,13 +60,9 @@ pub fn update_article_status(
             row.get(0)
         })?;
 
-    // When moving an article back to 'working', reset the screening flags so the
-    // article becomes eligible for re-screening on the next run. Without this the
-    // stale `screened_at` timestamp survives the status change and excludes the
-    // article from `get_next_unscreened_working_batch`, leaving it stuck in a
-    // "previously screened" limbo that surfaces in the Error tab even though
-    // `screening_error` is 0. See the state machine in `docs/bango-v4-spec.md`
-    // §4.2 - "Working ↔ Included ↔ Rejected" is an explicit allowed transition.
+    // Moving back to `working` resets screening flags so the article becomes eligible
+    // for re-screening (§4.2 of the spec). Without this the stale `screened_at` survives
+    // and excludes the article from `get_next_unscreened_working_batch`.
     if new_status == "working" {
         conn.execute(
             "UPDATE articles SET status = ?1, manual_override = 1, \
@@ -103,9 +99,8 @@ pub fn update_article_status(
 }
 
 /// Bump `changed_at` on an article. Used by tag/label mutations that touch
-/// junction rows but don't go through the full `update_article_*` path (e.g.
-/// the merge commands). Centralizes the `datetime('now')` contract so raw SQL
-/// stays out of the command layer.
+/// junction rows without going through the full `update_article_*` path.
+/// Centralizes the `datetime('now')` contract.
 pub fn bump_changed_at(conn: &Connection, article_id: &str) -> Result<(), AppError> {
     conn.execute("UPDATE articles SET changed_at = datetime('now') WHERE id = ?1", [article_id])?;
     Ok(())
@@ -242,20 +237,10 @@ pub fn override_ai_decision(
     Ok(())
 }
 
-/// Clear the AI decision, reasoning text, and confidence from an article
-/// while preserving the status, screening timestamp, and manual-override flag.
-///
-/// Powers the trashcan icon in the AI Decision card's expanded header. The
-/// `ai_decision` + `ai_reasoning` + `ai_confidence` are all nulled so the
-/// entire card unmounts (the card renders only when `ai_decision` is set);
-/// the user's own Include/Exclude choice lives on the separate `status` field,
-/// which stays intact. `screened_at` is preserved so the screening history
-/// (audit trail) survives the clear and the article is NOT re-enqueued for
-/// screening. Restoring the AI assessment requires re-screening the article
-/// (LLM token cost).
-///
-/// Writes an `ai_screen_clear` audit entry so the action is visible in the
-/// Audit Timeline.
+/// Clear AI decision/reasoning/confidence while preserving status and screening
+/// timestamp. Powers the trashcan icon in the AI Decision card. Nulls the three
+/// AI fields so the card unmounts; `screened_at` is preserved so the article is
+/// NOT re-enqueued. Writes an `ai_screen_clear` audit entry.
 pub fn clear_ai_reasoning(conn: &Connection, article_id: &str) -> Result<(), AppError> {
     conn.execute(
         "UPDATE articles SET ai_decision = NULL, ai_reasoning = NULL, ai_confidence = NULL, \

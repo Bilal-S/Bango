@@ -16,13 +16,8 @@ use crate::models::label::Label;
 use crate::models::tag_label::MergeResult;
 use rusqlite::params;
 
-/// Standard workflow labels that classify articles by review process state,
-/// quality assessment, and decision category. These complement the corpus-
-/// derived labels and should be suggested by the LLM (up to 4) when they
-/// match the review's screening workflow.
-///
-/// All entries are lowercase, hyphenated, and ≤ 35 chars so they pass the
-/// backend sanitization in `screening::engine::sanitize_tag_or_label_name`.
+/// Standard workflow labels classifying articles by review process state,
+/// quality, and decision category. All ≤35 chars (pass `sanitize_tag_or_label_name`).
 const STANDARD_WORKFLOW_LABELS: &[&str] = &[
     "priority-read",
     "strong-methodology",
@@ -272,13 +267,9 @@ pub struct MergeLabelRequest {
     pub into_id: String,
 }
 
-/// Replace one label with another: all articles carrying `from_id` are
-/// reassigned to `into_id`, then `from_id` is deleted. Destructive and
-/// irreversible; the frontend shows a confirmation dialog before invoking.
-///
-/// Mirrors `commands::tags::merge_tag`. Returns the shared `MergeResult` so
-/// the success toast can report the accurate `reassigned` + `already-had-
-/// survivor` split.
+/// Replace one label with another: reassign all articles from `from_id` to
+/// `into_id`, then delete `from_id`. Destructive and irreversible. Returns
+/// `MergeResult` so the toast can report `reassigned` + `already_had_survivor`.
 #[tauri::command]
 pub fn merge_label(
     db_state: State<'_, DbState>,
@@ -288,9 +279,8 @@ pub fn merge_label(
     merge_label_inner(&conn, &request.from_id, &request.into_id)
 }
 
-/// Core merge logic, extracted so it is testable without `State<DbState>`.
-/// Mirrors `commands::tags::merge_tag_inner` (see that function's doc-comment
-/// for the full contract).
+/// Core merge logic, testable without `State<DbState>`. Mirrors
+/// `commands::tags::merge_tag_inner`.
 pub fn merge_label_inner(
     conn: &rusqlite::Connection,
     from_id: &str,

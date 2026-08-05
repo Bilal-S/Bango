@@ -1,24 +1,15 @@
 //! Repository for the `article_chunks` table (Tier 3 chunk storage).
 //!
-//! The `article_chunks` table is created by migration `v002_wiki_manifest.rs`
-//! alongside the FTS5 drop, but it is NOT populated by the wiki pipeline. It
-//! holds the per-article chunks that Tier 3 screening retrieves as
-//! "Supporting Evidence from Full Text". It is filled at attach time by
-//! `commands::full_text::attach_full_text` (via `utils::sections::extract_sections`
-//! + `utils::chunking::chunk_sections`) and cleared on detach.
-//!
-//! Distinct from `wiki::fts` (which indexes wiki *pages* post-ingest): this
-//! table holds article-level chunks at attach time, pre-ingest, so screening
+//! Created by migration v003. Populated at attach time (NOT by the wiki pipeline);
+//! consumed by `screening::chunk_retrieval`. Distinct from `wiki::fts` (which indexes
+//! wiki pages post-ingest): this holds article-level chunks pre-ingest so screening
 //! never triggers PDF parsing.
 
 use crate::error::AppError;
 use crate::utils::chunking::Chunk;
 use rusqlite::{params, Connection};
 
-/// Replace all chunks for one article with the given set. Idempotent + re-attach
-/// safe: deletes existing rows for the article first, then inserts the new set.
-/// Callers pass the output of
-/// `chunk_sections(extract_sections(path), DEFAULT_CHUNK_WORDS)`.
+/// Replace all chunks for one article. Idempotent: deletes existing rows first, then inserts.
 pub fn replace_chunks_for_article(
     conn: &Connection,
     article_id: &str,
@@ -43,9 +34,8 @@ pub fn replace_chunks_for_article(
     Ok(count)
 }
 
-/// Delete all chunks for an article. Called by `delete_full_text` (the article
-/// row isn't deleted on full-text removal - only `has_full_text` flips - so the
-/// `ON DELETE CASCADE` foreign key does not fire and an explicit clear is needed).
+/// Delete all chunks for an article. Called by `delete_full_text` (not an article
+/// delete, so `ON DELETE CASCADE` does not fire — explicit clear needed).
 pub fn delete_chunks_for_article(conn: &Connection, article_id: &str) -> Result<(), AppError> {
     conn.execute("DELETE FROM article_chunks WHERE article_id = ?1", params![article_id])?;
     Ok(())
@@ -87,19 +77,10 @@ pub fn count_chunks_for_article(conn: &Connection, article_id: &str) -> Result<i
     Ok(count)
 }
 
-/// Article rows that have `has_full_text = 1` but zero rows in `article_chunks`.
-/// Used by the `ensure_chunks_for_full_text_articles` guard (runs at screening
-/// start with `force=false`) so previously-attached PDFs without chunks are
-/// backfilled transparently.
-///
-/// Excludes articles whose `full_text` is NULL or empty. Those rows result from
-/// `attach_full_text_inner`'s soft-fallback path (corrupt/empty PDF that
-/// attached but failed text extraction): re-parsing the same invalid source
-/// would never produce chunks, so including them would make the screening-start
-/// guard retry - and re-log the same `log_error` - on every screening run. The
-/// explicit Settings "Rebuild text chunks" button (`force=true`,
-/// `get_articles_with_full_text`) still attempts them so a user can retry after
-/// replacing the source file.
+/// Articles with `has_full_text = 1` but zero rows in `article_chunks`.
+/// Used by the screening-start guard (`force=false`). Excludes articles whose
+/// `full_text` is NULL/empty (soft-fallback attaches that can never produce chunks),
+/// so the guard does not retry the same invalid PDF on every screening run.
 pub fn get_articles_with_full_text_missing_chunks(
     conn: &Connection,
 ) -> Result<Vec<String>, AppError> {
@@ -118,11 +99,9 @@ pub fn get_articles_with_full_text_missing_chunks(
     Ok(out)
 }
 
-/// Every article id with `has_full_text = 1`, regardless of whether it already
-/// has chunks. Used by `ensure_chunks_for_full_text_articles(force=true)` so the
-/// Settings "Rebuild text chunks" button repairs corrupted/partial/outdated
-/// chunk sets, not just empty ones. `replace_chunks_for_article` deletes-then-
-/// inserts per article, so re-chunking is idempotent.
+/// Every article id with `has_full_text = 1`, regardless of chunk state.
+/// Used by the "Rebuild text chunks" button (`force=true`) so corrupted/partial/
+/// outdated chunk sets are repaired, not just empty ones.
 pub fn get_articles_with_full_text(conn: &Connection) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare("SELECT id FROM articles WHERE has_full_text = 1")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;

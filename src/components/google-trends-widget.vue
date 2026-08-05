@@ -155,9 +155,9 @@ function handleMessage(event: MessageEvent) {
   }
 }
 
-// Watch props to debounce iframe updates. The parent panel is now responsible
-// for serialization (chart first, then map after a 2–4s pause), so we keep a
-// short internal debounce only to coalesce rapid prop changes.
+/* Watch props to debounce iframe updates. Parent handles serialization
+   (chart first, then map after ~2-4s); we keep a short internal debounce
+   only to coalesce rapid prop changes. */
 watch(
   () => [
     props.type,

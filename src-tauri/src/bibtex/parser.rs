@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
-/// A single parsed BibTeX entry.
+/// Parsed BibTeX entry.
 #[derive(Debug, Clone, Default)]
 pub struct BibtexEntry {
-    /// Entry type (e.g., "article", "book", "inproceedings").
     pub entry_type: String,
-    /// Citation key.
     pub key: String,
-    /// All field name-value pairs, stored in order of appearance.
+    /// Name-value pairs in order of appearance.
     pub fields: Vec<(String, String)>,
 }
 
@@ -26,15 +24,9 @@ pub struct BibtexParseError {
     pub message: String,
 }
 
-/// Parses a complete BibTeX file content into entries.
-///
-/// Handles:
-/// - `@type{key, ...}` entries
-/// - Both `{value}` and `"value"` delimiters
-/// - Nested braces within values
-/// - `@string` macros (expanded in subsequent entries)
-/// - `%` comment lines
-/// - `@comment` and `@preamble` (skipped)
+/// Parses a `.bib` file. Handles `@type{key, ...}`, `{value}`/`"value"`
+/// delimiters, nested braces, `@string` macros, `%` comments.
+/// Skips `@comment` and `@preamble`.
 #[must_use]
 pub fn parse_bibtex(content: &str) -> BibtexParseResult {
     // Strip BOM if present
@@ -325,13 +317,8 @@ fn read_braced_value(chars: &[char], mut pos: u32, len: usize) -> (String, u32) 
     (value, pos)
 }
 
-/// Read a quote-delimited value.
-/// `pos` should point to the first character after the opening '"'.
-/// Returns (value, position_after_closing_quote).
-///
-/// Handles two escape conventions:
-/// - `\"` - backslash-escaped quote (standard LaTeX)
-/// - `""` - double-double-quote (EBSCO / some BibTeX exporters)
+/// `pos` is first char after `"`. Returns (value, pos_after_closing_quote).
+/// Escape conventions: `\"` (LaTeX) and `""` (EBSCO).
 fn read_quoted_value(chars: &[char], mut pos: u32, len: usize) -> (String, u32) {
     let mut value = String::new();
 

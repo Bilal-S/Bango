@@ -3,21 +3,17 @@ use crate::error::AppError;
 /// Consecutive transient-failure threshold for the auto-stop guard.
 pub const TRANSIENT_FAILURE_THRESHOLD: u32 = 3;
 
-/// Total (non-consecutive) timeout threshold. After this many timeout errors,
-/// the run auto-stops with an actionable message. This catches the pattern where
-/// large batches time out intermittently (some succeed between failures, resetting
-/// the consecutive counter) but the overall throughput is too slow to be useful.
+/// Total timeout threshold: auto-stop after this many non-consecutive timeouts.
 pub const TOTAL_TIMEOUT_THRESHOLD: u32 = 3;
 
-/// The reason the run should stop (drives the `fatal_error` message).
+/// Reason the run should stop (drives `fatal_error` message).
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct FatalReason {
     pub message: String,
 }
 
-/// Outcome of classifying an LLM error. The caller (`run_sync`) acts on the
-/// variant - the helper itself does NOT touch progress state.
+/// Outcome of classifying an LLM error. Caller acts on the variant.
 #[derive(Debug, Clone)]
 #[must_use]
 pub enum LlmErrorOutcome {
@@ -33,15 +29,8 @@ pub enum LlmErrorOutcome {
     HardError,
 }
 
-/// Classify an LLM error and determine the outcome for the engine loop.
-///
-/// This is the pure decision-tree half of the error handling. It does NOT touch
-/// progress state or the DB - the caller (`run_sync`) performs the actual
-/// defer/stop/error actions based on the returned `LlmErrorOutcome`.
-///
-/// The caller passes `consecutive_transient_failures` and `total_timeouts` by
-/// `&mut` so this helper can update them (they're per-run counters that the
-/// caller owns).
+/// Classify LLM error → outcome for engine loop. Pure: no progress/DB state.
+/// Updates `consecutive_transient_failures` and `total_timeouts` by `&mut`.
 pub fn classify_llm_error(
     e: &AppError,
     batch_len: usize,
@@ -89,14 +78,9 @@ pub fn classify_llm_error(
     LlmErrorOutcome::Defer { batch_len, is_timeout, should_stop, warn_slow_llm }
 }
 
-/// Classify an LLM error as a permanent authentication failure (wrong/revoked
-/// API key, wrong org). These should stop the run immediately (threshold = 1)
-/// because every subsequent batch will fail identically - there is no recovery
-/// except the user fixing their credentials.
-///
-/// Checks for 401/403 WITHOUT the `"insufficient permissions for this operation"`
-/// Windows-transient body string. The transient variant (which succeeds on
-/// resubmit) is handled by `is_transient_llm_error` instead.
+/// Permanent auth failure (wrong/revoked API key). 401/403 WITHOUT the
+/// Windows-transient `"insufficient permissions for this operation"` body.
+/// Stop immediately (threshold=1) - every subsequent batch will fail identically.
 #[must_use]
 pub fn is_auth_failure(e: &AppError) -> bool {
     let msg = e.to_string().to_lowercase();
@@ -109,18 +93,9 @@ pub fn is_auth_failure(e: &AppError) -> bool {
     !msg.contains("insufficient permissions for this operation")
 }
 
-/// Classify an LLM error as transient (network/rate-limit/auth-transient/timeout)
-/// vs non-transient (content-specific: malformed JSON, parse count mismatch).
-///
-/// Transient errors leave articles UNSCREENED so the next run picks them up
-/// naturally - no clunky "Reset Errors" workaround needed. Non-transient errors
-/// mark the batch as errors (existing behavior) because they are unlikely to
-/// resolve on retry.
-///
-/// The error message string is the only signal available because all LLM
-/// errors are routed through `AppError::Import(String)`. The patterns below
-/// match the error strings emitted by `client::send_with_retry` and
-/// `orchestrator::send` (status codes, "timed out", "transport error").
+/// Classify LLM error as transient (network/rate-limit/timeout) vs non-transient
+/// (malformed JSON, count mismatch). Transient leaves articles unscreened for next run.
+/// Matches error strings from `client::send_with_retry` / `orchestrator::send`.
 #[must_use]
 pub fn is_transient_llm_error(e: &AppError) -> bool {
     let msg = e.to_string().to_lowercase();

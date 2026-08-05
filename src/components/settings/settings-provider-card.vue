@@ -210,9 +210,8 @@ watch(
   }
 );
 
-// Detect imported model names that don't match available select options.
-// When the loaded model isn't in the provider's default list, switch to
-// the custom text input so the user can see and edit their imported model name.
+/* Detect imported model names not in available select options. When a loaded
+   model isn't in the provider's default list, switch to custom text input. */
 watch(
   () => config.value.modelName,
   (name) => {
@@ -233,29 +232,13 @@ watch(
   }
 );
 
-// ── Debounced auto-save for ALL config fields ─────────────────────────────
-//
-// The Provider card has no Save button. Without this watcher, editing any
-// field mutates only the in-memory Pinia store: the change never reaches
-// `save_llm_config`, so the orchestrator's `update_settings` is never called
-// and the next LLM call uses stale concurrency/delay/provider. The watcher
-// debounces `save()` (600ms trailing) so dragging the Context Tokens slider
-// fires one save per pause, not one per tick.
-//
-// CRITICAL: this watcher tracks `provider`, `endpointUrl`, `modelName`, AND
-// `apiKeyEncrypted` in addition to the 4 Parameters fields. The provider
-// dropdown's `watch(() => config.value.provider, ...)` mutates `endpointUrl`
-// + `modelName` synchronously (all three change in one tick), so without
-// tracking them here the provider change would NEVER persist until the user
-// clicks Test Connection - leaving the DB stale (old provider + old
-// `embedding_status`) and breaking the Citation Finder toggle visibility
-// (which reads the persisted provider to detect known-unsupported providers
-// like Anthropic/Z.AI via `compute_readiness`'s static-override).
-//
-// Gated on `!testing` (Test Connection already saves) and `!fetchingModels`
-// (Get Models saves explicitly) so a concurrent debounced save cannot race
-// with their explicit save + re-fetch. Skips the very first run so loading
-// the config from the DB doesn't trigger a spurious re-save.
+/* Debounced auto-save for ALL config fields (no Save button). Edits mutate
+   the in-memory store; without this watcher changes never reach `save_llm_config`
+   and the orchestrator uses stale settings. Debounces `save()` at 600ms
+   trailing. Tracks provider/endpoint/model/apiKey in addition to the 4
+   Parameter fields so provider changes persist immediately (not just on
+   Test Connection click). Gated on `!testing` + `!fetchingModels`. Skips
+   initial propagation so loading config doesn't fire a spurious re-save. */
 let paramSaveStarted = false;
 watch(
   () => [
@@ -275,34 +258,25 @@ watch(
       paramSaveStarted = true;
       return;
     }
-    // Don't schedule a debounced save while Test Connection or Get Models is
-    // running: those paths save explicitly + re-fetch, and a concurrent
-    // debounced save could race with the re-fetch.
+    /* Don't schedule debounced save while Test Connection or Get Models is
+       running: those save explicitly + re-fetch, a concurrent save could race. */
     if (testing.value || fetchingModels.value) return;
     scheduleParamSave();
   }
 );
 
-// Invalidate the cached screening-readiness estimate whenever a save lands.
-// `readiness` includes a token estimate derived from `contextWindowTokens`
-// (via `worst_case_per_article_tokens`); without this invalidation the
-// Articles-view progress bar keeps showing the old context window until the
-// user navigates away and back (which triggers `fetchIfNeeded`). Reactive on
-// `lastSavedAt` so it only fires after a successful save, not on every edit.
+/* Invalidate screening-readiness on save so the token estimate derived from
+   `contextWindowTokens` updates without navigating away-and-back. Fires on
+   `lastSavedAt` (after successful save, not every edit). */
 watch(lastSavedAt, (ts) => {
   if (ts > 0) {
     screeningStore.invalidate();
   }
 });
 
-// ── Embedding model override (premium) ────────────────────────────────────
-//
-// Premium-only field. When set, the embedding probe tries the user's pinned
-// model first (ahead of the provider-default + chat model). Loaded once on
-// mount via `get_embedding_status` (which returns `modelOverride`). Saved via
-// a debounced watcher (600ms trailing, same pattern as the Parameters fields)
-// so typing fires one save per pause. Clearing the field (empty input) clears
-// the override and restores auto-detection.
+/* Embedding model override (premium only). When set, the probe tries the
+   user's pinned model first ahead of auto-detection. Loaded once on mount,
+   saved via 600ms debounced watcher. Clearing restores auto-detection. */
 const EMBEDDING_OVERRIDE_SAVE_DELAY_MS = 600;
 let embeddingOverrideSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let embeddingOverrideInitialized = false;
@@ -314,9 +288,9 @@ onMounted(() => {
 });
 
 watch(modelOverride, (value) => {
-  // Skip the initial propagation that fires when `loadEmbeddingOverride`
-  // populates the ref from the backend (avoid an immediate no-op save
-  // round-trip that would also reset `embedding_status` to `unknown`).
+  /* Skip initial propagation when `loadEmbeddingOverride` populates the ref.
+     Avoids an immediate no-op save round-trip that would reset
+     `embedding_status` to `unknown`. */
   if (!embeddingOverrideInitialized) {
     embeddingOverrideInitialized = true;
     return;
