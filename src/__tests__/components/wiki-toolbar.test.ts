@@ -273,4 +273,60 @@ describe('wiki-toolbar.vue', () => {
     // conditional rendering pattern.
     expect(wrapperNoProgress.findAll('button').some((b) => b.text().includes('Stop'))).toBe(false);
   });
+
+  // -- Update button (replaces the removed reset icon button) -----------------
+  // The Update button is the explicit, user-initiated replacement for the
+  // removed `autoIngestIfStale` auto-trigger. It is enabled (primary indigo)
+  // when `needsRefresh` is true and disabled (grey) otherwise.
+
+  it('Update button renders when wiki is initialized', () => {
+    const wrapper = mountToolbar({ status: makeStatus({ initialized: true }) });
+    const updateBtn = wrapper.findAll('button').find((b) => b.text().includes('Update'));
+    expect(updateBtn).toBeTruthy();
+  });
+
+  it('Update button does not render when wiki is not initialized', () => {
+    const wrapper = mountToolbar({ status: makeStatus({ initialized: false }) });
+    const updateBtn = wrapper.findAll('button').find((b) => b.text().includes('Update'));
+    expect(updateBtn).toBeUndefined();
+  });
+
+  it('Update button is disabled when needsRefresh is false', () => {
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: true, needsRefresh: false }),
+    });
+    const updateBtn = wrapper.findAll('button').find((b) => b.text().includes('Update'))!;
+    expect(updateBtn).toBeTruthy();
+    expect(updateBtn.attributes('disabled')).toBeDefined();
+    expect(updateBtn.classes()).not.toContain('wiki-toolbar__btn--primary');
+  });
+
+  it('Update button is enabled + primary when needsRefresh is true', () => {
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: true, needsRefresh: true }),
+    });
+    const updateBtn = wrapper.findAll('button').find((b) => b.text().includes('Update'))!;
+    expect(updateBtn).toBeTruthy();
+    expect(updateBtn.attributes('disabled')).toBeUndefined();
+    expect(updateBtn.classes()).toContain('wiki-toolbar__btn--primary');
+  });
+
+  it('Update button click calls wiki_export_and_ingest when needsRefresh is true', async () => {
+    const report = { pagesWritten: 3, errors: [] as string[] };
+    mockTauriCommand.mockResolvedValue(report);
+    const wrapper = mountToolbar({
+      status: makeStatus({ initialized: true, needsRefresh: true }),
+    });
+    const updateBtn = wrapper.findAll('button').find((b) => b.text().includes('Update'))!;
+    await updateBtn.trigger('click');
+    await flushPromises();
+    expect(mockTauriCommand).toHaveBeenCalledWith('wiki_export_and_ingest');
+  });
+
+  it('Actions menu contains Reset View item', async () => {
+    const wrapper = mountToolbar({ status: makeStatus({ initialized: true }) });
+    const items = await openActionsMenu(wrapper);
+    const texts = items.map((i) => i.text());
+    expect(texts.some((t) => t.includes('Reset View'))).toBe(true);
+  });
 });

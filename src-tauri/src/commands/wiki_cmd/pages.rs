@@ -127,13 +127,19 @@ pub fn wiki_delete_page(
     Ok(false)
 }
 
-/// Delete the entire wiki output (the `wiki/` subtree). Keeps `raw/`,
-/// `templates/`, and `AGENTS.md`.
+/// Delete the entire wiki: removes the `wiki/` subtree AND `AGENTS.md` so the
+/// wiki is fully de-initialized (`status.initialized` becomes `false`).
 ///
-/// Clears the `wiki_needs_refresh` staleness flag so that
-/// `wiki-view.vue`'s `autoIngestIfStale` does NOT trigger a rebuild when the
-/// user revisits the Wiki page. The user must explicitly rebuild via the
-/// toolbar.
+/// Keeps `raw/` and `templates/` so the user's source documents are preserved
+/// for a future rebuild. The user must explicitly re-initialize via the
+/// "Initialize & Build Wiki" button (or Rebuild Wiki action), which
+/// re-scaffolds the tree + writes `AGENTS.md` via the self-healing
+/// `ensure_initialized` guard.
+///
+/// Also clears the `wiki_needs_refresh` staleness flag so the stale badge
+/// does not appear after deletion. Auto-ingest on tab visit has been removed
+/// entirely (replaced by an explicit Update button in the toolbar); the flag
+/// clear is defense-in-depth.
 #[tauri::command]
 pub fn wiki_delete_wiki(db_state: tauri::State<'_, DbState>) -> Result<(), AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
@@ -142,10 +148,14 @@ pub fn wiki_delete_wiki(db_state: tauri::State<'_, DbState>) -> Result<(), AppEr
     if wiki_dir.exists() {
         std::fs::remove_dir_all(&wiki_dir)?;
     }
-    // Re-scaffold the empty wiki tree + log.md.
-    storage::scaffold_tree(&root)?;
-    // Clear the staleness flag so autoIngestIfStale does not
-    // rebuild what the user just deleted on the next visit.
+    // Remove AGENTS.md to de-initialize the wiki. The status command reports
+    // `initialized: false` based on AGENTS.md presence, so the wiki-view shows
+    // the "Initialize Your Wiki" empty-state card after deletion.
+    let agents_path = root.join("AGENTS.md");
+    if agents_path.exists() {
+        std::fs::remove_file(&agents_path)?;
+    }
+    // Clear the staleness flag so the stale badge does not show after delete.
     clear_wiki_needs_refresh(&conn);
     Ok(())
 }

@@ -41,7 +41,6 @@ const {
   initWiki,
   startProgressListener,
   stopProgressListener,
-  exportAndIngest,
   rebuild,
   checkForUpdates,
 } = useWiki();
@@ -220,21 +219,24 @@ onMounted(async () => {
   await checkForUpdatesOnMount();
 });
 
-/** Re-run the wiki status + pages + stale-ingest checks whenever the user
- *  re-enters the Wiki view. This is critical because the view is keep-alive
- *  cached: `onMounted` only fires once for the component's lifetime, so
- *  without re-checking in `onActivated`, the wiki status + page list + drift
- *  detection would stay frozen at whatever value they had on first mount.
+/** Re-run the wiki status + pages checks whenever the user re-enters the Wiki
+ *  view. This is critical because the view is keep-alive cached: `onMounted`
+ *  only fires once for the component's lifetime, so without re-checking in
+ *  `onActivated`, the wiki status + page list would stay frozen at whatever
+ *  value they had on first mount.
  *
  *  The LLM-configured gate is NOT re-checked here anymore: it is a reactive
  *  `ComputedRef` from `useLlmConfigured()` that tracks the Pinia store, so it
  *  updates instantly on Settings edits without any re-probe. All three
- *  remaining calls are idempotent backend reads. */
+ *  remaining calls are idempotent backend reads.
+ *
+ *  Auto-ingest was REMOVED: heavyweight generation (LLM ingest +
+ *  bibliometrics) must never fire automatically on tab visit. The user
+ *  triggers it explicitly via the toolbar's Update button when
+ *  `status.needsRefresh` is true. */
 async function runReadinessChecks(): Promise<void> {
   await Promise.all([refreshStatus()]);
   await loadPages();
-  // Auto-ingest if wiki is stale (articles changed since last ingest).
-  await autoIngestIfStale();
 }
 
 /** Re-check for external edits whenever the user re-enters the Wiki view
@@ -329,32 +331,6 @@ function onKeyDown(e: KeyboardEvent): void {
   } else if (direction === 'forward' && canGoForward.value) {
     e.preventDefault();
     navHistory.goForward();
-  }
-}
-
-/** Check if wiki needs refresh and auto-trigger export + ingest. */
-async function autoIngestIfStale(): Promise<void> {
-  if (
-    status.value?.initialized &&
-    isLlmConfigured.value &&
-    status.value?.needsRefresh &&
-    (status.value?.includedArticleCount ?? 0) > 0
-  ) {
-    try {
-      const report = await exportAndIngest();
-      toast.show(
-        `Wiki auto-updated: ${report.pagesWritten} pages written.`,
-        report.errors.length > 0 ? 'error' : 'success'
-      );
-      navHistory.clear();
-      await loadPages();
-      graphPanelRef.value?.refresh();
-    } catch (e) {
-      // Surface the actual error so the user is not left staring at a frozen
-      // spinner. The manual "Rebuild Wiki" toolbar action remains available.
-      const msg = e instanceof Error ? e.message : String(e);
-      toast.show(`Wiki auto-update failed: ${msg}`, 'error');
-    }
   }
 }
 

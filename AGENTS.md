@@ -591,8 +591,15 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     reference/citation import, tag/label/status/override/bulk edits, AI screening
     completion). `clear_wiki_needs_refresh` runs only after `wiki_ingest`/`wiki_rebuild`
     commits; `get_wiki_needs_refresh` powers the frontend `wiki_get_needs_refresh`
-    command that drives the `autoIngestIfStale()` flow in `wiki-view.vue`. Absent key =
-    fresh (false). Tested in `wiki_full_text_refresh_test.rs`.
+    command that drives the Update button's enabled/disabled state in
+    `wiki-toolbar.vue` (`needsRefresh=true` -> primary indigo + enabled;
+    `false` -> grey + disabled). The former `autoIngestIfStale()` auto-trigger
+    in `wiki-view.vue` was REMOVED so visiting the Wiki tab never surprises
+    the user with a multi-minute LLM + bibliometrics pipeline; updates are
+    explicit via the Update button. `clear_wiki_needs_refresh` also runs in
+    `wiki_delete_wiki` (defense-in-depth alongside the AGENTS.md removal).
+    Absent key = fresh (false). Tested in `wiki_full_text_refresh_test.rs` +
+    `wiki_test.rs::delete_wiki_de_initializes_by_removing_agents_md`.
   - **`src-tauri/src/wiki/`** - LLM Wiki knowledge-base module (all phases complete).
     Generates and maintains a local-first Obsidian-style Markdown knowledge base from the
     `included` article corpus. Modules: `storage.rs` (resolves `wiki-root/`, scaffolds
@@ -785,6 +792,15 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `wiki_update_page` / `wiki_delete_page` rebuild it on every edit/delete so chat + search
     stay in sync with user changes (both use `rebuild_index_with_manifest` so the drift
     manifest stays in sync too).
+    **`wiki_delete_wiki` de-initializes the wiki** (not just clears the
+    `wiki/` subtree): removes `AGENTS.md` too so `status.initialized` becomes
+    `false` and the wiki-view shows the "Initialize Your Wiki" empty-state
+    card after deletion. Keeps `raw/` and `templates/` so source documents
+    survive for a future rebuild. The self-healing `ensure_initialized`
+    guard re-creates `AGENTS.md` when the user clicks any ingest action.
+    Also clears `wiki_needs_refresh` (defense-in-depth). Tested in
+    `tests/wiki_test.rs::delete_wiki_de_initializes_by_removing_agents_md` +
+    `delete_then_mark_staleness_does_not_re_initialize`.
     **External-edit drift detection** (`wiki_check_for_updates`, async): detects when
     external programs edit `wiki/**/*.md` files and re-indexes them transparently WITHOUT
     re-running the LLM ingest. Runs entirely on the tokio runtime - all file reads + per-file

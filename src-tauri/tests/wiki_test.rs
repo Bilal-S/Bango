@@ -659,6 +659,79 @@ fn delete_wiki_clears_wiki_subtree() {
     assert_eq!(pages.len(), 0);
 }
 
+/// `wiki_delete_wiki` de-initializes the wiki by removing `AGENTS.md` in
+/// addition to the `wiki/` subtree. The status command reports
+/// `initialized: false` based on `AGENTS.md` presence, so the wiki-view
+/// shows the "Initialize Your Wiki" empty-state card after deletion. This
+/// test mirrors the command's filesystem operations (the command itself
+/// requires `State<DbState>` and cannot be unit-tested directly).
+#[test]
+fn delete_wiki_de_initializes_by_removing_agents_md() {
+    let conn = test_db();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // Scaffold the tree + AGENTS.md (mirrors wiki_init).
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    bango_lib::commands::wiki_cmd::ensure_initialized(root).unwrap();
+    write_wiki_page(root, "concepts", "alpha", "Alpha", "# Alpha");
+
+    // Pre-conditions: wiki is initialized + has a page.
+    assert!(root.join("AGENTS.md").exists());
+    assert!(root.join("wiki").exists());
+
+    // Mirror wiki_delete_wiki: remove wiki/ + AGENTS.md + clear staleness.
+    std::fs::remove_dir_all(root.join("wiki")).unwrap();
+    std::fs::remove_file(root.join("AGENTS.md")).unwrap();
+    clear_wiki_needs_refresh(&conn);
+
+    // Post-conditions: wiki is de-initialized (AGENTS.md gone).
+    assert!(!root.join("AGENTS.md").exists());
+    assert!(!root.join("wiki").exists());
+
+    // The status command reports initialized = AGENTS.md presence, so this
+    // mirrors `initialized: false` after delete.
+    let initialized = root.join("AGENTS.md").exists();
+    assert!(!initialized);
+
+    // Staleness flag is cleared so the stale badge does not appear.
+    assert!(!get_wiki_needs_refresh(&conn).unwrap());
+
+    // collect_wiki_pages returns empty (no wiki/ dir).
+    let pages = fts::collect_wiki_pages(root).unwrap();
+    assert_eq!(pages.len(), 0);
+}
+
+/// After delete + re-mark (e.g. an article is added to included), the
+/// staleness flag is set but the wiki is still de-initialized. The frontend
+/// must NOT auto-ingest (the Update button only renders when `initialized`
+/// is true, and `runReadinessChecks` no longer calls auto-ingest). This test
+/// verifies the flag state alone does not re-initialize the wiki.
+#[test]
+fn delete_then_mark_staleness_does_not_re_initialize() {
+    let conn = test_db();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    // Init + delete (mirrors the command sequence).
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    bango_lib::commands::wiki_cmd::ensure_initialized(root).unwrap();
+    std::fs::remove_dir_all(root.join("wiki")).unwrap();
+    std::fs::remove_file(root.join("AGENTS.md")).unwrap();
+    clear_wiki_needs_refresh(&conn);
+
+    // Simulate an article being added to included after delete.
+    mark_wiki_needs_refresh(&conn);
+    assert!(get_wiki_needs_refresh(&conn).unwrap());
+
+    // The wiki is still de-initialized (AGENTS.md absent).
+    assert!(!root.join("AGENTS.md").exists());
+
+    // Re-init via ensure_initialized re-creates AGENTS.md (self-healing).
+    bango_lib::commands::wiki_cmd::ensure_initialized(root).unwrap();
+    assert!(root.join("AGENTS.md").exists());
+}
+
 // -------------------------------------------------------------------------
 // Graph view (Phase 6)
 // -------------------------------------------------------------------------

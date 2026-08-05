@@ -306,6 +306,18 @@ async function handleIngest(): Promise<void> {
   }
 }
 
+/**
+ * Update button click handler. This is the explicit, user-initiated
+ * replacement for the removed `autoIngestIfStale` auto-trigger. Calls
+ * `handleIngest`, which gates on `needsRefresh` and runs `exportAndIngest`
+ * (LLM pipeline + bibliometrics normalization). The Update button is only
+ * enabled when `needsRefresh` is true, so this path should not hit the
+ * "up to date" toast, but the guard is defense-in-depth.
+ */
+async function handleUpdate(): Promise<void> {
+  await handleIngest();
+}
+
 /** Show the delete confirmation dialog. */
 const showDeleteDialog = ref(false);
 
@@ -606,6 +618,21 @@ function handleChat(): void {
         </button>
         <!-- Divider -->
         <hr class="wiki-toolbar__menu-divider" />
+        <!-- Reset View: clear selected page, search query, graph tab, edit mode. -->
+        <button
+          class="wiki-toolbar__menu-item"
+          :disabled="!isInitialized()"
+          title="Reset the wiki view to its start state (clear selection, search, edit mode)"
+          @click="
+            () => {
+              closeActionsMenu();
+              emit('reset');
+            }
+          "
+        >
+          <span class="material-symbols-outlined text-[16px] text-slate-500">restart_alt</span>
+          Reset View
+        </button>
         <!-- Delete Wiki -->
         <button
           class="wiki-toolbar__menu-item wiki-toolbar__menu-item--danger"
@@ -639,17 +666,27 @@ function handleChat(): void {
       <span>Chat</span>
     </button>
 
-    <!-- Reset: restore the wiki view to its start state (clear selected page,
-         search query, graph tab, edit mode, article-detail slide-over).
-         Disabled until the wiki is initialized. -->
+    <!-- Update: explicit, user-initiated ingest. Enabled (primary indigo)
+         when `needsRefresh` is true (corpus changed since last ingest);
+         disabled (grey) when the wiki is up to date. Replaces the removed
+         `autoIngestIfStale` auto-trigger so visiting the Wiki tab never
+         surprises the user with a multi-minute LLM + bibliometrics pipeline. -->
     <button
       v-if="isInitialized()"
-      class="wiki-toolbar__btn wiki-toolbar__btn--icon"
-      title="Reset wiki view to start state"
-      aria-label="Reset wiki view"
-      @click="emit('reset')"
+      class="wiki-toolbar__btn"
+      :class="{ 'wiki-toolbar__btn--primary': needsRefresh() }"
+      :disabled="!needsRefresh() || ingesting"
+      :title="
+        needsRefresh()
+          ? 'Update the wiki with the latest article changes (runs LLM ingest + bibliometrics)'
+          : 'Wiki is up to date - no changes to ingest'
+      "
+      @click="handleUpdate"
     >
-      <span class="material-symbols-outlined text-[18px]">restart_alt</span>
+      <span class="material-symbols-outlined text-[18px]">{{
+        ingesting ? 'hourglass_top' : 'update'
+      }}</span>
+      <span>{{ ingesting ? 'Updating...' : 'Update' }}</span>
     </button>
 
     <!-- Progress bar (when active, replaces stats on the left) -->
