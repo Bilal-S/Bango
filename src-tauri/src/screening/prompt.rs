@@ -111,7 +111,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
 
     let same_priority = all_same_priority(&input.inclusion_criteria, &input.exclusion_criteria);
 
-    /* Sort criteria by priority descending when priorities differ */
+    // Sort criteria by priority descending when priorities differ
     let sorted_inclusion: Vec<&CriterionEntry> = if same_priority {
         input.inclusion_criteria.iter().collect()
     } else {
@@ -216,7 +216,7 @@ pub fn build_screening_prompt(input: &ScreeningPromptInput) -> String {
         )
     };
 
-    /* Existing tags/labels section */
+    // Existing tags/labels section
     let existing_tags_section = if input.existing_tags.is_empty() {
         String::new()
     } else {

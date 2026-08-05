@@ -19,7 +19,7 @@ struct EmbeddingRequest {
 #[derive(Debug, Deserialize)]
 struct EmbeddingResponse {
     data: Vec<EmbeddingData>,
-    /* Deserialized for future token accounting; not currently read. */
+    // Deserialized for future token accounting; not currently read.
     #[serde(default)]
     #[allow(dead_code)]
     usage: Option<EmbeddingUsage>,
@@ -110,8 +110,10 @@ pub fn check_embedding_support(provider: &LlmProvider) -> bool {
 
 /// Per-provider limits for chunking + dispatching embedding requests.
 ///
-/// All three caps must be respected simultaneously: a sub-batch is closed when
-/// ANY would be exceeded by adding one more input.
+/// All three caps must be respected simultaneously. [`group_into_embedding_batches`]
+/// closes a sub-batch when `current.len()` is at/above `max_inputs_per_batch` OR
+/// adding the next piece would exceed `max_tokens_per_batch` (`max_tokens_per_input`
+/// is enforced upstream by the text splitter).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmbeddingLimits {
     /// Max input strings per single `/embeddings` request. OpenAI: 2048,
@@ -151,7 +153,7 @@ const OPENAI_COMPATIBLE_LIMITS: EmbeddingLimits = EmbeddingLimits {
 pub fn embedding_limits(provider: &LlmProvider, model: &str) -> EmbeddingLimits {
     match provider {
         LlmProvider::Openai => {
-            /* All current models share 8191 per-input cap. */
+            // All current models share 8191 per-input cap.
             EmbeddingLimits {
                 max_inputs_per_batch: 2048,
                 max_tokens_per_input: 8191,
@@ -164,7 +166,7 @@ pub fn embedding_limits(provider: &LlmProvider, model: &str) -> EmbeddingLimits 
             max_tokens_per_batch: 300_000,
         },
         LlmProvider::Google => EmbeddingLimits {
-            /* `embedContent` is one-text-per-call; single-call shape used. */
+            // `embedContent` is one-text-per-call; single-call shape used.
             max_inputs_per_batch: 1,
             max_tokens_per_input: 2048, // text-embedding-004
             max_tokens_per_batch: 2048,

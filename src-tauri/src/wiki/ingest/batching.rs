@@ -340,7 +340,7 @@ pub async fn run_chunked_ingest(
         return Ok(report);
     }
 
-    /* Early cancel check: skip LLM calls entirely if token signalled during pre-seed phases. */
+    // Early cancel check: skip LLM calls entirely if token signalled during pre-seed phases.
     if cancel_token.is_some_and(|t| t.load(Ordering::SeqCst)) {
         report.errors.push("Cancelled".to_string());
         return Ok(report);

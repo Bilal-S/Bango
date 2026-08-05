@@ -1,4 +1,4 @@
-/* Citation Network types. Directed graph: edge source→target means source cites target. */
+// Citation Network types. Directed graph: edge source→target means source cites target.
 
 /** A single node (article/paper) in the citation network. */
 export interface CitationNode {

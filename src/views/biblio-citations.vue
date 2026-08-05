@@ -100,7 +100,7 @@ const { handleDeleteArticle } = useArticleDelete({
 
 const selectedPaper = ref<CitationNode | null>(null);
 
-/* Isolation mode: dims all nodes except selected paper + ancestry/progeny. */
+// Isolation mode: dims all nodes except selected paper + ancestry/progeny.
 const isolationMode = ref<{ nodeId: string; direction: IsolationDirection; label?: string } | null>(
   null
 );

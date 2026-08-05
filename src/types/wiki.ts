@@ -1,31 +1,31 @@
-/* Wiki type definitions. Mirrors Rust structs (camelCase serde). */
+// Wiki type definitions. Mirrors Rust structs (camelCase serde).
 
 /** Status payload returned by `wiki_get_status`. */
 export interface WikiStatus {
-  /** Always true after `wiki_init` has scaffolded the tree. */
+  // Always true after `wiki_init` has scaffolded the tree. */
   configured: boolean;
-  /** Absolute path to the effective `wiki-root/` directory. */
+  // Absolute path to the effective `wiki-root/` directory. */
   rootDir: string;
-  /** Whether an explicit override is configured (vs derived default). */
+  // Whether an explicit override is configured (vs derived default). */
   isCustom: boolean;
-  /** Platform default path (derived from `fulltext_storage_dir`). */
+  // Platform default path (derived from `fulltext_storage_dir`). */
   defaultPath: string;
-  /** Count of `.md` files in `/raw` (top-level). */
+  // Count of `.md` files in `/raw` (top-level). */
   rawCount: number;
-  /** Count of `.md` files in `/wiki` (recursive). */
+  // Count of `.md` files in `/wiki` (recursive). */
   pageCount: number;
-  /** Whether the included article corpus changed since the last ingest. */
+  // Whether the included article corpus changed since the last ingest. */
   needsRefresh: boolean;
-  /** Number of included articles (the raw input set for the wiki). */
+  // Number of included articles (the raw input set for the wiki). */
   includedArticleCount: number;
-  /** Whether the wiki root has been initialized (AGENTS.md present). */
+  // Whether the wiki root has been initialized (AGENTS.md present). */
   initialized: boolean;
 }
 
 /** Result returned by `wiki_init`. */
 export interface WikiInitResult {
   rootDir: string;
-  /** true if AGENTS.md did not exist before this call. */
+  // true if AGENTS.md did not exist before this call. */
   created: boolean;
 }
 

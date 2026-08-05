@@ -104,7 +104,7 @@ export function autoDownloadReferences(
       onComplete?.(true);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      /* A NoData/Cancelled outcome is a skip (info toast), not an error. */
+      // A NoData/Cancelled outcome is a skip (info toast), not an error.
       if (isScrapeSkipMessage(msg)) {
         toast.show(`Skipped: ${msg}`, 'info');
         onComplete?.(true);

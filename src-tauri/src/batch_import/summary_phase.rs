@@ -52,7 +52,7 @@ where
         };
     }
 
-    /* Exit early when nothing to summarize (matches previous behavior). */
+    // Exit early when nothing to summarize (matches previous behavior).
     if total == 0 {
         return BatchImportPhaseResult {
             total,

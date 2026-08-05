@@ -48,7 +48,7 @@ impl ScreeningEngine {
             return Ok(false);
         }
 
-        /* Stage-2 progress sub-line. */
+        // Stage-2 progress sub-line.
         let borderline_len = borderline.len();
         self.update_progress(ctx.app_handle, |p| {
             p.stage_total = Some(borderline_len);
@@ -57,7 +57,7 @@ impl ScreeningEngine {
         .await;
 
         for (stage2_done, (article, _stage1)) in borderline.iter().enumerate() {
-            /* Cancel/pause gate between stage-2 articles. */
+            // Cancel/pause gate between stage-2 articles.
             if *self.cancel_token.lock().await {
                 break;
             }

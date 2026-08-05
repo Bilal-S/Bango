@@ -292,7 +292,7 @@ pub async fn generate_embeddings_inner(
         let result = match joined {
             Ok(r) => r,
             Err(join_err) => {
-                /* Task panicked. Count as single error (unknown article from join err). */
+                // Task panicked. Count as single error (unknown article from join err).
                 eprintln!("[embedding] article task panicked: {join_err}");
                 processed += 1;
                 if emit_events {

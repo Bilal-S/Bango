@@ -1,4 +1,4 @@
-/* Co-Citation Network types. Undirected: edge A-B = frequently cited together. */
+// Co-Citation Network types. Undirected: edge A-B = frequently cited together.
 
 /** A single node (reference paper) in the co-citation network. */
 export interface CocitationNode {

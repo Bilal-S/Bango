@@ -584,7 +584,7 @@ pub async fn send_embedding_batch_parallel(
         dispatch_batches.push((indices, strings, token_counts));
     }
 
-    /* Clone orchestrator Arc so the `'static` closure captures it by value. */
+    // Clone orchestrator Arc so the `'static` closure captures it by value.
     let orch_owned = Arc::clone(orchestrator);
     let config_arc = Arc::new(config.clone());
     let model_arc = Arc::new(model.to_string());

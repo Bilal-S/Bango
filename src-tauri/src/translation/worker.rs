@@ -38,7 +38,8 @@ pub struct TranslationWorkerHandle {
 }
 
 impl TranslationWorkerHandle {
-    /// Enqueue a translation job.
+    /// Enqueue a translation job. `Err` means the worker task has exited;
+    /// callers treat this as a transient failure (logged, not surfaced).
     pub fn try_send(&self, job: TranslationJob) -> Result<(), AppError> {
         self.sender
             .try_send(job)
@@ -157,8 +158,10 @@ pub fn spawn_translation_worker(app: tauri::AppHandle) -> TranslationWorkerHandl
 /// N to re-enable bounded re-enqueueing.
 pub const STARTUP_STRANDED_CAP: usize = 0;
 
-/// Crash recovery: mark stranded (queued/running) articles as failed and
-/// optionally re-enqueue up to `STARTUP_STRANDED_CAP`. Non-fatal.
+/// Crash recovery for articles stranded in `queued`/`running` at startup.
+/// With [`STARTUP_STRANDED_CAP`] = 0 (current setting), ALL stranded rows are
+/// marked `failed` with a retryable audit note (user retries manually); none
+/// are re-enqueued. Raising the cap re-enables bounded re-enqueueing. Non-fatal.
 pub fn reenqueue_stranded_on_startup(
     conn: &rusqlite::Connection,
     sender: &mpsc::Sender<TranslationJob>,

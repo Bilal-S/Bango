@@ -137,10 +137,11 @@ pub fn retry_translation_job(
 ///
 /// Lock-free: takes `&Mutex<Connection>`, acquires the lock only for the
 /// filtered read + bulk status write, then drops the guard before sending jobs
-/// to the worker channel. Replaces the per-article `get_article_by_id` +
-/// `update_translation_status` sequence with one filtered read + one bulk
-/// UPDATE, preserving the non-English gate and the `has_full_text` job-kind
-/// rule.
+/// to the worker channel. Callers MUST NOT hold the `Mutex<Connection>` guard
+/// when calling — `lock_conn(db)` inside would deadlock. Replaces the
+/// per-article `get_article_by_id` + `update_translation_status` sequence with
+/// one filtered read + one bulk UPDATE, preserving the non-English gate and the
+/// `has_full_text` job-kind rule.
 pub fn try_enqueue_translations_for_import(
     app: &tauri::AppHandle,
     db: &Mutex<rusqlite::Connection>,

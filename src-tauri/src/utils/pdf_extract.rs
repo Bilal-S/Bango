@@ -86,14 +86,14 @@ pub fn recover_mojibake(text: &str) -> String {
     if !is_mojibake(text) {
         return text.to_string();
     }
-    /* Re-encode back to Latin-1 bytes (inverse of buggy `unpdf` decode). */
+    // Re-encode back to Latin-1 bytes (inverse of buggy `unpdf` decode).
     let bytes: Vec<u8> = text.chars().map(|c| u8::try_from(c).unwrap_or(b'?')).collect();
 
     let mut detector = chardetng::EncodingDetector::new();
     detector.feed(&bytes, true);
     let (encoding, confident) = detector.guess_assess(None, true);
 
-    /* Only accept confident detection of a known legacy CJK encoding. */
+    // Only accept confident detection of a known legacy CJK encoding.
     if !confident || !is_legacy_cjk_encoding(encoding) {
         return text.to_string();
     }
@@ -102,7 +102,7 @@ pub fn recover_mojibake(text: &str) -> String {
     if had_errors {
         return text.to_string();
     }
-    /* Sanity check: recovered text must have LOWER C1 density than original. */
+    // Sanity check: recovered text must have LOWER C1 density than original.
     if c1_control_density(&decoded) >= c1_control_density(text) {
         return text.to_string();
     }

@@ -33,7 +33,7 @@ app.mount('#app');
  * snapshot after success. `decideUpgrade` + sessionStorage is defense-in-depth:
  * if both backend layers are bypassed, refuse to re-run upgrade. */
 async function bootstrap(): Promise<void> {
-  /* Startup schema upgrade (silent). Must complete before any store reads. */
+  // Startup schema upgrade (silent). Must complete before any store reads.
   const needsUpgrade = await getStartupStatus();
   const decision = decideUpgrade(needsUpgrade, getUpgradeAttempted());
 
@@ -54,7 +54,7 @@ async function bootstrap(): Promise<void> {
   if (decision === 'run') {
     const toast = useToast();
     toast.show('Database upgrade in progress...', 'info', 0);
-    /* Record attempt BEFORE awaiting so concurrent bootstrap cannot double-run. */
+    // Record attempt BEFORE awaiting so concurrent bootstrap cannot double-run.
     markUpgradeAttempted();
     try {
       const result = await performLegacyUpgrade();
@@ -69,7 +69,7 @@ async function bootstrap(): Promise<void> {
         'error',
         0
       );
-      /* Loop-guard token is already set; reload for clean state. */
+      // Loop-guard token is already set; reload for clean state.
       window.location.reload();
       return;
     }
@@ -79,7 +79,7 @@ async function bootstrap(): Promise<void> {
     return;
   }
 
-  /* Pre-warm all stores in parallel; signal loading overlay to dismiss on complete. */
+  // Pre-warm all stores in parallel; signal loading overlay to dismiss on complete.
   void Promise.all([
     useArticlesStore().fetchIfNeeded(),
     useCriteriaStore().fetchIfNeeded(),

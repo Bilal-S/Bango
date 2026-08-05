@@ -61,7 +61,7 @@ pub fn resolve_article_decision(
         })
         .collect();
 
-    /* Collect auto-label info before matches are moved into resolution. */
+    // Collect auto-label info before matches are moved into resolution.
     let auto_label_criteria: Vec<(String, String)> = inc_matches
         .iter()
         .chain(exc_matches.iter())
@@ -84,7 +84,7 @@ pub fn resolve_article_decision(
         inclusion_matches: inc_matches,
         exclusion_matches: exc_matches,
     };
-    /* Custom logic: LLM decision final; priority resolver not applied. */
+    // Custom logic: LLM decision final; priority resolver not applied.
     let final_decision =
         resolution::finalize_decision(&screening.decision, &resolution_input, has_custom_logic);
 

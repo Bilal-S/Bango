@@ -347,10 +347,10 @@ pub fn rebuild_index_with_manifest(conn: &Connection, root: &Path) -> Result<usi
     let file_hashes = compute_file_hashes(&rows)?;
     let dir_hash = compute_directory_fingerprint(&rows);
 
-    /* Expand to chunk rows for FTS insertion only (not for manifest). */
+    // Expand to chunk rows for FTS insertion only (not for manifest).
     let chunked_rows = chunk_page_rows(rows);
 
-    /* DB: wipe + rebuild FTS5, rewrite manifest, update dir hash. */
+    // DB: wipe + rebuild FTS5, rewrite manifest, update dir hash.
     conn.execute_batch(&format!("DELETE FROM {FTS_TABLE};"))?;
     ensure_table(conn)?;
     let wiki_dir = root.join("wiki");
@@ -470,7 +470,7 @@ pub fn build_match_query(query: &str) -> String {
         return String::new();
     }
 
-    /* Prefer non-stop-word tokens; fall back to all tokens if that leaves nothing. */
+    // Prefer non-stop-word tokens; fall back to all tokens if that leaves nothing.
     let stop = |t: &str| STOP_WORDS.contains(&t);
     let meaningful: Vec<&String> = raw_tokens.iter().filter(|t| !stop(t.as_str())).collect();
     let tokens: Vec<&String> =
@@ -479,7 +479,7 @@ pub fn build_match_query(query: &str) -> String {
     tokens
         .iter()
         .map(|t| {
-            /* Phrase-quote each token, doubling embedded " so FTS5 reads it literally. */
+            // Phrase-quote each token, doubling embedded " so FTS5 reads it literally.
             let escaped = t.replace('"', "\"\"");
             format!("\"{escaped}\"")
         })

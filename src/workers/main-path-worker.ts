@@ -5,13 +5,13 @@
 import Graph from 'graphology';
 import { computeMainPath } from '../utils/citation-analysis';
 
-/* Serializable graph payload sent to the worker. */
+// Serializable graph payload sent to the worker.
 export interface MainPathRequest {
   nodes: { id: string; year?: number | null }[];
   edges: { id: string; source: string; target: string }[];
 }
 
-/* Result payload posted back from the worker. */
+// Result payload posted back from the worker.
 export interface MainPathResponse {
   nodes: string[];
   edges: string[];

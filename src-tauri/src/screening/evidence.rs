@@ -221,7 +221,7 @@ fn build_chunks_sections_label(chunks: &[ScoredChunk]) -> String {
     }
 }
 
-/* `resolve_evidence` tests live in `src-tauri/tests/evidence_test.rs`. */
+// `resolve_evidence` tests live in `src-tauri/tests/evidence_test.rs`.
 
 /// The evidence body string plus the deduped section labels that survived
 /// ranking (e.g. `"§Methods, §Results"`), for the audit trail.

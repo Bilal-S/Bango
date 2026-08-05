@@ -2,15 +2,17 @@
 //!
 //! [`group_into_embedding_batches`] greedily packs `(input_idx, TextPiece)` pairs into
 //! sub-batches respecting provider limits (`max_inputs_per_batch`, `max_tokens_per_batch`).
-//! A sub-batch closes when the next piece would exceed either cap.
+//! Closes when current is at/above `max_inputs_per_batch` OR adding the next piece would
+//! exceed `max_tokens_per_batch`.
 
 use crate::embedding::text::TextPiece;
 use crate::llm::embedding::EmbeddingLimits;
 
 /// Group `(input_idx, TextPiece)` pairs into sub-batches within provider limits.
 ///
-/// Greedy accumulation. Closes sub-batch when next piece exceeds `max_inputs_per_batch`
-/// OR `max_tokens_per_batch`. Oversized piece gets its own sub-batch. Empty input → empty vec.
+/// Greedy accumulation. Closes when current.len() is at/above `max_inputs_per_batch` OR
+/// adding the next piece would exceed `max_tokens_per_batch`. Oversized piece gets its own
+/// sub-batch. Empty input → empty vec.
 #[must_use]
 pub fn group_into_embedding_batches(
     flat: Vec<(usize, TextPiece)>,

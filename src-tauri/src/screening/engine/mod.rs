@@ -489,7 +489,7 @@ impl ScreeningEngine {
             let (response_text, total_tokens) = match response_data {
                 Some(data) => data,
                 None => {
-                    /* Hard-error path only (transients `continue` above). */
+                    // Hard-error path only (transients `continue` above).
                     let mut progress = self.progress.lock().await;
                     progress.errors += batch.len();
                     progress.completed += batch.len();
@@ -502,7 +502,7 @@ impl ScreeningEngine {
 
             match crate::screening::json_parse::process_screening_responses(&response_text) {
                 Ok(screenings) => {
-                    /* Count mismatch → mark batch as errors. */
+                    // Count mismatch → mark batch as errors.
                     if screenings.len() != batch.len() {
                         {
                             let c = crate::db::connection::lock_conn(conn_mutex)?;
@@ -524,7 +524,7 @@ impl ScreeningEngine {
                         continue;
                     }
 
-                    /* Per-article decision + write. */
+                    // Per-article decision + write.
                     for (article, screening) in batch.iter().zip(screenings.iter()) {
                         if screening.decision == "error" {
                             {
@@ -570,7 +570,7 @@ impl ScreeningEngine {
                         }
                     }
 
-                    /* Two-stage: delegate borderline re-screening. */
+                    // Two-stage: delegate borderline re-screening.
                     if two_stage_mode {
                         let stage2_ctx = Stage2Context {
                             prompt_parts: &prompt_parts,
@@ -597,7 +597,7 @@ impl ScreeningEngine {
                         }
                     }
 
-                    /* Post-batch elapsed/ETA. */
+                    // Post-batch elapsed/ETA.
                     let mut progress = self.progress.lock().await;
                     let elapsed = start.elapsed().as_millis() as u64;
                     progress.elapsed_ms = elapsed;
@@ -630,7 +630,7 @@ impl ScreeningEngine {
             }
         }
 
-        /* Final event. */
+        // Final event.
         {
             let mut progress = self.progress.lock().await;
             progress.is_running = false;
@@ -663,7 +663,7 @@ impl ScreeningEngine {
     }
 }
 
-/* Backward-compat re-exports (external tests import these from `engine`). */
+// Backward-compat re-exports (external tests import these from `engine`).
 
 /// Re-export `json_parse` helpers.
 pub use crate::screening::json_parse::{
