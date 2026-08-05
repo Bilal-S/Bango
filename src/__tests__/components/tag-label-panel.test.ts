@@ -141,6 +141,22 @@ describe('tag-label-panel.vue', () => {
     expect(document.body.querySelector('.dialog__danger-box')).toBeNull();
   });
 
+  // Regression: the color-picker <input type="color"> overlay is abspos over
+  // the palette icon. Because it is a replaced element with an intrinsic
+  // native width (~44px in Chromium), `inset-0` alone leaves `width: auto`,
+  // so the intrinsic size wins (CSS 2.1 §10.3.8) and the overlay overflows
+  // ~16px to the right - silently covering the left portion of the adjacent
+  // delete button. The fix pins `w-full h-full` so the overlay fills only
+  // the label. Asserting the class (rather than a pixel measurement) keeps
+  // the test stable in jsdom, which does not compute replaced-element sizes.
+  it('constrains the color input overlay so it does not cover the delete button', () => {
+    const wrapper = mountPanel();
+    const colorInput = wrapper.find('input[type="color"]');
+    expect(colorInput.exists()).toBe(true);
+    expect(colorInput.classes()).toContain('w-full');
+    expect(colorInput.classes()).toContain('h-full');
+  });
+
   it('emits "filter" when the filter button is clicked and articleCount > 0', async () => {
     const wrapper = mountPanel({ items: [makeTag({ id: 't1', articleCount: 3 })] });
     const filterBtn = wrapper.find('button[title="see assigned"]');

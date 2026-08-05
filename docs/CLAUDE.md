@@ -93,6 +93,8 @@
   NOT repeated `//` line comments.
 - Use single-line `//` comments only for short notes (one to two lines).
 - Never use the emdash (&mdash;) character. Use a plain dash (`-`) in all comments.
+- Keep comments compact. 
+- Don't over explain each step or change in the middle of function code. One line if possible. Larger reasons blocks should be placed on the function level.
 
 ### File Organization
 - `src/components/` - reusable Vue components.

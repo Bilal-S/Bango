@@ -540,7 +540,7 @@ async function onProjectFileSelected(event: Event): Promise<void> {
             <p><strong>Recommended workflow:</strong></p>
             <ol class="dashboard__start-new-steps">
               <li>
-                <strong>Backup</strong> - Export the current project to a
+                <strong>Back up</strong> - Export the current project to a
                 <code>.bango.json</code> file so you can restore it later.
               </li>
               <li>

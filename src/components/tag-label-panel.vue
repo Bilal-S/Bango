@@ -479,9 +479,17 @@ function confirmDelete(): void {
                     :title="`Set ${config.noun} color`"
                   >
                     <span class="material-symbols-outlined text-[20px]">palette</span>
+                    <!-- `w-full h-full` is required: <input type="color"> is a
+                         replaced element with an intrinsic native width (~44px
+                         in Chromium). With only `inset-0` + `width: auto`, the
+                         intrinsic size wins (CSS 2.1 §10.3.8) and the overlay
+                         overflows ~16px to the right, silently covering the
+                         left portion of the adjacent delete button. Explicit
+                         width/height 100% constrains the overlay to the label
+                         so the delete icon stays fully clickable. -->
                     <input
                       type="color"
-                      class="absolute inset-0 opacity-0 cursor-pointer"
+                      class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       :value="item.color || getColorScheme(item.name, null).base"
                       :aria-label="`Set ${config.noun} color`"
                       @input="onColorChange(item.id, $event)"
