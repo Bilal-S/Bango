@@ -466,7 +466,7 @@ pub const PROJECT_NAME_KEY: &str = "project_name";
 
 /// Max character length for project name. Frontend `<input maxlength>` is primary
 /// gate; backend hard-caps as defense-in-depth.
-pub const PROJECT_NAME_MAX_LEN: usize = 50;
+pub const PROJECT_NAME_MAX_LEN: usize = 60;
 
 /// Read the project name. `None` when absent or trims to empty.
 pub fn get_project_name(conn: &Connection) -> Result<Option<String>, AppError> {

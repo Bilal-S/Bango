@@ -130,7 +130,7 @@ pub fn get_project_name(db_state: tauri::State<'_, DbState>) -> Result<Option<St
 }
 
 /// Persist the Dashboard title. Trimmed + hard-capped at
-/// `PROJECT_NAME_MAX_LEN` (50), defense-in-depth (frontend `<input maxlength>`
+/// `PROJECT_NAME_MAX_LEN` (60), defense-in-depth (frontend `<input maxlength>`
 /// is primary). Empty/whitespace clears to NULL → fallback.
 #[tauri::command]
 pub fn set_project_name(

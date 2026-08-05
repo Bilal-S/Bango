@@ -576,7 +576,7 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     provider configuration; matches `embedding_status`/`flag_premium`. Tested in
     `tests/embedding_model_override_test.rs` (6 tests: default-None, round-trip,
     whitespace-trim, clear-to-empty, clear-to-whitespace, not-portable)).
-    `project_name` (optional plaintext, up to `PROJECT_NAME_MAX_LEN = 50` chars;
+    `project_name` (optional plaintext, up to `PROJECT_NAME_MAX_LEN = 60` chars;
     user-editable Dashboard title shown in `dashboard.vue`'s `<h1>` - replaces
     the "Project Dashboard" placeholder once set. Double-click the title OR
     click the trailing pencil icon to enter inline edit (reuses

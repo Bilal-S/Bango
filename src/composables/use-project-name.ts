@@ -4,10 +4,10 @@ import { tauriCommand } from '@/composables/use-tauri-command';
 /** The fallback title shown when no project name is set. */
 export const DEFAULT_PROJECT_TITLE = 'Project Dashboard';
 
-/** Mirrors the backend `PROJECT_NAME_MAX_LEN` (50). The `<input maxlength>`
+/** Mirrors the backend `PROJECT_NAME_MAX_LEN` (60). The `<input maxlength>`
  *  is the primary gate; this constant keeps the frontend + tests in sync with
  *  the backend hard-cap. */
-export const PROJECT_NAME_MAX_LEN = 50;
+export const PROJECT_NAME_MAX_LEN = 60;
 
 /**
  * Dashboard project-name controller. Loads the persisted name (if any),

@@ -4,7 +4,7 @@
 //! default (dashboard renders the "Project Dashboard" fallback), round-trips
 //! through `set_project_name` / `get_project_name`, trims surrounding
 //! whitespace, treats empty/whitespace as cleared (NULL storage), and is
-//! hard-capped to `PROJECT_NAME_MAX_LEN` (50) chars as defense-in-depth.
+//! hard-capped to `PROJECT_NAME_MAX_LEN` (60) chars as defense-in-depth.
 //! Portability: the key is in `PROJECT_PORTABLE_SETTINGS` so it travels with
 //! a project backup.
 use bango_lib::db::app_settings_repo::{
