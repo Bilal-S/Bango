@@ -88,13 +88,15 @@
 - Use **JSDoc** (`/** ... */`) for all exported functions and composables.
   Include `@param`, `@returns`, and other relevant tags (`@throws`, `@example`).
   This is part of the function definition, not optional decoration.
-- For multi-line explanatory comments inside function bodies or between
+- For multi-line explanatory comments (more than 2 lines) inside function bodies or between
   sections (more than two lines), use standard block comments (`/* ... */`),
   NOT repeated `//` line comments.
 - Use single-line `//` comments only for short notes (one to two lines).
 - Never use the emdash (&mdash;) character. Use a plain dash (`-`) in all comments.
 - Keep comments compact. 
 - Don't over explain each step or change in the middle of function code. One line if possible. Larger reasons blocks should be placed on the function level.
+- For RUST multi-line (3 or more lines) comments use comment block marekers `/* ... */`.
+- For RUST do not repeat `///` for ordiantry comments, this reserved for comments that should be picked up by rustdoc
 
 ### File Organization
 - `src/components/` - reusable Vue components.

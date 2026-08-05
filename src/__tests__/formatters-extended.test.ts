@@ -10,6 +10,7 @@ import {
   doiLink,
   getPublicationTypeLabel,
   avgPerYear,
+  truncateAtWordBoundary,
 } from '@/utils/formatters';
 
 describe('formatters (extended)', () => {
@@ -205,6 +206,46 @@ describe('formatters (extended)', () => {
     });
     it('trims whitespace before lookup', () => {
       expect(getPublicationTypeLabel('  JOUR  ')).toBe('Journal');
+    });
+  });
+
+  describe('truncateAtWordBoundary', () => {
+    it('returns the trimmed string verbatim when it already fits (no ellipsis)', () => {
+      expect(truncateAtWordBoundary('A short aim', 20)).toBe('A short aim');
+    });
+
+    it('truncates at the last word boundary under the cap and appends an ellipsis', () => {
+      const out = truncateAtWordBoundary('A very long research aim about obesity', 20);
+      expect([...out].length).toBeLessThanOrEqual(20 + 3); // cap + ellipsis
+      expect(out.endsWith('...')).toBe(true);
+      expect(out).not.toMatch(/\s\.\.\.$/); // no dangling space before ellipsis
+    });
+
+    it('hard-truncates when a single word exceeds the cap', () => {
+      // First word longer than maxLen -> no word boundary available, hard cut.
+      const out = truncateAtWordBoundary('supercalifragilistic', 10);
+      expect([...out].length).toBe(10 + 3);
+      expect(out.endsWith('...')).toBe(true);
+    });
+
+    it('counts by code points, not UTF-16 code units (CJK / emoji)', () => {
+      // Each emoji is one code point but two UTF-16 code units.
+      const out = truncateAtWordBoundary('🎉'.repeat(10), 5);
+      expect([...out].length).toBe(5 + 3); // 5 emoji + ellipsis
+    });
+
+    it('trims surrounding whitespace before measuring', () => {
+      expect(truncateAtWordBoundary('   short   ', 20)).toBe('short');
+    });
+
+    it('returns empty string when maxLen < 1', () => {
+      expect(truncateAtWordBoundary('anything', 0)).toBe('');
+      expect(truncateAtWordBoundary('anything', -3)).toBe('');
+    });
+
+    it('does not split a word mid-token when a boundary exists at exactly maxLen', () => {
+      // 'abcd efgh' with cap=4: boundary at index 4 (space), so kept = 'abcd'.
+      expect(truncateAtWordBoundary('abcd efgh', 4)).toBe('abcd...');
     });
   });
 });

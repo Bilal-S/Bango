@@ -1062,18 +1062,30 @@ fn import_llm_config(tx: &Transaction, backup: &ProjectBackup) -> Result<(), App
     Ok(())
 }
 
-/// Project-portable `app_settings`. Only allowlisted keys are applied
-/// (defense-in-depth via `is_project_portable`); absent keys leave the target
-/// machine's value untouched.
+/// Project-portable `app_settings` (allowlisted keys only). `project_name` is
+/// project identity: when absent from the backup, clear the target (NULL) so
+/// the dashboard reverts to the fallback instead of showing the old title.
 fn import_app_settings(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
+    let mut has_project_name = false;
     for setting in &backup.app_settings {
         if !app_settings_repo::is_project_portable(&setting.key) {
             continue;
+        }
+        if setting.key == app_settings_repo::PROJECT_NAME_KEY {
+            has_project_name = true;
         }
         tx.execute(
             "INSERT INTO app_settings (key, value) VALUES (?1, ?2) \
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             rusqlite::params![setting.key, setting.value],
+        )?;
+    }
+    /* Backup without project_name: clear target so the dashboard reverts to
+    the fallback instead of showing the old title. */
+    if !has_project_name {
+        tx.execute(
+            "UPDATE app_settings SET value = NULL WHERE key = ?1",
+            [app_settings_repo::PROJECT_NAME_KEY],
         )?;
     }
     Ok(())

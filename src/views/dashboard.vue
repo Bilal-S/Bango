@@ -8,6 +8,9 @@ import {
 } from '@/composables/use-dashboard';
 import { useDemo } from '@/composables/use-demo';
 import { useExport } from '@/composables/use-export';
+import { useProjectName, PROJECT_NAME_MAX_LEN } from '@/composables/use-project-name';
+import { useToast } from '@/composables/use-toast';
+import ClearableInput from '@/components/clearable-input.vue';
 
 const router = useRouter();
 const {
@@ -28,13 +31,78 @@ const {
   loadMoreActivities,
 } = useDashboard();
 
+/* Project name: dblclick h1 or pencil -> ClearableInput; Enter/blur commits,
+   Esc cancels, "x" clears (empty reverts to fallback). */
+const {
+  displayName,
+  projectName,
+  hasCustomName,
+  load: loadProjectName,
+  save: saveProjectName,
+  clear: clearProjectName,
+} = useProjectName();
+
+const toast = useToast();
+
+/** True while the inline edit input is shown (replaces the read-mode h1). */
+const isEditingProjectName = ref(false);
+/** The editable draft bound to the `ClearableInput`. */
+const projectNameDraft = ref('');
+/** True while a save is in flight (disables the input + shows a saving hint). */
+const projectNameSaving = ref(false);
+
+/** Start inline edit: seed the draft with the current custom name (or empty
+ *  when none is set so the placeholder shows). */
+function startEditProjectName(): void {
+  if (projectNameSaving.value) return;
+  projectNameDraft.value = projectName.value ?? '';
+  isEditingProjectName.value = true;
+}
+
+/** Commit the draft. Trim; if empty -> clear (revert to fallback); if changed
+ *  -> save; if unchanged -> no-op exit. Errors surface a toast and leave the
+ *  edit state intact so the user can retry without losing the draft. */
+async function commitProjectName(): Promise<void> {
+  if (!isEditingProjectName.value || projectNameSaving.value) return;
+  const trimmed = projectNameDraft.value.trim();
+  // Unchanged -> exit without a backend call.
+  if (trimmed === (projectName.value ?? '')) {
+    isEditingProjectName.value = false;
+    projectNameDraft.value = '';
+    return;
+  }
+  projectNameSaving.value = true;
+  try {
+    if (trimmed === '') {
+      await clearProjectName();
+    } else {
+      await saveProjectName(trimmed);
+    }
+    isEditingProjectName.value = false;
+    projectNameDraft.value = '';
+  } catch (e: unknown) {
+    toast.show(
+      `Failed to save project name: ${e instanceof Error ? e.message : String(e)}`,
+      'error'
+    );
+    // Leave edit state intact for retry.
+  } finally {
+    projectNameSaving.value = false;
+  }
+}
+
+/** Discard the draft and exit edit mode without saving or clearing. */
+function cancelEditProjectName(): void {
+  if (projectNameSaving.value) return;
+  isEditingProjectName.value = false;
+  projectNameDraft.value = '';
+}
+
 // Activity list scroll container ref (for preserving scroll position on load-more)
 const activityListEl = ref<HTMLElement | null>(null);
 
-// Track batch boundaries for the permanent "── N new ──" separators and the
-// TransitionGroup staggered fade-in. Since the backend now returns a single
-// merged, timestamp-sorted feed, new entries always land at the end - so
-// prevCount correctly identifies the boundary.
+/* Batch-boundary indices for "N new" separators + TransitionGroup staggered
+   fade-in (backend feed is sorted; new entries land at the end). */
 const batchBoundaryIndices = ref<Set<number>>(new Set());
 
 /** Index of the first item in the most recently loaded batch (for animation). */
@@ -44,9 +112,12 @@ const newBatchStart = computed<number>(() => {
   return sorted[0]!;
 });
 
-// Re-fetch data every time dashboard is mounted (e.g. after import + invalidation)
+// Re-fetch data every time dashboard is mounted (e.g. after import + invalidation).
+// Load the project name in parallel (single-row SELECT; safe to re-run on every
+// mount since dashboard is not keep-alive cached).
 onMounted(() => {
   refresh();
+  void loadProjectName();
 });
 
 /**
@@ -161,6 +232,17 @@ function navigateToArticle(articleId: string): void {
 const { demoLoading, demoError, loadDemo } = useDemo(router);
 const { importProject } = useExport();
 
+/** Wrap `loadDemo` so the project name refreshes after a successful demo
+ *  import. The demo backup has no `project_name` (created before the feature),
+ *  so the backend clears any existing name; without this refresh the stale
+ *  pre-demo name would show until the user navigates away and back. */
+async function handleLoadDemo(): Promise<void> {
+  await loadDemo();
+  if (!demoError.value) {
+    void loadProjectName();
+  }
+}
+
 // --- Start New Project info dialog (shown when a project is loaded) ---
 // Single-project model: surfaces the export → delete → begin-fresh workflow
 // without hiding it behind Settings discovery.
@@ -181,10 +263,8 @@ function openHelpGuideStartingPoints(): void {
   router.push('/help?tab=guide#starting-points');
 }
 
-// --- Load Existing Project (from a .bango.json backup file) ---
-// Uses a hidden HTML <input type="file"> rather than the Tauri fs dialog so
-// the picker can read from any directory (the `fs:allow-read-file` capability
-// is scoped to `$DOCUMENT/**`). This mirrors the Settings import-backup flow.
+/* Hidden HTML <input type="file"> (not the Tauri fs dialog) so the picker
+   reads from any directory; mirrors Settings import-backup. */
 const projectFileInput = ref<HTMLInputElement | null>(null);
 const projectLoading = ref(false);
 const projectError = ref<string | null>(null);
@@ -209,7 +289,13 @@ async function onProjectFileSelected(event: Event): Promise<void> {
   projectError.value = null;
   try {
     const ok = await importProject(file);
-    if (ok) router.push('/');
+    if (ok) {
+      /* Reload name after import: backup without project_name clears the
+         target (backend contract); same-route push is a no-op so onMounted
+         won't refire. */
+      void loadProjectName();
+      router.push('/');
+    }
   } catch (e: unknown) {
     projectError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -223,7 +309,44 @@ async function onProjectFileSelected(event: Event): Promise<void> {
     <!-- Page Header -->
     <section class="dashboard__header">
       <div class="dashboard__header-text">
-        <h1 class="page-title">Project Dashboard</h1>
+        <!-- Editable project title. Read mode: double-click the h1 OR click the
+             pencil icon to enter edit mode. Edit mode: a ClearableInput replaces
+             the h1; Enter/blur commits, Escape cancels, the "x" clears the
+             draft (an empty commit reverts to the "Project Dashboard" fallback). -->
+        <div class="dashboard__title-row">
+          <h1
+            v-if="!isEditingProjectName"
+            class="page-title dashboard__title"
+            :class="{ 'dashboard__title--custom': hasCustomName }"
+            :title="'Double-click to edit' + (hasCustomName ? '' : ' (set a project name)')"
+            @dblclick="startEditProjectName"
+          >
+            <span class="dashboard__title-text">{{ displayName }}</span>
+            <button
+              type="button"
+              class="dashboard__title-edit-btn"
+              title="Edit project name"
+              aria-label="Edit project name"
+              @click="startEditProjectName"
+            >
+              <span class="material-symbols-outlined">edit</span>
+            </button>
+          </h1>
+          <ClearableInput
+            v-else
+            v-model="projectNameDraft"
+            :maxlength="PROJECT_NAME_MAX_LEN"
+            :autofocus="true"
+            :disabled="projectNameSaving"
+            placeholder="Project name (leave empty to reset)"
+            input-class="dashboard__title-input"
+            class="dashboard__title-edit"
+            @enter="commitProjectName"
+            @blur="commitProjectName"
+            @clear="commitProjectName"
+            @keydown.escape.prevent="cancelEditProjectName"
+          />
+        </div>
         <p class="dashboard__subtitle"><b>Bango - Your Literature Review Assistant</b></p>
       </div>
       <div v-if="hasArticles" class="dashboard__header-actions">
@@ -304,7 +427,7 @@ async function onProjectFileSelected(event: Event): Promise<void> {
             <button
               class="dashboard__empty-cta dashboard__empty-cta--secondary"
               :disabled="demoLoading"
-              @click="loadDemo()"
+              @click="handleLoadDemo"
             >
               <span v-if="demoLoading" class="material-symbols-outlined dashboard__empty-cta-icon"
                 >progress_activity</span
@@ -619,6 +742,88 @@ async function onProjectFileSelected(event: Event): Promise<void> {
   font-weight: var(--font-weight-semibold);
   letter-spacing: var(--letter-spacing-display);
   color: var(--color-on-surface);
+}
+
+/* ── Editable project title ── */
+/* Title row wraps the h1 + the inline edit block so they share width + stay
+   aligned. The fallback ("Project Dashboard") is muted so a custom name pops. */
+.dashboard__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.dashboard__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: text;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  margin: -2px -4px; /* keep visual position identical to the old bare h1 */
+  transition: background-color 0.15s;
+}
+
+.dashboard__title:hover {
+  background-color: rgba(79, 70, 229, 0.06);
+}
+
+/* Custom name is rendered in the primary on-surface color so it reads as a
+   real title; the fallback stays muted (via .page-title color) so the user
+   notices the placeholder and is nudged to set a name. */
+.dashboard__title--custom .dashboard__title-text {
+  color: var(--color-on-surface);
+}
+
+/* Pencil affordance. Ghosted at rest (opacity 0.4) for a quiet title; full
+   opacity on h1 hover so the affordance surfaces. */
+.dashboard__title-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--color-outline);
+  border-radius: var(--radius-sm);
+  opacity: 0.4;
+  transition:
+    opacity 0.15s,
+    color 0.15s,
+    background-color 0.15s;
+  font-family: inherit;
+}
+
+.dashboard__title-edit-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.dashboard__title:hover .dashboard__title-edit-btn {
+  opacity: 1;
+  color: #4f46e5;
+}
+
+.dashboard__title-edit-btn:hover {
+  background-color: rgba(79, 70, 229, 0.1);
+}
+
+/* Edit-mode container sizing. Width in `ch` (the "0" glyph width at the
+   title font size) so the field comfortably displays ~40 characters; capped
+   at 100% so it never overflows narrow viewports. The inner input is `w-full`
+   (from `clearable-input.vue`) and fills this width. */
+.dashboard__title-edit {
+  width: 42ch;
+  max-width: 100%;
+}
+
+/* The ClearableInput's inner input: sized to the title font so the edit box
+   reads as the same field the user just double-clicked. */
+.dashboard__title-input {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+  padding: 6px 32px 6px 10px;
+  background-color: #ffffff;
 }
 
 .dashboard__subtitle {

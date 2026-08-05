@@ -12,7 +12,12 @@
  *
  * The clear button is hidden while the field is empty OR disabled, matching
  * the established pattern in `citation-controls.vue` / `cocitation-controls.vue`.
+ *
+ * Optional `maxlength` + `autofocus` props cover single-line inline-edit use
+ * cases (e.g. the Dashboard project-name title); both default to no-op so
+ * existing callers are unaffected.
  */
+import { onMounted, ref } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -27,6 +32,10 @@ const props = withDefaults(
     max?: number | string;
     /** Forwarded to the native input (e.g. the disabled-tooltip for DOI). */
     title?: string;
+    /** Forwarded to the native input's `maxlength` (character-cap enforcement). */
+    maxlength?: number;
+    /** When true, focuses + selects the input's text on mount. */
+    autofocus?: boolean;
   }>(),
   {
     placeholder: '',
@@ -36,6 +45,8 @@ const props = withDefaults(
     min: undefined,
     max: undefined,
     title: '',
+    maxlength: undefined,
+    autofocus: false,
   }
 );
 
@@ -48,6 +59,15 @@ const emit = defineEmits<{
   focus: [];
   blur: [];
 }>();
+
+const inputEl = ref<HTMLInputElement | null>(null);
+
+onMounted(() => {
+  if (props.autofocus && inputEl.value) {
+    inputEl.value.focus();
+    inputEl.value.select();
+  }
+});
 
 function onInput(event: Event): void {
   const value = (event.target as HTMLInputElement).value;
@@ -82,12 +102,14 @@ void props;
 <template>
   <div class="relative">
     <input
+      ref="inputEl"
       :type="type"
       :value="modelValue"
       :placeholder="placeholder"
       :disabled="disabled"
       :min="min"
       :max="max"
+      :maxlength="maxlength"
       :title="title"
       class="w-full pr-8 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
       :class="inputClass"
@@ -103,6 +125,7 @@ void props;
       title="Clear"
       aria-label="Clear"
       @click="clear"
+      @mousedown.prevent
     >
       <span class="material-symbols-outlined text-base">close</span>
     </button>

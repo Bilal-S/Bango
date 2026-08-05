@@ -235,6 +235,8 @@ pub fn run() {
             commands::app_settings::set_auto_translate,
             commands::app_settings::get_screening_custom_logic,
             commands::app_settings::set_screening_custom_logic,
+            commands::app_settings::get_project_name,
+            commands::app_settings::set_project_name,
             commands::full_text::attach_full_text,
             commands::full_text::count_articles_with_full_text,
             commands::full_text::delete_full_text,

@@ -1,6 +1,7 @@
 //! Integration tests for project backup export/import round-trip.
 //! Verifies all tables survive serialize → deserialize correctly.
 
+use bango_lib::db::app_settings_repo;
 use bango_lib::db::article_repo;
 use bango_lib::db::audit_repo;
 use bango_lib::db::connection::create_connection;
@@ -1090,4 +1091,104 @@ fn import_biblio_terms_dedup_composite_key() {
         .filter_map(|r| r.ok())
         .collect();
     assert_eq!(types, vec!["keyword", "noun_phrase"], "both term_type variants must be present");
+}
+
+/// A backup that DOES include `project_name` must replace the target's
+/// pre-existing name on import (the upsert path already handles this; this
+/// test locks down the contract so a future refactor of `import_app_settings`
+/// does not silently regress it).
+#[test]
+fn import_replaces_existing_project_name_when_backup_has_one() {
+    let conn = setup_db();
+    // Target already has a project name set.
+    app_settings_repo::set_project_name(&conn, "Old Project Name").expect("set old name");
+    assert_eq!(
+        app_settings_repo::get_project_name(&conn).unwrap().as_deref(),
+        Some("Old Project Name"),
+        "pre: target has a name"
+    );
+
+    // Backup carries a different project name.
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "3.0.7"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "llmConfig": null,
+        "appSettings": [
+            {"key": "project_name", "value": "Imported Project Name"}
+        ]
+    }"#;
+
+    import_project(&conn, backup).expect("import should succeed");
+
+    // The backup's name must replace the target's pre-existing name.
+    assert_eq!(
+        app_settings_repo::get_project_name(&conn).unwrap().as_deref(),
+        Some("Imported Project Name"),
+        "backup with project_name must replace the target's existing name"
+    );
+}
+
+/// A backup that does NOT include `project_name` (e.g. the demo project, or a
+/// backup created before the feature shipped) must CLEAR the target's
+/// pre-existing name on import. `project_name` is project identity - when the
+/// user imports a different project (articles/aims/criteria all replaced), the
+/// old project's name must not survive over the new data. Cleared = NULL so the
+/// dashboard reverts to its "Project Dashboard" fallback.
+#[test]
+fn import_clears_existing_project_name_when_backup_lacks_one() {
+    let conn = setup_db();
+    // Target already has a project name set.
+    app_settings_repo::set_project_name(&conn, "Old Project Name").expect("set old name");
+    assert_eq!(
+        app_settings_repo::get_project_name(&conn).unwrap().as_deref(),
+        Some("Old Project Name"),
+        "pre: target has a name"
+    );
+
+    // Backup has an `appSettings` array but NO `project_name` entry (simulates
+    // the demo project, which carries screening settings but predates the
+    // project_name feature).
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "3.0.7"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "llmConfig": null,
+        "appSettings": [
+            {"key": "screening_mode", "value": "abstract"}
+        ]
+    }"#;
+
+    import_project(&conn, backup).expect("import should succeed");
+
+    // The target's pre-existing name must be cleared (NULL), so the dashboard
+    // reverts to the "Project Dashboard" fallback instead of showing the old
+    // project's name over the newly-imported data.
+    assert_eq!(
+        app_settings_repo::get_project_name(&conn).unwrap(),
+        None,
+        "backup without project_name must clear the target's existing name"
+    );
 }

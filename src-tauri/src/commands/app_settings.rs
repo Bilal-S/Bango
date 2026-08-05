@@ -128,6 +128,31 @@ pub fn set_screening_custom_logic(
     app_settings_repo::set_screening_custom_logic(&conn, &value)
 }
 
+/// Read the user-editable project name shown in the Dashboard header. Returns
+/// `null` when the key is absent or empty (the dashboard renders its
+/// "Project Dashboard" fallback in that case). Travels with project backups
+/// (portable).
+#[tauri::command]
+pub fn get_project_name(db_state: tauri::State<'_, DbState>) -> Result<Option<String>, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    app_settings_repo::get_project_name(&conn)
+}
+
+/// Persist the user-editable project name. The value is trimmed of surrounding
+/// whitespace and hard-capped to `PROJECT_NAME_MAX_LEN` (50) chars as
+/// defense-in-depth (the frontend `<input maxlength>` is the primary gate).
+/// An empty/whitespace-only value clears the name (stored as NULL) so the
+/// dashboard reverts to the "Project Dashboard" fallback, matching the
+/// inline-edit "clear to reset" contract.
+#[tauri::command]
+pub fn set_project_name(
+    db_state: tauri::State<'_, DbState>,
+    value: String,
+) -> Result<(), AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    app_settings_repo::set_project_name(&conn, &value)
+}
+
 /// Compute the platform default root: `~/Documents/Bango/`.
 fn compute_default_storage_root() -> String {
     let docs = dirs::document_dir()

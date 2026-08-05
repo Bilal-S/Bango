@@ -505,14 +505,51 @@ pub fn set_embedding_model_override(
     set_setting(conn, EMBEDDING_MODEL_OVERRIDE_KEY, trimmed)
 }
 
+// ── Project name (editable dashboard title) ─────────────────────────────────
+
+/// The `app_settings` key for the user-editable project name shown in the
+/// Dashboard header (replaces the "Project Dashboard" placeholder once set).
+///
+/// Free-text, up to [`PROJECT_NAME_MAX_LEN`] characters. Stored verbatim
+/// (only trimmed of surrounding whitespace on read). Empty/absent = the
+/// dashboard shows the "Project Dashboard" fallback. Portable: travels with
+/// a project backup so restoring on a new machine keeps the user's title.
+pub const PROJECT_NAME_KEY: &str = "project_name";
+
+/// Maximum character length enforced for the project name. The frontend
+/// `<input maxlength>` is the primary gate; the backend `set_project_name`
+/// hard-caps as defense-in-depth so a stale frontend (or a direct DB write)
+/// cannot store an overlong value.
+pub const PROJECT_NAME_MAX_LEN: usize = 50;
+
+/// Read the project name. Returns `None` when the key is absent or the stored
+/// value trims to empty (the dashboard renders its "Project Dashboard"
+/// fallback in that case).
+pub fn get_project_name(conn: &Connection) -> Result<Option<String>, AppError> {
+    Ok(get_setting(conn, PROJECT_NAME_KEY)?.map(|v| v.trim().to_string()).filter(|v| !v.is_empty()))
+}
+
+/// Persist the project name. The value is trimmed of surrounding whitespace
+/// and hard-capped to [`PROJECT_NAME_MAX_LEN`] chars (counted by `char::count`,
+/// not byte length, so multi-byte CJK/emoji counts as one char per code point).
+/// An empty/whitespace-only value is stored as `NULL` (effectively a clear),
+/// keeping the table clean and matching [`get_project_name`]'s `None`-on-empty
+/// contract.
+pub fn set_project_name(conn: &Connection, value: &str) -> Result<(), AppError> {
+    let trimmed = value.trim();
+    let capped: String = trimmed.chars().take(PROJECT_NAME_MAX_LEN).collect();
+    let to_store = if capped.is_empty() { None } else { Some(capped.as_str()) };
+    set_setting(conn, PROJECT_NAME_KEY, to_store)
+}
+
 // ── Project-portable settings (export/import) ───────────────────────────────
 //
 // `app_settings` mixes project-level intent (screening rules, summary mode,
-// auto-translate) with machine-local state (storage root, premium flag,
-// staleness flags, embedding model override). Only the project-level subset
-// travels with a backup so restoring a project on a new machine preserves the
-// user's screening configuration without leaking secrets or clobbering local
-// state.
+// auto-translate, project name) with machine-local state (storage root,
+// premium flag, staleness flags, embedding model override). Only the
+// project-level subset travels with a backup so restoring a project on a new
+// machine preserves the user's screening configuration + project title
+// without leaking secrets or clobbering local state.
 
 /// The subset of `app_settings` keys that travel with a project backup.
 ///
@@ -520,6 +557,7 @@ pub fn set_embedding_model_override(
 /// - `summary_evidence_mode` - literature-review evidence enrichment
 /// - `auto_translate` - experimental non-English → English translation toggle
 /// - `screening_mode` + enhanced/two-stage params - per-run screening behavior
+/// - `project_name` - user-editable dashboard title
 ///
 /// Explicitly **excluded** (stay machine-local, never exported):
 /// `storage_root`, `flag_premium`, `biblio_needs_refresh`, `wiki_needs_refresh`,
@@ -537,6 +575,7 @@ pub const PROJECT_PORTABLE_SETTINGS: &[&str] = &[
     TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY,
     "openalex_mailto",
     "openalex_retrieve_references",
+    PROJECT_NAME_KEY,
 ];
 
 /// Whether a given `app_settings` key should travel with a project backup.

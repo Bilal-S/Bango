@@ -576,6 +576,37 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     provider configuration; matches `embedding_status`/`flag_premium`. Tested in
     `tests/embedding_model_override_test.rs` (6 tests: default-None, round-trip,
     whitespace-trim, clear-to-empty, clear-to-whitespace, not-portable)).
+    `project_name` (optional plaintext, up to `PROJECT_NAME_MAX_LEN = 50` chars;
+    user-editable Dashboard title shown in `dashboard.vue`'s `<h1>` - replaces
+    the "Project Dashboard" placeholder once set. Double-click the title OR
+    click the trailing pencil icon to enter inline edit (reuses
+    `clearable-input.vue` with `maxlength` + the `autofocus` prop; the "x"
+    clears the draft - `@mousedown.prevent` on the clear button keeps focus on
+    the input so the subsequent `@clear` handler commits the empty draft -
+    and an empty commit reverts to the fallback). `set_project_name` trims
+    surrounding whitespace and hard-caps via `chars().take(50)` as
+    defense-in-depth (the `<input maxlength>` is the primary gate); empty /
+    whitespace-only stores NULL so the dashboard reverts to the fallback.
+    **Included in `PROJECT_PORTABLE_SETTINGS`** - project-level preference that
+    travels with a backup so restoring on a new machine keeps the user's title.
+    **Import contract**: unlike the other portable settings (which preserve
+    the target machine's value when the backup omits them), `project_name` is
+    *project identity* - when the backup omits it (e.g. the demo project, or a
+    backup created before the feature shipped), the import path explicitly
+    clears the target's pre-existing name (NULL) so the dashboard reverts to
+    the "Project Dashboard" fallback instead of showing the previous project's
+    title over newly-imported data. When the backup DOES include a name, it
+    replaces the target's via the standard upsert. The frontend
+    (`dashboard.vue::onProjectFileSelected` + `handleLoadDemo`) re-loads the
+    name after a successful import so the title updates without a navigation
+    away-and-back (same-route `router.push('/')` is a no-op so `onMounted`
+    does not re-fire). Cleared automatically by `reset_project` (`app_settings`
+    is in `DROP_TABLES`).
+    Tested in `tests/project_name_test.rs` (9 tests: default-None, round-trip,
+    overwrite, whitespace-trim, empty-clears-to-NULL, whitespace-clears-to-NULL,
+    hard-cap ASCII, hard-cap multibyte-by-char-count, portable-membership) +
+    `src/__tests__/composables/use-project-name.test.ts` (7 tests) +
+    `src/__tests__/formatters-extended.test.ts` (`truncateAtWordBoundary` cases).
     `mark_biblio_needs_refresh(conn)` is called by every mutation that
     changes data bibliometrics depends on (RIS/BibTeX import in `commands/import.rs`,
     project backup restore in `commands/export_cmd::import_project_backup`,

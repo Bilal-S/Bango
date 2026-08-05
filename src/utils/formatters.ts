@@ -142,3 +142,50 @@ export function folderLabelFromPath(path: string): string {
   const last = segments[segments.length - 1];
   return last ? `${last}/` : 'Bango/';
 }
+
+/**
+ * Truncate `text` to at most `maxLen` characters at the last word boundary
+ * (never mid-word), appending an ellipsis (`...`) when truncation occurs.
+ *
+ * - If `text` already fits, it is returned verbatim (no trimming, no ellipsis).
+ * - If the first word alone exceeds `maxLen`, it is hard-truncated at `maxLen`
+ *   with an ellipsis (so a long single token still yields a sensible label).
+ * - Surrounding whitespace is trimmed before measuring, and any whitespace
+ *   preceding the cut point is removed so the ellipsis sits flush against the
+ *   last kept word.
+ *
+ * Counts characters by `Array.from(text)` code points (not UTF-16 code units),
+ * so multi-byte text (CJK, emoji) is counted the same way a browser counts
+ * `maxlength`.
+ *
+ * @param text - the source string (e.g. a research aim).
+ * @param maxLen - the maximum character length of the result, excluding the
+ *   ellipsis. Must be >= 1.
+ * @returns the truncated string (with `...` when shortened), or the trimmed
+ *   original when it already fits.
+ * @example truncateAtWordBoundary('A short aim', 20) // 'A short aim'
+ * @example truncateAtWordBoundary('A very long research aim about obesity', 20) // 'A very long...'
+ * @example truncateAtWordBoundary('supercalifragilistic', 10) // 'supercalif...'
+ */
+export function truncateAtWordBoundary(text: string, maxLen: number): string {
+  const trimmed = text.trim();
+  if (maxLen < 1) return '';
+  // Fast path: already fits.
+  if ([...trimmed].length <= maxLen) return trimmed;
+
+  const chars = Array.from(trimmed);
+  // Find the last index <= maxLen that ends on a word boundary (i.e. the char
+  // at `end` is whitespace OR the char after `end` is whitespace). If no such
+  // boundary exists (the first word is longer than maxLen), hard-cut at maxLen.
+  let end = maxLen;
+  // Walk back to the most recent whitespace so we never split a word.
+  while (end > 0 && /\S/.test(chars[end - 1] ?? '') && !/\s/.test(chars[end] ?? '')) {
+    end -= 1;
+  }
+  if (end === 0) {
+    // The first word alone exceeds maxLen; hard-truncate at maxLen.
+    end = maxLen;
+  }
+  const kept = chars.slice(0, end).join('').trimEnd();
+  return `${kept}...`;
+}
