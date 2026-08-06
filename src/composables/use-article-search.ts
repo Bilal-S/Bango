@@ -815,6 +815,17 @@ export function useArticleSearch() {
     // helpers so the incoming params overwrite the freshly-cleared defaults.
     if (params.resetFilters) {
       resetFilterState(filter, query, searchText, resetPage);
+      // Hard-close any open detail panel: the displayed article is from a
+      // prior session and almost certainly does not match the fresh deep-link
+      // filter. Hard-close (not `closeDetail()`, which would walk the
+      // back-stack and re-open the previous article) and clear the back-stack
+      // too so the reset is a clean slate. `autoSelectSingleResult` below can
+      // still open the FRESH sole-result article.
+      showDetail.value = false;
+      selectedArticle.value = null;
+      auditTrail.value = [];
+      returnToArticleId.value = null;
+      returnToReferencePaperId.value = null;
     }
 
     if (params.status) {

@@ -1489,6 +1489,57 @@ describe('useArticleSearch', () => {
         await s.applyRouteParams({ author: 'Bob', resetFilters: true });
         expect(s.currentPage.value).toBe(1);
       });
+
+      it('hard-closes an open detail panel when resetFilters: true', async () => {
+        // The displayed article is from a prior session and almost certainly
+        // does not match the fresh deep-link filter, so the panel must close.
+        vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+          if (cmd === 'get_article') return Promise.resolve(sampleArticles[0]);
+          if (cmd === 'get_audit_trail') return Promise.resolve([]);
+          if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+          if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+          return Promise.resolve(undefined);
+        });
+        const s = useArticleSearch();
+        // Simulate a prior session: an article is open in the detail panel.
+        await s.selectArticle('a1');
+        expect(s.showDetail.value).toBe(true);
+        expect(s.selectedArticle.value?.id).toBe('a1');
+        // Arrive via a biblio deep-link with resetFilters.
+        await s.applyRouteParams({ author: 'Bob', resetFilters: true });
+        expect(s.showDetail.value).toBe(false);
+        expect(s.selectedArticle.value).toBeNull();
+      });
+
+      it('clears the back-stack when resetFilters: true (no re-open)', async () => {
+        // `closeDetail()` would walk the back-stack and re-open the previous
+        // article; the D5 reset must hard-close so the prior article does not
+        // bounce back. Also verifies `navigateToArticle`'s return target is
+        // cleared.
+        vi.mocked(tauriCommand).mockImplementation(
+          (cmd: string, args?: Record<string, unknown>) => {
+            if (cmd === 'get_article') {
+              const id = args?.id as string;
+              return Promise.resolve({ ...sampleArticles[0], id });
+            }
+            if (cmd === 'get_audit_trail') return Promise.resolve([]);
+            if (cmd === 'query_articles') return Promise.resolve(sampleArticles);
+            if (cmd === 'get_article_counts') return Promise.resolve(sampleCounts);
+            return Promise.resolve(undefined);
+          }
+        );
+        const s = useArticleSearch();
+        // Build a back-stack: a1 -> a2.
+        await s.selectArticle('a1');
+        await s.navigateToArticle('a2');
+        expect(s.selectedArticle.value?.id).toBe('a2');
+        await s.applyRouteParams({ author: 'Bob', resetFilters: true });
+        expect(s.showDetail.value).toBe(false);
+        expect(s.selectedArticle.value).toBeNull();
+        // Calling closeDetail after the reset must NOT re-open a1.
+        s.closeDetail();
+        expect(s.showDetail.value).toBe(false);
+      });
     });
   });
 

@@ -1083,6 +1083,14 @@ child `AGENTS.md` under a folder only when that folder grows its own local rules
     `resetFilters: '1'` (plus the existing `filterCollapsed: '1'`) so the D5 reset path
     clears any prior session's filters before applying the chosen tag/label - the list
     shows exactly that tag/label's articles instead of overlaying stale filters.
+    **D5 reset also hard-closes the article detail panel** (`applyRouteParams` with
+    `resetFilters: true`): the displayed article is from a prior session and almost
+    certainly does not match the fresh deep-link filter, so `showDetail` /
+    `selectedArticle` / `auditTrail` are cleared AND the back-stack
+    (`returnToArticleId` / `returnToReferencePaperId`) is wiped so `closeDetail()`
+    cannot bounce back to the stale article. Hard-close (not `closeDetail()`, which
+    walks the back-stack). `autoSelectSingleResult` still fires afterward, so a
+    deep-link that yields exactly one FRESH result still opens that article.
     **Bulk tag/label add + remove contract**: `bulk_add_tag_to_articles`,
     `bulk_add_label_to_articles`, `bulk_remove_tag_from_articles`, and
     `bulk_remove_label_from_articles` each return `Vec<String>` (the IDs of articles
