@@ -98,6 +98,16 @@ toggle visibility). `sendMessage(text)` branches: `source==='wiki'` calls
 its `source` for bubble rendering. `toggleWikiMode()` flips the source;
 `clearChat()` resets it to `'articles'`.
 
+**Unsent-input draft persistence**: the store also holds `inputDraft` (the
+article/wiki chat `<input>` text) and `citationDraft` (the Citation Finder
+`<textarea>` prose). chat-view is NOT keep-alive cached (only `WikiView` and
+`ArticleList` are), so the component unmounts on navigation away and any local
+input ref would be destroyed. The store-backed drafts are the persistence
+mechanism so the user's typed-but-unsent text survives a tab-away + tab-back.
+`v-model` binds the two inputs directly to `chatStore.inputDraft` /
+`chatStore.citationDraft`. `clearChat()` deliberately does NOT clear these
+("Clear Chat" wipes conversation history, not in-progress typing).
+
 ### `styles/forms.css`
 
 Global form/button/dialog primitives (`.field__*`, `.btn--*`, `.dialog`,

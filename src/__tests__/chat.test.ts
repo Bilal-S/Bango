@@ -32,6 +32,38 @@ describe('useChatStore', () => {
     expect(store.wikiReady).toBe(false);
   });
 
+  it('initializes inputDraft and citationDraft as empty strings', () => {
+    const store = useChatStore();
+    expect(store.inputDraft).toBe('');
+    expect(store.citationDraft).toBe('');
+  });
+
+  it('persists inputDraft and citationDraft across store reads (navigation-survival contract)', () => {
+    /* chat-view is NOT keep-alive cached; its local refs are destroyed on
+     * unmount. The store-backed drafts are the persistence mechanism so the
+     * user's unsent typed text survives navigation away and back. Because the
+     * store is a singleton, the values written here are what a freshly-mounted
+     * chat-view would read on its next activation. */
+    const store = useChatStore();
+    store.inputDraft = 'What is the main finding?';
+    store.citationDraft = 'Sugar taxes reduce obesity.';
+    expect(store.inputDraft).toBe('What is the main finding?');
+    expect(store.citationDraft).toBe('Sugar taxes reduce obesity.');
+  });
+
+  it('clearChat does not wipe the input drafts (Clear Chat clears history, not in-progress typing)', () => {
+    const store = useChatStore();
+    store.inputDraft = 'unsent question';
+    store.citationDraft = 'unsent citation prose';
+    store.messages.push({ role: 'user', content: 'past msg', timestamp: '12:00' });
+
+    store.clearChat();
+
+    expect(store.messages.length).toBe(0);
+    expect(store.inputDraft).toBe('unsent question');
+    expect(store.citationDraft).toBe('unsent citation prose');
+  });
+
   it('manages selectedArticleIds', () => {
     const store = useChatStore();
     store.addSelectedArticle('art-1');

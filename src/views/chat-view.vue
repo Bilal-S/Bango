@@ -44,7 +44,6 @@ const checkingLlm = computed(() => !llmConfigStore.initialized);
 const articles = ref<Article[]>([]);
 const showSelector = ref(false);
 const searchQuery = ref('');
-const inputMessage = ref('');
 const chatScrollContainer = ref<HTMLElement | null>(null);
 
 const isDetailFullScreen = ref(false);
@@ -122,10 +121,6 @@ watch(detailArticle, (newVal) => {
     isDetailFullScreen.value = false;
   }
 });
-
-/** Citation-finder prose textarea (replaces the single-line `<input>` used by
- *  chat/wiki modes). Multi-line; submits on Ctrl/Cmd+Enter. */
-const citationProse = ref('');
 
 /** Citation-finder status-filter checkboxes state. Working + Included default
  *  ON, Rejected default OFF, Duplicate always excluded (hidden). */
@@ -268,13 +263,13 @@ function onToggleCitationFinder() {
 async function handleCitationSend() {
   /* The Find button is `:disabled` when prose is empty, but Ctrl/Cmd+Enter
    * bypasses disabled button, so guard here + show toast. */
-  if (!citationProse.value.trim()) {
+  if (!chatStore.citationDraft.trim()) {
     toast.show('Please paste text to search.', 'info');
     return;
   }
   if (chatStore.loading) return;
-  const text = citationProse.value;
-  citationProse.value = '';
+  const text = chatStore.citationDraft;
+  chatStore.citationDraft = '';
 
   /* Cheap pre-check: detect stored-model mismatch before searching. One
    * SELECT DISTINCT + COUNT(*) (sub-ms), safe to run on every submit. When
@@ -330,7 +325,7 @@ async function confirmMismatchRegenerate() {
       'info'
     );
     // Restore the held prose so the user can re-submit after the regenerate.
-    citationProse.value = pendingSearchText.value;
+    chatStore.citationDraft = pendingSearchText.value;
     pendingSearchText.value = '';
     /* Mark mismatch resolved so dialog doesn't re-fire for same stored model
      * if user searches again before regenerate completes. */
@@ -556,9 +551,9 @@ function onToggleWiki() {
 }
 
 async function handleSend() {
-  if (!inputMessage.value.trim() || chatStore.loading) return;
-  const msg = inputMessage.value;
-  inputMessage.value = '';
+  if (!chatStore.inputDraft.trim() || chatStore.loading) return;
+  const msg = chatStore.inputDraft;
+  chatStore.inputDraft = '';
   await chatStore.sendMessage(msg);
   scrollToBottom();
 }
@@ -1130,7 +1125,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
                  stays visible so the user can draft the next search. -->
             <div class="citation-input-area__prose-row">
               <textarea
-                v-model="citationProse"
+                v-model="chatStore.citationDraft"
                 class="citation-input-area__textarea"
                 placeholder="Paste the text you want to find citations for..."
                 rows="4"
@@ -1143,7 +1138,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
                 v-if="!chatStore.citationProgress"
                 type="button"
                 class="citation-input-area__find-btn"
-                :disabled="!citationProse.trim() || chatStore.loading"
+                :disabled="!chatStore.citationDraft.trim() || chatStore.loading"
                 @click="handleCitationSend"
               >
                 <span class="material-symbols-outlined text-[18px]">search</span>
@@ -1316,7 +1311,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
             <!-- Input field -->
             <div class="flex-1 relative">
               <input
-                v-model="inputMessage"
+                v-model="chatStore.inputDraft"
                 type="text"
                 :placeholder="
                   chatStore.source === 'wiki'
@@ -1330,7 +1325,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
               <!-- Submit button -->
               <button
                 class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 transition-colors cursor-pointer"
-                :disabled="!inputMessage.trim() || chatStore.loading"
+                :disabled="!chatStore.inputDraft.trim() || chatStore.loading"
                 @click="handleSend"
               >
                 <span class="material-symbols-outlined text-[18px]">send</span>

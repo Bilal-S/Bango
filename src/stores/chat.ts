@@ -39,6 +39,17 @@ export const useChatStore = defineStore('chat', () => {
   /** Active retrieval source. Mutually exclusive. */
   const source = ref<ChatSource>('articles');
 
+  /* Unsent chat input drafts. chat-view is NOT keep-alive cached (only
+   * WikiView + ArticleList are), so the component unmounts on navigation
+   * away. The store is the persistence mechanism for typed-but-unsent text
+   * so the user does not lose their draft when they tab out and back. The
+   * two drafts mirror the two distinct inputs in chat-view: the
+   * article/wiki single-line <input> + the citation-finder <textarea>.
+   * `clearChat()` deliberately does NOT clear these (Clear Chat wipes the
+   * conversation history, not in-progress typing). */
+  const inputDraft = ref('');
+  const citationDraft = ref('');
+
   /** Wiki available for chat (initialized AND has pages). */
   const wikiReady = ref(false);
 
@@ -313,6 +324,8 @@ export const useChatStore = defineStore('chat', () => {
     loading,
     error,
     source,
+    inputDraft,
+    citationDraft,
     wikiReady,
     citationFinderReady,
     citationReadiness,
