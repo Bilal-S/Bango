@@ -80,6 +80,11 @@ pub struct BatchImportPhaseResult {
 }
 
 /// Pipeline phases (1-indexed for display).
+///
+/// Variants 1-5 are work phases. `Complete` (6) is a terminal indicator used
+/// only for the final 100% snapshot emitted after all work phases finish; it
+/// renders the phase label "Batch Import" so the user sees an unambiguous
+/// end state instead of the just-finished phase label.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BatchImportPhase {
     FullText = 1,
@@ -87,6 +92,8 @@ pub enum BatchImportPhase {
     Translations = 3,
     Summaries = 4,
     Embeddings = 5,
+    /// Terminal "all phases done" indicator, not a work phase.
+    Complete = 6,
 }
 
 impl BatchImportPhase {
@@ -98,6 +105,7 @@ impl BatchImportPhase {
             Self::Translations => "Translations",
             Self::Summaries => "AI Summaries",
             Self::Embeddings => "Embeddings",
+            Self::Complete => "Batch Import",
         }
     }
 }
@@ -728,11 +736,12 @@ pub async fn start_batch_import(
             Some(sum_result.clone()),
         );
 
-        // Final state.
+        // Final state. Uses the `Complete` variant so the phase label renders
+        // "Batch Import" (not the just-finished "Embeddings") at 100%.
         emit_progress(
             &app_handle_clone,
             &progress,
-            BatchImportPhase::Embeddings,
+            BatchImportPhase::Complete,
             emb_result.processed,
             emb_result.total,
             100,

@@ -82,6 +82,35 @@ describe('settings-reprocessing.vue', () => {
     expect(wrapper.find('.batch-progress').exists()).toBe(true);
   });
 
+  it('renders the phase label and percent from the snapshot (Batch Import @ 100%)', async () => {
+    // The terminal snapshot emitted after all phases finish carries
+    // phaseName "Batch Import" + overallPercent 100 so the user sees an
+    // unambiguous end state instead of the just-finished "Embeddings".
+    // The bar is data-driven: it renders whatever phaseName/overallPercent
+    // the backend sends. We mount with isRunning=true so batchStarted flips
+    // on (the reveal guard), then assert the header renders the values.
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'count_articles_with_full_text') return Promise.resolve(0);
+      if (cmd === 'get_batch_import_progress') {
+        return Promise.resolve({
+          ...IDLE_PROGRESS,
+          isRunning: true,
+          phaseName: 'Batch Import',
+          overallPercent: 100,
+          message: 'Batch import complete',
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    expect(wrapper.find('.batch-progress').exists()).toBe(true);
+    expect(wrapper.find('.batch-progress__phase').text()).toBe('Batch Import');
+    expect(wrapper.find('.batch-progress__percent').text()).toBe('100%');
+  });
+
   it('hides the progress bar, then reveals it after clicking Start in the dialog', async () => {
     const wrapper = mountCard();
     await flushPromises();

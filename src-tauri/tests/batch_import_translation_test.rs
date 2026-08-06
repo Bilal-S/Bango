@@ -27,6 +27,17 @@ fn phase_order_is_fulltext_citations_translation_summaries() {
 }
 
 #[test]
+fn embeddings_and_complete_phase_labels_render() {
+    // Phase 5 is the embeddings work phase; Complete (6) is the terminal
+    // "all phases done" indicator used only for the final 100% snapshot so
+    // the user sees "Batch Import" instead of "Embeddings" at completion.
+    assert_eq!(BatchImportPhase::Embeddings as usize, 5);
+    assert_eq!(BatchImportPhase::Complete as usize, 6);
+    assert_eq!(BatchImportPhase::Embeddings.name(), "Embeddings");
+    assert_eq!(BatchImportPhase::Complete.name(), "Batch Import");
+}
+
+#[test]
 fn summary_waits_for_required_translation() {
     // TC-08: Phase 4 waits per article until translation_status leaves 'running'.
     //

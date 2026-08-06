@@ -127,6 +127,12 @@ DOI match map.
   with a warning style via `phaseSkipMessage(phase)` so the user understands
   why a phase did nothing; listens to `batch-import:progress` events so it
   survives navigation.
+- Terminal snapshot: after all five phases finish, `start_batch_import`
+  emits one final `emit_progress` with the `BatchImportPhase::Complete`
+  variant (phase label "Batch Import", `overall_percent = 100`,
+  `is_running = false`) so the user sees an unambiguous "Batch Import / 100%"
+  end state instead of the just-finished "Embeddings" label. `Complete` (6)
+  is a terminal indicator, not a work phase.
 
 ## Verification
 
