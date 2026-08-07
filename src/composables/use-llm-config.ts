@@ -29,18 +29,25 @@ export function useLlmConfig() {
   const fetchingModels = ref(false);
   const fetchedModels = ref<string[] | null>(null);
 
-  // Clear connection status whenever any LLM setting changes
+  /* Clear connection status whenever any LLM setting changes. MUST use an
+     array of getter sources (not a getter returning a fresh object/array):
+     the latter always yields a new reference so Vue reports "changed" on
+     every reactive touch, causing an infinite save -> fetch -> clearTestResult
+     -> save loop after every edit (status pill flickered between "Saving..."
+     and "Not Tested"). Array-of-getters compares each value via Object.is,
+     so it fires only on real value changes - including the identical-value
+     reassignment `store.fetch()` performs after every save. */
   watch(
-    () => ({
-      provider: config.value.provider,
-      endpointUrl: config.value.endpointUrl,
-      apiKeyEncrypted: config.value.apiKeyEncrypted,
-      modelName: config.value.modelName,
-      temperature: config.value.temperature,
-      maxConcurrentRequests: config.value.maxConcurrentRequests,
-      requestDelayMs: config.value.requestDelayMs,
-      contextWindowTokens: config.value.contextWindowTokens,
-    }),
+    [
+      () => config.value.provider,
+      () => config.value.endpointUrl,
+      () => config.value.apiKeyEncrypted,
+      () => config.value.modelName,
+      () => config.value.temperature,
+      () => config.value.maxConcurrentRequests,
+      () => config.value.requestDelayMs,
+      () => config.value.contextWindowTokens,
+    ],
     () => {
       store.clearTestResult();
     }

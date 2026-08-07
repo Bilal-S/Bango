@@ -238,18 +238,27 @@ watch(
    trailing. Tracks provider/endpoint/model/apiKey in addition to the 4
    Parameter fields so provider changes persist immediately (not just on
    Test Connection click). Gated on `!testing` + `!fetchingModels`. Skips
-   initial propagation so loading config doesn't fire a spurious re-save. */
+   initial propagation so loading config doesn't fire a spurious re-save.
+
+   Reactivity note: MUST use an array of getter sources, NOT a getter that
+   returns a fresh array. The latter always yields a new reference, so Vue's
+   Object.is change check reports "changed" on every reactive touch. That
+   caused an infinite save -> store.fetch() (identical config) -> watcher
+   fires -> save loop: the status pill flickered forever between "Saving..."
+   and "Not Tested" after a single edit, with no further user input. The
+   array-of-getters form compares each value independently, so the watcher
+   fires only when a tracked value truly changes. */
 let paramSaveStarted = false;
 watch(
-  () => [
-    config.value.provider,
-    config.value.endpointUrl,
-    config.value.modelName,
-    config.value.apiKeyEncrypted,
-    config.value.maxConcurrentRequests,
-    config.value.requestDelayMs,
-    config.value.contextWindowTokens,
-    config.value.temperature,
+  [
+    () => config.value.provider,
+    () => config.value.endpointUrl,
+    () => config.value.modelName,
+    () => config.value.apiKeyEncrypted,
+    () => config.value.maxConcurrentRequests,
+    () => config.value.requestDelayMs,
+    () => config.value.contextWindowTokens,
+    () => config.value.temperature,
   ],
   () => {
     // Skip the initial propagation that fires when the config is first loaded

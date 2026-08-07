@@ -164,6 +164,19 @@ changes.
 - Follow the root `AGENTS.md` User Preferences for the LLM-configured gate.
 - Reuse `clearable-input.vue` for text inputs with a clear affordance.
 - Keep-alive cached views must use `defineOptions({ name: ... })`.
+- **Multi-source `watch()` MUST use the array-of-getters form**, never a
+  getter that returns a fresh array/object. `watch(() => [a.value, b.value],
+  cb)` returns a new array reference on every reactive touch, so Vue's
+  `Object.is` change check ALWAYS reports "changed" - even when the
+  underlying values are identical (e.g. when `store.fetch()` reassigns a ref
+  to a new object with the same fields). This caused an infinite
+  save -> fetch -> watcher-fires -> save loop in the LLM Settings card
+  (status pill flickered forever between "Saving..." and "Not Tested" after a
+  single edit). The correct form is `watch([() => a.value, () => b.value],
+  cb)`, which compares each element independently and fires only on real
+  value changes. Tested in
+  `src/__tests__/composables/use-llm-config.test.ts`
+  (`clearTestResult reactivity (regression: infinite save loop)`).
 
 ## Verification
 

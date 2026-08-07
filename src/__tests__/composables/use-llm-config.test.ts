@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
+import { nextTick } from 'vue';
 import { useLlmConfig } from '@/composables/use-llm-config';
 
 vi.mock('@/composables/use-tauri-command', () => ({
@@ -135,6 +136,71 @@ describe('useLlmConfig', () => {
     c.fetchedModels.value = ['x'];
     c.revert();
     expect(c.fetchedModels.value).toBeNull();
+  });
+
+  describe('clearTestResult reactivity (regression: infinite save loop)', () => {
+    /* Regression for the infinite "Saving..." <-> "Not Tested" flicker.
+       The clearTestResult watcher must use array-of-getters (not a getter
+       returning a fresh object/array), otherwise it fires on every reactive
+       touch - including store.fetch() reassigning config.value to an
+       identical-shape object after every save - causing an endless
+       save -> fetch -> clearTestResult -> save loop. */
+    it('does NOT clear testResult when store.fetch reassigns identical config', async () => {
+      const saved = {
+        provider: 'openai',
+        endpointUrl: 'https://api.openai.com/v1',
+        apiKeyEncrypted: 'sk-test',
+        modelName: 'gpt-5-mini',
+        temperature: 0.2,
+        skipTemperature: false,
+        maxConcurrentRequests: 3,
+        requestDelayMs: 500,
+        contextWindowTokens: 50000,
+      };
+      vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+        if (cmd === 'get_llm_config') return Promise.resolve({ ...saved });
+        return Promise.resolve(undefined);
+      });
+
+      const c = useLlmConfig();
+      await c.loadConfig();
+      // Simulate a successful test result (e.g. set by Test Connection).
+      c.testResult.value = { success: true, message: 'Connected' };
+      expect(c.testResult.value).not.toBeNull();
+
+      // Simulate `save()` -> `store.fetch()` reassigning config.value to a
+      // NEW object with identical field values (the post-save encrypted-key
+      // refresh). The watcher must NOT treat this as a change.
+      await c.loadConfig();
+      await nextTick();
+      expect(c.testResult.value).not.toBeNull();
+      expect(c.testResult.value?.success).toBe(true);
+    });
+
+    it('clears testResult on a real field change', async () => {
+      const saved = {
+        provider: 'openai',
+        endpointUrl: 'https://api.openai.com/v1',
+        apiKeyEncrypted: 'sk-test',
+        modelName: 'gpt-5-mini',
+        temperature: 0.2,
+        skipTemperature: false,
+        maxConcurrentRequests: 3,
+        requestDelayMs: 500,
+        contextWindowTokens: 50000,
+      };
+      vi.mocked(tauriCommand).mockResolvedValue({ ...saved });
+
+      const c = useLlmConfig();
+      await c.loadConfig();
+      c.testResult.value = { success: true, message: 'Connected' };
+      expect(c.testResult.value).not.toBeNull();
+
+      // A genuine user edit must still clear the stale test result.
+      c.config.value.modelName = 'gpt-5.4';
+      await nextTick();
+      expect(c.testResult.value).toBeNull();
+    });
   });
 
   describe('debounced parameter auto-save', () => {
