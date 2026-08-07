@@ -68,6 +68,32 @@ the right edge. Props: `modelValue`, `placeholder`, `inputClass`, `disabled`,
 "x" is clicked), `enter`, `input`/`focus`/`blur`. The canonical place for the
 clearable-input pattern going forward.
 
+### `openalex-search.vue`
+
+OpenAlex Search tab (`/articles` → Search). Input row holds `Search`,
+`Clear`, and the LLM-gated **Smart Search** button (reads
+`store.smartSearchAvailable`, the canonical `useLlmConfigured()` gate; same
+size as Search/Clear). The main query input uses the shared `ClearableInput`
+(x-affordance; `flex:1 min-w-0` wrapper so it fills available width). Below
+the input row sits a collapsible **SEARCH OPTIONS** box that mirrors the
+`article-metadata.vue` "Metadata" box (`border border-slate-200 rounded
+overflow-hidden`, label-caps header, `expand_more` caret; click to expand;
+shows the active-option count when collapsed, e.g. "2 active"). The panel
+body uses **`v-show`** (not `v-if`) so uncommitted panel edits survive a
+collapse/re-expand; `panelFilters` is seeded once at setup and re-synced from
+the store only while collapsed (so Smart Search still flows in). It surfaces
+the `OpenAlexFilters` dimensions the backend already supported but the UI
+previously did not: Work Type (chips → `workTypes`; active chip uses the same
+accent color as Smart Search), then a single wrapping row holding Publication
+Year range (→ `yearFrom`/`yearTo`; letters `e/+/-/.` blocked via keydown),
+Language (narrower `<select>` → `language`), Open access only + Include
+retracted (switch toggles → `isOa`/`showRetracted`) - all on one level by
+default, wrapping only on narrow viewports. Panel edits commit on **Apply**
+via `store.setFilters` (auto-re-searches when `hasSearched`); **Clear options**
+resets to `DEFAULT_OPENALEX_FILTERS`. All option defaults match the pre-panel
+search behavior so the panel is purely additive. The bulk **Add to Working**
+button shows `Adding...` + disables while `importSelected` is in flight.
+
 ### Settings cards (`components/settings/`)
 
 `settings-view.vue` consumes: `settings-provider-card.vue` (consolidated AI

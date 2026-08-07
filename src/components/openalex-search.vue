@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, computed, watch } from 'vue';
 
 import { useOpenAlexStore } from '@/stores/openalex';
 import { useToast } from '@/composables/use-toast';
-import { SORT_OPTIONS, PER_PAGE_OPTIONS } from '@/types/openalex';
+import {
+  SORT_OPTIONS,
+  PER_PAGE_OPTIONS,
+  WORK_TYPE_OPTIONS,
+  LANGUAGE_OPTIONS,
+  DEFAULT_OPENALEX_FILTERS,
+  type OpenAlexFilters,
+} from '@/types/openalex';
+import ClearableInput from '@/components/clearable-input.vue';
 import OpenAlexResultItem from './openalex-result-item.vue';
 import OpenAlexDetailPanel from './openalex-detail-panel.vue';
 
@@ -32,6 +40,112 @@ async function handleSearch(): Promise<void> {
 
 function handleClear(): void {
   store.clearSearch();
+}
+
+// ── Search Options panel ────────────────────────────────────────────────
+/* Collapsible panel exposing the OpenAlexFilters dimensions the backend
+ * already supports (work type, year range, language, OA, retracted) but the
+ * UI previously did not. All defaults preserve the prior search behavior. */
+const showOptions = ref(false);
+/* Local editable copy of the store filters; committed on Apply so partial
+ * edits don't trigger intermediate re-searches. Seeded from the store at
+ * setup so committed filters (prior session, Smart Search, deep-link) are
+ * reflected immediately in both the panel controls and the collapsed-header
+ * count. A watcher re-syncs from the store only while the panel is collapsed
+ * so Smart Search (which writes store.filters directly) still flows in, but
+ * uncommitted panel edits survive a collapse/re-expand. Mirrors the
+ * `article-metadata.vue` "Metadata" box pattern (DOM persists via v-show). */
+const panelFilters = ref<OpenAlexFilters>({
+  ...store.filters,
+  workTypes: [...store.filters.workTypes],
+});
+watch(
+  () => store.filters,
+  (f) => {
+    if (!showOptions.value) {
+      panelFilters.value = { ...f, workTypes: [...f.workTypes] };
+    }
+  },
+  { deep: true }
+);
+
+/** Year-range bounds + validation (mirrors article-filter-panel conventions). */
+const YEAR_MIN = 1900;
+const YEAR_MAX = 2100;
+
+const yearFromInvalid = computed((): boolean => {
+  const from = panelFilters.value.yearFrom;
+  const to = panelFilters.value.yearTo;
+  if (from !== null && (from < YEAR_MIN || from > YEAR_MAX)) return true;
+  return from !== null && to !== null && from > to;
+});
+
+const yearToInvalid = computed((): boolean => {
+  const from = panelFilters.value.yearFrom;
+  const to = panelFilters.value.yearTo;
+  if (to !== null && (to < YEAR_MIN || to > YEAR_MAX)) return true;
+  return from !== null && to !== null && from > to;
+});
+
+const yearRangeInvalid = computed((): boolean => yearFromInvalid.value || yearToInvalid.value);
+
+const yearHint = computed((): string => {
+  const from = panelFilters.value.yearFrom;
+  const to = panelFilters.value.yearTo;
+  if (from !== null && to !== null && from > to) return 'From year must be <= To year.';
+  if (from !== null && (from < YEAR_MIN || from > YEAR_MAX))
+    return `From year must be between ${YEAR_MIN}-${YEAR_MAX}.`;
+  if (to !== null && (to < YEAR_MIN || to > YEAR_MAX))
+    return `To year must be between ${YEAR_MIN}-${YEAR_MAX}.`;
+  return '';
+});
+
+/** Count of non-default option dimensions active in the panel (in-progress
+ * edits), shown in the panel's action row. */
+const activeOptionCount = computed((): number => {
+  const f = panelFilters.value;
+  return countActiveOptions(f);
+});
+
+function countActiveOptions(f: OpenAlexFilters): number {
+  let n = 0;
+  if (f.workTypes.length > 0) n += 1;
+  if (f.yearFrom !== null || f.yearTo !== null) n += 1;
+  if (f.language !== null) n += 1;
+  if (f.isOa) n += 1;
+  if (f.showRetracted) n += 1;
+  return n;
+}
+
+function toggleOptions(): void {
+  showOptions.value = !showOptions.value;
+}
+
+function toggleWorkType(value: string): void {
+  const current = panelFilters.value.workTypes;
+  panelFilters.value = {
+    ...panelFilters.value,
+    workTypes: current.includes(value) ? current.filter((t) => t !== value) : [...current, value],
+  };
+}
+
+function applyOptions(): void {
+  if (yearRangeInvalid.value) return;
+  store.setFilters({ ...panelFilters.value, workTypes: [...panelFilters.value.workTypes] });
+}
+
+/** Block `e`/`E`/`+`/`-`/`.` in year inputs so only digits (and editing keys)
+ * are accepted. `ClearableInput` has a single-root div without a `keydown`
+ * emit, so this native listener falls through to the inner `<input>`. */
+function onYearKeydown(event: KeyboardEvent): void {
+  if (['e', 'E', '+', '-', '.'].includes(event.key)) {
+    event.preventDefault();
+  }
+}
+
+function clearOptions(): void {
+  panelFilters.value = { ...DEFAULT_OPENALEX_FILTERS, workTypes: [] };
+  store.setFilters({ ...DEFAULT_OPENALEX_FILTERS, workTypes: [] });
 }
 
 async function handleImport(): Promise<void> {
@@ -77,28 +191,177 @@ async function handleAddSingle(): Promise<void> {
       <!-- Search Bar -->
       <div class="search-bar">
         <div class="search-input-row">
-          <input
-            v-model="store.query"
-            type="text"
-            placeholder="Search OpenAlex..."
-            class="search-input"
-            @keydown.enter="handleSearch"
-          />
+          <div class="search-input-wrap">
+            <ClearableInput
+              :model-value="store.query"
+              placeholder="Search OpenAlex..."
+              input-class="search-input"
+              @update:model-value="store.query = $event"
+              @clear="store.query = ''"
+              @enter="handleSearch"
+            />
+          </div>
           <button class="btn btn--primary" :disabled="store.loading" @click="handleSearch">
             {{ store.loading ? 'Searching...' : 'Search' }}
           </button>
-          <button class="btn btn--secondary" @click="handleClear">Clear</button>
+          <button class="btn btn--secondary" :disabled="store.loading" @click="handleClear">
+            Clear
+          </button>
+          <!-- Smart Search: accent button, same size as Search/Clear (LLM-gated). -->
+          <button
+            v-if="store.smartSearchAvailable"
+            class="btn btn--accent oa-smart-search"
+            :disabled="store.smartSearchLoading || store.loading"
+            title="Generate an OpenAlex Boolean query from your research aims + criteria"
+            @click="store.smartSearch()"
+          >
+            <span class="material-symbols-outlined text-[16px]">auto_awesome</span>
+            {{ store.smartSearchLoading ? 'Generating...' : 'Smart Search' }}
+          </button>
         </div>
 
-        <!-- Smart Search button (Tier 2) -->
-        <button
-          v-if="store.smartSearchAvailable"
-          class="btn btn--accent mt-2"
-          :disabled="store.smartSearchLoading || store.loading"
-          @click="store.smartSearch()"
-        >
-          {{ store.smartSearchLoading ? 'Generating...' : 'Smart Search' }}
-        </button>
+        <!-- Collapsible SEARCH OPTIONS box. Mirrors the `article-metadata.vue`
+             "Metadata" box: border+rounded container, header row, v-show body
+             (DOM persists so uncommitted panel edits survive collapse). -->
+        <div class="options-box border border-slate-200 rounded overflow-hidden">
+          <button
+            type="button"
+            class="options-header relative w-full flex items-center justify-between px-3 py-2 text-xs font-label-caps text-slate-500 uppercase tracking-wider hover:bg-slate-50 cursor-pointer transition-colors"
+            :aria-expanded="showOptions"
+            @click="toggleOptions"
+          >
+            <span class="shrink-0">Search Options</span>
+            <!-- Active-option count: centered in the header, shown only when
+                 collapsed and at least one option is selected in the panel. -->
+            <span
+              v-if="!showOptions && activeOptionCount > 0"
+              class="options-header__count absolute left-1/2 -translate-x-1/2 text-[11px] text-indigo-600 normal-case tracking-normal font-medium whitespace-nowrap"
+            >
+              {{ activeOptionCount }} option{{ activeOptionCount === 1 ? '' : 's' }} selected
+            </span>
+            <span
+              class="material-symbols-outlined text-[16px] text-slate-400 transition-transform duration-200 shrink-0"
+              :class="{ 'rotate-180': showOptions }"
+            >
+              expand_more
+            </span>
+          </button>
+
+          <!-- Panel body (v-show so edits persist across collapse). -->
+          <div v-show="showOptions" class="options-body px-3 pb-3 space-y-3">
+            <!-- Work Type chips -->
+            <div class="options-section">
+              <label class="options-label">Work Type</label>
+              <div class="options-chips">
+                <button
+                  v-for="opt in WORK_TYPE_OPTIONS"
+                  :key="opt.value"
+                  type="button"
+                  class="chip"
+                  :class="{ 'chip--on': panelFilters.workTypes.includes(opt.value) }"
+                  @click="toggleWorkType(opt.value)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+            </div>
+
+            <!-- One row: Year + Language + OA + Retracted. Wraps only when the
+                 viewport is too narrow (flex-wrap). -->
+            <div class="options-inline-row">
+              <div class="options-section options-inline-group">
+                <label class="options-label">Publication Year</label>
+                <div class="options-year-row">
+                  <ClearableInput
+                    :model-value="
+                      panelFilters.yearFrom !== null ? String(panelFilters.yearFrom) : ''
+                    "
+                    type="number"
+                    :min="YEAR_MIN"
+                    :max="YEAR_MAX"
+                    placeholder="From"
+                    :input-class="`options-year-input ${yearFromInvalid ? 'options-input--invalid' : ''}`"
+                    @update:model-value="
+                      panelFilters.yearFrom = $event === '' ? null : Number($event)
+                    "
+                    @keydown="onYearKeydown"
+                  />
+                  <span class="options-year-sep">&ndash;</span>
+                  <ClearableInput
+                    :model-value="panelFilters.yearTo !== null ? String(panelFilters.yearTo) : ''"
+                    type="number"
+                    :min="YEAR_MIN"
+                    :max="YEAR_MAX"
+                    placeholder="To"
+                    :input-class="`options-year-input ${yearToInvalid ? 'options-input--invalid' : ''}`"
+                    @update:model-value="
+                      panelFilters.yearTo = $event === '' ? null : Number($event)
+                    "
+                    @keydown="onYearKeydown"
+                  />
+                </div>
+              </div>
+
+              <div class="options-section options-inline-group">
+                <label class="options-label">Language</label>
+                <select
+                  class="options-select"
+                  :value="panelFilters.language ?? ''"
+                  @change="
+                    panelFilters.language = ($event.target as HTMLSelectElement).value || null
+                  "
+                >
+                  <option
+                    v-for="opt in LANGUAGE_OPTIONS"
+                    :key="opt.value ?? 'any'"
+                    :value="opt.value ?? ''"
+                  >
+                    {{ opt.label }}
+                  </option>
+                </select>
+              </div>
+
+              <label class="options-toggle options-inline-group">
+                <input v-model="panelFilters.isOa" type="checkbox" />
+                <span class="options-switch-track">
+                  <span class="options-switch-thumb"></span>
+                </span>
+                <span>Open access only</span>
+              </label>
+
+              <label class="options-toggle options-inline-group">
+                <input v-model="panelFilters.showRetracted" type="checkbox" />
+                <span class="options-switch-track">
+                  <span class="options-switch-thumb"></span>
+                </span>
+                <span>Include retracted</span>
+              </label>
+            </div>
+
+            <p v-if="yearRangeInvalid" class="options-hint">{{ yearHint }}</p>
+
+            <!-- Action row -->
+            <div class="options-actions">
+              <span v-if="activeOptionCount > 0" class="options-active-notice">
+                {{ activeOptionCount }} option{{ activeOptionCount === 1 ? '' : 's' }} active
+              </span>
+              <span v-else class="options-active-notice options-active-notice--idle"
+                >No options active</span
+              >
+              <button class="btn btn--secondary btn--sm" type="button" @click="clearOptions">
+                Clear options
+              </button>
+              <button
+                class="btn btn--primary btn--sm"
+                type="button"
+                :disabled="yearRangeInvalid"
+                @click="applyOptions"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Sort + Pagination Controls -->
@@ -285,12 +548,23 @@ async function handleAddSingle(): Promise<void> {
   align-items: center;
 }
 
-.search-input {
-  flex: 1;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #cbd5e1;
+.search-input-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The main search input is the inner <input> of ClearableInput. The component
+   hardcodes `focus:ring-2 focus:border-transparent` (an outside-extending
+   box-shadow) which gets clipped by the surrounding flex row on the top/left
+   edges. Override via :deep() with higher specificity: drop the ring and use
+   an inside-the-box border-color focus that can't be clipped. Also restore
+   `rounded-md` to match the previous native input corners. */
+.search-input-wrap :deep(input.search-input) {
   border-radius: 0.375rem;
-  font-size: 0.875rem;
+}
+.search-input-wrap :deep(input.search-input:focus) {
+  border-color: #6366f1;
+  box-shadow: none;
   outline: none;
 }
 
@@ -454,5 +728,208 @@ async function handleAddSingle(): Promise<void> {
 
 .mt-2 {
   margin-top: 0.5rem;
+}
+
+/* Smart Search button: icon + label inline (same size as Search/Clear). */
+.oa-smart-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* The header's structural classes (w-full flex items-center justify-between
+   px-3 py-2 ...) come from Tailwind utilities on the element; the `.options-header`
+   class is kept only as a test hook + styling anchor. No scoped overrides needed
+   beyond the base reset so the button doesn't inherit default form styles. */
+.options-header {
+  background: transparent;
+}
+
+/* Panel body: solid white background when expanded so the form fields read
+   clearly against the surrounding UI. The header keeps its transparent/
+   hover-slate-50 background. */
+.options-body {
+  background: white;
+}
+
+.options-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.options-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+/* Work-type chips. */
+.options-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.chip {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #475569;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.chip:hover {
+  background: #f8fafc;
+}
+
+.chip--on {
+  background: #e8def8;
+  border-color: #c8aee6;
+  color: #4a1564;
+}
+
+.chip--on:hover {
+  background: #d8c8f0;
+}
+
+/* Year range inputs. */
+.options-year-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.options-year-input {
+  width: 5.5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.options-year-sep {
+  color: #94a3b8;
+  font-size: 0.8rem;
+}
+
+.options-input--invalid :deep(input),
+.options-input--invalid {
+  border-color: #fca5a5;
+}
+
+.options-hint {
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  color: #ef4444;
+}
+
+/* Single inline row: Year + Language + OA + Retracted all on one level by
+   default. Wraps only when the viewport can't fit them. Each group aligns
+   to the bottom so labels + controls line up despite differing heights. */
+.options-inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1.5rem;
+}
+
+.options-inline-group {
+  flex: 0 0 auto;
+}
+
+.options-select {
+  width: 9rem;
+  max-width: 100%;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  font-size: 0.8rem;
+  background: white;
+  outline: none;
+}
+
+/* Switch toggles (OA + Retracted): bigger hit area, clear on/off state.
+   The native checkbox is visually hidden but kept in the label so the
+   existing test selector `label.options-toggle input[type="checkbox"]`
+   still works. */
+.options-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #334155;
+  cursor: pointer;
+  user-select: none;
+}
+
+.options-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.options-switch-track {
+  position: relative;
+  width: 2.5rem;
+  height: 1.4rem;
+  background: #cbd5e1;
+  border-radius: 9999px;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.options-switch-thumb {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  background: white;
+  border-radius: 9999px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  transition: left 0.15s;
+}
+
+.options-toggle input:checked + .options-switch-track {
+  background: #4f46e5;
+}
+
+.options-toggle input:checked + .options-switch-track .options-switch-thumb {
+  left: calc(100% - 1.25rem);
+}
+
+.options-toggle input:focus-visible + .options-switch-track {
+  outline: 2px solid #4f46e5;
+  outline-offset: 2px;
+}
+
+/* Action row. */
+.options-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.options-active-notice {
+  flex: 1;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #4338ca;
+}
+
+.options-active-notice--idle {
+  color: #94a3b8;
+  font-weight: 500;
 }
 </style>

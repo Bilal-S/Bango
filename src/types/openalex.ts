@@ -131,3 +131,39 @@ export const SORT_OPTIONS = [
 ] as const;
 
 export const PER_PAGE_OPTIONS = [10, 25, 50, 100] as const;
+
+/**
+ * Common OpenAlex work entity types offered as quick-pick chips in the Search
+ * Options panel. Values match the OpenAlex `type` filter (pipe-joined in
+ * `search.rs::build_filter_string`). The API accepts other types too, but
+ * these cover the systematic-review common cases.
+ */
+export const WORK_TYPE_OPTIONS = [
+  { label: 'Article', value: 'article' },
+  { label: 'Review', value: 'review-article' },
+  { label: 'Book Chapter', value: 'book-chapter' },
+  { label: 'Book', value: 'book' },
+  { label: 'Preprint', value: 'preprint' },
+  { label: 'Dataset', value: 'dataset' },
+  { label: 'Dissertation', value: 'dissertation' },
+  { label: 'Report', value: 'report' },
+  { label: 'Editorial', value: 'editorial' },
+  { label: 'Letter', value: 'letter' },
+] as const;
+
+/**
+ * Common language codes for the Search Options language `<select>`. OpenAlex
+ * uses ISO 2-letter codes in the `language:` filter. "Any" maps to `null`
+ * (no filter).
+ */
+export const LANGUAGE_OPTIONS = [
+  { label: 'Any', value: null },
+  { label: 'English', value: 'en' },
+  { label: 'Spanish', value: 'es' },
+  { label: 'French', value: 'fr' },
+  { label: 'German', value: 'de' },
+  { label: 'Portuguese', value: 'pt' },
+  { label: 'Italian', value: 'it' },
+  { label: 'Chinese', value: 'zh' },
+  { label: 'Japanese', value: 'ja' },
+] as const;
