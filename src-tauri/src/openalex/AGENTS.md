@@ -45,6 +45,20 @@ messages include the URL + HTTP status for diagnostics.
 LLM-generated Boolean query from aims + criteria via
 `LlmRequestType::OpenAlexSmartSearch`.
 
+**1500-character limit + truncation guardrail**: OpenAlex rejects `search=`
+queries longer than 1500 characters without an API key. The system + user
+prompts instruct the LLM that `searchQuery` MUST be 1500 chars or fewer and to
+leverage OpenAlex's native stemming/synonym matching (no redundant
+synonyms/stems/plurals, no single-word wildcards - wildcards only inside quoted
+multi-word phrases for adjacency/proximity, nested `(...)` grouping, trimmed
+redundant exclusions). A deterministic backstop enforces the ceiling regardless
+of LLM drift: `MAX_SEARCH_QUERY_LEN = 1500` + `truncate_search_query`
+(balance-aware, pure) is applied inside `parse_smart_search_response` so every
+parsed query is guaranteed <= 1500 bytes without splitting a quoted phrase,
+leaving parentheses unbalanced, or cutting mid-word. The cap is universal
+(never conditional on whether a key is configured) so a query stays valid even
+if the key is cleared after generation.
+
 ### Reference + Citation Harvest (`reference_harvest.rs`)
 
 Batch-fetch both outgoing `referenced_works` and incoming `cites:` citations
@@ -84,7 +98,9 @@ domain set).
   `deserialize_harvest_response_missing_fields`)
 - `tests/openalex_search_test.rs` (5 tests)
 - `tests/openalex_import_test.rs` (5 tests + 1 ignored Tier 2 stub)
-- `tests/openalex_smart_search_test.rs` (5 tests)
+- `tests/openalex_smart_search_test.rs` (15 tests: prompt char-limit/stemming/
+  wildcard, `truncate_search_query` balance + word-boundary, parser over-long
+  truncation)
 
 ## Child DOX Index
 

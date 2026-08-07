@@ -95,3 +95,123 @@ fn parse_smart_search_response_with_code_fences() {
     let query = result.unwrap();
     assert_eq!(query.search_query, "test query");
 }
+
+// ── Prompt: 1500-char budget + OpenAlex best practices ───────────────────
+
+#[test]
+fn build_smart_search_prompt_states_char_limit() {
+    let aims = vec![make_aim("Study sugar tax effects")];
+    let (system, user) = smart_search::build_smart_search_prompt(&aims, &[], &[]);
+
+    assert!(system.contains("1500"), "system prompt must state the 1500-char limit");
+    assert!(user.contains("1500"), "user prompt must state the 1500-char budget");
+}
+
+#[test]
+fn build_smart_search_prompt_leverages_stemming() {
+    let aims = vec![make_aim("Study sugar tax effects")];
+    let (system, user) = smart_search::build_smart_search_prompt(&aims, &[], &[]);
+
+    // The prompt must tell the LLM NOT to enumerate redundant synonyms/stems.
+    assert!(system.to_lowercase().contains("stems"), "system prompt must reference stemming");
+    assert!(
+        user.to_lowercase().contains("redundant"),
+        "user prompt must warn against redundant synonyms"
+    );
+}
+
+#[test]
+fn build_smart_search_prompt_wildcard_discipline() {
+    let aims = vec![make_aim("Study sugar tax effects")];
+    let (system, _user) = smart_search::build_smart_search_prompt(&aims, &[], &[]);
+
+    // The prompt must restrict wildcard usage to quoted multi-word phrases.
+    assert!(
+        system.to_lowercase().contains("wildcard"),
+        "system prompt must give wildcard guidance"
+    );
+}
+
+// ── truncate_search_query: pure helper ───────────────────────────────────
+
+#[test]
+fn truncate_search_query_under_limit_unchanged() {
+    let q = "(sugar OR levy) AND tax";
+    let out = smart_search::truncate_search_query(q, 1500);
+    assert_eq!(out, q);
+}
+
+#[test]
+fn truncate_search_query_truncates_at_top_level_operator() {
+    // Build: "(a OR b) AND (c OR d) AND " + padding so the third group is the
+    // latest top-level close that still fits under the small budget.
+    let q = "(alpha OR beta) AND (gamma OR delta) AND (epsilon OR zeta)";
+    // Budget chosen so "(alpha OR beta) AND (gamma OR delta)" fits but the
+    // trailing " AND (epsilon OR zeta)" does not.
+    let out = smart_search::truncate_search_query(q, 44);
+    assert!(out.len() <= 44);
+    assert!(out.contains("(alpha OR beta)"));
+    assert!(out.contains("(gamma OR delta)"));
+    assert!(!out.contains("epsilon"), "must drop the third group");
+}
+
+#[test]
+fn truncate_search_query_keeps_parens_balanced() {
+    // Many nested groups; truncate to a small budget and assert paren balance.
+    let q = "(a OR (b AND c)) AND (d OR e) AND (f OR g) AND (h OR i)";
+    let out = smart_search::truncate_search_query(q, 30);
+    let open = out.matches('(').count();
+    let close = out.matches(')').count();
+    assert_eq!(open, close, "parentheses must stay balanced: {out}");
+}
+
+#[test]
+fn truncate_search_query_does_not_split_inside_phrase() {
+    // Single over-long group with a quoted phrase that straddles the budget.
+    let q = "(\"long exact phrase here that should not be split mid quote\" OR x) AND (y OR z)";
+    let out = smart_search::truncate_search_query(q, 40);
+    // The cut must not land inside the quoted phrase: count double-quotes in
+    // the result must be even (balanced), never odd.
+    assert_eq!(
+        out.matches('"').count() % 2,
+        0,
+        "quotes must be balanced (never split inside a phrase): {out}"
+    );
+}
+
+#[test]
+fn truncate_search_query_falls_back_to_whitespace() {
+    // No parentheses at all: cut at the last whitespace boundary so the result
+    // ends on a complete word, never mid-word.
+    let q = "alpha beta gamma delta epsilon";
+    let out = smart_search::truncate_search_query(q, 16);
+    assert!(out.len() <= 16, "must respect budget: {out}");
+    assert_eq!(out, "alpha beta gamma", "must cut at the last word boundary <= 16: {out}");
+}
+
+#[test]
+fn truncate_search_query_zero_max_returns_empty() {
+    let out = smart_search::truncate_search_query("(a OR b) AND c", 0);
+    assert_eq!(out, "");
+}
+
+// ── parse_smart_search_response: over-long query is capped ───────────────
+
+#[test]
+fn parse_smart_search_response_truncates_overlong_query() {
+    // 2000+ char query (well over the 1500 limit). serde needs a valid JSON
+    // string, so build it programmatically.
+    let long_term = "obesity".repeat(300); // ~2100 chars, no quotes/parens
+    let raw = format!(
+        r#"{{"searchQuery":"{long_term}","suggestedFilters":{{"publicationYear":null,"type":[]}}}}"#
+    );
+    assert!(long_term.len() > 1500);
+
+    let result = smart_search::parse_smart_search_response(&raw);
+    assert!(result.is_ok());
+    let query = result.unwrap();
+    assert!(
+        query.search_query.len() <= smart_search::MAX_SEARCH_QUERY_LEN,
+        "parsed query must be capped to MAX_SEARCH_QUERY_LEN"
+    );
+}

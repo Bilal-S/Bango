@@ -47,8 +47,19 @@ the PR.
 |---|---|
 | `src-tauri/tests/openalex_smart_search_test.rs::build_smart_search_prompt_includes_aims` | Prompt embeds each research aim's text |
 | `src-tauri/tests/openalex_smart_search_test.rs::build_smart_search_prompt_includes_criteria` | Prompt embeds inclusion + exclusion criteria |
+| `src-tauri/tests/openalex_smart_search_test.rs::build_smart_search_prompt_states_char_limit` | System + user prompts state the 1500-char budget |
+| `src-tauri/tests/openalex_smart_search_test.rs::build_smart_search_prompt_leverages_stemming` | Prompt warns against redundant synonyms/stems (OpenAlex stems natively) |
+| `src-tauri/tests/openalex_smart_search_test.rs::build_smart_search_prompt_wildcard_discipline` | Prompt restricts wildcard usage to quoted multi-word phrases |
 | `src-tauri/tests/openalex_smart_search_test.rs::parse_smart_search_response_valid_json` | Valid JSON fixture parses into `SmartSearchQuery` |
 | `src-tauri/tests/openalex_smart_search_test.rs::parse_smart_search_response_malformed_json` | Malformed JSON yields `AppError` (not panic) |
+| `src-tauri/tests/openalex_smart_search_test.rs::parse_smart_search_response_with_code_fences` | JSON wrapped in ```json fences still parses |
+| `src-tauri/tests/openalex_smart_search_test.rs::truncate_search_query_under_limit_unchanged` | Short query returned verbatim (no-op under budget) |
+| `src-tauri/tests/openalex_smart_search_test.rs::truncate_search_query_truncates_at_top_level_operator` | Over-long query cut at top-level group boundary; trailing group dropped |
+| `src-tauri/tests/openalex_smart_search_test.rs::truncate_search_query_keeps_parens_balanced` | Result has matching `(`/`)` count |
+| `src-tauri/tests/openalex_smart_search_test.rs::truncate_search_query_does_not_split_inside_phrase` | Cut never lands inside a quoted phrase (quotes stay balanced) |
+| `src-tauri/tests/openalex_smart_search_test.rs::truncate_search_query_falls_back_to_whitespace` | Flat word list cut at last word boundary within budget |
+| `src-tauri/tests/openalex_smart_search_test.rs::truncate_search_query_zero_max_returns_empty` | `max_len = 0` returns empty string |
+| `src-tauri/tests/openalex_smart_search_test.rs::parse_smart_search_response_truncates_overlong_query` | 2000-char fixture parses to <= `MAX_SEARCH_QUERY_LEN` |
 
 ## Frontend store (`stores/openalex.ts`)
 
