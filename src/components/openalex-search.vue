@@ -10,6 +10,9 @@ import OpenAlexDetailPanel from './openalex-detail-panel.vue';
 const store = useOpenAlexStore();
 const toast = useToast();
 const importingSingle = ref(false);
+/** True while `importSelected` is in flight so the bulk button can show
+ * "Adding..." and disable, preventing double-clicks. */
+const importing = ref(false);
 
 const emit = defineEmits<{
   /** Emitted after a successful import so the parent can refresh status-tab counts. */
@@ -32,16 +35,21 @@ function handleClear(): void {
 }
 
 async function handleImport(): Promise<void> {
-  const result = await store.importSelected();
-  if (result) {
-    const working = result.importedCount - result.skippedCount;
-    const dupes = result.skippedCount;
-    const msg =
-      dupes > 0
-        ? `Added ${working} article(s) to Working, ${dupes} to Duplicates`
-        : `Added ${working} article(s) to Working list`;
-    toast.show(msg, 'success');
-    emit('imported');
+  importing.value = true;
+  try {
+    const result = await store.importSelected();
+    if (result) {
+      const working = result.importedCount - result.skippedCount;
+      const dupes = result.skippedCount;
+      const msg =
+        dupes > 0
+          ? `Added ${working} article(s) to Working, ${dupes} to Duplicates`
+          : `Added ${working} article(s) to Working list`;
+      toast.show(msg, 'success');
+      emit('imported');
+    }
+  } finally {
+    importing.value = false;
   }
 }
 
@@ -180,10 +188,10 @@ async function handleAddSingle(): Promise<void> {
           <div class="action-bar__buttons">
             <button
               class="btn btn--primary btn--sm"
-              :disabled="store.selectedCount === 0"
+              :disabled="store.selectedCount === 0 || importing"
               @click="handleImport"
             >
-              Add to Working
+              {{ importing ? 'Adding...' : 'Add to Working' }}
             </button>
             <button
               class="btn btn--clear-selection btn--sm"
