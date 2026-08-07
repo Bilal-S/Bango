@@ -1,7 +1,7 @@
 {
   "$schema": "./src/schema/tauri2.json",
   "productName": "Bango",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "identifier": "BonCode.Bango",
   "build": {
     "beforeDevCommand": "npm run dev",

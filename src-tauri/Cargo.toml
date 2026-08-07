@@ -1,6 +1,6 @@
 [package]
 name = "bango"
-version = "3.1.0"
+version = "3.1.1"
 description = "AI-Powered Systematic Literature Review Tool"
 authors = ["BonCode"]
 edition = "2021"
