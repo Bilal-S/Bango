@@ -123,7 +123,7 @@ Download the file that matches your operating system and architecture.
 
 | File | Best For |
 |------|----------|
-| [`Bango_3.1.1_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_aarch64.dmg) | **Recommended.** For Apple Silicon (M-CPU) Macs. Drag-and-drop install to Applications. You will be asked to grant permissions during install. |
+| [`Bango_3.1.1_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_aarch64.dmg) | **Recommended.** For Apple Silicon (M-CPU) Macs. Drag-and-drop install to Applications. You will be asked to grant permissions during install. Click `Open` in confirmation dialog. |
 
 > **Note:** macOS builds are for **Apple Silicon (ARM64)** only.
 > Intel (x86_64) Macs are not supported.
@@ -144,6 +144,72 @@ This means:
 - **We do not hold an Apple certificate**, which is required for signed distribution, but the software is still fully functional.
 
 If you prefer not to bypass OS security prompts, you can [build from source](#getting-started) yourself instead.
+
+## Platform-Specific Install Instructions
+
+<details>
+<summary><strong>🐧 Linux</strong></summary>
+
+**AppImage (recommended):**
+This is a full self-contained package.
+
+```bash
+chmod +x Bango_*_amd64.AppImage
+./Bango_*_amd64.AppImage
+```
+
+> If AppImage won't launch, ensure FUSE is installed: `sudo apt install libfuse2` (Debian/Ubuntu) or the equivalent for your distribution.
+
+**DEB package:**
+
+```bash
+sudo apt install ./Bango_*_amd64.deb
+```
+or
+
+```bash
+sudo dpkg -i Bango_*_amd64.deb
+sudo apt-get install -f   # resolve any missing dependencies
+```
+
+Linux does not enforce code signing, so no additional security bypass steps are needed.
+
+</details>
+
+<details>
+<summary><strong>🪟 Windows</strong></summary>
+
+1. Download [`Bango_3.1.1_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_x64-setup.exe) (or the [`.msi`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_x64_en-US.msi) for enterprise installs).
+2. Double-click to run the installer.
+3. **Windows SmartScreen** will show a warning: *"Windows protected your PC"*
+   - Click **"More info"**
+   - Click **"Run anyway"**
+4. Follow the setup wizard to complete installation.
+
+If your organization blocks unsigned installers via Group Policy, use the MSI package or build from source.
+
+</details>
+
+<details>
+<summary><strong>🍎 macOS</strong></summary>
+
+1. Download [`Bango_3.1.1_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_aarch64.dmg).
+2. Double-click the `.dmg` file to open it.
+3. Drag **Bango** to the **Applications** folder.
+4. On first launch, **macOS Gatekeeper** will block the app: *"Bango cannot be opened because the developer cannot be verified."*
+
+**To bypass Gatekeeper:**
+
+- **Option A:** Right-click (or Control-click) the app, select **"Open"**, then click **"Open"** again in the confirmation dialog.
+- **Option B:** Run the following command in Terminal:
+
+```bash
+xattr -cr /Applications/Bango.app
+```
+
+After bypassing once, the app will launch normally on subsequent opens.
+
+</details>
 
 ---
 
@@ -498,83 +564,17 @@ All LLM calls go through a centralized **LlmOrchestrator** that enforces concurr
 
 
 
-## Platform-Specific Install Instructions
 
-<details>
-<summary><strong>🐧 Linux</strong></summary>
 
-**AppImage (recommended):**
-This is a full self-contained package.
+## Build from Source
 
-```bash
-chmod +x Bango_*_amd64.AppImage
-./Bango_*_amd64.AppImage
-```
-
-> If AppImage won't launch, ensure FUSE is installed: `sudo apt install libfuse2` (Debian/Ubuntu) or the equivalent for your distribution.
-
-**DEB package:**
-
-```bash
-sudo apt install ./Bango_*_amd64.deb
-```
-or
-
-```bash
-sudo dpkg -i Bango_*_amd64.deb
-sudo apt-get install -f   # resolve any missing dependencies
-```
-
-Linux does not enforce code signing, so no additional security bypass steps are needed.
-
-</details>
-
-<details>
-<summary><strong>🪟 Windows</strong></summary>
-
-1. Download [`Bango_3.1.1_x64-setup.exe`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_x64-setup.exe) (or the [`.msi`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_x64_en-US.msi) for enterprise installs).
-2. Double-click to run the installer.
-3. **Windows SmartScreen** will show a warning: *"Windows protected your PC"*
-   - Click **"More info"**
-   - Click **"Run anyway"**
-4. Follow the setup wizard to complete installation.
-
-If your organization blocks unsigned installers via Group Policy, use the MSI package or build from source.
-
-</details>
-
-<details>
-<summary><strong>🍎 macOS</strong></summary>
-
-1. Download [`Bango_3.1.1_aarch64.dmg`](https://github.com/Bilal-S/Bango/releases/download/v3.1.1/Bango_3.1.1_aarch64.dmg).
-2. Double-click the `.dmg` file to open it.
-3. Drag **Bango** to the **Applications** folder.
-4. On first launch, **macOS Gatekeeper** will block the app: *"Bango cannot be opened because the developer cannot be verified."*
-
-**To bypass Gatekeeper:**
-
-- **Option A:** Right-click (or Control-click) the app, select **"Open"**, then click **"Open"** again in the confirmation dialog.
-- **Option B:** Run the following command in Terminal:
-
-```bash
-xattr -cr /Applications/Bango.app
-```
-
-After bypassing once, the app will launch normally on subsequent opens.
-
-</details>
-
-### Build from Source
-
-If you prefer to build Bango yourself, or need to run on an architecture without pre-built binaries, follow the instructions in [Getting Started](#getting-started) below.
+If you prefer to build Bango yourself, or need to run on an architecture without pre-built binaries, follow these instructions:
 
 > **RPM:** RPM packages are not published by CI.
 > To produce one, run `npm run tauri build -- --bundles rpm` on a Linux host (requires `rpm`/`rpmbuild`).
 > Add `rpm` to `bundle.targets` in [`src-tauri/tauri.conf.json`](src-tauri/tauri.conf.json) to make it the default.
 
----
 
-## 🚀 Getting Started
 
 ### Prerequisites
 
