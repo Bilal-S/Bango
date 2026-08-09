@@ -238,6 +238,8 @@ pub fn run() {
             commands::screening::get_screening_mode,
             commands::screening::set_screening_mode,
             commands::screening::get_full_text_article_count,
+            commands::screening::get_two_stage_thresholds,
+            commands::screening::set_two_stage_thresholds,
             commands::summary::generate_summary,
             commands::summary::get_saved_summary,
             commands::summary::generate_article_ai_summary,

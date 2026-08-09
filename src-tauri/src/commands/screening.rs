@@ -477,6 +477,84 @@ pub fn get_full_text_article_count(db_state: State<'_, DbState>) -> Result<i64, 
     chunk_repo::count_articles_with_full_text(&conn)
 }
 
+// ── Two-stage borderline thresholds (user-configurable, integer percent) ─────
+//
+// The two-stage borderline band `[two_stage_low, two_stage_high)` decides which
+// stage-1 articles get a second full-text pass (see `engine/stage2.rs::
+// is_borderline`). The band is stored in `app_settings` as `f64` in `[0,1]`
+// (defaults 0.4 / 0.7); these commands expose it to the Settings UI as whole
+// integer percents (0-100) so it matches the percent confidence shown in the
+// article list + AI decision card. Conversion happens at this IPC boundary;
+// `ScreeningConfig` and `is_borderline` keep using `f64` unchanged.
+
+/// Two-stage borderline band expressed as integer percent (0-100).
+/// `low_pct` is inclusive, `high_pct` is exclusive (mirrors the f64 contract).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TwoStageThresholds {
+    pub low_pct: u32,
+    pub high_pct: u32,
+}
+
+/// Convert an `f64` confidence fraction in `[0,1]` to a whole percent `0..=100`.
+/// Saturating + clamped so a malformed stored value can never yield > 100 or panic.
+#[must_use]
+fn f64_to_pct(value: f64) -> u32 {
+    if value.is_nan() {
+        return 0;
+    }
+    let pct = (value * 100.0).round().clamp(0.0, 100.0);
+    pct as u32
+}
+
+/// Convert a whole percent `0..=100` to an `f64` confidence fraction in `[0,1]`.
+#[must_use]
+fn pct_to_f64(pct: u32) -> f64 {
+    f64::from(pct.min(100)) / 100.0
+}
+
+/// Validate a `(low, high)` percent pair: both in `0..=100` and strict `low < high`.
+fn validate_thresholds(low_pct: u32, high_pct: u32) -> Result<(), AppError> {
+    if low_pct > 100 || high_pct > 100 {
+        return Err(AppError::Validation(format!(
+            "Two-stage thresholds must be 0-100 (got {low_pct}, {high_pct})"
+        )));
+    }
+    if low_pct >= high_pct {
+        return Err(AppError::Validation(format!(
+            "Two-stage lower threshold ({low_pct}%) must be less than the upper threshold ({high_pct}%)"
+        )));
+    }
+    Ok(())
+}
+
+/// Read the two-stage borderline band as integer percent. Defaults 40 / 70.
+#[tauri::command]
+pub fn get_two_stage_thresholds(
+    db_state: State<'_, DbState>,
+) -> Result<TwoStageThresholds, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let low = app_settings_repo::get_two_stage_low(&conn)?;
+    let high = app_settings_repo::get_two_stage_high(&conn)?;
+    Ok(TwoStageThresholds { low_pct: f64_to_pct(low), high_pct: f64_to_pct(high) })
+}
+
+/// Persist the two-stage borderline band (integer percent). Validates
+/// `0 <= low < high <= 100`, then stores as `f64` fractions. Returns the
+/// normalized percent pair that was persisted.
+#[tauri::command]
+pub fn set_two_stage_thresholds(
+    db_state: State<'_, DbState>,
+    low_pct: u32,
+    high_pct: u32,
+) -> Result<TwoStageThresholds, AppError> {
+    validate_thresholds(low_pct, high_pct)?;
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    app_settings_repo::set_two_stage_low(&conn, pct_to_f64(low_pct))?;
+    app_settings_repo::set_two_stage_high(&conn, pct_to_f64(high_pct))?;
+    Ok(TwoStageThresholds { low_pct, high_pct })
+}
+
 /// Screen a single article by its UUID. Powers the per-article "Screen" button.
 ///
 /// Unlike `start_screening` (which screens the next unscreened working article
@@ -744,4 +822,64 @@ async fn run_pre_screening_translation(
             message: "Translations complete; starting screening.".to_string(),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pct_conversions_round_trip() {
+        for pct in 0..=100u32 {
+            assert_eq!(f64_to_pct(pct_to_f64(pct)), pct, "round-trip {pct}");
+        }
+    }
+
+    #[test]
+    fn f64_to_pct_rounds_and_saturates() {
+        assert_eq!(f64_to_pct(0.0), 0);
+        assert_eq!(f64_to_pct(1.0), 100);
+        assert_eq!(f64_to_pct(0.4), 40);
+        assert_eq!(f64_to_pct(0.7), 70);
+        assert_eq!(f64_to_pct(0.555), 56); // rounds to nearest
+                                           // Defense: out-of-range / malformed values saturate, never panic.
+        assert_eq!(f64_to_pct(-0.5), 0);
+        assert_eq!(f64_to_pct(1.5), 100);
+        assert_eq!(f64_to_pct(f64::NAN), 0);
+    }
+
+    #[test]
+    fn pct_to_f64_yields_fraction() {
+        assert!((pct_to_f64(40) - 0.4).abs() < 1e-9);
+        assert!((pct_to_f64(70) - 0.7).abs() < 1e-9);
+        assert!((pct_to_f64(0) - 0.0).abs() < 1e-9);
+        assert!((pct_to_f64(100) - 1.0).abs() < 1e-9);
+        // Clamps > 100 (defense against a malformed caller).
+        assert!((pct_to_f64(150) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn validate_thresholds_accepts_strict_low_less_than_high() {
+        assert!(validate_thresholds(0, 100).is_ok());
+        assert!(validate_thresholds(40, 70).is_ok());
+        assert!(validate_thresholds(39, 40).is_ok()); // adjacent is fine
+    }
+
+    #[test]
+    fn validate_thresholds_rejects_low_equal_high() {
+        let err = validate_thresholds(70, 70).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)));
+        assert!(err.to_string().contains("must be less than"));
+    }
+
+    #[test]
+    fn validate_thresholds_rejects_low_greater_than_high() {
+        assert!(validate_thresholds(80, 20).is_err());
+    }
+
+    #[test]
+    fn validate_thresholds_rejects_above_one_hundred() {
+        assert!(validate_thresholds(101, 100).is_err());
+        assert!(validate_thresholds(70, 101).is_err());
+    }
 }

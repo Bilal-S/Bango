@@ -126,6 +126,27 @@ fn build_prompt_includes_criteria_when_present() {
 }
 
 #[test]
+fn build_prompt_includes_harmonization_guidance() {
+    // The user prompt must warn that negating exclusions are redundant and
+    // must not be encoded as self-canceling NOT clauses (defense in depth for
+    // the "exclusion negates inclusion" harmonization fix).
+    let aims = vec![aim("Test aim.")];
+    let inclusion =
+        vec![criterion("LLM-assisted screening", CriterionType::Inclusion, Priority::High)];
+    let exclusion =
+        vec![criterion("No LLM screening", CriterionType::Exclusion, Priority::Standard)];
+    let (_system, user) = build_search_strategy_prompt(&aims, &inclusion, &exclusion);
+    assert!(
+        user.contains("REDUNDANT"),
+        "harmonization guidance (negating exclusions are redundant) missing"
+    );
+    assert!(
+        user.contains("do NOT translate a negating exclusion"),
+        "must instruct the LLM not to translate negating exclusions into NOT clauses"
+    );
+}
+
+#[test]
 fn parse_response_parses_valid_eight_database_fixture() {
     let parsed = parse_search_strategy_response(VALID_FIXTURE).expect("valid fixture must parse");
     // PICO breakdown.

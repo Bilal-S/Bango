@@ -269,7 +269,7 @@ Application configurations are managed in the `app_settings` key-value table:
 * **`screening_mode`**: Tier 3 screening mode (§4.3.1).
 * **`enhanced_top_k`**: Criteria-matched chunks per article in Enhanced mode (default `2`).
 * **`enhanced_screening_sections`**: Comma-separated section allow-list for Enhanced evidence (default `"Methods,Results"`).
-* **`two_stage_low` / `two_stage_high`**: Borderline confidence band `[low, high)` triggering Two-stage's second pass (defaults `0.4` / `0.7`).
+* **`two_stage_low` / `two_stage_high`**: Borderline confidence band `[low, high)` triggering Two-stage's second pass (defaults `0.4` / `0.7`). User-configurable in Settings -> Screening Preferences as integer percent (defaults 40% / 70%); stored internally as `f64` fractions. The IPC commands `get_two_stage_thresholds` / `set_two_stage_thresholds` convert percent to/from the f64 band at the boundary.
 * **`chunk_budget_per_article`**: Per-article word budget for evidence chunks (default `2400`, ~600 tokens).
 * **`auto_translate`**: Opt-in toggle for translating non-English articles to English before AI processing (default `false`). See §4.4 for the full pipeline contract. The manual translate button works regardless of this setting. Persisted in the DB so backend stages can read it directly.
 * **`project_name`**: Optional user-editable Dashboard title (up to 50 chars). Double-click the title or click the pencil icon to edit inline; empty commit reverts to "Project Dashboard" fallback. **Portable**: travels with project backups. When a backup omits it, the target's existing name is cleared (NULL) so the dashboard reverts to the fallback. Cleared by Delete All Data.

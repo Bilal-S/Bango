@@ -19,3 +19,4 @@ the PR.
 | `src-tauri/tests/search_strategy_test.rs::parse_response_parses_valid_eight_database_fixture` | A complete JSON fixture with all 8 database fields deserializes into `SearchStrategyResult`. |
 | `src-tauri/tests/search_strategy_test.rs::parse_response_returns_error_on_malformed_json` | Malformed JSON yields an `AppError` (not a panic). |
 | `src-tauri/tests/search_strategy_test.rs::parse_response_tolerates_code_fences` | After `send_json` migration, fence-stripping moved upstream into `prepare_llm_json`; this test confirms the parse fn handles the post-`prepare_llm_json` cleaned payload. |
+| `src-tauri/tests/search_strategy_test.rs::build_prompt_includes_harmonization_guidance` | The user prompt warns that negating exclusions are redundant and must not be encoded as self-canceling NOT clauses. |

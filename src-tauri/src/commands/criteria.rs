@@ -132,7 +132,7 @@ pub async fn generate_criteria(
         ));
     }
 
-    let (config, aims) = {
+    let (config, aims, opposite_criteria) = {
         let conn = crate::db::connection::lock_conn(&db_state.conn)?;
         let config = llm_config_repo::get_config(&conn)?
             .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
@@ -142,51 +142,18 @@ pub async fn generate_criteria(
                 "Research aims must be defined before generating criteria".to_string(),
             ));
         }
-        (config, aims)
+        // Fetch the opposite-type criteria so the generation prompt can avoid
+        // producing negations of them (the "exclusion negates inclusion" bug).
+        let opposite_type = if criterion_type == "inclusion" { "exclusion" } else { "inclusion" };
+        let opposite = criteria_repo::get_criteria_by_type(&conn, opposite_type)?;
+        (config, aims, opposite)
     };
 
-    let aims_list: Vec<String> =
-        aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
-
-    let type_label = if criterion_type == "inclusion" { "inclusion" } else { "exclusion" };
-
-    let system_prompt = "You are a systematic literature review assistant. Based on the research aims provided, \
-        suggest appropriate criteria for screening research papers in a systematic review. \
-        Write criterion text concisely and directly - do not prefix with phrases like \
-        'Include studies that…' or 'Exclude studies that…'. The criterion type is already known from context. \
-        Do not use any EmDash characters your response. Example: write 'Randomized controlled trials only' not 'Include studies that use randomized controlled trials'.";
-
-    let user_prompt = format!(
-        r#"## Task
-First, determine the field of study based on the research aims below.
-Then suggest up to 8 {type_label} criteria that would be appropriate for this type of research.
-Criteria should follow common scientific and methodological patterns for systematic reviews in this domain.
-
-## Research Aims
-{research_aims}
-
-## Response Format
-Return JSON exactly matching this schema:
-{{
-  "criteria": [
-    {{ "text": "Description of the criterion", "priority": "standard" }},
-    ...
-  ]
-}}
-
-Rules:
-- Priority values: critical, high, standard, low, optional. Use "standard" unless there's a clear reason for a different priority.
-- Each criterion should be clear, specific, and actionable.
-- Criteria should be directly relevant to the research aims.
-- Do not duplicate or overlap concepts.
-- Do not use EmDash chracters in your response.
-- Write criterion text concisely. Do NOT start with "Include studies that…" or "Exclude studies that…" - state the essential condition directly."#,
-        type_label = type_label,
-        research_aims = aims_list.join("\n"),
-    );
+    let (system_prompt, user_prompt) =
+        build_criteria_generation_prompt(&aims, &criterion_type, &opposite_criteria);
 
     let result = orchestrator
-        .send_json(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
+        .send_json(&config, &system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
         .await;
     if let Err(ref e) = result {
         let err_msg = e.to_string();
@@ -225,6 +192,228 @@ Rules:
         .collect();
 
     Ok(GenerateCriteriaResult { criteria })
+}
+
+// ── Pure helper (extracted for testability) ──────────────────────────────
+
+/// Pure: build the (system, user) prompt pair for AI criteria generation.
+///
+/// Harmonization contract (fixes the "exclusion negates inclusion" bug):
+/// - Inclusion criteria define the SCOPE of the review (population,
+///   intervention, outcomes, study design, topical focus).
+/// - Exclusion criteria define INDEPENDENT removal reasons that would
+///   otherwise pass the inclusion filter (publication type, language,
+///   animal/in-vitro-only studies, duplicate publications, etc.).
+/// - An exclusion criterion must NEVER merely negate an inclusion criterion.
+///   When `opposite_criteria` is non-empty, its text is embedded so the LLM
+///   can see and avoid mirroring it. A negated inclusion is doubly redundant:
+///   spec §4.1 step 4 already excludes articles that match no inclusion, so
+///   restating it as an exclusion adds nothing to screening and bloats
+///   downstream search-strategy queries with self-canceling NOT clauses.
+#[must_use]
+pub fn build_criteria_generation_prompt(
+    aims: &[ResearchAim],
+    criterion_type: &str,
+    opposite_criteria: &[Criterion],
+) -> (String, String) {
+    let type_label = if criterion_type == "inclusion" { "inclusion" } else { "exclusion" };
+    let opposite_label = if criterion_type == "inclusion" { "exclusion" } else { "inclusion" };
+
+    // Exclusion criteria should be a small set of INDEPENDENT removal reasons
+    // (publication type, language, animal/in-vitro-only, duplicates, etc.).
+    // Capping lower than inclusion discourages padding the list with negations of
+    // inclusion criteria, which is the harmonization bug this prompt guards against.
+    let cap = if criterion_type == "exclusion" { "6" } else { "8" };
+
+    let aims_list: Vec<String> =
+        aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
+
+    let opposite_block = if opposite_criteria.is_empty() {
+        "None defined yet.".to_string()
+    } else {
+        opposite_criteria
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{}. [{}] {}", i + 1, c.priority.as_str(), c.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let system_prompt = "You are a systematic literature review assistant. Based on the research \
+        aims provided, suggest appropriate criteria for screening research papers in a systematic \
+        review. Write criterion text concisely and directly - do not prefix with phrases like \
+        'Include studies that...' or 'Exclude studies that...'. The criterion type is already \
+        known from context. Do not use em dash characters in your response. Example: write \
+        'Randomized controlled trials only' not 'Include studies that use randomized controlled \
+        trials'.";
+
+    let user_prompt = format!(
+        r#"## Task
+First, determine the field of study based on the research aims below.
+Then suggest up to {cap} {type_label} criteria appropriate for this type of research.
+Criteria should follow common scientific and methodological patterns for systematic reviews in this domain.
+
+## Division of Labor Between Inclusion and Exclusion Criteria
+- Inclusion criteria define the SCOPE of the review: the population, intervention,
+  outcomes, study design, and topical focus the review targets.
+- Exclusion criteria define INDEPENDENT removal reasons that would otherwise PASS the
+  inclusion filter - i.e., studies that look in-scope but must still be removed.
+  Typical independent exclusions: publication type (editorials, commentaries, conference
+  abstracts, protocols without an implemented prototype, opinion pieces), language
+  restrictions, animal/in-vitro-only studies, duplicate publications, inaccessible or
+  paywalled full text, and sample-size thresholds below a stated minimum.
+  Aim for a small, high-signal set (typically 3 to 6) rather than mirroring every
+  inclusion - the cap above is deliberately lower for exclusions.
+- CRITICAL - do NOT negate: an exclusion criterion must NEVER merely be the opposite
+  of an inclusion criterion (and vice versa). If a study fails an inclusion criterion it
+  is already excluded (the screening engine excludes any article that matches no
+  inclusion). Restating that as an exclusion criterion is redundant, and it bloats
+  search-strategy queries with self-canceling NOT clauses that fail to run.
+  Example of what to avoid: inclusion = "LLM-assisted screening"; exclusion = "No
+  application of LLMs to screening". The exclusion is a pure negation and must be
+  dropped in favor of independent removal reasons (e.g., "editorials and opinion
+  pieces", "non-English studies without translation").
+- Keep the two lists non-overlapping: each criterion should test a distinct
+  condition. Do not duplicate or restate concepts across the two types.
+
+## Existing {opposite_label} Criteria (do not duplicate or negate these)
+{opposite_block}
+
+## Research Aims
+{research_aims}
+
+## Response Format
+Return JSON exactly matching this schema:
+{{
+  "criteria": [
+    {{ "text": "Description of the criterion", "priority": "standard" }},
+    ...
+  ]
+}}
+
+Rules:
+- Priority values: critical, high, standard, low, optional. Use "standard" unless there's a clear reason for a different priority.
+- Each criterion should be clear, specific, and actionable.
+- Criteria should be directly relevant to the research aims.
+- Do not duplicate or overlap concepts with each other or with the existing {opposite_label} criteria above.
+- Do not use em dash characters in your response.
+- Write criterion text concisely. Do NOT start with "Include studies that..." or "Exclude studies that..." - state the essential condition directly."#,
+        type_label = type_label,
+        cap = cap,
+        opposite_label = opposite_label,
+        opposite_block = opposite_block,
+        research_aims = aims_list.join("\n"),
+    );
+
+    (system_prompt.to_string(), user_prompt)
+}
+
+// ── Pure helper: holistic ruleset review prompt (extracted for testability) ──
+
+/// Pure: build the (system, user) prompt pair for the holistic ruleset review
+/// (`check_rules`). Numbering mirrors the Criteria screen (inclusion 1..N, then
+/// exclusion N+1..N+M) so the LLM references the same numbers the user sees.
+///
+/// Harmonization contract: the review explicitly flags exclusion criteria that
+/// merely negate an inclusion criterion and recommends deleting them. This is
+/// the defense-in-depth counterpart to `build_criteria_generation_prompt` - it
+/// catches negations in ALREADY-EXISTING rulesets (e.g. a project whose
+/// exclusion list mirrors its inclusion list), which the generation guard
+/// cannot reach. Removing negating exclusions is also what keeps downstream
+/// search-strategy queries runnable (no self-canceling NOT clauses).
+#[must_use]
+pub fn build_check_rules_prompt(
+    aims: &[ResearchAim],
+    inclusion_criteria: &[Criterion],
+    exclusion_criteria: &[Criterion],
+    custom_logic: Option<&str>,
+) -> (String, String) {
+    let inclusion_refs: Vec<&Criterion> = inclusion_criteria.iter().collect();
+    let exclusion_refs: Vec<&Criterion> = exclusion_criteria.iter().collect();
+    let global_numbering = crate::screening::engine::build_global_criterion_numbering(
+        &inclusion_refs,
+        &exclusion_refs,
+    );
+
+    let aims_list: Vec<String> =
+        aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
+
+    let inc_list: Vec<String> = inclusion_criteria
+        .iter()
+        .map(|c| {
+            format!(
+                "{}. [{}] {} (priority: {})",
+                global_numbering.get(&c.id).unwrap_or(&0),
+                c.id,
+                c.text,
+                c.priority.as_str()
+            )
+        })
+        .collect();
+    let exc_list: Vec<String> = exclusion_criteria
+        .iter()
+        .map(|c| {
+            format!(
+                "{}. [{}] {} (priority: {})",
+                global_numbering.get(&c.id).unwrap_or(&0),
+                c.id,
+                c.text,
+                c.priority.as_str()
+            )
+        })
+        .collect();
+
+    let custom_logic_section = match custom_logic {
+        Some(text) if !text.trim().is_empty() => {
+            format!("\n## Custom Screening Instructions\n{}\n", text.trim())
+        }
+        _ => "\n## Custom Screening Instructions\n(none defined)\n".to_string(),
+    };
+
+    let system_prompt = "You are a systematic literature review ruleset reviewer. Evaluate the \
+        consistency, completeness, and clarity of the inclusion criteria, exclusion criteria, \
+        and any custom combinatorial screening instructions. Reference criteria by their \
+        numbered position. Provide specific, actionable feedback as plain text.";
+
+    let user_prompt = format!(
+        r#"## Task
+Review the complete screening ruleset for a systematic literature review. Identify:
+1. Exclusion criteria that merely NEGATE an inclusion criterion (or vice versa). A study that
+   fails an inclusion criterion is already excluded, so restating its opposite as an exclusion
+   is redundant. Flag every such negation and recommend DELETING it - negating exclusions also
+   bloat downstream search-strategy queries with self-canceling NOT clauses. Keep INDEPENDENT
+   exclusions (publication type such as editorials/commentaries/protocols without a prototype,
+   language restrictions, animal or in-vitro-only studies, duplicate publications) which remove
+   studies that would otherwise PASS the inclusion filter.
+2. Overlapping or duplicate criteria (within or across types)
+3. Ambiguous or unclear criteria wording
+4. Custom-rule references to criterion numbers that don't exist or are out of range
+5. Custom-rule logic that conflicts with the stated priorities
+6. Missing priorities or priority mis-orderings
+7. Gaps where common screening dimensions (population, intervention, outcomes, study design) are uncovered
+
+## Research Aims
+{research_aims}
+
+## Inclusion Criteria (numbered 1..N)
+{inclusion}
+
+## Exclusion Criteria (numbering continues N+1..N+M)
+{exclusion}
+{custom_logic_section}
+Provide your critique as plain text with specific recommendations. Group findings under the
+headings: Negations, Overlaps, Ambiguity, Custom-Rule Issues, Priority Issues, Gaps. For each
+negation or overlap, state explicitly whether the criterion should be DELETED or MERGED. Do not
+return JSON."#,
+        research_aims = aims_list.join("\n"),
+        inclusion =
+            if inc_list.is_empty() { "(none defined)".to_string() } else { inc_list.join("\n") },
+        exclusion =
+            if exc_list.is_empty() { "(none defined)".to_string() } else { exc_list.join("\n") },
+        custom_logic_section = custom_logic_section,
+    );
+
+    (system_prompt.to_string(), user_prompt)
 }
 
 #[derive(Deserialize)]
@@ -368,86 +557,15 @@ pub async fn check_rules(
         (config, aims, inclusion, exclusion, logic)
     };
 
-    // Build global numbering: inclusion 1..N, then exclusion N+1..N+M (mirrors
-    // the Criteria screen so the LLM sees the same numbers the user sees).
-    let inclusion_refs: Vec<&Criterion> = inclusion_criteria.iter().collect();
-    let exclusion_refs: Vec<&Criterion> = exclusion_criteria.iter().collect();
-    let global_numbering = crate::screening::engine::build_global_criterion_numbering(
-        &inclusion_refs,
-        &exclusion_refs,
-    );
-
-    let aims_list: Vec<String> =
-        aims.iter().enumerate().map(|(i, a)| format!("{}. {}", i + 1, a.text)).collect();
-
-    let inc_list: Vec<String> = inclusion_criteria
-        .iter()
-        .map(|c| {
-            format!(
-                "{}. [{}] {} (priority: {})",
-                global_numbering.get(&c.id).unwrap_or(&0),
-                c.id,
-                c.text,
-                c.priority.as_str()
-            )
-        })
-        .collect();
-    let exc_list: Vec<String> = exclusion_criteria
-        .iter()
-        .map(|c| {
-            format!(
-                "{}. [{}] {} (priority: {})",
-                global_numbering.get(&c.id).unwrap_or(&0),
-                c.id,
-                c.text,
-                c.priority.as_str()
-            )
-        })
-        .collect();
-
-    let custom_logic_section = match custom_logic.as_deref() {
-        Some(text) if !text.trim().is_empty() => {
-            format!("\n## Custom Screening Instructions\n{}\n", text.trim())
-        }
-        _ => "\n## Custom Screening Instructions\n(none defined)\n".to_string(),
-    };
-
-    let system_prompt = "You are a systematic literature review ruleset reviewer. Evaluate the \
-        consistency, completeness, and clarity of the inclusion criteria, exclusion criteria, \
-        and any custom combinatorial screening instructions. Reference criteria by their \
-        numbered position. Provide specific, actionable feedback as plain text.";
-
-    let user_prompt = format!(
-        r#"## Task
-Review the complete screening ruleset for a systematic literature review. Identify:
-1. Contradictions between inclusion and exclusion criteria
-2. Overlapping or duplicate criteria (within or across types)
-3. Ambiguous or unclear criteria wording
-4. Custom-rule references to criterion numbers that don't exist or are out of range
-5. Custom-rule logic that conflicts with the stated priorities
-6. Missing priorities or priority mis-orderings
-7. Gaps where common screening dimensions (population, intervention, outcomes, study design) are uncovered
-
-## Research Aims
-{research_aims}
-
-## Inclusion Criteria (numbered 1..N)
-{inclusion}
-
-## Exclusion Criteria (numbering continues N+1..N+M)
-{exclusion}
-{custom_logic_section}
-Provide your critique as plain text with specific recommendations. Group findings under the headings: Contradictions, Overlaps, Ambiguity, Custom-Rule Issues, Priority Issues, Gaps. Do not return JSON."#,
-        research_aims = aims_list.join("\n"),
-        inclusion =
-            if inc_list.is_empty() { "(none defined)".to_string() } else { inc_list.join("\n") },
-        exclusion =
-            if exc_list.is_empty() { "(none defined)".to_string() } else { exc_list.join("\n") },
-        custom_logic_section = custom_logic_section,
+    let (system_prompt, user_prompt) = build_check_rules_prompt(
+        &aims,
+        &inclusion_criteria,
+        &exclusion_criteria,
+        custom_logic.as_deref(),
     );
 
     let result = orchestrator
-        .send(&config, system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
+        .send(&config, &system_prompt, &user_prompt, LlmRequestType::CriteriaGeneration)
         .await;
     if let Err(ref e) = result {
         let err_msg = e.to_string();

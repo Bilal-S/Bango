@@ -41,7 +41,9 @@ describe('settings-screening-preferences.vue', () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'get_screening_mode') return Promise.resolve('abstract');
       if (cmd === 'get_full_text_article_count') return Promise.resolve(0);
+      if (cmd === 'get_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
       if (cmd === 'set_screening_mode') return Promise.resolve(undefined);
+      if (cmd === 'set_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
       return Promise.resolve(undefined);
     });
   });
@@ -86,6 +88,7 @@ describe('settings-screening-preferences.vue', () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'get_screening_mode') return Promise.resolve('enhanced');
       if (cmd === 'get_full_text_article_count') return Promise.resolve(0);
+      if (cmd === 'get_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
       return Promise.resolve(undefined);
     });
 
@@ -103,6 +106,7 @@ describe('settings-screening-preferences.vue', () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'get_screening_mode') return Promise.resolve('two_stage');
       if (cmd === 'get_full_text_article_count') return Promise.resolve(3);
+      if (cmd === 'get_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
       return Promise.resolve(undefined);
     });
 
@@ -121,6 +125,7 @@ describe('settings-screening-preferences.vue', () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'get_screening_mode') return Promise.resolve('abstract');
       if (cmd === 'get_full_text_article_count') return Promise.resolve(0);
+      if (cmd === 'get_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
       return Promise.resolve(undefined);
     });
 
@@ -129,5 +134,90 @@ describe('settings-screening-preferences.vue', () => {
 
     expect(wrapper.find('.mode-select__fallback').exists()).toBe(false);
     expect(wrapper.find('.mode-select__active').exists()).toBe(false);
+  });
+
+  it('shows the two-stage threshold inputs only when Two-stage mode is selected', async () => {
+    const wrapper = mountCard();
+    await flushPromises();
+
+    // Abstract mode (default): no threshold inputs rendered.
+    expect(wrapper.findAll('.threshold-input')).toHaveLength(0);
+
+    // Switch to Two-stage: inputs appear, on the same row as the select.
+    await wrapper.find('select.mode-select').setValue('two_stage');
+    await flushPromises();
+
+    const inputs = wrapper.findAll('.threshold-input');
+    expect(inputs).toHaveLength(2);
+    // Both the select and the threshold block live inside the same .mode-row.
+    expect(wrapper.find('.mode-row').exists()).toBe(true);
+    expect(wrapper.find('.mode-row').find('select.mode-select').exists()).toBe(true);
+  });
+
+  it('loads two-stage thresholds from the backend on mount', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_screening_mode') return Promise.resolve('two_stage');
+      if (cmd === 'get_full_text_article_count') return Promise.resolve(5);
+      if (cmd === 'get_two_stage_thresholds') return Promise.resolve({ lowPct: 35, highPct: 72 });
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    const inputs = wrapper.findAll('.threshold-input');
+    expect(inputs).toHaveLength(2);
+    expect((inputs[0]!.element as HTMLInputElement).value).toBe('35');
+    expect((inputs[1]!.element as HTMLInputElement).value).toBe('72');
+    // The dynamic Two-stage description reflects the live thresholds.
+    expect(wrapper.find('.mode-select__desc').text()).toContain('35-72%');
+  });
+
+  it('persists thresholds via set_two_stage_thresholds on change', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_screening_mode') return Promise.resolve('two_stage');
+      if (cmd === 'get_full_text_article_count') return Promise.resolve(2);
+      if (cmd === 'get_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
+      if (cmd === 'set_two_stage_thresholds') return Promise.resolve({ lowPct: 45, highPct: 65 });
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    const inputs = wrapper.findAll('.threshold-input');
+    await inputs[0]!.setValue('45');
+    await inputs[0]!.trigger('change');
+    await inputs[1]!.setValue('65');
+    await inputs[1]!.trigger('change');
+    await flushPromises();
+
+    expect(mockInvoke).toHaveBeenCalledWith('set_two_stage_thresholds', {
+      lowPct: 45,
+      highPct: 65,
+    });
+  });
+
+  it('rejects low >= high client-side without calling the backend', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'get_screening_mode') return Promise.resolve('two_stage');
+      if (cmd === 'get_full_text_article_count') return Promise.resolve(2);
+      if (cmd === 'get_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
+      if (cmd === 'set_two_stage_thresholds') return Promise.resolve({ lowPct: 40, highPct: 70 });
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    // Set low == high, which fails the strict low < high guard.
+    const inputs = wrapper.findAll('.threshold-input');
+    await inputs[0]!.setValue('70');
+    await inputs[1]!.setValue('70');
+    await inputs[1]!.trigger('change');
+    await flushPromises();
+
+    expect(wrapper.find('.mode-error').text()).toContain('Lower threshold');
+    expect(mockInvoke).not.toHaveBeenCalledWith('set_two_stage_thresholds', expect.anything());
   });
 });

@@ -157,10 +157,22 @@ using that database's syntax from the cheatsheet in your instructions.
 - Extract Population, Intervention, Comparison, and Outcome concepts from the
   aims. Omit an arm when it genuinely does not apply (e.g., observational
   reviews often have no Comparison).
-- For each concept, list 3 to 8 synonyms, variant spellings, and related terms.
+- For each concept, list 3 to 6 synonyms, variant spellings, and related terms.
+  Prefer precise, high-signal terms over a long list of marginal variants.
 - Compose one Boolean string per database using that database's syntax from the
   cheatsheet. Join concepts with AND; join synonyms within a concept with OR
   inside parentheses.
+- Exclusion handling - avoid self-canceling queries: an exclusion criterion
+  that merely negates an inclusion criterion is REDUNDANT. The inclusion
+  AND-groups already enforce scope, so do NOT translate a negating exclusion
+  into a NOT clause (that produces a query that cancels its own inclusion
+  terms and will not run). Only encode INDEPENDENT exclusions - removal
+  reasons that would otherwise pass the inclusion filter (publication type,
+  language, animal/in-vitro-only studies, duplicate publications, etc.) - as
+  narrow, specific NOT clauses. Omit any exclusion that restates an inclusion.
+- Keep each database string runnable: a few targeted NOT clauses, not many
+  broad ones. If the exclusion list is long, encode only the highest-priority
+  independent exclusions and note the rest in `notes`.
 - Each database entry must include a short `notes` field explaining any
   database-specific choices (field codes, proximity operators, MeSH headings).
 - Add a warning for Semantic Scholar: it does NOT support Boolean operators, so

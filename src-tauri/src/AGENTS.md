@@ -150,6 +150,31 @@ legacy upgrade round-trip. `reset_project_test.rs` covers `reset_project_inner`
 `wiki_index_drift_test.rs` cover the wiki pipelines. `sections_test.rs` +
 `chunking_test.rs` cover the utils text-classification + chunking.
 
+### Criteria harmonization (inclusion/exclusion division of labor)
+
+Inclusion criteria define the SCOPE of a review; exclusion criteria define
+INDEPENDENT removal reasons that would otherwise pass the inclusion filter
+(publication type, language, animal/in-vitro-only studies, duplicates). An
+exclusion criterion must NEVER merely negate an inclusion criterion: the
+screening engine already excludes any article that matches no inclusion, so a
+negating exclusion is doubly redundant AND bloats search-strategy queries with
+self-canceling NOT clauses that fail to run.
+
+Enforced across three prompt builders (each a `pub fn` pure helper with binding
+tests):
+- `commands::criteria::build_criteria_generation_prompt` - surfaces existing
+  opposite-type criteria, caps exclusions lower (6 vs 8), and carries the
+  "do not negate" guidance.
+- `commands::criteria::build_check_rules_prompt` - the holistic "review my
+  ruleset" review flags negations in ALREADY-EXISTING criteria and recommends
+  deleting them (catches the generation guard's blind spot).
+- `commands::search_strategy::build_search_strategy_prompt` - tells the LLM to
+  drop negating exclusions rather than encoding them as self-canceling NOT
+  clauses.
+Binding inventory: `docs/test-plans/criteria-generation-tests.md` and
+`docs/test-plans/search-strategy-tests.md` (enforced by
+`scripts/check-test-inventory.sh` via `npm run check:all`).
+
 ## Work Guidance
 
 - All LLM calls MUST flow through `LlmOrchestrator` (see `llm/AGENTS.md`),

@@ -241,7 +241,11 @@ param.
   text get a second per-article evidence call that overrides stage 1; both
   passes flow through `resolve_decision` and write audit entries (`ai_screen`
   stage 1, `ai_screen_enhanced` stage 2). `ScreeningProgress` gains
-  `stage`/`stage_total` for the progress sub-line.
+  `stage`/`stage_total` for the progress sub-line. The borderline band is
+  user-configurable in Settings -> Screening Preferences as integer percent
+  (defaults 40% / 70%); stored/used internally as `f64` `[0,1]` and converted
+  at the IPC boundary (`get_two_stage_thresholds` /
+  `set_two_stage_thresholds`).
 - **Always-selectable mode + per-article fallback**: all three modes are
   selectable in Settings regardless of attachments/articles; Enhanced and
   Two-stage evidence retrieval is applied per article only when
@@ -297,8 +301,11 @@ background task before `run_sync` (NOT in the synchronous IPC handler, so the
 PDF-parse + chunk-write pass does not freeze the UI by holding the DbState
 mutex); the Settings "Rebuild text chunks" button calls the same fn with
 `force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
-`get_screening_mode`/`set_screening_mode`/`get_full_text_article_count`
-commands. The `commands/screening.rs` honors `1..=15` verbatim for `batch_size`,
+`get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` and
+`get_two_stage_thresholds`/`set_two_stage_thresholds` (the latter two speak
+integer percent 0-100, converting to the f64 band at the boundary; pure helpers
+`f64_to_pct`/`pct_to_f64`/`validate_thresholds` + inline tests live in the same
+file). The `commands/screening.rs` honors `1..=15` verbatim for `batch_size`,
 matching the frontend stepper's `BATCH_MAX`.
 
 ## Work Guidance
