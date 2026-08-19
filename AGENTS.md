@@ -78,39 +78,11 @@ Default section order:
 
 When the user requests a durable behavior change, record it here or in the relevant child AGENTS.md
 
-### Frontend "is the LLM configured?" gate - single canonical pattern
-
-- EVERY frontend feature gate that depends on "LLM configured" (Chat, Wiki,
-  Screening, OpenAlex Smart Search, Dashboard CTA, AI Summary, AI buttons in
-  the article detail panel, Search Strategy Builder, Citation Finder
-  readiness) MUST read `useLlmConfigured()` (from
-  `src/composables/use-llm-configured.ts`), which wraps
-  `useLlmConfigStore().isConfigured`.
-- No component, view, composable, or store may hold a local
-  `isLlmConfigured`/`llmConfigured`/`smartSearchAvailable` ref populated by a
-  one-shot `has_llm_config` IPC call, nor re-derive the local-provider
-  (`ollama`/`lmStudio`/`llamaCpp`) check from `apiKeyEncrypted`. Both
-  patterns go stale on Settings edits (the original bug: clearing the API key
-  in Settings did not disable Chat/Wiki/Screening until a manual refresh).
-- The Pinia store (`src/stores/llm-config.ts`) is the single source of truth.
-  Its `isConfigured` computed mirrors the backend
-  `llm_config_repo::has_config` contract (initialized + endpoint + model +
-  (local-provider OR API key)). `useLlmConfigStore` keeps the
-  `LOCAL_PROVIDERS` set store-private and exports only the
-  `isLocalProvider(provider)` predicate, so the local-provider set has exactly
-  one frontend definition (mirrors the backend Rust `is_local` match).
-- The `has_llm_config` Tauri command stays registered (the screening
-  `get_screening_readiness` composite still calls `has_config` server-side),
-  but NO frontend caller may invoke it directly. The one exception is
-  `screening-progress.vue`, which ANDs the backend composite
-  `readiness.hasLlmConfig` with `useLlmConfigured()` so the Start button +
-  guardrails react instantly to Settings edits without waiting for the
-  composite readiness to re-fetch.
-- `use-llm-config.ts::save()` re-fetches the store after every successful
-  `save_llm_config` so the in-memory `config` reflects the post-save DB state
-  (the backend encrypts `api_key_encrypted`, replacing the plaintext the user
-  typed with the encrypted blob). This keeps `isConfigured` accurate after
-  every save.
+- **Frontend "is the LLM configured?" gate - single canonical pattern**:
+  every frontend feature gate that depends on "LLM configured" MUST read
+  `useLlmConfigured()` (which wraps the `llm-config` Pinia store); no
+  component, view, composable, or store may derive its own LLM-configured
+  state. Full contract: `src/AGENTS.md` §Local Contracts.
 
 ## Child DOX Index
 
@@ -121,14 +93,18 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
 - **`src-tauri/src/`** - Rust backend (Tauri 2.x). Owns the article state
   machine, hard-delete cascade, journal-index loader, startup upgrade path,
   and the backend Child DOX Index. See `src-tauri/src/AGENTS.md`. Child docs:
-  `db/`, `llm/`, `screening/`, `wiki/`, `embedding/`, `citation_finder/`,
-  `translation/`, `batch_import/`, `openalex/`, `scraping/`, `export/`,
-  `utils/`.
-- **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend. Owns keep-alive
-  caching, the LLM-configured gate (cross-ref to User Preferences above),
-  settings cards, the chat store, and the frontend Child DOX Index covering
-  `views/`, `components/`, `composables/`, `stores/`, `utils/`, `types/`,
-  `router/`, `styles/`. See `src/AGENTS.md`.
+  `commands/`, `db/`, `llm/`, `screening/`, `wiki/`, `embedding/`,
+  `citation_finder/`, `translation/`, `batch_import/`, `openalex/`,
+  `scraping/`, `export/`, `utils/`.
+- **`src-tauri/tests/`** - Rust integration tests (one self-contained crate
+  per `.rs` file; also the extraction home for inline `#[cfg(test)]` blocks).
+  See `src-tauri/tests/AGENTS.md`.
+- **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend. Owns the canonical
+  LLM-configured gate, the multi-source `watch()` rule, and the shared test
+  helpers, plus the frontend Child DOX Index: `views/`, `components/`,
+  `composables/`, `stores/` each have their own `AGENTS.md`; `utils/`,
+  `types/`, `router/`, `styles/`, `workers/` are indexed inline. See
+  `src/AGENTS.md`.
 - **`landingpage/`** - standalone marketing microsite (NOT part of the shipped
   Tauri app). Static HTML5 + Tailwind v4 (browser CDN build). Two pages
   (`index.html` + `help.html`); shared `assets/`. When porting app Help
@@ -152,24 +128,7 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
 `-D warnings` on the library crate + vitest + `check:test-inventory`) and
-`cargo test`. The clippy rule lives in `src-tauri/Cargo.toml`
-`[lints.clippy]` (escalated to deny by `-D warnings`); `unwrap_used`,
-`expect_used`, and `panic` are re-asserted test-aware in `src-tauri/src/lib.rs`
-via `#![cfg_attr(not(test), warn(...))]` so they fire on production code but
-not on test code (see `docs/CLAUDE.md` §Error Handling).
-
-Coverage tooling: `npm run test:coverage` (Vue/TS via `@vitest/coverage-v8`, config in
-`vitest.config.ts`, report at `coverage/index.html`) and
-`cd src-tauri && cargo llvm-cov --html --output-dir target/llvm-cov/html` (Rust via
-`cargo-llvm-cov` + `llvm-tools-preview`, report at
-`src-tauri/target/llvm-cov/html/html/index.html`). Both artifact dirs are git-ignored.
-
-Disk-space: `src-tauri/target` can balloon into hundreds of GB because each of the
-~136 `src-tauri/tests/*.rs` files compiles into its own ~450MB test binary (each
-statically links llama.cpp/LLM + headless_chrome + GTK + tauri), and Cargo never
-deletes stale hashed binaries across builds. `target/llvm-cov-target` (~50G) is
-cargo-llvm-cov's separate target dir. Reclaim space with `npm run clean:rust`
-(full `cargo clean`) or `npm run sweep:rust` (`cargo-sweep -t 14`, removes only
-artifacts untouched >14 days — preferred periodic cleanup). After coverage runs,
-`cargo llvm-cov clean` drops `target/llvm-cov-target`. `cargo-sweep` must be
-installed (`cargo install cargo-sweep`).
+`cargo test`. Clippy test-awareness details live in `docs/CLAUDE.md`
+§Error Handling; per-side coverage tooling and the `src-tauri/target`
+disk-space contract live in the `src/AGENTS.md` and `src-tauri/src/AGENTS.md`
+Verification sections.

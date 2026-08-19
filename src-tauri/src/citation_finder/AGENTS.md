@@ -225,8 +225,8 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `async` and each takes a brief `lock_conn` burst per article (releasing
   between articles, with `tokio::task::yield_now()`), so the `DbState` mutex
   is never held across the up-to-150 chunk reads (30 candidates × 5 claims)
-  or the ≤15 metadata reads. Avoids the mutex-starvation anti-pattern the
-  root `AGENTS.md` flags for screening.
+  or the ≤15 metadata reads. Avoids the mutex-starvation anti-pattern
+  `db/AGENTS.md` flags.
 - **Clean error messages**: the `citation:error` event strips the
   `AppError::Import` `"Import error: "` prefix (`raw.strip_prefix(...)` in
   `commands/citation_finder.rs`) so the frontend receives bare user-facing
