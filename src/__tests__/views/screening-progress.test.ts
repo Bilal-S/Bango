@@ -22,6 +22,7 @@ const mockLoading = ref(false);
 const mockReadinessLoading = ref(false);
 const mockError = ref<string | null>(null);
 const mockTokenWarning = ref<string | null>(null);
+const mockLlmConfigured = ref(true);
 
 function resetMockState(): void {
   mockReadiness.value = {
@@ -39,13 +40,14 @@ function resetMockState(): void {
   mockReadinessLoading.value = false;
   mockError.value = null;
   mockTokenWarning.value = null;
+  mockLlmConfigured.value = true;
 }
 
 // `screening-progress.vue` ANDs `readiness.hasLlmConfig` with the live
-// `useLlmConfigured()` gate. Mock it true so the Start button is enabled
-// (the readiness mock already sets hasLlmConfig: true).
+// `useLlmConfigured()` gate. Controllable ref so individual tests can flip
+// the gate and assert guardrails/empty-state rendering.
 vi.mock('@/composables/use-llm-configured', () => ({
-  useLlmConfigured: () => ref(true),
+  useLlmConfigured: () => mockLlmConfigured,
 }));
 
 vi.mock('@/composables/use-screening', () => ({
@@ -205,5 +207,24 @@ describe('screening-progress.vue - start controls and subtitle', () => {
     const startBtn = getStartButton(wrapper);
     expect(startBtn).toBeTruthy();
     expect(startBtn!.attributes('disabled')).toBeDefined();
+  });
+
+  it('renders no empty-state hint when fully configured (LLM configured, green readiness)', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('.screening-view__empty').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('Configure your criteria and LLM settings');
+  });
+
+  it('shows guardrails instead of an empty-state hint when the live LLM gate is off', async () => {
+    mockLlmConfigured.value = false;
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.find('.screening-view__empty').exists()).toBe(false);
+    expect(wrapper.text()).toContain('LLM is not configured. Set up your LLM in Settings.');
+    expect(wrapper.text()).not.toContain('Configure your criteria and LLM settings');
   });
 });

@@ -605,14 +605,6 @@ const isWorkingListScreened = computed((): boolean => {
           <span class="material-symbols-outlined" style="font-size: 16px">arrow_forward</span>
         </button>
       </div>
-
-      <!-- Empty State (when no progress and no guardrails - shouldn't normally show but fallback) -->
-      <div
-        v-if="!progress && !loading && readiness && blockingReasons.length === 0"
-        class="screening-view__empty"
-      >
-        <p>Configure your criteria and LLM settings, then start screening.</p>
-      </div>
     </template>
   </div>
 </template>
@@ -938,12 +930,6 @@ const isWorkingListScreened = computed((): boolean => {
   font-size: var(--font-size-caption);
   color: var(--color-on-surface-variant);
   font-weight: var(--font-weight-medium);
-}
-
-.screening-view__empty {
-  text-align: center;
-  color: var(--color-on-surface-variant);
-  padding: var(--space-10) 0;
 }
 
 .btn {
