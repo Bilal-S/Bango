@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-PLAN_DOCS=(docs/test-plans/language-plan-v2-tests.md docs/test-plans/translation-3-tests.md docs/test-plans/search-strategy-tests.md docs/test-plans/criteria-generation-tests.md docs/test-plans/openalex-tests.md docs/test-plans/exim-tests.md docs/test-plans/import-plan-tests.md docs/test-plans/refactor3-tests.md docs/test-plans/refactor5-tests.md docs/test-plans/citation-finder-tests.md docs/test-plans/embedding-probe-persist-tests.md docs/test-plans/tags-merge-tests.md docs/test-plans/wiki-ingest-freeze-tests.md)
+PLAN_DOCS=(docs/test-plans/language-plan-v2-tests.md docs/test-plans/translation-3-tests.md docs/test-plans/search-strategy-tests.md docs/test-plans/criteria-generation-tests.md docs/test-plans/openalex-tests.md docs/test-plans/exim-tests.md docs/test-plans/import-plan-tests.md docs/test-plans/refactor3-tests.md docs/test-plans/refactor5-tests.md docs/test-plans/citation-finder-tests.md docs/test-plans/embedding-probe-persist-tests.md docs/test-plans/tags-merge-tests.md docs/test-plans/wiki-ingest-freeze-tests.md docs/test-plans/refactor1-tests.md)
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
