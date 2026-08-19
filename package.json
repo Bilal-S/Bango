@@ -20,6 +20,8 @@
     "check:test-inventory": "bash scripts/check-test-inventory.sh",
     "test:coverage": "vitest run --coverage",
     "coverage:rust": "source \"$HOME/.cargo/env\" 2>/dev/null; cd src-tauri && cargo llvm-cov --fail-under-lines 70",
+    "clean:rust": "cd src-tauri && cargo clean",
+    "sweep:rust": "cd src-tauri && cargo sweep -t 14",
     "test:watch": "vitest",
     "postinstall": "simple-git-hooks || true",
     "tauri:windows:build": "tauri-windows-bundle build"

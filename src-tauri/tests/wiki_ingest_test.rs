@@ -1166,8 +1166,10 @@ async fn cancel_token_aborts_during_llm_batch() {
 
 #[test]
 fn progress_events_fire_for_each_preseed_step() {
+    // Alias for the pre-seed progress callback slot (clippy type_complexity).
+    type ProgressCb<'a> = Option<&'a dyn Fn(usize, &str)>;
     let events: std::cell::RefCell<Vec<(usize, String)>> = std::cell::RefCell::new(Vec::new());
-    let cb: Option<&dyn Fn(usize, &str)> = Some(&|step, msg| {
+    let cb: ProgressCb<'_> = Some(&|step, msg| {
         events.borrow_mut().push((step, msg.to_string()));
     });
 

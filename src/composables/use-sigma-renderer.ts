@@ -72,7 +72,7 @@ void main(void) {
   }
 }
 
-interface SigmaRendererOptions {
+export interface SigmaRendererOptions {
   /** Min camera ratio (zoom in limit). Default 0.1 */
   minCameraRatio?: number;
   /** Max camera ratio (zoom out limit). Default 10 */

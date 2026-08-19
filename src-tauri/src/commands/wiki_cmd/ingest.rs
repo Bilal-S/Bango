@@ -15,7 +15,6 @@
 //! `report.errors.push("Cancelled")` - there is no `Cancelled` error variant
 //! (mirrors the screening engine's `Ok(true)`/`Ok(false)` convention).
 
-use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -624,11 +623,4 @@ async fn wiki_export_and_ingest_inner(
 pub fn cancel_wiki_ingest(state: tauri::State<'_, WikiIngestState>) -> Result<(), AppError> {
     state.cancel_active();
     Ok(())
-}
-
-/// Helper used by tests and (later) other commands to resolve the root without
-/// going through Tauri state. Not a `#[tauri::command]`.
-#[allow(dead_code)]
-pub(crate) fn root_for_conn(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
-    storage::resolve_root(conn)
 }

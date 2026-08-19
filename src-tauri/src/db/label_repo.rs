@@ -1,46 +1,33 @@
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
+use crate::db::tag_label_core::{self, read_row, NamedEntityRow};
 use crate::error::AppError;
 use crate::models::label::{Label, LabelSource};
 
+fn label_source(source: &str) -> LabelSource {
+    match source {
+        "ai_generated" => LabelSource::AiGenerated,
+        _ => LabelSource::UserCreated,
+    }
+}
+
+/// Map one raw `labels` row to the public `Label` model.
+fn label_from_row(row: NamedEntityRow) -> Label {
+    Label { id: row.id, name: row.name, source: label_source(&row.source), color: row.color }
+}
+
 pub fn get_all_labels(conn: &Connection) -> Result<Vec<Label>, AppError> {
     let mut stmt = conn.prepare("SELECT id, name, source, color FROM labels ORDER BY name")?;
-    let rows = stmt.query_map([], |row| {
-        let source_str: String = row.get(2)?;
-        let source = match source_str.as_str() {
-            "ai_generated" => LabelSource::AiGenerated,
-            _ => LabelSource::UserCreated,
-        };
-        Ok(Label { id: row.get(0)?, name: row.get(1)?, source, color: row.get(3)? })
-    })?;
+    let rows = stmt.query_map([], |row| Ok(label_from_row(read_row(row)?)))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn create_label(conn: &Connection, name: &str, source: &str) -> Result<Label, AppError> {
-    // Check if label already exists (case-insensitive) to avoid UNIQUE constraint violation
-    let existing: Option<Label> = conn
-        .query_row(
-            "SELECT id, name, source, color FROM labels WHERE LOWER(name) = LOWER(?1)",
-            params![name],
-            |row| {
-                let source_str: String = row.get(2)?;
-                let source_enum = match source_str.as_str() {
-                    "ai_generated" => LabelSource::AiGenerated,
-                    _ => LabelSource::UserCreated,
-                };
-                Ok(Label {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    source: source_enum,
-                    color: row.get(3)?,
-                })
-            },
-        )
-        .ok();
-
-    if let Some(label) = existing {
-        return Ok(label);
+    // Dedupe case-insensitively to avoid the UNIQUE constraint violation
+    // (pinned by tests/tags_labels_test.rs::create_label_dedupes_normalized_name).
+    if let Some(raw) = tag_label_core::find_by_normalized_name(conn, "labels", name) {
+        return Ok(label_from_row(raw));
     }
 
     let id = Uuid::new_v4().to_string();
@@ -48,11 +35,7 @@ pub fn create_label(conn: &Connection, name: &str, source: &str) -> Result<Label
         "INSERT INTO labels (id, name, source) VALUES (?1, ?2, ?3)",
         params![id, name, source],
     )?;
-    let source_enum = match source {
-        "ai_generated" => LabelSource::AiGenerated,
-        _ => LabelSource::UserCreated,
-    };
-    Ok(Label { id, name: name.to_string(), source: source_enum, color: None })
+    Ok(Label { id, name: name.to_string(), source: label_source(source), color: None })
 }
 
 pub fn rename_label(conn: &Connection, id: &str, new_name: &str) -> Result<Label, AppError> {
@@ -114,15 +97,7 @@ pub fn create_labels_batch(
 ) -> Result<Vec<Label>, AppError> {
     let mut labels = Vec::with_capacity(names.len());
     for name in names {
-        let exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM labels WHERE LOWER(name) = LOWER(?1)",
-                params![name],
-                |row| row.get::<_, usize>(0),
-            )
-            .map(|c| c > 0)
-            .unwrap_or(false);
-        if !exists {
+        if !tag_label_core::exists_normalized(conn, "labels", name) {
             labels.push(create_label(conn, name, source)?);
         }
     }

@@ -5,13 +5,7 @@
 
 use crate::db::connection::DbState;
 use crate::error::AppError;
-use crate::wiki::{engine, frontmatter, fts, storage};
-
-// Allow frontmatter import to be referenced (used by tests + future lint command).
-#[allow(dead_code)]
-fn _ensure_frontmatter_linked() {
-    let _ = frontmatter::Frontmatter::default();
-}
+use crate::wiki::{engine, fts, storage};
 
 /// Search the wiki FTS5 index. Returns BM25-ranked hits.
 #[tauri::command]

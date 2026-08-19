@@ -7,7 +7,7 @@ import CocitationHeatmap from '../components/cocitation-heatmap.vue';
 import ArticleDetailPanel from '../components/article-detail-panel.vue';
 import { useCocitationNetwork } from '../composables/use-cocitation-network';
 import { useNetworkView } from '../composables/use-network-view';
-import { applyCocitationGraphFilters } from '../utils/graph-filters';
+import { applyCocitationGraphFilters, applyRejectedMatchesFilter } from '../utils/graph-filters';
 import { useArticleSearch } from '../composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
 import { useToast } from '../composables/use-toast';
@@ -245,38 +245,18 @@ async function onParamsChange() {
   }
 }
 
+/** Last search string emitted by the controls sidebar, so the
+ * "Hide rejected matches" toggle can re-compose search + rejected filters. */
+let lastSearch = '';
+
 function onFilterChange(filters: { search: string }) {
   if (!graph.value) return;
+  lastSearch = filters.search;
   /* Co-citation nodes lack `weight` (carry coCitationCount/citationCount),
-   * so keyword filter can't be reused. Use dedicated co-citation search. */
-  const result = applyCocitationGraphFilters(graph.value, { search: filters.search });
-  visibleNodeCount.value = result.visibleNodes;
-  applyHideRejectedFilter();
-}
-
-/**
- * Toggle the `hidden` attribute on nodes whose matched article is rejected.
- * Called after the search filter so the two compose (a node hidden by either
- * stays hidden). Does not touch edges - the renderer already drops edges to
- * hidden nodes. Recomputes the visible-node count so the stats row updates.
- */
-function applyHideRejectedFilter(): void {
-  if (!graph.value) return;
-  let visible = 0;
-  graph.value.forEachNode((id) => {
-    const attrs = graph.value!.getNodeAttributes(id);
-    const isRejected = attrs.matchedArticleStatus === 'rejected';
-    // Preserve the search filter's hidden state; only force-hide on rejected.
-    if (isRejected && hideRejectedMatches.value) {
-      attrs.hidden = true;
-    } else if (attrs.hidden === true && !isRejected) {
-      /* Only un-hide if the search filter didn't hide for another reason.
-       * To avoid clobbering the search filter, re-run via onFilterChange. */
-      attrs.hidden = false;
-    }
-    if (attrs.hidden !== true) visible++;
-  });
-  visibleNodeCount.value = visible;
+   * so keyword filter can't be reused. Use dedicated co-citation search.
+   * The rejected-matches filter layers on top and never un-hides. */
+  applyCocitationGraphFilters(graph.value, { search: filters.search });
+  visibleNodeCount.value = applyRejectedMatchesFilter(graph.value, hideRejectedMatches.value);
 }
 
 /**
@@ -291,14 +271,9 @@ function onHideRejectedToggle(value: boolean): void {
   graph.value.forEachNode((id) => {
     graph.value!.setNodeAttribute(id, 'hidden', false);
   });
-  // Re-run the search filter (reads the search box) then the rejected filter.
-  applyHideRejectedFilter();
-  visibleNodeCount.value =
-    visibleNodeCount.value -
-    (graph.value.filterNodes((id) => {
-      const a = graph.value!.getNodeAttributes(id);
-      return a.matchedArticleStatus === 'rejected' && hideRejectedMatches.value;
-    }).length ?? 0);
+  // Re-run the search filter (last emitted search) then the rejected filter.
+  applyCocitationGraphFilters(graph.value, { search: lastSearch });
+  visibleNodeCount.value = applyRejectedMatchesFilter(graph.value, hideRejectedMatches.value);
 }
 
 async function onExportImage(format: NetworkExportFormat) {

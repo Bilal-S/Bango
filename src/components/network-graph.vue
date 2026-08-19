@@ -1,42 +1,19 @@
 <template>
   <div class="relative w-full h-full bg-slate-50/50 overflow-hidden">
     <!-- Sigma container -->
-    <div ref="containerRef" class="w-full h-full" />
+    <div ref="sigmaContainer" class="w-full h-full" />
 
-    <!-- Loading overlay -->
-    <div
-      v-if="loading || isLayouting"
-      class="absolute inset-0 z-20 flex items-center justify-center bg-white/60 backdrop-blur-sm"
-    >
-      <div class="flex items-center gap-3 text-slate-600">
-        <span class="material-symbols-outlined text-xl animate-spin">progress_activity</span>
-        <span class="text-sm font-medium">{{
-          isLayouting ? 'Computing layout…' : 'Loading network…'
-        }}</span>
-      </div>
-    </div>
-
-    <!-- Error overlay -->
-    <div v-else-if="error" class="absolute inset-0 z-20 flex items-center justify-center">
-      <div class="text-center p-6 max-w-sm">
-        <span class="material-symbols-outlined text-3xl text-red-400 mb-2 block">error</span>
-        <p class="text-sm text-red-600">{{ error }}</p>
-        <button
-          class="mt-3 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer transition-colors"
-          @click="$emit('retry')"
-        >
-          Retry
-        </button>
-      </div>
-    </div>
-
-    <!-- Empty state -->
-    <div v-else-if="!hasGraph" class="absolute inset-0 z-20 flex items-center justify-center">
-      <div class="text-center text-slate-400">
-        <span class="material-symbols-outlined text-4xl mb-2 block">hub</span>
-        <p class="text-sm">No network data. Import articles first.</p>
-      </div>
-    </div>
+    <!-- Loading / error / empty overlay -->
+    <GraphStatusOverlay
+      :loading="loading"
+      :is-layouting="isLayouting"
+      :error="error"
+      :empty="!hasGraph"
+      loading-label="Loading network…"
+      empty-icon="hub"
+      empty-text="No network data. Import articles first."
+      @retry="$emit('retry')"
+    />
 
     <!-- Hover tooltip -->
     <div
@@ -54,76 +31,42 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue';
+import { watch } from 'vue';
 import type Graph from 'graphology';
-import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { useNetworkGraph } from '../composables/use-network-graph';
 import { clusterColor } from '../types/biblio-network';
 import type { CoAuthorNode } from '../types/biblio-network';
+import type { NetworkGraphProps } from '../types/network-graph';
 import { getTemporalColor } from '@/utils/color';
+import GraphStatusOverlay from './graph-status-overlay.vue';
 
-const props = defineProps<{
-  graph: Graph | null;
-  loading: boolean;
-  isLayouting: boolean;
-  error: string | null;
-  focusedNodeId: string | null;
-  selectedClusters: number[];
-  colorMode: 'cluster' | 'temporal';
-  minYear: number;
-  maxYear: number;
-  recalculateTrigger: number;
-}>();
+const props = defineProps<NetworkGraphProps>();
 
 const emit = defineEmits<{
   (e: 'node-click', nodeId: string | null): void;
   (e: 'retry'): void;
 }>();
 
-const containerRef = ref<HTMLElement>();
-const hoveredNode = ref<CoAuthorNode | null>(null);
-const tooltipX = ref(0);
-const tooltipY = ref(0);
-
-let isUnmounted = false;
-let pendingFrame: number | null = null;
-
-const { renderer, initRenderer, destroyRenderer, locateNode, resetZoom, refresh } =
-  useSigmaRenderer();
-
-const hasGraph = computed(() => (props.graph?.order ?? 0) > 0);
-
-const tooltipPosition = computed(() => ({
-  left: `${tooltipX.value + 12}px`,
-  top: `${tooltipY.value - 8}px`,
-}));
-
-watch(
-  () => props.graph,
-  (g) => {
-    if (pendingFrame !== null) {
-      cancelAnimationFrame(pendingFrame);
-      pendingFrame = null;
-    }
-    if (!g) {
-      destroyRenderer();
-      return;
-    }
-    if (!containerRef.value) return;
-    clearFocusMode();
-    pendingFrame = requestAnimationFrame(() => {
-      pendingFrame = null;
-      if (isUnmounted || !containerRef.value || !g) return;
-      initRenderer(containerRef.value, g, {
-        labelRenderSizeThreshold: 1.2,
-        defaultEdgeColor: '#e2e8f0',
-      });
-      bindSigmaEvents();
+const { hoveredNode, hasGraph, tooltipPosition, renderer, locateNode, resetZoom, refresh } =
+  useNetworkGraph<CoAuthorNode>(props, {
+    rendererOptions: {
+      labelRenderSizeThreshold: 1.2,
+      defaultEdgeColor: '#e2e8f0',
+    },
+    mapHoveredNode,
+    /* The co-author graph dispatches its own focus > cluster > clear logic per
+       prop change, so the shared reapply watchers are disabled and installed
+       locally below. */
+    installStandardWatchers: false,
+    onBeforeInit: clearFocusMode,
+    onGraphReady: () => {
       if (props.focusedNodeId) {
         applyFocusMode(props.focusedNodeId);
       }
-    });
-  }
-);
+    },
+    applyVisualState: clearFocusMode,
+    onNodeClick: (nodeId) => emit('node-click', nodeId),
+  });
 
 watch(
   () => props.focusedNodeId,
@@ -190,46 +133,17 @@ function getNodeColor(nodeId: string): string {
   }
 }
 
-function bindSigmaEvents() {
-  if (!renderer.value) return;
-  const sig = renderer.value;
-
-  sig.on('enterNode', ({ node }) => {
-    if (!props.graph) return;
-    const attrs = props.graph.getNodeAttributes(node);
-    hoveredNode.value = {
-      id: node,
-      label: attrs.label ?? node,
-      weight: attrs.weight ?? 0,
-      totalCitations: attrs.totalCitations ?? 0,
-      avgYear: attrs.avgYear ?? null,
-      estimatedHIndex: attrs.estimatedHIndex ?? null,
-      cluster: attrs.cluster ?? null,
-      color: getNodeColor(node),
-    };
-  });
-
-  sig.on('leaveNode', () => {
-    hoveredNode.value = null;
-  });
-
-  sig.on('moveBody', (payload) => {
-    const mouseEvt = payload.event.original as MouseEvent;
-    if (!mouseEvt.x) return;
-    const rect = containerRef.value?.getBoundingClientRect();
-    if (rect) {
-      tooltipX.value = mouseEvt.x - rect.left;
-      tooltipY.value = mouseEvt.y - rect.top;
-    }
-  });
-
-  sig.on('clickNode', ({ node }) => {
-    emit('node-click', node);
-  });
-
-  sig.on('clickStage', () => {
-    emit('node-click', null);
-  });
+function mapHoveredNode(node: string, attrs: ReturnType<Graph['getNodeAttributes']>): CoAuthorNode {
+  return {
+    id: node,
+    label: attrs.label ?? node,
+    weight: attrs.weight ?? 0,
+    totalCitations: attrs.totalCitations ?? 0,
+    avgYear: attrs.avgYear ?? null,
+    estimatedHIndex: attrs.estimatedHIndex ?? null,
+    cluster: attrs.cluster ?? null,
+    color: getNodeColor(node),
+  };
 }
 
 defineExpose({
@@ -305,13 +219,4 @@ function clearFocusMode() {
     g.setEdgeAttribute(e as string, 'color', '#e2e8f0');
   });
 }
-
-onUnmounted(() => {
-  isUnmounted = true;
-  if (pendingFrame !== null) {
-    cancelAnimationFrame(pendingFrame);
-    pendingFrame = null;
-  }
-  destroyRenderer();
-});
 </script>

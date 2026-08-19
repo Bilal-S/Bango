@@ -5,6 +5,7 @@ import {
   applyCitationGraphFilters,
   applyCocitationGraphFilters,
   applyKeywordGraphFilters,
+  applyRejectedMatchesFilter,
 } from '@/utils/graph-filters';
 
 // ─── graph builders ──────────────────────────────────────────────
@@ -608,5 +609,60 @@ describe('applyKeywordGraphFilters', () => {
       search: '',
     });
     expect(result.visibleNodes).toBe(2);
+  });
+});
+
+describe('applyRejectedMatchesFilter', () => {
+  function makeGraph(): Graph {
+    const g = new Graph({ type: 'undirected' });
+    g.addNode('kept', { label: 'Kept Paper', matchedArticleStatus: 'included' });
+    g.addNode('rejected', { label: 'Rejected Paper', matchedArticleStatus: 'rejected' });
+    g.addNode('unmatched', { label: 'Unmatched Paper', matchedArticleStatus: null });
+    g.addUndirectedEdge('kept', 'rejected');
+    return g;
+  }
+
+  it('hides rejected matches when hide is true and returns the composed count', () => {
+    const g = makeGraph();
+    const visible = applyRejectedMatchesFilter(g, true);
+    expect(g.getNodeAttribute('rejected', 'hidden')).toBe(true);
+    /* Untouched nodes stay `undefined` (visible) - the helper only ever adds hiding. */
+    expect(g.getNodeAttribute('kept', 'hidden')).not.toBe(true);
+    expect(g.getNodeAttribute('unmatched', 'hidden')).not.toBe(true);
+    expect(visible).toBe(2);
+  });
+
+  it('never hides anything when hide is false', () => {
+    const g = makeGraph();
+    const visible = applyRejectedMatchesFilter(g, false);
+    expect(g.getNodeAttribute('rejected', 'hidden')).not.toBe(true);
+    expect(visible).toBe(3);
+  });
+
+  it('does not un-hide nodes the search filter hid (regression)', () => {
+    /* Regression: the old inline view version un-hid every non-rejected
+     * node, silently cancelling the live search filter. The compose contract:
+     * a node hidden by the search stays hidden; rejected adds hiding. */
+    const g = makeGraph();
+    g.setNodeAttribute('kept', 'hidden', true); // hidden by search
+    g.setNodeAttribute('unmatched', 'hidden', true); // hidden by search
+
+    const visible = applyRejectedMatchesFilter(g, true);
+
+    expect(g.getNodeAttribute('kept', 'hidden')).toBe(true);
+    expect(g.getNodeAttribute('unmatched', 'hidden')).toBe(true);
+    expect(g.getNodeAttribute('rejected', 'hidden')).toBe(true);
+    expect(visible).toBe(0);
+  });
+
+  it('composes with the cocitation search filter end to end', () => {
+    const g = makeGraph();
+    applyCocitationGraphFilters(g, { search: 'kept' });
+    const visible = applyRejectedMatchesFilter(g, true);
+    // Only 'kept' matches the search; the rejected match is additionally hidden.
+    expect(visible).toBe(1);
+    expect(g.getNodeAttribute('kept', 'hidden')).toBe(false);
+    expect(g.getNodeAttribute('rejected', 'hidden')).toBe(true);
+    expect(g.getNodeAttribute('unmatched', 'hidden')).toBe(true);
   });
 });

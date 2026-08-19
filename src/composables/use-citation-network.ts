@@ -1,34 +1,20 @@
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import Graph from 'graphology';
 import { tauriCommand } from './use-tauri-command';
+import {
+  createBiblioNetworkState,
+  runNetworkFetch,
+  scaleToRange,
+} from './use-biblio-network-fetch';
 import type {
   CitationNetworkData,
   CitationNetworkMeta,
   CitationNode,
 } from '../types/biblio-citation';
 
-const graph = ref<Graph | null>(null);
-const loading = ref(false);
-const error = ref<string | null>(null);
+const { graph, loading, error, nodeCount, edgeCount } = createBiblioNetworkState();
 /** Diagnostic counts from the backend (article/paper/edge totals). */
 const meta = ref<CitationNetworkMeta | null>(null);
-
-const nodeCount = computed(() => graph.value?.order ?? 0);
-const edgeCount = computed(() => graph.value?.size ?? 0);
-
-/**
- * Scale a numeric value from one range to another.
- */
-function scale(
-  value: number,
-  inMin: number,
-  inMax: number,
-  outMin: number,
-  outMax: number
-): number {
-  if (inMax === inMin) return (outMin + outMax) / 2;
-  return outMin + ((value - inMin) / (inMax - inMin)) * (outMax - outMin);
-}
 
 /**
  * Build a directed graphology Graph instance from raw citation network data.
@@ -61,7 +47,7 @@ function buildGraph(data: CitationNetworkData): Graph {
       abstract: node.abstract,
       // Unmatched leaves are always small; real articles scale with citations.
       // +2 floor so zero-citation papers are still visible.
-      size: isUnmatched ? 3 : scale(node.numCited, minCited, maxCited, 4, 22),
+      size: isUnmatched ? 3 : scaleToRange(node.numCited, minCited, maxCited, 4, 22),
       x: Math.random() * 100,
       y: Math.random() * 100,
       // Unmatched leaves get a muted grey; real articles default to indigo.
@@ -100,32 +86,28 @@ function buildGraph(data: CitationNetworkData): Graph {
  */
 export function useCitationNetwork() {
   async function fetchNetwork(includeUnmatched = false): Promise<void> {
-    loading.value = true;
-    error.value = null;
+    await runNetworkFetch(
+      { graph, loading, error },
+      async () => {
+        const data = await tauriCommand<CitationNetworkData>(
+          'biblio_get_citation_network',
+          includeUnmatched ? { includeUnmatched: true } : undefined
+        );
 
-    try {
-      const data = await tauriCommand<CitationNetworkData>(
-        'biblio_get_citation_network',
-        includeUnmatched ? { includeUnmatched: true } : undefined
-      );
+        // Always capture diagnostic meta, even when there are no nodes, so the
+        // empty-state can explain why the graph is sparse.
+        meta.value = data?.meta ?? null;
 
-      // Always capture diagnostic meta, even when there are no nodes, so the
-      // empty-state can explain why the graph is sparse.
-      meta.value = data?.meta ?? null;
+        if (!data?.nodes?.length) {
+          return null;
+        }
 
-      if (!data?.nodes?.length) {
-        graph.value = null;
-        return;
+        return buildGraph(data);
+      },
+      () => {
+        meta.value = null;
       }
-
-      graph.value = buildGraph(data);
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-      graph.value = null;
-      meta.value = null;
-    } finally {
-      loading.value = false;
-    }
+    );
   }
 
   function clearGraph(): void {

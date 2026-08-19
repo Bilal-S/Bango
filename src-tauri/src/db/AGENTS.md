@@ -12,10 +12,10 @@ maintenance (VACUUM), and the shared `DbState` connection holder.
 - Owns: `connection.rs`, `migration.rs`, `schema_check.rs`, `rebuild.rs`,
   `maintenance.rs`, `mod.rs`, `app_settings_repo.rs`, `article_repo/`,
   `biblio_repo/`, `journal_repo.rs`, `tag_repo.rs`, `label_repo.rs`,
-  `criteria_repo.rs`, `audit_repo.rs`, `llm_config_repo.rs`,
-  `embedding_repo.rs`, `chunk_repo.rs`, `reference_repo.rs`,
-  `summary_repo.rs`, `gap_analysis_repo.rs`, `article_original_repo.rs`,
-  `migrations/`.
+  `tag_label_core.rs`, `criteria_repo.rs`, `audit_repo.rs`,
+  `llm_config_repo.rs`, `embedding_repo.rs`, `chunk_repo.rs`,
+  `reference_repo.rs`, `summary_repo.rs`, `gap_analysis_repo.rs`,
+  `saved_report.rs`, `article_original_repo.rs`, `migrations/`.
 - Consumed by every backend module that touches the DB.
 
 ## Local Contracts
@@ -189,6 +189,27 @@ articles). `mod.rs` re-exports the public API unchanged. The full 8-step
 bibliometric pipeline is extracted into a pure
 `pub fn run_full_normalization(conn)` in `biblio_repo/normalization.rs` and
 shared by both `biblio_normalize` and the wiki ingest path.
+
+### `saved_report.rs` + `tag_label_core.rs` - shared repo cores (refactor v1 Tier 2)
+
+`summary` and `gap_analysis` are separate single-row tables sharing one
+contract (spec §10.2: `id = 1`, wiped by `reset_project`, excluded from
+`ProjectBackup`). `saved_report.rs` owns the shared save/get/clear core;
+`summary_repo.rs` and `gap_analysis_repo.rs` are thin wrappers supplying a
+`SavedReportTable { table, text_column }` const and mapping the generic
+`SavedReport { text, ... }` into their serde-renamed public structs
+(`summaryText` / `gapText` IPC shapes unchanged). Table/column identifiers
+are compile-time constants - never user input - so the composed SQL is safe;
+all values stay bound parameters.
+
+`tag_label_core.rs` holds the mechanical `tags`/`labels` helpers (raw
+`id, name, source, color` row read, case-insensitive
+`LOWER(name) = LOWER(?1)` lookup, batch exists-check). Tags and labels stay
+distinct domain concepts per spec: separate repos, models, and commands;
+only the SQL shapes are shared. The normalized-name create-dedupe contract
+(existing row returned on case-insensitive match, original casing preserved)
+is pinned by `tests/tags_labels_test.rs::create_tag_dedupes_normalized_name`
++ `create_label_dedupes_normalized_name`.
 
 ### `journal_repo.rs` - journal_index lookup/match
 

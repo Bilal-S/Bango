@@ -68,6 +68,15 @@ the right edge. Props: `modelValue`, `placeholder`, `inputClass`, `disabled`,
 "x" is clicked), `enter`, `input`/`focus`/`blur`. The canonical place for the
 clearable-input pattern going forward.
 
+### `chip-base.vue`
+
+Shared chip scaffold used by `tag-chip.vue` (`variant="filled"`, solid
+scheme background) and `label-chip.vue` (`variant="dot"`, transparent with a
+leading color dot). Owns the `getColorScheme` bindings, the optional
+`highlight` indigo match halo, and the optional `(N)` count suffix; wrappers
+forward props and pick a variant (DOM output is byte-identical per variant).
+The canonical place for the chip pattern going forward.
+
 ### `openalex-search.vue`
 
 OpenAlex Search tab (`/articles` → Search). Input row holds `Search`,
@@ -159,6 +168,38 @@ populate via reference/citation imports. `scripts/enrich_demo.py` is the
 idempotent generator (deterministic UUID5 article IDs); re-run after schema
 changes.
 
+### Bibliometric network graph quartet (`*-network-graph.vue`)
+
+`citation-network-graph.vue`, `cocitation-network-graph.vue`,
+`keyword-network-graph.vue`, and `network-graph.vue` (co-author) share
+scaffolding instead of duplicating it:
+
+- `composables/use-network-graph.ts` owns the Sigma renderer lifecycle
+  (rAF-deferred init with unmount guards, container via
+  `useTemplateRef('sigmaContainer')`), hover-tooltip state, sigma event
+  bindings, and the standard reapply watchers (focusedNodeId, colorMode,
+  selectedClusters, recalculateTrigger). The co-author graph passes
+  `installStandardWatchers: false` plus `onBeforeInit`/`onGraphReady` because
+  it dispatches its own focus > cluster > clear logic per prop change.
+- `components/graph-status-overlay.vue` renders the loading/error/empty
+  chain; only the hover tooltip stays in each domain component.
+- `types/network-graph.ts` (`NetworkGraphProps`, `NetworkColorMode`,
+  `NetworkSearchSuggestion`) is the shared props contract; domain components
+  extend it via `defineProps<NetworkGraphProps & { ... }>`.
+- `IsolationDirection` remains exported from `citation-network-graph.vue`
+  (imported by the citations view and paper detail panel).
+- `composables/use-biblio-network-fetch.ts` backs the network composables
+  (`createBiblioNetworkState` module-scope state bundle, `runNetworkFetch`
+  loading/error scaffold, `scaleToRange`). The keyword composable keeps its
+  bespoke worker flow (loading stays held open until the layout worker
+  responds) but shares the state bundle and `scaleToRange`.
+- The controls sidebars (`citation/cocitation/keyword/network-controls.vue`)
+  are built from `network-search-box.vue` (v-model + input/select/
+  select-first/clear/escape emits; Enter-select deliberately skips the filter
+  emit in keyword/coauthor - that asymmetry lives in the parents),
+  `network-threshold-slider.vue` (input = every tick, commit = release), and
+  `network-export-menu.vue` (owns its own open state).
+
 ## Work Guidance
 
 - Follow the root `AGENTS.md` User Preferences for the LLM-configured gate.
@@ -203,14 +244,20 @@ No child `AGENTS.md` files yet under `src/`. The durable boundaries are:
   `article-filter-panel.vue`, `article-metadata.vue`, `ai-decision-card.vue`,
   `detail-header.vue`, `wiki-toolbar.vue`, `wiki-page-viewer.vue`,
   `wiki-page-editor.vue`, `wiki-graph-panel.vue`, `openalex-search.vue`,
-  `openalex-result-item.vue`, `openalex-detail-panel.vue`. `help/` holds the
+  `openalex-result-item.vue`, `openalex-detail-panel.vue`. Shared network
+  primitives: `graph-status-overlay.vue`, `network-search-box.vue`,
+  `network-threshold-slider.vue`, `network-export-menu.vue` (see Local
+  Contracts above). `help/` holds the
   six `help-tab-*.vue` tab components. `settings/` holds the settings
   sub-components (see Local Contracts above).
 - **`composables/`** - Vue composables. Notable: `use-startup-upgrade.ts`,
   `use-bibliometrics.ts`, `use-journal-info.ts`, `use-article-search.ts`,
   `use-network-view.ts`, `use-nav-history.ts`, `use-full-text-attachment.ts`,
   `use-article-delete.ts`, `use-gap-analysis.ts`, `use-llm-configured.ts`,
-  `use-wiki.ts`, `use-llm-config.ts`.
+  `use-wiki.ts`, `use-llm-config.ts`, `use-saved-report.ts` (shared
+  saved-report factory behind `use-summary` + `use-gap-analysis`),
+  `use-network-graph.ts` + `use-biblio-network-fetch.ts` (shared scaffolding
+  behind the four biblio network views; see Local Contracts above).
 - **`stores/`** - Pinia stores. Notable: `chat.ts`, `openalex.ts`,
   `llm-config.ts`.
 - **`utils/`** - pure utilities. Notable: `network-export.ts`, `formatters.ts`,

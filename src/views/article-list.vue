@@ -415,53 +415,56 @@ async function handleBulkMoveToWorking(): Promise<void> {
   toast.show(`${ids.length} article${ids.length > 1 ? 's' : ''} moved to Working`, 'success');
 }
 
+/* Shared bulk tag/label mutation: reads the dialog input, runs the IPC
+ * mutation, closes the dialog, then toasts using the real affected count -
+ * an info no-op message when nothing changed, or a success (add) /
+ * warning (remove) action message with the exact affected/selected counts. */
+async function runBulkTagLabelMutation(
+  action: (ids: string[], name: string) => Promise<number>,
+  kind: 'Tag' | 'Label',
+  mode: 'add' | 'remove',
+  closeDialog: () => void
+): Promise<void> {
+  const name = bulkInputValue.value.trim();
+  if (!name) return;
+  const ids = Array.from(selectedIds.value);
+  const affected = await action(ids, name);
+  closeDialog();
+  const plural = ids.length > 1 ? 's' : '';
+  if (affected === 0) {
+    toast.show(
+      mode === 'add'
+        ? `${kind} "${name}" was already on all ${ids.length} selected article${plural}.`
+        : `${kind} "${name}" was not present on any of the ${ids.length} selected article${plural}.`,
+      'info'
+    );
+  } else {
+    toast.show(
+      mode === 'add'
+        ? `${kind} "${name}" added to ${affected} of ${ids.length} selected article${plural}.`
+        : `${kind} "${name}" removed from ${affected} of ${ids.length} selected article${plural}.`,
+      mode === 'add' ? 'success' : 'warning'
+    );
+  }
+}
+
 function openBulkTagDialog(): void {
   bulkInputValue.value = '';
   bulkTagDialogOpen.value = true;
 }
 
 async function handleBulkAddTag(): Promise<void> {
-  const name = bulkInputValue.value.trim();
-  if (!name) return;
-  const ids = Array.from(selectedIds.value);
-  const affected = await bulkAddTag(ids, name);
-  bulkTagDialogOpen.value = false;
-  if (affected === 0) {
-    toast.show(
-      `Tag "${name}" was already on all ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'info'
-    );
-  } else {
-    toast.show(
-      `Tag "${name}" added to ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'success'
-    );
-  }
+  await runBulkTagLabelMutation(bulkAddTag, 'Tag', 'add', () => {
+    bulkTagDialogOpen.value = false;
+  });
 }
 
-/**
- * Bulk-remove handler for the "Remove Tag" button in the Change Tag dialog.
- * Uses the real affected count (articles that actually had the tag) so the
- * toast is accurate: warning-styled removal message, or an info no-op message
- * when the tag was not present on any selected article.
- */
+/* "Remove Tag" button in the Change Tag dialog; toast semantics in
+ * `runBulkTagLabelMutation`. */
 async function handleBulkRemoveTag(): Promise<void> {
-  const name = bulkInputValue.value.trim();
-  if (!name) return;
-  const ids = Array.from(selectedIds.value);
-  const affected = await bulkRemoveTag(ids, name);
-  bulkTagDialogOpen.value = false;
-  if (affected === 0) {
-    toast.show(
-      `Tag "${name}" was not present on any of the ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'info'
-    );
-  } else {
-    toast.show(
-      `Tag "${name}" removed from ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'warning'
-    );
-  }
+  await runBulkTagLabelMutation(bulkRemoveTag, 'Tag', 'remove', () => {
+    bulkTagDialogOpen.value = false;
+  });
 }
 
 function openBulkLabelDialog(): void {
@@ -470,45 +473,17 @@ function openBulkLabelDialog(): void {
 }
 
 async function handleBulkAddLabel(): Promise<void> {
-  const name = bulkInputValue.value.trim();
-  if (!name) return;
-  const ids = Array.from(selectedIds.value);
-  const affected = await bulkAddLabel(ids, name);
-  bulkLabelDialogOpen.value = false;
-  if (affected === 0) {
-    toast.show(
-      `Label "${name}" was already on all ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'info'
-    );
-  } else {
-    toast.show(
-      `Label "${name}" added to ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'success'
-    );
-  }
+  await runBulkTagLabelMutation(bulkAddLabel, 'Label', 'add', () => {
+    bulkLabelDialogOpen.value = false;
+  });
 }
 
-/**
- * Bulk-remove handler for the "Remove Label" button in the Change Label
- * dialog. See {@link handleBulkRemoveTag} for the toast semantics.
- */
+/* "Remove Label" button in the Change Label dialog; toast semantics in
+ * `runBulkTagLabelMutation`. */
 async function handleBulkRemoveLabel(): Promise<void> {
-  const name = bulkInputValue.value.trim();
-  if (!name) return;
-  const ids = Array.from(selectedIds.value);
-  const affected = await bulkRemoveLabel(ids, name);
-  bulkLabelDialogOpen.value = false;
-  if (affected === 0) {
-    toast.show(
-      `Label "${name}" was not present on any of the ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'info'
-    );
-  } else {
-    toast.show(
-      `Label "${name}" removed from ${affected} of ${ids.length} selected article${ids.length > 1 ? 's' : ''}.`,
-      'warning'
-    );
-  }
+  await runBulkTagLabelMutation(bulkRemoveLabel, 'Label', 'remove', () => {
+    bulkLabelDialogOpen.value = false;
+  });
 }
 
 function handleBulkAddToChat(): void {

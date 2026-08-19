@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 use serde::Serialize;
 
+use crate::db::saved_report::{self, SavedReportTable};
 use crate::error::AppError;
 
 /// persisted Research Gap Analysis report (single-row, mirrors `SavedSummary`).
@@ -12,6 +13,9 @@ pub struct SavedGapAnalysis {
     pub generated_at: String,
 }
 
+/// Single-row `gap_analysis` table identifiers for the shared saved-report core.
+const TABLE: SavedReportTable = SavedReportTable { table: "gap_analysis", text_column: "gap_text" };
+
 /// Upsert the gap report. Single-row table (`id = 1 CHECK`), same shape as
 /// `summary_repo::save_summary`.
 pub fn save_gap_analysis(
@@ -20,45 +24,17 @@ pub fn save_gap_analysis(
     citation_style: &str,
     generated_at: &str,
 ) -> Result<(), AppError> {
-    let exists: bool = conn
-        .query_row("SELECT COUNT(*) > 0 FROM gap_analysis WHERE id = 1", [], |row| row.get(0))
-        .unwrap_or(false);
-
-    if exists {
-        conn.execute(
-            "UPDATE gap_analysis SET gap_text = ?1, citation_style = ?2, generated_at = ?3 WHERE id = 1",
-            rusqlite::params![gap_text, citation_style, generated_at],
-        )?;
-    } else {
-        conn.execute(
-            "INSERT INTO gap_analysis (id, gap_text, citation_style, generated_at) VALUES (1, ?1, ?2, ?3)",
-            rusqlite::params![gap_text, citation_style, generated_at],
-        )?;
-    }
-
-    Ok(())
+    saved_report::save(conn, &TABLE, gap_text, citation_style, generated_at)
 }
 
 pub fn get_gap_analysis(conn: &Connection) -> Result<Option<SavedGapAnalysis>, AppError> {
-    let mut stmt = conn
-        .prepare("SELECT gap_text, citation_style, generated_at FROM gap_analysis WHERE id = 1")?;
-
-    let result = stmt.query_row([], |row| {
-        Ok(SavedGapAnalysis {
-            gap_text: row.get(0)?,
-            citation_style: row.get(1)?,
-            generated_at: row.get(2)?,
-        })
-    });
-
-    match result {
-        Ok(gap) => Ok(Some(gap)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(AppError::Database(e)),
-    }
+    Ok(saved_report::get(conn, &TABLE)?.map(|r| SavedGapAnalysis {
+        gap_text: r.text,
+        citation_style: r.citation_style,
+        generated_at: r.generated_at,
+    }))
 }
 
 pub fn clear_gap_analysis(conn: &Connection) -> Result<(), AppError> {
-    conn.execute("DELETE FROM gap_analysis WHERE id = 1", [])?;
-    Ok(())
+    saved_report::clear(conn, &TABLE)
 }

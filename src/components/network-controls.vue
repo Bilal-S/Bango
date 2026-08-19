@@ -3,90 +3,44 @@
     class="flex flex-col gap-4 p-4 bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/80 shadow-sm"
   >
     <!-- Search with autocomplete -->
-    <div class="relative">
-      <span
-        class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-base z-10"
-        >search</span
-      >
-      <input
-        v-model="searchQuery"
-        type="text"
-        placeholder="Search authors…"
-        class="w-full pl-8 pr-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-        @input="onSearchInput"
-        @keydown.enter="selectFirstSuggestion"
-        @keydown.escape="clearSuggestions"
-        @focus="showSuggestions = true"
-      />
-      <!-- Autocomplete dropdown -->
-      <ul
-        v-if="showSuggestions && suggestions.length > 0"
-        class="absolute z-20 left-0 right-0 top-full mt-1 max-h-40 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"
-      >
-        <li
-          v-for="s in suggestions"
-          :key="s.id"
-          class="px-3 py-1.5 text-sm cursor-pointer hover:bg-indigo-50 text-slate-700 truncate"
-          @mousedown.prevent="selectSuggestion(s)"
-        >
-          {{ s.label }}
-          <span class="text-xs text-slate-400 ml-1"
-            >({{ s.weight }} {{ s.weight === 1 ? 'paper' : 'papers' }})</span
-          >
-        </li>
-      </ul>
-    </div>
+    <NetworkSearchBox
+      v-model="searchQuery"
+      placeholder="Search authors…"
+      :suggestions="suggestions"
+      @input="onSearchInput"
+      @select-first="onSelectFirst"
+      @select="selectSuggestion"
+    />
 
     <!-- Min papers slider -->
-    <div>
-      <label class="flex items-center justify-between text-xs text-slate-600 mb-1">
-        <span>Min. Papers</span>
-        <span class="font-semibold tabular-nums">{{ minPapers }}</span>
-      </label>
-      <input
-        v-model.number="minPapers"
-        type="range"
-        :min="1"
-        :max="maxPapersLimit"
-        step="1"
-        class="w-full accent-indigo-600"
-        @input="emitFilters"
-      />
-    </div>
+    <NetworkThresholdSlider
+      v-model="minPapers"
+      label="Min. Papers"
+      :min="1"
+      :max="maxPapersLimit"
+      :step="1"
+      @input="emitFilters"
+    />
 
     <!-- Min link strength slider -->
-    <div>
-      <label class="flex items-center justify-between text-xs text-slate-600 mb-1">
-        <span>Min. Link Strength</span>
-        <span class="font-semibold tabular-nums">{{ minLinkStrength }}</span>
-      </label>
-      <input
-        v-model.number="minLinkStrength"
-        type="range"
-        :min="1"
-        :max="maxLinkLimit"
-        step="1"
-        class="w-full accent-indigo-600"
-        @input="emitFilters"
-      />
-    </div>
+    <NetworkThresholdSlider
+      v-model="minLinkStrength"
+      label="Min. Link Strength"
+      :min="1"
+      :max="maxLinkLimit"
+      :step="1"
+      @input="emitFilters"
+    />
 
     <!-- Max authors per document slider -->
-    <div>
-      <label class="flex items-center justify-between text-xs text-slate-600 mb-1">
-        <span>Max. Authors per Document</span>
-        <span class="font-semibold tabular-nums">{{ maxAuthors }}</span>
-      </label>
-      <input
-        v-model.number="maxAuthors"
-        type="range"
-        :min="20"
-        :max="200"
-        step="5"
-        class="w-full accent-indigo-600"
-        @input="emitFilters"
-      />
-    </div>
+    <NetworkThresholdSlider
+      v-model="maxAuthors"
+      label="Max. Authors per Document"
+      :min="20"
+      :max="200"
+      :step="5"
+      @input="emitFilters"
+    />
 
     <!-- Counting mode toggle -->
     <div>
@@ -261,35 +215,7 @@
       >
         <span class="material-symbols-outlined text-base">restart_alt</span>
       </button>
-      <div class="relative">
-        <button
-          class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer transition-colors"
-          @click="showExportMenu = !showExportMenu"
-        >
-          <span class="material-symbols-outlined text-sm">download</span>
-          Export
-          <span class="material-symbols-outlined text-sm">expand_more</span>
-        </button>
-        <ul
-          v-if="showExportMenu"
-          class="absolute left-0 bottom-full mb-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-30 overflow-hidden"
-        >
-          <li
-            class="px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 cursor-pointer flex items-center gap-2"
-            @click="onExport('png')"
-          >
-            <span class="material-symbols-outlined text-sm">image</span>
-            PNG Image
-          </li>
-          <li
-            class="px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 cursor-pointer flex items-center gap-2"
-            @click="onExport('gexf')"
-          >
-            <span class="material-symbols-outlined text-sm">share</span>
-            GEXF Network
-          </li>
-        </ul>
-      </div>
+      <NetworkExportMenu @select="onExport" />
     </div>
   </div>
 </template>
@@ -298,6 +224,10 @@
 import { ref, computed } from 'vue';
 import { CLUSTER_PALETTE } from '../types/biblio-network';
 import type { CountingMode } from '../types/biblio-network';
+import type { NetworkSearchSuggestion } from '../types/network-graph';
+import NetworkSearchBox from './network-search-box.vue';
+import NetworkThresholdSlider from './network-threshold-slider.vue';
+import NetworkExportMenu from './network-export-menu.vue';
 
 const props = defineProps<{
   totalNodes: number;
@@ -340,26 +270,22 @@ const searchQuery = ref('');
 const minPapers = ref(1);
 const minLinkStrength = ref(1);
 const maxAuthors = ref(20);
-const showSuggestions = ref(false);
-const showExportMenu = ref(false);
 
-interface AuthorSuggestion {
-  id: string;
-  label: string;
-  weight: number;
-}
-
-const suggestions = computed<AuthorSuggestion[]>(() => {
+const suggestions = computed<NetworkSearchSuggestion[]>(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (!q || q.length < 2) return [];
   return props.authorNames
     .filter((name) => name.toLowerCase().includes(q))
     .slice(0, 8)
-    .map((name) => ({
-      id: name,
-      label: name,
-      weight: props.authorWeights.get(name) ?? 0,
-    }));
+    .map((name) => {
+      const weight = props.authorWeights.get(name) ?? 0;
+      return {
+        key: name,
+        display: name,
+        detail: `${weight} ${weight === 1 ? 'paper' : 'papers'}`,
+        payload: name,
+      };
+    });
 });
 
 const maxPapersLimit = computed(() => Math.max(10, Math.ceil(props.totalNodes / 2)));
@@ -378,28 +304,17 @@ const clusters = computed(() => {
 });
 
 function onSearchInput() {
-  showSuggestions.value = true;
   emitFilters();
 }
 
-function selectFirstSuggestion() {
-  if (suggestions.value.length > 0) {
-    const first = suggestions.value[0]!;
-    searchQuery.value = first.label;
-    showSuggestions.value = false;
-    emit('locate-author', first.label);
-  }
+/** Enter-select: locate the author without re-emitting the filter payload. */
+function onSelectFirst(s: NetworkSearchSuggestion) {
+  emit('locate-author', s.payload);
 }
 
-function selectSuggestion(s: AuthorSuggestion) {
-  searchQuery.value = s.label;
-  showSuggestions.value = false;
-  emit('locate-author', s.label);
+function selectSuggestion(s: NetworkSearchSuggestion) {
+  emit('locate-author', s.payload);
   emitFilters();
-}
-
-function clearSuggestions() {
-  showSuggestions.value = false;
 }
 
 function emitFilters() {
@@ -412,7 +327,6 @@ function emitFilters() {
 }
 
 function onExport(format: 'png' | 'gexf') {
-  showExportMenu.value = false;
   emit('export-image', format);
 }
 
@@ -421,7 +335,6 @@ function resetAnalysis() {
   minLinkStrength.value = 1;
   maxAuthors.value = 20;
   searchQuery.value = '';
-  showSuggestions.value = false;
   emitFilters();
   emit('reset-analysis');
 }

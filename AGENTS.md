@@ -95,9 +95,10 @@ When the user requests a durable behavior change, record it here or in the relev
 - The Pinia store (`src/stores/llm-config.ts`) is the single source of truth.
   Its `isConfigured` computed mirrors the backend
   `llm_config_repo::has_config` contract (initialized + endpoint + model +
-  (local-provider OR API key)). `useLlmConfigStore` exports `LOCAL_PROVIDERS`
-  + `isLocalProvider(provider)` so the local-provider set has exactly one
-  frontend definition (mirrors the backend Rust `is_local` match).
+  (local-provider OR API key)). `useLlmConfigStore` keeps the
+  `LOCAL_PROVIDERS` set store-private and exports only the
+  `isLocalProvider(provider)` predicate, so the local-provider set has exactly
+  one frontend definition (mirrors the backend Rust `is_local` match).
 - The `has_llm_config` Tauri command stays registered (the screening
   `get_screening_readiness` composite still calls `has_config` server-side),
   but NO frontend caller may invoke it directly. The one exception is
@@ -162,3 +163,13 @@ Coverage tooling: `npm run test:coverage` (Vue/TS via `@vitest/coverage-v8`, con
 `cd src-tauri && cargo llvm-cov --html --output-dir target/llvm-cov/html` (Rust via
 `cargo-llvm-cov` + `llvm-tools-preview`, report at
 `src-tauri/target/llvm-cov/html/html/index.html`). Both artifact dirs are git-ignored.
+
+Disk-space: `src-tauri/target` can balloon into hundreds of GB because each of the
+~136 `src-tauri/tests/*.rs` files compiles into its own ~450MB test binary (each
+statically links llama.cpp/LLM + headless_chrome + GTK + tauri), and Cargo never
+deletes stale hashed binaries across builds. `target/llvm-cov-target` (~50G) is
+cargo-llvm-cov's separate target dir. Reclaim space with `npm run clean:rust`
+(full `cargo clean`) or `npm run sweep:rust` (`cargo-sweep -t 14`, removes only
+artifacts untouched >14 days — preferred periodic cleanup). After coverage runs,
+`cargo llvm-cov clean` drops `target/llvm-cov-target`. `cargo-sweep` must be
+installed (`cargo install cargo-sweep`).

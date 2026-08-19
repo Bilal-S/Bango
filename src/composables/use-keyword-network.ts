@@ -1,22 +1,19 @@
-import { ref, computed, shallowRef, onUnmounted } from 'vue';
+import { ref, shallowRef, onUnmounted } from 'vue';
 import Graph from 'graphology';
 import { tauriCommand } from './use-tauri-command';
+import { createBiblioNetworkState, scaleToRange } from './use-biblio-network-fetch';
 import type { KeywordNetworkResponse } from '../types/biblio-keyword';
 import type { LayoutRequest, LayoutResponse } from '../workers/layout.worker';
 
 // Module-scoped state so the graph remains populated when navigating away/back
-const graph = ref<Graph | null>(null);
-const loading = ref(false);
-const error = ref<string | null>(null);
+// (the shared bundle keeps the historical module-scope refs for this file).
+const { graph, loading, error, nodeCount, edgeCount } = createBiblioNetworkState();
 const clusterCount = ref(0);
 const isLayouting = ref(false);
 
 const sources = ref<string[]>(['metadata', 'ai_extracted', 'tags', 'labels', 'user_added']);
 const minOccurrences = ref(2);
 const minCooccurrence = ref(2);
-
-const nodeCount = computed(() => graph.value?.order ?? 0);
-const edgeCount = computed(() => graph.value?.size ?? 0);
 
 function buildGraph(response: LayoutResponse): Graph {
   const g = new Graph({ type: 'undirected', multi: false });
@@ -25,16 +22,10 @@ function buildGraph(response: LayoutResponse): Graph {
   const minW = Math.min(...weights, 1);
   const maxW = Math.max(...weights, 1);
 
-  // Helper scale
-  const scale = (val: number, inMin: number, inMax: number, outMin: number, outMax: number) => {
-    if (inMax === inMin) return (outMin + outMax) / 2;
-    return outMin + ((val - inMin) / (inMax - inMin)) * (outMax - outMin);
-  };
-
   for (const node of response.nodes) {
     g.addNode(node.id, {
       label: node.label,
-      size: scale(node.weight, minW, maxW, 6, 26),
+      size: scaleToRange(node.weight, minW, maxW, 6, 26),
       x: node.x ?? Math.random() * 100,
       y: node.y ?? Math.random() * 100,
       color: node.color ?? '#94a3b8',
@@ -57,7 +48,7 @@ function buildGraph(response: LayoutResponse): Graph {
     if (g.hasEdge(edge.source, edge.target)) continue;
     g.addUndirectedEdge(edge.source, edge.target, {
       weight: edge.weight,
-      thickness: scale(edge.weight, minEW, maxEW, 0.5, 5),
+      thickness: scaleToRange(edge.weight, minEW, maxEW, 0.5, 5),
       color: '#cbd5e1',
     });
   }

@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { tauriCommand } from './use-tauri-command';
-import { useLlmConfigStore, LOCAL_PROVIDERS } from '@/stores/llm-config';
+import { useLlmConfigStore, isLocalProvider as storeIsLocalProvider } from '@/stores/llm-config';
 import type { TestResult } from '@/stores/llm-config';
 
 const providerDisplayNames: Record<string, string> = {
@@ -134,10 +134,10 @@ export function useLlmConfig() {
   }
 
   function isLocalProvider(): boolean {
-    /* Delegate to the canonical `LOCAL_PROVIDERS` Set exported from the store
-    so there is exactly one copy of the local-provider set in the frontend
-    (mirrors the backend `is_local` match). */
-    return LOCAL_PROVIDERS.has(store.config.provider);
+    /* Delegate to the store's canonical predicate so the local-provider set
+       has exactly one frontend definition (mirrors the backend `is_local`
+       match); see the root AGENTS.md single-definition contract. */
+    return storeIsLocalProvider(store.config.provider);
   }
 
   async function fetchModels(): Promise<void> {

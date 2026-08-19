@@ -10,6 +10,7 @@
 - Never manually modify `CHANGELOG.md` or any file marked as auto-generated.
 - Never use the emdash (&mdash;) character (`—`) in any generated text.  
   Use a plain dash (`-`) instead in all generated text and comments.
+- DO NOT MAKE ANY GIT COMMITTS OR PUSHES. ONLY THE USER CAN COMMIT CODE.
 
 ## Engineering Principles
 

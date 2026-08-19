@@ -16,6 +16,8 @@ pub mod migration;
 pub mod migrations;
 pub mod rebuild;
 pub mod reference_repo;
+pub mod saved_report;
 pub mod schema_check;
 pub mod summary_repo;
+pub mod tag_label_core;
 pub mod tag_repo;

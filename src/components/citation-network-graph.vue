@@ -1,42 +1,19 @@
 <template>
   <div class="relative w-full h-full bg-slate-50/50 overflow-hidden">
     <!-- Sigma container -->
-    <div ref="containerRef" class="w-full h-full" />
+    <div ref="sigmaContainer" class="w-full h-full" />
 
-    <!-- Loading overlay -->
-    <div
-      v-if="loading || isLayouting"
-      class="absolute inset-0 z-20 flex items-center justify-center bg-white/60 backdrop-blur-sm"
-    >
-      <div class="flex items-center gap-3 text-slate-600">
-        <span class="material-symbols-outlined text-xl animate-spin">progress_activity</span>
-        <span class="text-sm font-medium">{{
-          isLayouting ? 'Computing layout…' : 'Loading citation network…'
-        }}</span>
-      </div>
-    </div>
-
-    <!-- Error overlay -->
-    <div v-else-if="error" class="absolute inset-0 z-20 flex items-center justify-center">
-      <div class="text-center p-6 max-w-sm">
-        <span class="material-symbols-outlined text-3xl text-red-400 mb-2 block">error</span>
-        <p class="text-sm text-red-600">{{ error }}</p>
-        <button
-          class="mt-3 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer transition-colors"
-          @click="$emit('retry')"
-        >
-          Retry
-        </button>
-      </div>
-    </div>
-
-    <!-- Empty state -->
-    <div v-else-if="!hasGraph" class="absolute inset-0 z-20 flex items-center justify-center">
-      <div class="text-center text-slate-400">
-        <span class="material-symbols-outlined text-4xl mb-2 block">account_tree</span>
-        <p class="text-sm">No citation data. Import articles with references first.</p>
-      </div>
-    </div>
+    <!-- Loading / error / empty overlay -->
+    <GraphStatusOverlay
+      :loading="loading"
+      :is-layouting="isLayouting"
+      :error="error"
+      :empty="!hasGraph"
+      loading-label="Loading citation network…"
+      empty-icon="account_tree"
+      empty-text="No citation data. Import articles with references first."
+      @retry="$emit('retry')"
+    />
 
     <!-- Hover tooltip -->
     <div
@@ -63,101 +40,51 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue';
+import { watch } from 'vue';
 import type Graph from 'graphology';
-import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { useNetworkGraph } from '../composables/use-network-graph';
 import { citationClusterColor } from '../types/biblio-citation';
 import type { CitationNode } from '../types/biblio-citation';
+import type { NetworkGraphProps } from '../types/network-graph';
 import { getTemporalColor } from '@/utils/color';
 import { computeAncestry, computeProgeny } from '../utils/citation-analysis';
+import GraphStatusOverlay from './graph-status-overlay.vue';
 
 /** Isolation mode: focus on a node's ancestry (papers it cites) or progeny (papers citing it). */
 export type IsolationDirection = 'ancestry' | 'progeny';
 
-const props = defineProps<{
-  graph: Graph | null;
-  loading: boolean;
-  isLayouting: boolean;
-  error: string | null;
-  focusedNodeId: string | null;
-  selectedClusters: number[];
-  colorMode: 'cluster' | 'temporal';
-  minYear: number;
-  maxYear: number;
-  recalculateTrigger: number;
-  /** When set, non-isolated nodes are dimmed. Takes visual precedence over focus/cluster. */
-  isolationMode: { nodeId: string; direction: IsolationDirection; label?: string } | null;
-  /** Phase 3 - Main Path (SPC): node IDs on the main path backbone. */
-  mainPathNodes: Set<string>;
-  /** Phase 3 - Main Path (SPC): edge IDs on the main path. */
-  mainPathEdges: Set<string>;
-  /** Phase 3 - Main Path (SPC): master toggle for the highlight. */
-  showMainPath: boolean;
-}>();
+const props = defineProps<
+  NetworkGraphProps & {
+    /** When set, non-isolated nodes are dimmed. Takes visual precedence over focus/cluster. */
+    isolationMode: { nodeId: string; direction: IsolationDirection; label?: string } | null;
+    /** Phase 3 - Main Path (SPC): node IDs on the main path backbone. */
+    mainPathNodes: Set<string>;
+    /** Phase 3 - Main Path (SPC): edge IDs on the main path. */
+    mainPathEdges: Set<string>;
+    /** Phase 3 - Main Path (SPC): master toggle for the highlight. */
+    showMainPath: boolean;
+  }
+>();
 
 const emit = defineEmits<{
   (e: 'node-click', nodeId: string | null): void;
   (e: 'retry'): void;
 }>();
 
-const containerRef = ref<HTMLElement>();
-const hoveredNode = ref<CitationNode | null>(null);
-const tooltipX = ref(0);
-const tooltipY = ref(0);
-
-/* Guard against async callbacks (rAF, worker results) firing after unmount.
-   Without this, a pending rAF can call initRenderer() on a detached container
-   during route transitions, causing crashes. */
-let isUnmounted = false;
-let pendingFrame: number | null = null;
-
-const { renderer, initRenderer, destroyRenderer, locateNode, resetZoom, refresh } =
-  useSigmaRenderer();
-
-const hasGraph = computed(() => (props.graph?.order ?? 0) > 0);
-
-const tooltipPosition = computed(() => ({
-  left: `${tooltipX.value + 12}px`,
-  top: `${tooltipY.value - 8}px`,
-}));
-
-watch(
-  () => props.graph,
-  (g) => {
-    if (pendingFrame !== null) {
-      cancelAnimationFrame(pendingFrame);
-      pendingFrame = null;
-    }
-    if (!g) {
-      destroyRenderer();
-      return;
-    }
-    if (!containerRef.value) return;
-    pendingFrame = requestAnimationFrame(() => {
-      pendingFrame = null;
-      // Abort if the component was unmounted while we waited for the frame.
-      // This prevents mounting a Sigma renderer onto a detached DOM node.
-      if (isUnmounted || !containerRef.value || !g) return;
-      initRenderer(containerRef.value, g, {
-        labelRenderSizeThreshold: 1.2,
-        defaultEdgeColor: '#cbd5e1',
-        renderEdgeLabels: false,
-        // Enlarge arrowheads so citation direction is clearly visible.
-        // Sigma defaults are length 2.5 / wideness 2.
-        edgeArrowSize: { length: 4, wideness: 3 },
-      });
-      bindSigmaEvents();
-      applyVisualState();
-    });
-  }
-);
-
-watch(
-  () => props.focusedNodeId,
-  () => {
-    applyVisualState();
-  }
-);
+const { hoveredNode, hasGraph, tooltipPosition, renderer, locateNode, resetZoom, refresh } =
+  useNetworkGraph<CitationNode>(props, {
+    rendererOptions: {
+      labelRenderSizeThreshold: 1.2,
+      defaultEdgeColor: '#cbd5e1',
+      renderEdgeLabels: false,
+      // Enlarge arrowheads so citation direction is clearly visible.
+      // Sigma defaults are length 2.5 / wideness 2.
+      edgeArrowSize: { length: 4, wideness: 3 },
+    },
+    mapHoveredNode,
+    applyVisualState,
+    onNodeClick: (nodeId) => emit('node-click', nodeId),
+  });
 
 /** Centralized visual state dispatch. Isolation > focus > cluster highlight.
  *  None active → default full-brightness restored. */
@@ -278,24 +205,6 @@ function applyVisualState() {
 }
 
 watch(
-  () => props.colorMode,
-  () => applyVisualState()
-);
-
-watch(
-  () => props.selectedClusters,
-  () => applyVisualState(),
-  { deep: true }
-);
-
-watch(
-  () => props.recalculateTrigger,
-  () => {
-    if (props.graph) applyVisualState();
-  }
-);
-
-watch(
   () => props.isolationMode,
   () => applyVisualState(),
   { deep: true }
@@ -326,49 +235,20 @@ function getNodeColor(nodeId: string): string {
   }
 }
 
-function bindSigmaEvents() {
-  if (!renderer.value) return;
-  const sig = renderer.value;
-
-  sig.on('enterNode', ({ node }) => {
-    if (!props.graph) return;
-    const attrs = props.graph.getNodeAttributes(node);
-    hoveredNode.value = {
-      id: node,
-      label: attrs.label ?? node,
-      title: attrs.title ?? '',
-      authors: attrs.authors ?? '',
-      year: attrs.year ?? null,
-      journal: attrs.journal ?? null,
-      numCited: attrs.numCited ?? 0,
-      numReferences: attrs.numReferences ?? 0,
-      abstract: attrs.abstract ?? '',
-      cluster: attrs.cluster ?? null,
-      color: getNodeColor(node),
-    };
-  });
-
-  sig.on('leaveNode', () => {
-    hoveredNode.value = null;
-  });
-
-  sig.on('moveBody', (payload) => {
-    const mouseEvt = payload.event.original as MouseEvent;
-    if (!mouseEvt.x) return;
-    const rect = containerRef.value?.getBoundingClientRect();
-    if (rect) {
-      tooltipX.value = mouseEvt.x - rect.left;
-      tooltipY.value = mouseEvt.y - rect.top;
-    }
-  });
-
-  sig.on('clickNode', ({ node }) => {
-    emit('node-click', node);
-  });
-
-  sig.on('clickStage', () => {
-    emit('node-click', null);
-  });
+function mapHoveredNode(node: string, attrs: ReturnType<Graph['getNodeAttributes']>): CitationNode {
+  return {
+    id: node,
+    label: attrs.label ?? node,
+    title: attrs.title ?? '',
+    authors: attrs.authors ?? '',
+    year: attrs.year ?? null,
+    journal: attrs.journal ?? null,
+    numCited: attrs.numCited ?? 0,
+    numReferences: attrs.numReferences ?? 0,
+    abstract: attrs.abstract ?? '',
+    cluster: attrs.cluster ?? null,
+    color: getNodeColor(node),
+  };
 }
 
 defineExpose({
@@ -376,15 +256,6 @@ defineExpose({
   resetZoom,
   refresh,
   renderer,
-});
-
-onUnmounted(() => {
-  isUnmounted = true;
-  if (pendingFrame !== null) {
-    cancelAnimationFrame(pendingFrame);
-    pendingFrame = null;
-  }
-  destroyRenderer();
 });
 </script>
 

@@ -19,6 +19,9 @@ import type { GenerateExportResult } from '@/types/wiki';
 /** Get the module-level wiki export result (survives remount). */
 const wikiExportResult = ref<GenerateExportResult | null>(null);
 
+/** Shared save-dialog filter set for RIS exports. */
+const RIS_FILTERS = [{ name: 'RIS File', extensions: ['ris'] }];
+
 export function useExport() {
   const exporting = ref(false);
   const error = ref<string | null>(null);
@@ -48,46 +51,21 @@ export function useExport() {
     ]);
   }
 
-  async function exportRis(): Promise<boolean> {
-    exporting.value = true;
-    error.value = null;
-    try {
-      const filePath = await save({
-        defaultPath: 'included-articles.ris',
-        filters: [{ name: 'RIS File', extensions: ['ris'] }],
-      });
-      if (filePath) {
-        await tauriCommand('export_ris_to_file', { path: filePath });
-        return true;
-      }
-      return false;
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-      return false;
-    } finally {
-      exporting.value = false;
-    }
-  }
-
-  async function exportRisForTab(
-    status: string,
-    screeningErrorsOnly: boolean,
-    label: string
+  /* Shared file-export scaffold: OS save dialog -> IPC command, with the
+   * `exporting`/`error` flags managed around it. Returns false on dialog
+   * cancel or invoke error. IPC command names are frozen (backend contract). */
+  async function runExport(
+    command: string,
+    args: Record<string, unknown>,
+    defaultPath: string,
+    filters: { name: string; extensions: string[] }[] = RIS_FILTERS
   ): Promise<boolean> {
     exporting.value = true;
     error.value = null;
     try {
-      const slug = label.toLowerCase().replace(/\s+/g, '-');
-      const filePath = await save({
-        defaultPath: `${slug}-articles.ris`,
-        filters: [{ name: 'RIS File', extensions: ['ris'] }],
-      });
+      const filePath = await save({ defaultPath, filters });
       if (filePath) {
-        await tauriCommand('export_ris_for_tab_to_file', {
-          path: filePath,
-          status,
-          screeningErrorsOnly,
-        });
+        await tauriCommand(command, { ...args, path: filePath });
         return true;
       }
       return false;
@@ -97,52 +75,38 @@ export function useExport() {
     } finally {
       exporting.value = false;
     }
+  }
+
+  /** Export the Included list to RIS. */
+  function exportRis(): Promise<boolean> {
+    return runExport('export_ris_to_file', {}, 'included-articles.ris');
+  }
+
+  /** Export one status tab to RIS (`screeningErrorsOnly` for the Error tab). */
+  function exportRisForTab(
+    status: string,
+    screeningErrorsOnly: boolean,
+    label: string
+  ): Promise<boolean> {
+    const slug = label.toLowerCase().replace(/\s+/g, '-');
+    return runExport(
+      'export_ris_for_tab_to_file',
+      { status, screeningErrorsOnly },
+      `${slug}-articles.ris`
+    );
   }
 
   /** Export a specific set of articles (by UUID) to RIS. */
-  async function exportRisForIds(ids: string[]): Promise<boolean> {
-    exporting.value = true;
-    error.value = null;
-    try {
-      const filePath = await save({
-        defaultPath: 'selected-articles.ris',
-        filters: [{ name: 'RIS File', extensions: ['ris'] }],
-      });
-      if (filePath) {
-        await tauriCommand('export_ris_for_ids_to_file', { path: filePath, ids });
-        return true;
-      }
-      return false;
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-      return false;
-    } finally {
-      exporting.value = false;
-    }
+  function exportRisForIds(ids: string[]): Promise<boolean> {
+    return runExport('export_ris_for_ids_to_file', { ids }, 'selected-articles.ris');
   }
 
-  async function exportProject(): Promise<boolean> {
-    exporting.value = true;
-    error.value = null;
-    try {
-      const filePath = await save({
-        defaultPath: 'bango-project.bango.json',
-        filters: [
-          { name: 'Bango Backup', extensions: ['bango.json'] },
-          { name: 'JSON', extensions: ['json'] },
-        ],
-      });
-      if (filePath) {
-        await tauriCommand('export_project_to_file', { path: filePath });
-        return true;
-      }
-      return false;
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-      return false;
-    } finally {
-      exporting.value = false;
-    }
+  /** Export the whole project as a `.bango.json` backup. */
+  function exportProject(): Promise<boolean> {
+    return runExport('export_project_to_file', {}, 'bango-project.bango.json', [
+      { name: 'Bango Backup', extensions: ['bango.json'] },
+      { name: 'JSON', extensions: ['json'] },
+    ]);
   }
 
   async function importProject(file: File): Promise<boolean> {

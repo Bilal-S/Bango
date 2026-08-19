@@ -1,29 +1,15 @@
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import Graph from 'graphology';
 import { tauriCommand } from './use-tauri-command';
+import {
+  createBiblioNetworkState,
+  runNetworkFetch,
+  scaleToRange,
+} from './use-biblio-network-fetch';
 import type { NetworkData, CountingMode } from '../types/biblio-network';
 
-const graph = ref<Graph | null>(null);
-const loading = ref(false);
-const error = ref<string | null>(null);
+const { graph, loading, error, nodeCount, edgeCount } = createBiblioNetworkState();
 const countingMode = ref<CountingMode>('full');
-
-const nodeCount = computed(() => graph.value?.order ?? 0);
-const edgeCount = computed(() => graph.value?.size ?? 0);
-
-/**
- * Scale a numeric value from one range to another.
- */
-function scale(
-  value: number,
-  inMin: number,
-  inMax: number,
-  outMin: number,
-  outMax: number
-): number {
-  if (inMax === inMin) return (outMin + outMax) / 2;
-  return outMin + ((value - inMin) / (inMax - inMin)) * (outMax - outMin);
-}
 
 /**
  * Build a graphology Graph instance from raw network data.
@@ -40,7 +26,7 @@ function buildGraph(data: NetworkData): Graph {
   for (const node of data.nodes) {
     g.addNode(node.id, {
       label: node.label,
-      size: scale(node.weight, minW, maxW, 3, 20),
+      size: scaleToRange(node.weight, minW, maxW, 3, 20),
       x: Math.random() * 100,
       y: Math.random() * 100,
       color: '#94a3b8', // default slate - will be overridden by clustering
@@ -73,7 +59,7 @@ function buildGraph(data: NetworkData): Graph {
       fullWeight: edge.weight,
       fractionalWeight: fw,
       maxAuthorCount: edge.maxAuthorCount ?? 0,
-      thickness: scale(edge.weight, minEW, maxEW, 0.5, 4),
+      thickness: scaleToRange(edge.weight, minEW, maxEW, 0.5, 4),
       minFull: minEW,
       maxFull: maxEW,
       minFrac,
@@ -93,24 +79,13 @@ export function useCoAuthorNetwork() {
    * Fetch co-authorship network data from the backend and build a graphology Graph.
    */
   async function fetchNetwork(_countingMode?: CountingMode): Promise<void> {
-    loading.value = true;
-    error.value = null;
-
-    try {
+    await runNetworkFetch({ graph, loading, error }, async () => {
       const data = await tauriCommand<NetworkData>('biblio_get_coauthor_network');
-
       if (!data?.nodes?.length) {
-        graph.value = null;
-        return;
+        return null;
       }
-
-      graph.value = buildGraph(data);
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-      graph.value = null;
-    } finally {
-      loading.value = false;
-    }
+      return buildGraph(data);
+    });
   }
 
   function clearGraph(): void {
@@ -147,7 +122,7 @@ export function useCoAuthorNetwork() {
     for (const eid of g.edges()) {
       const w = g.getEdgeAttribute(eid, isFull ? 'fullWeight' : 'fractionalWeight') as number;
       g.setEdgeAttribute(eid, 'weight', w);
-      g.setEdgeAttribute(eid, 'thickness', scale(w, minVal, maxVal, 0.5, 4));
+      g.setEdgeAttribute(eid, 'thickness', scaleToRange(w, minVal, maxVal, 0.5, 4));
     }
 
     countingMode.value = mode;

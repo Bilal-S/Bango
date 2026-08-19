@@ -3,46 +3,16 @@
     class="flex flex-col gap-4 p-4 bg-white/80 backdrop-blur-sm rounded-xl border border-slate-200/80 shadow-sm"
   >
     <!-- Search with autocomplete -->
-    <div class="relative">
-      <span
-        class="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-base z-10"
-        >search</span
-      >
-      <input
-        v-model="searchQuery"
-        type="text"
-        placeholder="Search papers…"
-        class="w-full pl-8 pr-8 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-        @input="onSearchInput"
-        @keydown.enter="selectFirstSuggestion"
-        @keydown.escape="clearSuggestions"
-        @focus="showSuggestions = true"
-      />
-      <!-- Clear (x) button -->
-      <button
-        v-if="searchQuery"
-        type="button"
-        class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 z-10 cursor-pointer"
-        title="Clear search"
-        @click="clearSearch"
-      >
-        <span class="material-symbols-outlined text-base">close</span>
-      </button>
-      <!-- Autocomplete dropdown -->
-      <ul
-        v-if="showSuggestions && suggestions.length > 0"
-        class="absolute z-20 left-0 right-0 top-full mt-1 max-h-40 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg"
-      >
-        <li
-          v-for="s in suggestions"
-          :key="s.label"
-          class="px-3 py-1.5 text-sm cursor-pointer hover:bg-indigo-50 text-slate-700 truncate"
-          @mousedown.prevent="selectSuggestion(s)"
-        >
-          {{ s.display }}
-        </li>
-      </ul>
-    </div>
+    <NetworkSearchBox
+      v-model="searchQuery"
+      placeholder="Search papers…"
+      :suggestions="suggestions"
+      clearable
+      @input="onSearchInput"
+      @select-first="onSuggestionChosen"
+      @select="onSuggestionChosen"
+      @clear="clearSearch"
+    />
 
     <!-- Scope toggle -->
     <div>
@@ -94,36 +64,22 @@
     </div>
 
     <!-- Min citation count -->
-    <div>
-      <label class="flex items-center justify-between text-xs text-slate-600 mb-1">
-        <span>Min. Citation Count</span>
-        <span class="font-semibold tabular-nums">{{ minCitationCount }}</span>
-      </label>
-      <input
-        type="range"
-        min="1"
-        max="20"
-        :value="minCitationCount"
-        class="w-full accent-indigo-600"
-        @input="$emit('min-citation-change', Number(($event.target as HTMLInputElement).value))"
-      />
-    </div>
+    <NetworkThresholdSlider
+      :model-value="minCitationCount"
+      label="Min. Citation Count"
+      :min="1"
+      :max="20"
+      @input="(v) => emit('min-citation-change', v)"
+    />
 
     <!-- Min co-citation -->
-    <div>
-      <label class="flex items-center justify-between text-xs text-slate-600 mb-1">
-        <span>Min. Co-Citation</span>
-        <span class="font-semibold tabular-nums">{{ minCoCitation }}</span>
-      </label>
-      <input
-        type="range"
-        min="1"
-        max="20"
-        :value="minCoCitation"
-        class="w-full accent-indigo-600"
-        @input="$emit('min-co-citation-change', Number(($event.target as HTMLInputElement).value))"
-      />
-    </div>
+    <NetworkThresholdSlider
+      :model-value="minCoCitation"
+      label="Min. Co-Citation"
+      :min="1"
+      :max="20"
+      @input="(v) => emit('min-co-citation-change', v)"
+    />
 
     <!-- Hide rejected matches toggle -->
     <label class="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
@@ -279,35 +235,7 @@
       >
         <span class="material-symbols-outlined text-base">restart_alt</span>
       </button>
-      <div class="relative">
-        <button
-          class="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer transition-colors"
-          @click="showExportMenu = !showExportMenu"
-        >
-          <span class="material-symbols-outlined text-sm">download</span>
-          Export
-          <span class="material-symbols-outlined text-sm">expand_more</span>
-        </button>
-        <ul
-          v-if="showExportMenu"
-          class="absolute left-0 bottom-full mb-1 w-36 bg-white border border-slate-200 rounded-lg shadow-lg z-30 overflow-hidden"
-        >
-          <li
-            class="px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 cursor-pointer flex items-center gap-2"
-            @click="onExport('png')"
-          >
-            <span class="material-symbols-outlined text-sm">image</span>
-            PNG Image
-          </li>
-          <li
-            class="px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 cursor-pointer flex items-center gap-2"
-            @click="onExport('gexf')"
-          >
-            <span class="material-symbols-outlined text-sm">share</span>
-            GEXF Network
-          </li>
-        </ul>
-      </div>
+      <NetworkExportMenu @select="onExport" />
     </div>
   </div>
 </template>
@@ -316,6 +244,10 @@
 import { ref, computed } from 'vue';
 import { CLUSTER_PALETTE } from '../types/biblio-network';
 import type { NetworkExportFormat } from '../utils/network-export';
+import type { NetworkSearchSuggestion } from '../types/network-graph';
+import NetworkSearchBox from './network-search-box.vue';
+import NetworkThresholdSlider from './network-threshold-slider.vue';
+import NetworkExportMenu from './network-export-menu.vue';
 
 const props = defineProps<{
   totalNodes: number;
@@ -361,13 +293,14 @@ const normalizationModes = [
 ];
 
 const searchQuery = ref('');
-const showSuggestions = ref(false);
-const showExportMenu = ref(false);
 
-const suggestions = computed<{ label: string; display: string; searchText: string }[]>(() => {
+const suggestions = computed<NetworkSearchSuggestion[]>(() => {
   const q = searchQuery.value.trim().toLowerCase();
   if (!q || q.length < 2) return [];
-  return props.paperLabels.filter((p) => p.searchText.includes(q)).slice(0, 8);
+  return props.paperLabels
+    .filter((p) => p.searchText.includes(q))
+    .slice(0, 8)
+    .map((p) => ({ key: p.label, display: p.display, payload: p.label }));
 });
 
 const clusters = computed(() => {
@@ -383,35 +316,20 @@ const clusters = computed(() => {
 });
 
 function onSearchInput() {
-  showSuggestions.value = true;
   emit('filter-change', { search: searchQuery.value });
 }
 
-function selectFirstSuggestion() {
-  if (suggestions.value.length > 0) {
-    const first = suggestions.value[0]!;
-    searchQuery.value = first.display;
-    showSuggestions.value = false;
-    emit('locate-paper', first.label);
-    /* Clear live-hide filter so focus dimming from locate-paper takes over.
-       Without this the composite `display` string hides every node. */
-    clearSearchFilter();
-  }
-}
-
-function selectSuggestion(s: { label: string; display: string; searchText: string }) {
-  searchQuery.value = s.display;
-  showSuggestions.value = false;
-  emit('locate-paper', s.label);
-  /* Clear live-hide filter so focus dimming from locate-paper takes over.
-     Without this the composite `display` string hides every node. */
+/** Locate the chosen paper and clear the live-hide filter so focus dimming
+ *  from locate-paper takes over. Without this the composite `display` string
+ *  hides every node. */
+function onSuggestionChosen(s: NetworkSearchSuggestion) {
+  emit('locate-paper', s.payload);
   clearSearchFilter();
 }
 
-/** Clear the search box and restore all nodes (no live-hide). */
+/** Clear-button path: the search box already emptied the query; restore all
+ *  nodes (no live-hide). */
 function clearSearch() {
-  searchQuery.value = '';
-  showSuggestions.value = false;
   clearSearchFilter();
 }
 
@@ -424,12 +342,7 @@ function clearSearchFilter() {
   emit('filter-change', { search: '' });
 }
 
-function clearSuggestions() {
-  showSuggestions.value = false;
-}
-
 function onExport(format: NetworkExportFormat) {
-  showExportMenu.value = false;
   emit('export-image', format);
 }
 </script>

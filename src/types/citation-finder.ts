@@ -89,7 +89,3 @@ export interface CitationFinderProgress {
   isRunning: boolean;
   isCancelled: boolean;
 }
-
-/** Default status filter: Working + Included checked, Rejected / Duplicate
- *  unchecked. Mirrors spec §8.7 ("Duplicates always excluded"). */
-export const DEFAULT_CITATION_STATUSES: string[] = ['working', 'included'];

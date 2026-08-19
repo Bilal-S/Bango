@@ -1,5 +1,4 @@
 import { computed, ref } from 'vue';
-import type { LabelWithCount, TagWithCount } from '@/types';
 
 /**
  * Sortable item: `name`, `articleCount`, `color`. Both `TagWithCount` and
@@ -124,9 +123,3 @@ export function useTagLabelFilter<T extends FilterableItem>(items: () => readonl
     toggleFilterOpen,
   };
 }
-
-/** Convenience alias so callers can import a single typed name. */
-export type TagLabelFilter<T extends FilterableItem> = ReturnType<typeof useTagLabelFilter<T>>;
-
-/** Re-exported so the generic type resolves for TagWithCount callers. */
-export type { TagWithCount, LabelWithCount };

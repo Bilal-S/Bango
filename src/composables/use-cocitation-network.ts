@@ -1,6 +1,11 @@
-import { ref, computed } from 'vue';
 import Graph from 'graphology';
+import { ref } from 'vue';
 import { tauriCommand } from './use-tauri-command';
+import {
+  createBiblioNetworkState,
+  runNetworkFetch,
+  scaleToRange,
+} from './use-biblio-network-fetch';
 import type {
   CocitationMeta,
   CocitationNetworkData,
@@ -8,28 +13,9 @@ import type {
   CocitationParams,
 } from '../types/biblio-cocitation';
 
-const graph = ref<Graph | null>(null);
-const loading = ref(false);
-const error = ref<string | null>(null);
+const { graph, loading, error, nodeCount, edgeCount } = createBiblioNetworkState();
 /** Diagnostic counts from the backend (article/paper/edge totals). */
 const meta = ref<CocitationMeta | null>(null);
-
-const nodeCount = computed(() => graph.value?.order ?? 0);
-const edgeCount = computed(() => graph.value?.size ?? 0);
-
-/**
- * Scale a numeric value from one range to another.
- */
-function scale(
-  value: number,
-  inMin: number,
-  inMax: number,
-  outMin: number,
-  outMax: number
-): number {
-  if (inMax === inMin) return (outMin + outMax) / 2;
-  return outMin + ((value - inMin) / (inMax - inMin)) * (outMax - outMin);
-}
 
 /**
  * Build an undirected graphology Graph instance from raw co-citation network data.
@@ -61,7 +47,7 @@ function buildGraph(data: CocitationNetworkData): Graph {
       abstract: node.abstract,
       referenceType: node.referenceType,
       // +4 floor so 0-co-citation papers are still visible.
-      size: scale(node.coCitationCount, minCount, maxCount, 5, 24),
+      size: scaleToRange(node.coCitationCount, minCount, maxCount, 5, 24),
       x: Math.random() * 100,
       y: Math.random() * 100,
       color: '#6366f1', // indigo-500 (overridden by cluster in graph component)
@@ -93,30 +79,26 @@ function buildGraph(data: CocitationNetworkData): Graph {
  */
 export function useCocitationNetwork() {
   async function fetchNetwork(params: CocitationParams): Promise<void> {
-    loading.value = true;
-    error.value = null;
+    await runNetworkFetch(
+      { graph, loading, error },
+      async () => {
+        const data = await tauriCommand<CocitationNetworkData>('biblio_get_cocitation_network', {
+          params,
+        });
 
-    try {
-      const data = await tauriCommand<CocitationNetworkData>('biblio_get_cocitation_network', {
-        params,
-      });
+        // Always capture diagnostic meta, even when there are no nodes.
+        meta.value = data?.meta ?? null;
 
-      // Always capture diagnostic meta, even when there are no nodes.
-      meta.value = data?.meta ?? null;
+        if (!data?.nodes?.length) {
+          return null;
+        }
 
-      if (!data?.nodes?.length) {
-        graph.value = null;
-        return;
+        return buildGraph(data);
+      },
+      () => {
+        meta.value = null;
       }
-
-      graph.value = buildGraph(data);
-    } catch (e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e);
-      graph.value = null;
-      meta.value = null;
-    } finally {
-      loading.value = false;
-    }
+    );
   }
 
   function clearGraph(): void {

@@ -16,12 +16,9 @@ export interface TestResult {
 export const MIN_CONTEXT_WINDOW_TOKENS = 16_000;
 
 /** Local LLM providers that do not require an API key. Must stay in sync with
- *  the backend Rust `is_local` match in `llm_config_repo::has_config`. */
-export const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set([
-  'ollama',
-  'lmStudio',
-  'llamaCpp',
-]);
+ *  the backend Rust `is_local` match in `llm_config_repo::has_config`.
+ *  Store-private: `isLocalProvider` is the only public accessor. */
+const LOCAL_PROVIDERS: ReadonlySet<LlmProvider> = new Set(['ollama', 'lmStudio', 'llamaCpp']);
 
 /** Canonical "is this provider local (no API key)?" predicate. Mirrors the
  *  backend `is_local` match. */
@@ -56,7 +53,7 @@ export const useLlmConfigStore = defineStore('llm-config', () => {
     if (!initialized.value) return false;
     const c = config.value;
     if (!c.endpointUrl.trim() || !c.modelName.trim()) return false;
-    return LOCAL_PROVIDERS.has(c.provider) || !!c.apiKeyEncrypted;
+    return isLocalProvider(c.provider) || !!c.apiKeyEncrypted;
   });
 
   async function fetchIfNeeded(): Promise<void> {

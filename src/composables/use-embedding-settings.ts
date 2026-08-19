@@ -5,7 +5,7 @@ import { tauriCommand } from './use-tauri-command';
  * Shape returned by `get_embedding_status`. `modelOverride` is the premium
  * user's pinned embedding-model name (`undefined` when absent/empty).
  */
-export interface EmbeddingStatusInfo {
+interface EmbeddingStatusInfo {
   status: string;
   model: string;
   dimensions: number;

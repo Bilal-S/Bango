@@ -1,45 +1,20 @@
 <template>
   <div class="relative w-full h-full bg-slate-50/50 overflow-hidden">
     <!-- Sigma container -->
-    <div ref="containerRef" class="w-full h-full" />
+    <div ref="sigmaContainer" class="w-full h-full" />
 
-    <!-- Loading overlay -->
-    <div
-      v-if="loading || isLayouting"
-      class="absolute inset-0 z-20 flex items-center justify-center bg-white/60 backdrop-blur-sm"
-    >
-      <div class="flex items-center gap-3 text-slate-600">
-        <span class="material-symbols-outlined text-xl animate-spin">progress_activity</span>
-        <span class="text-sm font-medium">{{
-          isLayouting ? 'Computing layout…' : 'Loading co-citation network…'
-        }}</span>
-      </div>
-    </div>
-
-    <!-- Error overlay -->
-    <div v-else-if="error" class="absolute inset-0 z-20 flex items-center justify-center">
-      <div class="text-center p-6 max-w-sm">
-        <span class="material-symbols-outlined text-3xl text-red-400 mb-2 block">error</span>
-        <p class="text-sm text-red-600">{{ error }}</p>
-        <button
-          class="mt-3 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer transition-colors"
-          @click="$emit('retry')"
-        >
-          Retry
-        </button>
-      </div>
-    </div>
-
-    <!-- Empty state -->
-    <div v-else-if="!hasGraph" class="absolute inset-0 z-20 flex items-center justify-center">
-      <div class="text-center text-slate-400 max-w-sm">
-        <span class="material-symbols-outlined text-4xl mb-2 block">hub</span>
-        <p class="text-sm font-medium text-slate-500 mb-1">No co-citation data</p>
-        <p class="text-xs text-slate-400 leading-relaxed">
-          Adjust thresholds, import reference data, or try a different normalization mode.
-        </p>
-      </div>
-    </div>
+    <!-- Loading / error / empty overlay -->
+    <GraphStatusOverlay
+      :loading="loading"
+      :is-layouting="isLayouting"
+      :error="error"
+      :empty="!hasGraph"
+      loading-label="Loading co-citation network…"
+      empty-icon="hub"
+      empty-title="No co-citation data"
+      empty-hint="Adjust thresholds, import reference data, or try a different normalization mode."
+      @retry="$emit('retry')"
+    />
 
     <!-- Hover tooltip -->
     <div
@@ -75,81 +50,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue';
 import type Graph from 'graphology';
-import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { useNetworkGraph } from '../composables/use-network-graph';
+import { scaleToRange } from '../composables/use-biblio-network-fetch';
 import { clusterColor } from '../types/biblio-network';
 import type { CocitationNode } from '../types/biblio-cocitation';
+import type { NetworkGraphProps } from '../types/network-graph';
 import { getTemporalColor } from '../utils/color';
+import GraphStatusOverlay from './graph-status-overlay.vue';
 
-const props = defineProps<{
-  graph: Graph | null;
-  loading: boolean;
-  isLayouting: boolean;
-  error: string | null;
-  focusedNodeId: string | null;
-  selectedClusters: number[];
-  colorMode: 'cluster' | 'temporal';
-  minYear: number;
-  maxYear: number;
-  recalculateTrigger: number;
-}>();
+const props = defineProps<NetworkGraphProps>();
 
 const emit = defineEmits<{
   (e: 'node-click', nodeId: string | null): void;
   (e: 'retry'): void;
 }>();
 
-const containerRef = ref<HTMLElement>();
-const hoveredNode = ref<CocitationNode | null>(null);
-const tooltipX = ref(0);
-const tooltipY = ref(0);
-
-let isUnmounted = false;
-let pendingFrame: number | null = null;
-
-const { renderer, initRenderer, destroyRenderer, locateNode, resetZoom, refresh } =
-  useSigmaRenderer();
-
-const hasGraph = computed(() => (props.graph?.order ?? 0) > 0);
-
-const tooltipPosition = computed(() => ({
-  left: `${tooltipX.value + 12}px`,
-  top: `${tooltipY.value - 8}px`,
-}));
-
-watch(
-  () => props.graph,
-  (g) => {
-    if (pendingFrame !== null) {
-      cancelAnimationFrame(pendingFrame);
-      pendingFrame = null;
-    }
-    if (!g) {
-      destroyRenderer();
-      return;
-    }
-    if (!containerRef.value) return;
-    pendingFrame = requestAnimationFrame(() => {
-      pendingFrame = null;
-      if (isUnmounted || !containerRef.value || !g) return;
-      initRenderer(containerRef.value, g, {
-        labelRenderSizeThreshold: 1.0,
-        defaultEdgeColor: '#cbd5e1',
-        renderEdgeLabels: false,
-      });
-      bindSigmaEvents();
-      applyVisualState();
-    });
-  }
-);
-
-watch(
-  () => props.focusedNodeId,
-  () => {
-    applyVisualState();
-  }
-);
+const { hoveredNode, hasGraph, tooltipPosition, renderer, locateNode, resetZoom, refresh } =
+  useNetworkGraph<CocitationNode>(props, {
+    rendererOptions: {
+      labelRenderSizeThreshold: 1.0,
+      defaultEdgeColor: '#cbd5e1',
+      renderEdgeLabels: false,
+    },
+    mapHoveredNode,
+    applyVisualState,
+    onNodeClick: (nodeId) => emit('node-click', nodeId),
+  });
 
 function applyVisualState() {
   if (!props.graph) return;
@@ -203,7 +130,7 @@ function applyVisualState() {
   // Apply colors and thickness to edges.
   g.forEachEdge((edge, _attrs, source, target) => {
     const weight = g.getEdgeAttribute(edge, 'weight') ?? 1;
-    const thickness = minW === maxW ? 1.5 : scale(weight, minW, maxW, 0.8, 4);
+    const thickness = minW === maxW ? 1.5 : scaleToRange(weight, minW, maxW, 0.8, 4);
 
     const isFocusedEdgeDimmed =
       isFocusActive && (!focusNeighborsSet.has(source) || !focusNeighborsSet.has(target));
@@ -232,35 +159,6 @@ function applyVisualState() {
   renderer.value?.refresh();
 }
 
-function scale(
-  value: number,
-  inMin: number,
-  inMax: number,
-  outMin: number,
-  outMax: number
-): number {
-  if (inMax === inMin) return (outMin + outMax) / 2;
-  return outMin + ((value - inMin) / (inMax - inMin)) * (outMax - outMin);
-}
-
-watch(
-  () => props.colorMode,
-  () => applyVisualState()
-);
-
-watch(
-  () => props.selectedClusters,
-  () => applyVisualState(),
-  { deep: true }
-);
-
-watch(
-  () => props.recalculateTrigger,
-  () => {
-    if (props.graph) applyVisualState();
-  }
-);
-
 function getNodeColor(nodeId: string): string {
   if (!props.graph || !props.graph.hasNode(nodeId)) return '#94a3b8';
   if (props.colorMode === 'temporal') {
@@ -271,51 +169,25 @@ function getNodeColor(nodeId: string): string {
   return clusterColor(cluster);
 }
 
-function bindSigmaEvents() {
-  if (!renderer.value) return;
-  const sig = renderer.value;
-
-  sig.on('enterNode', ({ node }) => {
-    if (!props.graph) return;
-    const attrs = props.graph.getNodeAttributes(node);
-    hoveredNode.value = {
-      id: node,
-      label: attrs.label ?? node,
-      title: attrs.title ?? '',
-      authors: attrs.authors ?? '',
-      year: attrs.year ?? null,
-      journal: attrs.journal ?? null,
-      doi: attrs.doi ?? null,
-      citationCount: attrs.citationCount ?? 0,
-      coCitationCount: attrs.coCitationCount ?? 0,
-      matchedArticleId: attrs.matchedArticleId ?? null,
-      matchedArticleStatus: attrs.matchedArticleStatus ?? null,
-      abstract: attrs.abstract ?? '',
-      referenceType: attrs.referenceType ?? null,
-    };
-  });
-
-  sig.on('leaveNode', () => {
-    hoveredNode.value = null;
-  });
-
-  sig.on('moveBody', (payload) => {
-    const mouseEvt = payload.event.original as MouseEvent;
-    if (!mouseEvt.x) return;
-    const rect = containerRef.value?.getBoundingClientRect();
-    if (rect) {
-      tooltipX.value = mouseEvt.x - rect.left;
-      tooltipY.value = mouseEvt.y - rect.top;
-    }
-  });
-
-  sig.on('clickNode', ({ node }) => {
-    emit('node-click', node);
-  });
-
-  sig.on('clickStage', () => {
-    emit('node-click', null);
-  });
+function mapHoveredNode(
+  node: string,
+  attrs: ReturnType<Graph['getNodeAttributes']>
+): CocitationNode {
+  return {
+    id: node,
+    label: attrs.label ?? node,
+    title: attrs.title ?? '',
+    authors: attrs.authors ?? '',
+    year: attrs.year ?? null,
+    journal: attrs.journal ?? null,
+    doi: attrs.doi ?? null,
+    citationCount: attrs.citationCount ?? 0,
+    coCitationCount: attrs.coCitationCount ?? 0,
+    matchedArticleId: attrs.matchedArticleId ?? null,
+    matchedArticleStatus: attrs.matchedArticleStatus ?? null,
+    abstract: attrs.abstract ?? '',
+    referenceType: attrs.referenceType ?? null,
+  };
 }
 
 defineExpose({
@@ -323,14 +195,5 @@ defineExpose({
   resetZoom,
   refresh,
   renderer,
-});
-
-onUnmounted(() => {
-  isUnmounted = true;
-  if (pendingFrame !== null) {
-    cancelAnimationFrame(pendingFrame);
-    pendingFrame = null;
-  }
-  destroyRenderer();
 });
 </script>

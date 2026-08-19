@@ -1,42 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
+import { sigmaEvents } from '../helpers/sigma-renderer-stub';
 import { nextTick } from 'vue';
 import Graph from 'graphology';
 import { clusterColor } from '@/types/biblio-network';
 import { getTemporalColor } from '@/utils/color';
-
-/* Sigma needs WebGL, which happy-dom cannot provide. Stub the renderer
- * composable (per docs/CLAUDE.md component-test rule) and expose the event
- * handler registry so tests can drive events like the real renderer. */
-const sigmaEvents = vi.hoisted(() => new Map<string, (payload: unknown) => void>());
-
-vi.mock('@/composables/use-sigma-renderer', () => {
-  interface FakeRenderer {
-    on: (type: string, cb: (payload: unknown) => void) => void;
-    refresh: () => void;
-    kill: () => void;
-  }
-  const rendererRef: { value: FakeRenderer | null } = { value: null };
-  return {
-    useSigmaRenderer: () => ({
-      renderer: rendererRef,
-      initRenderer: () => {
-        rendererRef.value = {
-          on: (type, cb) => sigmaEvents.set(type, cb),
-          refresh: () => {},
-          kill: () => {},
-        };
-        return rendererRef.value;
-      },
-      destroyRenderer: () => {
-        rendererRef.value = null;
-      },
-      locateNode: () => {},
-      resetZoom: () => {},
-      refresh: () => {},
-    }),
-  };
-});
 
 import NetworkGraph from '@/components/network-graph.vue';
 

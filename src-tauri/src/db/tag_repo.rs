@@ -1,48 +1,34 @@
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
+use crate::db::tag_label_core::{self, read_row, NamedEntityRow};
 use crate::error::AppError;
 use crate::models::tag::{Tag, TagSource};
 
+fn tag_source(source: &str) -> TagSource {
+    match source {
+        "ai_suggested" => TagSource::AiSuggested,
+        "ris_keyword" => TagSource::RisKeyword,
+        _ => TagSource::UserCreated,
+    }
+}
+
+/// Map one raw `tags` row to the public `Tag` model.
+fn tag_from_row(row: NamedEntityRow) -> Tag {
+    Tag { id: row.id, name: row.name, source: tag_source(&row.source), color: row.color }
+}
+
 pub fn get_all_tags(conn: &Connection) -> Result<Vec<Tag>, AppError> {
     let mut stmt = conn.prepare("SELECT id, name, source, color FROM tags ORDER BY name")?;
-    let rows = stmt.query_map([], |row| {
-        let source_str: String = row.get(2)?;
-        let source = match source_str.as_str() {
-            "ai_suggested" => TagSource::AiSuggested,
-            "ris_keyword" => TagSource::RisKeyword,
-            _ => TagSource::UserCreated,
-        };
-        Ok(Tag { id: row.get(0)?, name: row.get(1)?, source, color: row.get(3)? })
-    })?;
+    let rows = stmt.query_map([], |row| Ok(tag_from_row(read_row(row)?)))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn create_tag(conn: &Connection, name: &str, source: &str) -> Result<Tag, AppError> {
-    // Check if tag already exists (case-insensitive) to avoid UNIQUE constraint violation
-    let existing: Option<Tag> = conn
-        .query_row(
-            "SELECT id, name, source, color FROM tags WHERE LOWER(name) = LOWER(?1)",
-            params![name],
-            |row| {
-                let source_str: String = row.get(2)?;
-                let source_enum = match source_str.as_str() {
-                    "ai_suggested" => TagSource::AiSuggested,
-                    "ris_keyword" => TagSource::RisKeyword,
-                    _ => TagSource::UserCreated,
-                };
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    source: source_enum,
-                    color: row.get(3)?,
-                })
-            },
-        )
-        .ok();
-
-    if let Some(tag) = existing {
-        return Ok(tag);
+    // Dedupe case-insensitively to avoid the UNIQUE constraint violation
+    // (pinned by tests/tags_labels_test.rs::create_tag_dedupes_normalized_name).
+    if let Some(raw) = tag_label_core::find_by_normalized_name(conn, "tags", name) {
+        return Ok(tag_from_row(raw));
     }
 
     let id = Uuid::new_v4().to_string();
@@ -50,12 +36,7 @@ pub fn create_tag(conn: &Connection, name: &str, source: &str) -> Result<Tag, Ap
         "INSERT INTO tags (id, name, source) VALUES (?1, ?2, ?3)",
         params![id, name, source],
     )?;
-    let source_enum = match source {
-        "ai_suggested" => TagSource::AiSuggested,
-        "ris_keyword" => TagSource::RisKeyword,
-        _ => TagSource::UserCreated,
-    };
-    Ok(Tag { id, name: name.to_string(), source: source_enum, color: None })
+    Ok(Tag { id, name: name.to_string(), source: tag_source(source), color: None })
 }
 
 pub fn rename_tag(conn: &Connection, id: &str, new_name: &str) -> Result<Tag, AppError> {
@@ -110,15 +91,7 @@ pub fn create_tags_batch(
     let mut tags = Vec::with_capacity(names.len());
     for name in names {
         // Skip duplicates (case-insensitive)
-        let exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) FROM tags WHERE LOWER(name) = LOWER(?1)",
-                params![name],
-                |row| row.get::<_, usize>(0),
-            )
-            .map(|c| c > 0)
-            .unwrap_or(false);
-        if !exists {
+        if !tag_label_core::exists_normalized(conn, "tags", name) {
             tags.push(create_tag(conn, name, source)?);
         }
     }

@@ -7,6 +7,36 @@
 import type Graph from 'graphology';
 import { filterNodesByYearRange } from './citation-analysis';
 
+/* Shared visibility scaffold used by every filter below: marks nodes hidden
+ * via `isNodeVisible`, then edges hidden unless `isEdgeVisible` passes AND
+ * both endpoints are visible. Mutates `hidden` in place; returns counts. */
+function applyVisibility(
+  g: Graph,
+  isNodeVisible: (node: string) => boolean,
+  isEdgeVisible: (edge: string) => boolean = () => true
+): { visibleNodes: number; visibleEdges: number } {
+  const nodeVisible = new Map<string, boolean>();
+  for (const node of g.nodes()) {
+    const visible = isNodeVisible(node);
+    nodeVisible.set(node, visible);
+    g.setNodeAttribute(node, 'hidden', !visible);
+  }
+
+  let visibleEdges = 0;
+  for (const edge of g.edges()) {
+    const source = g.source(edge);
+    const target = g.target(edge);
+    const visible =
+      isEdgeVisible(edge) && nodeVisible.get(source) === true && nodeVisible.get(target) === true;
+    g.setEdgeAttribute(edge, 'hidden', !visible);
+    if (visible) visibleEdges++;
+  }
+
+  const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
+
+  return { visibleNodes, visibleEdges };
+}
+
 // ─── co-author / generic network ─────────────────────────────────
 
 /** Filter inputs for the co-author / generic network graph. */
@@ -28,40 +58,21 @@ export function applyGraphFilters(
   const { minPapers, minLinkStrength, maxAuthors, search } = filters;
   const searchLower = search.toLowerCase();
 
-  const edgeVisible = new Map<string, boolean>();
-  for (const edge of g.edges()) {
-    const mac = (g.getEdgeAttribute(edge, 'maxAuthorCount') as number) ?? 0;
-    edgeVisible.set(edge, mac <= maxAuthors);
-  }
-
-  const nodeVisible = new Map<string, boolean>();
-  for (const node of g.nodes()) {
-    const weight = g.getNodeAttribute(node, 'weight') as number;
-    const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
-    const passesPapers = weight >= minPapers;
-    const passesSearch = !searchLower || label.toLowerCase().includes(searchLower);
-    const visible = passesPapers && passesSearch;
-    nodeVisible.set(node, visible);
-    g.setNodeAttribute(node, 'hidden', !visible);
-  }
-
-  // Edges pass if strength + maxAuthors + both endpoints are visible
-  let visibleEdges = 0;
-  for (const edge of g.edges()) {
-    const weight = g.getEdgeAttribute(edge, 'weight') as number;
-    const source = g.source(edge);
-    const target = g.target(edge);
-    const passesStrength = weight >= minLinkStrength;
-    const passesMaxAuthors = edgeVisible.get(edge) !== false;
-    const bothEndsVisible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-    const visible = passesStrength && passesMaxAuthors && bothEndsVisible;
-    g.setEdgeAttribute(edge, 'hidden', !visible);
-    if (visible) visibleEdges++;
-  }
-
-  const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
-
-  return { visibleNodes, visibleEdges };
+  return applyVisibility(
+    g,
+    (node) => {
+      const weight = g.getNodeAttribute(node, 'weight') as number;
+      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
+      return weight >= minPapers && (!searchLower || label.toLowerCase().includes(searchLower));
+    },
+    /* Edge passes strength + maxAuthors; visibility additionally requires
+     * both endpoints visible. */
+    (edge) => {
+      const weight = g.getEdgeAttribute(edge, 'weight') as number;
+      const mac = (g.getEdgeAttribute(edge, 'maxAuthorCount') as number) ?? 0;
+      return weight >= minLinkStrength && mac <= maxAuthors;
+    }
+  );
 }
 
 // ─── citation network ────────────────────────────────────────────
@@ -88,40 +99,23 @@ export function applyCitationGraphFilters(
 
   const yearPassSet = filterNodesByYearRange(g, yearRange ?? null);
 
-  const nodeVisible = new Map<string, boolean>();
-  for (const node of g.nodes()) {
+  return applyVisibility(g, (node) => {
     const numCited = (g.getNodeAttribute(node, 'numCited') as number) ?? 0;
     const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
     const title = (g.getNodeAttribute(node, 'title') as string) ?? '';
     const authors = (g.getNodeAttribute(node, 'authors') as string) ?? '';
     const degree = g.degree(node);
 
-    const passesCitations = numCited >= minCitations;
-    const passesIsolated = showIsolated || degree > 0;
-    const passesSearch =
-      !searchLower ||
-      label.toLowerCase().includes(searchLower) ||
-      title.toLowerCase().includes(searchLower) ||
-      authors.toLowerCase().includes(searchLower);
-    const passesYear = yearPassSet.has(node);
-    const visible = passesCitations && passesIsolated && passesSearch && passesYear;
-    nodeVisible.set(node, visible);
-    g.setNodeAttribute(node, 'hidden', !visible);
-  }
-
-  // Edge visible only when both endpoints are visible
-  let visibleEdges = 0;
-  for (const edge of g.edges()) {
-    const source = g.source(edge);
-    const target = g.target(edge);
-    const visible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-    g.setEdgeAttribute(edge, 'hidden', !visible);
-    if (visible) visibleEdges++;
-  }
-
-  const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
-
-  return { visibleNodes, visibleEdges };
+    return (
+      numCited >= minCitations &&
+      (showIsolated || degree > 0) &&
+      (!searchLower ||
+        label.toLowerCase().includes(searchLower) ||
+        title.toLowerCase().includes(searchLower) ||
+        authors.toLowerCase().includes(searchLower)) &&
+      yearPassSet.has(node)
+    );
+  });
 }
 
 // ─── co-citation network ─────────────────────────────────────────
@@ -144,39 +138,39 @@ export function applyCocitationGraphFilters(
   g: Graph,
   filters: CocitationGraphFilters
 ): { visibleNodes: number; visibleEdges: number } {
-  const { search } = filters;
-  const searchLower = search.toLowerCase();
+  const searchLower = filters.search.toLowerCase();
 
-  // Search filter on label/title/authors/doi
-  const nodeVisible = new Map<string, boolean>();
-  for (const node of g.nodes()) {
+  return applyVisibility(g, (node) => {
     const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
     const title = (g.getNodeAttribute(node, 'title') as string) ?? '';
     const authors = (g.getNodeAttribute(node, 'authors') as string) ?? '';
     const doi = (g.getNodeAttribute(node, 'doi') as string) ?? '';
-    const passesSearch =
+    return (
       !searchLower ||
       label.toLowerCase().includes(searchLower) ||
       title.toLowerCase().includes(searchLower) ||
       authors.toLowerCase().includes(searchLower) ||
-      doi.toLowerCase().includes(searchLower);
-    nodeVisible.set(node, passesSearch);
-    g.setNodeAttribute(node, 'hidden', !passesSearch);
-  }
+      doi.toLowerCase().includes(searchLower)
+    );
+  });
+}
 
-  // Edge visible only when both endpoints are visible
-  let visibleEdges = 0;
-  for (const edge of g.edges()) {
-    const source = g.source(edge);
-    const target = g.target(edge);
-    const visible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-    g.setEdgeAttribute(edge, 'hidden', !visible);
-    if (visible) visibleEdges++;
-  }
-
-  const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
-
-  return { visibleNodes, visibleEdges };
+/* Compose the "hide rejected-article matches" filter on top of any existing
+ * `hidden` state (e.g. the live search filter). Only ever ADDS hiding for
+ * rejected matches; never un-hides, so a node hidden by the search filter
+ * stays hidden (regression: the old inline version un-hid every non-rejected
+ * node, silently cancelling the search filter).
+ *
+ * Returns the composed visible-node count. */
+export function applyRejectedMatchesFilter(g: Graph, hide: boolean): number {
+  let visible = 0;
+  g.forEachNode((node) => {
+    if (hide && g.getNodeAttribute(node, 'matchedArticleStatus') === 'rejected') {
+      g.setNodeAttribute(node, 'hidden', true);
+    }
+    if (g.getNodeAttribute(node, 'hidden') !== true) visible++;
+  });
+  return visible;
 }
 
 // ─── keyword network ─────────────────────────────────────────────
@@ -199,30 +193,15 @@ export function applyKeywordGraphFilters(
   const { minOccurrences, minCooccurrence, search } = filters;
   const searchLower = search.toLowerCase();
 
-  const nodeVisible = new Map<string, boolean>();
-  for (const node of g.nodes()) {
-    const weight = g.getNodeAttribute(node, 'weight') as number;
-    const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
-    const passesOccurrences = weight >= minOccurrences;
-    const passesSearch = !searchLower || label.toLowerCase().includes(searchLower);
-    const visible = passesOccurrences && passesSearch;
-    nodeVisible.set(node, visible);
-    g.setNodeAttribute(node, 'hidden', !visible);
-  }
-
-  let visibleEdges = 0;
-  for (const edge of g.edges()) {
-    const weight = g.getEdgeAttribute(edge, 'weight') as number;
-    const source = g.source(edge);
-    const target = g.target(edge);
-    const passesStrength = weight >= minCooccurrence;
-    const bothEndsVisible = nodeVisible.get(source) === true && nodeVisible.get(target) === true;
-    const visible = passesStrength && bothEndsVisible;
-    g.setEdgeAttribute(edge, 'hidden', !visible);
-    if (visible) visibleEdges++;
-  }
-
-  const visibleNodes = g.nodes().filter((n: string) => nodeVisible.get(n) === true).length;
-
-  return { visibleNodes, visibleEdges };
+  return applyVisibility(
+    g,
+    (node) => {
+      const weight = g.getNodeAttribute(node, 'weight') as number;
+      const label = (g.getNodeAttribute(node, 'label') as string) ?? '';
+      return (
+        weight >= minOccurrences && (!searchLower || label.toLowerCase().includes(searchLower))
+      );
+    },
+    (edge) => (g.getEdgeAttribute(edge, 'weight') as number) >= minCooccurrence
+  );
 }

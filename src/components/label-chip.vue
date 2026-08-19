@@ -1,53 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { getColorScheme } from '@/utils/color';
+import ChipBase from './chip-base.vue';
 
-const props = defineProps<{
+/* Label chip with a leading color dot and transparent background. Thin
+ * wrapper over the shared chip scaffold; see `chip-base.vue` for the full
+ * prop contract. */
+defineProps<{
   name: string;
   color?: string | null;
-  /**
-   * Optional article count rendered as a muted `(N)` suffix inside the chip.
-   * Mirrors `tag-chip.vue`'s `count` prop. Used by the Tags & Labels
-   * management panel for the two-column row layout.
-   */
+  /** Optional article count rendered as a muted `(N)` suffix. */
   count?: number;
-  /**
-   * When true, renders a strong indigo halo (ring + glow) around the chip.
-   * Used by `labels-section` to surface already-assigned chips whose name
-   * contains the substring typed into the add input. Mirrors `tag-chip.vue`.
-   */
+  /** When true, renders an indigo match halo. */
   highlight?: boolean;
 }>();
-
-const scheme = computed(() => getColorScheme(props.name, props.color));
-
-/**
- * Inline styles applied only when `highlight` is true. See `tag-chip.vue` for
- * the rationale; the indigo glow matches the SuggestInput `<mark>` highlight.
- */
-const highlightStyle = computed(() =>
-  props.highlight
-    ? {
-        boxShadow: '0 0 0 2px rgba(99, 102, 241, 0.35), 0 0 8px 2px rgba(99, 102, 241, 0.25)',
-      }
-    : {}
-);
 </script>
 
 <template>
-  <span
-    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border bg-transparent font-mono text-mono transition-shadow"
-    :class="highlight ? 'ring-2 ring-indigo-500 ring-offset-1' : ''"
-    :style="{
-      borderColor: scheme.border,
-      color: scheme.text,
-      ...highlightStyle,
-    }"
-  >
-    <span class="w-1.5 h-1.5 rounded-full" :style="{ backgroundColor: scheme.base }"></span>
-    {{ name
-    }}<span v-if="count !== undefined" class="opacity-70" :class="{ 'font-bold': count > 0 }">
-      ({{ count }})</span
-    >
-  </span>
+  <ChipBase :name="name" :color="color" :count="count" :highlight="highlight" variant="dot" />
 </template>
