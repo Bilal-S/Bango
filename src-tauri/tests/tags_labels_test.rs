@@ -213,3 +213,42 @@ fn test_delete_label_sets_staleness_flags() {
         "wiki_needs_refresh must be set after deleting a label"
     );
 }
+
+/// Refactor1 Tier 0 (see .worktrees/refactor1.md section 5): pin the
+/// case-insensitive normalized-name dedupe contract of `create_tag` before the
+/// tag/label repo consolidation (task T2.2). Creating a name that matches an
+/// existing tag modulo case MUST return the existing row (original casing and
+/// id preserved) instead of violating the UNIQUE constraint.
+#[test]
+fn create_tag_dedupes_normalized_name() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    let first =
+        tag_repo::create_tag(&conn, "Machine-Learning", "user_created").expect("create_tag failed");
+    // Different casing + different source: still resolves to the same row.
+    let second =
+        tag_repo::create_tag(&conn, "machine-learning", "ai_suggested").expect("create_tag failed");
+
+    assert_eq!(second.id, first.id, "must dedupe to the existing tag id");
+    assert_eq!(second.name, "Machine-Learning", "original casing is preserved");
+    let tags = tag_repo::get_all_tags(&conn).expect("get_all_tags failed");
+    assert_eq!(tags.len(), 1, "no second row may be inserted");
+}
+
+/// Refactor1 Tier 0: same dedupe contract for labels (`create_label`).
+#[test]
+fn create_label_dedupes_normalized_name() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    let first = label_repo::create_label(&conn, "Priority-Read", "user_created")
+        .expect("create_label failed");
+    let second = label_repo::create_label(&conn, "priority-read", "ai_generated")
+        .expect("create_label failed");
+
+    assert_eq!(second.id, first.id, "must dedupe to the existing label id");
+    assert_eq!(second.name, "Priority-Read", "original casing is preserved");
+    let labels = label_repo::get_all_labels(&conn).expect("get_all_labels failed");
+    assert_eq!(labels.len(), 1, "no second row may be inserted");
+}
