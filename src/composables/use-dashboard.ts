@@ -3,8 +3,8 @@ import { useArticlesStore } from '@/stores/articles';
 import { useAuditStore } from '@/stores/audit';
 import { useScreeningStore } from '@/stores/screening';
 import { tauriCommand } from '@/composables/use-tauri-command';
-import { useLlmConfigured } from '@/composables/use-llm-configured';
-import { stripUuidFromDetails } from '@/utils/formatters';
+import { useDashboardCta } from '@/composables/use-dashboard-cta';
+import { useDashboardActivity } from '@/composables/use-dashboard-activity';
 import type { WikiStatus } from '@/types/wiki';
 interface StatusCounts {
   total: number;
@@ -20,60 +20,13 @@ interface ScreeningProgress {
   percentage: number;
 }
 
-/** A single audit entry or a group of import entries */
-interface GroupedAuditEntry {
-  id: string;
-  action: string;
-  source: string;
-  timestamp: string;
-  details: string | null;
-  /** First 40 chars of article title for context */
-  articleTitle?: string | null;
-  /** Article ID for navigation (null for system/import-grouped entries) */
-  articleId?: string | null;
-  /** For grouped imports: how many articles were imported */
-  count?: number;
-}
-
 /** Module-level singleton - true once the first dashboard data load completes */
 export const initialDataLoaded = ref(false);
-
-/**
- * Dashboard CTA button state. Priority order:
- *   1. `connect_llm`    - LLM not configured
- *   2. `start_screening` - LLM ok AND working articles await screening
- *   3. `build_wiki`     - LLM ok, screening done, wiki not yet built
- *   4. `review_wiki`    - LLM ok, screening done, wiki exists
- */
-type DashboardCtaState = 'connect_llm' | 'start_screening' | 'build_wiki' | 'review_wiki';
-
-interface DashboardCta {
-  /** Material Symbols icon name (reused from the existing icon set). */
-  icon: string;
-  /** Button label. */
-  label: string;
-  /** Route to navigate to on click. */
-  route: string;
-  /** The resolved state (for tests / debugging). */
-  state: DashboardCtaState;
-}
 
 export function useDashboard() {
   const articlesStore = useArticlesStore();
   const auditStore = useAuditStore();
   const screeningStore = useScreeningStore();
-
-  // ── CTA signals (fetched in refresh(), non-fatal) ───────────────────────
-  /**
-   * Reactive "is the LLM configured?" gate sourced from the canonical Pinia
-   * store. Replaces the one-shot `has_llm_config` IPC probe.
-   */
-  const llmConfigured = useLlmConfigured();
-  /**
-   * True when the wiki is initialized AND has at least one generated page
-   * (mirrors the `chat-view.vue` wikiReady test: `initialized && pageCount > 0`).
-   */
-  const wikiBuilt = ref(false);
 
   const counts = computed<StatusCounts>(() => {
     const all = articlesStore.articles;
@@ -134,65 +87,17 @@ export function useDashboard() {
 
   const hasArticles = computed(() => articlesStore.articles.length > 0);
 
-  /**
-   * Resolved CTA state (pure computed over `llmConfigured`, `counts.working`, `wikiBuilt`).
-   */
-  const ctaState = computed<DashboardCtaState>(() => {
-    if (!llmConfigured.value) return 'connect_llm';
-    if (counts.value.working > 0) return 'start_screening';
-    if (!wikiBuilt.value) return 'build_wiki';
-    return 'review_wiki';
+  // ── CTA signals (extracted composable; refresh() writes wikiBuilt) ────
+  const { llmConfigured, wikiBuilt, ctaState, cta } = useDashboardCta({
+    workingCount: computed(() => counts.value.working),
   });
 
-  /** CTA button manifest (icon + label + route) by state. */
-  const CTA_BY_STATE: Record<DashboardCtaState, DashboardCta> = {
-    connect_llm: { icon: 'link', label: 'Connect LLM', route: '/settings', state: 'connect_llm' },
-    start_screening: {
-      icon: 'play_arrow',
-      label: 'Start AI Screening',
-      route: '/screening',
-      state: 'start_screening',
-    },
-    build_wiki: {
-      icon: 'local_library',
-      label: 'Build Wiki',
-      route: '/wiki',
-      state: 'build_wiki',
-    },
-    review_wiki: {
-      icon: 'local_library',
-      label: 'Review Wiki',
-      route: '/wiki',
-      state: 'review_wiki',
-    },
-  };
-  const cta = computed<DashboardCta>(() => CTA_BY_STATE[ctaState.value]);
+  // ── Activity feed (extracted composable) ─────────────────────────────
+  const { groupedAudit, loadingMoreActivities, hasMoreActivities, loadMoreActivities } =
+    useDashboardActivity();
 
   const loading = computed(() => articlesStore.loading || auditStore.loading);
-  const loadingMoreActivities = computed(() => auditStore.loadingMore);
-  const hasMoreActivities = computed(() => auditStore.hasMore);
   const error = computed(() => articlesStore.error);
-
-  /** Activity feed - client-side sort as defense-in-depth ensuring newest-first. */
-  const groupedAudit = computed<GroupedAuditEntry[]>(() => {
-    const items: GroupedAuditEntry[] = auditStore.feed.map((entry) => ({
-      id: entry.id,
-      action: entry.kind === 'import' ? 'import' : (entry.action ?? ''),
-      source: entry.kind === 'import' ? 'system' : (entry.source ?? ''),
-      timestamp: entry.timestamp,
-      details: stripUuidFromDetails(entry.filename ?? entry.details),
-      articleTitle: entry.articleTitle ?? null,
-      articleId: entry.articleId ?? null,
-      count: entry.count ?? undefined,
-    }));
-    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    return items;
-  });
-
-  /** Load more activity entries (pagination) */
-  async function loadMoreActivities(): Promise<void> {
-    await auditStore.loadMore();
-  }
 
   /**
    * Full refresh of articles + audit + wiki CTA signals from the DB.

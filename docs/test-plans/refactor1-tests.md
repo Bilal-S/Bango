@@ -55,6 +55,18 @@ the T2.2 repo consolidation.
 | `src-tauri/tests/tags_labels_test.rs::create_tag_dedupes_normalized_name` | normalized-name create dedupes to the existing tag |
 | `src-tauri/tests/tags_labels_test.rs::create_label_dedupes_normalized_name` | normalized-name create dedupes to the existing label |
 
+## Tier 4 tests (added with the decomposition; same binding rule)
+
+| Test identifier | Assertion |
+|---|---|
+| `src/__tests__/utils/article-deep-links.test.ts::empty_query_yields_no_params_and_no_flags` | no params -> all flags false |
+| `src/__tests__/utils/article-deep-links.test.ts::filter_params_are_parsed_and_flagged` | full filter deep-link parses + sets hasFilterParams |
+| `src/__tests__/utils/article-deep-links.test.ts::article_id_only_does_not_set_filter_flag` | articleId-only deep-link skips filter path |
+| `src/__tests__/utils/article-deep-links.test.ts::numeric_flags_are_strictly_one` | filterCollapsed/resetFilters only fire on literal '1' |
+| `src/__tests__/utils/article-deep-links.test.ts::non_finite_years_do_not_set_filter_flag` | NaN years kept raw but excluded from hasFilterParams |
+| `src/__tests__/utils/article-deep-links.test.ts::non_string_values_are_ignored` | arrays/null query values ignored |
+| `src/__tests__/utils/article-deep-links.test.ts::empty_comma_list_parses_to_single_empty_string_entry` | `?tags=` parity with the old view parser |
+
 ## Existing regression anchors (already green; informational for the checker)
 
 | Test identifier | Guards |

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onActivated, onDeactivated, onUnmounted, ref, computed } from 'vue';
+import { onMounted, onActivated, ref, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
@@ -15,9 +15,10 @@ import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import { useExport } from '@/composables/use-export';
 import { resolveBiblioReturn } from '@/utils/biblio-links';
 import {
-  classifyArticleDetailArrowKey,
-  classifyArticleTableArrowKey,
-} from '@/utils/article-keyboard-navigation';
+  parseArticleRouteQuery,
+  type ArticleRouteDeepLinkParams,
+} from '@/utils/article-deep-links';
+import { useArticleListKeyboard } from '@/composables/use-article-list-keyboard';
 import ArticleToolbar from '@/components/article-toolbar.vue';
 import ArticleTable from '@/components/article-table.vue';
 import ArticleDetailPanel from '@/components/article-detail-panel.vue';
@@ -128,70 +129,10 @@ function handleNavigateToArticleWithRef(articleId: string, paperId?: string): vo
 }
 
 /**
- * Read route deep-link query params. Shared by `onMounted` and `onActivated`
- * so parsing logic stays in one place.
- */
-function readRouteDeepLinkParams(): {
-  status?: string;
-  tagsParam?: string[];
-  labelsParam?: string[];
-  yearFrom?: number;
-  yearTo?: number;
-  journal?: string;
-  author?: string;
-  filterCollapsed: boolean;
-  /**
-   * When true, clear preserved filter/query state in cached ArticleList before
-   * applying deep-link params (decision D5). Set by `buildBiblioArticleQuery`.
-   */
-  resetFilters: boolean;
-  articleId?: string;
-  hasFilterParams: boolean;
-} {
-  const status = typeof route.query.status === 'string' ? route.query.status : undefined;
-  const tagsParam = typeof route.query.tags === 'string' ? route.query.tags.split(',') : undefined;
-  const labelsParam =
-    typeof route.query.labels === 'string' ? route.query.labels.split(',') : undefined;
-  const yearFrom =
-    typeof route.query.yearFrom === 'string' ? Number(route.query.yearFrom) : undefined;
-  const yearTo = typeof route.query.yearTo === 'string' ? Number(route.query.yearTo) : undefined;
-  const journal = typeof route.query.journal === 'string' ? route.query.journal : undefined;
-  const author = typeof route.query.author === 'string' ? route.query.author : undefined;
-  // filterCollapsed=1 → keep filter panel collapsed (filters still applied)
-  const filterCollapsed = route.query.filterCollapsed === '1';
-  // resetFilters=1 → clear preserved filter/query before applying (decision D5)
-  const resetFilters = route.query.resetFilters === '1';
-  // articleId deep-link (dashboard "Go to article"): opens detail panel
-  const articleId = typeof route.query.articleId === 'string' ? route.query.articleId : undefined;
-  const hasFilterParams = !!(
-    status ||
-    tagsParam ||
-    labelsParam ||
-    (yearFrom !== undefined && Number.isFinite(yearFrom)) ||
-    (yearTo !== undefined && Number.isFinite(yearTo)) ||
-    journal ||
-    author
-  );
-  return {
-    status,
-    tagsParam,
-    labelsParam,
-    yearFrom,
-    yearTo,
-    journal,
-    author,
-    filterCollapsed,
-    resetFilters,
-    articleId,
-    hasFilterParams,
-  };
-}
-
-/**
  * Apply deep-link params: filter params -> `applyRouteParams`, then select
  * articleId if provided. Returns true when any param was applied.
  */
-function applyDeepLinkParams(params: ReturnType<typeof readRouteDeepLinkParams>): boolean {
+function applyDeepLinkParams(params: ArticleRouteDeepLinkParams): boolean {
   const { hasFilterParams, articleId } = params;
   if (!hasFilterParams && !articleId) return false;
   if (hasFilterParams) {
@@ -216,7 +157,7 @@ function applyDeepLinkParams(params: ReturnType<typeof readRouteDeepLinkParams>)
 }
 
 onMounted(() => {
-  const params = readRouteDeepLinkParams();
+  const params = parseArticleRouteQuery(route.query);
   const applied = applyDeepLinkParams(params);
   if (!applied) {
     // No deep-link params - run initial search
@@ -242,7 +183,7 @@ onActivated(() => {
     return;
   }
 
-  const params = readRouteDeepLinkParams();
+  const params = parseArticleRouteQuery(route.query);
   const articleIdDiffers = !!params.articleId && selectedArticle.value?.id !== params.articleId;
 
   /* Deep-link wins: re-apply filter params and/or select deep-linked article
@@ -616,85 +557,22 @@ async function handleBatchScrapeRefs(): Promise<void> {
   });
 }
 
-/* Keyboard navigation: context-dependent arrow-key shortcuts.
- * Detail panel OPEN: ArrowLeft/Right -> prev/next article (reuses `navigatePrev`
- * / `navigateNext` including cross-page behavior).
- * Detail panel CLOSED (table focused): ArrowUp/Down -> select prev/next row;
- * ArrowLeft/Right -> simulate horizontal scroll chevrons.
- *
- * Listener wired on `onActivated`, removed on `onDeactivated` because this
- * view is keep-alive cached: `onMounted` fires once for component lifetime,
- * so a listener there would fire while user is on another view. */
+/* Keyboard navigation: context-dependent arrow-key shortcuts, extracted to
+ * `use-article-list-keyboard` (refactor1 T4.2). Listener lifecycle is owned by
+ * the composable (onActivated / onDeactivated / onUnmounted) because this view
+ * is keep-alive cached: the shortcuts must only fire while Articles is the
+ * active view. */
 const articleTableRef = ref<InstanceType<typeof ArticleTable> | null>(null);
 
-function isTypingTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  return (
-    el.tagName === 'INPUT' ||
-    el.tagName === 'TEXTAREA' ||
-    el.tagName === 'SELECT' ||
-    el.isContentEditable
-  );
-}
-
-/** True when the current tab owns an article table (not References / Search). */
-function tableIsVisible(): boolean {
-  const tab = activeStatusTab.value;
-  return tab !== 'references' && tab !== 'search';
-}
-
-function onKeyDown(e: KeyboardEvent): void {
-  // Never hijack typing in inputs / textareas / contenteditable / selects
-  // (filter panel, toolbar search, notes, tags, bulk dialogs).
-  if (isTypingTarget(e.target)) return;
-
-  // Detail-panel arrows: prev/next article.
-  if (showDetail.value && selectedArticle.value) {
-    const dir = classifyArticleDetailArrowKey(e);
-    if (dir === 'prev' && hasPrevious.value) {
-      e.preventDefault();
-      void navigatePrev();
-    } else if (dir === 'next' && hasNext.value) {
-      e.preventDefault();
-      void navigateNext();
-    }
-    return;
-  }
-
-  // Table arrows: only when the table is visible and the detail panel is closed.
-  if (!tableIsVisible() || showDetail.value) return;
-
-  const dir = classifyArticleTableArrowKey(e);
-  if (!dir) return;
-
-  if (dir === 'up' && hasPrevious.value) {
-    e.preventDefault();
-    void navigatePrev();
-  } else if (dir === 'down' && hasNext.value) {
-    e.preventDefault();
-    void navigateNext();
-  } else if (dir === 'scroll-left' && articleTableRef.value?.canScrollLeft) {
-    e.preventDefault();
-    articleTableRef.value.scrollTable('left');
-  } else if (dir === 'scroll-right' && articleTableRef.value?.canScrollRight) {
-    e.preventDefault();
-    articleTableRef.value.scrollTable('right');
-  }
-}
-
-// Activate / deactivate the listener with the keep-alive lifecycle so the
-// shortcuts only fire while the Articles view is actually active.
-onActivated(() => {
-  window.addEventListener('keydown', onKeyDown);
-});
-onDeactivated(() => {
-  window.removeEventListener('keydown', onKeyDown);
-});
-// Also guard the non-cached path: if keep-alive is ever removed, the listener
-// should still be cleaned up on unmount.
-onUnmounted(() => {
-  window.removeEventListener('keydown', onKeyDown);
+useArticleListKeyboard({
+  showDetail,
+  selectedArticle,
+  activeStatusTab,
+  hasPrevious,
+  hasNext,
+  navigatePrev,
+  navigateNext,
+  articleTableRef,
 });
 </script>
 

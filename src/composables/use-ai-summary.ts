@@ -174,31 +174,47 @@ export async function requestArticleAiSummary(
 export function parseAiSummary(raw: string | null | undefined): AiSummaryData | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return null;
     /* Lenient fallback: accept any blob with at least one substantive field.
     Prevents all-or-nothing failure where a reasoning model returns just
     `{"schema_version":2}` and the view shows "No AI summary". */
-    const hasDigest = typeof parsed.summary_150_250_words === 'string';
-    const hasField = typeof parsed.field === 'string' && parsed.field.length > 0;
-    const hasExtraction =
-      parsed.structured_extraction &&
-      typeof parsed.structured_extraction === 'object' &&
-      Object.keys(parsed.structured_extraction).length > 0;
-    if (hasDigest || hasField || hasExtraction) {
-      // Ensure required fields have safe defaults so the TS interface is satisfied.
-      if (!parsed.field) parsed.field = '';
-      if (!parsed.subfield) parsed.subfield = '';
-      if (!parsed.summary_150_250_words) parsed.summary_150_250_words = '';
-      if (!Array.isArray(parsed.key_insights)) parsed.key_insights = [];
-      if (!Array.isArray(parsed.keywords)) parsed.keywords = [];
-      if (!parsed.structured_extraction) parsed.structured_extraction = {};
-      return parsed as AiSummaryData;
-    }
-    return null;
+    if (!summaryHasSubstance(parsed)) return null;
+    return withSafeDefaults(parsed);
   } catch {
     return null;
   }
+}
+
+/** True when `value` is a non-null object (arrays included, like JSON.parse output). */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** True when at least one substantive AI-summary field survived parsing. */
+function summaryHasSubstance(parsed: Record<string, unknown>): boolean {
+  const extraction = parsed.structured_extraction;
+  return (
+    typeof parsed.summary_150_250_words === 'string' ||
+    (typeof parsed.field === 'string' && parsed.field.length > 0) ||
+    (isRecord(extraction) && Object.keys(extraction).length > 0)
+  );
+}
+
+/**
+ * Fill safe defaults in-place so the parsed blob satisfies the
+ * {@link AiSummaryData} interface (empty strings/arrays/objects for missing
+ * or wrongly-typed fields). All other fields pass through untouched.
+ */
+function withSafeDefaults(parsed: Record<string, unknown>): AiSummaryData {
+  const data = parsed as Partial<AiSummaryData>;
+  data.field = data.field || '';
+  data.subfield = data.subfield || '';
+  data.summary_150_250_words = data.summary_150_250_words || '';
+  if (!Array.isArray(data.key_insights)) data.key_insights = [];
+  if (!Array.isArray(data.keywords)) data.keywords = [];
+  if (!data.structured_extraction) data.structured_extraction = {};
+  return data as AiSummaryData;
 }
 
 /** Module-level pending set for figure-description requests (T2 Phase 4). */

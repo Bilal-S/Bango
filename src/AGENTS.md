@@ -251,19 +251,27 @@ No child `AGENTS.md` files yet under `src/`. The durable boundaries are:
   six `help-tab-*.vue` tab components. `settings/` holds the settings
   sub-components (see Local Contracts above).
 - **`composables/`** - Vue composables. Notable: `use-startup-upgrade.ts`,
-  `use-bibliometrics.ts`, `use-journal-info.ts`, `use-article-search.ts`,
-  `use-network-view.ts`, `use-nav-history.ts`, `use-full-text-attachment.ts`,
-  `use-article-delete.ts`, `use-gap-analysis.ts`, `use-llm-configured.ts`,
-  `use-wiki.ts`, `use-llm-config.ts`, `use-saved-report.ts` (shared
-  saved-report factory behind `use-summary` + `use-gap-analysis`),
-  `use-network-graph.ts` + `use-biblio-network-fetch.ts` (shared scaffolding
-  behind the four biblio network views; see Local Contracts above).
+  `use-bibliometrics.ts`, `use-journal-info.ts`, `use-article-search.ts`
+  (root orchestrator; its returned-object shape is a frozen contract - change
+  internals only, never the shape; backed by the `use-article-{filters,detail,
+  mutations,bulk,route-params,counts,pagination,selection,full-text}` sub-composables),
+  `use-article-list-keyboard.ts` (Articles-view arrow-key shortcuts + their
+  keep-alive listener lifecycle), `use-network-view.ts`, `use-nav-history.ts`,
+  `use-full-text-attachment.ts`, `use-article-delete.ts`, `use-gap-analysis.ts`,
+  `use-llm-configured.ts`, `use-wiki.ts`, `use-llm-config.ts`,
+  `use-saved-report.ts` (shared saved-report factory behind `use-summary` +
+  `use-gap-analysis`), `use-dashboard-cta.ts` + `use-dashboard-activity.ts`
+  (behind `use-dashboard`), `use-network-graph.ts` +
+  `use-biblio-network-fetch.ts` (shared scaffolding behind the four biblio
+  network views; see Local Contracts above).
 - **`stores/`** - Pinia stores. Notable: `chat.ts`, `openalex.ts`,
   `llm-config.ts`.
 - **`utils/`** - pure utilities. Notable: `network-export.ts`, `formatters.ts`,
   `color.ts`, `debounce.ts`, `next-paint.ts`, `reference-flatten.ts`,
   `citation-analysis.ts`, `graph-filters.ts`, `llm-error.ts`,
-  `google-trends.ts`, `wiki-markdown.ts`, `wiki-site-export.ts`, `platform.ts`.
+  `google-trends.ts`, `wiki-markdown.ts`, `wiki-site-export.ts`, `platform.ts`,
+  `article-keyboard-navigation.ts`, `article-deep-links.ts`
+  (pure `parseArticleRouteQuery` for Articles-view deep-links).
 - **`types/`** - TypeScript interfaces (incl. `openalex.ts`, `wiki.ts`,
   `index.ts`).
 - **`router/`** - route table.
