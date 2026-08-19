@@ -56,7 +56,8 @@ import type { NetworkSearchSuggestion } from '../types/network-graph';
  * Emits `input` on every keystroke (parents re-emit their filter payloads),
  * `select` / `select-first` on suggestion click / Enter (parents locate the
  * node; some deliberately skip the filter emit there - that logic stays in
- * the parent), `clear` on the x button, and `escape` on Escape.
+ * the parent), and `clear` on the x button. Escape only closes the dropdown
+ * internally (no parent consumes it).
  */
 const props = defineProps<{
   modelValue: string;
@@ -72,7 +73,6 @@ const emit = defineEmits<{
   (e: 'select', suggestion: NetworkSearchSuggestion): void;
   (e: 'select-first', suggestion: NetworkSearchSuggestion): void;
   (e: 'clear'): void;
-  (e: 'escape'): void;
 }>();
 
 const showSuggestions = ref(false);
@@ -106,6 +106,5 @@ function onClear() {
 
 function onEscape() {
   showSuggestions.value = false;
-  emit('escape');
 }
 </script>

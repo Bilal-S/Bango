@@ -16,8 +16,13 @@ export interface NetworkGraphOptions<THover> {
    * Called on every `enterNode` renderer event.
    */
   mapHoveredNode: (node: string, attrs: NodeAttrs) => THover;
-  /** Domain visual-state pass (colors, sizes, dimming) over the graph. */
-  applyVisualState: () => void;
+  /** Domain visual-state pass (colors, sizes, dimming) over the graph.
+   *  Required when the standard reapply watchers are installed or
+   *  `onGraphReady` is omitted (the default graph-ready path calls it);
+   *  optional only for components that install fully custom dispatch
+   *  (`installStandardWatchers: false` + `onGraphReady`, e.g. the co-author
+   *  graph). */
+  applyVisualState?: () => void;
   /** Forwards renderer node/stage clicks (the component re-emits `node-click`). */
   onNodeClick: (nodeId: string | null) => void;
   /**
@@ -95,7 +100,7 @@ export function useNetworkGraph<THover>(
         if (options.onGraphReady) {
           options.onGraphReady();
         } else {
-          options.applyVisualState();
+          options.applyVisualState?.();
         }
       });
     }
@@ -105,21 +110,21 @@ export function useNetworkGraph<THover>(
     watch(
       () => props.focusedNodeId,
       () => {
-        options.applyVisualState();
+        options.applyVisualState?.();
       }
     );
 
     watch(
       () => props.colorMode,
       () => {
-        options.applyVisualState();
+        options.applyVisualState?.();
       }
     );
 
     watch(
       () => props.selectedClusters,
       () => {
-        options.applyVisualState();
+        options.applyVisualState?.();
       },
       { deep: true }
     );
@@ -127,7 +132,7 @@ export function useNetworkGraph<THover>(
     watch(
       () => props.recalculateTrigger,
       () => {
-        if (props.graph) options.applyVisualState();
+        if (props.graph) options.applyVisualState?.();
       }
     );
   }

@@ -82,14 +82,16 @@ describe('network-search-box.vue', () => {
     expect(plain.find('button').exists()).toBe(false);
   });
 
-  it('escape_emits_and_hides_dropdown', async () => {
+  it('escape_hides_dropdown_without_emitting', async () => {
     const wrapper = mountBox({ modelValue: 's', suggestions });
 
     await wrapper.find('input[type="text"]').trigger('focus');
     expect(wrapper.findAll('li')).toHaveLength(2);
 
     await wrapper.find('input[type="text"]').trigger('keydown.escape');
-    expect(wrapper.emitted('escape')).toHaveLength(1);
     expect(wrapper.findAll('li')).toHaveLength(0);
+    /* Escape is dropdown-close only; no `escape` emit exists (removed as
+     * unused API cruft - no parent ever bound it). */
+    expect(wrapper.emitted('escape')).toBeUndefined();
   });
 });

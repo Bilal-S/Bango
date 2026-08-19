@@ -64,7 +64,6 @@ const { hoveredNode, hasGraph, tooltipPosition, renderer, locateNode, resetZoom,
         applyFocusMode(props.focusedNodeId);
       }
     },
-    applyVisualState: clearFocusMode,
     onNodeClick: (nodeId) => emit('node-click', nodeId),
   });
 

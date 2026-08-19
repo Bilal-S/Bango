@@ -195,7 +195,7 @@ scaffolding instead of duplicating it:
   responds) but shares the state bundle and `scaleToRange`.
 - The controls sidebars (`citation/cocitation/keyword/network-controls.vue`)
   are built from `network-search-box.vue` (v-model + input/select/
-  select-first/clear/escape emits; Enter-select deliberately skips the filter
+  select-first/clear emits; Enter-select deliberately skips the filter
   emit in keyword/coauthor - that asymmetry lives in the parents),
   `network-threshold-slider.vue` (input = every tick, commit = release), and
   `network-export-menu.vue` (owns its own open state).
