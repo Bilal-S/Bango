@@ -226,6 +226,18 @@ vitest + `check:test-inventory`) and `npm run test:coverage`
 (`@vitest/coverage-v8`, config in `vitest.config.ts`, report at
 `coverage/index.html`).
 
+### Shared test helpers (`src/__tests__/helpers/`)
+
+- `fixtures.ts` - the single canonical `makeArticle` factory (all fields,
+  translation fields included; per-file tests add thin aliases carrying only
+  their semantic defaults) plus `makeArticlesStore` / `makeTagsStore` /
+  `makeLabelsStore` mock-store factories and `shimLocalStorage`. New tests
+  MUST NOT re-declare a local full-field `makeArticle` clone.
+- `sigma-renderer-stub.ts` - the shared `use-sigma-renderer` WebGL stub for
+  graph component tests; import it BEFORE the component under test so the
+  `vi.mock` registration lands first. The `sigmaEvents` map is the seam tests
+  drive (clear it in `beforeEach`).
+
 ## Child DOX Index
 
 No child `AGENTS.md` files yet under `src/`. The durable boundaries are:

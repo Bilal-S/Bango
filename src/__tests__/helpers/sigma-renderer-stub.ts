@@ -8,8 +8,14 @@ import { vi } from 'vitest';
  * Import this module BEFORE importing the graph component under test so the
  * `vi.mock` registration below lands before the component resolves
  * `@/composables/use-sigma-renderer`. Each test-file module registry gets a
- * fresh `sigmaEvents` map; clear it in `beforeEach`. */
-export const sigmaEvents = new Map<string, (payload: unknown) => void>();
+ * fresh `sigmaEvents` map; clear it in `beforeEach`.
+ *
+ * `vi.hoisted` guarantees the map exists before Vitest hoists the `vi.mock`
+ * factory above this declaration - robust by construction instead of relying
+ * on the factory running lazily. (Re-exported via a separate statement:
+ * Vitest cannot `export const` a hoisted binding inline.) */
+const sigmaEvents = vi.hoisted(() => new Map<string, (payload: unknown) => void>());
+export { sigmaEvents };
 
 vi.mock('@/composables/use-sigma-renderer', () => {
   interface FakeRenderer {

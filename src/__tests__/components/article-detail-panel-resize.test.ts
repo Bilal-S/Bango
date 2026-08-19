@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { shimLocalStorage } from '../helpers/fixtures';
+import { shimLocalStorage, makeArticle as makeBaseArticle } from '../helpers/fixtures';
 import type { Article, AuditEntry } from '@/types';
 
 /* Stub the stores + IPC so the panel mounts without backend interaction. */
@@ -39,72 +39,12 @@ import ArticleDetailPanel from '@/components/article-detail-panel.vue';
 
 /** Build a minimal non-fullscreen article so the resizer renders. */
 function makeArticle(): Article {
-  return {
-    id: 'a1',
-    sequenceId: 1,
-    status: 'included',
-    screeningError: false,
-    title: 'Test Article',
+  return makeBaseArticle({
     abstractText: 'Abstract.',
     authors: ['Author A'],
     publicationYear: 2024,
-    doi: null,
-    journal: null,
-    volume: null,
-    issue: null,
-    startPage: null,
-    endPage: null,
-    keywords: [],
-    url: null,
-    language: null,
-    publisher: null,
-    publisherCity: null,
-    publisherAddress: null,
-    issn: null,
-    eissn: null,
-    journalIndexId: null,
     referenceType: 'JOUR',
-    date: null,
-    authorAddress: null,
-    affiliation: null,
-    accessionNumber: null,
-    customField3: null,
-    journalAbbreviation: null,
-    journalIsoAbbreviation: null,
-    notes: null,
-    webOfScienceDb: null,
-    userNotes: null,
-    risExtras: null,
-    duplicateOf: null,
-    aiDecision: null,
-    aiReasoning: null,
-    aiConfidence: null,
-    matchedInclusionCriteria: [],
-    matchedExclusionCriteria: [],
-    tags: [],
-    labels: [],
-    manualOverride: false,
-    importSource: null,
-    importedAt: '',
-    changedAt: '',
-    screenedAt: null,
-    dataLength: null,
-    tokenEstimate: null,
-    actualTokens: null,
-    fullText: null,
-    fullTextAiSummary: null,
-    numCited: null,
-    numReferences: null,
-    hasCitationDetails: false,
-    hasReferenceDetails: false,
-    hasFullText: false,
-    fullTextFileName: null,
-    hasFiguresOrTables: false,
-    isTranslated: false,
-    translationStatus: 'none',
-    translationError: null,
-    translatedAt: null,
-  } as Article;
+  });
 }
 
 const emptyAudit: AuditEntry[] = [];

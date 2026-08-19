@@ -18,6 +18,14 @@
   Prefer quality, simplicity, robustness, scalability, and long-term maintainability.
 - When writing or substantially editing long Markdown files, put each full sentence on its own physical line.
   Preserve normal Markdown structure, but avoid wrapping multiple sentences onto one physical line.
+- Fallow health's unit-size and hotspot penalties are capped/churn-driven and do not
+  recover from function decomposition (measured across refactor1 T3-T5: eliminating the
+  1629/710/670/525-line functions left both penalties pinned at their -10.0 caps).
+  The recoverable levers are duplication and dead-code removal, and coupling rises
+  slightly with module splits (2.1 -> 2.2 across refactor1).
+  Treat unit-size decomposition as a maintainability investment, never as a
+  health-score investment; set health-score targets only against the measured
+  duplication/dead-code/coupling headroom.
 
 ## Rust (src-tauri/)
 

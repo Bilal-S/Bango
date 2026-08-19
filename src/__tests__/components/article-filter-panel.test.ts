@@ -2,24 +2,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
 import ArticleFilterPanel from '@/components/article-filter-panel.vue';
+import { makeTagsStore, makeLabelsStore } from '../helpers/fixtures';
 import type { ArticleFilter } from '@/composables/use-article-search';
 
 // ── Mock stores ─────────────────────────────────────────────────────
-const mockTagsStore = {
+const mockTagsStore = makeTagsStore({
   tags: [
     { id: 't1', name: 'machine-learning', source: 'user_created', color: null, articleCount: 5 },
     { id: 't2', name: 'nlp', source: 'ai_suggested', color: null, articleCount: 3 },
   ],
-  fetchTags: vi.fn(),
-};
+});
 
-const mockLabelsStore = {
+const mockLabelsStore = makeLabelsStore({
   labels: [
     { id: 'l1', name: 'priority-read', source: 'user_created', color: null, articleCount: 2 },
     { id: 'l2', name: 'disputed', source: 'ai_generated', color: null, articleCount: 1 },
   ],
-  fetchLabels: vi.fn(),
-};
+});
 
 vi.mock('@/stores/tags', () => ({
   useTagsStore: vi.fn(() => mockTagsStore),

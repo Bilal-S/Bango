@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import LabelsSection from '@/components/labels-section.vue';
 import type { Article } from '@/types';
+import { makeArticle as makeBaseArticle } from '../helpers/fixtures';
 
 // Mock the labels store so the component can find labels/label colors.
 vi.mock('@/stores/labels', () => ({
@@ -37,73 +38,13 @@ vi.mock('@/stores/labels', () => ({
 }));
 
 function makeArticle(overrides: Partial<Article> = {}): Article {
-  return {
-    id: 'a1',
-    sequenceId: 1,
-    status: 'included',
-    screeningError: false,
-    title: 'Test Article',
+  return makeBaseArticle({
     abstractText: '',
     authors: [],
-    publicationYear: 2021,
-    doi: null,
-    journal: null,
-    volume: null,
-    issue: null,
-    startPage: null,
-    endPage: null,
-    keywords: [],
-    url: null,
-    language: null,
-    publisher: null,
-    publisherCity: null,
-    publisherAddress: null,
-    issn: null,
-    eissn: null,
-    journalIndexId: null,
     referenceType: 'JOUR',
-    date: null,
-    authorAddress: null,
-    affiliation: null,
-    accessionNumber: null,
-    customField3: null,
-    journalAbbreviation: null,
-    journalIsoAbbreviation: null,
-    notes: null,
-    webOfScienceDb: null,
-    userNotes: null,
-    risExtras: null,
-    duplicateOf: null,
-    aiDecision: null,
-    aiReasoning: null,
-    aiConfidence: null,
-    matchedInclusionCriteria: [],
-    matchedExclusionCriteria: [],
-    tags: [],
     labels: ['priority-read', 'strong-methodology'],
-    manualOverride: false,
-    importSource: null,
-    importedAt: '',
-    changedAt: '',
-    screenedAt: null,
-    dataLength: null,
-    tokenEstimate: null,
-    actualTokens: null,
-    fullText: null,
-    fullTextAiSummary: null,
-    numCited: null,
-    numReferences: null,
-    hasCitationDetails: false,
-    hasReferenceDetails: false,
-    hasFullText: false,
-    fullTextFileName: null,
-    hasFiguresOrTables: false,
-    isTranslated: false,
-    translationStatus: 'none',
-    translationError: null,
-    translatedAt: null,
     ...overrides,
-  } as Article;
+  });
 }
 
 describe('labels-section.vue', () => {

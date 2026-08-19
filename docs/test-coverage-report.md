@@ -1,6 +1,6 @@
 # Test Coverage Report
 
-Coverage baselines captured via `cargo-llvm-cov` (Rust) and `@vitest/coverage-v8` (Vue/TS). Generated 2026-06-17; refreshed 2026-07-29 with the latest full-suite measurements.
+Coverage baselines captured via `cargo-llvm-cov` (Rust) and `@vitest/coverage-v8` (Vue/TS). Generated 2026-06-17; refreshed 2026-07-29 with the latest full-suite measurements; Vue/TS re-measured 2026-08-19 after refactor1 Tiers 4-5 (Rust not re-measured that day - zero Rust code changed since 2026-07-29's snapshot, and `cargo llvm-cov` costs ~50G of build artifacts).
 
 ## How to reproduce
 
@@ -24,10 +24,18 @@ Coverage artifacts are git-ignored (`coverage/`, `src-tauri/target/`). The `@vit
 
 ## Headline numbers
 
-| Stack | Baseline (initial) | Previous (2026-07-04) | Current (2026-07-29) | Target |
-|-------|--------------------|-----------------------|----------------------|--------|
-| **Rust** (`src-tauri/`) | 51.93% lines | 65.47% lines | **64.53%** lines | 70% |
-| **Vue/TS** (`src/`) | 17.57% lines | 32.22% lines | **40.37%** lines | 70% |
+| Stack | Baseline (initial) | Previous (2026-07-04) | Previous (2026-07-29) | Current (2026-08-19) | Target |
+|-------|--------------------|-----------------------|----------------------|----------------------|--------|
+| **Rust** (`src-tauri/`) | 51.93% lines | 65.47% lines | 64.53% lines | **64.53%** lines (carried forward, not re-measured) | 70% |
+| **Vue/TS** (`src/`) | 17.57% lines | 32.22% lines | 40.37% lines | **48.49%** lines | 70% |
+
+The 2026-08-19 Vue/TS measurement ran after refactor1 (`.worktrees/refactor1.md`)
+Tiers 4-5: the `useArticleSearch`/dashboard decompositions (T4) and the test-suite
+dedupe (T5 - shared `src/__tests__/helpers/fixtures.ts` factories, unwrapped giant
+describes; zero production changes in T5). The suite is now **1,766 tests** across
+**131 files** (was 1,530 / 102), all passing under coverage with the configured
+thresholds. The +8.1 pp jump versus 2026-07-29 comes mostly from Tier 0-5 test
+additions and the T4 code splits moving uncovered monoliths under existing tests.
 
 Rust line coverage dipped ~0.94 pp versus the 2026-07-04 snapshot because new untested code
 landed since then (notably the `openalex/` module at 0% and several expanded `commands/`

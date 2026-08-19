@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from 'pinia';
 import MatchedCriteria from '@/components/matched-criteria.vue';
 import { useCriteriaStore } from '@/stores/criteria';
 import type { Article } from '@/types';
+import { makeArticle as makeBaseArticle } from '../helpers/fixtures';
 
 vi.mock('@/composables/use-tauri-command', () => ({
   isTauri: () => false,
@@ -11,73 +12,13 @@ vi.mock('@/composables/use-tauri-command', () => ({
 }));
 
 function makeArticle(overrides: Partial<Article> = {}): Article {
-  return {
-    id: 'a1',
-    sequenceId: 1,
-    status: 'included',
-    screeningError: false,
+  return makeBaseArticle({
     title: 'T',
     abstractText: '',
     authors: [],
     publicationYear: null,
-    doi: null,
-    journal: null,
-    volume: null,
-    issue: null,
-    startPage: null,
-    endPage: null,
-    keywords: [],
-    url: null,
-    language: null,
-    publisher: null,
-    publisherCity: null,
-    publisherAddress: null,
-    issn: null,
-    eissn: null,
-    journalIndexId: null,
-    referenceType: null,
-    date: null,
-    authorAddress: null,
-    affiliation: null,
-    accessionNumber: null,
-    customField3: null,
-    journalAbbreviation: null,
-    journalIsoAbbreviation: null,
-    notes: null,
-    webOfScienceDb: null,
-    userNotes: null,
-    risExtras: null,
-    duplicateOf: null,
-    aiDecision: null,
-    aiReasoning: null,
-    aiConfidence: null,
-    matchedInclusionCriteria: [],
-    matchedExclusionCriteria: [],
-    tags: [],
-    labels: [],
-    manualOverride: false,
-    importSource: null,
-    importedAt: '',
-    changedAt: '',
-    screenedAt: null,
-    dataLength: null,
-    tokenEstimate: null,
-    actualTokens: null,
-    fullText: null,
-    fullTextAiSummary: null,
-    numCited: null,
-    numReferences: null,
-    hasCitationDetails: false,
-    hasReferenceDetails: false,
-    hasFullText: false,
-    fullTextFileName: null,
-    hasFiguresOrTables: false,
-    isTranslated: false,
-    translationStatus: 'none',
-    translationError: null,
-    translatedAt: null,
     ...overrides,
-  } as Article;
+  });
 }
 
 describe('matched-criteria.vue', () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import ArticleTable from '@/components/article-table.vue';
 import type { Article } from '@/types';
+import { makeArticle as makeBaseArticle } from '../helpers/fixtures';
 
 // Stub child components - we only care about the exposed scroll surface,
 // not the rendered chips/badges.
@@ -13,72 +14,14 @@ vi.mock('@/components/confidence-bar.vue', () => ({
 }));
 
 function makeArticle(id: string, sequenceId: number): Article {
-  return {
-    id,
-    sequenceId,
-    status: 'included',
-    screeningError: false,
+  return makeBaseArticle({
     title: `Article ${id}`,
     abstractText: '',
     authors: ['Doe J'],
-    publicationYear: 2021,
-    doi: null,
-    journal: null,
-    volume: null,
-    issue: null,
-    startPage: null,
-    endPage: null,
-    keywords: [],
-    url: null,
-    language: null,
-    publisher: null,
-    publisherCity: null,
-    publisherAddress: null,
-    issn: null,
-    eissn: null,
-    journalIndexId: null,
     referenceType: 'JOUR',
-    date: null,
-    authorAddress: null,
-    affiliation: null,
-    accessionNumber: null,
-    customField3: null,
-    journalAbbreviation: null,
-    journalIsoAbbreviation: null,
-    notes: null,
-    webOfScienceDb: null,
-    userNotes: null,
-    risExtras: null,
-    duplicateOf: null,
-    aiDecision: null,
-    aiReasoning: null,
-    aiConfidence: null,
-    matchedInclusionCriteria: [],
-    matchedExclusionCriteria: [],
-    tags: [],
-    labels: [],
-    manualOverride: false,
-    importSource: null,
-    importedAt: '',
-    changedAt: '',
-    screenedAt: null,
-    dataLength: null,
-    tokenEstimate: null,
-    actualTokens: null,
-    fullText: null,
-    fullTextAiSummary: null,
-    numCited: null,
-    numReferences: null,
-    hasCitationDetails: false,
-    hasReferenceDetails: false,
-    hasFullText: false,
-    fullTextFileName: null,
-    hasFiguresOrTables: false,
-    isTranslated: false,
-    translationStatus: 'none',
-    translationError: null,
-    translatedAt: null,
-  } as Article;
+    id,
+    sequenceId,
+  });
 }
 
 /**
