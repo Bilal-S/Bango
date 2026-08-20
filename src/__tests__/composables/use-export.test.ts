@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-/* Characterization tests for the RIS-export scaffold that Tier 1 (T1.3) of
- * .worktrees/refactor1.md extracts into a shared helper. Pins the three
+/* Characterization tests for the RIS-export scaffold that the Tier 1 (T1.3)
+ * refactor extracts into a shared helper. Pins the three
  * behavioral contracts: dialog cancel, tab-export IPC payload, and error
  * propagation. See also src/__tests__/export-lifecycle.test.ts for the full
  * composable suite. */

@@ -4,10 +4,15 @@ import { useRouter } from 'vue-router';
 import NetworkGraph from '../components/network-graph.vue';
 import NetworkControls from '../components/network-controls.vue';
 import AuthorDetailPanel from '../components/author-detail-panel.vue';
+import ClusterThemesPanel from '../components/cluster-themes-panel.vue';
+import ArticleDetailSlideOver from '../components/article-detail-slide-over.vue';
 import { useCoAuthorNetwork } from '../composables/use-coauthor-network';
 import { useNetworkView } from '../composables/use-network-view';
 import { useNetworkLayout } from '../composables/use-network-layout';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { useClusterThemes } from '../composables/use-cluster-themes';
+import { useLlmConfigured } from '../composables/use-llm-configured';
+import { collectClusterMembers } from '@/utils/cluster-members';
 import { buildBiblioArticleQuery } from '@/utils/biblio-links';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CoAuthorNode } from '../types/biblio-network';
@@ -47,6 +52,86 @@ const {
 
 const { runForceAtlas2Async } = useNetworkLayout();
 const { applyGraphFilters } = useSigmaRenderer();
+
+/* ── Cluster thematic analysis ─────────────────────────────────────────
+ * The canonical LLM gate hides the trigger; the store caches per
+ * `networkType:clusterIndex` and the composable centralizes invalidation on
+ * any recalculate/layout change (Louvain indices are not stable). */
+const llmReady = useLlmConfigured();
+const themes = useClusterThemes({
+  networkType: 'co_authorship',
+  recalculateTrigger,
+  graph,
+});
+const themesPanelOpen = ref(false);
+const themesClusterIndex = ref<number | null>(null);
+
+const themesEntry = computed(() =>
+  themesClusterIndex.value === null
+    ? { markdown: null, loading: false, error: null }
+    : themes.entryFor(themesClusterIndex.value)
+);
+
+/* The legend trigger's loading state follows the currently selected cluster,
+ * not the panel's (last analyzed) cluster: reselecting another cluster while
+ * one analysis is in flight must re-enable the button. */
+const analyzeLoading = computed(() => {
+  const selected = selectedClusters.value[0];
+  return selected === undefined ? false : themes.entryFor(selected).loading;
+});
+
+function onAnalyzeThemes(): void {
+  const clusterIndex = selectedClusters.value[0];
+  if (clusterIndex === undefined || !graph.value) return;
+  themesClusterIndex.value = clusterIndex;
+  themesPanelOpen.value = true;
+  const members = collectClusterMembers(graph.value, clusterIndex);
+  void themes.analyze(clusterIndex, members);
+}
+
+async function onReanalyzeThemes(): Promise<void> {
+  const clusterIndex = themesClusterIndex.value;
+  if (clusterIndex === null || !graph.value) return;
+  const members = collectClusterMembers(graph.value, clusterIndex);
+  await themes.reanalyze(clusterIndex, members);
+}
+
+async function onCopyThemes(markdown: string): Promise<void> {
+  await themes.copyMarkdown(markdown);
+}
+
+/* ── Article detail slide-over ───────────────────────────────────────────
+ * Shared component owns the useArticleSearch wiring + panel lifecycle; the
+ * view only keeps the overlay guards so `article:` links open the full
+ * article detail without leaving the view (closing returns to the exact
+ * network state: graph, cluster selection, cached analysis). */
+const articleDetailRef = ref<InstanceType<typeof ArticleDetailSlideOver> | null>(null);
+const showArticleDetail = ref(false);
+const isArticleDetailFullScreen = ref(false);
+
+function onArticleDetailOpened(): void {
+  showArticleDetail.value = true;
+}
+
+function onArticleDetailClosed(): void {
+  showArticleDetail.value = false;
+  isArticleDetailFullScreen.value = false;
+}
+
+function onArticleDetailToggleFullScreen(): void {
+  isArticleDetailFullScreen.value = !isArticleDetailFullScreen.value;
+}
+
+/* Protocol registry injected into the panel: author -> focus + locate,
+ * article -> full in-view article detail slide-over (no route change, so the
+ * network state - graph, cluster selection, cached analysis - is intact on
+ * close). */
+const themeLinkHandlers: Record<string, (id: string) => void> = {
+  author: (id: string) => onNavigateToAuthor(id),
+  article: (id: string) => {
+    void articleDetailRef.value?.open(id);
+  },
+};
 
 const selectedAuthor = ref<CoAuthorNode | null>(null);
 
@@ -182,6 +267,8 @@ function viewAuthorArticles(): void {
           :min-year="yearRange.min"
           :max-year="yearRange.max"
           :selected-clusters="selectedClusters"
+          :llm-ready="llmReady"
+          :analysis-loading="analyzeLoading"
           @filter-change="onFilterChange"
           @locate-author="(name: string) => locateByLabel(name)"
           @export-image="onExportImage"
@@ -190,6 +277,7 @@ function viewAuthorArticles(): void {
           @layout-mode-change="onLayoutModeChange"
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"
+          @analyze-themes="onAnalyzeThemes"
           @recalculate="onRecalculate"
           @reset-analysis="onResetAnalysis"
         />
@@ -206,8 +294,8 @@ function viewAuthorArticles(): void {
       </button>
     </div>
 
-    <!-- Graph canvas -->
-    <main class="flex-1 relative">
+    <!-- Graph canvas (hidden while the article detail overlay is fullscreen) -->
+    <main v-show="!(showArticleDetail && isArticleDetailFullScreen)" class="flex-1 relative">
       <NetworkGraph
         ref="graphRef"
         :graph="graph"
@@ -225,13 +313,36 @@ function viewAuthorArticles(): void {
       />
     </main>
 
-    <!-- Detail panel -->
+    <!-- Detail panel (hidden while the article detail overlay is open) -->
     <AuthorDetailPanel
+      v-show="!showArticleDetail"
       :author="selectedAuthor"
       :graph="graph"
       @close="onNodeClick(null)"
       @navigate="onNavigateToAuthor"
       @view-articles="viewAuthorArticles"
+    />
+
+    <!-- Cluster thematic analysis panel -->
+    <ClusterThemesPanel
+      :visible="themesPanelOpen"
+      :title="`Cluster ${(themesClusterIndex ?? 0) + 1} - Thematic Analysis`"
+      :markdown="themesEntry.markdown"
+      :loading="themesEntry.loading"
+      :error="themesEntry.error"
+      :link-handlers="themeLinkHandlers"
+      @close="themesPanelOpen = false"
+      @reanalyze="onReanalyzeThemes"
+      @copy="onCopyThemes"
+    />
+
+    <!-- Full article detail panel (opened via the themes panel article links). -->
+    <ArticleDetailSlideOver
+      ref="articleDetailRef"
+      :full-screen="isArticleDetailFullScreen"
+      @opened="onArticleDetailOpened"
+      @closed="onArticleDetailClosed"
+      @toggle-full-screen="onArticleDetailToggleFullScreen"
     />
   </div>
 </template>

@@ -4,17 +4,11 @@ import CitationNetworkGraph from '../components/citation-network-graph.vue';
 import type { IsolationDirection } from '../components/citation-network-graph.vue';
 import CitationControls from '../components/citation-controls.vue';
 import CitationPaperDetailPanel from '../components/citation-paper-detail-panel.vue';
-import ArticleDetailPanel from '../components/article-detail-panel.vue';
+import ArticleDetailSlideOver from '../components/article-detail-slide-over.vue';
 import { useCitationNetwork } from '../composables/use-citation-network';
 import { useNetworkView } from '../composables/use-network-view';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
 import { useMainPathWorker } from '../composables/use-main-path-worker';
-import { useArticleSearch } from '../composables/use-article-search';
-import { useScreening } from '@/composables/use-screening';
-import { useToast } from '../composables/use-toast';
-import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
-import { useArticleDelete } from '@/composables/use-article-delete';
-import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import { debounce } from '../utils/debounce';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { CitationNode } from '../types/biblio-citation';
@@ -61,42 +55,28 @@ const {
 });
 
 const { applyCitationGraphFilters } = useSigmaRenderer();
-const toast = useToast();
 
 /**
  * Article detail panel (opened via "open linked record" from citation paper
- * detail). Re-uses the same ArticleDetailPanel as the Articles view.
+ * detail). Shared `ArticleDetailSlideOver` owns the useArticleSearch wiring +
+ * panel lifecycle; this view keeps only the overlay guards.
  */
-const {
-  selectedArticle: detailArticle,
-  auditTrail: detailAuditTrail,
-  selectArticle,
-  refreshArticle,
-  updateNotes,
-  updateTags,
-  updateLabels,
-  updateCriteria,
-  updateMetadata,
-  moveArticle,
-  deleteArticle,
-  clearAiReasoning,
-  attachFullText,
-  deleteFullTextAttachment,
-} = useArticleSearch();
-const { screenArticle } = useScreening();
-
+const articleDetailRef = ref<InstanceType<typeof ArticleDetailSlideOver> | null>(null);
 const showArticleDetail = ref(false);
 const isArticleDetailFullScreen = ref(false);
 
-/* Article delete orchestration centralized in `useArticleDelete`. Composable
- * nulls `selectedArticle`; `onDeleted` hook clears local visibility + fullscreen. */
-const { handleDeleteArticle } = useArticleDelete({
-  deleteArticle,
-  onDeleted: () => {
-    showArticleDetail.value = false;
-    isArticleDetailFullScreen.value = false;
-  },
-});
+function onArticleDetailOpened(): void {
+  showArticleDetail.value = true;
+}
+
+function onArticleDetailClosed(): void {
+  showArticleDetail.value = false;
+  isArticleDetailFullScreen.value = false;
+}
+
+function onArticleDetailToggleFullScreen(): void {
+  isArticleDetailFullScreen.value = !isArticleDetailFullScreen.value;
+}
 
 const selectedPaper = ref<CitationNode | null>(null);
 
@@ -234,30 +214,9 @@ function onClearIsolation() {
 }
 
 /** Open the full article detail panel from the citation paper detail panel. */
-async function onOpenLinkedRecord(articleId: string) {
-  try {
-    await selectArticle(articleId);
-    showArticleDetail.value = true;
-  } catch {
-    toast.show('Failed to load article details', 'error');
-  }
+function onOpenLinkedRecord(articleId: string) {
+  void articleDetailRef.value?.open(articleId);
 }
-
-/** Close the article detail panel. */
-function onCloseArticleDetail() {
-  showArticleDetail.value = false;
-  isArticleDetailFullScreen.value = false;
-  detailArticle.value = null;
-  detailAuditTrail.value = [];
-}
-
-// Full-text attach UI orchestration is centralized in
-// `useFullTextAttachment` (shared with the other detail-panel host views).
-const { handleAttachFullText } = useFullTextAttachment({ attachFullText });
-
-/* AI-reasoning clear orchestration centralized in `useClearAiReasoning`.
- * Composable owns toast; `useArticleSearch.clearAiReasoning` owns IPC + refresh. */
-const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 
 function onFilterChange(filters: {
   minCitations: number;
@@ -479,33 +438,13 @@ async function onResetAnalysis() {
     </Transition>
 
     <!-- Full article detail panel (opened from the citation paper detail panel). -->
-    <Transition name="detail-slide">
-      <ArticleDetailPanel
-        v-if="showArticleDetail && detailArticle"
-        :article="detailArticle"
-        :audit-trail="detailAuditTrail"
-        :has-previous="false"
-        :has-next="false"
-        :has-return-target="false"
-        :full-screen="isArticleDetailFullScreen"
-        :article-position="1"
-        :article-total="1"
-        @close="onCloseArticleDetail"
-        @delete-article="handleDeleteArticle"
-        @clear-ai-reasoning="handleClearAiReasoning"
-        @toggle-full-screen="isArticleDetailFullScreen = !isArticleDetailFullScreen"
-        @update-notes="updateNotes"
-        @update-tags="updateTags"
-        @update-labels="updateLabels"
-        @update-criteria="updateCriteria"
-        @update-metadata="updateMetadata"
-        @screen-article="screenArticle"
-        @move-article="moveArticle"
-        @attach-full-text="handleAttachFullText"
-        @delete-full-text="deleteFullTextAttachment"
-        @refresh-article="refreshArticle"
-      />
-    </Transition>
+    <ArticleDetailSlideOver
+      ref="articleDetailRef"
+      :full-screen="isArticleDetailFullScreen"
+      @opened="onArticleDetailOpened"
+      @closed="onArticleDetailClosed"
+      @toggle-full-screen="onArticleDetailToggleFullScreen"
+    />
   </div>
 </template>
 

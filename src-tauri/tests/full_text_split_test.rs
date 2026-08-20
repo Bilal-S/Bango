@@ -5,7 +5,7 @@
 //! DB writes (`commit_full_text_to_db`, short lock burst). The monolithic
 //! `attach_full_text_inner` path is covered by `figures_flag_test.rs`; these
 //! tests cover the split path that batch import actually exercises, closing
-//! the coverage gap identified in `.worktrees/import_gaps.md` (Gap 3).
+//! the figures-flag coverage gap (Gap 3).
 //!
 //! Coverage:
 //! - `extract_full_text_data`: figures-flag true/false, chunks populated,

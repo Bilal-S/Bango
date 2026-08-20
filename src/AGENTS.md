@@ -144,7 +144,10 @@ directories are indexed inline.
   `citation-analysis.ts`, `graph-filters.ts`, `llm-error.ts`,
   `google-trends.ts`, `wiki-markdown.ts`, `wiki-site-export.ts`,
   `platform.ts`, `article-keyboard-navigation.ts`, `article-deep-links.ts`
-  (pure `parseArticleRouteQuery` for Articles-view deep-links).
+  (pure `parseArticleRouteQuery` for Articles-view deep-links),
+  `cluster-members.ts` (pure `collectClusterMembers` for cluster thematic
+  analysis; collects visible members only, skipping `hidden` nodes whose
+  cluster ids can go stale after a recalculate).
 - **`types/`** - TypeScript interfaces (incl. `openalex.ts`, `wiki.ts`,
   `index.ts`).
 - **`router/`** - route table (see Local Contracts).

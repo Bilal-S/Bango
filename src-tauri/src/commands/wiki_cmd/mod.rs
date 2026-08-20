@@ -1,7 +1,7 @@
 //! Wiki Tauri commands: status, init, raw files, page CRUD, search/lint,
 //! chat, ingest pipeline, and static-site export.
 //!
-//! Directory module split (refactor v6, see `.worktrees/refactor6.md`):
+//! Directory module split (refactor v6):
 //! - `mod.rs` (this file) - shared progress helpers (`pub(super)`),
 //!   module declarations, and `pub use` re-exports so every historical
 //!   `crate::commands::wiki_cmd::*` import path keeps resolving (including

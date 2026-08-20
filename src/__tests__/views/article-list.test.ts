@@ -3,7 +3,7 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { h, defineComponent, ref, KeepAlive } from 'vue';
 
 /* View-level characterization tests for article-list.vue, pinning the two
- * behaviors that refactor1 Tiers 1/4 (see .worktrees/refactor1.md) rely on:
+ * behaviors that the refactor1 Tiers 1/4 changes rely on:
  * keyboard navigation and route deep-link application. The heavy composable
  * graph (use-article-search + its stores) is mocked; the view's own logic
  * (readRouteDeepLinkParams, onKeyDown) runs for real. */

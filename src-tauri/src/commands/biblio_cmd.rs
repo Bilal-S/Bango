@@ -233,3 +233,67 @@ pub async fn biblio_get_cocitation_network(
         p.min_co_citation.unwrap_or(2),
     )
 }
+
+/// Explain the shared themes of one selected bibliometric cluster
+/// (co-authorship or keyword co-occurrence) in Markdown.
+///
+/// Lock-release discipline mirrors `analyze_research_gaps`: LLM config read +
+/// member resolution + Top-N cap under the lock, orchestrator call with the
+/// lock released, no DB write. On LLM failure the error is logged via
+/// `audit_repo::log_error_best_effort` (system diagnostics entry,
+/// `article_id = NULL`) before returning.
+#[tauri::command]
+pub async fn biblio_analyze_cluster_themes(
+    db_state: tauri::State<'_, DbState>,
+    app_handle: tauri::AppHandle,
+    network_type: crate::models::biblio::NetworkType,
+    cluster_index: i32,
+    members: Vec<crate::biblio::thematic::ClusterMember>,
+) -> Result<String, AppError> {
+    use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
+    use tauri::Manager;
+
+    let member_ids = members.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+
+    let (config, capped_articles, total) = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+
+        let config = crate::db::llm_config_repo::get_config(&conn)?
+            .ok_or_else(|| AppError::Validation("LLM not configured".to_string()))?;
+
+        let articles = crate::biblio::thematic::resolve_members_to_articles(
+            &conn,
+            &network_type,
+            &member_ids,
+        )?;
+        if articles.is_empty() {
+            return Err(AppError::Validation(
+                "The selected cluster resolves to no included articles.".to_string(),
+            ));
+        }
+        let (capped, total) = crate::biblio::thematic::apply_top_n_cap(articles);
+        (config, capped, total)
+    }; // conn lock released before the LLM call
+
+    let system_prompt = crate::biblio::thematic::cluster_themes_system_prompt();
+    let user_prompt = crate::biblio::thematic::build_cluster_themes_prompt(
+        &network_type,
+        cluster_index,
+        &members,
+        &capped_articles,
+        total,
+    );
+
+    let orchestrator = app_handle.state::<std::sync::Arc<LlmOrchestrator>>();
+    match orchestrator
+        .send(&config, &system_prompt, &user_prompt, LlmRequestType::ClusterThematicAnalysis)
+        .await
+    {
+        Ok((markdown, _tokens)) => Ok(markdown),
+        Err(err) => {
+            let message = format!("Cluster thematic analysis failed: {err}");
+            crate::db::audit_repo::log_error_best_effort(&db_state.conn, &message);
+            Err(err)
+        }
+    }
+}

@@ -214,7 +214,7 @@ fn test_delete_label_sets_staleness_flags() {
     );
 }
 
-/// Refactor1 Tier 0 (see .worktrees/refactor1.md section 5): pin the
+/// Refactor1 Tier 0: pin the
 /// case-insensitive normalized-name dedupe contract of `create_tag` before the
 /// tag/label repo consolidation (task T2.2). Creating a name that matches an
 /// existing tag modulo case MUST return the existing row (original casing and

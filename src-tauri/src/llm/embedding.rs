@@ -1,7 +1,7 @@
 //! Per-provider HTTP shapes for embedding generation.
 //!
 //! Routes through `client::shared_client()` (NOT `send_chat_completion`). Model resolution:
-//! provider default → chat model → disabled. See `.worktrees/embed-plan.md` §5.
+//! provider default → chat model → disabled.
 
 use serde::{Deserialize, Serialize};
 

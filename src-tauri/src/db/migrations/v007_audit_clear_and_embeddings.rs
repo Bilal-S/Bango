@@ -9,7 +9,7 @@
 //!    v003-v006. Preserves the v006 empty-string `article_id` heal.
 //!
 //! 2. **`article_embeddings` table** - per-article, per-chunk embedding vectors
-//!    for semantic search (see `.worktrees/embed-plan.md`). Keyed on
+//!    for semantic search. Keyed on
 //!    `(article_id, chunk_index)` where the title+abstract row uses the
 //!    sentinel `chunk_index = -1` and per-chunk rows use the matching
 //!    `article_chunks.chunk_index` (`>= 0`). The `-1` sentinel (not NULL)

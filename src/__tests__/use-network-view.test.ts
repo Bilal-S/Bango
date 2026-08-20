@@ -16,10 +16,20 @@ const mockApplyLayout = vi.fn(async (_g: Graph) => {
   });
 });
 
+let positionsCounter = 1000;
+const mockApplyLayoutPositions = vi.fn(async (_g: Graph) => {
+  // Simulate a positioning-only relayout: distinct x/y, cluster untouched.
+  _g.forEachNode((node) => {
+    _g.setNodeAttribute(node, 'x', 500 + positionsCounter++);
+    _g.setNodeAttribute(node, 'y', 600 + positionsCounter++);
+  });
+});
+
 vi.mock('@/composables/use-network-layout', () => ({
   useNetworkLayout: () => ({
     isLayouting: ref(false),
     applyLayout: mockApplyLayout,
+    applyLayoutPositions: mockApplyLayoutPositions,
     applyCircularLayout: vi.fn(),
     detectCommunities: vi.fn(),
     runForceAtlas2Async: vi.fn(),
@@ -495,19 +505,36 @@ describe('onLayoutModeChange', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApplyLayout.mockClear();
+    mockApplyLayoutPositions.mockClear();
   });
 
-  it('updates layoutMode and triggers a recalculate', async () => {
-    const g = makeGraph([{ id: 'a', label: 'A', cluster: null }]);
+  it('repositions without reclustering and preserves the trigger', async () => {
+    const g = makeGraph([
+      { id: 'a', label: 'A', cluster: 3 },
+      { id: 'b', label: 'B', cluster: 3 },
+    ]);
     const graph = ref<Graph | null>(g);
-    const { layoutMode, onLayoutModeChange } = useNetworkView({
+    const { layoutMode, onLayoutModeChange, recalculateTrigger } = useNetworkView({
       graph: graph as never,
       exportPrefix: 'test',
     });
-    expect(layoutMode.value).toBe('fixed');
+    const triggerBefore = recalculateTrigger.value;
+    expect(g.getNodeAttribute('a', 'x')).toBe(0);
+
     await onLayoutModeChange('dynamic');
+
     expect(layoutMode.value).toBe('dynamic');
-    expect(mockApplyLayout).toHaveBeenCalled();
+    // Positioning-only path: no Louvain re-cluster via applyLayout.
+    expect(mockApplyLayout).not.toHaveBeenCalled();
+    expect(mockApplyLayoutPositions).toHaveBeenCalled();
+    // Positions were rewritten on the parent graph...
+    expect(g.getNodeAttribute('a', 'x')).not.toBe(0);
+    expect(g.getNodeAttribute('b', 'y')).not.toBe(0);
+    // ...cluster assignments survive, and the recalculate trigger (the
+    // themes-cache invalidation signal) is NOT bumped.
+    expect(g.getNodeAttribute('a', 'cluster')).toBe(3);
+    expect(g.getNodeAttribute('b', 'cluster')).toBe(3);
+    expect(recalculateTrigger.value).toBe(triggerBefore);
   });
 
   it('does not recalculate when the graph is null', async () => {
@@ -518,6 +545,7 @@ describe('onLayoutModeChange', () => {
     });
     await onLayoutModeChange('dynamic');
     expect(layoutMode.value).toBe('dynamic');
+    expect(mockApplyLayoutPositions).not.toHaveBeenCalled();
     expect(mockApplyLayout).not.toHaveBeenCalled();
   });
 });

@@ -108,6 +108,8 @@ pub enum LlmRequestType {
     CitationFinder,
     /// Citation Finder claim-split (per-statement mode): ≤5 distinct claims.
     CitationFinderSplit,
+    /// Cluster thematic analysis: shared themes of one bibliometric cluster.
+    ClusterThematicAnalysis,
 }
 
 /// Centralized LLM request coordinator (Tauri managed state).
@@ -199,7 +201,7 @@ impl LlmOrchestrator {
     ///
     /// Swaps in a fresh semaphore of the exact requested size (handles both grow
     /// and shrink). In-flight requests holding the old semaphore are unaffected.
-    /// A lower limit takes effect for new acquisitions only — brief transient
+    /// A lower limit takes effect for new acquisitions only - brief transient
     /// acceptable for an advisory rate limiter.
     pub async fn update_settings(&self, max_concurrent: usize, request_delay_ms: u64) {
         let new_sem = Arc::new(Semaphore::new(max_concurrent.max(1)));
@@ -539,7 +541,7 @@ where
 ///
 /// Takes `&Arc<LlmOrchestrator>` so inner closure can `Arc::clone` into spawned tasks.
 ///
-/// Pipeline (`.worktrees/embed-plan.md`):
+/// Pipeline:
 /// 1. Resolve `embedding_limits` → 2. Split each text by `max_tokens_per_input` →
 /// 3. Flatten into `(input_idx, TextPiece)` → 4. Group into sub-batches respecting
 ///    BOTH caps → 5-6. Parallel HTTP via `send_batch_parallel` → 7. Scatter + pool →

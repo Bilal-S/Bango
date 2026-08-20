@@ -6,9 +6,14 @@ import GoogleTrendsPanel from '../components/google-trends-panel.vue';
 import KeywordNetworkGraph from '../components/keyword-network-graph.vue';
 import KeywordControls from '../components/keyword-controls.vue';
 import KeywordDetailPanel from '../components/keyword-detail-panel.vue';
+import ClusterThemesPanel from '../components/cluster-themes-panel.vue';
+import ArticleDetailSlideOver from '../components/article-detail-slide-over.vue';
 import { useKeywordNetwork } from '../composables/use-keyword-network';
 import { useNetworkView } from '../composables/use-network-view';
 import { useSigmaRenderer } from '../composables/use-sigma-renderer';
+import { useClusterThemes } from '../composables/use-cluster-themes';
+import { useLlmConfigured } from '../composables/use-llm-configured';
+import { collectClusterMembers } from '@/utils/cluster-members';
 import { buildBiblioArticleQuery } from '@/utils/biblio-links';
 import type { NetworkExportFormat } from '../utils/network-export';
 import type { KeywordNode } from '../types/biblio-keyword';
@@ -58,6 +63,87 @@ const {
 });
 
 const { applyKeywordGraphFilters } = useSigmaRenderer();
+
+/* ── Cluster thematic analysis ─────────────────────────────────────────
+ * Keyword clusters have no author entities, so the injected protocol
+ * registry carries `article` only (the backend prompt teaches the same
+ * restricted protocol set via `link_protocols_for`). */
+const llmReady = useLlmConfigured();
+const themes = useClusterThemes({
+  networkType: 'co_occurrence',
+  recalculateTrigger,
+  graph,
+});
+const themesPanelOpen = ref(false);
+const themesClusterIndex = ref<number | null>(null);
+
+const themesEntry = computed(() =>
+  themesClusterIndex.value === null
+    ? { markdown: null, loading: false, error: null }
+    : themes.entryFor(themesClusterIndex.value)
+);
+
+/* The legend trigger's loading state follows the currently selected cluster,
+ * not the panel's (last analyzed) cluster: reselecting another cluster while
+ * one analysis is in flight must re-enable the button. */
+const analyzeLoading = computed(() => {
+  const selected = selectedClusters.value[0];
+  return selected === undefined ? false : themes.entryFor(selected).loading;
+});
+
+function onAnalyzeThemes(): void {
+  const clusterIndex = selectedClusters.value[0];
+  if (clusterIndex === undefined || !graph.value) return;
+  themesClusterIndex.value = clusterIndex;
+  themesPanelOpen.value = true;
+  const members = collectClusterMembers(graph.value, clusterIndex);
+  void themes.analyze(clusterIndex, members);
+}
+
+async function onReanalyzeThemes(): Promise<void> {
+  const clusterIndex = themesClusterIndex.value;
+  if (clusterIndex === null || !graph.value) return;
+  const members = collectClusterMembers(graph.value, clusterIndex);
+  await themes.reanalyze(clusterIndex, members);
+}
+
+async function onCopyThemes(markdown: string): Promise<void> {
+  await themes.copyMarkdown(markdown);
+}
+
+/* ── Article detail slide-over ───────────────────────────────────────────
+ * Shared component owns the useArticleSearch wiring + panel lifecycle; the
+ * view only keeps the overlay guards so `article:` links open the full
+ * article detail without leaving the view (closing returns to the exact
+ * network state: graph, cluster selection, cached analysis). */
+const articleDetailRef = ref<InstanceType<typeof ArticleDetailSlideOver> | null>(null);
+const showArticleDetail = ref(false);
+const isArticleDetailFullScreen = ref(false);
+
+function onArticleDetailOpened(): void {
+  showArticleDetail.value = true;
+}
+
+function onArticleDetailClosed(): void {
+  showArticleDetail.value = false;
+  isArticleDetailFullScreen.value = false;
+}
+
+function onArticleDetailToggleFullScreen(): void {
+  isArticleDetailFullScreen.value = !isArticleDetailFullScreen.value;
+}
+
+/* Protocol registry injected into the panel: the keyword network has no
+ * author entities, so the registry carries `article` only (the backend prompt
+ * teaches the same restricted protocol set via `link_protocols_for`); article
+ * links open the full in-view detail slide-over (no route change, so the
+ * network state - graph, cluster selection, cached analysis - is intact on
+ * close). */
+const themeLinkHandlers: Record<string, (id: string) => void> = {
+  article: (id: string) => {
+    void articleDetailRef.value?.open(id);
+  },
+};
 
 const selectedKeyword = ref<KeywordNode | null>(null);
 
@@ -258,6 +344,8 @@ watch(
           :min-year="yearRange.min"
           :max-year="yearRange.max"
           :selected-clusters="selectedClusters"
+          :llm-ready="llmReady"
+          :analysis-loading="analyzeLoading"
           :sources="sources"
           :min-occurrences="minOccurrences"
           :min-cooccurrence="minCooccurrence"
@@ -269,6 +357,7 @@ watch(
           @color-mode-change="colorMode = $event"
           @select-cluster="onSelectCluster($event)"
           @clear-clusters="onClearClusters"
+          @analyze-themes="onAnalyzeThemes"
           @fit-screen="() => graphRef?.resetZoom()"
           @recalculate="onRecalculate"
           @reset-analysis="onResetAnalysis"
@@ -286,8 +375,11 @@ watch(
       </button>
     </div>
 
-    <!-- Central Content Area -->
-    <div class="flex-1 flex flex-col min-h-0 relative">
+    <!-- Central Content Area (hidden while the article detail overlay is fullscreen) -->
+    <div
+      v-show="!(showArticleDetail && isArticleDetailFullScreen)"
+      class="flex-1 flex flex-col min-h-0 relative"
+    >
       <!-- Graph canvas -->
       <main class="flex-1 relative min-h-0">
         <KeywordNetworkGraph
@@ -311,10 +403,10 @@ watch(
       <GoogleTrendsPanel />
     </div>
 
-    <!-- Keyword detail panel -->
+    <!-- Keyword detail panel (hidden while the article detail overlay is open) -->
     <Transition name="detail-slide">
       <KeywordDetailPanel
-        v-if="selectedKeyword"
+        v-if="selectedKeyword && !showArticleDetail"
         :keyword="selectedKeyword"
         :graph="graph"
         class="w-72 shrink-0"
@@ -323,6 +415,28 @@ watch(
         @view-articles="viewKeywordArticles"
       />
     </Transition>
+
+    <!-- Cluster thematic analysis panel -->
+    <ClusterThemesPanel
+      :visible="themesPanelOpen"
+      :title="`Cluster ${(themesClusterIndex ?? 0) + 1} - Thematic Analysis`"
+      :markdown="themesEntry.markdown"
+      :loading="themesEntry.loading"
+      :error="themesEntry.error"
+      :link-handlers="themeLinkHandlers"
+      @close="themesPanelOpen = false"
+      @reanalyze="onReanalyzeThemes"
+      @copy="onCopyThemes"
+    />
+
+    <!-- Full article detail panel (opened via the themes panel article links). -->
+    <ArticleDetailSlideOver
+      ref="articleDetailRef"
+      :full-screen="isArticleDetailFullScreen"
+      @opened="onArticleDetailOpened"
+      @closed="onArticleDetailClosed"
+      @toggle-full-screen="onArticleDetailToggleFullScreen"
+    />
   </div>
 </template>
 

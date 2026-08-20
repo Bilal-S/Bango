@@ -1,4 +1,4 @@
-//! Embedding pipeline for semantic article search (see `.worktrees/embed-plan.md`).
+//! Embedding pipeline for semantic article search.
 //!
 //! 1. Provider client (`llm::embedding`) - HTTP shapes, model resolution, capability probe.
 //! 2. Runner + director (`embedding::director`, `embedding::runner`) - work-list computation

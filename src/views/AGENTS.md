@@ -44,9 +44,13 @@ matcher to find `<script setup>` components).
   state when they differ (explicit navigation wins). The References and Search
   tabs skip `search()` (their child components own their data) but still
   refresh tab badges.
-- The other three `useArticleSearch()` consumers (`wiki-view.vue`,
-  `chat-view.vue`, `biblio-citations.vue`) are NOT affected - they keep
-  creating fresh per-view composable instances as today.
+- The other `useArticleSearch()` consumers (`wiki-view.vue`, `chat-view.vue`,
+  `biblio-citations.vue`, `biblio-coauthors.vue`, `biblio-keywords.vue`) are
+  NOT affected - they keep creating fresh per-view composable instances as
+  today. The two biblio network views feed an in-view `ArticleDetailPanel`
+  slide-over from the themes panel's `article:` links (closing it returns to
+  the exact network state; the graph canvas hides while the panel is
+  fullscreen).
 
 ## Work Guidance
 

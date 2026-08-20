@@ -373,6 +373,17 @@ Paste-prose-to-citations matching over the user's article library, accessed as a
 
 Commands: `find_citations`, `cancel_citation_search`, `get_citation_finder_readiness`.
 
+### 8.8 Cluster Thematic Analysis
+
+The `biblio_analyze_cluster_themes` command asks the LLM to explain, for one selected Louvain cluster, what its members share, grounded in article titles, author lists, keywords, and abstracts. In scope: the co-authorship (`co_authorship`) and keyword co-occurrence (`co_occurrence`) networks; the citation, co-citation, and bibliographic-coupling variants are rejected with a validation error (extension seams prepared).
+
+* **Trigger**: an "Analyze" button in the `Clusters` legend heading row (between the heading text and the clear-filter icon, matched to its height), visible only when exactly one cluster is selected and `useLlmConfigured()` is true, disabled with a spinner while the selected cluster's analysis is in flight.
+* **Member resolution**: the frontend sends the cluster's member entities (`{ id, label }`). Co-authorship member ids are `biblio_authors.id` UUIDs (resolved via `biblio_article_authors`); keyword member ids are `normalize_term(raw_term)` strings resolved by mirroring the keyword network's three-source term collection (`biblio_article_terms` + `article_tags` + `article_labels`), all scoped to included articles and deduped by article id.
+* **Prompt size**: single call with a Top-N cap - the 40 most representative articles ranked by citation count (NULLs last) then recency, member list capped at 100, author lists truncated at 300 chars, keyword lists at 200 chars (empty values omit the line), abstracts at 1200 chars, each on a word boundary; the report opens `## Overview` with an italic disclosure line naming the exact capped/total counts whenever truncation occurred.
+* **Link protocols**: the LLM may reference only stable ids present in the prompt, wrapped as `[Article Title](article:{id})` and (co-authorship only) `[Author Name](author:{id})`. The panel renders these as clickable spans (author -> focus + locate in the graph; article -> full in-view article detail slide-over, so closing it returns to the exact network state), escapes raw HTML, and renders every other link as plain text.
+* **Cache**: session-only Pinia store keyed by `networkType:clusterIndex`, invalidated on every layout/recalculate (Louvain indices are unstable across runs); no persistence and no migration. Analyzing an already-analyzed cluster redisplays the cached markdown without a new LLM call; a duplicate click while the same cluster is in flight is skipped, and an errored entry retries. The panel's re-analyze deletes the entry first and forces a fresh call. Layout-mode switches (fixed <-> dynamic) are positioning-only relayouts: cluster assignments and cached analyses are preserved, and only the explicit Recalculate path re-clusters and invalidates. Client-side visibility filters (min-papers/search) do not invalidate the cache - re-analyze refreshes membership.
+* **Output**: Markdown with `# Cluster N - Thematic Analysis`, `## Overview`, `## Main Themes`, `## Representative Articles`; no em dashes; LLM failures surface per-cluster in the panel plus a system diagnostics audit entry.
+
 ---
 
 ## 9. UI Layout & Design System

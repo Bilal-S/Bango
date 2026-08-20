@@ -47,7 +47,7 @@ export function useNetworkView(options: NetworkViewOptions) {
   } = options;
 
   // Layout composable - instance-scoped (fresh state per view).
-  const { isLayouting, applyLayout } = useNetworkLayout();
+  const { isLayouting, applyLayout, applyLayoutPositions } = useNetworkLayout();
 
   // ── Refs exposed to the template ────────────────────────────────
   const graphRef = ref<NetworkGraphHandle | null>(null);
@@ -158,11 +158,34 @@ export function useNetworkView(options: NetworkViewOptions) {
   }
 
   // ── Layout mode ─────────────────────────────────────────────────
-  /** Switch layout mode and trigger a full recalculate. */
+  /**
+   * Switch layout mode with a positioning-only relayout: circular +
+   * ForceAtlas2 on the visible subgraph, preserving the existing cluster
+   * assignments (Louvain communities depend only on topology, not
+   * positions). Deliberately does NOT bump `recalculateTrigger`, so cached
+   * per-cluster thematic analyses and the cluster selection survive the
+   * switch. A full re-cluster remains available via `onRecalculate`.
+   */
   async function onLayoutModeChange(mode: 'fixed' | 'dynamic'): Promise<void> {
     layoutMode.value = mode;
-    if (graph.value) {
-      await onRecalculate();
+    const sub = buildVisibleSubgraph();
+    if (!sub) return;
+
+    isLayouting.value = true;
+    try {
+      await applyLayoutPositions(sub, recalculateIterations, mode);
+
+      // Write back positions only - never the cluster attribute.
+      sub.forEachNode((node) => {
+        const newAttrs = sub.getNodeAttributes(node);
+        graph.value!.setNodeAttribute(node, 'x', newAttrs.x);
+        graph.value!.setNodeAttribute(node, 'y', newAttrs.y);
+      });
+
+      resetZoom();
+      refresh();
+    } finally {
+      isLayouting.value = false;
     }
   }
 
@@ -189,36 +212,44 @@ export function useNetworkView(options: NetworkViewOptions) {
 
   // ── Recalculate (subgraph layout) ───────────────────────────────
   /**
+   * Build a temporary subgraph of visible (non-hidden) nodes + edges.
+   * Returns null when there is no graph or no visible node.
+   */
+  function buildVisibleSubgraph(): Graph | null {
+    if (!graph.value) return null;
+    const sub = new Graph({ type: graphType, multi: false });
+
+    graph.value.forEachNode((node, attrs) => {
+      if (attrs.hidden !== true) {
+        sub.addNode(node, { ...attrs });
+      }
+    });
+
+    graph.value.forEachEdge((edge, attrs, source, target) => {
+      if (attrs.hidden !== true && sub.hasNode(source) && sub.hasNode(target)) {
+        if (graphType === 'directed') {
+          sub.addDirectedEdgeWithKey(edge, source, target, { ...attrs });
+        } else {
+          sub.addUndirectedEdgeWithKey(edge, source, target, { ...attrs });
+        }
+      }
+    });
+
+    return sub.order === 0 ? null : sub;
+  }
+
+  /**
    * Build a temporary subgraph of visible (non-hidden) nodes + edges,
    * re-run Louvain + ForceAtlas2 on it, and write the new coordinates and
    * cluster assignments back to the parent graph. Then refresh the renderer
    * and bump `recalculateTrigger` so computeds re-evaluate.
    */
   async function onRecalculate(): Promise<void> {
-    if (!graph.value) return;
+    const sub = buildVisibleSubgraph();
+    if (!sub) return;
 
     isLayouting.value = true;
     try {
-      const sub = new Graph({ type: graphType, multi: false });
-
-      graph.value.forEachNode((node, attrs) => {
-        if (attrs.hidden !== true) {
-          sub.addNode(node, { ...attrs });
-        }
-      });
-
-      graph.value.forEachEdge((edge, attrs, source, target) => {
-        if (attrs.hidden !== true && sub.hasNode(source) && sub.hasNode(target)) {
-          if (graphType === 'directed') {
-            sub.addDirectedEdgeWithKey(edge, source, target, { ...attrs });
-          } else {
-            sub.addUndirectedEdgeWithKey(edge, source, target, { ...attrs });
-          }
-        }
-      });
-
-      if (sub.order === 0) return;
-
       await applyLayout(sub, recalculateIterations, layoutMode.value);
 
       sub.forEachNode((node) => {

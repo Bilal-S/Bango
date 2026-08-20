@@ -1091,7 +1091,7 @@ fn jaccard_similarity_disjoint_sets() {
 }
 
 // -----------------------------------------------------------------
-// Wiki ingest freeze tests (T3.2 from .worktrees/wiki2.md)
+// Wiki ingest freeze tests (T3.2)
 // -----------------------------------------------------------------
 
 use std::sync::atomic::{AtomicBool, Ordering};

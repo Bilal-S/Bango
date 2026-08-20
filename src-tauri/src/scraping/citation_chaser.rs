@@ -1,6 +1,6 @@
 //! Citation Chaser scraping: automates RIS download for references/citations.
 //!
-//! Cancellation, empty-result detection, and download contract per `.worktrees/scrapefix2.md`.
+//! Cancellation, empty-result detection, and the download contract are documented inline.
 
 use std::ffi::OsStr;
 use std::fs;

@@ -33,6 +33,10 @@ against RIS fixtures live in `cocitation_data_test.rs`.
 VACUUM + wiki-root wipe). `wiki_consolidation_test.rs` +
 `wiki_index_drift_test.rs` cover the wiki pipelines. `sections_test.rs` +
 `chunking_test.rs` cover the utils text-classification + chunking.
+`biblio_cluster_themes_test.rs` covers the cluster thematic analysis pure
+helpers (resolution dispatcher, three-source term resolution, Top-N cap,
+link protocols, prompt builder); binding inventory:
+`docs/test-plans/cluster-themes-tests.md`.
 
 ## Work Guidance
 

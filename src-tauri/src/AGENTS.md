@@ -157,5 +157,10 @@ described inline.
 - **`crypto/`** - AES-256-GCM encryption helpers (API keys, LLM config). No
   own `AGENTS.md`.
 - **`schema/`** - Shared schema types. No own `AGENTS.md`.
-- **`biblio/`** + **`summary/`** + **`batch/`** - Bibliometric commands,
-  summary prompts/engine, and batch processing helpers. No own `AGENTS.md`.
+- **`biblio/`** - Bibliometric normalization + `thematic.rs` (cluster
+  thematic analysis: member resolution dispatcher, three-source term
+  resolution mirroring the keyword network builder, Top-N article cap,
+  link-protocol registry, grounded prompt builder; all `pub` + pure, tested
+  from `tests/biblio_cluster_themes_test.rs`). Plus **`summary/`** +
+  **`batch/`** - summary prompts/engine, and batch processing helpers. No own
+  `AGENTS.md`.

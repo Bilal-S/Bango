@@ -36,15 +36,15 @@ fn temp_dir(name: &str) -> PathBuf {
 ///  for the use of platelet-rich plasma in dermatology."
 const TEST_DOI: &str = "10.1016/j.jaad.2023.01.013";
 
-/// A DOI with **zero references** in Lens.org. Validated live (see
-/// `.worktrees/scrapefix2.md` §2.2): the References tab shows
+/// A DOI with **zero references** in Lens.org. Validated live: the
+/// References tab shows
 /// "Your input article(s) had 0 references ..." before Search, and clicking
 /// Search disconnects the Shiny session. The scrape must return `NoData`
 /// promptly (well under the 120s `ELEMENT_TIMEOUT_SECS`) instead of hanging.
 const ZERO_REFS_DOI: &str = "10.1504/EJIM.2025.10073474";
 
-/// A DOI with **zero citations** in Lens.org. Validated live (see
-/// `.worktrees/scrapefix2.md` §2.3): the Citations tab renders an `Error`
+/// A DOI with **zero citations** in Lens.org. Validated live: the
+/// Citations tab renders an `Error`
 /// table header + "no recorded citations in the Lens.org" row, but `#cits_ris`
 /// becomes enabled with a valid href that serves a **0-byte** RIS. The scrape
 /// must return `NoData` (either via the body-text detector or the

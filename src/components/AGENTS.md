@@ -11,6 +11,24 @@ network primitives, and the help tabs.
 - Shared network primitives: `graph-status-overlay.vue`,
   `network-search-box.vue`, `network-threshold-slider.vue`,
   `network-export-menu.vue` (see the graph quartet contract below).
+- `article-detail-slide-over.vue`: the shared full-article detail slide-over
+  for host views that open an article by id without leaving the view
+  (`biblio-citations/coauthors/keywords.vue`). Owns the per-instance
+  `useArticleSearch` wiring plus the screening/delete/full-text/clear-reasoning
+  orchestrators and the `ArticleDetailPanel` template block; exposes
+  `open(id)`/`close()` via template ref and emits `opened`/`closed`/
+  `toggle-full-screen` so hosts keep their overlay guards (domain panel
+  hiding, canvas hidden while fullscreen).
+- Cluster thematic analysis pair: `cluster-legend.vue` (shared Louvain
+  legend + single-cluster "Analyze" trigger in the heading row between the
+  title and the clear-filter icon, matched to its h-6 height; gated by the
+  canonical LLM gate passed down as `llmReady`; adopted by
+  `network-controls.vue` +
+  `keyword-controls.vue`; citation/cocitation controls can adopt it
+  unchanged) and `cluster-themes-panel.vue` (slide-over markdown renderer;
+  converts only the registered `author:` / `article:` protocols to
+  data-attribute spans, escapes raw HTML, renders every other link as plain
+  text).
 - `help/` holds the six `help-tab-*.vue` tab components.
 - `settings/` holds the settings sub-components (see Settings cards below).
 - Other notable components: `journal-info-card.vue`,

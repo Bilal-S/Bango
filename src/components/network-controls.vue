@@ -144,39 +144,16 @@
     <!-- Legends -->
     <div class="border-t border-slate-100 pt-3">
       <!-- Cluster legend -->
-      <div v-if="colorMode === 'cluster' && clusters.length > 0">
-        <div class="flex items-center justify-between mb-2">
-          <p class="text-xs text-slate-500">Clusters</p>
-          <button
-            class="w-6 h-6 flex items-center justify-center rounded-md border transition-colors cursor-pointer"
-            :class="
-              selectedClusters.length > 0
-                ? 'text-indigo-600 border-indigo-300 bg-indigo-50 hover:bg-indigo-100'
-                : 'text-slate-300 border-slate-200 bg-slate-50 cursor-default'
-            "
-            :disabled="selectedClusters.length === 0"
-            title="Clear cluster selection"
-            @click="$emit('clear-clusters')"
-          >
-            <span class="material-symbols-outlined text-sm">filter_alt_off</span>
-          </button>
-        </div>
-        <div class="flex flex-wrap gap-1.5">
-          <button
-            v-for="c in clusters"
-            :key="c.id"
-            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium cursor-pointer transition-all"
-            :style="{
-              backgroundColor: selectedClusters.includes(c.id) ? c.color : c.color + '33',
-              color: selectedClusters.includes(c.id) ? '#fff' : c.color,
-              outline: selectedClusters.includes(c.id) ? `2px solid ${c.color}` : 'none',
-            }"
-            @click="$emit('select-cluster', c.id)"
-          >
-            {{ c.label }}
-          </button>
-        </div>
-      </div>
+      <ClusterLegend
+        v-if="colorMode === 'cluster'"
+        :cluster-count="clusterCount"
+        :selected-clusters="selectedClusters"
+        :llm-ready="llmReady"
+        :analysis-loading="analysisLoading"
+        @select-cluster="$emit('select-cluster', $event)"
+        @clear-clusters="$emit('clear-clusters')"
+        @analyze-themes="$emit('analyze-themes')"
+      />
 
       <!-- Temporal legend -->
       <div v-else-if="colorMode === 'temporal'">
@@ -222,12 +199,12 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { CLUSTER_PALETTE } from '../types/biblio-network';
 import type { CountingMode } from '../types/biblio-network';
 import type { NetworkSearchSuggestion } from '../types/network-graph';
 import NetworkSearchBox from './network-search-box.vue';
 import NetworkThresholdSlider from './network-threshold-slider.vue';
 import NetworkExportMenu from './network-export-menu.vue';
+import ClusterLegend from './cluster-legend.vue';
 
 const props = defineProps<{
   totalNodes: number;
@@ -243,6 +220,10 @@ const props = defineProps<{
   minYear: number;
   maxYear: number;
   selectedClusters: number[];
+  /** Canonical `useLlmConfigured()` gate value (thematic-analysis trigger). */
+  llmReady?: boolean;
+  /** True while the selected cluster's thematic analysis is in flight. */
+  analysisLoading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -262,6 +243,7 @@ const emit = defineEmits<{
   (e: 'layout-mode-change', mode: 'fixed' | 'dynamic'): void;
   (e: 'select-cluster', clusterId: number): void;
   (e: 'clear-clusters'): void;
+  (e: 'analyze-themes'): void;
   (e: 'recalculate'): void;
   (e: 'reset-analysis'): void;
 }>();
@@ -290,18 +272,6 @@ const suggestions = computed<NetworkSearchSuggestion[]>(() => {
 
 const maxPapersLimit = computed(() => Math.max(10, Math.ceil(props.totalNodes / 2)));
 const maxLinkLimit = computed(() => Math.max(5, Math.ceil(props.totalEdges / 4)));
-
-const clusters = computed(() => {
-  const result: { id: number; color: string; label: string }[] = [];
-  for (let i = 0; i < props.clusterCount; i++) {
-    result.push({
-      id: i,
-      color: CLUSTER_PALETTE[i % CLUSTER_PALETTE.length]!,
-      label: `Cluster ${i + 1}`,
-    });
-  }
-  return result;
-});
 
 function onSearchInput() {
   emitFilters();

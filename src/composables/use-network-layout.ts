@@ -114,10 +114,31 @@ export function useNetworkLayout() {
     }
   }
 
+  /**
+   * Positioning-only layout: circular → ForceAtlas2 WITHOUT re-detecting
+   * communities. Used by layout-mode switches, where the existing cluster
+   * assignments must be preserved (Louvain communities depend only on graph
+   * topology, not positions) so cached per-cluster analyses stay valid.
+   */
+  async function applyLayoutPositions(
+    g: Graph,
+    iterations = 100,
+    layoutMode: 'fixed' | 'dynamic' = 'fixed'
+  ): Promise<void> {
+    isLayouting.value = true;
+    try {
+      applyCircularLayout(g);
+      await runForceAtlas2Async(g, iterations, layoutMode);
+    } finally {
+      isLayouting.value = false;
+    }
+  }
+
   return {
     isLayouting,
     clusterCount,
     applyLayout,
+    applyLayoutPositions,
     applyCircularLayout,
     // Exposed under the original name for backward compatibility with callers
     // that destructure `detectCommunities` from the composable's return value.
