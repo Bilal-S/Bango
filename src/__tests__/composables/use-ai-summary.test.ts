@@ -25,6 +25,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 // Import after mocks are set up (vi.mock is hoisted above imports)
 import {
   requestArticleAiSummary,
+  requestBulkArticleAiSummary,
   parseAiSummary,
   pendingSummaries,
   isUnifiedSummary,
@@ -115,6 +116,65 @@ describe('use-ai-summary', () => {
       articleId: 'a1',
       includeSectionSummaries: true,
     });
+  });
+
+  // ── requestBulkArticleAiSummary ────────────────────────────────────
+
+  it('bulk request enqueues every id with a single submit toast', async () => {
+    const { toasts } = useToast();
+
+    await requestBulkArticleAiSummary(['a1', 'a2', 'a3']);
+
+    expect(pendingSummaries.value.has('a1')).toBe(true);
+    expect(pendingSummaries.value.has('a2')).toBe(true);
+    expect(pendingSummaries.value.has('a3')).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledTimes(3);
+    for (const id of ['a1', 'a2', 'a3']) {
+      expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', {
+        articleId: id,
+        includeSectionSummaries: false,
+      });
+    }
+    /* ONE submit toast for the whole batch (not one per article). */
+    expect(toasts.value).toHaveLength(1);
+    expect(toasts.value[0]!.message).toBe('Submitted 3 articles for AI summary');
+    expect(toasts.value[0]!.type).toBe('info');
+  });
+
+  it('bulk request resolves the section-summaries toggle once for the batch', async () => {
+    localStorage.setItem('bango-section-summaries', 'true');
+    await requestBulkArticleAiSummary(['a1', 'a2']);
+    expect(mockInvoke).toHaveBeenCalledWith('generate_article_ai_summary', {
+      articleId: 'a2',
+      includeSectionSummaries: true,
+    });
+  });
+
+  it('bulk request is a no-op for an empty batch', async () => {
+    const { toasts } = useToast();
+    await requestBulkArticleAiSummary([]);
+    expect(mockInvoke).not.toHaveBeenCalled();
+    expect(pendingSummaries.value.size).toBe(0);
+    expect(toasts.value).toHaveLength(0);
+  });
+
+  it('bulk request per-article failure clears only that pending id', async () => {
+    const { toasts } = useToast();
+    mockInvoke.mockImplementation((_cmd: unknown, args: unknown) => {
+      const { articleId } = args as { articleId: string };
+      return articleId === 'a2' ? Promise.reject(new Error('boom')) : Promise.resolve('ok');
+    });
+
+    await requestBulkArticleAiSummary(['a1', 'a2']);
+
+    await vi.waitFor(() => {
+      expect(pendingSummaries.value.has('a2')).toBe(false);
+    });
+    expect(pendingSummaries.value.has('a1')).toBe(true);
+
+    const errorToast = toasts.value.find((t) => t.message.includes('AI summary failed: boom'));
+    expect(errorToast).toBeTruthy();
+    expect(errorToast!.type).toBe('error');
   });
 
   it('invokes onComplete callback and clears pending on complete event', async () => {

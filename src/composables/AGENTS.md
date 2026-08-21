@@ -34,6 +34,14 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   unhandled promise rejection.
 - `use-dashboard-cta.ts` + `use-dashboard-activity.ts` sit behind
   `use-dashboard`.
+- `use-ai-summary.ts` is the AI-summary submission layer: module-level
+  singleton listeners for `article-ai-summary-complete`/`-error` (per-article
+  toasts + callback registry + `pendingSummaries` drain) plus the request
+  APIs - `requestArticleAiSummary` (single article; detail-panel button and
+  the attach auto-summarize hook) and `requestBulkArticleAiSummary`
+  (BulkActionBar More-menu "AI Summary" action: one submit toast for the
+  batch, one fire-and-forget command per article; eligibility filtering
+  stays in `article-list.vue::handleBulkAiSummary`).
 - Also: `use-startup-upgrade.ts`, `use-bibliometrics.ts`,
   `use-journal-info.ts`, `use-network-view.ts`, `use-nav-history.ts`,
   `use-full-text-attachment.ts`, `use-article-delete.ts`,

@@ -44,11 +44,26 @@ network primitives, and the help tabs.
 
 `<BulkActionBar>` is the fixed bottom-center multi-select action bar shown
 when ≥1 article row is checked. Emits `bulkInclude`/`bulkReject`/
-`bulkMoveToWorking`/`bulkAddTag`/`bulkAddLabel`/`bulkAddToChat`/`bulkExport`/
-`clearSelection`. The `bulkExport` emit is the **sole entry point for "export
+`bulkMoveToWorking`/`bulkAddTag`/`bulkAddLabel`/`bulkAddToChat`/
+`bulkExport`/`bulkAiSummary`/`clearSelection`.
+Export and AI Summary live behind the More submenu: a vertical-dots
+(`more_vert`) anchor button opens a submenu that slides open above the bar
+(component-local open state; closes on item pick, anchor re-click, outside
+click, and Escape).
+The AI Summary item is disabled (not hidden) when the `llmReady` prop is
+false - the host view passes the canonical `useLlmConfigured()` gate down;
+the bar never derives LLM state itself.
+Both completion handlers clear the multi-select: Export clears only on
+success (cancel/failure keeps the rows for retry); AI Summary clears once the
+batch is submitted (the nothing-eligible path keeps it).
+The `bulkExport` emit is the **sole entry point for "export
 selected"**: `article-list.vue::handleBulkExport` snapshots
 `Array.from(selectedIds.value)` and calls `useExport().exportRisForIds`,
 distinct from the toolbar Export button + `ExportDialog`.
+The `bulkAiSummary` emit routes to `article-list.vue::handleBulkAiSummary`,
+which filters the selection to articles with full text, no stored summary
+(`parseAiSummary === null`), and not already in `pendingSummaries`, then
+submits them via `use-ai-summary.ts::requestBulkArticleAiSummary`.
 
 ### `clearable-input.vue`
 

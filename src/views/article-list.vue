@@ -5,7 +5,12 @@ import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import { useToast } from '@/composables/use-toast';
-import { requestArticleAiSummary } from '@/composables/use-ai-summary';
+import {
+  requestArticleAiSummary,
+  requestBulkArticleAiSummary,
+  parseAiSummary,
+  pendingSummaries,
+} from '@/composables/use-ai-summary';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useBatchReferenceScraping } from '@/composables/use-references';
 import { useChatStore } from '@/stores/chat';
@@ -13,6 +18,7 @@ import { useFullTextAttachment } from '@/composables/use-full-text-attachment';
 import { useArticleDelete } from '@/composables/use-article-delete';
 import { useClearAiReasoning } from '@/composables/use-clear-ai-reasoning';
 import { useExport } from '@/composables/use-export';
+import { useLlmConfigured } from '@/composables/use-llm-configured';
 import { resolveBiblioReturn } from '@/utils/biblio-links';
 import {
   parseArticleRouteQuery,
@@ -118,6 +124,11 @@ const {
   readFullTextContent,
 } = useArticleSearch();
 const { screenArticle } = useScreening();
+
+/* Canonical LLM-configured gate (see src/AGENTS.md Local Contracts). Passed
+ * down to the BulkActionBar so its AI Summary action disables instantly when
+ * the LLM config changes in Settings. */
+const llmReady = useLlmConfigured();
 
 const activeReferencePaperId = ref<string | null>(null);
 
@@ -449,11 +460,63 @@ async function handleBulkExport(): Promise<void> {
   const ok = await exportRisForIds(ids);
   if (ok) {
     toast.show(`Exported ${ids.length} article${ids.length > 1 ? 's' : ''} to RIS`, 'success');
+    // Selection clears only on success; cancel (dismissed save dialog) and
+    // failures keep the checked rows so the user can retry.
+    clearSelection();
   } else if (exportError.value) {
     // A real failure surfaces via the composable's error ref. Cancel (user
     // dismissed the save dialog) leaves error null and stays silent.
     toast.show(`Export failed: ${exportError.value}`, 'error');
   }
+}
+
+/* Bulk AI Summary: enqueue every selected article that is actually
+ * summarizable - full text attached, no stored summary yet, and not already
+ * queued. Eligibility mirrors the detail panel's `canRequestAiSummary` so the
+ * batch path and the per-article button agree on what "needs a summary"
+ * means. Skips are reported with exact counts (runBulkTagLabelMutation
+ * precedent); the submit toast comes from the composable. The selection is
+ * cleared once the batch is accepted - completion is async and can run for
+ * minutes, so the user should not stay locked into a stale selection. */
+function handleBulkAiSummary(): void {
+  let withoutFullText = 0;
+  let alreadySummarized = 0;
+  const eligible: string[] = [];
+
+  for (const id of selectedIds.value) {
+    const article = articles.value.find((a) => a.id === id);
+    if (!article) continue;
+    if (!article.hasFullText || !article.fullText) {
+      withoutFullText += 1;
+      continue;
+    }
+    if (parseAiSummary(article.fullTextAiSummary) !== null || pendingSummaries.value.has(id)) {
+      alreadySummarized += 1;
+      continue;
+    }
+    eligible.push(id);
+  }
+
+  if (eligible.length === 0) {
+    toast.show('No selected articles are eligible for an AI summary.', 'info');
+    return;
+  }
+  requestBulkArticleAiSummary(eligible);
+
+  const skipped = withoutFullText + alreadySummarized;
+  if (skipped > 0) {
+    const parts: string[] = [];
+    if (withoutFullText > 0) parts.push(`${withoutFullText} without full text`);
+    if (alreadySummarized > 0) parts.push(`${alreadySummarized} already summarized`);
+    toast.show(
+      `Skipped ${skipped} of ${selectedIds.value.size} selected: ${parts.join(', ')}.`,
+      'info'
+    );
+  }
+
+  // Clear at submit time (after the skip toast computed its totals): the
+  // batch is accepted, and nothing-eligible above keeps the selection.
+  clearSelection();
 }
 
 /* Full text orchestration centralized in `useFullTextAttachment`; auto-summarize
@@ -751,6 +814,7 @@ useArticleListKeyboard({
            the column, the bar re-centers automatically and wraps if needed. -->
       <BulkActionBar
         :selected-count="selectedCount"
+        :llm-ready="llmReady"
         @bulk-include="handleBulkInclude"
         @bulk-reject="handleBulkReject"
         @bulk-move-to-working="handleBulkMoveToWorking"
@@ -758,6 +822,7 @@ useArticleListKeyboard({
         @bulk-add-label="openBulkLabelDialog"
         @bulk-add-to-chat="handleBulkAddToChat"
         @bulk-export="handleBulkExport"
+        @bulk-ai-summary="handleBulkAiSummary"
         @clear-selection="clearSelection"
       />
     </div>

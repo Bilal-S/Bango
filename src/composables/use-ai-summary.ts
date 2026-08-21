@@ -169,6 +169,39 @@ export async function requestArticleAiSummary(
 }
 
 /**
+ * Bulk variant of {@link requestArticleAiSummary} (BulkActionBar "AI Summary"
+ * action). Enqueues a batch of articles for AI summarization: ONE submit toast
+ * for the whole batch, then one fire-and-forget command per article. The
+ * backend LLM orchestrator's concurrency semaphore is the actual queue; the
+ * global complete/error listeners toast per-article outcomes and drain
+ * `pendingSummaries`. Eligibility filtering (full text attached, no stored
+ * summary yet, not already queued) stays with the caller.
+ */
+export async function requestBulkArticleAiSummary(ids: string[]) {
+  const { show } = useToast();
+  if (ids.length === 0) return;
+
+  // Resolve the section-summaries preference once for the whole batch
+  // (same source as the single-article path).
+  const wantSections = localStorage.getItem('bango-section-summaries') === 'true';
+
+  const plural = ids.length > 1 ? 's' : '';
+  show(`Submitted ${ids.length} article${plural} for AI summary`, 'info');
+
+  for (const articleId of ids) {
+    pendingSummaries.value.add(articleId);
+    invoke<string>('generate_article_ai_summary', {
+      articleId,
+      includeSectionSummaries: wantSections,
+    }).catch((e: unknown) => {
+      pendingSummaries.value.delete(articleId);
+      const msg = e instanceof Error ? e.message : String(e);
+      show(`AI summary failed: ${msg}`, 'error');
+    });
+  }
+}
+
+/**
  * Parse a raw AI summary JSON string into a structured object.
  */
 export function parseAiSummary(raw: string | null | undefined): AiSummaryData | null {
