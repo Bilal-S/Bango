@@ -107,4 +107,73 @@ describe('useEmbeddingSettings', () => {
 
     expect(saving.value).toBe(false);
   });
+
+  it('marks the loaded value as persisted (isPersisted)', async () => {
+    vi.mocked(tauriCommand).mockResolvedValue({
+      status: 'enabled',
+      model: 'm',
+      dimensions: 1536,
+      modelOverride: 'nomic-embed-text',
+    });
+
+    const { modelOverride, isPersisted, load } = useEmbeddingSettings();
+    // Nothing loaded yet: '' is not backend-known.
+    expect(isPersisted('')).toBe(false);
+
+    await load();
+    expect(modelOverride.value).toBe('nomic-embed-text');
+    expect(isPersisted('nomic-embed-text')).toBe(true);
+    expect(isPersisted('text-embedding-3-large')).toBe(false);
+  });
+
+  it('marks the saved value as persisted so trim-normalization is not re-saved', async () => {
+    vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+    const { modelOverride, isPersisted, save } = useEmbeddingSettings();
+    await save('  nomic-embed-text  ');
+
+    expect(modelOverride.value).toBe('nomic-embed-text');
+    expect(isPersisted('nomic-embed-text')).toBe(true);
+  });
+
+  it('does not clobber a user edit that lands while the load is in flight', async () => {
+    const deferred: { resolve: ((value: unknown) => void) | null } = { resolve: null };
+    vi.mocked(tauriCommand).mockReturnValue(
+      new Promise<unknown>((resolve) => {
+        deferred.resolve = resolve;
+      })
+    );
+
+    const { modelOverride, load } = useEmbeddingSettings();
+    const pending = load();
+    // The user types while the read is in flight.
+    modelOverride.value = 'user-typed-model';
+    deferred.resolve?.({
+      status: 'unknown',
+      model: '',
+      dimensions: 0,
+      modelOverride: 'stale-backend-value',
+    });
+    await pending;
+
+    expect(modelOverride.value).toBe('user-typed-model');
+  });
+
+  it('keeps the last known value when a later read fails', async () => {
+    vi.mocked(tauriCommand)
+      .mockResolvedValueOnce({
+        status: 'enabled',
+        model: 'm',
+        dimensions: 1536,
+        modelOverride: 'old-model',
+      })
+      .mockRejectedValueOnce(new Error('db locked'));
+
+    const { modelOverride, isPersisted, load } = useEmbeddingSettings();
+    await load();
+    await load();
+
+    expect(modelOverride.value).toBe('old-model');
+    expect(isPersisted('old-model')).toBe(true);
+  });
 });

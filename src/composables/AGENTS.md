@@ -38,7 +38,10 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   `use-journal-info.ts`, `use-network-view.ts`, `use-nav-history.ts`,
   `use-full-text-attachment.ts`, `use-article-delete.ts`,
   `use-gap-analysis.ts`, `use-wiki.ts`, `use-llm-config.ts`,
-  `use-llm-configured.ts` (the canonical LLM gate, `src/AGENTS.md`), and
+  `use-llm-configured.ts` (the canonical LLM gate, `src/AGENTS.md`),
+  `use-embedding-settings.ts` (premium embedding-model override load/save;
+  `isPersisted` marks backend-known values so auto-save watchers skip
+  propagation, never user edits - contract in `components/AGENTS.md`), and
   `use-demo.ts` (loads `assets/demo-project.bango.json`).
 
 ## Local Contracts

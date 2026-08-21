@@ -103,7 +103,18 @@ the orchestrator's `update_settings` takes effect for the next LLM call
 without a manual Save button; the parameters-only save path is safe with
 respect to embedding capability: `save_llm_config` guards
 `reset_embedding_status` behind `embedding_relevant_changed` so a
-parameters-only save preserves a known-good `embedding_status`),
+parameters-only save preserves a known-good `embedding_status`;
+premium-only **Embedding Model override** input under Model Name/API Key:
+auto-saves via a 600ms debounced watcher that skips only propagation - it
+checks `useEmbeddingSettings().isPersisted(value)`, which `load()`/`save()`
+keep in sync with the backend, instead of a "skip the first change" flag
+(that flag swallowed the user's only edit when the stored value was empty,
+so a pasted model name was never persisted and the field re-appeared blank
+after navigating away; regression test:
+`src/__tests__/components/settings-provider-card.test.ts`). The load runs
+on mount and again when `isPremium` flips true (flags resolve async during
+bootstrap); a pending debounced save is flushed on unmount so quick
+navigation never loses the edit),
 `settings-ai-summaries.vue` (3 toggles: auto-generate-summaries
 [localStorage `bango-full-text-summaries`], section-summaries [localStorage
 `bango-section-summaries`], auto-translate [DB-backed

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { watch, ref, computed, nextTick, onMounted } from 'vue';
+import { watch, ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { useLlmConfig } from '@/composables/use-llm-config';
 import { useEmbeddingSettings } from '@/composables/use-embedding-settings';
 import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { useScreeningStore } from '@/stores/screening';
+import { useToast } from '@/composables/use-toast';
 import { formatLlmError } from '@/utils/llm-error';
 
 const router = useRouter();
@@ -13,6 +14,7 @@ const { isPremium } = useFeatureFlags();
 const {
   modelOverride,
   saving: savingEmbeddingOverride,
+  isPersisted: isPersistedOverride,
   load: loadEmbeddingOverride,
   save: saveEmbeddingOverride,
 } = useEmbeddingSettings();
@@ -284,11 +286,23 @@ watch(lastSavedAt, (ts) => {
 });
 
 /* Embedding model override (premium only). When set, the probe tries the
-   user's pinned model first ahead of auto-detection. Loaded once on mount,
-   saved via 600ms debounced watcher. Clearing restores auto-detection. */
+   user's pinned model first ahead of auto-detection. Loaded on mount and when
+   the premium flag flips true after mount (flags resolve asynchronously during
+   bootstrap, so `isPremium` can still be false when this card mounts). Saved
+   via 600ms debounced watcher; a pending save is flushed on unmount so quick
+   navigation away never loses the last edit. Clearing restores
+   auto-detection. */
 const EMBEDDING_OVERRIDE_SAVE_DELAY_MS = 600;
 let embeddingOverrideSaveTimer: ReturnType<typeof setTimeout> | null = null;
-let embeddingOverrideInitialized = false;
+
+/** Surface a failed override save (e.g. backend validation) instead of an
+    unhandled promise rejection; the in-memory field keeps the user's text. */
+function handleEmbeddingSaveError(e: unknown): void {
+  useToast().show(
+    `Could not save embedding model: ${e instanceof Error ? e.message : String(e)}`,
+    'error'
+  );
+}
 
 onMounted(() => {
   if (isPremium.value) {
@@ -296,22 +310,44 @@ onMounted(() => {
   }
 });
 
-watch(modelOverride, (value) => {
-  /* Skip initial propagation when `loadEmbeddingOverride` populates the ref.
-     Avoids an immediate no-op save round-trip that would reset
-     `embedding_status` to `unknown`. */
-  if (!embeddingOverrideInitialized) {
-    embeddingOverrideInitialized = true;
-    return;
+/* Bootstrap race: if this card mounts before `initFeatureFlags` resolves,
+   `isPremium` is still false and the mount hook above skipped the load. Load
+   as soon as the flag flips true so the field shows the stored value. */
+watch(isPremium, (premium) => {
+  if (premium) {
+    void loadEmbeddingOverride();
   }
+});
+
+watch(modelOverride, (value) => {
+  /* Skip propagation only: changes that `useEmbeddingSettings` itself caused
+     (`load()` populating the ref, `save()` normalizing whitespace) already
+     match the backend; re-saving them would no-op and reset
+     `embedding_status` to `unknown`. Every other change is a user edit and
+     MUST schedule the debounced save. Regression: a "skip the first change"
+     flag used to swallow the user's only edit when the stored value was
+     empty (the load had produced no ref change), so a pasted model name was
+     never persisted and the field came back blank after navigating away. */
+  if (isPersistedOverride(value)) return;
   if (!isPremium.value) return;
   if (embeddingOverrideSaveTimer !== null) {
     clearTimeout(embeddingOverrideSaveTimer);
   }
   embeddingOverrideSaveTimer = setTimeout(() => {
     embeddingOverrideSaveTimer = null;
-    void saveEmbeddingOverride(value);
+    void saveEmbeddingOverride(value).catch(handleEmbeddingSaveError);
   }, EMBEDDING_OVERRIDE_SAVE_DELAY_MS);
+});
+
+onBeforeUnmount(() => {
+  /* Flush a pending debounced save synchronously: navigating away unmounts
+     this card, and a stray timer could otherwise fire after (or race) the
+     next mount's `load()`, losing the edit. */
+  if (embeddingOverrideSaveTimer !== null) {
+    clearTimeout(embeddingOverrideSaveTimer);
+    embeddingOverrideSaveTimer = null;
+    void saveEmbeddingOverride(modelOverride.value).catch(handleEmbeddingSaveError);
+  }
 });
 </script>
 
