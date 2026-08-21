@@ -27,9 +27,10 @@ const rebuildError = ref<string | null>(null);
 // Hide the progress bar until the user starts a run (or a run is live on
 // mount, i.e. the user navigated away and back mid-rebuild).
 const rebuildStarted = ref(false);
-/** Live embedding sub-line (`embedding:progress`), shown only during the
+/** Live embedding counters from `embedding:progress`, used only during the
  * cascade phase of a rebuild run. */
-const embeddingLine = ref<string | null>(null);
+const embedProcessed = ref(0);
+const embedTotal = ref(0);
 let rebuildUnlisten: UnlistenFn | null = null;
 let embeddingUnlisten: UnlistenFn | null = null;
 
@@ -38,6 +39,31 @@ const rebuildPhaseLabel = computed(() => {
   if (phase === 'embeddings') return 'Updating embeddings';
   if (phase === 'done') return 'Chunk rebuild';
   return 'Rebuilding text chunks';
+});
+
+/** Phase-mapped bar position: chunking owns the 0-90 band, the embedding
+ * cascade owns 90-100 (driven by the live `embedding:progress` counters),
+ * and the terminal snapshot shows the raw (100) value. Without this the bar
+ * sits frozen at 100% through the whole cascade. */
+const displayedPercent = computed(() => {
+  const p = rebuildProgress.value;
+  if (!p) return 0;
+  if (p.phase === 'chunks') return Math.floor(p.percent * 0.9);
+  if (p.phase === 'embeddings') {
+    if (embedTotal.value > 0) {
+      return 90 + Math.floor((10 * embedProcessed.value) / embedTotal.value);
+    }
+    return 90;
+  }
+  return p.percent;
+});
+
+/** Sub-line rendered only while the cascade is actually embedding. */
+const embeddingLine = computed<string | null>(() => {
+  if (rebuildProgress.value?.phase !== 'embeddings' || embedTotal.value === 0) {
+    return null;
+  }
+  return `Embedding articles... ${embedProcessed.value}/${embedTotal.value}`;
 });
 
 async function loadFullTextCount(): Promise<void> {
@@ -189,10 +215,12 @@ onMounted(async () => {
   rebuildUnlisten = await listen<RebuildChunksProgress>('chunk-rebuild:progress', (event) => {
     rebuildProgress.value = event.payload;
     if (event.payload.phase !== 'embeddings') {
-      embeddingLine.value = null;
+      // Leaving the cascade phase: drop the stale embedding counters.
+      embedProcessed.value = 0;
+      embedTotal.value = 0;
     }
   });
-  /* Embedding sub-line: the runner emits `embedding:progress` per article.
+  /* Embedding counters: the runner emits `embedding:progress` per article.
      Only applied while a rebuild run is in its cascade phase, so standalone
      embedding generation (Settings / Citation Finder) does not leak into
      this widget. */
@@ -200,7 +228,8 @@ onMounted(async () => {
     'embedding:progress',
     (event) => {
       if (rebuildProgress.value?.phase === 'embeddings') {
-        embeddingLine.value = `Embedding articles... ${event.payload.processed}/${event.payload.total}`;
+        embedProcessed.value = event.payload.processed;
+        embedTotal.value = event.payload.total;
       }
     }
   );
@@ -254,17 +283,20 @@ onUnmounted(() => {
       <div v-if="rebuildStarted && rebuildProgress" class="batch-progress rebuild-chunks__bar">
         <div class="batch-progress__header">
           <span class="batch-progress__phase">{{ rebuildPhaseLabel }}</span>
-          <span class="batch-progress__percent">{{ rebuildProgress.percent }}%</span>
+          <span class="batch-progress__percent">{{ displayedPercent }}%</span>
         </div>
         <div class="batch-progress__track">
           <div
             class="batch-progress__fill"
             :class="{ 'batch-progress__fill--cancelled': rebuildProgress.isCancelled }"
-            :style="{ width: `${rebuildProgress.percent}%` }"
+            :style="{ width: `${displayedPercent}%` }"
           ></div>
         </div>
         <p class="batch-progress__message">{{ rebuildProgress.message }}</p>
-        <p v-if="rebuildProgress.total > 0" class="batch-progress__detail">
+        <p
+          v-if="rebuildProgress.total > 0 && rebuildProgress.phase !== 'embeddings'"
+          class="batch-progress__detail"
+        >
           {{ rebuildProgress.completed }} / {{ rebuildProgress.total }} articles
         </p>
         <p

@@ -907,14 +907,16 @@ impl RebuildChunksState {
 }
 
 /// 0-100% avoiding division by zero (100 when the work set is empty).
-#[allow(clippy::manual_checked_ops)]
+#[must_use]
 fn rebuild_percent(done: usize, total: usize) -> usize {
-    if total == 0 {
-        100
-    } else {
-        (done * 100) / total
-    }
+    done.saturating_mul(100).checked_div(total).unwrap_or(100)
 }
+
+/// Hard cap on `RebuildChunksProgress.errors`. The list is cloned +
+/// serialized into every `chunk-rebuild:progress` event; unbounded growth is
+/// O(n^2) IPC at the 10k-article cap. The `failed` counter always reports the
+/// true total; overflow is summarized at finalize time (audit rows carry all).
+const MAX_PROGRESS_ERRORS: usize = 50;
 
 /// Lock the progress snapshot, apply `f`, recompute `percent`, return the
 /// cloned payload for event emission.
@@ -933,6 +935,62 @@ fn emit_rebuild_progress(app_handle: Option<&tauri::AppHandle>, payload: &Rebuil
     if let Some(handle) = app_handle {
         let _ = handle.emit(CHUNK_REBUILD_PROGRESS_EVENT, payload);
     }
+}
+
+/// Atomically claim the run slot: if a rebuild is already running, return
+/// `false` (caller surfaces the live snapshot). Otherwise reset the cancel
+/// token + snapshot and mark running, all in ONE critical section so two
+/// overlapping `start_rebuild_chunks` invokes can never both spawn a task
+/// (the previous check-then-act pair had that race).
+pub fn claim_run_slot(
+    progress: &Arc<Mutex<RebuildChunksProgress>>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<bool, AppError> {
+    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    if guard.is_running {
+        return Ok(false);
+    }
+    cancel.store(false, Ordering::Relaxed);
+    *guard = RebuildChunksProgress::default();
+    guard.is_running = true;
+    guard.phase = "chunks".to_string();
+    Ok(true)
+}
+
+/// Release a claimed-but-unstarted slot (discovery error path).
+pub fn release_run_slot(progress: &Arc<Mutex<RebuildChunksProgress>>) -> Result<(), AppError> {
+    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    guard.is_running = false;
+    Ok(())
+}
+
+/// Terminal epilogue shared by the background task. Sets `is_cancelled` from
+/// the token (covers a cancel that landed during the embedding cascade, which
+/// the loop's pre-article check never sees), appends the error-truncation
+/// tail, and computes the final summary. `skipped` stays exactly what the
+/// loop counted (== translated skips) - never recomputed here.
+pub fn finalize_rebuild_progress(
+    progress: &Arc<Mutex<RebuildChunksProgress>>,
+    cancel: &Arc<AtomicBool>,
+) -> Result<RebuildChunksProgress, AppError> {
+    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    if cancel.load(Ordering::Relaxed) {
+        guard.is_cancelled = true;
+    }
+    if guard.failed > guard.errors.len() {
+        let more = guard.failed - guard.errors.len();
+        guard.errors.push(format!("... and {more} more failures (see Diagnostics)"));
+    }
+    guard.is_running = false;
+    guard.phase = "done".to_string();
+    guard.message = rebuild_summary_message(
+        guard.chunked,
+        guard.failed,
+        guard.skipped_translated,
+        guard.is_cancelled,
+    );
+    guard.percent = rebuild_percent(guard.completed, guard.total);
+    Ok(guard.clone())
 }
 
 /// What the rebuild loop did; consumed by the embedding cascade.
@@ -1048,7 +1106,9 @@ async fn record_rebuild_failure(
     let payload = update_rebuild_progress(progress, |p| {
         p.completed += 1;
         p.failed += 1;
-        p.errors.push(message);
+        if p.errors.len() < MAX_PROGRESS_ERRORS {
+            p.errors.push(message);
+        }
     })?;
     emit_rebuild_progress(app_handle, &payload);
     tokio::task::yield_now().await;
@@ -1079,7 +1139,11 @@ pub async fn rebuild_chunks_loop(
         let payload = update_rebuild_progress(progress, |p| {
             p.phase = "chunks".to_string();
             p.total = total;
-            p.message = "Rebuilding text chunks...".to_string();
+            p.message = if total == 0 {
+                "No articles with full text".to_string()
+            } else {
+                "Rebuilding text chunks...".to_string()
+            };
         })?;
         emit_rebuild_progress(app_handle, &payload);
     }
@@ -1171,11 +1235,17 @@ pub async fn rebuild_chunks_loop(
         };
 
         // Short lock burst: replace chunk rows + invalidate the article's
-        // embedding rows (re-chunked text is stale; the runner only INSERTs,
-        // so an explicit delete also prunes orphaned high-index rows).
+        // embedding rows in ONE transaction. Re-chunked text makes stored
+        // vectors stale and the runner only INSERTs (an explicit delete also
+        // prunes orphaned high-index rows); transactional so a DELETE failure
+        // after a successful REPLACE rolls back instead of leaving chunks and
+        // vectors divergent while the article is counted "failed".
         let write = match crate::db::connection::lock_conn(conn_mutex) {
-            Ok(conn) => chunk_repo::replace_chunks_for_article(&conn, &candidate.id, &chunks)
-                .and_then(|_| embedding_repo::delete_embeddings_for_article(&conn, &candidate.id)),
+            Ok(conn) => conn.unchecked_transaction().map_err(AppError::from).and_then(|tx| {
+                chunk_repo::replace_chunks_for_article(&tx, &candidate.id, &chunks)?;
+                embedding_repo::delete_embeddings_for_article(&tx, &candidate.id)?;
+                tx.commit().map_err(AppError::from)
+            }),
             Err(e) => Err(e),
         };
         if let Err(e) = write {
@@ -1281,39 +1351,41 @@ pub async fn start_rebuild_chunks(
     db_state: tauri::State<'_, DbState>,
     rebuild_state: tauri::State<'_, RebuildChunksState>,
 ) -> Result<RebuildChunksProgress, AppError> {
-    // Concurrent-start guard: return the live snapshot untouched.
-    {
+    // Atomic run-slot claim: an in-flight rebuild returns its live snapshot;
+    // a fresh claim resets the token + snapshot in the SAME critical section
+    // (no double-spawn race between overlapping start invokes).
+    if !claim_run_slot(&rebuild_state.progress, &rebuild_state.cancel_handle())? {
         let guard =
             rebuild_state.progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
-        if guard.is_running {
-            return Ok(guard.clone());
-        }
+        return Ok(guard.clone());
     }
 
     let cancel = rebuild_state.cancel_handle();
     let progress = rebuild_state.progress_handle();
-    cancel.store(false, Ordering::Relaxed);
 
-    // Brief discovery lock: storage dir + full candidate work list, then
-    // release before any parsing (split-pipeline lock hygiene).
+    /* Brief discovery lock: storage dir + full candidate work list, then
+    release before any parsing (split-pipeline lock hygiene). A failure here
+    must release the claimed slot so a later start is not rejected forever. */
     let (storage_dir, candidates) = {
-        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        let dir = compute_storage_dir(&conn)?;
-        let list = chunk_repo::get_full_text_chunk_candidates(&conn)?;
-        (dir, list)
+        let discovery: Result<(PathBuf, Vec<chunk_repo::FullTextChunkCandidate>), AppError> =
+            (|| {
+                let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+                let dir = compute_storage_dir(&conn)?;
+                let list = chunk_repo::get_full_text_chunk_candidates(&conn)?;
+                Ok((dir, list))
+            })();
+        match discovery {
+            Ok(found) => found,
+            Err(e) => {
+                release_run_slot(&progress)?;
+                return Err(e);
+            }
+        }
     };
 
     let total = candidates.len();
     update_rebuild_progress(&progress, |p| {
-        *p = RebuildChunksProgress::default();
-        p.is_running = true;
-        p.phase = "chunks".to_string();
         p.total = total;
-        p.message = if total == 0 {
-            "No articles with full text".to_string()
-        } else {
-            "Rebuilding text chunks...".to_string()
-        };
     })?;
 
     /* Spawn the background task (we are on the async runtime, so
@@ -1337,12 +1409,15 @@ pub async fn start_rebuild_chunks(
         {
             Ok(outcome) => outcome,
             Err(e) => {
-                if let Ok(payload) = update_rebuild_progress(&task_progress, |p| {
-                    p.is_running = false;
-                    p.phase = "done".to_string();
-                    p.message = format!("Chunk rebuild failed: {e}");
-                }) {
-                    emit_rebuild_progress(Some(&task_handle), &payload);
+                /* Loop-level failure (lock poison / audit write): finalize
+                first (cancel flag, error tail, done state), then override the
+                message with the failure cause. */
+                if finalize_rebuild_progress(&task_progress, &task_cancel).is_ok() {
+                    if let Ok(payload) = update_rebuild_progress(&task_progress, |p| {
+                        p.message = format!("Chunk rebuild failed: {e}");
+                    }) {
+                        emit_rebuild_progress(Some(&task_handle), &payload);
+                    }
                 }
                 return;
             }
@@ -1360,13 +1435,10 @@ pub async fn start_rebuild_chunks(
             .await;
         }
 
-        if let Ok(payload) = update_rebuild_progress(&task_progress, |p| {
-            p.is_running = false;
-            p.phase = "done".to_string();
-            p.skipped = p.total.saturating_sub(p.chunked + p.failed + p.skipped_translated);
-            p.message =
-                rebuild_summary_message(p.chunked, p.failed, p.skipped_translated, p.is_cancelled);
-        }) {
+        // Terminal epilogue: picks up a cancel that landed during the cascade,
+        // appends the error-truncation tail, keeps `skipped` == translated
+        // skips, computes the summary.
+        if let Ok(payload) = finalize_rebuild_progress(&task_progress, &task_cancel) {
             emit_rebuild_progress(Some(&task_handle), &payload);
         }
     });

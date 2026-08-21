@@ -46,6 +46,24 @@ pub enum SkipReason {
     AllFresh,
 }
 
+impl SkipReason {
+    /// Canonical serialized form. The single source of truth for consumers
+    /// string-matching `EmbeddingRunReport.skip_reason` (e.g. the chunk-rebuild
+    /// cascade's `embedding_summary_line`); never match `{:?}` Debug output.
+    /// Values intentionally equal the variant names so pre-`as_str` payloads
+    /// (emitted via `format!("{reason:?}")`) stay byte-compatible.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::LlmNotConfigured => "LlmNotConfigured",
+            Self::Disabled => "Disabled",
+            Self::UnknownNotProbed => "UnknownNotProbed",
+            Self::NoTargets => "NoTargets",
+            Self::AllFresh => "AllFresh",
+        }
+    }
+}
+
 /// Output of [`compute_work_list`].
 #[derive(Debug, Clone)]
 pub struct WorkList {

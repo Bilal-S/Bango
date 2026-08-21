@@ -75,20 +75,30 @@ Replaces the old sync `rebuild_article_chunks` command, which froze the UI
 no Tokio reactor exists - panic + process abort after every successful
 rebuild). New contract:
 
-- Commands: `start_rebuild_chunks` (async; concurrent-start guard; brief
-  discovery lock via `chunk_repo::get_full_text_chunk_candidates`; spawns the
-  background task; returns the initial snapshot), `cancel_rebuild_chunks`
-  (`Arc<AtomicBool>` token), `get_rebuild_chunks_progress` (restore-on-mount).
-  State: `RebuildChunksState` managed in `lib.rs`. Events:
+- Commands: `start_rebuild_chunks` (async; ATOMIC run-slot claim via
+  `claim_run_slot` - check + cancel reset + snapshot reset in one critical
+  section, so overlapping starts can never double-spawn; a discovery error
+  releases the slot via `release_run_slot`), `cancel_rebuild_chunks`
+  (`Arc<AtomicBool>` token), `get_rebuild_chunks_progress`
+  (restore-on-mount). State: `RebuildChunksState` managed in `lib.rs`. Events:
   `chunk-rebuild:progress` (`RebuildChunksProgress`, camelCase).
 - Split-pipeline lock discipline (mirrors batch import Phase 1): CPU-bound
   `extract_sections` + `chunk_sections` on `spawn_blocking` with NO DB lock;
-  short lock bursts for `replace_chunks_for_article` + per-article
-  `delete_embeddings_for_article`; `yield_now()` between articles.
+  one short lock burst per article wrapping `replace_chunks_for_article` +
+  `delete_embeddings_for_article` in a single `unchecked_transaction`
+  (a failed embedding DELETE rolls the chunk REPLACE back - chunks and
+  vectors can never diverge on a mid-write failure); `yield_now()` between
+  articles.
 - All three per-article failure modes (missing `full_text_file_name`, missing
   on-disk file, extraction/write error) increment `failed`, push a message
   embedding the article id into `RebuildChunksProgress.errors`, and write a
-  `log_error` audit row (the first two were previously silent).
+  `log_error` audit row (the first two were previously silent). `errors` is
+  capped at `MAX_PROGRESS_ERRORS` (50) so the per-event snapshot clone stays
+  bounded; `failed` always reports the true total and
+  `finalize_rebuild_progress` appends a "... and N more failures (see
+  Diagnostics)" tail. `finalize_rebuild_progress` also ORs `is_cancelled`
+  from the token (covering a cancel that lands during the embedding cascade)
+  and never recomputes `skipped` (it stays == translated skips).
 - **Translated guard**: candidates with `is_translated = 1` are never
   re-chunked (working chunks are the English translation; the on-disk PDF is
   the original language). They count as `skipped_translated` and feed the
@@ -101,12 +111,15 @@ rebuild). New contract:
   Gating (LLM configured, provider supports embeddings) is owned by the
   runner/director; skips surface as `embeddingSummary` lines
   ("Embeddings skipped: LLM not configured" / "... provider does not support
-  embeddings"), not errors. The shared cancel token also aborts the cascade.
+  embeddings"), not errors. Skip reasons are matched via
+  `SkipReason::as_str()` (the canonical serialized form in
+  `embedding/director.rs`) - never against `{:?}` Debug output. The shared
+  cancel token also aborts the cascade.
 - Frontend: `settings-reprocessing.vue` renders the live progress bar
-  (phase label, percent, N/M articles, counts + translated-skip summary,
-  per-article error list, cancel button) and restores it on mount; an
-  `embedding:progress` listener drives a sub-line only during the cascade
-  phase.
+  (phase label, phase-mapped percent - chunking owns the 0-90 band, the
+  cascade owns 90-100 driven by `embedding:progress` counters - counts +
+  translated-skip summary, per-article error list, cancel button) and
+  restores it on mount.
 - Unchanged: the screening-path helpers `ensure_chunks_inner`,
   `ensure_chunks_for_full_text_articles(_with_progress)` stay byte-identical
   (they run inside the screening task's own lock scope).

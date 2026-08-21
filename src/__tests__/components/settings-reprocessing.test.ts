@@ -176,7 +176,7 @@ describe('settings-reprocessing.vue', () => {
     });
   }
 
-  it('starts the async rebuild and reveals the progress bar', async () => {
+  it('rebuildChunks_starts_async_task_and_reveals_bar', async () => {
     mockFullTextCount(3);
     const wrapper = mountCard();
     await flushPromises();
@@ -191,7 +191,7 @@ describe('settings-reprocessing.vue', () => {
     expect(wrapper.find('.batch-progress__phase').text()).toBe('Rebuilding text chunks');
   });
 
-  it('hides the rebuild bar on mount when no rebuild is running', async () => {
+  it('rebuildBar_hidden_on_fresh_mount', async () => {
     mockFullTextCount(3);
     const wrapper = mountCard();
     await flushPromises();
@@ -199,7 +199,7 @@ describe('settings-reprocessing.vue', () => {
     expect(wrapper.find('.rebuild-chunks__bar').exists()).toBe(false);
   });
 
-  it('restores the rebuild bar on mount when a run is already live', async () => {
+  it('rebuildBar_restored_on_mount_when_run_is_live', async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'count_articles_with_full_text') return Promise.resolve(2);
       if (cmd === 'get_batch_import_progress') return Promise.resolve(IDLE_PROGRESS);
@@ -221,11 +221,12 @@ describe('settings-reprocessing.vue', () => {
     await flushPromises();
 
     expect(wrapper.find('.rebuild-chunks__bar').exists()).toBe(true);
-    expect(wrapper.find('.batch-progress__percent').text()).toBe('25%');
+    // Chunk-phase percent maps into the 0-90 display band: 25% -> 22%.
+    expect(wrapper.find('.batch-progress__percent').text()).toBe('22%');
     expect(wrapper.find('.batch-progress__detail').text()).toContain('1 / 4 articles');
   });
 
-  it('renders counts summary, translated skip note, and error list from a live event', async () => {
+  it('rebuildBar_renders_counts_skip_note_and_errors_from_event', async () => {
     mockFullTextCount(3);
     const wrapper = mountCard();
     await flushPromises();
@@ -261,7 +262,7 @@ describe('settings-reprocessing.vue', () => {
     expect(errors[0]?.text() ?? '').toContain('art-9');
   });
 
-  it('renders the embedding phase sub-line and final embedding summary', async () => {
+  it('rebuildBar_embedding_phase_subline_and_final_summary', async () => {
     mockFullTextCount(3);
     const wrapper = mountCard();
     await flushPromises();
@@ -310,7 +311,7 @@ describe('settings-reprocessing.vue', () => {
     expect(wrapper.find('.rebuild-chunks__bar').text()).not.toContain('Embedding articles...');
   });
 
-  it('invokes cancel_rebuild_chunks from the Cancel button', async () => {
+  it('cancel_button_invokes_cancel_rebuild_chunks', async () => {
     mockFullTextCount(3);
     const wrapper = mountCard();
     await flushPromises();
@@ -341,5 +342,99 @@ describe('settings-reprocessing.vue', () => {
     await flushPromises();
 
     expect(mockInvoke).toHaveBeenCalledWith('cancel_rebuild_chunks');
+  });
+
+  it('chunk_percent_maps_to_0_90_band_and_hides_counter_during_embeddings', async () => {
+    mockFullTextCount(3);
+    const wrapper = mountCard();
+    await flushPromises();
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('Rebuild text chunks'));
+    await btn!.trigger('click');
+    await flushPromises();
+
+    const handler = eventHandlers.get('chunk-rebuild:progress')!;
+    // Chunk phase at 50% raw -> displayed in the 0-90 band (45%).
+    handler!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: true,
+        phase: 'chunks',
+        completed: 3,
+        total: 6,
+        percent: 50,
+        message: 'Rebuilding text chunks...',
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find('.rebuild-chunks__bar .batch-progress__percent').text()).toBe('45%');
+    expect(wrapper.find('.batch-progress__detail').text()).toContain('3 / 6 articles');
+
+    // Cascade phase: the "N / M articles" counter is hidden even though the
+    // raw snapshot still carries chunk totals.
+    handler!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: true,
+        phase: 'embeddings',
+        completed: 6,
+        total: 6,
+        percent: 100,
+        message: 'Updating embeddings...',
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find('.rebuild-chunks__bar .batch-progress__percent').text()).toBe('90%');
+    expect(wrapper.find('.rebuild-chunks__bar .batch-progress__detail').exists()).toBe(false);
+
+    // Done: raw percent (100) again.
+    handler!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: false,
+        phase: 'done',
+        completed: 6,
+        total: 6,
+        percent: 100,
+        message: '6 chunked, 0 failed',
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find('.rebuild-chunks__bar .batch-progress__percent').text()).toBe('100%');
+  });
+
+  it('cascade_band_90_100_driven_by_embedding_progress', async () => {
+    mockFullTextCount(3);
+    const wrapper = mountCard();
+    await flushPromises();
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('Rebuild text chunks'));
+    await btn!.trigger('click');
+    await flushPromises();
+
+    eventHandlers.get('chunk-rebuild:progress')!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: true,
+        phase: 'embeddings',
+        completed: 6,
+        total: 6,
+        percent: 100,
+        message: 'Updating embeddings...',
+      },
+    });
+    await flushPromises();
+
+    // No embedding events yet: fallback floor of the cascade band.
+    expect(wrapper.find('.rebuild-chunks__bar .batch-progress__percent').text()).toBe('90%');
+
+    // Halfway through embedding 4 articles: 90 + 10*2/4 = 95%.
+    eventHandlers.get('embedding:progress')!({ payload: { processed: 2, total: 4 } });
+    await flushPromises();
+    expect(wrapper.find('.rebuild-chunks__bar .batch-progress__percent').text()).toBe('95%');
+    expect(wrapper.find('.rebuild-chunks__bar').text()).toContain('Embedding articles... 2/4');
+
+    // Complete: top of the band.
+    eventHandlers.get('embedding:progress')!({ payload: { processed: 4, total: 4 } });
+    await flushPromises();
+    expect(wrapper.find('.rebuild-chunks__bar .batch-progress__percent').text()).toBe('100%');
   });
 });

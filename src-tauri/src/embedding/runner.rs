@@ -131,7 +131,7 @@ pub async fn generate_embeddings_inner(
                 errors: 0,
                 status: app_settings_repo::EmbeddingStatus::Unknown.as_str().to_string(),
                 model: String::new(),
-                skip_reason: Some(format!("{reason:?}")),
+                skip_reason: Some(reason.as_str().to_string()),
             };
             if emit_events {
                 if let Some(handle) = app_handle {

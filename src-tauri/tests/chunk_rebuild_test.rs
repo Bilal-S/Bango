@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bango_lib::commands::full_text::{
-    embedding_cascade_scopes, embedding_summary_line, rebuild_chunks_loop, rebuild_summary_message,
-    RebuildChunksProgress, RebuildChunksState,
+    claim_run_slot, embedding_cascade_scopes, embedding_summary_line, finalize_rebuild_progress,
+    rebuild_chunks_loop, rebuild_summary_message, RebuildChunksProgress, RebuildChunksState,
 };
 use bango_lib::db::chunk_repo;
 use bango_lib::db::connection::create_connection;
@@ -373,4 +373,120 @@ fn summary_message_includes_translated_skip_note() {
     assert!(msg.contains("3 skipped (translated, English chunks preserved)"));
     let cancelled = rebuild_summary_message(1, 0, 0, true);
     assert!(cancelled.starts_with("Cancelled after "), "cancelled runs are labelled");
+}
+
+// ── Round-2 fixes: error cap, rollback, finalize, atomic claim ──────────────
+
+#[tokio::test]
+async fn loop_caps_error_list_length() {
+    let conn = setup_db();
+    // 60 articles whose files are all missing -> 60 failures, errors capped.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    for i in 0..60 {
+        let id = format!("cap-{i}");
+        insert_article(&conn, &id);
+        mark_full_text(&conn, &id, Some("missing.pdf"), false);
+    }
+
+    let candidates = chunk_repo::get_full_text_chunk_candidates(&conn).expect("candidates");
+    assert_eq!(candidates.len(), 60);
+    let conn_mutex = Mutex::new(conn);
+    let (cancel, progress) = state_harness();
+    rebuild_chunks_loop(&conn_mutex, tmp.path(), &candidates, &cancel, &progress, None)
+        .await
+        .expect("loop ok");
+
+    let snap = snapshot(&progress);
+    assert_eq!(snap.failed, 60, "failed counter reports the true total");
+    assert_eq!(snap.errors.len(), 50, "errors list is capped at 50");
+
+    // Finalize appends the truncation tail.
+    let finalized = finalize_rebuild_progress(&progress, &cancel).expect("finalize");
+    assert_eq!(finalized.errors.len(), 51, "cap + one tail line");
+    assert!(finalized.errors.last().unwrap().contains("10 more failures"));
+    assert!(finalized.errors.last().unwrap().contains("Diagnostics"));
+    assert_eq!(finalized.failed, 60);
+}
+
+#[tokio::test]
+async fn loop_chunk_write_rolls_back_on_embedding_delete_failure() {
+    let conn = setup_db();
+    insert_article(&conn, "art-rb");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    write_txt(tmp.path(), "art-rb.txt");
+    mark_full_text(&conn, "art-rb", Some("art-rb.txt"), false);
+    // Force the SECOND write (embedding delete) to fail inside the tx.
+    conn.execute("DROP TABLE article_embeddings", []).expect("drop embeddings table");
+
+    let candidates = chunk_repo::get_full_text_chunk_candidates(&conn).expect("candidates");
+    let conn_mutex = Mutex::new(conn);
+    let (cancel, progress) = state_harness();
+    let outcome =
+        rebuild_chunks_loop(&conn_mutex, tmp.path(), &candidates, &cancel, &progress, None)
+            .await
+            .expect("loop ok");
+
+    assert!(outcome.chunked_ids.is_empty(), "failed write must not count as chunked");
+    let snap = snapshot(&progress);
+    assert_eq!(snap.failed, 1);
+    // Transactional rollback: the chunk REPLACE must NOT survive the failed
+    // embedding DELETE (previously it left chunks/vectors divergent).
+    let conn = conn_mutex.lock().unwrap();
+    let listed = chunk_repo::list_chunks_for_article(&conn, "art-rb").expect("list");
+    assert!(listed.is_empty(), "chunk write rolled back with the failed tx");
+}
+
+#[test]
+fn finalize_sets_cancelled_and_keeps_skipped_coherent() {
+    let state = RebuildChunksState::default();
+    let (cancel, progress) = (state.cancel_handle(), state.progress_handle());
+    // Simulate a loop result: 4 chunked, 1 failed, 2 translated skips; then a
+    // cancel that lands DURING the embedding cascade (the loop never sees it).
+    {
+        let mut p = progress.lock().unwrap();
+        p.total = 7;
+        p.completed = 7;
+        p.chunked = 4;
+        p.failed = 1;
+        p.skipped = 2;
+        p.skipped_translated = 2;
+        p.phase = "embeddings".to_string();
+        p.is_running = true;
+    }
+    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+
+    let finalized = finalize_rebuild_progress(&progress, &cancel).expect("finalize");
+
+    assert!(finalized.is_cancelled, "cascade-time cancel must set is_cancelled");
+    assert!(!finalized.is_running);
+    assert_eq!(finalized.phase, "done");
+    assert_eq!(finalized.skipped, 2, "skipped stays == translated skips (never recomputed)");
+    assert!(
+        finalized.message.starts_with("Cancelled after "),
+        "summary carries the Cancelled prefix; got {:?}",
+        finalized.message
+    );
+    assert!(finalized.message.contains("2 skipped (translated"));
+}
+
+#[test]
+fn claim_run_slot_rejects_second_claim() {
+    let state = RebuildChunksState::default();
+    let progress = state.progress_handle();
+    let cancel = state.cancel_handle();
+
+    assert!(claim_run_slot(&progress, &cancel).expect("first claim"), "fresh state claims");
+    // Seed a marker to prove the second claim does not reset the snapshot.
+    progress.lock().unwrap().total = 42;
+
+    assert!(
+        !claim_run_slot(&progress, &cancel).expect("second claim"),
+        "running rebuild rejects a second claim"
+    );
+    assert_eq!(progress.lock().unwrap().total, 42, "snapshot untouched by rejected claim");
+
+    // Release + re-claim succeeds (discovery-error recovery path).
+    bango_lib::commands::full_text::release_run_slot(&progress).expect("release");
+    assert!(claim_run_slot(&progress, &cancel).expect("re-claim"), "released slot claims again");
+    assert_eq!(progress.lock().unwrap().total, 0, "fresh claim resets the snapshot");
 }
