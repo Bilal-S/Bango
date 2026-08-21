@@ -105,8 +105,10 @@ git-ignored.
 
 Disk-space: `src-tauri/target` can balloon into hundreds of GB because each
 of the ~136 `src-tauri/tests/*.rs` files compiles into its own ~450MB test
-binary (each statically links llama.cpp/LLM + headless_chrome + GTK + tauri),
-and Cargo never deletes stale hashed binaries across builds.
+binary (each statically links tauri + GTK/webkit2gtk, headless_chrome, resvg,
+the PDF stack (unpdf/pdf-extract/lopdf), and reqwest/rustls; there is no
+llama.cpp dependency - "llama.cpp" is only an LLM provider label for a
+user-run server), and Cargo never deletes stale hashed binaries across builds.
 `target/llvm-cov-target` (~50G) is cargo-llvm-cov's separate target dir.
 Reclaim space with `npm run clean:rust` (full `cargo clean`) or
 `npm run sweep:rust` (`cargo-sweep -t 14`, removes only artifacts untouched

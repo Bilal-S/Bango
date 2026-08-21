@@ -299,8 +299,9 @@ Reads mode + params from `app_settings` and runs
 `ensure_chunks_for_full_text_articles(conn, force=false)` inside the spawned
 background task before `run_sync` (NOT in the synchronous IPC handler, so the
 PDF-parse + chunk-write pass does not freeze the UI by holding the DbState
-mutex); the Settings "Rebuild text chunks" button calls the same fn with
-`force=true` so a corrupted/partial/outdated chunk set is repaired. Exposes
+mutex). The Settings "Rebuild text chunks" button uses the separate async
+pipeline in `commands/full_text.rs` (`start_rebuild_chunks`), NOT this fn -
+see `commands/AGENTS.md` for that contract. Exposes
 `get_screening_mode`/`set_screening_mode`/`get_full_text_article_count` and
 `get_two_stage_thresholds`/`set_two_stage_thresholds` (the latter two speak
 integer percent 0-100, converting to the f64 band at the boundary; pure helpers

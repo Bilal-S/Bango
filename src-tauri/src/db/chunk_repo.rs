@@ -112,6 +112,43 @@ pub fn get_articles_with_full_text(conn: &Connection) -> Result<Vec<String>, App
     Ok(out)
 }
 
+/// One discovery row for the async chunk-rebuild pipeline: everything the
+/// per-article loop needs, read up front under one brief lock burst.
+#[derive(Debug, Clone)]
+pub struct FullTextChunkCandidate {
+    pub id: String,
+    /// Stored `articles.full_text_file_name`. `None` = NULL/empty in DB.
+    pub file_name: Option<String>,
+    /// `articles.is_translated`. Translated articles are NEVER re-chunked
+    /// (the working `article_chunks` rows hold the English translation; the
+    /// on-disk PDF is the original language).
+    pub is_translated: bool,
+}
+
+/// Full discovery set for the Settings "Rebuild text chunks" background task:
+/// id + file name + translated flag for every `has_full_text = 1` article,
+/// in one query (split-pipeline lock hygiene: the loop never re-reads the
+/// articles table).
+pub fn get_full_text_chunk_candidates(
+    conn: &Connection,
+) -> Result<Vec<FullTextChunkCandidate>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, full_text_file_name, is_translated FROM articles WHERE has_full_text = 1",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(FullTextChunkCandidate {
+            id: row.get::<_, String>(0)?,
+            file_name: row.get::<_, Option<String>>(1)?.filter(|n| !n.trim().is_empty()),
+            is_translated: row.get::<_, i64>(2)? != 0,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// Count articles with full text attached (used by the Settings UI to label
 /// the "Rebuild text chunks" button).
 pub fn count_articles_with_full_text(conn: &Connection) -> Result<i64, AppError> {

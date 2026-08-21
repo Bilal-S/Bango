@@ -9,10 +9,16 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
-// Mock the event listener so onMounted does not blow up. The listen callback
-// is not needed for these tests; we just need the registration to resolve.
+// Mock the event API. Handlers are captured per event name so tests can
+// simulate live backend events (`chunk-rebuild:progress`, `embedding:progress`).
+const { eventHandlers } = vi.hoisted(() => ({
+  eventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
+}));
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(async () => () => undefined),
+  listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => {
+    eventHandlers.set(name, handler);
+    return () => undefined;
+  }),
 }));
 
 import SettingsReprocessing from '@/components/settings/settings-reprocessing.vue';
@@ -32,6 +38,23 @@ const IDLE_PROGRESS = {
   summaries: null,
 };
 
+/** An idle chunk-rebuild progress snapshot (fresh `RebuildChunksState`). */
+const REBUILD_IDLE = {
+  phase: 'idle',
+  isRunning: false,
+  isCancelled: false,
+  completed: 0,
+  total: 0,
+  percent: 0,
+  chunked: 0,
+  failed: 0,
+  skipped: 0,
+  skippedTranslated: 0,
+  message: '',
+  errors: [] as string[],
+  embeddingSummary: null,
+};
+
 function mountCard() {
   setActivePinia(createPinia());
   return mount(SettingsReprocessing, {
@@ -49,12 +72,17 @@ describe('settings-reprocessing.vue', () => {
       configurable: true,
     });
     mockInvoke.mockReset();
+    eventHandlers.clear();
     // Default: no full-text articles (hides the rebuild section), idle progress.
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === 'count_articles_with_full_text') return Promise.resolve(0);
       if (cmd === 'get_batch_import_progress') return Promise.resolve(IDLE_PROGRESS);
+      if (cmd === 'get_rebuild_chunks_progress') return Promise.resolve(REBUILD_IDLE);
       if (cmd === 'start_batch_import') {
         return Promise.resolve({ ...IDLE_PROGRESS, isRunning: true });
+      }
+      if (cmd === 'start_rebuild_chunks') {
+        return Promise.resolve({ ...REBUILD_IDLE, isRunning: true, phase: 'chunks', total: 3 });
       }
       return Promise.resolve(undefined);
     });
@@ -132,5 +160,186 @@ describe('settings-reprocessing.vue', () => {
     // Bar is now revealed.
     expect(wrapper.find('.batch-progress').exists()).toBe(true);
     expect(mockInvoke).toHaveBeenCalledWith('start_batch_import', expect.objectContaining({}));
+  });
+
+  // ── Chunk rebuild widget ────────────────────────────────────────────────
+
+  function mockFullTextCount(n: number) {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'count_articles_with_full_text') return Promise.resolve(n);
+      if (cmd === 'get_batch_import_progress') return Promise.resolve(IDLE_PROGRESS);
+      if (cmd === 'get_rebuild_chunks_progress') return Promise.resolve(REBUILD_IDLE);
+      if (cmd === 'start_rebuild_chunks') {
+        return Promise.resolve({ ...REBUILD_IDLE, isRunning: true, phase: 'chunks', total: 3 });
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  it('starts the async rebuild and reveals the progress bar', async () => {
+    mockFullTextCount(3);
+    const wrapper = mountCard();
+    await flushPromises();
+
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('Rebuild text chunks'));
+    expect(btn).toBeTruthy();
+    await btn!.trigger('click');
+    await flushPromises();
+
+    expect(mockInvoke).toHaveBeenCalledWith('start_rebuild_chunks');
+    expect(wrapper.find('.rebuild-chunks__bar').exists()).toBe(true);
+    expect(wrapper.find('.batch-progress__phase').text()).toBe('Rebuilding text chunks');
+  });
+
+  it('hides the rebuild bar on mount when no rebuild is running', async () => {
+    mockFullTextCount(3);
+    const wrapper = mountCard();
+    await flushPromises();
+
+    expect(wrapper.find('.rebuild-chunks__bar').exists()).toBe(false);
+  });
+
+  it('restores the rebuild bar on mount when a run is already live', async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'count_articles_with_full_text') return Promise.resolve(2);
+      if (cmd === 'get_batch_import_progress') return Promise.resolve(IDLE_PROGRESS);
+      if (cmd === 'get_rebuild_chunks_progress') {
+        return Promise.resolve({
+          ...REBUILD_IDLE,
+          isRunning: true,
+          phase: 'chunks',
+          completed: 1,
+          total: 4,
+          percent: 25,
+          message: 'Rebuilding text chunks...',
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountCard();
+    await flushPromises();
+
+    expect(wrapper.find('.rebuild-chunks__bar').exists()).toBe(true);
+    expect(wrapper.find('.batch-progress__percent').text()).toBe('25%');
+    expect(wrapper.find('.batch-progress__detail').text()).toContain('1 / 4 articles');
+  });
+
+  it('renders counts summary, translated skip note, and error list from a live event', async () => {
+    mockFullTextCount(3);
+    const wrapper = mountCard();
+    await flushPromises();
+    // Reveal the widget the way the user does: click Start.
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('Rebuild text chunks'));
+    await btn!.trigger('click');
+    await flushPromises();
+
+    const handler = eventHandlers.get('chunk-rebuild:progress');
+    expect(handler).toBeTruthy();
+    handler!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: true,
+        phase: 'chunks',
+        completed: 5,
+        total: 6,
+        percent: 83,
+        chunked: 4,
+        failed: 1,
+        skippedTranslated: 1,
+        message: 'Rebuilding text chunks...',
+        errors: ['Article art-9: File not found for article art-9: /x/gone.pdf'],
+      },
+    });
+    await flushPromises();
+
+    const summary = wrapper.find('.rebuild-chunks__bar .batch-progress__summary');
+    expect(summary.text()).toContain('4 chunked, 1 failed');
+    expect(summary.text()).toContain('1 skipped (translated)');
+    const errors = wrapper.findAll('.rebuild-chunks__errors li');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.text() ?? '').toContain('art-9');
+  });
+
+  it('renders the embedding phase sub-line and final embedding summary', async () => {
+    mockFullTextCount(3);
+    const wrapper = mountCard();
+    await flushPromises();
+    // Reveal the widget the way the user does: click Start.
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('Rebuild text chunks'));
+    await btn!.trigger('click');
+    await flushPromises();
+
+    const handler = eventHandlers.get('chunk-rebuild:progress');
+    handler!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: true,
+        phase: 'embeddings',
+        completed: 6,
+        total: 6,
+        percent: 100,
+        message: 'Updating embeddings...',
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find('.batch-progress__phase').text()).toBe('Updating embeddings');
+
+    // Live per-article embedding progress drives the sub-line.
+    const embedHandler = eventHandlers.get('embedding:progress');
+    expect(embedHandler).toBeTruthy();
+    embedHandler!({ payload: { processed: 2, total: 5 } });
+    await flushPromises();
+    expect(wrapper.find('.rebuild-chunks__bar').text()).toContain('Embedding articles... 2/5');
+
+    // Final summary line replaces the sub-line context on completion.
+    handler!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: false,
+        phase: 'done',
+        completed: 6,
+        total: 6,
+        percent: 100,
+        message: '6 chunked, 0 failed',
+        embeddingSummary: 'Embeddings skipped: LLM not configured',
+      },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain('Embeddings skipped: LLM not configured');
+    expect(wrapper.find('.rebuild-chunks__bar').text()).not.toContain('Embedding articles...');
+  });
+
+  it('invokes cancel_rebuild_chunks from the Cancel button', async () => {
+    mockFullTextCount(3);
+    const wrapper = mountCard();
+    await flushPromises();
+    // Reveal the widget the way the user does: click Start.
+    const btn = wrapper.findAll('button').find((b) => b.text().includes('Rebuild text chunks'));
+    await btn!.trigger('click');
+    await flushPromises();
+
+    eventHandlers.get('chunk-rebuild:progress')!({
+      payload: {
+        ...REBUILD_IDLE,
+        isRunning: true,
+        phase: 'chunks',
+        completed: 1,
+        total: 6,
+        percent: 16,
+        message: 'Rebuilding text chunks...',
+      },
+    });
+    await flushPromises();
+
+    const cancel = wrapper
+      .find('.rebuild-chunks__bar')
+      .findAll('button')
+      .find((b) => b.text().includes('Cancel'));
+    expect(cancel).toBeTruthy();
+    await cancel!.trigger('click');
+    await flushPromises();
+
+    expect(mockInvoke).toHaveBeenCalledWith('cancel_rebuild_chunks');
   });
 });

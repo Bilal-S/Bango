@@ -47,6 +47,13 @@ preserved in `article_original_content` and `article_original_chunks`.
   after translation. `is_translated = 1` with `language = 'French'` means
   "originally French, now translated to English; originals in
   `article_original_content`".
+- **Chunk-rebuild interaction**: any path that regenerates `article_chunks`
+  from the on-disk PDF must skip `is_translated = 1` articles (the PDF is the
+  original language; the working chunks are the English translation). The
+  Settings chunk-rebuild pipeline enforces this
+  (`commands/full_text.rs::rebuild_chunks_loop`); it also only BACKFILLS
+  missing embedding rows for translated articles (never re-chunks, never
+  re-embeds fresh rows). Contract: `commands/AGENTS.md`.
 - Translation skip-policy gate: `language::should_skip_translation(language)`
   returns `true` for English OR absent/blank language (plan §F.2 + §G). All
   enqueue/engine call sites use this gate - never `is_english_language` alone,

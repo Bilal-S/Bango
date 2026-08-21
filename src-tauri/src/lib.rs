@@ -132,6 +132,7 @@ pub fn run() {
         })
         .manage(ScreeningState { engine: tokio::sync::RwLock::new(None) })
         .manage(batch_import::BatchImportState::default())
+        .manage(commands::full_text::RebuildChunksState::default())
         .manage(ScrapingState::default())
         .manage(CitationFinderState::default())
         .manage(WikiIngestState::default())
@@ -224,7 +225,9 @@ pub fn run() {
             commands::full_text::get_full_text_file_path,
             commands::full_text::read_full_text,
             commands::full_text::read_full_text_file_bytes,
-            commands::full_text::rebuild_article_chunks,
+            commands::full_text::start_rebuild_chunks,
+            commands::full_text::cancel_rebuild_chunks,
+            commands::full_text::get_rebuild_chunks_progress,
             commands::screening::get_screening_readiness,
             commands::screening::start_screening,
             commands::screening::screen_article,

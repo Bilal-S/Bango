@@ -1,20 +1,44 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 // ── Text chunks for screening (moved from the old Full-Text Storage card) ──
-interface RebuildChunksResult {
-  success: boolean;
+/** Progress payload from `start_rebuild_chunks` / `chunk-rebuild:progress`. */
+interface RebuildChunksProgress {
+  phase: 'idle' | 'chunks' | 'embeddings' | 'done';
+  isRunning: boolean;
+  isCancelled: boolean;
+  completed: number;
+  total: number;
+  percent: number;
   chunked: number;
   failed: number;
   skipped: number;
+  skippedTranslated: number;
   message: string;
+  errors: string[];
+  embeddingSummary: string | null;
 }
+
 const fullTextArticleCount = ref(0);
-const rebuildLoading = ref(false);
-const rebuildResult = ref<RebuildChunksResult | null>(null);
+const rebuildProgress = ref<RebuildChunksProgress | null>(null);
 const rebuildError = ref<string | null>(null);
+// Hide the progress bar until the user starts a run (or a run is live on
+// mount, i.e. the user navigated away and back mid-rebuild).
+const rebuildStarted = ref(false);
+/** Live embedding sub-line (`embedding:progress`), shown only during the
+ * cascade phase of a rebuild run. */
+const embeddingLine = ref<string | null>(null);
+let rebuildUnlisten: UnlistenFn | null = null;
+let embeddingUnlisten: UnlistenFn | null = null;
+
+const rebuildPhaseLabel = computed(() => {
+  const phase = rebuildProgress.value?.phase;
+  if (phase === 'embeddings') return 'Updating embeddings';
+  if (phase === 'done') return 'Chunk rebuild';
+  return 'Rebuilding text chunks';
+});
 
 async function loadFullTextCount(): Promise<void> {
   try {
@@ -25,16 +49,33 @@ async function loadFullTextCount(): Promise<void> {
   }
 }
 
+/** Start the async chunk rebuild (progress arrives via events). */
 async function rebuildChunks(): Promise<void> {
-  rebuildLoading.value = true;
   rebuildError.value = null;
-  rebuildResult.value = null;
+  // Reveal the bar now that the user has explicitly started a run.
+  rebuildStarted.value = true;
   try {
-    rebuildResult.value = await invoke<RebuildChunksResult>('rebuild_article_chunks');
+    rebuildProgress.value = await invoke<RebuildChunksProgress>('start_rebuild_chunks');
   } catch (e: unknown) {
     rebuildError.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    rebuildLoading.value = false;
+  }
+}
+
+/** Cancel the running rebuild (takes effect before the next article). */
+async function cancelRebuild(): Promise<void> {
+  try {
+    await invoke('cancel_rebuild_chunks');
+  } catch (e: unknown) {
+    rebuildError.value = e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** Fetch the progress snapshot (restores the bar after navigating back). */
+async function refreshRebuildProgress(): Promise<void> {
+  try {
+    rebuildProgress.value = await invoke<RebuildChunksProgress>('get_rebuild_chunks_progress');
+  } catch {
+    // Non-fatal.
   }
 }
 
@@ -141,11 +182,39 @@ onMounted(async () => {
   batchUnlisten = await listen<BatchImportProgress>('batch-import:progress', (event) => {
     batchProgress.value = event.payload;
   });
+
+  // Chunk rebuild: restore a live run + subscribe to live updates.
+  await refreshRebuildProgress();
+  rebuildStarted.value = rebuildProgress.value?.isRunning === true;
+  rebuildUnlisten = await listen<RebuildChunksProgress>('chunk-rebuild:progress', (event) => {
+    rebuildProgress.value = event.payload;
+    if (event.payload.phase !== 'embeddings') {
+      embeddingLine.value = null;
+    }
+  });
+  /* Embedding sub-line: the runner emits `embedding:progress` per article.
+     Only applied while a rebuild run is in its cascade phase, so standalone
+     embedding generation (Settings / Citation Finder) does not leak into
+     this widget. */
+  embeddingUnlisten = await listen<{ processed: number; total: number }>(
+    'embedding:progress',
+    (event) => {
+      if (rebuildProgress.value?.phase === 'embeddings') {
+        embeddingLine.value = `Embedding articles... ${event.payload.processed}/${event.payload.total}`;
+      }
+    }
+  );
 });
 
 onUnmounted(() => {
   if (batchUnlisten) {
     batchUnlisten();
+  }
+  if (rebuildUnlisten) {
+    rebuildUnlisten();
+  }
+  if (embeddingUnlisten) {
+    embeddingUnlisten();
   }
 });
 </script>
@@ -164,7 +233,11 @@ onUnmounted(() => {
     <div v-if="fullTextArticleCount > 0" class="rebuild-chunks">
       <div class="rebuild-chunks__row">
         <span class="rebuild-chunks__title">Text chunks for screening</span>
-        <button class="btn btn--secondary" :disabled="rebuildLoading" @click="rebuildChunks">
+        <button
+          class="btn btn--secondary"
+          :disabled="rebuildProgress?.isRunning === true"
+          @click="rebuildChunks"
+        >
           <span class="material-symbols-outlined btn__icon">cached</span>
           Rebuild text chunks
         </button>
@@ -172,12 +245,55 @@ onUnmounted(() => {
       <p class="rebuild-chunks__desc">
         Enhanced / Two-stage screening retrieves criteria-matched chunks from attached full text.
         Rebuild if chunks are missing (e.g. PDFs attached before this feature shipped) or after a
-        chunking-algorithm update.
+        chunking-algorithm update. Translated articles keep their English chunks; only their missing
+        embeddings are backfilled.
       </p>
-      <p v-if="rebuildLoading" class="rebuild-chunks__status">Rebuilding chunks...</p>
-      <p v-if="rebuildResult" class="rebuild-chunks__status rebuild-chunks__status--ok">
-        {{ rebuildResult.message }}
-      </p>
+
+      <!-- Live progress widget (revealed on explicit start, or on mount when a
+           run is already live). -->
+      <div v-if="rebuildStarted && rebuildProgress" class="batch-progress rebuild-chunks__bar">
+        <div class="batch-progress__header">
+          <span class="batch-progress__phase">{{ rebuildPhaseLabel }}</span>
+          <span class="batch-progress__percent">{{ rebuildProgress.percent }}%</span>
+        </div>
+        <div class="batch-progress__track">
+          <div
+            class="batch-progress__fill"
+            :class="{ 'batch-progress__fill--cancelled': rebuildProgress.isCancelled }"
+            :style="{ width: `${rebuildProgress.percent}%` }"
+          ></div>
+        </div>
+        <p class="batch-progress__message">{{ rebuildProgress.message }}</p>
+        <p v-if="rebuildProgress.total > 0" class="batch-progress__detail">
+          {{ rebuildProgress.completed }} / {{ rebuildProgress.total }} articles
+        </p>
+        <p
+          v-if="rebuildProgress.total > 0 && rebuildProgress.phase !== 'embeddings'"
+          class="batch-progress__summary"
+        >
+          {{ rebuildProgress.chunked }} chunked, {{ rebuildProgress.failed }} failed<template
+            v-if="rebuildProgress.skippedTranslated > 0"
+          >
+            , {{ rebuildProgress.skippedTranslated }} skipped (translated)</template
+          >
+        </p>
+        <p v-if="embeddingLine" class="batch-progress__detail">{{ embeddingLine }}</p>
+        <p v-if="rebuildProgress.embeddingSummary" class="batch-progress__summary">
+          {{ rebuildProgress.embeddingSummary }}
+        </p>
+        <ul v-if="rebuildProgress.errors.length > 0" class="rebuild-chunks__errors">
+          <li v-for="err in rebuildProgress.errors" :key="err">{{ err }}</li>
+        </ul>
+        <button
+          v-if="rebuildProgress.isRunning && !rebuildProgress.isCancelled"
+          class="btn btn--danger batch-progress__cancel"
+          @click="cancelRebuild"
+        >
+          <span class="material-symbols-outlined btn__icon">stop</span>
+          Cancel
+        </button>
+      </div>
+
       <p v-if="rebuildError" class="rebuild-chunks__status rebuild-chunks__status--err">
         {{ rebuildError }}
       </p>
@@ -385,6 +501,21 @@ onUnmounted(() => {
 
 .rebuild-chunks__status--err {
   color: #991b1b;
+}
+
+/* Per-article failure list inside the rebuild progress widget. */
+.rebuild-chunks__errors {
+  margin: 0.375rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #991b1b;
+  max-height: 7.5rem;
+  overflow-y: auto;
+}
+
+.rebuild-chunks__bar {
+  margin-top: 0.75rem;
 }
 
 /* ── Batch Import ── */

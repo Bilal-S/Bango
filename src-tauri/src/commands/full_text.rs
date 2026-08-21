@@ -1,11 +1,18 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::chunk_repo;
 use crate::db::connection::DbState;
+use crate::db::embedding_repo;
+use crate::embedding::director::EmbeddingScope;
+use crate::embedding::runner::{
+    generate_embeddings_inner, EmbeddingBatchSender, EmbeddingRunReport, HttpEmbeddingBatchSender,
+};
 use crate::error::AppError;
 use crate::scraping::citation_chaser::clean_doi_filename;
 use crate::utils::chunking::{chunk_sections, Chunk, DEFAULT_CHUNK_WORDS};
@@ -812,51 +819,580 @@ pub fn ensure_chunks_for_full_text_articles_with_progress(
     }
 }
 
-/// One-shot rebuild: (re)build `article_chunks` for every article with full
-/// text (`force=true` selects `get_articles_with_full_text`). Wired to the
-/// Settings "Rebuild text chunks" button. Also fire-and-forgets embedding
-/// regeneration for included articles (best-effort, non-blocking).
-#[tauri::command]
-pub fn rebuild_article_chunks(
-    db_state: tauri::State<'_, DbState>,
-    app_handle: tauri::AppHandle,
-) -> Result<RebuildChunksResult, AppError> {
-    let result = {
-        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-        ensure_chunks_for_full_text_articles(&conn, true)
+// ── Async chunk-rebuild pipeline (Settings -> Re-processing) ────────────────
+//
+// Replaces the old sync `rebuild_article_chunks` command, which (a) held the
+// DbState mutex for the whole PDF-parse pass (UI freeze), and (b) called
+// `tokio::task::spawn` from the sync IPC handler running on the main/GTK
+// thread, where no Tokio reactor exists - a guaranteed panic + process abort
+// ("there is no reactor running"). The new pipeline mirrors the batch-import
+// split pipeline: brief discovery lock, `spawn_blocking` parses with NO lock,
+// short lock bursts for writes, live progress events, cancellation.
+
+/// Event channel carrying `RebuildChunksProgress` payloads.
+pub const CHUNK_REBUILD_PROGRESS_EVENT: &str = "chunk-rebuild:progress";
+
+/// Progress payload emitted via [`CHUNK_REBUILD_PROGRESS_EVENT`] and returned
+/// by `start_rebuild_chunks` / `get_rebuild_chunks_progress`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebuildChunksProgress {
+    /// "idle" | "chunks" | "embeddings" | "done".
+    pub phase: String,
+    pub is_running: bool,
+    pub is_cancelled: bool,
+    pub completed: usize,
+    pub total: usize,
+    pub percent: usize,
+    pub chunked: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    /// Translated articles skipped to preserve their English chunk rows.
+    pub skipped_translated: usize,
+    pub message: String,
+    /// Per-article failure messages (surfaced in the Settings widget).
+    pub errors: Vec<String>,
+    /// Final embedding-cascade outcome line (counts, skip reason, or error).
+    pub embedding_summary: Option<String>,
+}
+
+impl Default for RebuildChunksProgress {
+    fn default() -> Self {
+        Self {
+            phase: "idle".to_string(),
+            is_running: false,
+            is_cancelled: false,
+            completed: 0,
+            total: 0,
+            percent: 0,
+            chunked: 0,
+            failed: 0,
+            skipped: 0,
+            skipped_translated: 0,
+            message: String::new(),
+            errors: Vec::new(),
+            embedding_summary: None,
+        }
+    }
+}
+
+/// Managed state for the chunk-rebuild background task (mirrors
+/// `batch_import::BatchImportState`). The cancel token is an `AtomicBool` so
+/// it plugs directly into `generate_embeddings_inner`'s cancel parameter
+/// (Cancel also aborts the embedding cascade).
+pub struct RebuildChunksState {
+    cancel: Arc<AtomicBool>,
+    progress: Arc<Mutex<RebuildChunksProgress>>,
+}
+
+impl Default for RebuildChunksState {
+    fn default() -> Self {
+        Self {
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: Arc::new(Mutex::new(RebuildChunksProgress::default())),
+        }
+    }
+}
+
+impl RebuildChunksState {
+    /// Cloned cancel token for the background task.
+    pub fn cancel_handle(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
+    }
+
+    /// Cloned progress handle for the background task.
+    pub fn progress_handle(&self) -> Arc<Mutex<RebuildChunksProgress>> {
+        Arc::clone(&self.progress)
+    }
+}
+
+/// 0-100% avoiding division by zero (100 when the work set is empty).
+#[allow(clippy::manual_checked_ops)]
+fn rebuild_percent(done: usize, total: usize) -> usize {
+    if total == 0 {
+        100
+    } else {
+        (done * 100) / total
+    }
+}
+
+/// Lock the progress snapshot, apply `f`, recompute `percent`, return the
+/// cloned payload for event emission.
+fn update_rebuild_progress(
+    progress: &Arc<Mutex<RebuildChunksProgress>>,
+    f: impl FnOnce(&mut RebuildChunksProgress),
+) -> Result<RebuildChunksProgress, AppError> {
+    let mut guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    f(&mut guard);
+    guard.percent = rebuild_percent(guard.completed, guard.total);
+    Ok(guard.clone())
+}
+
+/// Emit one progress event. `app_handle: None` = test mode (no events).
+fn emit_rebuild_progress(app_handle: Option<&tauri::AppHandle>, payload: &RebuildChunksProgress) {
+    if let Some(handle) = app_handle {
+        let _ = handle.emit(CHUNK_REBUILD_PROGRESS_EVENT, payload);
+    }
+}
+
+/// What the rebuild loop did; consumed by the embedding cascade.
+#[derive(Debug, Default)]
+pub struct RebuildOutcome {
+    /// Articles whose chunks were regenerated this run (their embedding rows
+    /// were deleted; the cascade regenerates them).
+    pub chunked_ids: Vec<String>,
+    /// Translated articles skipped this run (English chunks preserved; the
+    /// cascade only BACKFILLS their missing embedding rows).
+    pub translated_ids: Vec<String>,
+}
+
+/// Pure: final one-line summary for the progress widget.
+#[must_use]
+pub fn rebuild_summary_message(
+    chunked: usize,
+    failed: usize,
+    skipped_translated: usize,
+    cancelled: bool,
+) -> String {
+    let mut parts = vec![format!("{chunked} chunked"), format!("{failed} failed")];
+    if skipped_translated > 0 {
+        parts.push(format!("{skipped_translated} skipped (translated, English chunks preserved)"));
+    }
+    let prefix = if cancelled { "Cancelled after " } else { "" };
+    format!("{prefix}{}", parts.join(", "))
+}
+
+/// Pure: map the two id sets into embedding scopes. `None` when a set is
+/// empty (that cascade call is skipped entirely). Both scopes use
+/// `force = false`:
+/// - the regenerate scope's articles just had their embedding rows deleted,
+///   so "missing row" alone drives full regeneration (orphan-free);
+/// - the backfill scope (translated articles) must only generate rows that do
+///   not exist and never re-embed fresh English rows.
+#[must_use]
+pub fn embedding_cascade_scopes(
+    chunked_ids: &[String],
+    translated_ids: &[String],
+) -> (Option<EmbeddingScope>, Option<EmbeddingScope>) {
+    let make = |ids: &[String]| {
+        (!ids.is_empty()).then(|| EmbeddingScope {
+            article_ids: Some(ids.to_vec()),
+            status_filter: None,
+            force: false,
+        })
     };
-    /* Cascade: re-chunking changes chunk body text, invalidating
-    `input_hash` rows in `article_embeddings`. Fire-and-forget embedding
-    regeneration (`force=true`). Non-blocking: result returned immediately,
-    embeddings run on detached task with orchestrator concurrency + rate
-    limits. Best-effort; failures are logged inside the runner. */
-    if result.success && result.chunked > 0 {
-        let handle = app_handle.clone();
-        tokio::task::spawn(async move {
-            let db = handle.state::<crate::db::connection::DbState>();
-            let orch = handle.state::<std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>();
-            // Wrap the orchestrator into the v2 HttpEmbeddingBatchSender.
-            let sender: std::sync::Arc<dyn crate::embedding::runner::EmbeddingBatchSender> =
-                std::sync::Arc::new(crate::embedding::runner::HttpEmbeddingBatchSender::new(
-                    std::sync::Arc::clone(&orch),
-                ));
-            let scope = crate::embedding::director::EmbeddingScope {
-                article_ids: None,
-                status_filter: Some("included".to_string()),
-                force: true,
-            };
-            let _ = crate::embedding::runner::generate_embeddings_inner(
+    (make(chunked_ids), make(translated_ids))
+}
+
+/// Pure: human-readable one-line summary of the cascade outcome. Skip reasons
+/// (from `generate_embeddings_inner` / the director) map into friendly
+/// wording; otherwise per-scope counts are joined.
+#[must_use]
+pub fn embedding_summary_line(
+    regen: Option<&EmbeddingRunReport>,
+    backfill: Option<&EmbeddingRunReport>,
+) -> Option<String> {
+    let friendly = |report: &EmbeddingRunReport| -> Option<String> {
+        let reason = report.skip_reason.as_deref()?;
+        let text = match reason {
+            "LlmNotConfigured" => "LLM not configured".to_string(),
+            "Disabled" => "provider does not support embeddings".to_string(),
+            other => other.to_string(),
+        };
+        Some(format!("Embeddings skipped: {text}"))
+    };
+    /* A skip gate (LLM not configured / provider cannot embed) dominates:
+    both calls skip for the same reason, so one line suffices. */
+    if let Some(line) = regen.and_then(friendly).or_else(|| backfill.and_then(friendly)) {
+        return Some(line);
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(r) = regen {
+        parts.push(format!("{} regenerated", r.generated));
+        if r.errors > 0 {
+            parts.push(format!("{} errors", r.errors));
+        }
+    }
+    if let Some(r) = backfill {
+        parts.push(format!("{} backfilled", r.generated));
+        if r.errors > 0 {
+            parts.push(format!("{} errors", r.errors));
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    let model = regen
+        .or(backfill)
+        .map(|r| r.model.as_str())
+        .filter(|m| !m.is_empty())
+        .map(|m| format!(" ({m})"))
+        .unwrap_or_default();
+    Some(format!("Embeddings: {}{model}", parts.join(", ")))
+}
+
+/// Record one per-article failure: `failed++`, message into `errors`, plus a
+/// system audit row (article id embedded in the message) so the Diagnostics
+/// feed shows the cause. Fixes the two previously-silent failure modes
+/// (missing file name, missing on-disk file).
+async fn record_rebuild_failure(
+    conn_mutex: &Mutex<rusqlite::Connection>,
+    progress: &Arc<Mutex<RebuildChunksProgress>>,
+    app_handle: Option<&tauri::AppHandle>,
+    message: String,
+) -> Result<(), AppError> {
+    {
+        let conn = crate::db::connection::lock_conn(conn_mutex)?;
+        let _ = crate::db::audit_repo::log_error(&conn, &format!("ensure_chunks: {message}"));
+    }
+    let payload = update_rebuild_progress(progress, |p| {
+        p.completed += 1;
+        p.failed += 1;
+        p.errors.push(message);
+    })?;
+    emit_rebuild_progress(app_handle, &payload);
+    tokio::task::yield_now().await;
+    Ok(())
+}
+
+/// Core chunk-rebuild loop (testable: plain `&Mutex<Connection>`, no Tauri
+/// state). Split-pipeline lock discipline: `spawn_blocking` parses with NO DB
+/// lock; short lock bursts only for the chunk write + embedding
+/// invalidation; progress event + `yield_now()` after every article.
+///
+/// Translated guard: `is_translated = 1` candidates are NEVER re-chunked
+/// (the working chunk rows hold the English translation; parsing the on-disk
+/// PDF would replace them with original-language text).
+///
+/// `app_handle: None` = test mode (progress struct updates, no events).
+pub async fn rebuild_chunks_loop(
+    conn_mutex: &Mutex<rusqlite::Connection>,
+    storage_dir: &Path,
+    candidates: &[chunk_repo::FullTextChunkCandidate],
+    cancel: &Arc<AtomicBool>,
+    progress: &Arc<Mutex<RebuildChunksProgress>>,
+    app_handle: Option<&tauri::AppHandle>,
+) -> Result<RebuildOutcome, AppError> {
+    let total = candidates.len();
+    let mut outcome = RebuildOutcome::default();
+    {
+        let payload = update_rebuild_progress(progress, |p| {
+            p.phase = "chunks".to_string();
+            p.total = total;
+            p.message = "Rebuilding text chunks...".to_string();
+        })?;
+        emit_rebuild_progress(app_handle, &payload);
+    }
+
+    for candidate in candidates {
+        // Cancel takes effect before the next article (never mid-parse).
+        if cancel.load(Ordering::Relaxed) {
+            let payload = update_rebuild_progress(progress, |p| {
+                p.is_cancelled = true;
+                p.message = "Cancelled".to_string();
+            })?;
+            emit_rebuild_progress(app_handle, &payload);
+            break;
+        }
+
+        // Translated articles: preserve the English chunk rows; the cascade
+        // later backfills only their MISSING embedding rows.
+        if candidate.is_translated {
+            outcome.translated_ids.push(candidate.id.clone());
+            let payload = update_rebuild_progress(progress, |p| {
+                p.completed += 1;
+                p.skipped += 1;
+                p.skipped_translated += 1;
+            })?;
+            emit_rebuild_progress(app_handle, &payload);
+            tokio::task::yield_now().await;
+            continue;
+        }
+
+        // Failure mode 1: no stored file name.
+        let Some(file_name) = candidate.file_name.clone() else {
+            record_rebuild_failure(
+                conn_mutex,
+                progress,
+                app_handle,
+                format!("Article {} has no full_text_file_name", candidate.id),
+            )
+            .await?;
+            continue;
+        };
+
+        // Failure mode 2: file missing from the fulltext storage dir.
+        let path = storage_dir.join(&file_name);
+        if !path.exists() {
+            record_rebuild_failure(
+                conn_mutex,
+                progress,
+                app_handle,
+                format!("File not found for article {}: {}", candidate.id, path.display()),
+            )
+            .await?;
+            continue;
+        }
+
+        // Lock-free CPU-bound parse on the blocking pool. Failure mode 3:
+        // extraction error (or a panicked blocking task).
+        let parse_path = path.clone();
+        let parsed = tokio::task::spawn_blocking(move || {
+            extract_sections(&parse_path)
+                .map(|sections| chunk_sections(&sections, DEFAULT_CHUNK_WORDS))
+                .map_err(AppError::Import)
+        })
+        .await;
+        let chunks = match parsed {
+            Ok(Ok(chunks)) => chunks,
+            Ok(Err(e)) => {
+                record_rebuild_failure(
+                    conn_mutex,
+                    progress,
+                    app_handle,
+                    format!("Chunk extraction failed for article {}: {e}", candidate.id),
+                )
+                .await?;
+                continue;
+            }
+            Err(join_err) => {
+                record_rebuild_failure(
+                    conn_mutex,
+                    progress,
+                    app_handle,
+                    format!(
+                        "Chunk extraction task panicked for article {}: {join_err}",
+                        candidate.id
+                    ),
+                )
+                .await?;
+                continue;
+            }
+        };
+
+        // Short lock burst: replace chunk rows + invalidate the article's
+        // embedding rows (re-chunked text is stale; the runner only INSERTs,
+        // so an explicit delete also prunes orphaned high-index rows).
+        let write = match crate::db::connection::lock_conn(conn_mutex) {
+            Ok(conn) => chunk_repo::replace_chunks_for_article(&conn, &candidate.id, &chunks)
+                .and_then(|_| embedding_repo::delete_embeddings_for_article(&conn, &candidate.id)),
+            Err(e) => Err(e),
+        };
+        if let Err(e) = write {
+            record_rebuild_failure(
+                conn_mutex,
+                progress,
+                app_handle,
+                format!("Failed to write chunks for article {}: {e}", candidate.id),
+            )
+            .await?;
+            continue;
+        }
+
+        outcome.chunked_ids.push(candidate.id.clone());
+        let payload = update_rebuild_progress(progress, |p| {
+            p.completed += 1;
+            p.chunked += 1;
+        })?;
+        emit_rebuild_progress(app_handle, &payload);
+        tokio::task::yield_now().await;
+    }
+
+    Ok(outcome)
+}
+
+/// Regenerate + backfill embeddings after the chunk loop. Runs INSIDE the
+/// spawned background task - the valid Tokio context. (The old sync command's
+/// `tokio::task::spawn` from the main thread is exactly what crashed the app.)
+///
+/// Gating (LLM configured, provider can embed) is owned by
+/// `generate_embeddings_inner` + the director: `LlmNotConfigured` and
+/// `Disabled` return skipped reports, `unknown` triggers a live probe.
+async fn run_embedding_cascade(
+    db_state: &tauri::State<'_, DbState>,
+    app_handle: &tauri::AppHandle,
+    outcome: &RebuildOutcome,
+    cancel: Arc<AtomicBool>,
+    progress: &Arc<Mutex<RebuildChunksProgress>>,
+) -> Result<(), AppError> {
+    let (regen_scope, backfill_scope) =
+        embedding_cascade_scopes(&outcome.chunked_ids, &outcome.translated_ids);
+    if regen_scope.is_none() && backfill_scope.is_none() {
+        return Ok(());
+    }
+
+    {
+        let payload = update_rebuild_progress(progress, |p| {
+            p.phase = "embeddings".to_string();
+            p.message = "Updating embeddings...".to_string();
+        })?;
+        emit_rebuild_progress(Some(app_handle), &payload);
+    }
+
+    let orchestrator =
+        app_handle.state::<Arc<crate::llm::orchestrator::LlmOrchestrator>>().inner().clone();
+    let mut regen_report: Option<EmbeddingRunReport> = None;
+    let mut backfill_report: Option<EmbeddingRunReport> = None;
+    let mut failure: Option<String> = None;
+
+    for (scope, slot) in [(regen_scope, &mut regen_report), (backfill_scope, &mut backfill_report)]
+    {
+        let Some(scope) = scope else { continue };
+        let sender: Arc<dyn EmbeddingBatchSender> =
+            Arc::new(HttpEmbeddingBatchSender::new(Arc::clone(&orchestrator)));
+        /* `emit_events = true`: the runner emits per-article
+        `embedding:progress` + final `embedding:done` for live sub-progress.
+        The shared cancel token lets Cancel abort this cascade too. */
+        match generate_embeddings_inner(
+            db_state,
+            sender,
+            scope,
+            Some(app_handle),
+            true,
+            Some(Arc::clone(&cancel)),
+        )
+        .await
+        {
+            Ok(report) => *slot = Some(report),
+            Err(e) => {
+                failure = Some(format!("Embeddings failed: {e}"));
+                break;
+            }
+        }
+    }
+
+    let summary =
+        failure.or_else(|| embedding_summary_line(regen_report.as_ref(), backfill_report.as_ref()));
+    let payload = update_rebuild_progress(progress, |p| {
+        p.embedding_summary = summary.clone();
+    })?;
+    emit_rebuild_progress(Some(app_handle), &payload);
+    Ok(())
+}
+
+/// Start the async chunk-rebuild background task (Settings -> Re-processing
+/// "Rebuild text chunks" button). Returns the initial progress snapshot;
+/// live updates arrive via `chunk-rebuild:progress`; cancel via
+/// `cancel_rebuild_chunks`. Never blocks: the parse loop runs on the spawned
+/// task with short lock bursts, so the UI stays responsive.
+#[tauri::command]
+pub async fn start_rebuild_chunks(
+    app_handle: tauri::AppHandle,
+    db_state: tauri::State<'_, DbState>,
+    rebuild_state: tauri::State<'_, RebuildChunksState>,
+) -> Result<RebuildChunksProgress, AppError> {
+    // Concurrent-start guard: return the live snapshot untouched.
+    {
+        let guard =
+            rebuild_state.progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+        if guard.is_running {
+            return Ok(guard.clone());
+        }
+    }
+
+    let cancel = rebuild_state.cancel_handle();
+    let progress = rebuild_state.progress_handle();
+    cancel.store(false, Ordering::Relaxed);
+
+    // Brief discovery lock: storage dir + full candidate work list, then
+    // release before any parsing (split-pipeline lock hygiene).
+    let (storage_dir, candidates) = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let dir = compute_storage_dir(&conn)?;
+        let list = chunk_repo::get_full_text_chunk_candidates(&conn)?;
+        (dir, list)
+    };
+
+    let total = candidates.len();
+    update_rebuild_progress(&progress, |p| {
+        *p = RebuildChunksProgress::default();
+        p.is_running = true;
+        p.phase = "chunks".to_string();
+        p.total = total;
+        p.message = if total == 0 {
+            "No articles with full text".to_string()
+        } else {
+            "Rebuilding text chunks...".to_string()
+        };
+    })?;
+
+    /* Spawn the background task (we are on the async runtime, so
+    `tokio::spawn` is valid here - unlike the old sync command). The task
+    runs the loop, then the gated embedding cascade, then emits the final
+    snapshot. */
+    let task_handle = app_handle.clone();
+    let task_cancel = Arc::clone(&cancel);
+    let task_progress = Arc::clone(&progress);
+    tokio::spawn(async move {
+        let db = task_handle.state::<DbState>();
+        let outcome = match rebuild_chunks_loop(
+            &db.conn,
+            &storage_dir,
+            &candidates,
+            &task_cancel,
+            &task_progress,
+            Some(&task_handle),
+        )
+        .await
+        {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                if let Ok(payload) = update_rebuild_progress(&task_progress, |p| {
+                    p.is_running = false;
+                    p.phase = "done".to_string();
+                    p.message = format!("Chunk rebuild failed: {e}");
+                }) {
+                    emit_rebuild_progress(Some(&task_handle), &payload);
+                }
+                return;
+            }
+        };
+
+        // Cascade only on a clean (non-cancelled) run.
+        if !task_cancel.load(Ordering::Relaxed) {
+            let _ = run_embedding_cascade(
                 &db,
-                sender,
-                scope,
-                Some(&handle),
-                false,
-                None,
+                &task_handle,
+                &outcome,
+                Arc::clone(&task_cancel),
+                &task_progress,
             )
             .await;
-        });
-    }
-    Ok(result)
+        }
+
+        if let Ok(payload) = update_rebuild_progress(&task_progress, |p| {
+            p.is_running = false;
+            p.phase = "done".to_string();
+            p.skipped = p.total.saturating_sub(p.chunked + p.failed + p.skipped_translated);
+            p.message =
+                rebuild_summary_message(p.chunked, p.failed, p.skipped_translated, p.is_cancelled);
+        }) {
+            emit_rebuild_progress(Some(&task_handle), &payload);
+        }
+    });
+
+    let guard = progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    Ok(guard.clone())
+}
+
+/// Cancel a running chunk rebuild. Takes effect before the next article; a
+/// shared token also aborts the embedding cascade mid-run.
+#[tauri::command]
+pub async fn cancel_rebuild_chunks(
+    rebuild_state: tauri::State<'_, RebuildChunksState>,
+) -> Result<(), AppError> {
+    rebuild_state.cancel_handle().store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+/// Current chunk-rebuild progress snapshot (used by the Settings UI to
+/// restore the progress bar after navigating away and back).
+#[tauri::command]
+pub async fn get_rebuild_chunks_progress(
+    rebuild_state: tauri::State<'_, RebuildChunksState>,
+) -> Result<RebuildChunksProgress, AppError> {
+    let guard = rebuild_state.progress.lock().map_err(|e| AppError::LockPoisoned(e.to_string()))?;
+    Ok(guard.clone())
 }
 
 /// Count articles with full text attached (drives the "Rebuild text chunks"

@@ -67,6 +67,51 @@ The shared `audit_repo::write_tag_label_audit` helper is the canonical loop for
 multi-article tag/label audit entries, reused by both the bulk commands (via
 `write_bulk_tag_label_audit` in `commands/articles.rs`) and the merge commands.
 
+### `full_text.rs` - async chunk-rebuild pipeline (Settings "Rebuild text chunks")
+
+Replaces the old sync `rebuild_article_chunks` command, which froze the UI
+(DB mutex held across every PDF parse) and crashed the app
+(`tokio::task::spawn` from the sync IPC handler on the main/GTK thread, where
+no Tokio reactor exists - panic + process abort after every successful
+rebuild). New contract:
+
+- Commands: `start_rebuild_chunks` (async; concurrent-start guard; brief
+  discovery lock via `chunk_repo::get_full_text_chunk_candidates`; spawns the
+  background task; returns the initial snapshot), `cancel_rebuild_chunks`
+  (`Arc<AtomicBool>` token), `get_rebuild_chunks_progress` (restore-on-mount).
+  State: `RebuildChunksState` managed in `lib.rs`. Events:
+  `chunk-rebuild:progress` (`RebuildChunksProgress`, camelCase).
+- Split-pipeline lock discipline (mirrors batch import Phase 1): CPU-bound
+  `extract_sections` + `chunk_sections` on `spawn_blocking` with NO DB lock;
+  short lock bursts for `replace_chunks_for_article` + per-article
+  `delete_embeddings_for_article`; `yield_now()` between articles.
+- All three per-article failure modes (missing `full_text_file_name`, missing
+  on-disk file, extraction/write error) increment `failed`, push a message
+  embedding the article id into `RebuildChunksProgress.errors`, and write a
+  `log_error` audit row (the first two were previously silent).
+- **Translated guard**: candidates with `is_translated = 1` are never
+  re-chunked (working chunks are the English translation; the on-disk PDF is
+  the original language). They count as `skipped_translated` and feed the
+  backfill-only embedding scope. See `translation/AGENTS.md`.
+- **Embedding cascade** (inside the spawned task, after the loop): two
+  `generate_embeddings_inner` calls with `force = false` - (A) regenerate the
+  re-chunked ids (their embedding rows were deleted by the loop, so missing
+  rows drive full regeneration and orphans cannot survive), (B) backfill-only
+  for translated ids (existing fresh English rows are never re-embedded).
+  Gating (LLM configured, provider supports embeddings) is owned by the
+  runner/director; skips surface as `embeddingSummary` lines
+  ("Embeddings skipped: LLM not configured" / "... provider does not support
+  embeddings"), not errors. The shared cancel token also aborts the cascade.
+- Frontend: `settings-reprocessing.vue` renders the live progress bar
+  (phase label, percent, N/M articles, counts + translated-skip summary,
+  per-article error list, cancel button) and restores it on mount; an
+  `embedding:progress` listener drives a sub-line only during the cascade
+  phase.
+- Unchanged: the screening-path helpers `ensure_chunks_inner`,
+  `ensure_chunks_for_full_text_articles(_with_progress)` stay byte-identical
+  (they run inside the screening task's own lock scope).
+
+
 ### Criteria harmonization (inclusion/exclusion division of labor)
 
 Inclusion criteria define the SCOPE of a review; exclusion criteria define
@@ -101,7 +146,8 @@ Binding inventory: `docs/test-plans/criteria-generation-tests.md` and
 ## Verification
 
 See `src-tauri/src/AGENTS.md`: `npm run check:all` + `cargo test`. Relevant
-integration tests: `tests/tags_labels_test.rs`,
+integration tests: `tests/chunk_rebuild_test.rs` (async chunk-rebuild loop,
+translated guard, embedding-cascade helpers), `tests/tags_labels_test.rs`,
 `tests/merge_tags_labels_test.rs`, `tests/legacy_upgrade_test.rs`. Binding
 inventories: `docs/test-plans/criteria-generation-tests.md` and
 `docs/test-plans/search-strategy-tests.md` (enforced by

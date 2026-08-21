@@ -135,7 +135,13 @@ navigation never loses the edit),
 `bango-section-summaries`], auto-translate [DB-backed
 `app_settings.auto_translate`]),
 `settings-screening-preferences.vue`, `settings-storage.vue`,
-`settings-reprocessing.vue`, `settings-project-management.vue`,
+`settings-reprocessing.vue` (owns the chunk-rebuild progress widget: live
+`chunk-rebuild:progress` bar with phase label, percent, counts + translated
+skip note, per-article error list, cancel button, restore-on-mount via
+`get_rebuild_chunks_progress`, and an `embedding:progress` sub-line gated to
+the cascade phase; backend contract in
+`src-tauri/src/commands/AGENTS.md`),
+`settings-project-management.vue`,
 `settings-notification-history.vue`, `settings-diagnostics.vue`. Shared card
 chrome lives in `settings-card-shared.css`.
 
