@@ -60,8 +60,21 @@ paper dedup) + inline composite-key lookup for `biblio_terms`
 reverse-dependency DELETEs. Each `import_*` fn takes `&Transaction`; only
 `import_project` owns the tx lifecycle. 2 new dedup-path tests
 (`import_reference_papers_dedup_via_doi`,
-`import_biblio_terms_dedup_composite_key`) cover the ID-remap paths. 16 total
+`import_biblio_terms_dedup_composite_key`) cover the ID-remap paths. 20 total
 tests pass.
+
+#### `full_text_ai_summary` JSON-blob round-trip
+
+`articles.full_text_ai_summary` always stores a JSON blob (sole writer:
+`article_repo::set_ai_summary`). Because `serialize_table` parses TEXT as
+JSON first, the exporter emits it as a nested JSON object under
+`fullTextAiSummary`. The import path must NOT read it via `get_str_field`
+(`.as_str()` yields None for objects and silently binds NULL, losing the
+LLM-generated summary on restore); it re-serializes objects back to text and
+passes plain strings through for old/hand-edited backups. Tested in
+`tests/project_backup_test.rs` (`export_import_preserves_full_text_ai_summary_json_blob`,
+`import_full_text_ai_summary_string_shape_passthrough`); inventory at
+`docs/test-plans/exim-tests.md`.
 
 #### Tag/label color preservation
 
@@ -108,8 +121,9 @@ current-format `ProjectBackup` JSON, deduplicating rows into `reference_papers`
 
 ## Verification
 
-`tests/project_backup_test.rs` (16 tests incl. round-trip all tables +
-dedup paths + color preservation + audit normalization),
+`tests/project_backup_test.rs` (20 tests incl. round-trip all tables +
+dedup paths + color preservation + audit normalization + AI-summary blob
+preservation),
 `tests/legacy_upgrade_test.rs` (legacy round-trip + pure decision function),
 `tests/reset_project_test.rs` (delete-all-data + VACUUM + wiki-root wipe),
 inventory at `docs/test-plans/exim-tests.md` + `docs/test-plans/refactor5-tests.md`.

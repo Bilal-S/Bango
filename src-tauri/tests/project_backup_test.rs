@@ -465,6 +465,103 @@ fn test_export_import_preserves_article_data() {
     assert_eq!(year, 2024);
 }
 
+/// The AI summary column always holds a JSON blob (sole writer:
+/// `article_repo::set_ai_summary`, fed by `merge_summary_into_blob`), so the
+/// exporter's JSON-first TEXT parsing emits it as a nested JSON *object* under
+/// `fullTextAiSummary`. The old import path read it via `get_str_field`
+/// (`.as_str()`), which yields `None` for objects - binding NULL and silently
+/// losing the LLM-generated summary on restore. Regression for that bug.
+#[test]
+fn export_import_preserves_full_text_ai_summary_json_blob() {
+    let conn = setup_db();
+    let a = article_repo::insert_article(&conn, &new_article("Summarized Article"))
+        .expect("insert article");
+    article_repo::move_to_working(&conn, &a.id).expect("move to working");
+
+    // Realistic schema_version: 2 blob (digest + section summaries + figures).
+    // Seeded with natural key order + whitespace: the exporter re-serializes
+    // through serde_json (compact, sorted keys), so the assertion compares
+    // parsed values, not raw bytes.
+    let blob = r#"{
+        "schema_version": 2,
+        "summary_150_250_words": "The study evaluates resilience in global supply chains via a survey.",
+        "field": "operations management",
+        "section_summaries": [
+            {"section": "Methods", "summary": "Survey of 120 manufacturing firms."}
+        ],
+        "figures": [
+            {"caption": "Fig 1. Supplier network.", "description": "A network graph of tier-1 suppliers."}
+        ]
+    }"#;
+    article_repo::set_ai_summary(&conn, &a.id, blob).expect("seed ai summary");
+
+    let json = export_project(&conn).expect("export");
+    let conn2 = setup_db();
+    import_project(&conn2, &json).expect("import");
+
+    let restored: Option<String> = conn2
+        .query_row(
+            "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+            params![a.id],
+            |row| row.get(0),
+        )
+        .expect("query restored ai summary");
+    let restored = restored
+        .expect("full_text_ai_summary must survive the round-trip, not silently drop to NULL");
+    let restored_value: serde_json::Value =
+        serde_json::from_str(&restored).expect("restored blob must parse as JSON");
+    let seeded_value: serde_json::Value =
+        serde_json::from_str(blob).expect("seeded blob must parse as JSON");
+    assert_eq!(restored_value, seeded_value, "AI summary blob must round-trip intact");
+}
+
+/// Old or hand-edited backups may carry the column as a plain JSON string.
+/// The string shape must pass through untouched (import only re-serializes
+/// the object shape the current exporter emits).
+#[test]
+fn import_full_text_ai_summary_string_shape_passthrough() {
+    let conn = setup_db();
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.0.0"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [
+            {
+                "id": "art-str",
+                "status": "working",
+                "title": "Legacy Backup Article",
+                "abstractText": "Abstract of the legacy backup article.",
+                "authors": ["Smith, J."],
+                "keywords": [],
+                "fullTextAiSummary": "{\"schema_version\": 1, \"summary_150_250_words\": \"legacy blob\"}"
+            }
+        ],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "llmConfig": null
+    }"#;
+
+    import_project(&conn, backup).expect("import");
+
+    let restored: String = conn
+        .query_row("SELECT full_text_ai_summary FROM articles WHERE id = 'art-str'", [], |row| {
+            row.get(0)
+        })
+        .expect("query restored ai summary");
+    assert_eq!(
+        restored, "{\"schema_version\": 1, \"summary_150_250_words\": \"legacy blob\"}",
+        "string-shaped AI summary must round-trip byte-identically"
+    );
+}
+
 /// System-level audit entries (article_id = NULL, details = NULL) must survive
 /// a backup/restore round-trip with NULLs intact. Regression test for the bug
 /// where `get_str` returned "" for JSON null, corrupting NULL → empty string.

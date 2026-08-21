@@ -29,6 +29,8 @@ against RIS fixtures live in `cocitation_data_test.rs`.
 `biblio_needs_refresh_test.rs` covers the staleness-flag round-trip.
 `auto_translate_test.rs` covers the experimental auto-translate toggle.
 `legacy_upgrade_test.rs` covers the full legacy upgrade round-trip.
+`project_backup_test.rs` covers the ProjectBackup export/import round-trip incl.
+`full_text_ai_summary` blob preservation (inventory: `docs/test-plans/exim-tests.md`).
 `reset_project_test.rs` covers `reset_project_inner` (delete-all-data +
 VACUUM + wiki-root wipe). `wiki_consolidation_test.rs` +
 `wiki_index_drift_test.rs` cover the wiki pipelines. `sections_test.rs` +

@@ -467,7 +467,18 @@ fn import_articles(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppEr
         let sequence_id =
             a.get("sequenceId").and_then(|v| v.as_i64()).unwrap_or_else(|| (i as i64) + 1);
         let full_text = get_str_field(a, "fullText", "full_text");
-        let full_text_ai_summary = get_str_field(a, "fullTextAiSummary", "full_text_ai_summary");
+        /* `full_text_ai_summary` always holds a JSON blob (sole writer:
+        `article_repo::set_ai_summary`), so `serialize_table`'s JSON-first TEXT
+        parsing exports it as a nested JSON object. Re-serialize objects back
+        to text; pass plain strings through for old/hand-edited backups.
+        Reading it via `get_str_field` (`.as_str()`) returned None for objects
+        and silently bound NULL, losing the summary on restore. */
+        let full_text_ai_summary =
+            match a.get("fullTextAiSummary").or_else(|| a.get("full_text_ai_summary")) {
+                None | Some(serde_json::Value::Null) => None,
+                Some(serde_json::Value::String(s)) => Some(s.clone()),
+                Some(other) => Some(other.to_string()),
+            };
         let data_length = a.get("dataLength").and_then(|v| v.as_i64());
         let token_estimate = a.get("tokenEstimate").and_then(|v| v.as_i64());
         let num_cited = a.get("numCited").and_then(|v| v.as_i64());
