@@ -4,7 +4,7 @@ Product specification for Bango, a desktop application for AI-assisted systemati
 
 ---
 
-> **Extra features**: Optional supplementary features may be documented in `docs/extra-features.md`. If that document is present, treat its contents as part of this specification; if it is absent, disregard this reference — this specification is complete on its own.
+> **Extra features**: Optional supplementary features may be documented in `docs/extra-features.md`. If that document is present, treat its contents as part of this specification; if it is absent, disregard this reference and treat this specification is complete on its own.
 
 ## 1. Product Overview
 
