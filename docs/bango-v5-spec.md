@@ -1,8 +1,10 @@
-# Bango - v4 Specification
+# Bango - v5 Specification
 
 Product specification for Bango, a desktop application for AI-assisted systematic literature review. Covers the references/citations system, BibTeX import, App Settings, Journal Index, translation pipeline, embedding-based search, and the OpenAlex/Citation Finder integrations.
 
 ---
+
+> **Extra features**: Optional supplementary features may be documented in `docs/extra-features.md`. If that document is present, treat its contents as part of this specification; if it is absent, disregard this reference — this specification is complete on its own.
 
 ## 1. Product Overview
 
@@ -34,7 +36,7 @@ The SQLite schema consists of the following primary tables. All IDs are UUID str
 * **`criteria`**: `id` (PK), `text`, `type` (`'inclusion'`, `'exclusion'`), `priority` (`'critical'`, `'high'`, `'standard'`, `'low'`, `'optional'`), `created_at`
 * **`tags`**: `id` (PK), `name` (unique), `color`, `source` (`'ai_suggested'`, `'user_created'`, `'ris_keyword'`)
 * **`labels`**: `id` (PK), `name` (unique), `color`, `source` (`'ai_generated'`, `'user_created'`)
-* **`app_settings`**: `key` (PK), `value` (e.g., `'storage_root'`, `'flag_premium'`)
+* **`app_settings`**: `key` (PK), `value` (e.g., `'storage_root'`)
 
 #### Articles & Audit Tables
 * **`articles`**:
@@ -265,7 +267,6 @@ The `journal_index` table hosts system-distributed reference metadata mapping jo
 Application configurations are managed in the `app_settings` key-value table:
 
 * **`storage_root`**: Bango documents root. All on-disk artifacts derive from it (`fulltext/`, `ris/`, `wiki-root/`). Defaults to `~/Documents/Bango/`. Legacy `fulltext_storage_dir` values are lazy-migrated (trailing `fulltext` segment stripped).
-* **`flag_premium`**: Premium features unlocked.
 * **`screening_mode`**: Tier 3 screening mode (§4.3.1).
 * **`enhanced_top_k`**: Criteria-matched chunks per article in Enhanced mode (default `2`).
 * **`enhanced_screening_sections`**: Comma-separated section allow-list for Enhanced evidence (default `"Methods,Results"`).
@@ -275,13 +276,12 @@ Application configurations are managed in the `app_settings` key-value table:
 * **`project_name`**: Optional user-editable Dashboard title (up to 50 chars). Double-click the title or click the pencil icon to edit inline; empty commit reverts to "Project Dashboard" fallback. **Portable**: travels with project backups. When a backup omits it, the target's existing name is cleared (NULL) so the dashboard reverts to the fallback. Cleared by Delete All Data.
 * **`screening_custom_logic`**: Optional combinatorial screening rules (AND/OR gates, hard exclusions). See §4.1 for governance contract.
 * **`summary_evidence_mode`**: Project-wide evidence enrichment for literature reviews (`abstract_only` default | `with_summary_facts`).
-* **`embedding_model_override`**: Optional premium-only embedding model name; tried first ahead of auto-detection.
 * **`embedding_status` / `embedding_model` / `embedding_dimensions`**: Triple-state embedding capability flag (see §8.6).
 * **`openalex_api_key`**: AES-256-GCM encrypted; raises rate-limit tier. Excluded from backups.
 * **`openalex_mailto`**: Polite-pool email. Portable.
 * **`openalex_retrieve_references`**: Reference + citation harvest toggle (default `false`). Portable.
 
-**Portability contract**: Machine-local settings (`storage_root`, `flag_premium`, `*_needs_refresh` flags, `wiki_dir_hash`, `openalex_api_key`, `embedding_*`) are deliberately excluded from backups. Secrets are never exported.
+**Portability contract**: Machine-local settings (`storage_root`, `*_needs_refresh` flags, `wiki_dir_hash`, `openalex_api_key`, `embedding_*`) are deliberately excluded from backups. Secrets are never exported.
 
 ### 8.2 Full-Text Attachments
 * **Attachment**: Users can attach `.pdf` or `.txt` files to articles.
@@ -298,15 +298,6 @@ The `analyze_research_gaps` command produces a corpus-wide Markdown gap-analysis
 * **Batching**: When the estimated footprint exceeds 80% of the context window, the corpus is split, each half analyzed separately, and the partial reports synthesized into one document.
 * **Output**: Markdown-only; no JSON, no UUIDs; citations use the selected style's in-text form. The model is instructed to cite only articles present in the prompt.
 * **Persistence**: Single-row `gap_analysis` table. **Regenerable derived artifact** (see §10.2).
-
-#### 8.3.1 Premium Report Guidance (AI Summary View)
-
-The AI Summary view exposes two collapsible instruction cards between the header and the Citation Style toolbar: one for the Literature Review ("Summarize Findings"), one for the Research Gap Report. Each card holds a free-text "Additional instructions for the LLM" textarea plus a compact "Target length (words)" number input, and each generate button forwards only its own card's values.
-
-* **Prompt injection**: Rendered as `## Target Length` and `## Additional Instructions` blocks directly after `## Citation Style` in the `generate_summary` and `analyze_research_gaps` prompts, threaded through every batch pass and both synthesis prompts (batched corpora honor the guidance; the word count stays a whole-document target).
-* **Premium gating**: Cards render only when `isPremium` (`useFeatureFlags()`); the view never forwards the values for non-premium callers, and both commands drop `additionalInstructions` / `targetWordCount` to `None` when `AppFlags.premium` is false (silent fallback to the legacy prompt; generation itself stays available to everyone).
-* **Normalization**: Instructions are trimmed (blank = omitted); word counts must be positive integers (blank / 0 / invalid = omitted, no length constraint).
-* **Persistence**: Session-scoped composable singletons (survive navigation, reset on project import/reset); never stored in the DB.
 
 ### 8.4 Search Strategy Builder
 

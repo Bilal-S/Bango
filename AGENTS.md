@@ -115,7 +115,8 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
   tests. `main_articles.ris` (10 articles, DOIs `10.1001/art1`–`10.1010/art10`)
   with per-article `_references.ris` and `_citations.ris` files (filename =
   DOI with `/`→`_`). A dedicated co-citation dataset uses `co-citation.ris`.
-- **`docs/bango-v4-spec.md`** - authoritative v4 product specification.
+- **`docs/bango-v5-spec.md`** - authoritative v5 product specification.
+- **`docs/extra-features.md`** - local-only (git-ignored) supplement holding the premium features split out of the spec; referenced conditionally (once) from `docs/bango-v5-spec.md`.
 - **`docs/CLAUDE.md`** - project coding rules (Rust/TS error handling, naming,
   LLM orchestrator pattern, DB rules, testing conventions).
 - **`docs/test-coverage-report.md`** - coverage baseline + under-coverage

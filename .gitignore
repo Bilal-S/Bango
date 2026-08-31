@@ -37,3 +37,6 @@ scripts/**/target/
 .worktrees/
 scratch/
 
+
+# Local-only docs supplement (never commit)
+docs/extra-features.md

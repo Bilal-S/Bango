@@ -1,7 +1,7 @@
 //! Tier 3 Gap 5: tests for the mode-aware worst-case per-article token
 //! footprint (`token_estimation::worst_case_per_article_tokens`).
 //!
-//! Per `docs/bango-v4-spec.md` §4.3 (Readiness Check): the worst-case footprint
+//! Per `docs/bango-v5-spec.md` §4.3 (Readiness Check): the worst-case footprint
 //! is recomputed by the active screening mode - Abstract uses the abstract-only
 //! estimate; Enhanced adds the per-article chunk budget; Two-stage adds the
 //! budget times the expected borderline fraction.

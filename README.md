@@ -717,7 +717,7 @@ You can contribute via PR.
 │   └── sync-version.sh         # Version sync helper
 ├── tests/                      # RIS fixture data for system tests
 ├── docs/
-│   ├── bango-v4-spec.md        # v4 product specification (authoritative)
+│   ├── bango-v5-spec.md        # v5 product specification (authoritative)
 │   ├── CLAUDE.md               # Coding rules and conventions
 │   ├── test-coverage-report.md # Coverage baseline + gap analysis
 │   └── test-plans/             # Binding test inventory files

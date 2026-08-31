@@ -1,5 +1,5 @@
 /* Search Strategy Builder types. Session-scoped (Pinia store), not persisted.
- * Spec: docs/bango-v4-spec.md §8.4. */
+ * Spec: docs/bango-v5-spec.md §8.4. */
 
 export interface SearchStrategyResult {
   picoBreakdown: PicoBreakdown;

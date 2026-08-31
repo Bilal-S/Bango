@@ -174,7 +174,7 @@ pub fn get_wiki_needs_refresh(conn: &Connection) -> Result<bool, AppError> {
 
 // ── Tier 3 screening-mode settings ──────────────────────────────────────────
 //
-// All keys in `app_settings`. Absent key → default. See `docs/bango-v4-spec.md`
+// All keys in `app_settings`. Absent key → default. See `docs/bango-v5-spec.md`
 // §4.3.1 (Screening Modes) and §8.1 (Configuration Settings).
 
 /// `app_settings` key for the active screening mode.
@@ -202,7 +202,7 @@ const CHUNK_BUDGET_PER_ARTICLE_KEY: &str = "chunk_budget_per_article";
 /// (§4.3 Readiness Check) to compute the Two-stage worst-case footprint as
 /// `chunk_budget * borderline_fraction`. Advanced-only (no Settings UI);
 /// power users edit via `app_settings` directly, matching `two_stage_low`/
-/// `two_stage_high`. Default 0.15 per `docs/bango-v4-spec.md` §4.3.1.
+/// `two_stage_high`. Default 0.15 per `docs/bango-v5-spec.md` §4.3.1.
 const TWO_STAGE_EXPECTED_BORDERLINE_FRACTION_KEY: &str = "two_stage_expected_borderline_fraction";
 
 /// The screening mode. Absent key = `Abstract` (default, preserving today's

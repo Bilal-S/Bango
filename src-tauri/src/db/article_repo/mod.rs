@@ -58,7 +58,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::models::article::{AiDecision, Article, ArticleStatus};
 
-/// Project-wide hard cap (see `docs/bango-v4-spec.md` §3.1).
+/// Project-wide hard cap (see `docs/bango-v5-spec.md` §3.1).
 pub(super) const MAX_ARTICLES: usize = 10_000;
 
 /// Shared SELECT base for the `articles` table. Includes `tags`/`labels` correlated

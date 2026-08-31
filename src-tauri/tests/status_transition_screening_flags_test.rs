@@ -10,7 +10,7 @@
 //!
 //! The fix resets both flags whenever an article is moved TO `working`, so the
 //! state-machine transition `Working ↔ Included ↔ Rejected` (see
-//! `docs/bango-v4-spec.md` §4.2) always leaves the article eligible for
+//! `docs/bango-v5-spec.md` §4.2) always leaves the article eligible for
 //! re-screening.
 
 use bango_lib::db::article_repo;
