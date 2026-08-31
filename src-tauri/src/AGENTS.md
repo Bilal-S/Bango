@@ -154,8 +154,20 @@ described inline.
   pdf_extract). See `utils/AGENTS.md`.
 - **`models/`** - Serde structs shared across modules. No own `AGENTS.md`.
 - **`dedup/`** - Duplicate detection. No own `AGENTS.md`.
-- **`ris/`** + **`bibtex/`** + **`prisma/`** - Bibliographic format
-  parsers/converters. No own `AGENTS.md`.
+- **`ris/`** + **`bibtex/`** - Bibliographic format parsers/converters. No own
+  `AGENTS.md`.
+- **`prisma/`** - PRISMA flow data (`data.rs`) + the screening reasons report
+  (`report.rs`): primary-reason attribution (highest criterion priority wins,
+  ties broken by first-assigned order = earliest UUID in the article's matched
+  array), multi-assignment counts (one row per matched criterion), "General"
+  buckets for articles with no resolvable matched criterion, and the Markdown
+  rendering consumed by the `get_prisma_report_markdown` command. With a
+  custom project name (`app_settings.project_name`) the report opens with
+  `# {Project Name}` over an h2 report title (sections demoted to h3);
+  otherwise the report title is the single h1. Frontend exports it as Markdown
+  (save dialog) or PDF (print dialog) from the PRISMA view. Tested in
+  `tests/prisma_test.rs`, `tests/prisma_svg_test.rs`,
+  `tests/prisma_report_test.rs`. No own `AGENTS.md`.
 - **`crypto/`** - AES-256-GCM encryption helpers (API keys, LLM config). No
   own `AGENTS.md`.
 - **`schema/`** - Shared schema types. No own `AGENTS.md`.

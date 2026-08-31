@@ -3,6 +3,7 @@ use tauri::State;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::prisma::data::{self, PrismaData};
+use crate::prisma::report;
 use crate::prisma::svg;
 
 fn render_svg(db_state: &State<'_, DbState>) -> Result<String, AppError> {
@@ -69,4 +70,14 @@ pub fn export_prisma_png_to_file(
         pixmap.encode_png().map_err(|e| AppError::Rendering(format!("PNG encode error: {e}")))?;
 
     std::fs::write(path, png_data).map_err(AppError::Io)
+}
+
+/// Screening reasons report as Markdown (four tables + explanatory text).
+/// The frontend saves it via `write_text_to_file` (Markdown) or renders it
+/// to HTML and prints it (PDF via the webview print dialog).
+#[tauri::command]
+pub fn get_prisma_report_markdown(db_state: State<'_, DbState>) -> Result<String, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let report = report::compute_prisma_report(&conn)?;
+    Ok(report::render_prisma_report_markdown(&report))
 }

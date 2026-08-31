@@ -1,14 +1,58 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { usePrisma } from '@/composables/use-prisma';
+import type { PrismaReportFormat } from '@/composables/use-prisma';
 import ExportDialog from '@/components/export-dialog.vue';
-import { ref } from 'vue';
 
-const { data, loading, error, showExclusionReasons, loadDiagram, exportSvg, exportPng } =
-  usePrisma();
+const {
+  data,
+  loading,
+  error,
+  showExclusionReasons,
+  loadDiagram,
+  exportSvg,
+  exportPng,
+  exportReport,
+} = usePrisma();
 const showExport = ref(false);
 
-onMounted(loadDiagram);
+/* ── Export Report dropdown ──────────────────────────────────────────────
+ * Anchored at the "Export Report" button; closes on item pick, anchor
+ * re-click, outside click, and Escape (bulk-action-bar More-menu pattern). */
+const reportMenuOpen = ref(false);
+const reportMenuRef = ref<HTMLElement | null>(null);
+
+function toggleReportMenu(): void {
+  reportMenuOpen.value = !reportMenuOpen.value;
+}
+
+/** Item picked: close the menu, then run the export for the chosen format. */
+function pickReportFormat(format: PrismaReportFormat): void {
+  reportMenuOpen.value = false;
+  void exportReport(format);
+}
+
+/** Outside click closes the dropdown (suggest-input.vue pattern). */
+function handleReportOutsideClick(event: MouseEvent): void {
+  if (reportMenuRef.value && !reportMenuRef.value.contains(event.target as Node)) {
+    reportMenuOpen.value = false;
+  }
+}
+
+function handleReportKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') reportMenuOpen.value = false;
+}
+
+onMounted(() => {
+  loadDiagram();
+  document.addEventListener('click', handleReportOutsideClick);
+  document.addEventListener('keydown', handleReportKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleReportOutsideClick);
+  document.removeEventListener('keydown', handleReportKeydown);
+});
 </script>
 
 <template>
@@ -44,6 +88,40 @@ onMounted(loadDiagram);
             <span class="material-symbols-outlined btn__icon">download</span>
             Export RIS
           </button>
+          <!-- Export Report: dropdown with Markdown / PDF (print dialog) -->
+          <div ref="reportMenuRef" class="export-report">
+            <button
+              class="btn btn--secondary"
+              :disabled="loading || !data"
+              aria-haspopup="menu"
+              :aria-expanded="reportMenuOpen"
+              @click="toggleReportMenu"
+            >
+              <span class="material-symbols-outlined btn__icon">summarize</span>
+              Export Report
+              <span class="material-symbols-outlined btn__icon export-report__chevron">
+                expand_more
+              </span>
+            </button>
+            <ul v-if="reportMenuOpen" class="export-report__menu" role="menu">
+              <li
+                role="menuitem"
+                title="Save the screening reasons report as a Markdown file"
+                @click="pickReportFormat('markdown')"
+              >
+                <span class="material-symbols-outlined">description</span>
+                Markdown
+              </li>
+              <li
+                role="menuitem"
+                title="Print the screening reasons report (choose Save as PDF)"
+                @click="pickReportFormat('pdf')"
+              >
+                <span class="material-symbols-outlined">picture_as_pdf</span>
+                PDF
+              </li>
+            </ul>
+          </div>
           <button class="btn btn--primary" :disabled="loading" @click="loadDiagram">
             <span class="material-symbols-outlined btn__icon">refresh</span>
             Refresh
@@ -504,6 +582,51 @@ onMounted(loadDiagram);
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── Export Report dropdown ── */
+.export-report {
+  position: relative;
+}
+
+.export-report__chevron {
+  font-size: 16px;
+  margin-left: calc(var(--space-1) * -1);
+}
+
+.export-report__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 168px;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  background-color: var(--color-surface-container-lowest);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-default);
+  box-shadow: var(--shadow-sm);
+  z-index: 40;
+}
+
+.export-report__menu li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  cursor: pointer;
+}
+
+.export-report__menu li:hover {
+  background-color: var(--color-surface-container-high);
+}
+
+.export-report__menu li .material-symbols-outlined {
+  font-size: 16px;
 }
 
 /* ── Responsive ── */

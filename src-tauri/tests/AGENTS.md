@@ -32,7 +32,9 @@ against RIS fixtures live in `cocitation_data_test.rs`.
 `project_backup_test.rs` covers the ProjectBackup export/import round-trip incl.
 `full_text_ai_summary` blob preservation (inventory: `docs/test-plans/exim-tests.md`).
 `reset_project_test.rs` covers `reset_project_inner` (delete-all-data +
-VACUUM + wiki-root wipe). `wiki_consolidation_test.rs` +
+VACUUM + wiki-root wipe). `prisma_report_test.rs` covers the screening
+reasons report (primary-reason attribution, general buckets,
+multi-assignment counts, Markdown rendering). `wiki_consolidation_test.rs` +
 `wiki_index_drift_test.rs` cover the wiki pipelines. `sections_test.rs` +
 `chunking_test.rs` cover the utils text-classification + chunking.
 `biblio_cluster_themes_test.rs` covers the cluster thematic analysis pure
