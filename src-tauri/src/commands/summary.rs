@@ -26,13 +26,36 @@ use crate::summary::prompt::{
 use crate::summary::prompt::{parse_markdown_summary, ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT};
 use crate::utils::sections::{classify_sections, detect_markdown_tables, extract_captions};
 
+/// Premium-gated normalization of the optional report-guidance params shared by
+/// `generate_summary` and `analyze_research_gaps`. Non-premium callers silently
+/// get `(None, None)` (today's exact prompt, no hard error); instructions are
+/// trimmed with blanks dropped; word counts of 0 are dropped.
+fn normalize_guidance(
+    flags: &crate::AppFlags,
+    additional_instructions: Option<String>,
+    target_word_count: Option<u32>,
+) -> (Option<String>, Option<u32>) {
+    if !flags.premium {
+        return (None, None);
+    }
+    let instructions =
+        additional_instructions.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let words = target_word_count.filter(|&n| n > 0);
+    (instructions, words)
+}
+
 #[tauri::command]
 pub async fn generate_summary(
     db_state: State<'_, DbState>,
     app_handle: tauri::AppHandle,
+    flags: State<'_, crate::AppFlags>,
     citation_style: Option<String>,
+    additional_instructions: Option<String>,
+    target_word_count: Option<u32>,
 ) -> Result<String, AppError> {
     let style = citation_style.unwrap_or_else(|| "APA".to_string());
+    let (additional_instructions, target_word_count) =
+        normalize_guidance(&flags, additional_instructions, target_word_count);
 
     // Extract all DB data synchronously while holding the lock
     let summary_input = {
@@ -146,6 +169,8 @@ pub async fn generate_summary(
             style.clone(),
             inclusion_criteria,
             exclusion_criteria,
+            additional_instructions,
+            target_word_count,
         )
     }; // conn lock released here
 
@@ -928,9 +953,14 @@ const GAP_TOP_N: i32 = 10;
 pub async fn analyze_research_gaps(
     db_state: State<'_, DbState>,
     app_handle: tauri::AppHandle,
+    flags: State<'_, crate::AppFlags>,
     citation_style: Option<String>,
+    additional_instructions: Option<String>,
+    target_word_count: Option<u32>,
 ) -> Result<String, AppError> {
     let style = citation_style.unwrap_or_else(|| "APA".to_string());
+    let (additional_instructions, target_word_count) =
+        normalize_guidance(&flags, additional_instructions, target_word_count);
 
     // 1. Read all DB data synchronously while holding the lock.
     let gap_input = {
@@ -1032,6 +1062,8 @@ pub async fn analyze_research_gaps(
             inclusion_criteria,
             exclusion_criteria,
             biblio_context,
+            additional_instructions,
+            target_word_count,
         )
     }; // conn lock released
 

@@ -7,6 +7,16 @@ interface SavedReportRow {
   generatedAt: string;
 }
 
+/** Optional premium generation extras forwarded with every report command. */
+export interface SavedReportGenerateOptions {
+  /** Citation style sent as `citationStyle` (defaults to `'APA'`). */
+  style?: string;
+  /** Free-form LLM instructions sent as `additionalInstructions` when non-blank. */
+  additionalInstructions?: string;
+  /** Target length in words sent as `targetWordCount` when a positive integer. */
+  targetWordCount?: number | null;
+}
+
 /**
  * Factory for the single-row LLM report composables (summary, gap analysis).
  * Owns the shared load/generate/clear/format scaffold over refs the caller
@@ -33,7 +43,7 @@ export function createSavedReport<T extends SavedReportRow>(options: {
   error: Ref<string | null>;
   generatedAt: Ref<string | null>;
   loadSaved: () => Promise<void>;
-  generate: (style?: string) => Promise<void>;
+  generate: (gen?: SavedReportGenerateOptions) => Promise<void>;
   clear: () => void;
   formatGeneratedAt: () => string | null;
 } {
@@ -63,13 +73,24 @@ export function createSavedReport<T extends SavedReportRow>(options: {
     options.onClear?.();
   }
 
-  async function generate(style = 'APA'): Promise<void> {
+  /** Generate a fresh report. Builds the IPC payload from the options:
+   * `citationStyle` always, plus the optional premium guidance extras
+   * (`additionalInstructions` trimmed-non-blank, `targetWordCount` floored
+   * positive-integer) only when provided. */
+  async function generate(gen: SavedReportGenerateOptions = {}): Promise<void> {
     loading.value = true;
     error.value = null;
     try {
-      const result = await tauriCommand<string>(options.generateCommand, {
-        citationStyle: style,
-      });
+      const payload: Record<string, string | number> = { citationStyle: gen.style ?? 'APA' };
+      const trimmedInstructions = gen.additionalInstructions?.trim() ?? '';
+      if (trimmedInstructions) {
+        payload.additionalInstructions = trimmedInstructions;
+      }
+      const words = gen.targetWordCount;
+      if (typeof words === 'number' && Number.isFinite(words) && words > 0) {
+        payload.targetWordCount = Math.floor(words);
+      }
+      const result = await tauriCommand<string>(options.generateCommand, payload);
       text.value = result;
       // The backend saves with a timestamp; reload to get the exact server timestamp.
       await loadSaved();

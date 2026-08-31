@@ -22,6 +22,8 @@ describe('useGapAnalysis', () => {
     expect(c.loading.value).toBe(false);
     expect(c.error.value).toBeNull();
     expect(c.generatedAt.value).toBeNull();
+    expect(c.additionalInstructions.value).toBe('');
+    expect(c.targetWordCount.value).toBe('');
   });
 
   it('loadSaved hydrates state from get_saved_gap_analysis', async () => {
@@ -68,7 +70,7 @@ describe('useGapAnalysis', () => {
     });
 
     const c = useGapAnalysis();
-    await c.generate('APA');
+    await c.generate({ style: 'APA' });
     expect(tauriCommand).toHaveBeenCalledWith('analyze_research_gaps', { citationStyle: 'APA' });
     expect(c.gapText.value).toBe('# Gaps\n\nNew content');
     expect(c.loading.value).toBe(false);
@@ -79,7 +81,7 @@ describe('useGapAnalysis', () => {
     vi.mocked(tauriCommand).mockRejectedValue(new Error('LLM not configured'));
 
     const c = useGapAnalysis();
-    await c.generate('MLA');
+    await c.generate({ style: 'MLA' });
     expect(c.error.value).toBe('LLM not configured');
     expect(c.loading.value).toBe(false);
     expect(c.gapText.value).toBeNull();
@@ -97,7 +99,7 @@ describe('useGapAnalysis', () => {
     });
 
     const c = useGapAnalysis();
-    const p = c.generate('APA');
+    const p = c.generate({ style: 'APA' });
     expect(c.loading.value).toBe(true);
     resolveAnalyze!('content');
     await p;
@@ -109,10 +111,34 @@ describe('useGapAnalysis', () => {
     c.gapText.value = 'stale';
     c.generatedAt.value = 'stale-ts';
     c.error.value = 'stale-err';
+    c.additionalInstructions.value = 'Prioritize UK studies.';
+    c.targetWordCount.value = '900';
     c.clearGapAnalysis();
     expect(c.gapText.value).toBeNull();
     expect(c.generatedAt.value).toBeNull();
     expect(c.error.value).toBeNull();
+    expect(c.additionalInstructions.value).toBe('');
+    expect(c.targetWordCount.value).toBe('');
+  });
+
+  it('generate forwards premium guidance extras when provided', async () => {
+    vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+      if (cmd === 'analyze_research_gaps') return Promise.resolve('# Gaps\n\nNew content');
+      if (cmd === 'get_saved_gap_analysis') return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+
+    const c = useGapAnalysis();
+    await c.generate({
+      style: 'IEEE',
+      additionalInstructions: '  Keep methods terse.  ',
+      targetWordCount: 750.4,
+    });
+    expect(tauriCommand).toHaveBeenCalledWith('analyze_research_gaps', {
+      citationStyle: 'IEEE',
+      additionalInstructions: 'Keep methods terse.',
+      targetWordCount: 750,
+    });
   });
 
   it('formatGeneratedAt returns null when no timestamp', () => {

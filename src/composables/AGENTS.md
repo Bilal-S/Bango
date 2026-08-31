@@ -22,7 +22,12 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
   fixed <-> dynamic switches. `onRecalculate` remains the full
   re-cluster + invalidation path (both share `buildVisibleSubgraph`).
 - `use-saved-report.ts` is the shared saved-report factory behind
-  `use-summary` + `use-gap-analysis`.
+  `use-summary` + `use-gap-analysis`. Its
+  `generate({ style, additionalInstructions, targetWordCount })` builds the
+  IPC payload (`citationStyle` always; the premium guidance extras trimmed /
+  validated then omitted when blank); the per-report guidance refs behind the
+  premium AI-Summary cards live in the two composables and reset via
+  `onClear`.
 - `use-cluster-themes.ts` is the view-facing composable over the
   `cluster-themes` store (cluster thematic analysis on the co-authorship and
   keyword networks). It owns the centralized cache-invalidation watch

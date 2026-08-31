@@ -66,6 +66,8 @@ async fn generate_summary_errors_when_no_articles() {
         "apa".to_string(),
         vec![],
         vec![],
+        None,
+        None,
     );
     let result = generate_summary(&orch, input).await;
     assert!(result.is_err());
@@ -96,6 +98,8 @@ async fn generate_summary_single_batch_under_context_limit() {
         "apa".to_string(),
         vec![],
         vec![],
+        None,
+        None,
     );
 
     let summary = generate_summary(&orch, input).await.expect("summary ok");
@@ -128,6 +132,8 @@ async fn generate_summary_batches_when_over_context_limit() {
         "vancouver".to_string(),
         vec![],
         vec![],
+        None,
+        None,
     );
 
     let summary = generate_summary(&orch, input).await.expect("summary ok");
@@ -156,6 +162,8 @@ async fn generate_summary_trims_response() {
         "apa".to_string(),
         vec![],
         vec![],
+        None,
+        None,
     );
 
     let summary = generate_summary(&orch, input).await.expect("summary ok");
@@ -183,6 +191,8 @@ async fn generate_summary_propagates_llm_error() {
         "apa".to_string(),
         vec![],
         vec![],
+        None,
+        None,
     );
 
     // Give the failing request a moment to settle
@@ -190,4 +200,41 @@ async fn generate_summary_propagates_llm_error() {
         tokio::time::timeout(Duration::from_secs(30), generate_summary(&orch, input)).await;
     assert!(result.is_ok(), "should not time out");
     assert!(result.unwrap().is_err(), "should propagate LLM error");
+}
+
+/// Premium guidance must reach the LLM prompt. The JSON body escapes newlines,
+/// so the matcher anchors on plain substrings in DOTALL mode with order checks
+/// (Target Length block renders before Additional Instructions).
+#[tokio::test]
+async fn generate_summary_sends_premium_guidance_in_prompt() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", "Bearer test-key")
+        .match_body(mockito::Matcher::Regex(
+            r"(?s)approximately 1200 words.*Focus on UK policy studies".to_string(),
+        ))
+        .with_status(200)
+        .with_body(openai_chat_response("# Literature Review\n\nGuided output."))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let orch = Arc::new(LlmOrchestrator::new(1, 0));
+    let config = mock_openai_config(&server.url(), 50_000);
+    let input = SummaryInput::new(
+        config,
+        vec!["aim 1".to_string()],
+        vec![sample_article("Paper One", "Short abstract.")],
+        empty_screening(),
+        "apa".to_string(),
+        vec![],
+        vec![],
+        Some("Focus on UK policy studies".to_string()),
+        Some(1200),
+    );
+
+    let summary = generate_summary(&orch, input).await.expect("summary ok");
+    assert!(summary.contains("Guided output."));
+    mock.assert_async().await;
 }

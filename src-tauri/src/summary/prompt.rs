@@ -35,6 +35,12 @@ pub struct SummaryPromptInput {
     pub inclusion_criteria: Vec<String>,
     /// Full exclusion criterion definitions (Shape 0). Same role.
     pub exclusion_criteria: Vec<String>,
+    /// Premium report guidance: free-form researcher instructions rendered as an
+    /// `## Additional Instructions` block. `None`/blank = omitted (legacy prompt).
+    pub additional_instructions: Option<String>,
+    /// Premium report guidance: target document length in words rendered as a
+    /// `## Target Length` block. `None`/0 = omitted.
+    pub target_word_count: Option<u32>,
 }
 
 pub const SYSTEM_PROMPT: &str = "You are an expert academic literature review writer. You produce well-structured, scholarly literature reviews with proper in-text citations and a complete references section. You only cite sources that are explicitly provided. You never fabricate references. You write in formal academic English with natural variation in sentence length. You never use em dashes.";
@@ -618,6 +624,35 @@ pub fn format_screening_summary(
     lines.join("\n")
 }
 
+/// Render the optional premium report-guidance blocks (`## Target Length` and
+/// `## Additional Instructions`). Returns an empty string when both inputs are
+/// absent so guidance-free prompts stay byte-identical to the legacy form.
+/// Shared by the literature-review, gap-analysis, and synthesis prompt builders;
+/// callers splice the result into their template directly after the
+/// `## Citation Style` section (empty output keeps exactly one blank line there).
+#[must_use]
+pub fn render_optional_guidance(
+    target_word_count: Option<u32>,
+    additional_instructions: Option<&str>,
+) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    if let Some(words) = target_word_count {
+        blocks.push(format!(
+            "## Target Length\nAim for a total length of approximately {words} words for the main body of the document, excluding the References section."
+        ));
+    }
+    if let Some(instructions) = additional_instructions {
+        blocks.push(format!(
+            "## Additional Instructions\nThe researcher provided these additional instructions. Follow them alongside the requirements above unless they conflict with the citation style or the no-fabrication rules:\n{instructions}"
+        ));
+    }
+    if blocks.is_empty() {
+        String::new()
+    } else {
+        format!("\n{}\n", blocks.join("\n\n"))
+    }
+}
+
 #[must_use]
 pub fn build_summary_prompt(input: &SummaryPromptInput) -> String {
     let aims_list = if input.aims.is_empty() {
@@ -682,7 +717,7 @@ Focus on the research aims and synthesize findings across studies.
 
 ## Citation Style
 Use **{citation_style}** citation style for all in-text citations and the references section.
-
+{guidance}
 ## Included Articles
 {articles}
 
@@ -711,6 +746,10 @@ Use **Markdown formatting** with proper headings as shown below:
         aims = aims_list,
         screening = screening_summary,
         citation_style = input.citation_style,
+        guidance = render_optional_guidance(
+            input.target_word_count,
+            input.additional_instructions.as_deref(),
+        ),
         articles = articles_text,
     )
 }

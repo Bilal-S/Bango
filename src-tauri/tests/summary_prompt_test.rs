@@ -146,6 +146,8 @@ fn test_prompt_contains_research_aims() {
         articles: sample_articles(),
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("1. Understand AI in healthcare"));
@@ -161,6 +163,8 @@ fn test_prompt_with_empty_aims() {
         articles: sample_articles(),
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("None defined."));
@@ -175,6 +179,8 @@ fn test_prompt_contains_screening_summary() {
         articles: sample_articles(),
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("Total records identified: 150"));
@@ -189,6 +195,8 @@ fn test_prompt_contains_citation_style() {
         articles: sample_articles(),
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("**Vancouver**"));
@@ -203,6 +211,8 @@ fn test_prompt_contains_article_details() {
         articles: sample_articles(),
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("AI in Medicine"));
@@ -231,6 +241,8 @@ fn test_prompt_article_unknown_year() {
         }],
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("Year: Unknown"));
@@ -252,6 +264,8 @@ fn test_prompt_article_no_keywords() {
         }],
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(!prompt.contains("Keywords:"));
@@ -266,6 +280,8 @@ fn test_prompt_contains_section_instructions() {
         articles: vec![],
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("## Introduction"));
@@ -285,6 +301,8 @@ fn test_prompt_no_em_dashes_rule() {
         articles: vec![],
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     assert!(prompt.contains("em dash"));
@@ -299,9 +317,66 @@ fn test_prompt_with_empty_articles() {
         articles: vec![],
         inclusion_criteria: vec![],
         exclusion_criteria: vec![],
+        additional_instructions: None,
+        target_word_count: None,
     };
     let prompt = build_summary_prompt(&input);
     // Should still produce a valid prompt
     assert!(prompt.contains("## Task"));
     assert!(prompt.contains("## Research Aims"));
+}
+
+// ── premium guidance (target length + additional instructions) tests ──
+
+fn guidance_input(
+    additional_instructions: Option<&str>,
+    target_word_count: Option<u32>,
+) -> SummaryPromptInput {
+    SummaryPromptInput {
+        aims: vec!["Test".to_string()],
+        screening_data: sample_screening_data(),
+        citation_style: "APA".to_string(),
+        articles: vec![],
+        inclusion_criteria: vec![],
+        exclusion_criteria: vec![],
+        additional_instructions: additional_instructions.map(str::to_string),
+        target_word_count,
+    }
+}
+
+#[test]
+fn test_prompt_contains_target_length_when_set() {
+    let prompt = build_summary_prompt(&guidance_input(None, Some(1500)));
+    assert!(prompt.contains("## Target Length"));
+    assert!(prompt.contains("approximately 1500 words"));
+}
+
+#[test]
+fn test_prompt_contains_additional_instructions_when_set() {
+    let prompt = build_summary_prompt(&guidance_input(Some("Focus on policy outcomes."), None));
+    assert!(prompt.contains("## Additional Instructions"));
+    assert!(prompt.contains("Focus on policy outcomes."));
+}
+
+#[test]
+fn test_prompt_omits_guidance_sections_when_absent() {
+    let prompt = build_summary_prompt(&guidance_input(None, None));
+    assert!(!prompt.contains("## Target Length"));
+    assert!(!prompt.contains("## Additional Instructions"));
+    // Byte-identical legacy separator: exactly one blank line between the
+    // citation style line and the Included Articles header.
+    assert!(prompt
+        .contains("citation style for all in-text citations and the references section.\n\n## Included Articles"));
+}
+
+#[test]
+fn test_prompt_guidance_sections_render_after_citation_style() {
+    let prompt = build_summary_prompt(&guidance_input(Some("Keep it concise."), Some(800)));
+    let style_pos = prompt.find("## Citation Style").expect("style section");
+    let length_pos = prompt.find("## Target Length").expect("target length section");
+    let instructions_pos = prompt.find("## Additional Instructions").expect("instructions section");
+    let articles_pos = prompt.find("## Included Articles").expect("articles section");
+    assert!(style_pos < length_pos);
+    assert!(length_pos < instructions_pos);
+    assert!(instructions_pos < articles_pos);
 }

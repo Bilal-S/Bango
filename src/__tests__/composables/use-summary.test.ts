@@ -65,7 +65,7 @@ describe('useSummary', () => {
       vi.mocked(tauriCommand).mockResolvedValueOnce(resultText).mockResolvedValueOnce(savedAfter);
 
       const { summaryText, generatedAt, citationStyle, generate } = useSummary();
-      await generate('IEEE');
+      await generate({ style: 'IEEE' });
 
       expect(tauriCommand).toHaveBeenNthCalledWith(1, 'generate_summary', {
         citationStyle: 'IEEE',
@@ -92,7 +92,7 @@ describe('useSummary', () => {
       vi.mocked(tauriCommand).mockRejectedValueOnce(new Error('LLM timeout'));
 
       const { error, generate } = useSummary();
-      await generate('MLA');
+      await generate({ style: 'MLA' });
 
       expect(error.value).toBe('LLM timeout');
     });
@@ -100,11 +100,21 @@ describe('useSummary', () => {
 
   describe('clearSummary', () => {
     it('resets all state to defaults', () => {
-      const { summaryText, generatedAt, citationStyle, error, clearSummary } = useSummary();
+      const {
+        summaryText,
+        generatedAt,
+        citationStyle,
+        additionalInstructions,
+        targetWordCount,
+        error,
+        clearSummary,
+      } = useSummary();
 
       summaryText.value = 'Some text';
       generatedAt.value = '2025-01-01T00:00:00Z';
       citationStyle.value = 'Chicago' as CitationStyle;
+      additionalInstructions.value = 'Focus on RCTs.';
+      targetWordCount.value = '1200';
       error.value = 'Previous error';
 
       clearSummary();
@@ -112,7 +122,43 @@ describe('useSummary', () => {
       expect(summaryText.value).toBeNull();
       expect(generatedAt.value).toBeNull();
       expect(citationStyle.value).toBe('APA');
+      expect(additionalInstructions.value).toBe('');
+      expect(targetWordCount.value).toBe('');
       expect(error.value).toBeNull();
+    });
+  });
+
+  describe('premium guidance extras', () => {
+    it('forwards trimmed instructions and floored positive word counts', async () => {
+      vi.mocked(tauriCommand).mockResolvedValueOnce('result').mockResolvedValueOnce(null);
+
+      const { generate } = useSummary();
+      await generate({
+        style: 'MLA',
+        additionalInstructions: '  Focus on RCTs.  ',
+        targetWordCount: 1200.9,
+      });
+
+      expect(tauriCommand).toHaveBeenCalledWith('generate_summary', {
+        citationStyle: 'MLA',
+        additionalInstructions: 'Focus on RCTs.',
+        targetWordCount: 1200,
+      });
+    });
+
+    it('omits blank instructions and non-positive word counts', async () => {
+      vi.mocked(tauriCommand).mockResolvedValueOnce('result').mockResolvedValueOnce(null);
+
+      const { generate } = useSummary();
+      await generate({ additionalInstructions: '   ', targetWordCount: 0 });
+
+      expect(tauriCommand).toHaveBeenCalledWith('generate_summary', { citationStyle: 'APA' });
+    });
+
+    it('exposes guidance refs with empty-string defaults', () => {
+      const { additionalInstructions, targetWordCount } = useSummary();
+      expect(additionalInstructions.value).toBe('');
+      expect(targetWordCount.value).toBe('');
     });
   });
 

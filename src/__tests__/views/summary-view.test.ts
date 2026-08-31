@@ -11,6 +11,8 @@ const mockSummaryText = ref<string | null>('# Review\n\nContent');
 const mockSummaryLoading = ref(false);
 const mockSummaryError = ref<string | null>(null);
 const mockCitationStyle = ref<'APA' | 'MLA' | 'Chicago' | 'IEEE' | 'AMA'>('APA');
+const mockReviewInstructions = ref('');
+const mockReviewTargetWords = ref('');
 const mockGenerateSummary = vi.fn();
 const mockLoadSavedSummary = vi.fn().mockResolvedValue(undefined);
 const mockFormatSummaryGeneratedAt = vi.fn().mockReturnValue(null);
@@ -18,6 +20,8 @@ const mockFormatSummaryGeneratedAt = vi.fn().mockReturnValue(null);
 const mockGapText = ref<string | null>('# Gaps\n\nGap content');
 const mockGapLoading = ref(false);
 const mockGapError = ref<string | null>(null);
+const mockGapInstructions = ref('');
+const mockGapTargetWords = ref('');
 const mockGenerateGap = vi.fn();
 const mockLoadSavedGap = vi.fn().mockResolvedValue(undefined);
 const mockFormatGapGeneratedAt = vi.fn().mockReturnValue(null);
@@ -25,18 +29,24 @@ const mockFormatGapGeneratedAt = vi.fn().mockReturnValue(null);
 const mockIncludedCount = ref(5);
 const mockAims = ref([{ id: 'a1', text: 'Aim 1' }]);
 const mockHasLlmConfig = ref(true);
+const mockIsPremium = ref(false);
 
 function resetMockState(): void {
   mockSummaryText.value = '# Review\n\nContent';
   mockSummaryLoading.value = false;
   mockSummaryError.value = null;
   mockCitationStyle.value = 'APA';
+  mockReviewInstructions.value = '';
+  mockReviewTargetWords.value = '';
   mockGapText.value = '# Gaps\n\nGap content';
   mockGapLoading.value = false;
   mockGapError.value = null;
+  mockGapInstructions.value = '';
+  mockGapTargetWords.value = '';
   mockIncludedCount.value = 5;
   mockAims.value = [{ id: 'a1', text: 'Aim 1' }];
   mockHasLlmConfig.value = true;
+  mockIsPremium.value = false;
 }
 
 vi.mock('@/composables/use-summary', () => ({
@@ -45,6 +55,8 @@ vi.mock('@/composables/use-summary', () => ({
     loading: mockSummaryLoading,
     error: mockSummaryError,
     citationStyle: mockCitationStyle,
+    additionalInstructions: mockReviewInstructions,
+    targetWordCount: mockReviewTargetWords,
     generate: mockGenerateSummary,
     loadSaved: mockLoadSavedSummary,
     clearSummary: vi.fn(),
@@ -57,10 +69,18 @@ vi.mock('@/composables/use-gap-analysis', () => ({
     gapText: mockGapText,
     loading: mockGapLoading,
     error: mockGapError,
+    additionalInstructions: mockGapInstructions,
+    targetWordCount: mockGapTargetWords,
     generate: mockGenerateGap,
     loadSaved: mockLoadSavedGap,
     clearGapAnalysis: vi.fn(),
     formatGeneratedAt: mockFormatGapGeneratedAt,
+  }),
+}));
+
+vi.mock('@/composables/use-feature-flags', () => ({
+  useFeatureFlags: () => ({
+    isPremium: mockIsPremium,
   }),
 }));
 
@@ -159,7 +179,7 @@ describe('summary-view.vue - two-button UX with switch-vs-regenerate dialog', ()
     await gapBtn!.trigger('click');
     await flushPromises();
 
-    expect(mockGenerateGap).toHaveBeenCalledWith('APA');
+    expect(mockGenerateGap).toHaveBeenCalledWith({ style: 'APA' });
     // No dialog shown.
     expect(wrapper.find('.dialog-overlay').exists()).toBe(false);
   });
@@ -226,7 +246,7 @@ describe('summary-view.vue - two-button UX with switch-vs-regenerate dialog', ()
     await flushPromises();
 
     // Generate called.
-    expect(mockGenerateGap).toHaveBeenCalledWith('APA');
+    expect(mockGenerateGap).toHaveBeenCalledWith({ style: 'APA' });
     // Dialog closed.
     expect(wrapper.find('.dialog-overlay').exists()).toBe(false);
   });
@@ -314,5 +334,119 @@ describe('summary-view.vue - two-button UX with switch-vs-regenerate dialog', ()
     const wrapper = mountView();
     await flushPromises();
     expect(wrapper.find('.summary-view__error').text()).toContain('review failed');
+  });
+
+  // ── Premium guidance cards (per-report LLM instructions + target words) ──
+
+  it('guidance cards are hidden when not premium', async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.findAll('.summary-guidance')).toHaveLength(0);
+  });
+
+  it('renders both guidance cards collapsed when premium', async () => {
+    mockIsPremium.value = true;
+    const wrapper = mountView();
+    await flushPromises();
+
+    const cards = wrapper.findAll('.summary-guidance');
+    expect(cards).toHaveLength(2);
+    expect(cards[0]!.text()).toContain('Literature Review Instructions');
+    expect(cards[1]!.text()).toContain('Research Gap Report Instructions');
+    // Collapsed by default: no inputs rendered.
+    expect(wrapper.find('.summary-guidance__textarea').exists()).toBe(false);
+    expect(wrapper.find('.summary-guidance__input').exists()).toBe(false);
+  });
+
+  it('expanding a card reveals its textarea and word input (premium)', async () => {
+    mockIsPremium.value = true;
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('.summary-guidance__toggle').trigger('click');
+    const textarea = wrapper.find('#review-instructions');
+    const words = wrapper.find('#review-target-words');
+    expect(textarea.exists()).toBe(true);
+    expect(words.exists()).toBe(true);
+
+    await textarea.setValue('Focus on UK policy studies.');
+    await words.setValue('1200');
+    expect(mockReviewInstructions.value).toBe('Focus on UK policy studies.');
+    // v-model on type="number" auto-casts valid entries to numbers.
+    expect(mockReviewTargetWords.value).toBe(1200);
+  });
+
+  it('review generate forwards its card values when premium', async () => {
+    mockIsPremium.value = true;
+    mockSummaryText.value = null; // first generation: no switch dialog
+    mockGenerateSummary.mockResolvedValue(undefined);
+    mockReviewInstructions.value = 'Focus on UK policy studies.';
+    mockReviewTargetWords.value = '1200';
+    const wrapper = mountView();
+    await flushPromises();
+
+    await findHeaderButton(wrapper, 'Summarize Findings')!.trigger('click');
+    await flushPromises();
+
+    expect(mockGenerateSummary).toHaveBeenCalledWith({
+      style: 'APA',
+      additionalInstructions: 'Focus on UK policy studies.',
+      targetWordCount: 1200,
+    });
+  });
+
+  it('gap generate forwards its own card values when premium', async () => {
+    mockIsPremium.value = true;
+    mockGapText.value = null; // first generation: no switch dialog
+    mockGenerateGap.mockResolvedValue(undefined);
+    mockGapInstructions.value = 'Prioritize UK studies.';
+    mockGapTargetWords.value = '800';
+    const wrapper = mountView();
+    await flushPromises();
+
+    await findHeaderButton(wrapper, 'Research Gap Report')!.trigger('click');
+    await flushPromises();
+
+    expect(mockGenerateGap).toHaveBeenCalledWith({
+      style: 'APA',
+      additionalInstructions: 'Prioritize UK studies.',
+      targetWordCount: 800,
+    });
+  });
+
+  it('invalid word counts parse to null (no length constraint)', async () => {
+    mockIsPremium.value = true;
+    mockSummaryText.value = null;
+    mockGenerateSummary.mockResolvedValue(undefined);
+    mockReviewInstructions.value = 'Keep it terse';
+    mockReviewTargetWords.value = 'abc';
+    const wrapper = mountView();
+    await flushPromises();
+
+    await findHeaderButton(wrapper, 'Summarize Findings')!.trigger('click');
+    await flushPromises();
+
+    expect(mockGenerateSummary).toHaveBeenCalledWith({
+      style: 'APA',
+      additionalInstructions: 'Keep it terse',
+      targetWordCount: null,
+    });
+  });
+
+  it('stale guidance values are not forwarded when not premium', async () => {
+    mockIsPremium.value = false;
+    mockSummaryText.value = null;
+    mockGenerateSummary.mockResolvedValue(undefined);
+    // Values left over from a premium session must never reach the command.
+    mockReviewInstructions.value = 'stale';
+    mockReviewTargetWords.value = '999';
+    const wrapper = mountView();
+    await flushPromises();
+
+    await findHeaderButton(wrapper, 'Summarize Findings')!.trigger('click');
+    await flushPromises();
+
+    expect(mockGenerateSummary).toHaveBeenCalledWith({ style: 'APA' });
   });
 });

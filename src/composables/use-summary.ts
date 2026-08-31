@@ -12,6 +12,14 @@ interface SavedSummary {
 /* Module-level singleton citation style (persisted alongside the summary). */
 const citationStyle = ref<CitationStyle>('APA');
 
+/* Premium per-report generation guidance (AI Summary view collapsible card).
+ * Session-scoped: survives navigation, resets on project import/reset. The
+ * word count is held as `string | number` because `v-model` on
+ * `<input type="number">` auto-casts valid entries to numbers; it is parsed to
+ * a positive integer at generate time. */
+const additionalInstructions = ref('');
+const targetWordCount = ref<string | number>('');
+
 /* Module-level singleton state (shared across all callers) via the shared
  * saved-report factory; the citation style rides along via the hooks. */
 const report = createSavedReport<SavedSummary>({
@@ -25,6 +33,8 @@ const report = createSavedReport<SavedSummary>({
   },
   onClear: () => {
     citationStyle.value = 'APA';
+    additionalInstructions.value = '';
+    targetWordCount.value = '';
   },
 });
 
@@ -35,8 +45,10 @@ export function useSummary() {
     error: report.error,
     generatedAt: report.generatedAt,
     citationStyle,
+    additionalInstructions,
+    targetWordCount,
     loadSaved: report.loadSaved,
-    generate: (style: CitationStyle = 'APA') => report.generate(style),
+    generate: report.generate,
     clearSummary: report.clear,
     formatGeneratedAt: report.formatGeneratedAt,
   };

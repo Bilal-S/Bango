@@ -6,6 +6,7 @@ import { useGapAnalysis } from '@/composables/use-gap-analysis';
 import { useArticlesStore } from '@/stores/articles';
 import { useCriteriaStore } from '@/stores/criteria';
 import { useLlmConfigured } from '@/composables/use-llm-configured';
+import { useFeatureFlags } from '@/composables/use-feature-flags';
 import { save } from '@tauri-apps/plugin-dialog';
 import { tauriCommand } from '@/composables/use-tauri-command';
 
@@ -14,6 +15,8 @@ const {
   loading: summaryLoading,
   error: summaryError,
   citationStyle,
+  additionalInstructions: reviewInstructions,
+  targetWordCount: reviewTargetWords,
   loadSaved: loadSavedSummary,
   generate: generateSummary,
   formatGeneratedAt: formatSummaryGeneratedAt,
@@ -23,10 +26,16 @@ const {
   gapText,
   loading: gapLoading,
   error: gapError,
+  additionalInstructions: gapInstructions,
+  targetWordCount: gapTargetWords,
   loadSaved: loadSavedGap,
   generate: generateGap,
   formatGeneratedAt: formatGapGeneratedAt,
 } = useGapAnalysis();
+
+/* Canonical premium gate (`useFeatureFlags` wraps the `get_app_flags` IPC).
+ * The two per-report guidance cards below render only for premium users. */
+const { isPremium } = useFeatureFlags();
 
 const articlesStore = useArticlesStore();
 const criteriaStore = useCriteriaStore();
@@ -36,6 +45,33 @@ const criteriaStore = useCriteriaStore();
 const mode = ref<'review' | 'gaps'>('review');
 
 const copied = ref(false);
+
+/** Premium guidance cards (one per report). Collapsed by default; the toggle
+ *  state is view-local UI state, while the values live in the composables'
+ *  module singletons so they survive navigation. */
+const showReviewGuidance = ref(false);
+const showGapGuidance = ref(false);
+
+/** Parse a word-count input into a positive integer, or null when the field is
+ *  blank / zero / invalid (null = no length constraint in the prompt). Accepts
+ *  both string and number: `v-model` on `<input type="number">` auto-casts. */
+function parseTargetWords(value: string | number): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
+/** Premium-only extras spread into each generate call. Non-premium callers get
+ *  an empty object so stale session values can never reach the command. */
+function premiumExtras(
+  instructions: string,
+  words: string | number
+): { additionalInstructions?: string; targetWordCount?: number | null } {
+  if (!isPremium.value) return {};
+  return {
+    additionalInstructions: instructions,
+    targetWordCount: parseTargetWords(words),
+  };
+}
 
 /** Switch-vs-regenerate dialog. When target report already has content, open
  *  this instead of regenerating blindly. User can view existing or regenerate.
@@ -147,13 +183,20 @@ function closeSwitchDialog(): void {
 /** Shared generation path. Calls the matching composable, then switches
  *  `mode` AFTER the await resolves so the output area stays on the current
  *  report until the new one is ready (avoids the "text switches immediately"
- *  flash of the old saved report). */
+ *  flash of the old saved report). Each report forwards only its own guidance
+ *  card's values (premium-gated via `premiumExtras`). */
 async function doGenerate(kind: 'review' | 'gap'): Promise<void> {
   if (kind === 'review') {
-    await generateSummary(citationStyle.value);
+    await generateSummary({
+      style: citationStyle.value,
+      ...premiumExtras(reviewInstructions.value, reviewTargetWords.value),
+    });
     mode.value = 'review';
   } else {
-    await generateGap(citationStyle.value);
+    await generateGap({
+      style: citationStyle.value,
+      ...premiumExtras(gapInstructions.value, gapTargetWords.value),
+    });
     mode.value = 'gaps';
   }
 }
@@ -331,6 +374,99 @@ onMounted(async () => {
 
     <!-- Output toolbar + content (always visible when requirements met) -->
     <div v-if="canGenerate" class="summary-view__output">
+      <!-- Premium per-report generation guidance. Two collapsible cards between
+           the header and the Citation Style toolbar; each generate button uses
+           only its own card's values. Hidden entirely when not premium. -->
+      <template v-if="isPremium">
+        <div class="summary-guidance">
+          <button
+            type="button"
+            class="summary-guidance__toggle"
+            :aria-expanded="showReviewGuidance"
+            aria-controls="review-guidance-body"
+            @click="showReviewGuidance = !showReviewGuidance"
+          >
+            <span class="material-symbols-outlined summary-guidance__chevron">
+              {{ showReviewGuidance ? 'expand_less' : 'expand_more' }}
+            </span>
+            <span>Literature Review Instructions</span>
+          </button>
+          <div v-if="showReviewGuidance" id="review-guidance-body" class="summary-guidance__body">
+            <div class="summary-guidance__field">
+              <label for="review-instructions" class="summary-guidance__label">
+                Additional instructions for the LLM
+              </label>
+              <textarea
+                id="review-instructions"
+                v-model="reviewInstructions"
+                class="summary-guidance__textarea"
+                rows="4"
+                placeholder="e.g. Focus on policy outcomes and emphasize longitudinal designs"
+              ></textarea>
+            </div>
+            <div class="summary-guidance__field summary-guidance__field--words">
+              <label for="review-target-words" class="summary-guidance__label">
+                Target length (words)
+              </label>
+              <input
+                id="review-target-words"
+                v-model="reviewTargetWords"
+                class="summary-guidance__input"
+                type="number"
+                min="1"
+                max="50000"
+                step="1"
+                inputmode="numeric"
+                placeholder="No limit"
+              />
+            </div>
+          </div>
+        </div>
+        <div class="summary-guidance">
+          <button
+            type="button"
+            class="summary-guidance__toggle"
+            :aria-expanded="showGapGuidance"
+            aria-controls="gap-guidance-body"
+            @click="showGapGuidance = !showGapGuidance"
+          >
+            <span class="material-symbols-outlined summary-guidance__chevron">
+              {{ showGapGuidance ? 'expand_less' : 'expand_more' }}
+            </span>
+            <span>Research Gap Report Instructions</span>
+          </button>
+          <div v-if="showGapGuidance" id="gap-guidance-body" class="summary-guidance__body">
+            <div class="summary-guidance__field">
+              <label for="gap-instructions" class="summary-guidance__label">
+                Additional instructions for the LLM
+              </label>
+              <textarea
+                id="gap-instructions"
+                v-model="gapInstructions"
+                class="summary-guidance__textarea"
+                rows="4"
+                placeholder="e.g. Highlight methodological weaknesses and geographic blind spots"
+              ></textarea>
+            </div>
+            <div class="summary-guidance__field summary-guidance__field--words">
+              <label for="gap-target-words" class="summary-guidance__label">
+                Target length (words)
+              </label>
+              <input
+                id="gap-target-words"
+                v-model="gapTargetWords"
+                class="summary-guidance__input"
+                type="number"
+                min="1"
+                max="50000"
+                step="1"
+                inputmode="numeric"
+                placeholder="No limit"
+              />
+            </div>
+          </div>
+        </div>
+      </template>
       <div class="summary-toolbar">
         <!-- Left: Citation style -->
         <div class="summary-toolbar__style">
@@ -514,6 +650,96 @@ onMounted(async () => {
   display: flex;
   gap: var(--space-2);
   flex-wrap: wrap;
+}
+
+/* ── Premium guidance cards (between header and toolbar) ── */
+.summary-guidance {
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-default);
+  background-color: var(--color-surface-container-low);
+  flex-shrink: 0;
+}
+
+.summary-guidance__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-default);
+  background-color: transparent;
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-family);
+  cursor: pointer;
+}
+
+.summary-guidance__toggle:hover {
+  background-color: var(--color-surface-container);
+}
+
+.summary-guidance__chevron {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.summary-guidance__body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.summary-guidance__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 240px;
+}
+
+.summary-guidance__field--words {
+  flex: 0 0 150px;
+  min-width: 150px;
+}
+
+.summary-guidance__label {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface-variant);
+}
+
+.summary-guidance__textarea {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-body);
+  font-family: var(--font-family);
+  background-color: var(--color-surface-container-low);
+  color: var(--color-on-surface);
+  resize: vertical;
+  min-height: 90px;
+}
+
+.summary-guidance__input {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-body);
+  font-family: var(--font-family);
+  background-color: var(--color-surface-container-low);
+  color: var(--color-on-surface);
+  width: 100%;
+}
+
+.summary-guidance__textarea:focus,
+.summary-guidance__input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
 }
 
 /* ── Buttons (matches prisma buttons) ── */

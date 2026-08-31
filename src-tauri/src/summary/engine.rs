@@ -20,9 +20,15 @@ pub struct SummaryInput {
     pub inclusion_criteria: Vec<String>,
     /// Full exclusion criterion definitions (Shape 0).
     pub exclusion_criteria: Vec<String>,
+    /// Premium report guidance: free-form researcher instructions (pre-trimmed,
+    /// non-empty). Threaded into every batch + synthesis prompt.
+    pub additional_instructions: Option<String>,
+    /// Premium report guidance: target document length in words (validated > 0).
+    pub target_word_count: Option<u32>,
 }
 
 impl SummaryInput {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: LlmConfig,
         aim_texts: Vec<String>,
@@ -31,6 +37,8 @@ impl SummaryInput {
         citation_style: String,
         inclusion_criteria: Vec<String>,
         exclusion_criteria: Vec<String>,
+        additional_instructions: Option<String>,
+        target_word_count: Option<u32>,
     ) -> Self {
         Self {
             config,
@@ -40,6 +48,8 @@ impl SummaryInput {
             citation_style,
             inclusion_criteria,
             exclusion_criteria,
+            additional_instructions,
+            target_word_count,
         }
     }
 }
@@ -89,6 +99,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            input.additional_instructions.as_deref(),
+            input.target_word_count,
             &input.inclusion_criteria,
             &input.exclusion_criteria,
             batch_a,
@@ -100,6 +112,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            input.additional_instructions.as_deref(),
+            input.target_word_count,
             &input.inclusion_criteria,
             &input.exclusion_criteria,
             batch_b,
@@ -113,6 +127,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            input.additional_instructions.as_deref(),
+            input.target_word_count,
             &input.inclusion_criteria,
             &input.exclusion_criteria,
             &summary_a,
@@ -126,6 +142,8 @@ pub async fn generate_summary(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            input.additional_instructions.as_deref(),
+            input.target_word_count,
             &input.inclusion_criteria,
             &input.exclusion_criteria,
             &input.articles,
@@ -143,6 +161,8 @@ async fn summarize_batch(
     aims: &[String],
     screening: &ScreeningData,
     citation_style: &str,
+    additional_instructions: Option<&str>,
+    target_word_count: Option<u32>,
     inclusion_criteria: &[String],
     exclusion_criteria: &[String],
     articles: &[ArticleSummary],
@@ -154,6 +174,8 @@ async fn summarize_batch(
         articles: articles.to_vec(),
         inclusion_criteria: inclusion_criteria.to_vec(),
         exclusion_criteria: exclusion_criteria.to_vec(),
+        additional_instructions: additional_instructions.map(str::to_string),
+        target_word_count,
     };
     let user_prompt = prompt::build_summary_prompt(&input);
     let (response, _tokens) = orchestrator
@@ -169,6 +191,8 @@ async fn synthesize_batches(
     aims: &[String],
     screening: &ScreeningData,
     citation_style: &str,
+    additional_instructions: Option<&str>,
+    target_word_count: Option<u32>,
     inclusion_criteria: &[String],
     exclusion_criteria: &[String],
     a: &str,
@@ -184,6 +208,8 @@ async fn synthesize_batches(
     let screening_summary =
         prompt::format_screening_summary(screening, inclusion_criteria, exclusion_criteria);
 
+    let guidance = prompt::render_optional_guidance(target_word_count, additional_instructions);
+
     let synthesis_prompt = format!(
         r#"## Task
 Combine two partial literature reviews into a single coherent review. Maintain focus on the research aims.
@@ -197,7 +223,7 @@ Use {citation_style} citation style throughout. Do NOT invent references that do
 
 ## Citation Style
 {citation_style}
-
+{guidance}
 ## Partial Review A
 {a}
 
@@ -221,6 +247,7 @@ Produce a single unified literature review with these sections:
 
 Return only the plain text of the literature review. Do not wrap it in code fences."#,
         citation_style = citation_style,
+        guidance = guidance,
         aims = aims_text,
         screening = screening_summary,
         a = a,
@@ -250,6 +277,11 @@ pub struct GapAnalysisInput {
     pub inclusion_criteria: Vec<String>,
     pub exclusion_criteria: Vec<String>,
     pub biblio_context: BiblioContext,
+    /// Premium report guidance: free-form researcher instructions (pre-trimmed,
+    /// non-empty). Threaded into every batch + synthesis prompt.
+    pub additional_instructions: Option<String>,
+    /// Premium report guidance: target document length in words (validated > 0).
+    pub target_word_count: Option<u32>,
 }
 
 impl GapAnalysisInput {
@@ -263,6 +295,8 @@ impl GapAnalysisInput {
         inclusion_criteria: Vec<String>,
         exclusion_criteria: Vec<String>,
         biblio_context: BiblioContext,
+        additional_instructions: Option<String>,
+        target_word_count: Option<u32>,
     ) -> Self {
         Self {
             config,
@@ -273,6 +307,8 @@ impl GapAnalysisInput {
             inclusion_criteria,
             exclusion_criteria,
             biblio_context,
+            additional_instructions,
+            target_word_count,
         }
     }
 }
@@ -323,6 +359,8 @@ pub async fn generate_gap_analysis(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            input.additional_instructions.as_deref(),
+            input.target_word_count,
             &input.inclusion_criteria,
             &input.exclusion_criteria,
             &input.biblio_context,
@@ -340,6 +378,8 @@ pub async fn generate_gap_analysis(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            input.additional_instructions.as_deref(),
+            input.target_word_count,
             &input.inclusion_criteria,
             &input.exclusion_criteria,
             &input.biblio_context,
@@ -348,8 +388,14 @@ pub async fn generate_gap_analysis(
         .await?;
 
         // Synthesize the two partial gap reports into one coherent document.
-        let synthesis_prompt =
-            build_gap_synthesis_prompt(&input.aim_texts, &input.citation_style, &gap_a, &gap_b);
+        let synthesis_prompt = build_gap_synthesis_prompt(
+            &input.aim_texts,
+            &input.citation_style,
+            input.target_word_count,
+            input.additional_instructions.as_deref(),
+            &gap_a,
+            &gap_b,
+        );
         let (response, _tokens) = orchestrator
             .send(
                 &input.config,
@@ -366,6 +412,8 @@ pub async fn generate_gap_analysis(
             &input.aim_texts,
             &input.screening_data,
             &input.citation_style,
+            input.additional_instructions.as_deref(),
+            input.target_word_count,
             &input.inclusion_criteria,
             &input.exclusion_criteria,
             &input.biblio_context,
@@ -384,6 +432,8 @@ async fn gap_batch(
     aims: &[String],
     screening: &ScreeningData,
     citation_style: &str,
+    additional_instructions: Option<&str>,
+    target_word_count: Option<u32>,
     inclusion_criteria: &[String],
     exclusion_criteria: &[String],
     biblio_context: &BiblioContext,
@@ -402,6 +452,8 @@ async fn gap_batch(
         biblio_context: biblio_context.clone(),
         inclusion_criteria: inclusion_criteria.to_vec(),
         exclusion_criteria: exclusion_criteria.to_vec(),
+        additional_instructions: additional_instructions.map(str::to_string),
+        target_word_count,
     };
     let user_prompt = build_gap_analysis_prompt(&input);
     let (response, _tokens) = orchestrator

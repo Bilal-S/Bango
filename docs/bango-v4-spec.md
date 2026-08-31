@@ -299,6 +299,15 @@ The `analyze_research_gaps` command produces a corpus-wide Markdown gap-analysis
 * **Output**: Markdown-only; no JSON, no UUIDs; citations use the selected style's in-text form. The model is instructed to cite only articles present in the prompt.
 * **Persistence**: Single-row `gap_analysis` table. **Regenerable derived artifact** (see §10.2).
 
+#### 8.3.1 Premium Report Guidance (AI Summary View)
+
+The AI Summary view exposes two collapsible instruction cards between the header and the Citation Style toolbar: one for the Literature Review ("Summarize Findings"), one for the Research Gap Report. Each card holds a free-text "Additional instructions for the LLM" textarea plus a compact "Target length (words)" number input, and each generate button forwards only its own card's values.
+
+* **Prompt injection**: Rendered as `## Target Length` and `## Additional Instructions` blocks directly after `## Citation Style` in the `generate_summary` and `analyze_research_gaps` prompts, threaded through every batch pass and both synthesis prompts (batched corpora honor the guidance; the word count stays a whole-document target).
+* **Premium gating**: Cards render only when `isPremium` (`useFeatureFlags()`); the view never forwards the values for non-premium callers, and both commands drop `additionalInstructions` / `targetWordCount` to `None` when `AppFlags.premium` is false (silent fallback to the legacy prompt; generation itself stays available to everyone).
+* **Normalization**: Instructions are trimmed (blank = omitted); word counts must be positive integers (blank / 0 / invalid = omitted, no length constraint).
+* **Persistence**: Session-scoped composable singletons (survive navigation, reset on project import/reset); never stored in the DB.
+
 ### 8.4 Search Strategy Builder
 
 The `suggest_search_strategy` command generates database-ready Boolean search strings for 8 academic databases (PubMed, Scopus, Web of Science, Cochrane Library, EBSCOhost, JSTOR, ScienceDirect, arXiv) from research aims + criteria. Surfaced as a collapsible card in the Criteria Editor.

@@ -57,6 +57,10 @@ matcher to find `<script setup>` components).
 - Keep-alive cached views must use `defineOptions({ name: ... })`.
 - Feature gates that depend on "LLM configured" read `useLlmConfigured()`
   (see `src/AGENTS.md` §Local Contracts).
+- Premium-gated UI reads `useFeatureFlags().isPremium` (precedent:
+  `article-references.vue`; the AI Summary view's per-report guidance cards
+  also drop the values at generate time so stale session state never reaches
+  the command).
 
 ## Verification
 

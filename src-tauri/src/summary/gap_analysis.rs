@@ -2,7 +2,7 @@
 //! Article block reuses `build_summary_prompt` renderer (Shape-A evidence included)
 //! for byte-consistency with the literature-review prompt.
 
-use crate::summary::prompt::ArticleSummary;
+use crate::summary::prompt::{render_optional_guidance, ArticleSummary};
 
 /// System prompt: expert research analyst, Markdown-only output, no em dashes.
 pub const GAP_ANALYSIS_SYSTEM_PROMPT: &str = include_str!("gap_analysis_prompt.md");
@@ -35,6 +35,12 @@ pub struct GapPromptInput {
     pub inclusion_criteria: Vec<String>,
     /// Full exclusion criterion definitions.
     pub exclusion_criteria: Vec<String>,
+    /// Premium report guidance: free-form researcher instructions rendered as an
+    /// `## Additional Instructions` block. `None`/blank = omitted (legacy prompt).
+    pub additional_instructions: Option<String>,
+    /// Premium report guidance: target document length in words rendered as a
+    /// `## Target Length` block. `None`/0 = omitted.
+    pub target_word_count: Option<u32>,
 }
 
 /// Render gap-analysis user prompt. Pure, no I/O. Mirrors `build_summary_prompt` structure.
@@ -76,7 +82,7 @@ cited articles.
 
 ## Citation Style
 Use **{citation_style}** citation style for all in-text citations and the references list.
-
+{guidance}
 ## Included Articles
 {articles}
 
@@ -98,6 +104,10 @@ Do not use em dashes. Never invent references."#,
         screening = input.screening_summary,
         criteria = criteria_text,
         citation_style = input.citation_style,
+        guidance = render_optional_guidance(
+            input.target_word_count,
+            input.additional_instructions.as_deref(),
+        ),
         articles = articles_text,
         biblio = biblio_text,
     )
@@ -206,11 +216,14 @@ fn render_criteria(inclusion: &[String], exclusion: &[String]) -> String {
 }
 
 /// Render user prompt for merging two partial gap reports. Used when corpus >80%
-/// context window. Pure, no I/O.
+/// context window. Pure, no I/O. Carries the premium guidance blocks so batched
+/// corpora honor the researcher's instructions and target length.
 #[must_use]
 pub fn build_gap_synthesis_prompt(
     aims: &[String],
     citation_style: &str,
+    target_word_count: Option<u32>,
+    additional_instructions: Option<&str>,
     partial_a: &str,
     partial_b: &str,
 ) -> String {
@@ -235,7 +248,7 @@ in either section. De-duplicate themes and gaps that appear in both halves.
 
 ## Citation Style
 Use **{citation_style}** citation style throughout.
-
+{guidance}
 ## Partial Gap Analysis A
 {a}
 
@@ -255,6 +268,7 @@ Return only the Markdown text. Do not wrap it in code fences.
 Do not use em dashes. Never invent references."#,
         aims = aims_text,
         citation_style = citation_style,
+        guidance = render_optional_guidance(target_word_count, additional_instructions),
         a = partial_a,
         b = partial_b,
     )
@@ -316,6 +330,8 @@ mod tests {
             },
             inclusion_criteria: vec!["SSB tax studies".to_string()],
             exclusion_criteria: vec!["Non-English".to_string()],
+            additional_instructions: None,
+            target_word_count: None,
         };
         let prompt = build_gap_analysis_prompt(&input);
         assert!(prompt.contains("Effect of SSB taxes on consumption"));
@@ -343,6 +359,8 @@ mod tests {
             biblio_context: BiblioContext::default(),
             inclusion_criteria: Vec::new(),
             exclusion_criteria: Vec::new(),
+            additional_instructions: None,
+            target_word_count: None,
         };
         let prompt = build_gap_analysis_prompt(&input);
         assert!(prompt.contains("Evidence: study_type: RCT; sample_size: 1000"));
@@ -358,6 +376,8 @@ mod tests {
             biblio_context: BiblioContext::default(),
             inclusion_criteria: Vec::new(),
             exclusion_criteria: Vec::new(),
+            additional_instructions: None,
+            target_word_count: None,
         };
         let prompt = build_gap_analysis_prompt(&input);
         assert!(prompt.contains("No bibliometric aggregates available."));
@@ -368,6 +388,8 @@ mod tests {
         let prompt = build_gap_synthesis_prompt(
             &["Aim 1".to_string()],
             "APA",
+            None,
+            None,
             "PARTIAL A CONTENT",
             "PARTIAL B CONTENT",
         );
@@ -375,5 +397,62 @@ mod tests {
         assert!(prompt.contains("PARTIAL B CONTENT"));
         assert!(prompt.contains("Aim 1"));
         assert!(prompt.contains("**APA**"));
+    }
+
+    #[test]
+    fn build_prompt_renders_premium_guidance_after_citation_style() {
+        let input = GapPromptInput {
+            aims: vec!["Aim 1".to_string()],
+            screening_summary: "n/a".to_string(),
+            citation_style: "APA".to_string(),
+            articles: vec![sample_article()],
+            biblio_context: BiblioContext::default(),
+            inclusion_criteria: Vec::new(),
+            exclusion_criteria: Vec::new(),
+            additional_instructions: Some("Prioritize UK studies.".to_string()),
+            target_word_count: Some(900),
+        };
+        let prompt = build_gap_analysis_prompt(&input);
+        assert!(prompt.contains("## Target Length"));
+        assert!(prompt.contains("approximately 900 words"));
+        assert!(prompt.contains("## Additional Instructions"));
+        assert!(prompt.contains("Prioritize UK studies."));
+        let style_pos = prompt.find("## Citation Style").expect("style section");
+        let length_pos = prompt.find("## Target Length").expect("target length section");
+        let articles_pos = prompt.find("## Included Articles").expect("articles section");
+        assert!(style_pos < length_pos);
+        assert!(length_pos < articles_pos);
+    }
+
+    #[test]
+    fn build_prompt_omits_guidance_when_absent() {
+        let input = GapPromptInput {
+            aims: vec!["Aim 1".to_string()],
+            screening_summary: "n/a".to_string(),
+            citation_style: "APA".to_string(),
+            articles: vec![sample_article()],
+            biblio_context: BiblioContext::default(),
+            inclusion_criteria: Vec::new(),
+            exclusion_criteria: Vec::new(),
+            additional_instructions: None,
+            target_word_count: None,
+        };
+        let prompt = build_gap_analysis_prompt(&input);
+        assert!(!prompt.contains("## Target Length"));
+        assert!(!prompt.contains("## Additional Instructions"));
+    }
+
+    #[test]
+    fn synthesis_prompt_carries_guidance() {
+        let prompt = build_gap_synthesis_prompt(
+            &["Aim 1".to_string()],
+            "APA",
+            Some(2000),
+            Some("Keep methods terse."),
+            "PARTIAL A",
+            "PARTIAL B",
+        );
+        assert!(prompt.contains("approximately 2000 words"));
+        assert!(prompt.contains("Keep methods terse."));
     }
 }
