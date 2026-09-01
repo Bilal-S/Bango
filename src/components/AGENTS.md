@@ -40,6 +40,30 @@ network primitives, and the help tabs.
 
 ## Local Contracts
 
+### `criteria-edit-dialog.vue` + `matched-criteria.vue` (criterion pills)
+
+The "Edit Matched Criteria" dialog (opened from `matched-criteria.vue` in the
+article detail panel) mirrors the filter panel's Match Criteria pattern:
+removable pills + a `SuggestInput` search-and-add combobox per section.
+Two sections - Inclusion (satisfied criteria, emerald pills) and Exclusion
+(violated criteria, rose pills; failed inclusion criteria, amber `NOT MET`
+pills per the implicit cross-type contract; ghost values - raw numbers,
+deleted-criterion UUIDs - amber dashed pills). Pills carry the global number
+badge (inclusion `1..N`, exclusion `N+1..M`, same scheme as
+`criteriaStore.criterionIndexMap`, the screening prompt, and the filter-panel
+badges), computed locally from the props. A criterion can sit in only one
+section (combobox options hide ids assigned anywhere); the exclusion combobox
+offers inclusion criteria labeled `NOT MET: {text}` so a pick records a failed
+requirement. Picking adds the pill and collapses the combobox (`SuggestInput`
+reset-on-select: input cleared + dropdown closed, globally); the dropdown
+auto-flips upward when the space below the input (to the nearest scrollable
+ancestor's bottom edge) is insufficient, so the dialog's bottom combobox never
+clips; pill `x` removes it (ghosts deletable in place); Save
+emits the per-section value arrays (UUIDs + surviving ghosts) unchanged in
+shape. `matched-criteria.vue` renders failed-inclusion entries in the
+exclusion list as amber rows without strikethrough, with the rejection-reason
+tooltip.
+
 ### `bulk-action-bar.vue`
 
 `<BulkActionBar>` is the fixed bottom-center multi-select action bar shown

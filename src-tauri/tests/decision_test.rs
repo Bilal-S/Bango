@@ -33,6 +33,133 @@ fn numbering(inc: &[&Criterion], exc: &[&Criterion]) -> HashMap<String, usize> {
 }
 
 #[test]
+fn resolve_article_decision_maps_global_numbers_to_uuids() {
+    // LLM answers with global criterion numbers instead of UUIDs; the
+    // resolver must record the UUIDs, never the raw numbers.
+    let inc1 = criterion(
+        "inc-uuid-1",
+        "Wealth accumulation",
+        CriterionType::Inclusion,
+        Priority::Standard,
+    );
+    let inc2 = criterion("inc-uuid-2", "Time period", CriterionType::Inclusion, Priority::Standard);
+    let exc1 = criterion("exc-uuid-1", "Not Germany", CriterionType::Exclusion, Priority::Standard);
+    let criteria = vec![inc1.clone(), inc2.clone(), exc1.clone()];
+    let inc_refs = vec![&inc1, &inc2];
+    let exc_refs = vec![&exc1];
+    let global = numbering(&inc_refs, &exc_refs);
+    let ev_labels = HashMap::new();
+
+    // "1", "[2]", "#3" cover the common number shapes LLMs return.
+    let screening = response("include", "Matches.", &["1", "[2]"], &["#3"]);
+    let decision = resolve_article_decision(
+        &screening, "art-1", &criteria, &inc_refs, &global, false, &ev_labels,
+    );
+
+    assert_eq!(decision.augmented_inc, vec!["inc-uuid-1".to_string(), "inc-uuid-2".to_string()]);
+    assert_eq!(decision.augmented_exc, vec!["exc-uuid-1".to_string()]);
+}
+
+#[test]
+fn resolve_article_decision_exclusion_numbers_offset_past_inclusion() {
+    // Exclusion numbers continue at N+1; number keys in the exclusion array
+    // must resolve through the global numbering, not a per-list restart.
+    let inc1 = criterion("i1", "A", CriterionType::Inclusion, Priority::Standard);
+    let inc2 = criterion("i2", "B", CriterionType::Inclusion, Priority::Standard);
+    let exc1 = criterion("e1", "C", CriterionType::Exclusion, Priority::Standard);
+    let exc2 = criterion("e2", "D", CriterionType::Exclusion, Priority::Standard);
+    let criteria = vec![inc1.clone(), inc2.clone(), exc1.clone(), exc2.clone()];
+    let inc_refs = vec![&inc1, &inc2];
+    let exc_refs = vec![&exc1, &exc2];
+    let global = numbering(&inc_refs, &exc_refs);
+    let ev_labels = HashMap::new();
+
+    let screening = response("exclude", "Excluded.", &[], &["3", "4"]);
+    let decision = resolve_article_decision(
+        &screening, "art-1", &criteria, &inc_refs, &global, false, &ev_labels,
+    );
+
+    assert_eq!(decision.augmented_exc, vec!["e1".to_string(), "e2".to_string()]);
+    assert!(decision.augmented_inc.is_empty());
+}
+
+#[test]
+fn resolve_article_decision_drops_unresolvable_criteria_keys() {
+    // Out-of-range numbers, 0, and unknown text must not be stored on the
+    // article (previously they landed raw in the matched-criteria columns).
+    let inc1 = criterion("i1", "A", CriterionType::Inclusion, Priority::Standard);
+    let exc1 = criterion("e1", "B", CriterionType::Exclusion, Priority::Standard);
+    let criteria = vec![inc1.clone(), exc1.clone()];
+    let inc_refs = vec![&inc1];
+    let exc_refs = vec![&exc1];
+    let global = numbering(&inc_refs, &exc_refs);
+    let ev_labels = HashMap::new();
+
+    let screening = response("include", "Nope.", &["9", "unknown text"], &["0"]);
+    let decision = resolve_article_decision(
+        &screening, "art-1", &criteria, &inc_refs, &global, false, &ev_labels,
+    );
+
+    assert!(decision.augmented_inc.is_empty());
+    assert!(decision.augmented_exc.is_empty());
+}
+
+#[test]
+fn resolve_article_decision_number_keys_drive_priority_resolution() {
+    // A critical exclusion reported by number must flip an LLM include -
+    // numbers participate in the priority resolver, not just storage.
+    let inc1 = criterion("i1", "A", CriterionType::Inclusion, Priority::Standard);
+    let exc1 = criterion("e1", "B", CriterionType::Exclusion, Priority::Critical);
+    let criteria = vec![inc1.clone(), exc1.clone()];
+    let inc_refs = vec![&inc1];
+    let exc_refs = vec![&exc1];
+    let global = numbering(&inc_refs, &exc_refs);
+    let ev_labels = HashMap::new();
+
+    let screening = response("include", "Matches.", &["1"], &["2"]);
+    let decision = resolve_article_decision(
+        &screening, "art-1", &criteria, &inc_refs, &global, false, &ev_labels,
+    );
+
+    assert_eq!(decision.final_decision, "exclude");
+    assert_eq!(decision.augmented_inc, vec!["i1".to_string()]);
+    assert_eq!(decision.augmented_exc, vec!["e1".to_string()]);
+}
+
+#[test]
+fn resolve_article_decision_failed_inclusion_via_exclusion_array() {
+    // An inclusion key arriving via the exclusion array means the required
+    // criterion FAILED: it merges into the stored exclusion array (implicit
+    // cross-type storage) but never becomes a match, auto-label, or resolver
+    // input. An exclusion key via the inclusion array is dropped.
+    let inc1 = criterion("i1", "Inclusion text", CriterionType::Inclusion, Priority::Critical);
+    let exc1 = criterion("e1", "Exclusion text", CriterionType::Exclusion, Priority::Standard);
+    let criteria = vec![inc1.clone(), exc1.clone()];
+    let inc_refs = vec![&inc1];
+    let exc_refs = vec![&exc1];
+    let global = numbering(&inc_refs, &exc_refs);
+    let ev_labels = HashMap::new();
+
+    // "1" is the inclusion criterion but arrives via the exclusion array
+    // (duplicated); "Exclusion text" arrives as text via the inclusion array.
+    let screening = response("exclude", "Mixed.", &["Exclusion text"], &["e1", "1", "1"]);
+    let decision = resolve_article_decision(
+        &screening, "art-1", &criteria, &inc_refs, &global, false, &ev_labels,
+    );
+
+    // Violated exclusion first, then the failed inclusion; nothing satisfied.
+    assert!(decision.augmented_inc.is_empty());
+    assert_eq!(decision.augmented_exc, vec!["e1".to_string(), "i1".to_string()]);
+    // The failed inclusion never drives auto-labels (only the e1 match does).
+    assert_eq!(
+        decision.auto_label_criteria,
+        vec![("Exclusion".to_string(), "Exclusion text".to_string())]
+    );
+    // The critical inclusion never became a match, so the LLM exclude stands.
+    assert_eq!(decision.final_decision, "exclude");
+}
+
+#[test]
 fn resolve_article_decision_override_annotates_when_resolver_differs() {
     // LLM says include, but only an exclusion criterion matches. Without custom
     // logic, the resolver should flip to exclude and annotate the reasoning.

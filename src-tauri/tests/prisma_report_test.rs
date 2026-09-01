@@ -80,13 +80,13 @@ fn count_primary_and_multi_assignment_semantics() {
     let articles = [ids(&["e1", "e2"]), ids(&["e1"]), ids(&[]), ids(&["ghost"])];
     let slices: Vec<&[String]> = articles.iter().map(|a| a.as_slice()).collect();
 
-    let (primary, general) = count_primary(&slices, &criteria);
+    let (primary, general) = count_primary(&slices, &criteria, false);
     assert_eq!(general, 2); // no criteria + deleted-criterion-only article
     assert_eq!(primary.len(), 1);
     assert_eq!(primary[0].criterion_id, "e1");
     assert_eq!(primary[0].count, 2); // article 1 (e1 high beats e2) + article 2
 
-    let multi = count_multi(&slices, &criteria);
+    let multi = count_multi(&slices, &criteria, false);
     // Multi counts each matched criterion: e1 x2, e2 x1, ghost x1 (kept, dangling).
     let e1 = multi.iter().find(|r| r.criterion_id == "e1").unwrap();
     let e2 = multi.iter().find(|r| r.criterion_id == "e2").unwrap();
@@ -94,6 +94,40 @@ fn count_primary_and_multi_assignment_semantics() {
     assert_eq!((e1.count, e2.count, ghost.count), (2, 1, 1));
     assert_eq!(ghost.priority, None);
     assert!(ghost.criterion_text.contains("Deleted criterion"));
+}
+
+#[test]
+fn failed_inclusion_ids_render_as_not_met_in_exclusion_tables() {
+    let conn = setup();
+    insert_criterion(&conn, "i1", "inclusion", "Must be human study", "critical");
+    insert_criterion(&conn, "e1", "exclusion", "Animal study", "high");
+
+    // Rejected article whose exclusion array mixes a violated exclusion
+    // criterion and a failed inclusion criterion (implicit cross-type storage).
+    insert_article(&conn, "a1", "rejected", "[]", r#"["i1", "e1"]"#);
+    // Pure exclusion-criterion rejection for contrast.
+    insert_article(&conn, "a2", "rejected", "[]", r#"["e1"]"#);
+
+    let report = compute_prisma_report(&conn).unwrap();
+    // The critical failed inclusion outranks the high violated exclusion, so
+    // it wins primary attribution for a1 and carries the NOT MET prefix.
+    let not_met = report.primary_exclusion.iter().find(|r| r.criterion_id == "i1").unwrap();
+    assert_eq!(not_met.criterion_text, "NOT MET: Must be human study");
+    let violated = report.primary_exclusion.iter().find(|r| r.criterion_id == "e1").unwrap();
+    assert_eq!(violated.criterion_text, "Animal study");
+
+    let not_met_multi = report.multi_exclusion.iter().find(|r| r.criterion_id == "i1").unwrap();
+    assert_eq!(not_met_multi.criterion_text, "NOT MET: Must be human study");
+
+    // Inclusion tables never carry the prefix.
+    insert_article(&conn, "a3", "included", r#"["i1"]"#, "[]");
+    let report = compute_prisma_report(&conn).unwrap();
+    let inc_row = report.primary_inclusion.iter().find(|r| r.criterion_id == "i1").unwrap();
+    assert_eq!(inc_row.criterion_text, "Must be human study");
+
+    let md = render_prisma_report_markdown(&report);
+    assert!(md.contains("NOT MET: Must be human study"));
+    assert!(md.contains("Rows prefixed \"NOT MET:\""));
 }
 
 #[test]

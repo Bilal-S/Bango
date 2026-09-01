@@ -96,6 +96,41 @@ describe('matched-criteria.vue', () => {
     expect(wrapper.text()).toContain('Animal study');
   });
 
+  it('renders failed inclusion criteria in the exclusion list without strikethrough', () => {
+    const store = useCriteriaStore();
+    store.criteria = [
+      {
+        id: 'c1',
+        criterionType: 'inclusion',
+        text: 'Must be human study',
+        priority: 'high',
+        createdAt: '',
+      },
+      {
+        id: 'c2',
+        criterionType: 'exclusion',
+        text: 'Animal study',
+        priority: 'standard',
+        createdAt: '',
+      },
+    ];
+    store.inclusionCriteria = [store.criteria[0]!];
+    store.exclusionCriteria = [store.criteria[1]!];
+
+    const wrapper = mount(MatchedCriteria, {
+      props: {
+        article: makeArticle({ matchedExclusionCriteria: ['c1', 'c2'] }),
+      },
+      global: { stubs: { CriteriaEditDialog: true } },
+    });
+    // The failed inclusion (c1) carries the rejection-reason tooltip; the
+    // violated exclusion (c2) keeps its plain-text tooltip.
+    expect(wrapper.html()).toContain(
+      'Failed inclusion criterion (reason for rejection): Must be human study'
+    );
+    expect(wrapper.html()).toContain('title="Animal study"');
+  });
+
   it('renders edit button', () => {
     const store = useCriteriaStore();
     store.inclusionCriteria = [];

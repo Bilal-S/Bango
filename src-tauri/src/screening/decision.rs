@@ -38,11 +38,20 @@ pub fn resolve_article_decision(
     has_custom_logic: bool,
     enhanced_evidence_labels: &HashMap<String, String>,
 ) -> ArticleDecision {
-    // Apply priority resolution - match by UUID or by criterion text.
-    let inc_matches: Vec<CriterionMatch> = screening
-        .matched_inclusion_criteria
+    /* Normalize LLM keys (UUID, exact text, or global criterion number) into
+    satisfied-inclusion / violated-exclusion / FAILED-inclusion lists; junk is
+    dropped. */
+    let (resolved_inc, resolved_exc, failed_inc) = resolve_matched_keys(
+        &screening.matched_inclusion_criteria,
+        &screening.matched_exclusion_criteria,
+        criteria,
+        global_numbering,
+    );
+
+    // Apply priority resolution - match by resolved UUID.
+    let inc_matches: Vec<CriterionMatch> = resolved_inc
         .iter()
-        .filter_map(|key| criteria.iter().find(|c| c.id == *key || c.text == *key))
+        .filter_map(|key| criteria.iter().find(|c| c.id == *key))
         .map(|c| CriterionMatch {
             id: c.id.clone(),
             criterion_type: c.criterion_type.clone(),
@@ -50,10 +59,9 @@ pub fn resolve_article_decision(
         })
         .collect();
 
-    let exc_matches: Vec<CriterionMatch> = screening
-        .matched_exclusion_criteria
+    let exc_matches: Vec<CriterionMatch> = resolved_exc
         .iter()
-        .filter_map(|key| criteria.iter().find(|c| c.id == *key || c.text == *key))
+        .filter_map(|key| criteria.iter().find(|c| c.id == *key))
         .map(|c| CriterionMatch {
             id: c.id.clone(),
             criterion_type: c.criterion_type.clone(),
@@ -89,15 +97,25 @@ pub fn resolve_article_decision(
         resolution::finalize_decision(&screening.decision, &resolution_input, has_custom_logic);
 
     /* Augment matched arrays with criteria UUIDs mentioned in reasoning
-    but missing from the LLM's matched arrays. */
+    but missing from the resolved matched arrays. */
     let inclusion_count = inclusion_criteria.len();
-    let (augmented_inc, augmented_exc) = augment_matched_from_reasoning(
+    let (augmented_inc, mut augmented_exc) = augment_matched_from_reasoning(
         &screening.reasoning,
-        &screening.matched_inclusion_criteria,
-        &screening.matched_exclusion_criteria,
+        &resolved_inc,
+        &resolved_exc,
         global_numbering,
         inclusion_count,
     );
+
+    /* Failed inclusion criteria (required but not met) merge into the stored
+    exclusion array - implicit cross-type storage, resolved by criterion type
+    at display/report time. They never join `inc_matches`/`exc_matches`, so
+    they cannot influence the priority resolver or generate auto-labels. */
+    for id in failed_inc {
+        if !augmented_exc.contains(&id) {
+            augmented_exc.push(id);
+        }
+    }
 
     /* Raw reasoning kept with UUIDs - frontend replaces at display time.
     Append override annotation when resolver disagreed. */
@@ -140,6 +158,91 @@ pub fn build_global_criterion_numbering(
         n += 1;
     }
     map
+}
+
+/// Resolve raw LLM matched-criteria keys to criterion UUIDs split by meaning:
+/// satisfied inclusion (inclusion key via the inclusion array), violated
+/// exclusion (exclusion key via the exclusion array), and FAILED inclusion
+/// (inclusion key via the exclusion array - the required criterion was not met
+/// and drove the rejection). A key may be a criterion UUID, the exact
+/// criterion text, or the criterion's global number in any common shape
+/// ("3", "[3]", "#3", "3."). Exclusion keys via the inclusion array have no
+/// defined meaning and are dropped, as is unresolvable junk. Dedupes across
+/// all three lists, preserving first-seen order.
+#[must_use]
+pub fn resolve_matched_keys(
+    inclusion_keys: &[String],
+    exclusion_keys: &[String],
+    criteria: &[Criterion],
+    global_numbering: &HashMap<String, usize>,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let by_number: HashMap<usize, &str> =
+        global_numbering.iter().map(|(uuid, &n)| (n, uuid.as_str())).collect();
+
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut satisfied_inc = Vec::new();
+    let mut violated_exc = Vec::new();
+    let mut failed_inc = Vec::new();
+
+    let keyed = inclusion_keys
+        .iter()
+        .map(|key| (key, false))
+        .chain(exclusion_keys.iter().map(|key| (key, true)));
+    for (key, from_exclusion_array) in keyed {
+        let Some(criterion) = lookup_criterion(key.trim(), criteria, &by_number) else {
+            continue;
+        };
+        if seen.contains(criterion.id.as_str()) {
+            continue;
+        }
+        let is_inclusion = matches!(criterion.criterion_type, CriterionType::Inclusion);
+        // A key in the undefined slot (exclusion key via the inclusion array)
+        // is dropped WITHOUT marking seen, so a later meaningful placement of
+        // the same criterion still records.
+        let recorded = match (is_inclusion, from_exclusion_array) {
+            (true, false) => {
+                satisfied_inc.push(criterion.id.clone());
+                true
+            }
+            (false, true) => {
+                violated_exc.push(criterion.id.clone());
+                true
+            }
+            (true, true) => {
+                failed_inc.push(criterion.id.clone());
+                true
+            }
+            (false, false) => false,
+        };
+        if recorded {
+            seen.insert(criterion.id.as_str());
+        }
+    }
+
+    (satisfied_inc, violated_exc, failed_inc)
+}
+
+/// Find the criterion one raw LLM key refers to: exact UUID, exact text, or
+/// global number via the reverse numbering map.
+fn lookup_criterion<'a>(
+    key: &str,
+    criteria: &'a [Criterion],
+    by_number: &HashMap<usize, &str>,
+) -> Option<&'a Criterion> {
+    if let Some(c) = criteria.iter().find(|c| c.id == key || c.text == key) {
+        return Some(c);
+    }
+    let n = parse_criterion_number(key)?;
+    let uuid = by_number.get(&n).copied()?;
+    criteria.iter().find(|c| c.id == uuid)
+}
+
+/// Parse a raw LLM key as a 1-based global criterion number.
+/// Accepts "3", "[3]", "#3", " 3 ", "3."; rejects 0 and negatives.
+#[must_use]
+pub fn parse_criterion_number(key: &str) -> Option<usize> {
+    let core = key.trim().trim_start_matches(['[', '#']).trim_end_matches([']', '.']);
+    core.parse::<usize>().ok().filter(|&n| n > 0)
 }
 
 /// Scan reasoning for criterion UUIDs missing from matched arrays, return augmented tuples.

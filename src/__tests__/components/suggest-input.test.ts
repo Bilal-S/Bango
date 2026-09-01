@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import SuggestInput from '@/components/suggest-input.vue';
 
@@ -66,9 +66,9 @@ describe('suggest-input.vue', () => {
     expect(wrapper.findAll('li')[0]!.text()).toBe('Alpha');
   });
 
-  // ── Reset-to-dropdown-open behavior (the core change) ────────────
+  // ── Reset (collapse + clear) behavior on selection ────────────────
 
-  it('clears the input and keeps the dropdown open after selecting a suggestion', async () => {
+  it('clears the input and collapses the dropdown after selecting a suggestion', async () => {
     const { wrapper, syncModel } = mountWithVModel();
     await wrapper.find('input').trigger('focus');
     await flushPromises();
@@ -89,12 +89,12 @@ describe('suggest-input.vue', () => {
     const lastUpdate = updates![updates!.length - 1];
     expect(lastUpdate).toEqual(['']);
 
-    // The dropdown should still be open (3 suggestions visible).
+    // The dropdown should be collapsed so it never obscures surrounding UI.
     await flushPromises();
-    expect(wrapper.findAll('li')).toHaveLength(3);
+    expect(wrapper.findAll('li')).toHaveLength(0);
   });
 
-  it('clears the input and keeps the dropdown open after pressing Enter', async () => {
+  it('clears the input and collapses the dropdown after pressing Enter', async () => {
     const { wrapper, syncModel } = mountWithVModel();
     await wrapper.find('input').trigger('focus');
     await flushPromises();
@@ -113,9 +113,69 @@ describe('suggest-input.vue', () => {
     const lastUpdate = updates![updates!.length - 1];
     expect(lastUpdate).toEqual(['']);
 
-    // The dropdown should still be open.
+    // The dropdown should be collapsed.
     await flushPromises();
-    expect(wrapper.findAll('li')).toHaveLength(3);
+    expect(wrapper.findAll('li')).toHaveLength(0);
+  });
+
+  it('reopens the dropdown on the next input after a collapsed selection', async () => {
+    const { wrapper, syncModel } = mountWithVModel();
+    await wrapper.find('input').trigger('focus');
+    await flushPromises();
+    await wrapper.findAll('li')[0]!.trigger('mousedown');
+    await syncModel();
+    expect(wrapper.findAll('li')).toHaveLength(0);
+
+    // Focus persists in the input; typing reopens for the next pick.
+    await wrapper.find('input').setValue('alp');
+    await syncModel();
+    expect(wrapper.findAll('li')).toHaveLength(1);
+  });
+
+  // ── Auto-flip: open upward when space below is insufficient ──────
+
+  it('opens the dropdown upward when there is not enough space below the input', async () => {
+    vi.stubGlobal('innerHeight', 768);
+    const { wrapper } = mountWithVModel();
+    const input = wrapper.find('input').element;
+    // Input near the viewport bottom: 28px below, 700px above -> flip up.
+    const rectSpy = vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({
+      top: 700,
+      bottom: 740,
+      height: 40,
+      width: 200,
+      left: 0,
+      right: 200,
+      x: 0,
+      y: 700,
+      toJSON: () => ({}),
+    } as DOMRect);
+    await wrapper.find('input').trigger('focus');
+    expect(wrapper.find('ul').classes()).toContain('bottom-[calc(100%+4px)]');
+    rectSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('opens the dropdown downward when there is enough space below the input', async () => {
+    vi.stubGlobal('innerHeight', 768);
+    const { wrapper } = mountWithVModel();
+    const input = wrapper.find('input').element;
+    // Input near the top: 628px below -> stays down.
+    const rectSpy = vi.spyOn(input, 'getBoundingClientRect').mockReturnValue({
+      top: 100,
+      bottom: 140,
+      height: 40,
+      width: 200,
+      left: 0,
+      right: 200,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+    await wrapper.find('input').trigger('focus');
+    expect(wrapper.find('ul').classes()).not.toContain('bottom-[calc(100%+4px)]');
+    rectSpy.mockRestore();
+    vi.unstubAllGlobals();
   });
 
   it('does not fire enter when the input is empty', async () => {
@@ -151,7 +211,7 @@ describe('suggest-input.vue', () => {
     document.body.removeChild(outside);
   });
 
-  it('shows all suggestions when the input is cleared after a selection', async () => {
+  it('shows all suggestions when the dropdown reopens after a selection', async () => {
     const { wrapper, syncModel } = mountWithVModel();
     await wrapper.find('input').trigger('focus');
     await flushPromises();
@@ -160,7 +220,12 @@ describe('suggest-input.vue', () => {
     await wrapper.findAll('li')[0]!.trigger('mousedown');
     await syncModel();
 
-    // All 3 suggestions should be visible (the input is empty, so no filter)
+    // Selection collapses the dropdown (reset behavior)...
+    await flushPromises();
+    expect(wrapper.findAll('li')).toHaveLength(0);
+
+    // ...and clicking the still-empty input reopens the full list (no filter).
+    await wrapper.find('input').trigger('click');
     await flushPromises();
     const items = wrapper.findAll('li');
     expect(items).toHaveLength(3);

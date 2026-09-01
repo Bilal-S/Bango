@@ -20,10 +20,12 @@ const props = withDefaults(
     /**
      * Controls post-selection behavior.
      *
-     * - `true` (default): the input is cleared and the dropdown stays open so
-     *   the user can immediately add another entry. Intended for multi-add
-     *   consumers (`tags-section`, `labels-section`, `article-filter-panel`)
-     *   whose `@select` handler applies each pick right away.
+     * - `true` (default): the input is cleared and the dropdown collapses
+     *   (reset), so it never obscures the surrounding UI. Focus stays in the
+     *   input - typing or clicking it reopens the dropdown for the next pick.
+     *   Intended for multi-add consumers (`tags-section`, `labels-section`,
+     *   `article-filter-panel`, `criteria-edit-dialog`) whose `@select`
+     *   handler applies each pick right away.
      * - `false`: the selected value populates the input and the dropdown
      *   closes. Intended for single-select consumers (e.g. the bulk
      *   add-tag/add-label dialogs in `article-list.vue`, and the journal
@@ -63,7 +65,51 @@ const emit = defineEmits<{
 }>();
 
 const isOpen = ref(false);
+const openUpward = ref(false);
 const containerRef = ref<HTMLDivElement | null>(null);
+
+/** Dropdown footprint: max-h-40 (10rem) + 4px gap + slack. */
+const DROPDOWN_FOOTPRINT = 176;
+
+/**
+ * Open the dropdown, flipping upward when the space below the input is
+ * insufficient. The clipping edge is the nearest scrollable ancestor's bottom
+ * (e.g. a dialog body with overflow-y-auto), capped by the viewport; degenerate
+ * measurements (zero-size rects, e.g. test environments without real layout)
+ * fall back to the downward default.
+ */
+function openDropdown(): void {
+  const container = containerRef.value;
+  const input = container?.querySelector('input');
+  if (container && input) {
+    const inputRect = input.getBoundingClientRect();
+    if (inputRect.height !== 0 || inputRect.bottom !== 0) {
+      let clipTop = 0;
+      let clipBottom = window.innerHeight;
+      let node: HTMLElement | null = container.parentElement;
+      while (node) {
+        const overflowY = window.getComputedStyle(node).overflowY;
+        if (overflowY === 'auto' || overflowY === 'scroll') {
+          const rect = node.getBoundingClientRect();
+          if (rect.height > 0) {
+            clipTop = Math.max(clipTop, rect.top);
+            clipBottom = Math.min(clipBottom, rect.bottom);
+            break;
+          }
+        }
+        node = node.parentElement;
+      }
+      const spaceBelow = clipBottom - inputRect.bottom;
+      const spaceAbove = inputRect.top - clipTop;
+      openUpward.value = spaceBelow < DROPDOWN_FOOTPRINT && spaceAbove > spaceBelow;
+    } else {
+      openUpward.value = false;
+    }
+  } else {
+    openUpward.value = false;
+  }
+  isOpen.value = true;
+}
 
 /** True when the structured `options` mode is active (takes precedence). */
 const useOptions = computed((): boolean => props.options.length > 0);
@@ -145,11 +191,11 @@ const enteredValueMatchesDisabled = computed((): boolean => {
 function onInput(event: Event): void {
   const value = (event.target as HTMLInputElement).value;
   emit('update:modelValue', value);
-  isOpen.value = true;
+  openDropdown();
 }
 
 function onFocus(): void {
-  isOpen.value = true;
+  openDropdown();
 }
 
 function selectSuggestion(row: string | SuggestOption): void {
@@ -161,11 +207,11 @@ function selectSuggestion(row: string | SuggestOption): void {
   const option = typeof row === 'string' ? undefined : row;
   emit('select', name, option);
   if (props.clearOnSelect) {
-    /* Clear input + keep dropdown open for immediate re-add. The parent's
-       @select handler refreshes suggestions, so dropdown re-populates with
-       remaining un-assigned entries. */
+    /* Reset: clear the input and collapse the dropdown so it never obscures
+       the surrounding UI. Focus stays in the input; typing or clicking it
+       reopens for the next pick. */
     emit('update:modelValue', '');
-    isOpen.value = true;
+    isOpen.value = false;
   } else {
     /* Single-select: populate input with chosen value for review, close
        dropdown. Parent reads via v-model on subsequent confirm action. */
@@ -181,18 +227,17 @@ function onKeydown(event: KeyboardEvent): void {
     if (val) {
       emit('enter', val);
       if (props.clearOnSelect) {
-        // Clear the input and keep the dropdown open (same rationale as
-        // selectSuggestion above) instead of closing + blurring.
+        // Reset like selectSuggestion above: clear + collapse (no blur).
         emit('update:modelValue', '');
-        isOpen.value = true;
+        isOpen.value = false;
       }
       /* Single-select: parent's @enter handler is expected to close the dialog
          (or consume the value). We leave the input populated, dropdown untouched. */
     }
   } else if (event.key === 'Escape') {
     isOpen.value = false;
-    /* Bubble Escape so single-select parent can cancel the edit. String-mode
-       multi-add consumers ignore this (they keep dropdown open on selections). */
+    /* Bubble Escape so single-select parent can cancel the edit. Multi-add
+       consumers ignore this (selections already collapse the dropdown). */
     emit('escape');
   }
 }
@@ -221,12 +266,13 @@ onUnmounted(() => {
       class="flex-1 w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
       @input="onInput"
       @focus="onFocus"
-      @click="isOpen = true"
+      @click="openDropdown"
       @keydown="onKeydown"
     />
     <ul
       v-if="isOpen && filteredSuggestions.length > 0"
       class="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto"
+      :class="openUpward ? 'bottom-[calc(100%+4px)]' : ''"
     >
       <li
         v-for="row in filteredSuggestions"

@@ -172,6 +172,16 @@ fn system_prompt_references_custom_screening_instructions() {
     );
 }
 
+#[test]
+fn system_prompt_defines_failed_inclusion_semantics() {
+    // The exclusion array doubles as the rejection-reason channel: violated
+    // exclusion criteria plus failed inclusion criteria (required but not met).
+    assert!(
+        SYSTEM_PROMPT.contains("required inclusion criteria the article FAILED"),
+        "SYSTEM_PROMPT must define failed-inclusion semantics for the exclusion array"
+    );
+}
+
 // ── Tier 4.1: system-prompt cross-check amendment ────────────────────────────
 
 #[test]

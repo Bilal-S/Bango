@@ -88,14 +88,16 @@ pub struct LlmScreeningResponse {
         default,
         alias = "matched_inclusion_criteria",
         alias = "inclusionCriteria",
-        alias = "inclusion_criteria"
+        alias = "inclusion_criteria",
+        deserialize_with = "de_string_or_number_vec"
     )]
     pub matched_inclusion_criteria: Vec<String>,
     #[serde(
         default,
         alias = "matched_exclusion_criteria",
         alias = "exclusionCriteria",
-        alias = "exclusion_criteria"
+        alias = "exclusion_criteria",
+        deserialize_with = "de_string_or_number_vec"
     )]
     pub matched_exclusion_criteria: Vec<String>,
     #[serde(default, alias = "suggested_tags", alias = "tags")]
@@ -104,6 +106,42 @@ pub struct LlmScreeningResponse {
     pub confidence: f64,
     #[serde(default, alias = "extracted_terms", alias = "extractedTerms")]
     pub extracted_terms: Vec<String>,
+}
+
+/// Deserialize a `Vec<String>` whose elements may be bare JSON numbers.
+/// LLMs sometimes answer the matched-criteria fields with criterion numbers
+/// as `[1, 3]` instead of `["1", "3"]`; numbers are stringified, non-scalars
+/// are skipped so one odd element cannot fail the whole batch.
+fn de_string_or_number_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrNumberVecVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrNumberVecVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("an array of strings or numbers")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            while let Some(value) = seq.next_element::<serde_json::Value>()? {
+                match value {
+                    serde_json::Value::String(s) => out.push(s),
+                    serde_json::Value::Number(n) => out.push(n.to_string()),
+                    _ => {} // Skip nulls/bools/objects/arrays silently.
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    deserializer.deserialize_seq(StringOrNumberVecVisitor)
 }
 
 #[cfg(test)]
@@ -153,6 +191,16 @@ mod tests {
         let resp: LlmScreeningResponse = serde_json::from_str(raw).expect("parse");
         assert_eq!(resp.matched_inclusion_criteria, vec!["c1".to_string()]);
         assert_eq!(resp.suggested_tags, vec!["t1".to_string()]);
+    }
+
+    #[test]
+    fn llm_response_accepts_numeric_criterion_entries() {
+        // LLMs sometimes answer with criterion numbers as bare JSON numbers
+        // instead of strings; they must be stringified, not fail the batch.
+        let raw = r#"{"decision":"include","reasoning":"r","matched_inclusion_criteria":[1,3],"matched_exclusion_criteria":["2",null]}"#;
+        let resp: LlmScreeningResponse = serde_json::from_str(raw).expect("parse");
+        assert_eq!(resp.matched_inclusion_criteria, vec!["1".to_string(), "3".to_string()]);
+        assert_eq!(resp.matched_exclusion_criteria, vec!["2".to_string()]);
     }
 
     #[test]

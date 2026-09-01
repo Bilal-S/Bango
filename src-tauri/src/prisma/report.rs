@@ -10,8 +10,12 @@ use crate::db::app_settings_repo;
 use crate::db::article_repo;
 use crate::db::criteria_repo;
 use crate::error::AppError;
-use crate::models::criterion::{Criterion, Priority};
+use crate::models::criterion::{Criterion, CriterionType, Priority};
 use crate::prisma::data;
+
+/// Prefix marking a required inclusion criterion the article FAILED (recorded
+/// in the matched-exclusion array per the implicit cross-type contract).
+pub const NOT_MET_PREFIX: &str = "NOT MET: ";
 
 /// One counted row of a report table. `priority` is `None` for rows whose
 /// criterion no longer exists (deleted after screening).
@@ -72,11 +76,14 @@ pub fn primary_reason<'a>(ids: &[String], criteria: &'a [Criterion]) -> Option<&
 
 /// Primary attribution: one count per article under its most significant
 /// criterion. Returns (criterion rows, count of articles with no resolvable
-/// matched criterion - the "General" bucket).
+/// matched criterion - the "General" bucket). `failed_inclusion` marks rows
+/// whose id resolves to an inclusion criterion (failed requirement recorded
+/// via the matched-exclusion array) with the `NOT MET:` prefix.
 #[must_use]
 pub fn count_primary(
     article_ids: &[&[String]],
     criteria: &[Criterion],
+    failed_inclusion: bool,
 ) -> (Vec<ReasonCount>, usize) {
     let mut counts: HashMap<String, usize> = HashMap::new();
     let mut general = 0_usize;
@@ -86,32 +93,48 @@ pub fn count_primary(
             None => general += 1,
         }
     }
-    (to_reason_counts(&counts, criteria), general)
+    (to_reason_counts(&counts, criteria, failed_inclusion), general)
 }
 
 /// Multi-assignment: one count per article per matched criterion id, so an
 /// article matching N criteria contributes to N rows.
 #[must_use]
-pub fn count_multi(article_ids: &[&[String]], criteria: &[Criterion]) -> Vec<ReasonCount> {
+pub fn count_multi(
+    article_ids: &[&[String]],
+    criteria: &[Criterion],
+    failed_inclusion: bool,
+) -> Vec<ReasonCount> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for ids in article_ids {
         for id in *ids {
             *counts.entry(id.clone()).or_insert(0) += 1;
         }
     }
-    to_reason_counts(&counts, criteria)
+    to_reason_counts(&counts, criteria, failed_inclusion)
 }
 
 /// Resolve id counts into sorted rows: priority desc (deleted criteria last),
-/// count desc, then criterion text asc for a stable order.
+/// count desc, then criterion text asc for a stable order. With
+/// `failed_inclusion`, ids resolving to inclusion criteria carry the
+/// `NOT MET:` prefix (exclusion tables only).
 #[must_use]
-fn to_reason_counts(counts: &HashMap<String, usize>, criteria: &[Criterion]) -> Vec<ReasonCount> {
+fn to_reason_counts(
+    counts: &HashMap<String, usize>,
+    criteria: &[Criterion],
+    failed_inclusion: bool,
+) -> Vec<ReasonCount> {
     let mut rows: Vec<ReasonCount> = counts
         .iter()
         .map(|(id, count)| match criteria.iter().find(|c| c.id == *id) {
             Some(criterion) => ReasonCount {
                 criterion_id: id.clone(),
-                criterion_text: criterion.text.clone(),
+                criterion_text: if failed_inclusion
+                    && matches!(criterion.criterion_type, CriterionType::Inclusion)
+                {
+                    format!("{NOT_MET_PREFIX}{}", criterion.text)
+                } else {
+                    criterion.text.clone()
+                },
                 priority: Some(criterion.priority),
                 count: *count,
             },
@@ -234,7 +257,7 @@ pub fn render_prisma_report_markdown(report: &PrismaReport) -> String {
         report.general_exclusion_count,
         Some(report.records_excluded),
     );
-    md.push_str("Each rejected article is counted exactly once in this table, under its single most significant exclusion reason. Articles rejected without any matched exclusion criterion (for example manual user exclusions), or whose matched criteria were deleted after screening, are grouped under \"General exclusion (no criterion matched)\". The total therefore equals the number of excluded records.\n\n");
+    md.push_str("Each rejected article is counted exactly once in this table, under its single most significant exclusion reason. Articles rejected without any matched exclusion criterion (for example manual user exclusions), or whose matched criteria were deleted after screening, are grouped under \"General exclusion (no criterion matched)\". Rows prefixed \"NOT MET:\" mark required inclusion criteria the article failed (the recorded reason for rejection), not violated exclusion criteria. The total therefore equals the number of excluded records.\n\n");
 
     md.push_str(&format!("{section} Table 3: Multi-Assignment Inclusion Counts\n\n"));
     push_reason_table(
@@ -256,7 +279,7 @@ pub fn render_prisma_report_markdown(report: &PrismaReport) -> String {
         report.general_exclusion_count,
         None,
     );
-    md.push_str("This table counts every exclusion criterion matched by each rejected article, so an article with several matched criteria appears in several rows. A row's count reads as \"N rejected articles matched this criterion\". The counts are intentionally not summed: the column total would exceed the number of excluded records because articles are counted more than once. The general row counts rejected articles that matched no criterion.\n\n");
+    md.push_str("This table counts every exclusion criterion matched by each rejected article, so an article with several matched criteria appears in several rows. A row's count reads as \"N rejected articles matched this criterion\". Failed inclusion criteria appear here as well, prefixed \"NOT MET:\". The counts are intentionally not summed: the column total would exceed the number of excluded records because articles are counted more than once. The general row counts rejected articles that matched no criterion.\n\n");
 
     md
 }
@@ -275,10 +298,12 @@ pub fn compute_prisma_report(conn: &Connection) -> Result<PrismaReport, AppError
     let exclusion_ids: Vec<&[String]> =
         rejected.iter().map(|a| a.matched_exclusion_criteria.as_slice()).collect();
 
-    let (primary_inclusion, general_inclusion_count) = count_primary(&inclusion_ids, &criteria);
-    let (primary_exclusion, general_exclusion_count) = count_primary(&exclusion_ids, &criteria);
-    let multi_inclusion = count_multi(&inclusion_ids, &criteria);
-    let multi_exclusion = count_multi(&exclusion_ids, &criteria);
+    let (primary_inclusion, general_inclusion_count) =
+        count_primary(&inclusion_ids, &criteria, false);
+    let (primary_exclusion, general_exclusion_count) =
+        count_primary(&exclusion_ids, &criteria, true);
+    let multi_inclusion = count_multi(&inclusion_ids, &criteria, false);
+    let multi_exclusion = count_multi(&exclusion_ids, &criteria, true);
 
     Ok(PrismaReport {
         generated_at: chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string(),

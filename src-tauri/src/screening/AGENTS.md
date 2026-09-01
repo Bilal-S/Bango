@@ -58,6 +58,31 @@ under `clippy::too_many_arguments`). Both stages build prompts via
 symbols stay re-exported from `engine` (`pub use`) so external test import
 paths keep working.
 
+### Criterion-key resolution in matched arrays
+
+LLMs frequently answer `matched_inclusion_criteria` / `matched_exclusion_criteria`
+with the criterion's global number (`"1"`, `"[3]"`, `"#3"`, bare JSON `1`)
+instead of the bracketed UUID, despite the prompt schema. `decision.rs`
+normalizes every key in `resolve_matched_keys` before matching, augmentation,
+or DB write: exact UUID -> exact criterion text -> global-number reverse
+lookup against `build_global_criterion_numbering`. Keys split by meaning into
+(satisfied inclusion, violated exclusion, FAILED inclusion): an inclusion key
+via the EXCLUSION array means the required criterion was not met and is the
+rejection reason. Failed entries merge into the stored
+`matched_exclusion_criteria` array (implicit cross-type storage, resolved by
+criterion type at display/report time) but NEVER join `CriterionMatch`es, so
+they cannot influence the priority resolver or generate auto-labels. An
+exclusion key via the inclusion array is dropped without blocking a later
+meaningful placement of the same criterion; unresolvable junk (out-of-range
+numbers, unknown text) is dropped entirely; text keys are stored as UUIDs.
+`engine/types.rs` deserializes the two matched-criteria fields with
+`de_string_or_number_vec` so bare JSON numbers parse as strings instead of
+failing the whole batch. The SYSTEM_PROMPT explicitly allows "bracketed id or
+global number, never criterion text" and defines the failed-inclusion
+semantics. PRISMA exclusion tables render inclusion-type ids with the
+`NOT MET:` prefix (`prisma::report::NOT_MET_PREFIX`, also applied in
+`prisma::data` exclusion reasons).
+
 ### Custom-logic governance contract (v8.1)
 
 When `app_settings.screening_custom_logic` is present and non-empty (same trim

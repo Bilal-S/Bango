@@ -92,10 +92,19 @@ pub fn compute_prisma_data(conn: &Connection) -> Result<PrismaData, AppError> {
 
     let mut exclusion_reasons = Vec::new();
     for (criterion_id, count) in criterion_counts {
-        let text: String = conn
-            .query_row("SELECT text FROM criteria WHERE id = ?1", [&criterion_id], |row| row.get(0))
-            .unwrap_or_else(|_| criterion_id.clone());
-        exclusion_reasons.push(ExclusionReason { criterion_id, criterion_text: text, count });
+        // Inclusion-type ids here are failed requirements (implicit cross-type
+        // contract) and carry the NOT MET prefix, mirroring the report tables.
+        let (criterion_type, text): (String, String) = conn
+            .query_row("SELECT type, text FROM criteria WHERE id = ?1", [&criterion_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap_or_else(|_| ("unknown".to_string(), criterion_id.clone()));
+        let criterion_text = if criterion_type == "inclusion" {
+            format!("{}{}", crate::prisma::report::NOT_MET_PREFIX, text)
+        } else {
+            text
+        };
+        exclusion_reasons.push(ExclusionReason { criterion_id, criterion_text, count });
     }
 
     exclusion_reasons.sort_by_key(|b| std::cmp::Reverse(b.count));
