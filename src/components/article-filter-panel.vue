@@ -2,14 +2,17 @@
 import { ref, computed } from 'vue';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import type { TitleMatchType } from '@/composables/use-article-search';
+import type { Criterion, SuggestOption } from '@/types';
 import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
+import { useCriteriaStore } from '@/stores/criteria';
 import { getColorScheme, type ColorScheme } from '@/utils/color';
 import SuggestInput from '@/components/suggest-input.vue';
 import ClearableInput from '@/components/clearable-input.vue';
 
 const tagsStore = useTagsStore();
 const labelsStore = useLabelsStore();
+const criteriaStore = useCriteriaStore();
 
 const props = defineProps<{
   filter: ArticleFilter;
@@ -182,6 +185,149 @@ function tagColor(name: string): ColorScheme {
 /** Color scheme for a label (custom or hash-derived). */
 function labelColor(name: string): ColorScheme {
   return getColorScheme(name, labelsStore.labels.find((l) => l.name === name)?.color);
+}
+
+// ── Match Criteria filter (pills + combobox + X/Y/Z sentinels) ────────
+
+/** Max criterion-text chars on a filter pill; the `N.` number badge is extra. */
+const CRITERION_PILL_TEXT_MAX = 20;
+
+/** Criterion store lookup (store is warmed at bootstrap by `main.ts`). */
+function criterionById(id: string): Criterion | undefined {
+  return criteriaStore.criteria.find((c) => c.id === id);
+}
+
+/** Pill text: criterion text hard-capped at 20 chars + '...' when truncated. */
+function criterionPillText(text: string): string {
+  return text.length > CRITERION_PILL_TEXT_MAX
+    ? `${text.slice(0, CRITERION_PILL_TEXT_MAX)}...`
+    : text;
+}
+
+/** True for inclusion criteria (drives the emerald/rose pill tint). */
+function criterionIsInclusion(id: string): boolean {
+  return criteriaStore.inclusionCriteria.some((c) => c.id === id);
+}
+
+/**
+ * Add/remove a criterion UUID. Adding the first specific criterion clears the
+ * contradictory `criteriaEmpty` ("Z. No Criteria") sentinel.
+ */
+function toggleCriterion(id: string): void {
+  const updated = props.filter.criteria.includes(id)
+    ? props.filter.criteria.filter((c) => c !== id)
+    : [...props.filter.criteria, id];
+  updateField('criteria', updated);
+  if (updated.length > 0 && props.filter.criteriaEmpty) {
+    updateField('criteriaEmpty', false);
+  }
+}
+
+/**
+ * Toggle "X. No Exclusion Criteria" (empty matched-exclusion array, inclusion
+ * column irrelevant; Rejected tab + X = PRISMA "records generally excluded").
+ * Exclusive with "Z. No Criteria": Z implies X, so keeping both is redundant.
+ */
+function toggleExclusionCriteriaEmpty(): void {
+  const next = !props.filter.exclusionCriteriaEmpty;
+  updateField('exclusionCriteriaEmpty', next);
+  if (next && props.filter.criteriaEmpty) {
+    updateField('criteriaEmpty', false);
+  }
+}
+
+/** Toggle "Y. Unknown Criteria"; exclusive with "Z. No Criteria". */
+function toggleCriteriaUnknown(): void {
+  const next = !props.filter.criteriaUnknown;
+  updateField('criteriaUnknown', next);
+  if (next && props.filter.criteriaEmpty) {
+    updateField('criteriaEmpty', false);
+  }
+}
+
+/**
+ * Toggle "Z. No Criteria". Inherently exclusive: an article with no criteria
+ * cannot match specific/unknown ones, so enabling it clears the others
+ * (including X, which Z would subsume).
+ */
+function toggleCriteriaEmpty(): void {
+  const next = !props.filter.criteriaEmpty;
+  if (next) {
+    if (props.filter.criteria.length > 0) updateField('criteria', []);
+    if (props.filter.criteriaUnknown) updateField('criteriaUnknown', false);
+    if (props.filter.exclusionCriteriaEmpty) updateField('exclusionCriteriaEmpty', false);
+  }
+  updateField('criteriaEmpty', next);
+}
+
+const criterionInputValue = ref('');
+
+/** Combobox option ids for the sentinel markers (never valid criterion UUIDs). */
+const CRITERIA_EXCLUSION_EMPTY_ID = '__x_exclusion_empty__';
+const CRITERIA_UNKNOWN_ID = '__y_unknown__';
+const CRITERIA_EMPTY_ID = '__z_empty__';
+
+const CRITERIA_EXCLUSION_EMPTY_LABEL = 'X. No Exclusion Criteria';
+const CRITERIA_UNKNOWN_LABEL = 'Y. Unknown Criteria';
+const CRITERIA_EMPTY_LABEL = 'Z. No Criteria';
+
+/**
+ * Combobox options: inactive criteria (full text label + global number badge)
+ * with the three sentinel markers injected at the END of the list (X, Y, Z).
+ * Already-active entries are hidden, mirroring the tags/labels combobox behavior.
+ */
+const availableCriteriaOptions = computed((): SuggestOption[] => [
+  ...criteriaStore.criteria
+    .filter((c) => !props.filter.criteria.includes(c.id))
+    .map((c) => ({
+      id: c.id,
+      label: c.text,
+      badge: String(criteriaStore.criterionIndexMap.get(c.id) ?? '-'),
+    })),
+  ...(props.filter.exclusionCriteriaEmpty
+    ? []
+    : [{ id: CRITERIA_EXCLUSION_EMPTY_ID, label: CRITERIA_EXCLUSION_EMPTY_LABEL }]),
+  ...(props.filter.criteriaUnknown
+    ? []
+    : [{ id: CRITERIA_UNKNOWN_ID, label: CRITERIA_UNKNOWN_LABEL }]),
+  ...(props.filter.criteriaEmpty ? [] : [{ id: CRITERIA_EMPTY_ID, label: CRITERIA_EMPTY_LABEL }]),
+]);
+
+/**
+ * Combobox select handler: the `SuggestOption` payload carries either a
+ * criterion UUID or one of the sentinel ids (routed to the flag toggles -
+ * sentinels are always inactive when selectable, so the toggle turns them on).
+ */
+function onSelectCriterion(_name: string, option?: SuggestOption): void {
+  if (!option) return;
+  if (option.id === CRITERIA_EXCLUSION_EMPTY_ID) {
+    toggleExclusionCriteriaEmpty();
+    return;
+  }
+  if (option.id === CRITERIA_UNKNOWN_ID) {
+    toggleCriteriaUnknown();
+    return;
+  }
+  if (option.id === CRITERIA_EMPTY_ID) {
+    toggleCriteriaEmpty();
+    return;
+  }
+  toggleCriterion(option.id);
+}
+
+/** Remove the X sentinel pill (its "x" button). */
+function removeExclusionCriteriaEmpty(): void {
+  updateField('exclusionCriteriaEmpty', false);
+}
+
+/** Remove the Y sentinel pill (its "x" button). */
+function removeCriteriaUnknown(): void {
+  updateField('criteriaUnknown', false);
+}
+
+/** Remove the Z sentinel pill (its "x" button). */
+function removeCriteriaEmpty(): void {
+  updateField('criteriaEmpty', false);
 }
 
 const showAuthorDropdown = ref(false);
@@ -373,8 +519,119 @@ const matchedAuthors = computed(() => {
           </label>
         </div>
       </div>
+
+      <!-- Match Criteria: 6th metadata cell; sits right of DOI on the same row
+           (md/lg viewports) and stacks below it on narrow ones. Mirrors the
+           Tags/Labels pills + combobox pattern, plus three sentinel markers. -->
+      <div class="min-w-0">
+        <label class="block text-label-caps text-slate-500 uppercase mb-2">Match Criteria</label>
+        <!-- Active removable pills (all with an "x" on the right, like
+             Tags/Labels): criterion pills show the `N.` number badge (emerald
+             inclusion / rose exclusion) + text capped at 20 chars; the X/Y/Z
+             sentinel pills appear while their flag is on (dashed = special
+             marker, not a criterion). Full text in the title tooltips. -->
+        <div
+          v-if="
+            filter.criteria.length > 0 ||
+            filter.criteriaUnknown ||
+            filter.criteriaEmpty ||
+            filter.exclusionCriteriaEmpty
+          "
+          class="flex flex-wrap gap-1.5 mb-2 max-h-24 overflow-y-auto"
+        >
+          <span
+            v-for="id in filter.criteria"
+            :key="`crit-${id}`"
+            class="afp-crit-pill inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border select-none"
+            :class="
+              criterionIsInclusion(id)
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-rose-50 border-rose-200 text-rose-800'
+            "
+            :title="criterionById(id)?.text ?? id"
+          >
+            <span
+              class="font-bold rounded px-1 leading-tight"
+              :class="
+                criterionIsInclusion(id)
+                  ? 'text-emerald-700 bg-emerald-100'
+                  : 'text-rose-700 bg-rose-100'
+              "
+              >{{ criteriaStore.criterionIndexMap.get(id) ?? '-' }}</span
+            >
+            <span class="truncate">{{ criterionPillText(criterionById(id)?.text ?? id) }}</span>
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              :title="`Remove criterion ${criteriaStore.criterionIndexMap.get(id) ?? id}`"
+              @click="toggleCriterion(id)"
+            >
+              ×
+            </button>
+          </span>
+          <!-- X sentinel pill: empty matched-exclusion array (PRISMA
+               "records generally excluded" on the Rejected tab). -->
+          <span
+            v-if="filter.exclusionCriteriaEmpty"
+            class="afp-sentinel afp-sentinel--x inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border border-dashed border-indigo-300 bg-indigo-50 text-indigo-800 select-none"
+            title="Articles with no matched exclusion criteria (with the Rejected tab: PRISMA 'records generally excluded')"
+          >
+            <span class="font-bold">X.</span> No Exclusion Criteria
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              title="Remove X. No Exclusion Criteria"
+              @click="removeExclusionCriteriaEmpty"
+            >
+              ×
+            </button>
+          </span>
+          <!-- Y sentinel pill: deleted-criterion ghosts. -->
+          <span
+            v-if="filter.criteriaUnknown"
+            class="afp-sentinel afp-sentinel--y inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border border-dashed border-indigo-300 bg-indigo-50 text-indigo-800 select-none"
+            title="Articles whose matched criteria include since-deleted criteria"
+          >
+            <span class="font-bold">Y.</span> Unknown Criteria
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              title="Remove Y. Unknown Criteria"
+              @click="removeCriteriaUnknown"
+            >
+              ×
+            </button>
+          </span>
+          <!-- Z sentinel pill: no criteria assigned. -->
+          <span
+            v-if="filter.criteriaEmpty"
+            class="afp-sentinel afp-sentinel--z inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium border border-dashed border-indigo-300 bg-indigo-50 text-indigo-800 select-none"
+            title="Articles with no criteria currently assigned"
+          >
+            <span class="font-bold">Z.</span> No Criteria
+            <button
+              type="button"
+              class="flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-black/10 text-[10px] leading-none transition-colors"
+              title="Remove Z. No Criteria"
+              @click="removeCriteriaEmpty"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+        <!-- Search-and-add combobox (dropdown has its own max-h-40 scroll).
+             The X/Y/Z sentinels sit at the END of the dropdown list. -->
+        <SuggestInput
+          v-if="availableCriteriaOptions.length > 0"
+          v-model="criterionInputValue"
+          :options="availableCriteriaOptions"
+          placeholder="Search criteria to add..."
+          @select="onSelectCriterion"
+        />
+        <span v-else class="text-[11px] text-slate-400 italic">No criteria available</span>
+      </div>
     </div>
-    <!-- /3-column metadata grid (Title · Author · Year · Journal · DOI) -->
+    <!-- /3-column metadata grid (Title · Author · Year · Journal · DOI · Match Criteria) -->
 
     <!-- Tags + Labels: dedicated 2-column grid so they always sit side-by-side
          on the same level, regardless of how the other 5 fields wrap above. -->

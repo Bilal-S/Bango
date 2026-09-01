@@ -54,6 +54,8 @@ export function useArticleSearch() {
   const showDetail = ref(false);
   const returnToArticleId = ref<string | null>(null);
   const returnToReferencePaperId = ref<string | null>(null);
+  /** True match count for the active filtered query (0 when unfiltered). */
+  const filteredTotal = ref(0);
 
   // Multi-select (extracted composable)
   const {
@@ -100,7 +102,20 @@ export function useArticleSearch() {
     loading.value = true;
     error.value = null;
     try {
-      articles.value = await tauriCommand<Article[]>('query_articles', { query });
+      if (isQueryFiltered(query)) {
+        // Filtered: fetch the page + the TRUE match count in parallel so the
+        // pager and the "N article(s) found" notice reflect the full result
+        // set, not just the current page (`query.limit` caps the list).
+        const [results, total] = await Promise.all([
+          tauriCommand<Article[]>('query_articles', { query }),
+          tauriCommand<number>('count_query_articles', { query }),
+        ]);
+        articles.value = results;
+        filteredTotal.value = total;
+      } else {
+        filteredTotal.value = 0;
+        articles.value = await tauriCommand<Article[]>('query_articles', { query });
+      }
       await fetchCounts();
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : String(e);
@@ -135,6 +150,7 @@ export function useArticleSearch() {
     search,
     isFiltered,
     activeTotalCount,
+    filteredTotal,
   });
 
   // ── Detail panel + prev/next navigation (extracted composable) ──────
@@ -297,6 +313,7 @@ export function useArticleSearch() {
     activeTotalCount,
     isFiltered,
     resultCount,
+    filteredTotal,
     rangeStart,
     rangeEnd,
     changePageSize,

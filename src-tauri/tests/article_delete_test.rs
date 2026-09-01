@@ -372,6 +372,10 @@ fn delete_reflected_in_query_articles() {
         excluded_labels: vec![],
         doi: None,
         doi_empty: false,
+        matched_criteria: vec![],
+        criteria_unknown: false,
+        criteria_empty: false,
+        exclusion_criteria_empty: false,
         limit: None,
         offset: None,
     };

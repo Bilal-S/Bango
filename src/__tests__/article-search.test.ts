@@ -143,10 +143,19 @@ const sampleCounts: ArticleCounts = {
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────
-/** Configure tauriCommand mock to return articles + counts on search. */
-function mockSearchResults(articles = sampleArticles, counts = sampleCounts) {
+/**
+ * Configure tauriCommand mock to return articles + counts on search.
+ * `filteredTotal` seeds the `count_query_articles` response (defaults to the
+ * article-array length; only filtered searches invoke that command).
+ */
+function mockSearchResults(
+  articles = sampleArticles,
+  counts = sampleCounts,
+  filteredTotal?: number
+) {
   vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
     if (cmd === 'query_articles') return Promise.resolve(articles);
+    if (cmd === 'count_query_articles') return Promise.resolve(filteredTotal ?? articles.length);
     if (cmd === 'get_article_counts') return Promise.resolve(counts);
     return Promise.resolve(undefined);
   });
@@ -402,6 +411,50 @@ describe('filters', () => {
     });
   });
 
+  it('applyFilters forwards matched criteria + sentinels to the query', async () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.filter.criteria = ['c1', 'c2'];
+    s.filter.criteriaUnknown = true;
+    s.filter.exclusionCriteriaEmpty = true;
+    s.applyFilters();
+    await vi.waitFor(() => {
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({
+            matchedCriteria: ['c1', 'c2'],
+            criteriaUnknown: true,
+            criteriaEmpty: false,
+            exclusionCriteriaEmpty: true,
+          }),
+        })
+      );
+    });
+  });
+
+  it('isFiltered is true when only a criteria sentinel is set', async () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    expect(s.isFiltered.value).toBe(false);
+    s.filter.criteriaEmpty = true;
+    s.applyFilters();
+    await vi.waitFor(() => {
+      expect(s.isFiltered.value).toBe(true);
+    });
+  });
+
+  it('isFiltered is true when only the X sentinel is set', async () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    expect(s.isFiltered.value).toBe(false);
+    s.filter.exclusionCriteriaEmpty = true;
+    s.applyFilters();
+    await vi.waitFor(() => {
+      expect(s.isFiltered.value).toBe(true);
+    });
+  });
+
   it('isFiltered is true when only excludedTags are set', async () => {
     mockSearchResults();
     const s = useArticleSearch();
@@ -431,11 +484,19 @@ describe('filters', () => {
     s.filter.tags = ['ml'];
     s.filter.excludedTags = ['old'];
     s.filter.excludedLabels = ['dropped'];
+    s.filter.criteria = ['c1'];
+    s.filter.criteriaUnknown = true;
+    s.filter.criteriaEmpty = true;
+    s.filter.exclusionCriteriaEmpty = true;
     s.clearFilters();
     expect(s.filter.yearFrom).toBeNull();
     expect(s.filter.tags).toEqual([]);
     expect(s.filter.excludedTags).toEqual([]);
     expect(s.filter.excludedLabels).toEqual([]);
+    expect(s.filter.criteria).toEqual([]);
+    expect(s.filter.criteriaUnknown).toBe(false);
+    expect(s.filter.criteriaEmpty).toBe(false);
+    expect(s.filter.exclusionCriteriaEmpty).toBe(false);
   });
 
   it('clearFilters resets query params to defaults', async () => {
@@ -547,20 +608,69 @@ describe('pagination', () => {
     expect(totalPages.value).toBe(3);
   });
 
-  // ── Filtered pagination (regression: page count must track the filtered
-  //    result length, NOT the unfiltered tab total) ──────────────────
-  it('totalPages is 1 when filtered even if activeTotalCount is larger', async () => {
-    // Tab total is 25, but the filtered query returns only 2 articles.
+  // ── Filtered pagination (true totals from count_query_articles; the page
+  //    itself stays capped at query.limit/pageSize) ────────────────────
+  it('filtered resultCount/totalPages track the count_query_articles total', async () => {
+    // Page returns only 2 rows (pageSize caps the list), but the true match
+    // count reported by count_query_articles is 25.
     mockArticlesStore.byStatus.working = 25;
     const filteredArticles = [sampleArticles[0]!, sampleArticles[1]!];
-    mockSearchResults(filteredArticles, { ...sampleCounts, working: 25 });
+    mockSearchResults(filteredArticles, { ...sampleCounts, working: 25 }, 25);
     const s = useArticleSearch();
     s.filter.tags = ['some-tag'];
     s.applyFilters();
     await vi.waitFor(() => expect(s.isFiltered.value).toBe(true));
-    // resultCount = filteredArticles.length = 2; ceil(2/10) = 1 page.
-    expect(s.resultCount.value).toBe(2);
-    expect(s.totalPages.value).toBe(1);
+    await vi.waitFor(() => expect(s.resultCount.value).toBe(25));
+    // ceil(25 / 10) = 3 pages - the pager can now reach every match.
+    expect(s.totalPages.value).toBe(3);
+    expect(s.canGoNext.value).toBe(true);
+  });
+
+  it('filtered search calls count_query_articles with the same query', async () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.filter.criteriaEmpty = true;
+    s.applyFilters();
+    await vi.waitFor(() => {
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'count_query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ criteriaEmpty: true }),
+        })
+      );
+    });
+  });
+
+  it('unfiltered search never calls count_query_articles', async () => {
+    mockSearchResults();
+    const { search } = useArticleSearch();
+    await search();
+    const countCalls = vi
+      .mocked(tauriCommand)
+      .mock.calls.filter(([cmd]) => cmd === 'count_query_articles');
+    expect(countCalls).toHaveLength(0);
+  });
+
+  it('goToPage while filtered offsets into the full result set', async () => {
+    mockArticlesStore.byStatus.working = 25;
+    mockSearchResults([sampleArticles[0]!], { ...sampleCounts, working: 25 }, 25);
+    const s = useArticleSearch();
+    s.filter.tags = ['some-tag'];
+    s.applyFilters();
+    await vi.waitFor(() => expect(s.totalPages.value).toBe(3));
+    s.goToPage(2);
+    expect(s.currentPage.value).toBe(2);
+    await vi.waitFor(() => {
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ offset: 10 }),
+        })
+      );
+    });
+    // Range display uses the true total: page 2 shows 11-20 of 25.
+    await vi.waitFor(() => expect(s.rangeStart.value).toBe(11));
+    expect(s.rangeEnd.value).toBe(20);
   });
 
   it('selectedGlobalIndex is the 1-based position within the filtered page', async () => {
@@ -569,6 +679,7 @@ describe('pagination', () => {
     const filteredArticles = [sampleArticles[0]!, sampleArticles[1]!];
     vi.mocked(tauriCommand).mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === 'query_articles') return Promise.resolve(filteredArticles);
+      if (cmd === 'count_query_articles') return Promise.resolve(filteredArticles.length);
       if (cmd === 'get_article_counts') return Promise.resolve({ ...sampleCounts, working: 25 });
       if (cmd === 'get_article') {
         const id = args?.id as string;

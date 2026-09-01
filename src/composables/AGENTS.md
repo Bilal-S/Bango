@@ -64,6 +64,13 @@ views, LLM config, wiki, dashboard, saved reports, and the startup upgrade.
 The root orchestrator's returned-object shape is a frozen contract - change
 internals only, never the shape.
 
+Filtered searches (`isQueryFiltered(query)` true) run `query_articles` and
+`count_query_articles` in parallel; `filteredTotal` holds the true match count
+and `use-article-pagination` derives `resultCount`/`totalPages`/range display
+from it (unfiltered keeps using the store's per-status totals). The page itself
+stays capped at the toolbar page size - the pager reaches the remaining
+matches.
+
 ### `use-article-list-keyboard.ts`
 
 Articles-view arrow-key shortcuts + their keep-alive listener lifecycle.

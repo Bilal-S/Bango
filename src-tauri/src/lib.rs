@@ -183,6 +183,7 @@ pub fn run() {
             commands::labels::suggest_labels,
             commands::labels::merge_label,
             commands::articles::query_articles,
+            commands::articles::count_query_articles,
             commands::articles::get_article_counts,
             commands::articles::get_article,
             commands::articles::delete_article,

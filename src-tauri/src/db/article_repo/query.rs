@@ -133,16 +133,40 @@ pub struct ArticleQuery {
     /// Mutually exclusive with `doi`; this wins if both are set.
     #[serde(default)]
     pub doi_empty: bool,
+    /// Criterion UUIDs the article must have matched. Each entry AND-combines
+    /// like `tags`/`labels`; a UUID matches if present in EITHER
+    /// `matched_inclusion_criteria` OR `matched_exclusion_criteria` (the panel
+    /// lists criteria in one global-numbered sequence).
+    #[serde(default)]
+    pub matched_criteria: Vec<String>,
+    /// When true, restrict to articles referencing >= 1 matched criterion UUID
+    /// that no longer exists in `criteria` (deleted-criterion ghosts).
+    #[serde(default)]
+    pub criteria_unknown: bool,
+    /// When true, restrict to articles whose matched-criteria arrays are both
+    /// NULL or `'[]'` (no criteria assigned); literal comparison like `doi_empty`.
+    #[serde(default)]
+    pub criteria_empty: bool,
+    /// When true, restrict to articles whose `matched_exclusion_criteria` is
+    /// NULL or `'[]'` - the PRISMA "records generally excluded" set when
+    /// combined with `status = "rejected"` (the inclusion array is irrelevant).
+    #[serde(default)]
+    pub exclusion_criteria_empty: bool,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
 
-pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
+/// Shared WHERE builder behind `query_articles` + `count_query_articles`:
+/// duplicate-scope base filter + every filter fragment with positional params.
+/// Single source of truth so the count can never drift from the list query.
+fn build_article_query_filters(
+    query: &ArticleQuery,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     let is_duplicate_view = query.status.as_deref() == Some("duplicate");
     let is_all_view = query.status.is_none();
     let base_filter =
         if is_duplicate_view || is_all_view { " WHERE 1=1" } else { " WHERE duplicate_of IS NULL" };
-    let mut sql = format!("{ARTICLE_SELECT_BASE}{base_filter}");
+    let mut sql = String::from(base_filter);
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ref status) = query.status {
@@ -241,6 +265,68 @@ pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Art
         ));
         param_values.push(Box::new(label.to_lowercase()));
     }
+
+    // Matched-criteria filters. Matched criteria live as JSON UUID arrays on
+    // the article row itself (no junction table), so the UUID and unknown
+    // branches correlate `json_each` over the row's columns; their
+    // `json_valid` CASE guards keep malformed/legacy JSON (or NULL) from
+    // erroring - such rows decode to empty arrays in `row_to_article`, so the
+    // SQL must treat them the same. `criteria_empty` instead uses the
+    // `doi_empty`-style literal comparison (`col IS NULL OR col = '[]'`) on
+    // both arrays: the app only ever writes canonical JSON ('[]' or a UUID
+    // array), so exact strings are sufficient and can never crash on
+    // malformed values.
+    for criterion in &query.matched_criteria {
+        let idx = param_values.len() + 1;
+        sql.push_str(&format!(
+            " AND (EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(matched_inclusion_criteria) THEN matched_inclusion_criteria ELSE '[]' END) WHERE value = ?{idx}) \
+             OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(matched_exclusion_criteria) THEN matched_exclusion_criteria ELSE '[]' END) WHERE value = ?{idx}))"
+        ));
+        param_values.push(Box::new(criterion.clone()));
+    }
+
+    if query.criteria_unknown {
+        sql.push_str(
+            " AND (EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(matched_inclusion_criteria) THEN matched_inclusion_criteria ELSE '[]' END) WHERE value NOT IN (SELECT id FROM criteria)) \
+             OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(matched_exclusion_criteria) THEN matched_exclusion_criteria ELSE '[]' END) WHERE value NOT IN (SELECT id FROM criteria)))",
+        );
+    }
+
+    if query.criteria_empty {
+        sql.push_str(
+            " AND (matched_inclusion_criteria IS NULL OR matched_inclusion_criteria = '[]') \
+             AND (matched_exclusion_criteria IS NULL OR matched_exclusion_criteria = '[]')",
+        );
+    }
+
+    // "X. No Exclusion Criteria": exclusion column only, literal comparison.
+    // Byte-identical predicate to `prisma::data::records_excluded_general`, so
+    // Rejected tab + this flag reproduces that PRISMA count exactly (malformed
+    // JSON text is neither NULL nor '[]' and correctly does not match).
+    if query.exclusion_criteria_empty {
+        sql.push_str(
+            " AND (matched_exclusion_criteria IS NULL OR matched_exclusion_criteria = '[]')",
+        );
+    }
+
+    (sql, param_values)
+}
+
+/// Count the articles matching the same filters as [`query_articles`]
+/// (sort/limit/offset are ignored by construction). Powers the article list's
+/// true filtered result count + page count.
+pub fn count_query_articles(conn: &Connection, query: &ArticleQuery) -> Result<i64, AppError> {
+    let (filter_sql, param_values) = build_article_query_filters(query);
+    let sql = format!("SELECT COUNT(*) FROM articles{filter_sql}");
+    let params: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|p| p.as_ref()).collect();
+    let count: i64 = conn.query_row(&sql, params.as_slice(), |row| row.get(0))?;
+    Ok(count)
+}
+
+pub fn query_articles(conn: &Connection, query: &ArticleQuery) -> Result<Vec<Article>, AppError> {
+    let (filter_sql, mut param_values) = build_article_query_filters(query);
+    let mut sql = format!("{ARTICLE_SELECT_BASE}{filter_sql}");
 
     let sort_by = query.sort_by.as_deref().unwrap_or("imported_at");
     let sort_dir = match query.sort_dir.as_deref() {

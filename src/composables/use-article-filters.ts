@@ -20,6 +20,14 @@ export interface ArticleFilter {
   excludedTags: string[];
   /** Labels the article must NOT have. */
   excludedLabels: string[];
+  /** Matched criterion UUIDs the article must have (inclusion OR exclusion arrays). */
+  criteria: string[];
+  /** Restrict to articles referencing deleted (unknown) criterion UUIDs. */
+  criteriaUnknown: boolean;
+  /** Restrict to articles with no matched criteria at all. */
+  criteriaEmpty: boolean;
+  /** Restrict to articles with no matched exclusion criteria (PRISMA "generally excluded"). */
+  exclusionCriteriaEmpty: boolean;
 }
 
 export interface ArticleQuery {
@@ -41,6 +49,14 @@ export interface ArticleQuery {
   labels: string[];
   excludedTags: string[];
   excludedLabels: string[];
+  /** Matched criterion UUIDs the article must have (AND, across both arrays). */
+  matchedCriteria: string[];
+  /** Restrict to articles referencing deleted (unknown) criterion UUIDs. */
+  criteriaUnknown: boolean;
+  /** Restrict to articles with no matched criteria at all. */
+  criteriaEmpty: boolean;
+  /** Restrict to articles with an empty matched-exclusion array. */
+  exclusionCriteriaEmpty: boolean;
   limit: number;
   offset: number;
 }
@@ -86,6 +102,10 @@ export function createDefaultFilter(): ArticleFilter {
     labels: [],
     excludedTags: [],
     excludedLabels: [],
+    criteria: [],
+    criteriaUnknown: false,
+    criteriaEmpty: false,
+    exclusionCriteriaEmpty: false,
   };
 }
 
@@ -107,6 +127,10 @@ export function createDefaultQuery(defaultTab: StatusTab): ArticleQuery {
     labels: [],
     excludedTags: [],
     excludedLabels: [],
+    matchedCriteria: [],
+    criteriaUnknown: false,
+    criteriaEmpty: false,
+    exclusionCriteriaEmpty: false,
     limit: 10,
     offset: 0,
   };
@@ -135,6 +159,10 @@ export function resetFilterFields(
   filter.labels = [];
   filter.excludedTags = [];
   filter.excludedLabels = [];
+  filter.criteria = [];
+  filter.criteriaUnknown = false;
+  filter.criteriaEmpty = false;
+  filter.exclusionCriteriaEmpty = false;
   query.search = null;
   query.yearFrom = null;
   query.yearTo = null;
@@ -146,6 +174,10 @@ export function resetFilterFields(
   query.labels = [];
   query.excludedTags = [];
   query.excludedLabels = [];
+  query.matchedCriteria = [];
+  query.criteriaUnknown = false;
+  query.criteriaEmpty = false;
+  query.exclusionCriteriaEmpty = false;
   searchText.value = '';
   resetPage();
 }
@@ -165,6 +197,10 @@ export function isQueryFiltered(query: ArticleQuery): boolean {
     query.labels.length > 0 ||
     query.excludedTags.length > 0 ||
     query.excludedLabels.length > 0 ||
+    query.matchedCriteria.length > 0 ||
+    query.criteriaUnknown ||
+    query.criteriaEmpty ||
+    query.exclusionCriteriaEmpty ||
     query.yearFrom !== null ||
     query.yearTo !== null
   );
@@ -254,6 +290,10 @@ export function useArticleFilters(deps: ArticleFiltersDeps) {
     query.labels = [...filter.labels];
     query.excludedTags = [...filter.excludedTags];
     query.excludedLabels = [...filter.excludedLabels];
+    query.matchedCriteria = [...filter.criteria];
+    query.criteriaUnknown = filter.criteriaUnknown;
+    query.criteriaEmpty = filter.criteriaEmpty;
+    query.exclusionCriteriaEmpty = filter.exclusionCriteriaEmpty;
     resetPage();
     return search().then(autoSelectSingleResult);
   }

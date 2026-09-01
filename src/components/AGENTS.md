@@ -73,6 +73,29 @@ the right edge. Props: `modelValue`, `placeholder`, `inputClass`, `disabled`,
 "x" is clicked), `enter`, `input`/`focus`/`blur`. The canonical place for the
 clearable-input pattern going forward.
 
+### `article-filter-panel.vue`
+
+Article-list filter panel. Metadata fields (Title, Author, Year, Journal, DOI)
+live in a responsive `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` grid; the
+**Match Criteria** cell is the 6th cell so it sits right of DOI on md/lg.
+Match Criteria mirrors the Tags/Labels pills + `SuggestInput` combobox pattern
+but reads `useCriteriaStore()` (warmed at bootstrap) and filters by criterion
+UUID (`filter.criteria` -> `query.matchedCriteria`; backend contract in
+`src-tauri/src/db/AGENTS.md` §ArticleQuery). Pill labels show the global
+criterion number badge (emerald inclusion / rose exclusion) + criterion text
+hard-capped at 20 chars + `...` (`CRITERION_PILL_TEXT_MAX`); full text in the
+tooltip. Three sentinel markers are injected at the END of the combobox option
+list (ids `__x_exclusion_empty__` / `__y_unknown__` / `__z_empty__`):
+`X. No Exclusion Criteria` (`exclusionCriteriaEmpty`; empty matched-exclusion
+array, inclusion irrelevant - Rejected tab + X reproduces the PRISMA
+"records generally excluded" count), `Y. Unknown Criteria`
+(`criteriaUnknown`), and `Z. No Criteria` (`criteriaEmpty`). When active they
+render as removable pills in the pills area (dashed border + `x`, like
+Tags/Labels). Z is mutually exclusive with specific criteria, Y, and X at the
+UI layer (selecting it clears the others; adding a criterion or enabling X/Y
+clears Z). X may AND-combine with specific criteria and Y. The
+combobox uses `SuggestInput` `options` mode (`{ id, label, badge? }`).
+
 ### `chip-base.vue`
 
 Shared chip scaffold used by `tag-chip.vue` (`variant="filled"`, solid

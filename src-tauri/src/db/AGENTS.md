@@ -144,6 +144,34 @@ tag/label). All four are `#[serde(default)]`. Comparison is `LOWER()`-based
 Option<String>` (case-insensitive partial match) and `doi_empty: bool` (when
 true, emits `doi IS NULL OR doi = ''`). The two are mutually exclusive:
 `doi_empty` wins if both are set.
+It also carries four matched-criteria filter fields (all `#[serde(default)]):
+`matched_criteria: Vec<String>` (criterion UUIDs; each AND-combines like the
+tag/label vectors, matching if present in EITHER `matched_inclusion_criteria`
+OR `matched_exclusion_criteria` via correlated `json_each`), `criteria_unknown:
+bool` (>= 1 matched UUID missing from `criteria` - deleted-criterion ghosts),
+`criteria_empty: bool` ("Z. No Criteria"; emits the `doi_empty`-style
+literal comparison `(matched_inclusion_criteria IS NULL OR = '[]') AND
+(matched_exclusion_criteria IS NULL OR = '[]')` on both arrays), and
+`exclusion_criteria_empty: bool` ("X. No Exclusion Criteria"; the exclusion
+column alone: `matched_exclusion_criteria IS NULL OR = '[]'` - byte-identical
+to `prisma::data`'s `records_excluded_general` predicate, so Rejected tab +
+this flag reproduces that PRISMA count exactly; the inclusion column is
+irrelevant). The
+`json_each` branches wrap their calls in a `json_valid` CASE guard so
+malformed/NULL JSON never errors (matches `row_to_article`'s
+decode-to-empty fallback); `criteria_empty` and `exclusion_criteria_empty`
+use exact-string comparisons that are crash-proof by construction (malformed
+values simply do not match - mirroring the PRISMA literal). Tested in
+`tests/article_query_test.rs`; the PRISMA parity is pinned in
+`tests/prisma_test.rs`
+(`test_rejected_plus_exclusion_criteria_empty_matches_prisma_general_excluded`).
+`count_query_articles(conn, &ArticleQuery) -> i64` counts rows matching the
+SAME filters (both share the private `build_article_query_filters` helper, so
+they can never drift; sort/limit/offset are ignored). It backs the
+`count_query_articles` Tauri command, which the frontend article list calls
+alongside `query_articles` whenever `isQueryFiltered` is true so the result
+count, pager, and range display reflect the full match set instead of the
+current `limit`-capped page.
 
 #### Bulk tag/label add + remove contract
 
@@ -345,7 +373,9 @@ tests + `tests/migration_recovery_test.rs`.
   `tests/biblio_needs_refresh_test.rs`, `tests/auto_translate_test.rs`,
   `tests/journal_repo_test.rs`, `tests/chunk_retrieval_test.rs`,
   `tests/embedding_storage_test.rs`, `tests/project_name_test.rs`,
-  `tests/audit_coalesce_test.rs`, `tests/article_repo_coverage_test.rs`.
+  `tests/audit_coalesce_test.rs`, `tests/article_repo_coverage_test.rs`,
+  `tests/prisma_test.rs` (incl. the `exclusion_criteria_empty` PRISMA parity
+  test).
 
 ## Child DOX Index
 

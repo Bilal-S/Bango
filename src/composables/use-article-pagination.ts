@@ -15,31 +15,28 @@ export interface PaginationDeps {
   activeStatusTab: Ref<string>;
   /** Called whenever the page changes (triggers a backend query). */
   search: () => Promise<void>;
-  /** Whether the current view is filtered (affects rangeStart/rangeEnd). */
+  /** Whether the current view is filtered (affects the total source). */
   isFiltered: ComputedRef<boolean>;
-  /** Total count for the active tab. */
+  /** Total count for the active tab (unfiltered mode). */
   activeTotalCount: ComputedRef<number>;
+  /** True match count from `count_query_articles` (filtered mode). */
+  filteredTotal: Ref<number>;
 }
 
 export function useArticlePagination(deps: PaginationDeps) {
-  const { articles, selectedArticle, query, search, isFiltered, activeTotalCount } = deps;
+  const { articles, selectedArticle, query, search, isFiltered, activeTotalCount, filteredTotal } =
+    deps;
 
   const pageSize = ref(10);
   const currentPage = ref(1);
 
-  /** Display count: filtered result length when filtering, tab total otherwise. */
+  /** Display count: true filtered match total when filtering, tab total otherwise. */
   const resultCount = computed(() => {
-    if (isFiltered.value) return articles.value.length;
+    if (isFiltered.value) return filteredTotal.value;
     return activeTotalCount.value;
   });
 
-  const totalPages = computed(() => {
-    /* When filtered, the backend returns only matching articles (capped at
-    `pageSize`), so page count is driven by filtered length, NOT unfiltered
-    total. Using `activeTotalCount` would over-report pages. */
-    const total = isFiltered.value ? resultCount.value : activeTotalCount.value;
-    return Math.max(1, Math.ceil(total / pageSize.value));
-  });
+  const totalPages = computed(() => Math.max(1, Math.ceil(resultCount.value / pageSize.value)));
 
   const canGoPrev = computed(() => currentPage.value > 1);
   const canGoNext = computed(() => currentPage.value < totalPages.value);
@@ -53,23 +50,18 @@ export function useArticlePagination(deps: PaginationDeps) {
   /** 1-based global position of the selected article across all pages. */
   const selectedGlobalIndex = computed(() => {
     if (selectedIndex.value < 0) return 0;
-    /* When filtered, the loaded page IS the entire result set (no offset
-    math); position is 1-based within it. Unfiltered keeps multi-page math. */
-    if (isFiltered.value) return selectedIndex.value + 1;
     return (currentPage.value - 1) * pageSize.value + selectedIndex.value + 1;
   });
 
   /** 1-based index of the first displayed article on the current page. */
   const rangeStart = computed(() => {
     if (resultCount.value === 0) return 0;
-    if (isFiltered.value) return 1;
     return (currentPage.value - 1) * pageSize.value + 1;
   });
 
   /** 1-based index of the last displayed article on the current page. */
   const rangeEnd = computed(() => {
-    if (isFiltered.value) return articles.value.length;
-    return Math.min(currentPage.value * pageSize.value, activeTotalCount.value);
+    return Math.min(currentPage.value * pageSize.value, resultCount.value);
   });
 
   function resetPage(): void {

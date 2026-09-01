@@ -4,6 +4,7 @@ import { setActivePinia, createPinia } from 'pinia';
 import ArticleFilterPanel from '@/components/article-filter-panel.vue';
 import { makeTagsStore, makeLabelsStore } from '../helpers/fixtures';
 import type { ArticleFilter } from '@/composables/use-article-search';
+import type { Criterion, SuggestOption } from '@/types';
 
 // ── Mock stores ─────────────────────────────────────────────────────
 const mockTagsStore = makeTagsStore({
@@ -20,12 +21,51 @@ const mockLabelsStore = makeLabelsStore({
   ],
 });
 
+const mockCriteria = [
+  {
+    id: 'c1',
+    criterionType: 'inclusion',
+    text: 'The Studies should not include animal subjects',
+    priority: 'critical',
+    createdAt: '2024-01-01T00:00:00Z',
+  },
+  {
+    id: 'c2',
+    criterionType: 'inclusion',
+    text: 'Published after 2010',
+    priority: 'standard',
+    createdAt: '2024-01-01T00:00:00Z',
+  },
+  {
+    id: 'c3',
+    criterionType: 'exclusion',
+    text: 'Not a human study',
+    priority: 'low',
+    createdAt: '2024-01-01T00:00:00Z',
+  },
+] as Criterion[];
+
+const mockCriteriaStore = {
+  criteria: mockCriteria,
+  inclusionCriteria: mockCriteria.filter((c) => c.criterionType === 'inclusion'),
+  exclusionCriteria: mockCriteria.filter((c) => c.criterionType === 'exclusion'),
+  criterionIndexMap: new Map([
+    ['c1', 1],
+    ['c2', 2],
+    ['c3', 3],
+  ]),
+};
+
 vi.mock('@/stores/tags', () => ({
   useTagsStore: vi.fn(() => mockTagsStore),
 }));
 
 vi.mock('@/stores/labels', () => ({
   useLabelsStore: vi.fn(() => mockLabelsStore),
+}));
+
+vi.mock('@/stores/criteria', () => ({
+  useCriteriaStore: vi.fn(() => mockCriteriaStore),
 }));
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -43,6 +83,10 @@ function makeFilter(overrides: Partial<ArticleFilter> = {}): ArticleFilter {
     labels: [],
     excludedTags: [],
     excludedLabels: [],
+    criteria: [],
+    criteriaUnknown: false,
+    criteriaEmpty: false,
+    exclusionCriteriaEmpty: false,
     ...overrides,
   };
 }
@@ -86,6 +130,20 @@ function applyEmittedUpdates(wrapper: ReturnType<typeof mountPanel>, filter: Art
   }
 }
 
+/**
+ * Find a stubbed SuggestInput by its placeholder. The panel renders three
+ * comboboxes (criteria in the metadata grid, then tags and labels in the
+ * 2-column grid below); DOM-order indexing is fragile, so target by placeholder.
+ * The `?? all[0]!` fallback keeps the inferred element type (the expect above
+ * already failed the test when nothing matched).
+ */
+function findSuggestByPlaceholder(wrapper: ReturnType<typeof mountPanel>, placeholder: string) {
+  const all = wrapper.findAllComponents({ name: 'SuggestInput' });
+  const found = all.find((c) => c.props('placeholder') === placeholder);
+  expect(found, `expected a SuggestInput with placeholder "${placeholder}"`).toBeTruthy();
+  return found ?? all[0]!;
+}
+
 describe('article-filter-panel.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -119,9 +177,8 @@ describe('article-filter-panel.vue', () => {
   it('emits update:filter to add a tag when selected from the combobox', async () => {
     const filter = makeFilter();
     const wrapper = mountPanel(filter);
-    // The SuggestInput is stubbed; find it and emit a select event.
-    const suggest = wrapper.findComponent({ name: 'SuggestInput' });
-    // The first SuggestInput is for tags (tags section comes before labels).
+    // The SuggestInput is stubbed; find the tags one and emit a select event.
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search tags to add...');
     await suggest.vm.$emit('select', 'nlp');
     const events = wrapper.emitted('update:filter');
     expect(events).toBeTruthy();
@@ -226,9 +283,8 @@ describe('article-filter-panel.vue', () => {
     const filter = makeFilter({ tags: ['machine-learning'] });
     const wrapper = mountPanel(filter);
     // The stubbed SuggestInput receives `suggestions` as a prop.
-    const suggests = wrapper.findAllComponents({ name: 'SuggestInput' });
-    // First SuggestInput = tags. The already-included tag should be absent.
-    const tagSuggestions = suggests[0]!.props('suggestions') as string[];
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search tags to add...');
+    const tagSuggestions = suggest.props('suggestions') as string[];
     expect(tagSuggestions).not.toContain('machine-learning');
     expect(tagSuggestions).toContain('nlp');
   });
@@ -236,9 +292,249 @@ describe('article-filter-panel.vue', () => {
   it('hides a tag from the combobox suggestions when it is already excluded', () => {
     const filter = makeFilter({ excludedTags: ['machine-learning'] });
     const wrapper = mountPanel(filter);
-    const suggests = wrapper.findAllComponents({ name: 'SuggestInput' });
-    const tagSuggestions = suggests[0]!.props('suggestions') as string[];
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search tags to add...');
+    const tagSuggestions = suggest.props('suggestions') as string[];
     expect(tagSuggestions).not.toContain('machine-learning');
+  });
+
+  // ── Match Criteria filter ──────────────────────────────────────────
+  it('renders the Match Criteria heading with the sentinels at the END of the combobox list', () => {
+    const wrapper = mountPanel();
+    expect(wrapper.text()).toContain('Match Criteria');
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    const options = suggest.props('options') as SuggestOption[];
+    // Criteria first (with number badges), then X, Y, Z - always last.
+    expect(options.map((o) => o.id)).toEqual([
+      'c1',
+      'c2',
+      'c3',
+      '__x_exclusion_empty__',
+      '__y_unknown__',
+      '__z_empty__',
+    ]);
+    expect(options[3]).toMatchObject({
+      id: '__x_exclusion_empty__',
+      label: 'X. No Exclusion Criteria',
+    });
+    expect(options[4]).toMatchObject({ id: '__y_unknown__', label: 'Y. Unknown Criteria' });
+    expect(options[5]).toMatchObject({ id: '__z_empty__', label: 'Z. No Criteria' });
+  });
+
+  it('renders an active criterion pill with the number badge and 20-char truncated text', () => {
+    const filter = makeFilter({ criteria: ['c1'] });
+    const wrapper = mountPanel(filter);
+    const pill = wrapper.find('.afp-crit-pill');
+    expect(pill.exists()).toBe(true);
+    expect(pill.text()).toContain('1');
+    expect(pill.text()).toContain('The Studies should n...');
+    // The untruncated tail must not render; the full text lives in the tooltip.
+    expect(pill.text()).not.toContain('animal subjects');
+    expect(pill.attributes('title')).toBe('The Studies should not include animal subjects');
+  });
+
+  it('leaves short criterion text untruncated', () => {
+    const filter = makeFilter({ criteria: ['c2'] });
+    const wrapper = mountPanel(filter);
+    const pill = wrapper.find('.afp-crit-pill');
+    expect(pill.text()).toContain('Published after 2010');
+    expect(pill.text()).not.toContain('...');
+  });
+
+  it('tints inclusion pills emerald and exclusion pills rose', () => {
+    const filter = makeFilter({ criteria: ['c1', 'c3'] });
+    const wrapper = mountPanel(filter);
+    const pills = wrapper.findAll('.afp-crit-pill');
+    expect(pills).toHaveLength(2);
+    expect(pills[0]!.classes()).toContain('bg-emerald-50');
+    expect(pills[1]!.classes()).toContain('bg-rose-50');
+  });
+
+  it('adds a criterion when selected from the combobox (option id carries the UUID)', async () => {
+    const filter = makeFilter();
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'Not a human study', {
+      id: 'c3',
+      label: 'Not a human study',
+      badge: '3',
+    });
+    applyEmittedUpdates(wrapper, filter);
+    expect(filter.criteria).toEqual(['c3']);
+  });
+
+  it('hides already-active criteria from the combobox options and numbers them via badges', () => {
+    const filter = makeFilter({ criteria: ['c1'] });
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    const options = suggest.props('options') as SuggestOption[];
+    expect(options.map((o) => o.id)).toEqual([
+      'c2',
+      'c3',
+      '__x_exclusion_empty__',
+      '__y_unknown__',
+      '__z_empty__',
+    ]);
+    expect(options[0]).toMatchObject({ label: 'Published after 2010', badge: '2' });
+  });
+
+  it('removes a criterion pill when the x button is clicked', async () => {
+    const filter = makeFilter({ criteria: ['c1', 'c2'] });
+    const wrapper = mountPanel(filter);
+    await wrapper.find('.afp-crit-pill button').trigger('click');
+    applyEmittedUpdates(wrapper, filter);
+    expect(filter.criteria).toEqual(['c2']);
+  });
+
+  it('selecting X from the combobox emits update:filter(exclusionCriteriaEmpty, true)', async () => {
+    const wrapper = mountPanel();
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'X. No Exclusion Criteria', {
+      id: '__x_exclusion_empty__',
+      label: 'X. No Exclusion Criteria',
+    });
+    expect(wrapper.emitted('update:filter')).toContainEqual(['exclusionCriteriaEmpty', true]);
+  });
+
+  it('selecting X while Z is active clears Z (mutually exclusive)', async () => {
+    const filter = makeFilter({ criteriaEmpty: true });
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'X. No Exclusion Criteria', {
+      id: '__x_exclusion_empty__',
+      label: 'X. No Exclusion Criteria',
+    });
+    applyEmittedUpdates(wrapper, filter);
+    expect(filter.exclusionCriteriaEmpty).toBe(true);
+    expect(filter.criteriaEmpty).toBe(false);
+  });
+
+  it('X combines with a specific criterion (AND, no mutual clearing)', async () => {
+    const filter = makeFilter({ exclusionCriteriaEmpty: true });
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'Published after 2010', {
+      id: 'c2',
+      label: 'Published after 2010',
+      badge: '2',
+    });
+    applyEmittedUpdates(wrapper, filter);
+    expect(filter.criteria).toEqual(['c2']);
+    expect(filter.exclusionCriteriaEmpty).toBe(true);
+  });
+
+  it('selecting Y from the combobox emits update:filter(criteriaUnknown, true)', async () => {
+    const wrapper = mountPanel();
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'Y. Unknown Criteria', {
+      id: '__y_unknown__',
+      label: 'Y. Unknown Criteria',
+    });
+    expect(wrapper.emitted('update:filter')).toContainEqual(['criteriaUnknown', true]);
+  });
+
+  it('selecting Y while Z is active clears Z (mutually exclusive)', async () => {
+    const filter = makeFilter({ criteriaEmpty: true });
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'Y. Unknown Criteria', {
+      id: '__y_unknown__',
+      label: 'Y. Unknown Criteria',
+    });
+    applyEmittedUpdates(wrapper, filter);
+    expect(filter.criteriaUnknown).toBe(true);
+    expect(filter.criteriaEmpty).toBe(false);
+  });
+
+  it('selecting Z from the combobox clears specific criteria, Y, and X', async () => {
+    const filter = makeFilter({
+      criteria: ['c1'],
+      criteriaUnknown: true,
+      exclusionCriteriaEmpty: true,
+    });
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'Z. No Criteria', {
+      id: '__z_empty__',
+      label: 'Z. No Criteria',
+    });
+    applyEmittedUpdates(wrapper, filter);
+    expect(filter.criteriaEmpty).toBe(true);
+    expect(filter.criteria).toEqual([]);
+    expect(filter.criteriaUnknown).toBe(false);
+    expect(filter.exclusionCriteriaEmpty).toBe(false);
+  });
+
+  it('adding the first criterion clears the Z sentinel', async () => {
+    const filter = makeFilter({ criteriaEmpty: true });
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    await suggest.vm.$emit('select', 'Published after 2010', {
+      id: 'c2',
+      label: 'Published after 2010',
+      badge: '2',
+    });
+    applyEmittedUpdates(wrapper, filter);
+    expect(filter.criteria).toEqual(['c2']);
+    expect(filter.criteriaEmpty).toBe(false);
+  });
+
+  it('renders X/Y/Z sentinel pills with an x only while their flag is on', () => {
+    // Inactive: no sentinel pills in the DOM (they live in the dropdown list).
+    const inactive = mountPanel();
+    expect(inactive.find('.afp-sentinel--x').exists()).toBe(false);
+    expect(inactive.find('.afp-sentinel--y').exists()).toBe(false);
+    expect(inactive.find('.afp-sentinel--z').exists()).toBe(false);
+
+    // Active: removable pills, dashed-styled to mark them as sentinels.
+    const wrapper = mountPanel(
+      makeFilter({ criteria: ['c1'], criteriaUnknown: true, criteriaEmpty: true })
+    );
+    const y = wrapper.find('.afp-sentinel--y');
+    const z = wrapper.find('.afp-sentinel--z');
+    expect(y.text()).toContain('Y. Unknown Criteria');
+    expect(z.text()).toContain('Z. No Criteria');
+    expect(y.find('button').exists()).toBe(true);
+    expect(z.find('button').exists()).toBe(true);
+    expect(y.classes()).toContain('border-dashed');
+    expect(wrapper.find('.afp-crit-pill').classes()).not.toContain('border-dashed');
+
+    // X renders independently of the other two (Z clears it, but a fresh mount
+    // with only X on must show its pill).
+    const xWrapper = mountPanel(makeFilter({ exclusionCriteriaEmpty: true }));
+    const x = xWrapper.find('.afp-sentinel--x');
+    expect(x.exists()).toBe(true);
+    expect(x.text()).toContain('X. No Exclusion Criteria');
+    expect(x.find('button').exists()).toBe(true);
+    expect(x.classes()).toContain('border-dashed');
+  });
+
+  it('removes the X sentinel pill when its x is clicked', async () => {
+    const filter = makeFilter({ exclusionCriteriaEmpty: true });
+    const wrapper = mountPanel(filter);
+    await wrapper.find('.afp-sentinel--x button').trigger('click');
+    expect(wrapper.emitted('update:filter')).toContainEqual(['exclusionCriteriaEmpty', false]);
+  });
+
+  it('removes the Y sentinel pill when its x is clicked', async () => {
+    const filter = makeFilter({ criteriaUnknown: true });
+    const wrapper = mountPanel(filter);
+    await wrapper.find('.afp-sentinel--y button').trigger('click');
+    expect(wrapper.emitted('update:filter')).toContainEqual(['criteriaUnknown', false]);
+  });
+
+  it('removes the Z sentinel pill when its x is clicked', async () => {
+    const filter = makeFilter({ criteriaEmpty: true });
+    const wrapper = mountPanel(filter);
+    await wrapper.find('.afp-sentinel--z button').trigger('click');
+    expect(wrapper.emitted('update:filter')).toContainEqual(['criteriaEmpty', false]);
+  });
+
+  it('hides active sentinels from the combobox options', () => {
+    const filter = makeFilter({ criteriaUnknown: true, exclusionCriteriaEmpty: true });
+    const wrapper = mountPanel(filter);
+    const suggest = findSuggestByPlaceholder(wrapper, 'Search criteria to add...');
+    const options = suggest.props('options') as SuggestOption[];
+    expect(options.map((o) => o.id)).toEqual(['c1', 'c2', 'c3', '__z_empty__']);
   });
 
   // ── Clear / Apply events ───────────────────────────────────────────

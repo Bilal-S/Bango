@@ -19,6 +19,18 @@ pub fn query_articles(
     article_repo::query_articles(&conn, &query)
 }
 
+/// Total count for a filtered article query (same filters as `query_articles`;
+/// sort/limit/offset ignored). Powers the article list's true result count and
+/// page count while filters are active.
+#[tauri::command]
+pub fn count_query_articles(
+    db_state: State<'_, DbState>,
+    query: ArticleQuery,
+) -> Result<i64, AppError> {
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    article_repo::count_query_articles(&conn, &query)
+}
+
 #[tauri::command]
 pub fn get_article_counts(
     db_state: State<'_, DbState>,

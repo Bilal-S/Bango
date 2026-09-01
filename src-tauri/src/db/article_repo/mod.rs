@@ -38,9 +38,9 @@ pub use mutations::{
     update_article_labels, update_article_status, update_article_tags, update_user_notes,
 };
 pub use query::{
-    get_all_articles, get_article_by_id, get_articles_by_ids, get_articles_by_status,
-    get_articles_for_export, get_duplicate_articles, get_working_articles, query_articles,
-    ArticleQuery,
+    count_query_articles, get_all_articles, get_article_by_id, get_articles_by_ids,
+    get_articles_by_status, get_articles_for_export, get_duplicate_articles, get_working_articles,
+    query_articles, ArticleQuery,
 };
 pub use screening_queries::{
     count_articles, count_unscreened_working, count_working, get_next_unscreened_working_batch,
