@@ -273,11 +273,14 @@ CREATE INDEX IF NOT EXISTS idx_articles_sequence_id ON articles(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_articles_changed_at ON articles(changed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_entries_article_id ON audit_entries(article_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_type ON criteria(type);
--- Unique DOI (excluding NULLs - prevents duplicate papers with same DOI).
--- Expression index on LOWER(doi): DOIs are stored in canonical lowercase and
--- case variants are blocked even if a non-canonical value sneaks in.
+-- Unique DOI. Expression index on LOWER(doi): DOIs are stored in canonical
+-- lowercase and case variants are blocked even if a non-canonical value
+-- sneaks in. Deliberately non-partial: SQLite's planner won't use a partial
+-- index for `LOWER(doi) = ?` (no syntactic implication of `doi IS NOT
+-- NULL`), which turns every DOI lookup into a full scan; UNIQUE indexes
+-- treat NULLs as distinct, so a partial clause adds nothing.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ref_papers_doi
-    ON reference_papers(LOWER(doi)) WHERE doi IS NOT NULL;
+    ON reference_papers(LOWER(doi));
 -- Unique title + authors + year combination
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ref_papers_title_authors_year
     ON reference_papers(LOWER(title), authors, publication_year)

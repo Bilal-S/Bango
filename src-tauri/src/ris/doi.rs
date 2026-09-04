@@ -16,7 +16,9 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 
 /// Canonical DOI form: trim, strip one leading `doi.org`/`dx.doi.org`/`doi:`
 /// prefix (ASCII case-insensitive), trim again, filter placeholders, and
-/// lowercase. Returns `None` for empty, whitespace, or placeholder values.
+/// ASCII-lowercase. ASCII-lowercase mirrors SQLite `LOWER()`, keeping this
+/// helper and the v009 healing SQL byte-equivalent.
+/// Returns `None` for empty, whitespace, or placeholder values.
 /// Single source of truth for DOI identity across all import channels.
 #[must_use]
 pub fn normalize_doi(doi: Option<&str>) -> Option<String> {
@@ -31,5 +33,5 @@ pub fn normalize_doi(doi: Option<&str>) -> Option<String> {
             return None;
         }
     }
-    Some(stripped.to_lowercase())
+    Some(stripped.to_ascii_lowercase())
 }

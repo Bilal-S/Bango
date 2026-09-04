@@ -11,14 +11,10 @@ use bango_lib::db::migration::run_migrations;
 use bango_lib::db::migrations::v009_doi_canonicalization;
 use rusqlite::Connection;
 
-/// Build a legacy-shaped DB: full migration chain applied, then rewound to
-/// the v8 state (old BINARY DOI unique index) with mixed-case data inserted.
-fn legacy_db() -> Connection {
-    let conn = create_connection().expect("connection");
-    run_migrations(&conn).expect("migrations");
-
-    // Rewind to the v8 schema state: restore the old BINARY unique index so
-    // legacy mixed-case variants can be inserted.
+/// Rewind a fully-migrated DB to the v8 state (old BINARY partial DOI index)
+/// so legacy mixed-shape values can be inserted before re-running v009.
+/// Leaves `PRAGMA foreign_keys = OFF` for legacy seeding.
+fn rewind_to_v8(conn: &Connection) {
     conn.execute_batch(
         "DROP INDEX uq_ref_papers_doi;
          CREATE UNIQUE INDEX uq_ref_papers_doi
@@ -27,6 +23,14 @@ fn legacy_db() -> Connection {
     )
     .expect("rewind to v8 schema");
     conn.pragma_update(None, "user_version", 8).expect("rewind user_version");
+}
+
+/// Build a legacy-shaped DB: full migration chain applied, then rewound to
+/// the v8 state (old BINARY DOI unique index) with mixed-case data inserted.
+fn legacy_db() -> Connection {
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+    rewind_to_v8(&conn);
 
     // Legacy articles: mixed case, URL/scheme prefixes, whitespace, placeholder.
     conn.execute_batch(
@@ -195,4 +199,112 @@ fn migration_idempotent_on_canonical_data() {
         .expect("re-running UP_SQL on canonical data must succeed");
     let after = snapshot(&conn);
     assert_eq!(before, after, "re-run must change nothing");
+}
+
+// ─── Healing equivalence with the Rust helper (doifixes2 findings 2a-2d) ───
+
+#[test]
+fn migration_nulls_prefix_placeholder_dois() {
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+    rewind_to_v8(&conn);
+    conn.execute_batch(
+        "INSERT INTO articles (id, title, abstract_text, authors, doi) VALUES
+            ('p1', 'P1', 'A', '[]', 'doi: NA'),
+            ('p2', 'P2', 'A', '[]', 'doi: -');
+         INSERT INTO reference_papers (id, title, authors, doi) VALUES
+            ('rp-p1', 'P1', '[]', 'doi: N/A');",
+    )
+    .expect("seed prefix placeholders");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    run_migrations(&conn).expect("v009 must null prefix placeholders");
+
+    // Placeholders behind a scheme prefix filter to NULL (strip-then-filter
+    // order, matching `ris::doi::normalize_doi`), not 'doi: na'.
+    for (table, id) in [("articles", "p1"), ("articles", "p2"), ("reference_papers", "rp-p1")] {
+        let doi: Option<String> = conn
+            .query_row(&format!("SELECT doi FROM {table} WHERE id = ?1"), [id], |r| r.get(0))
+            .expect("query");
+        assert_eq!(doi, None, "{table}.{id} prefix placeholder must heal to NULL");
+    }
+}
+
+#[test]
+fn migration_heals_double_prefixed_doi() {
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+    rewind_to_v8(&conn);
+    conn.execute_batch(
+        "INSERT INTO articles (id, title, abstract_text, authors, doi) VALUES
+            ('d1', 'D1', 'A', '[]', 'https://doi.org/doi:10.1/x'),
+            ('d2', 'D2', 'A', '[]', 'doi:https://doi.org/10.2/y');",
+    )
+    .expect("seed double prefixes");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    run_migrations(&conn).expect("v009 must apply");
+
+    // Exactly ONE strip with the helper's precedence: URL prefixes beat
+    // `doi:`, so d1 keeps the inner scheme; d2 strips only the scheme.
+    let d1: String =
+        conn.query_row("SELECT doi FROM articles WHERE id = 'd1'", [], |r| r.get(0)).expect("d1");
+    assert_eq!(d1, "doi:10.1/x", "URL prefix strip must not cascade to the inner scheme");
+    let d2: String =
+        conn.query_row("SELECT doi FROM articles WHERE id = 'd2'", [], |r| r.get(0)).expect("d2");
+    assert_eq!(d2, "https://doi.org/10.2/y", "scheme strip must not cascade to the inner URL");
+}
+
+#[test]
+fn migration_heals_multispace_scheme_separator() {
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+    rewind_to_v8(&conn);
+    conn.execute(
+        "INSERT INTO articles (id, title, abstract_text, authors, doi)
+         VALUES ('m1', 'M1', 'A', '[]', 'doi:  10.1/x')",
+        [],
+    )
+    .expect("seed multispace");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    run_migrations(&conn).expect("v009 must apply");
+    let doi: String =
+        conn.query_row("SELECT doi FROM articles WHERE id = 'm1'", [], |r| r.get(0)).expect("m1");
+    assert_eq!(doi, "10.1/x", "any whitespace run after the scheme must trim clean");
+}
+
+#[test]
+fn doi_lookup_uses_lower_doi_index() {
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+    conn.execute(
+        "INSERT INTO reference_papers (id, title, authors, doi) VALUES ('r1', 'T', '[]', '10.1/abc')",
+        [],
+    )
+    .expect("seed paper");
+
+    let plan = |sql: &str| -> String {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).expect("prepare explain");
+        let rows: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(3))
+            .expect("plan rows")
+            .collect::<Result<_, _>>()
+            .expect("plan");
+        rows.join(" | ")
+    };
+
+    // The three shipped lookup shapes must SEEK the LOWER(doi) index, not
+    // SCAN. Guards the non-partial index: a `WHERE doi IS NOT NULL` partial
+    // clause defeats SQLite's planner for expression equality.
+    let shapes = [
+        "SELECT * FROM reference_papers WHERE LOWER(doi) = LOWER('10.1/abc') LIMIT 1",
+        "SELECT * FROM reference_papers WHERE LOWER(doi) = LOWER('10.1/abc') AND match_status = 'unmatched' LIMIT 1",
+        "SELECT id FROM reference_papers WHERE LOWER(doi) = LOWER('10.1/abc') LIMIT 1",
+    ];
+    for sql in shapes {
+        let p = plan(sql);
+        assert!(p.contains("USING INDEX uq_ref_papers_doi"), "expected index seek, got: {p}");
+        assert!(!p.contains("SCAN"), "DOI lookup must not full-scan, got: {p}");
+    }
 }

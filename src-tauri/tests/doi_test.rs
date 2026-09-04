@@ -172,6 +172,34 @@ fn test_trims_whitespace_around_prefix() {
     assert_eq!(normalize_doi(Some("  https://doi.org/10.9/x  ")), Some("10.9/x".to_string()));
 }
 
+// ── Prefix/placeholder interaction (mirrors migration v009 healing) ──
+
+#[test]
+fn normalize_doi_prefix_placeholder_to_none() {
+    // Placeholder behind a scheme prefix filters to None: the helper strips
+    // first, then filters (same order as the v009 healing SQL).
+    assert_eq!(normalize_doi(Some("doi: NA")), None);
+    assert_eq!(normalize_doi(Some("doi: N/A")), None);
+    assert_eq!(normalize_doi(Some("doi: -")), None);
+}
+
+#[test]
+fn normalize_doi_double_prefix_strips_once() {
+    // Exactly ONE prefix strip, URL prefixes before `doi:`.
+    assert_eq!(normalize_doi(Some("https://doi.org/doi:10.1/x")), Some("doi:10.1/x".to_string()));
+    // `doi:` scheme ahead of a URL prefix strips only the scheme.
+    assert_eq!(
+        normalize_doi(Some("doi:https://doi.org/10.2/y")),
+        Some("https://doi.org/10.2/y".to_string())
+    );
+}
+
+#[test]
+fn normalize_doi_scheme_multispace_separator() {
+    // Any whitespace run after the scheme colon trims clean.
+    assert_eq!(normalize_doi(Some("doi:  10.1/x")), Some("10.1/x".to_string()));
+}
+
 // ── Values that should NOT be treated as placeholders ──────────
 
 #[test]

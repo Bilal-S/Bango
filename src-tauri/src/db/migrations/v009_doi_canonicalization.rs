@@ -39,27 +39,41 @@ pub const UP_SQL: &str = "\
 -- (1) The old BINARY unique index must go before healing.
 DROP INDEX IF EXISTS uq_ref_papers_doi;
 
--- (2) Heal articles.doi to canonical form. Trim first so the prefix
--- strips also catch values that arrived with surrounding whitespace.
+-- (2) Heal articles.doi to canonical form: trim, strip exactly ONE leading
+-- prefix (URL prefixes before `doi:`, mirroring ris::doi::DOI_PREFIXES),
+-- trim, filter placeholders, ASCII-lowercase. A single CASE is required:
+-- sequential UPDATEs cannot tell whether an earlier strip fired and would
+-- double-strip values like 'https://doi.org/doi:10.1/x'. ASCII
+-- case-insensitive LIKE matches the helper's strip_prefix_ci and ASCII
+-- LOWER matches its to_ascii_lowercase. Placeholders are filtered AFTER
+-- the strip (the helper's strip-then-filter order), so 'doi: NA' -> NULL.
 UPDATE articles SET doi = TRIM(doi) WHERE doi IS NOT NULL;
-UPDATE articles SET doi = SUBSTR(doi, 17) WHERE doi LIKE 'https://doi.org/%';
-UPDATE articles SET doi = SUBSTR(doi, 16) WHERE doi LIKE 'http://doi.org/%';
-UPDATE articles SET doi = SUBSTR(doi, 20) WHERE doi LIKE 'https://dx.doi.org/%';
-UPDATE articles SET doi = SUBSTR(doi, 19) WHERE doi LIKE 'http://dx.doi.org/%';
-UPDATE articles SET doi = SUBSTR(doi, 5)
- WHERE doi LIKE 'doi:10.%' OR doi LIKE 'doi: 10.%';
+UPDATE articles SET doi = CASE
+    WHEN doi LIKE 'https://doi.org/%'    THEN SUBSTR(doi, 17)
+    WHEN doi LIKE 'http://doi.org/%'     THEN SUBSTR(doi, 16)
+    WHEN doi LIKE 'https://dx.doi.org/%' THEN SUBSTR(doi, 20)
+    WHEN doi LIKE 'http://dx.doi.org/%'  THEN SUBSTR(doi, 19)
+    WHEN doi LIKE 'doi:%'                THEN SUBSTR(doi, 5)
+    ELSE doi END
+ WHERE doi LIKE 'https://doi.org/%' OR doi LIKE 'http://doi.org/%'
+    OR doi LIKE 'https://dx.doi.org/%' OR doi LIKE 'http://dx.doi.org/%'
+    OR doi LIKE 'doi:%';
 UPDATE articles SET doi = NULL
  WHERE doi IS NOT NULL AND UPPER(TRIM(doi)) IN ('NA', 'N/A', 'NULL', 'NONE', '-');
 UPDATE articles SET doi = NULLIF(TRIM(LOWER(doi)), '') WHERE doi IS NOT NULL;
 
 -- ... and reference_papers.doi, identical block.
 UPDATE reference_papers SET doi = TRIM(doi) WHERE doi IS NOT NULL;
-UPDATE reference_papers SET doi = SUBSTR(doi, 17) WHERE doi LIKE 'https://doi.org/%';
-UPDATE reference_papers SET doi = SUBSTR(doi, 16) WHERE doi LIKE 'http://doi.org/%';
-UPDATE reference_papers SET doi = SUBSTR(doi, 20) WHERE doi LIKE 'https://dx.doi.org/%';
-UPDATE reference_papers SET doi = SUBSTR(doi, 19) WHERE doi LIKE 'http://dx.doi.org/%';
-UPDATE reference_papers SET doi = SUBSTR(doi, 5)
- WHERE doi LIKE 'doi:10.%' OR doi LIKE 'doi: 10.%';
+UPDATE reference_papers SET doi = CASE
+    WHEN doi LIKE 'https://doi.org/%'    THEN SUBSTR(doi, 17)
+    WHEN doi LIKE 'http://doi.org/%'     THEN SUBSTR(doi, 16)
+    WHEN doi LIKE 'https://dx.doi.org/%' THEN SUBSTR(doi, 20)
+    WHEN doi LIKE 'http://dx.doi.org/%'  THEN SUBSTR(doi, 19)
+    WHEN doi LIKE 'doi:%'                THEN SUBSTR(doi, 5)
+    ELSE doi END
+ WHERE doi LIKE 'https://doi.org/%' OR doi LIKE 'http://doi.org/%'
+    OR doi LIKE 'https://dx.doi.org/%' OR doi LIKE 'http://dx.doi.org/%'
+    OR doi LIKE 'doi:%';
 UPDATE reference_papers SET doi = NULL
  WHERE doi IS NOT NULL AND UPPER(TRIM(doi)) IN ('NA', 'N/A', 'NULL', 'NONE', '-');
 UPDATE reference_papers SET doi = NULLIF(TRIM(LOWER(doi)), '') WHERE doi IS NOT NULL;
@@ -105,7 +119,12 @@ SET citation_count = (SELECT COUNT(*) FROM article_reference_links l
                         WHERE l.reference_paper_id = reference_papers.id
                          AND l.type = 1);
 
--- (5) Case-insensitive uniqueness, created last.
+-- (5) Case-insensitive uniqueness, created last. Deliberately non-partial:
+-- SQLite's planner only uses a partial index when the query's WHERE clause
+-- syntactically implies the partial condition, and `LOWER(doi) = ?` does
+-- not imply `doi IS NOT NULL` - a partial clause silently turns every DOI
+-- lookup into a full scan. UNIQUE already treats NULLs as distinct, so the
+-- clause added nothing.
 CREATE UNIQUE INDEX uq_ref_papers_doi
-    ON reference_papers(LOWER(doi)) WHERE doi IS NOT NULL;
+    ON reference_papers(LOWER(doi));
 ";

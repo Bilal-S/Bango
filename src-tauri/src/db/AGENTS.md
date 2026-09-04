@@ -361,14 +361,21 @@ tests + `tests/migration_recovery_test.rs`.
   (`tests/doi_case_migration_test.rs`, inventory
   `docs/test-plans/doi-case-tests.md`). Heals legacy mixed-case, prefixed
   (`https://doi.org/` / `dx.doi.org` / `doi:`), and whitespace-wrapped DOIs in
-  `articles` + `reference_papers`, merges case-variant duplicate
-  `reference_papers` (survivor by match-state rank `matched`/`imported` >
-  `unmatched`, then lowest `rowid`; links remapped with collision absorption;
-  counters recounted from links), and rebuilds `uq_ref_papers_doi` as an
-  expression index on `LOWER(doi)`. Statement order is load-bearing: the old
+  `articles` + `reference_papers` via a single CASE one-strip statement that
+  is byte-equivalent to `ris::doi::normalize_doi` (URL prefixes before
+  `doi:`, placeholders filtered AFTER the strip so `doi: NA` -> NULL);
+  merges case-variant duplicate `reference_papers` (survivor by match-state
+  rank `matched`/`imported` > `unmatched`, then lowest `rowid`; links
+  remapped with collision absorption; counters recounted from links); and
+  rebuilds `uq_ref_papers_doi` as a NON-partial expression index on
+  `LOWER(doi)`. Non-partial is load-bearing: SQLite's planner only uses a
+  partial index when the query's WHERE clause syntactically implies the
+  partial condition, and `LOWER(doi) = ?` does not imply `doi IS NOT NULL`,
+  so a partial clause turns every DOI lookup into a full scan (UNIQUE
+  already treats NULLs as distinct). Statement order is load-bearing: the old
   BINARY index is dropped FIRST (the healing UPDATEs would violate it on
   case-variant data), and the new index is created LAST. v001 is updated so
-  fresh DBs get the `LOWER(doi)` index directly.
+  fresh DBs get the non-partial `LOWER(doi)` index directly.
 
 ## Work Guidance
 
