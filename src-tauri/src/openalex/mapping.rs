@@ -46,17 +46,6 @@ pub fn truncate_snippet(abstract_text: &str) -> String {
     }
 }
 
-/// Strip `https://doi.org/` prefix, lowercase. Returns `None` if empty/absent.
-#[must_use]
-pub fn normalize_doi(doi: &Option<String>) -> Option<String> {
-    doi.as_ref().filter(|s| !s.is_empty()).map(|s| {
-        s.strip_prefix("https://doi.org/")
-            .or_else(|| s.strip_prefix("http://doi.org/"))
-            .unwrap_or(s)
-            .to_lowercase()
-    })
-}
-
 /// Map OpenAlex work type to RIS-equivalent `reference_type`.
 #[must_use]
 pub fn map_work_type_to_reference_type(work_type: &Option<String>) -> Option<String> {
@@ -136,7 +125,7 @@ pub fn map_work_to_new_article(work: &OpenAlexWork) -> NewArticle {
         .map(|b| (b.volume.clone(), b.issue.clone(), b.first_page.clone(), b.last_page.clone()))
         .unwrap_or((None, None, None, None));
 
-    let doi = normalize_doi(&work.doi);
+    let doi = crate::ris::doi::normalize_doi(work.doi.as_deref());
 
     let data_length = title.chars().count() + abstract_text.chars().count();
     let token_estimate = data_length / 4;
@@ -188,10 +177,11 @@ pub fn map_works_to_new_articles(works: &[OpenAlexWork]) -> Vec<NewArticle> {
     works.iter().map(map_work_to_new_article).collect()
 }
 
-/// Extract DOI from a work as normalized string (lowercase, no prefix).
+/// Extract DOI from a work in canonical form (lowercase, trimmed,
+/// prefix-stripped, placeholder-filtered) via the shared `ris::doi` helper.
 #[must_use]
 pub fn work_doi_normalized(work: &OpenAlexWork) -> Option<String> {
-    normalize_doi(&work.doi)
+    crate::ris::doi::normalize_doi(work.doi.as_deref())
 }
 
 /// Map an OpenAlex Work to a `NewReferencePaper` for the reference harvest.
@@ -226,7 +216,7 @@ pub fn map_work_to_reference_paper(
         .map(|b| (b.volume.clone(), b.issue.clone(), b.first_page.clone(), b.last_page.clone()))
         .unwrap_or((None, None, None, None));
 
-    let doi = normalize_doi(&work.doi);
+    let doi = crate::ris::doi::normalize_doi(work.doi.as_deref());
 
     crate::models::reference::NewReferencePaper {
         title: if title.is_empty() { None } else { Some(title) },

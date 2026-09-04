@@ -341,3 +341,25 @@ fn map_work_eissn_differs_from_issn_l() {
     assert_eq!(article.issn, Some("1234-5678".to_string()));
     assert_eq!(article.eissn, Some("8765-4321".to_string()));
 }
+
+#[test]
+fn mapping_normalizes_doi_via_canonical_helper() {
+    // Mapping delegates to the canonical ris::doi helper: trim, strip prefix
+    // (case-insensitive), filter placeholders, lowercase.
+    let mut work = make_test_work();
+    work.doi = Some("  HTTPS://DOI.ORG/10.1234/MiXeD  ".to_string());
+
+    let article = mapping::map_work_to_new_article(&work);
+    assert_eq!(article.doi, Some("10.1234/mixed".to_string()));
+
+    let paper = mapping::map_work_to_reference_paper(&work);
+    assert_eq!(paper.doi, Some("10.1234/mixed".to_string()));
+
+    assert_eq!(mapping::work_doi_normalized(&work), Some("10.1234/mixed".to_string()));
+
+    work.doi = Some("NA".to_string());
+    assert_eq!(mapping::work_doi_normalized(&work), None, "placeholder must filter");
+
+    work.doi = None;
+    assert_eq!(mapping::work_doi_normalized(&work), None);
+}

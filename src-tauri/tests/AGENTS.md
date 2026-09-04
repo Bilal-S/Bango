@@ -41,6 +41,9 @@ multi-assignment counts, Markdown rendering). `wiki_consolidation_test.rs` +
 helpers (resolution dispatcher, three-source term resolution, Top-N cap,
 link protocols, prompt builder); binding inventory:
 `docs/test-plans/cluster-themes-tests.md`.
+`doi_case_migration_test.rs` covers migration v009 (DOI canonicalization:
+healing, duplicate-paper merge with match-state preservation, index rebuild,
+idempotency); binding inventory: `docs/test-plans/doi-case-tests.md`.
 
 ## Work Guidance
 

@@ -73,9 +73,10 @@ errors). `reqwest::blocking` requires the `blocking` feature on the `reqwest`
 dep in `src-tauri/Cargo.toml`. The scrape is invoked by
 `scrape_citation_chaser_cmd` (async, `spawn_blocking`) which has an
 existence-shortcut (if both expected RIS files exist, return them immediately
-without launching the browser) and logs every outcome to the audit table via
-`log_error_best_effort` (skip outcomes are labeled "skipped" so they read
-correctly in the Audit Timeline / Diagnostics).
+without launching the browser; resolved via `find_file_case_insensitive` so
+legacy mixed-case DOI filenames still hit the cache) and logs every outcome
+to the audit table via `log_error_best_effort` (skip outcomes are labeled
+"skipped" so they read correctly in the Audit Timeline / Diagnostics).
 
 ## Work Guidance
 

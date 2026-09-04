@@ -47,6 +47,13 @@ auto-regenerates the biblio tables. The import code uses `INSERT OR IGNORE` +
 ID-remap maps for `reference_papers`, `biblio_authors`, `biblio_institutions`,
 and `biblio_terms` (all have UNIQUE constraints) to handle older backups that
 may still contain biblio data.
+**DOI canonicalization on restore**: both `import_articles` and
+`import_reference_papers` normalize DOIs through the canonical
+`ris::doi::normalize_doi` helper (trim, strip prefix, lowercase,
+placeholder -> NULL) before insert, and `find_existing_paper_id` matches
+DOIs case-insensitively, so legacy backups restore canonical values without
+creating case-variant duplicates. Migration v009 cannot backstop this path
+(it runs at startup, before any restore).
 
 #### `import_project` decomposition (refactor v5, see `.worktrees/refactor5.md` + `docs/test-plans/refactor5-tests.md`)
 

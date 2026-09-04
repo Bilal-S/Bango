@@ -35,6 +35,9 @@ failures are handled inside `attach_full_text_inner` as soft-fallback attaches
 with empty `full_text` + a `log_error` audit row, and hard attach failures
 (missing file, copy error, DB write error) write a `log_error` audit entry in
 addition to the in-memory progress errors.
+Filename matching is case-insensitive: match-map keys are built from
+`clean_doi_filename(lowercase doi)` and file stems are looked up lowercased,
+so legacy mixed-case filenames still resolve.
 
 ### Phase 2 - `citations_phase.rs`
 
@@ -42,6 +45,10 @@ Scan `ris/` for `{cleaned_doi}_references.ris`, `_citations.ris`, `.ris`,
 `.bib`; skips articles with `has_reference_details`/`has_citation_details`;
 auto-detects RIS vs BibTeX by extension via extracted
 `commands::references::import_references_inner`.
+Discovery builds a one-pass lowercase filename index of `ris/`
+(`build_lowercase_dir_index`) and resolves every probe against it (O(1) per
+probe); when two files differ only in letter case, the
+exactly-lowercase-named file wins the slot (deterministic on Linux).
 
 ### Phase 3 - `translations_phase.rs`
 

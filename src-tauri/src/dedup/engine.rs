@@ -58,7 +58,7 @@ fn compare_articles(a: &DedupArticle, b: &DedupArticle) -> Option<DuplicatePair>
         let norm_a = crate::ris::doi::normalize_doi(Some(doi_a));
         let norm_b = crate::ris::doi::normalize_doi(Some(doi_b));
         if let (Some(na), Some(nb)) = (norm_a, norm_b) {
-            if na.eq_ignore_ascii_case(nb) {
+            if na == nb {
                 return Some(make_pair(
                     a,
                     b,

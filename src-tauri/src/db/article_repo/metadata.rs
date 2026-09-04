@@ -134,6 +134,13 @@ pub fn update_article_metadata_field(
                 params![journal_id, article_id],
             )?;
         }
+        (ArticleMetaField::Doi, ArticleMetaValue::Scalar(s)) => {
+            // Canonical form (trim, strip prefix, lowercase); empty and
+            // placeholder values clear to NULL so manual edits can never
+            // reintroduce mixed-case or prefixed DOIs.
+            let bound = crate::ris::doi::normalize_doi(s.as_deref());
+            conn.execute(&sql, params![bound, article_id])?;
+        }
         (_, ArticleMetaValue::Scalar(s)) => {
             // Empty string -> NULL so "clear the field" sets it to NULL rather
             // than an empty string, matching how RIS import treats absent fields.

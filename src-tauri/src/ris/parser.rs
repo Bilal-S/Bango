@@ -184,7 +184,7 @@ fn finalize_record(record: &mut RisRecord) {
     }
     // Normalize DOI: handles cases where DOI was built from continuation lines
     // or where initial normalization in apply_tag was insufficient.
-    record.doi = normalize_doi(record.doi.as_deref()).map(|s| s.to_string());
+    record.doi = normalize_doi(record.doi.as_deref());
 }
 
 /// Appends a continuation line to the appropriate field for the given tag.
@@ -326,7 +326,7 @@ fn apply_tag(tag: &str, value: &str, record: &mut RisRecord) {
             let year_str = value.split('/').next().unwrap_or(value);
             record.publication_year = year_str.parse().ok();
         }
-        "DO" => record.doi = normalize_doi(Some(value)).map(|s| s.to_string()),
+        "DO" => record.doi = normalize_doi(Some(value)),
         "JF" => record.journal = Some(value.to_string()),
         "T2" => {
             if record.journal.is_none() {

@@ -1,5 +1,9 @@
-//! Tests for the OpenAlex search URL builder.
+//! Tests for the OpenAlex search URL builder + DOI library check.
 
+use bango_lib::db::article_repo;
+use bango_lib::db::connection::create_connection;
+use bango_lib::db::migration::run_migrations;
+use bango_lib::models::article::NewArticle;
 use bango_lib::openalex::search::build_search_url;
 use bango_lib::openalex::OpenAlexFilters;
 
@@ -68,4 +72,35 @@ fn build_search_url_with_filters() {
     assert!(url.contains("type"));
     assert!(url.contains("language"));
     assert!(url.contains("is_oa"));
+}
+
+#[test]
+fn check_dois_in_library_case_insensitive() {
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+
+    // Legacy mixed-case stored DOI (as written by pre-canonicalization builds).
+    let article = NewArticle {
+        title: "Mixed Case DOI".to_string(),
+        doi: Some("10.1016/J.Puhe.2018.04.012".to_string()),
+        ..Default::default()
+    };
+    article_repo::insert_article(&conn, &article).expect("insert article");
+
+    // Canonical probe finds the mixed-case row; the returned value is lowercase
+    // so exact `Set`/`HashSet` consumers (backend search, frontend store) match.
+    let found = article_repo::check_dois_in_library(
+        &conn,
+        &["10.1016/j.puhe.2018.04.012".to_string(), "10.9999/absent".to_string()],
+    )
+    .expect("check dois");
+    assert_eq!(found, vec!["10.1016/j.puhe.2018.04.012".to_string()]);
+
+    // Prefixed probe also resolves: inputs are canonicalized server-side.
+    let found_prefixed = article_repo::check_dois_in_library(
+        &conn,
+        &["https://doi.org/10.1016/j.puhe.2018.04.012".to_string()],
+    )
+    .expect("check dois prefixed");
+    assert_eq!(found_prefixed, vec!["10.1016/j.puhe.2018.04.012".to_string()]);
 }

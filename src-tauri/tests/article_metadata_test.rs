@@ -482,3 +482,31 @@ fn test_update_title_empty_rejected() {
     let article = article_repo::get_article_by_id(&conn, &id).expect("get failed");
     assert_eq!(article.title, "Valid Replacement");
 }
+
+#[test]
+fn update_doi_normalizes_to_canonical_form() {
+    let conn = setup_db();
+    let id = seed_article(&conn);
+
+    // Mixed-case + prefixed input must land in canonical lowercase form.
+    article_repo::update_article_metadata_field(
+        &conn,
+        &id,
+        ArticleMetaField::Doi,
+        ArticleMetaValue::Scalar(Some("https://doi.org/10.1/AbC".to_string())),
+    )
+    .expect("update DOI failed");
+    let article = article_repo::get_article_by_id(&conn, &id).expect("get failed");
+    assert_eq!(article.doi.as_deref(), Some("10.1/abc"));
+
+    // Placeholder input clears the DOI to NULL.
+    article_repo::update_article_metadata_field(
+        &conn,
+        &id,
+        ArticleMetaField::Doi,
+        ArticleMetaValue::Scalar(Some("NA".to_string())),
+    )
+    .expect("clear DOI failed");
+    let article = article_repo::get_article_by_id(&conn, &id).expect("get failed");
+    assert_eq!(article.doi, None);
+}

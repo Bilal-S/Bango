@@ -16,11 +16,11 @@ pub fn insert_or_find_paper(
     conn: &Connection,
     new_paper: &NewReferencePaper,
 ) -> Result<(ReferencePaper, bool), AppError> {
-    // Normalize DOI: filter placeholders via centralized utility
+    // Normalize DOI: canonical form via the single shared helper
     let doi_normalized = normalize_doi(new_paper.doi.as_deref());
 
-    // Try to find existing by DOI first
-    if let Some(doi) = doi_normalized {
+    // Try to find existing by DOI first (case-insensitive on canonical form)
+    if let Some(doi) = doi_normalized.as_deref() {
         if let Some(existing) = find_paper_by_doi(conn, doi)? {
             return Ok((existing, false));
         }
@@ -46,7 +46,7 @@ pub fn insert_or_find_paper(
         // If constraint violation, look up existing
         Err(_) => {
             // Try DOI lookup first
-            if let Some(doi) = doi_normalized {
+            if let Some(doi) = doi_normalized.as_deref() {
                 if let Some(existing) = find_paper_by_doi(conn, doi)? {
                     return Ok((existing, false));
                 }
@@ -83,8 +83,9 @@ fn insert_paper(
         new_paper.ris_extras.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default());
     let match_status = new_paper.match_status.as_ref().unwrap_or(&MatchStatus::Unmatched).as_str();
 
-    // Normalize DOI: empty string and placeholders → NULL (prevents unique constraint violations)
-    let doi: Option<String> = normalize_doi(new_paper.doi.as_deref()).map(|s| s.to_string());
+    // Normalize DOI: canonical form; empty string and placeholders -> NULL
+    // (prevents unique constraint violations)
+    let doi: Option<String> = normalize_doi(new_paper.doi.as_deref());
 
     conn.execute(
         "INSERT INTO reference_papers (
@@ -146,10 +147,11 @@ pub fn get_paper_by_id(conn: &Connection, id: &str) -> Result<ReferencePaper, Ap
     )
 }
 
-/// Find a reference paper by DOI.
+/// Find a reference paper by DOI (case-insensitive: DOIs are stored in
+/// canonical lowercase, and the LOWER() match is a defense-in-depth backstop).
 pub fn find_paper_by_doi(conn: &Connection, doi: &str) -> Result<Option<ReferencePaper>, AppError> {
     let result = conn.query_row(
-        "SELECT * FROM reference_papers WHERE doi = ?1 LIMIT 1",
+        "SELECT * FROM reference_papers WHERE LOWER(doi) = LOWER(?1) LIMIT 1",
         [doi],
         row_to_paper,
     );
@@ -199,9 +201,11 @@ pub fn auto_match_paper_to_article(
     if let Some(ref doi) = paper.doi {
         if !doi.is_empty() {
             let result: Option<String> = conn
-                .query_row("SELECT id FROM articles WHERE doi = ?1 LIMIT 1", [doi], |row| {
-                    row.get(0)
-                })
+                .query_row(
+                    "SELECT id FROM articles WHERE LOWER(doi) = LOWER(?1) LIMIT 1",
+                    [doi],
+                    |row| row.get(0),
+                )
                 .ok();
             if let Some(article_id) = result {
                 return Ok(Some(article_id));
@@ -501,7 +505,7 @@ fn find_unmatched_papers_by_doi(
     doi: &str,
 ) -> Result<Vec<ReferencePaper>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT * FROM reference_papers WHERE doi = ?1 AND match_status = 'unmatched' LIMIT 1",
+        "SELECT * FROM reference_papers WHERE LOWER(doi) = LOWER(?1) AND match_status = 'unmatched' LIMIT 1",
     )?;
     let rows = stmt.query_map([doi], row_to_paper)?;
     Ok(rows.filter_map(|r| r.ok()).collect())

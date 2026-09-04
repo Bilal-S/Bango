@@ -1289,3 +1289,140 @@ fn import_clears_existing_project_name_when_backup_lacks_one() {
         "backup without project_name must clear the target's existing name"
     );
 }
+
+/// Restoring a legacy backup must store `articles.doi` in canonical form
+/// (trim, strip prefix, lowercase, placeholder -> NULL). Migration v009
+/// cannot backstop this path: it runs at startup, before any restore.
+#[test]
+fn import_articles_normalizes_legacy_doi() {
+    let conn = setup_db();
+
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.5.6"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [
+            {
+                "id": "a-legacy",
+                "title": "Legacy Article",
+                "abstractText": "Legacy abstract",
+                "status": "working",
+                "doi": "https://doi.org/10.1/AbC",
+                "importedAt": "2026-01-01T00:00:00Z"
+            },
+            {
+                "id": "a-placeholder",
+                "title": "Placeholder Article",
+                "abstractText": "Placeholder abstract",
+                "status": "working",
+                "doi": "NA",
+                "importedAt": "2026-01-01T00:00:00Z"
+            }
+        ],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "referencePapers": [],
+        "articleReferenceLinks": [],
+        "llmConfig": null
+    }"#;
+
+    import_project(&conn, backup).expect("import should succeed");
+
+    let legacy_doi: Option<String> = conn
+        .query_row("SELECT doi FROM articles WHERE id = 'a-legacy'", [], |row| row.get(0))
+        .expect("query legacy article");
+    assert_eq!(legacy_doi.as_deref(), Some("10.1/abc"), "legacy DOI must import canonically");
+
+    let placeholder_doi: Option<String> = conn
+        .query_row("SELECT doi FROM articles WHERE id = 'a-placeholder'", [], |row| row.get(0))
+        .expect("query placeholder article");
+    assert_eq!(placeholder_doi, None, "placeholder DOI must import as NULL");
+}
+
+/// Restoring a backup whose reference-paper DOIs differ only in casing must
+/// collapse them onto one canonical row (no case-variant duplicates), with the
+/// duplicate id remapped onto the survivor.
+#[test]
+fn import_reference_papers_dedups_case_variant_doi() {
+    let conn = setup_db();
+
+    let backup = r#"{
+        "metadata": {
+            "specVersion": "3.0",
+            "exportedAt": "2026-01-01T00:00:00Z",
+            "appName": "Bango",
+            "appVersion": "2.5.6"
+        },
+        "researchAims": [],
+        "criteria": [],
+        "articles": [],
+        "tags": [],
+        "labels": [],
+        "articleTags": [],
+        "articleLabels": [],
+        "auditEntries": [],
+        "referencePapers": [
+            {
+                "id": "rp-survivor",
+                "title": "Original Paper",
+                "authors": "[\"Smith, J.\"]",
+                "doi": "10.1234/Dup",
+                "matchStatus": "unmatched",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z"
+            },
+            {
+                "id": "rp-dupe",
+                "title": "Duplicate Paper",
+                "authors": "[\"Jones, K.\"]",
+                "doi": "10.1234/dup",
+                "matchStatus": "unmatched",
+                "createdAt": "2026-01-01T00:00:00Z",
+                "updatedAt": "2026-01-01T00:00:00Z"
+            }
+        ],
+        "articleReferenceLinks": [
+            {
+                "id": "rl-1",
+                "parentArticleId": "ghost-article",
+                "referencePaperId": "rp-dupe",
+                "type": 0,
+                "createdAt": "2026-01-01T00:00:00Z"
+            }
+        ],
+        "llmConfig": null
+    }"#;
+
+    conn.execute("PRAGMA foreign_keys = OFF", []).expect("disable fk");
+    import_project(&conn, backup).expect("import should succeed");
+    conn.execute("PRAGMA foreign_keys = ON", []).expect("re-enable fk");
+
+    assert_eq!(
+        count_rows(&conn, "reference_papers"),
+        1,
+        "case-variant DOIs must collapse to 1 row"
+    );
+
+    let (survivor_id, stored_doi): (String, String) = conn
+        .query_row("SELECT id, doi FROM reference_papers", [], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query survivor");
+    assert_eq!(survivor_id, "rp-survivor", "first-inserted row must win the dedup");
+    assert_eq!(stored_doi, "10.1234/dup", "survivor DOI must be canonical lowercase");
+
+    let linked_paper_id: String = conn
+        .query_row(
+            "SELECT reference_paper_id FROM article_reference_links WHERE id = 'rl-1'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("query link");
+    assert_eq!(linked_paper_id, "rp-survivor", "case-variant dupe id must remap to survivor");
+}

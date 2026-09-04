@@ -200,3 +200,28 @@ fn test_short_title_guard_boundary() {
     assert!(short_title_guard("123456789")); // 9 chars, still short
     assert!(!short_title_guard("1234567890")); // 10 chars, OK
 }
+
+// ── DOI canonical comparison (case + prefix insensitive) ────────
+
+#[test]
+fn doi_exact_match_case_insensitive() {
+    // Articles whose DOIs differ only in letter casing are exact duplicates.
+    let articles = vec![
+        make_article("1", "Title A", &["Author A"], Some(2023), Some("10.1234/CaSe")),
+        make_article("2", "Title B", &["Author B"], Some(2023), Some("10.1234/cAsE")),
+    ];
+    let result = run_dedup(&articles);
+    assert_eq!(result.exact_duplicates.len(), 1);
+    assert!(result.fuzzy_matches.is_empty());
+}
+
+#[test]
+fn doi_exact_match_ignores_url_prefix() {
+    // A prefixed URL form matches the bare stored DOI after canonicalization.
+    let articles = vec![
+        make_article("1", "Title A", &["Author A"], Some(2023), Some("10.1234/x")),
+        make_article("2", "Title B", &["Author B"], Some(2023), Some("https://doi.org/10.1234/x")),
+    ];
+    let result = run_dedup(&articles);
+    assert_eq!(result.exact_duplicates.len(), 1);
+}

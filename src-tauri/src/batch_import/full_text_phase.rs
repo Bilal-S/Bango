@@ -28,16 +28,18 @@ type IdToDoiMap = HashMap<String, String>;
 /// The file extensions recognized as full-text attachments.
 const FULLTEXT_EXTENSIONS: &[&str] = &["pdf", "txt"];
 
-/// Build DOI match map from articles with DOIs. Each DOI normalized through
-/// `clean_doi_filename`. Has-full-text articles are included but flagged for
-/// skipping. Pure `#[must_use]`.
+/// Build DOI match map from articles with DOIs. Each DOI lowercased (canonical
+/// form) then normalized through `clean_doi_filename`, so map keys are
+/// lowercase and filename matching is case-insensitive on both sides.
+/// Has-full-text articles are included but flagged for skipping.
+/// Pure `#[must_use]`.
 ///
 /// First article per cleaned-DOI key wins (avoids ambiguous matches).
 #[must_use]
 pub fn build_fulltext_match_map(articles: &[ArticleDoiInfo]) -> DoiMatchMap {
     let mut map: HashMap<String, ArticleDoiInfo> = HashMap::with_capacity(articles.len());
     for a in articles {
-        let key = clean_doi_filename(&a.doi);
+        let key = clean_doi_filename(&a.doi.to_lowercase());
         if key.is_empty() {
             continue;
         }
@@ -81,8 +83,9 @@ pub fn discover_importable_files(
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        let stem = stem.to_string();
-        // Match against the DOI map. Skip if article already has full text.
+        let stem = stem.to_lowercase();
+        // Match against the DOI map (both sides lowercase: legacy mixed-case
+        // filenames still resolve). Skip if article already has full text.
         if let Some(article) = match_map.get(&stem) {
             if !article.has_full_text {
                 importable.push((path, article.id.clone()));
@@ -223,6 +226,16 @@ mod tests {
         let articles = vec![art("a1", "", false)];
         let map = build_fulltext_match_map(&articles);
         assert!(map.0.is_empty());
+    }
+
+    #[test]
+    fn build_fulltext_match_map_keys_are_lowercase() {
+        // Mixed-case stored DOIs must produce lowercase map keys so filename
+        // matching stays case-insensitive even for non-canonical data.
+        let articles = vec![art("a1", "10.1001/Foo.Bar", false)];
+        let map = build_fulltext_match_map(&articles);
+        assert!(map.contains_key("10.1001_foo.bar"));
+        assert!(!map.contains_key("10.1001_Foo.Bar"));
     }
 
     #[test]

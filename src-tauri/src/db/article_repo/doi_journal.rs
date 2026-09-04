@@ -101,19 +101,25 @@ pub fn get_article_counts(
 }
 
 /// Check which DOIs already exist in `articles`. Batched parameterized `IN (...)` query.
-/// Returns the subset of DOIs present in the library.
+/// Inputs are normalized through the canonical `ris::doi` helper; returns the
+/// matching DOIs in lowercase canonical form so case-sensitive `Set`/`HashSet`
+/// consumers (backend `search_openalex`, frontend store) compare correctly.
 pub fn check_dois_in_library(conn: &Connection, dois: &[String]) -> Result<Vec<String>, AppError> {
-    if dois.is_empty() {
+    let canonical: Vec<String> =
+        dois.iter().filter_map(|d| crate::ris::doi::normalize_doi(Some(d.as_str()))).collect();
+    if canonical.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Build a parameterized IN clause: `WHERE doi IN (?1, ?2, ?3, ...)`
-    let placeholders: Vec<String> = (1..=dois.len()).map(|i| format!("?{i}")).collect();
+    // Build a parameterized IN clause: `WHERE LOWER(doi) IN (LOWER(?1), ...)`
+    let placeholders: Vec<String> = (1..=canonical.len()).map(|i| format!("LOWER(?{i})")).collect();
     let placeholder_str = placeholders.join(", ");
-    let sql = format!("SELECT DISTINCT doi FROM articles WHERE doi IN ({placeholder_str})");
+    let sql = format!(
+        "SELECT DISTINCT LOWER(doi) AS doi FROM articles WHERE LOWER(doi) IN ({placeholder_str})"
+    );
 
     let params: Vec<&dyn rusqlite::types::ToSql> =
-        dois.iter().map(|d| d as &dyn rusqlite::types::ToSql).collect();
+        canonical.iter().map(|d| d as &dyn rusqlite::types::ToSql).collect();
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params.as_slice(), |row| row.get::<_, String>(0))?;

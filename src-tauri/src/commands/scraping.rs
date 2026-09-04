@@ -23,7 +23,8 @@ use crate::db::audit_repo;
 use crate::db::connection::DbState;
 use crate::error::AppError;
 use crate::scraping::citation_chaser::{
-    clean_doi_filename, scrape_citation_chaser, CancelToken, ScrapeOptions,
+    clean_doi_filename, find_file_case_insensitive, scrape_citation_chaser, CancelToken,
+    ScrapeOptions,
 };
 
 /// Serializable result returned to the frontend.
@@ -142,19 +143,18 @@ pub async fn scrape_citation_chaser_cmd(
     };
 
     // ── Shortcut: check if RIS files already exist ──
-    let safe_doi = clean_doi_filename(&doi);
-    let refs_path = output_path.join(format!("{safe_doi}_references.ris"));
-    let cits_path = output_path.join(format!("{safe_doi}_citations.ris"));
+    // Probe case-insensitively (legacy files may carry mixed-case DOI names)
+    // and lowercase the DOI first so non-canonical callers still resolve.
+    let safe_doi = clean_doi_filename(&doi.to_lowercase());
+    let refs_path = find_file_case_insensitive(&output_path, &format!("{safe_doi}_references.ris"));
+    let cits_path = find_file_case_insensitive(&output_path, &format!("{safe_doi}_citations.ris"));
 
-    let refs_exist = get_refs && refs_path.exists();
-    let cits_exist = get_cits && cits_path.exists();
+    let refs_exist = get_refs && refs_path.is_some();
+    let cits_exist = get_cits && cits_path.is_some();
 
     if refs_exist && cits_exist {
         // Both needed files already cached - skip scraping entirely.
-        return Ok(ScrapeResultDto {
-            references_ris: get_refs.then_some(refs_path),
-            citations_ris: get_cits.then_some(cits_path),
-        });
+        return Ok(ScrapeResultDto { references_ris: refs_path, citations_ris: cits_path });
     }
 
     // ── Install the cancel token for the duration of the scrape ──

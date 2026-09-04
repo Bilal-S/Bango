@@ -225,6 +225,30 @@ pub fn clean_doi_filename(doi: &str) -> String {
     doi.chars().map(|c| if INVALID.contains(&c) { '_' } else { c }).collect()
 }
 
+/// Resolve `filename` in `dir` case-insensitively: exact path first, then one
+/// `read_dir` scan comparing file names with `eq_ignore_ascii_case`. Used by
+/// the Citation Chaser existence-shortcut so legacy mixed-case DOI filenames
+/// still hit the cache without a browser launch.
+#[must_use]
+pub fn find_file_case_insensitive(dir: &Path, filename: &str) -> Option<PathBuf> {
+    let exact = dir.join(filename);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let matches = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case(filename));
+        if matches {
+            return Some(path);
+        }
+    }
+    None
+}
+
 /// Randomized delay 500-2500ms to mimic human behaviour. Returns `true` if cancelled.
 fn human_delay(cancel: &CancelToken) -> bool {
     let mut rng = rand::rng();

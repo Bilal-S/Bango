@@ -26,6 +26,7 @@ Built with **Tauri 2.x** and **Vue 3 + TypeScript + Tailwind CSS v4** for a ligh
 * **Reference**: An external article *cited by* a parent article (`article_reference_links.type = 1`).
 * **Parent Article**: An article in the library containing citation/reference details.
 * **Match Status**: Connection state between a reference paper and a library article (`'unmatched'`, `'matched'`, `'imported'`, `'not_in_library'`).
+* **DOI Canonical Form**: DOIs are stored trimmed, lowercased, with `https://doi.org/` / `http://doi.org/` / `https://dx.doi.org/` / `http://dx.doi.org/` / `doi:` prefixes stripped and placeholder values (`NA`, `N/A`, `NULL`, `NONE`, `-`) treated as absent. Every DOI identity decision (dedup, matching, library checks, backup restore, filename match) compares this canonical form case-insensitively.
 
 ### 2.2 Core Database Schema
 
@@ -97,7 +98,7 @@ The SQLite schema consists of the following primary tables. All IDs are UUID str
 
 ### 3.2 Multi-Strategy Deduplication
 Upon import, new articles run sequentially through a prioritized strategy pipeline against the entire project database:
-1. **DOI Exact**: Match `doi` exactly → auto-merge as duplicate.
+1. **DOI Exact**: Match `doi` case-insensitively on the canonical form (§2.1) → auto-merge as duplicate.
 2. **Title + Year**: Normalised title similarity ≥ 95% (Levenshtein) AND exact `publicationYear`.
 3. **Fuzzy Title + Year**: Normalised title similarity 70–94% AND exact `publicationYear` → flags for manual review.
 4. **Author + Title Partial**: Exact first-author last name AND normalised title similarity ≥ 80% → flags for manual review.

@@ -683,3 +683,120 @@ fn phase5_report_mapping_generated_skipped_errors() {
         result.errors
     );
 }
+
+// ── Case-insensitive filename matching (legacy mixed-case files) ────────────
+
+#[tokio::test]
+async fn full_text_phase_matches_case_variant_filename() {
+    let tmp = TempDir::new().unwrap();
+    let conn = test_db();
+    configure_storage_root(&conn, tmp.path());
+
+    let id = insert_article_with_doi(&conn, "10.1001/MixedCase", "Mixed Case Article");
+    // File named with different casing than the stored DOI.
+    write_fulltext_txt(tmp.path(), "10.1001/mixedcase", "Full text body.");
+
+    let conn_mutex = Mutex::new(conn);
+    let (result, newly_attached) =
+        full_text_phase::run_full_text_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 1");
+
+    assert_eq!(result.total, 1, "should discover the case-variant file");
+    assert_eq!(result.succeeded, 1, "should attach it");
+    assert_eq!(newly_attached.len(), 1);
+
+    let conn = conn_mutex.into_inner().unwrap();
+    let article = article_repo::get_article_by_id(&conn, &id).unwrap();
+    assert!(article.has_full_text, "case-variant file must attach to the article");
+}
+
+#[tokio::test]
+async fn citations_phase_matches_case_variant_ris_filename() {
+    let tmp = TempDir::new().unwrap();
+    let conn = test_db();
+    configure_storage_root(&conn, tmp.path());
+
+    let id = insert_article_with_doi(&conn, "10.2001/Refs", "Refs Article");
+    write_references_ris(tmp.path(), "10.2001/refs", &["Cased Reference"]);
+
+    let conn_mutex = Mutex::new(conn);
+    let result =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2");
+
+    assert_eq!(result.total, 1, "should discover the case-variant RIS file");
+    assert_eq!(result.succeeded, 1, "should import it");
+    assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
+
+    let conn = conn_mutex.into_inner().unwrap();
+    let refs = reference_repo::get_references_for_article(
+        &conn,
+        &id,
+        Some(&bango_lib::models::reference::ReferenceType::Reference),
+    )
+    .unwrap();
+    assert_eq!(refs.len(), 1, "case-variant references file must import + link");
+    assert_eq!(refs[0].paper.title, "Cased Reference");
+}
+
+#[tokio::test]
+async fn citations_phase_directory_index_prefers_lowercase_named_file() {
+    let tmp = TempDir::new().unwrap();
+    let conn = test_db();
+    configure_storage_root(&conn, tmp.path());
+
+    let _id = insert_article_with_doi(&conn, "10.3001/Case", "Index Preference");
+
+    // Two files differing only in letter case; the exactly-lowercase-named
+    // file must win the directory-index slot (deterministic resolution).
+    let ris_dir = tmp.path().join("ris");
+    let write_ris = |name: &str, title: &str| {
+        use std::io::Write as _;
+        let mut f = std::fs::File::create(ris_dir.join(name)).unwrap();
+        writeln!(f, "TY  - JOUR").unwrap();
+        writeln!(f, "TI  - {title}").unwrap();
+        writeln!(f, "ER  -").unwrap();
+    };
+    write_ris("10.3001_Case_references.ris", "From Mixed File");
+    write_ris("10.3001_case_references.ris", "From Lowercase File");
+
+    let conn_mutex = Mutex::new(conn);
+    let result =
+        citations_phase::run_citations_phase(&conn_mutex, &never_cancel(), &mut noop_progress())
+            .await
+            .expect("phase 2");
+    assert_eq!(result.succeeded, 1);
+
+    let conn = conn_mutex.into_inner().unwrap();
+    let title: String = conn
+        .query_row("SELECT title FROM reference_papers WHERE title LIKE 'From %'", [], |row| {
+            row.get(0)
+        })
+        .expect("imported paper");
+    assert_eq!(title, "From Lowercase File", "lowercase-named file must win the slot");
+}
+
+#[test]
+fn find_file_case_insensitive_prefers_exact_match() {
+    use bango_lib::scraping::citation_chaser::find_file_case_insensitive;
+
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("10.4001_x_references.ris"), b"exact").unwrap();
+    std::fs::write(tmp.path().join("10.4001_X_references.ris"), b"variant").unwrap();
+
+    // Exact-named path wins over the case-variant sibling.
+    let found =
+        find_file_case_insensitive(tmp.path(), "10.4001_x_references.ris").expect("must resolve");
+    assert_eq!(found.file_name().unwrap().to_str().unwrap(), "10.4001_x_references.ris");
+
+    // Case-variant fallback when no exact file exists.
+    std::fs::remove_file(tmp.path().join("10.4001_x_references.ris")).unwrap();
+    let fallback =
+        find_file_case_insensitive(tmp.path(), "10.4001_x_references.ris").expect("must resolve");
+    assert_eq!(fallback.file_name().unwrap().to_str().unwrap(), "10.4001_X_references.ris");
+
+    // Absent file resolves to None.
+    assert!(find_file_case_insensitive(tmp.path(), "missing.ris").is_none());
+}

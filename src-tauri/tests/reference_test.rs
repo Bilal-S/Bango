@@ -580,3 +580,82 @@ fn test_case_insensitive_title_dedup() {
     assert!(!created2, "Case-insensitive title match should dedup");
     assert_eq!(first.id, second.id);
 }
+
+// ─── Case-insensitive DOI identity (legacy mixed-case data) ──────
+
+/// Simulate a legacy row: paper inserted canonically, then raw-updated to a
+/// mixed-case DOI (as stored by pre-canonicalization builds).
+fn seed_legacy_mixed_case_paper(conn: &rusqlite::Connection, doi: &str) -> String {
+    let (paper, _) = reference_repo::insert_or_find_paper(
+        conn,
+        &make_paper("Legacy Paper", Some("10.0000/placeholder")),
+    )
+    .expect("insert legacy paper");
+    conn.execute(
+        "UPDATE reference_papers SET doi = ?1 WHERE id = ?2",
+        rusqlite::params![doi, paper.id],
+    )
+    .expect("raw-update doi to legacy mixed case");
+    paper.id
+}
+
+#[test]
+fn find_paper_by_doi_case_insensitive() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    let paper_id = seed_legacy_mixed_case_paper(&conn, "10.1234/AbC");
+
+    let found =
+        reference_repo::find_paper_by_doi(&conn, "10.1234/abc").expect("find_paper_by_doi failed");
+    assert_eq!(found.expect("paper must be found").id, paper_id);
+}
+
+#[test]
+fn auto_match_paper_to_article_case_insensitive() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    // Article stores a legacy mixed-case DOI; the paper canonicalizes to
+    // lowercase, so only the case-insensitive SQL match bridges them.
+    let existing = article_repo::insert_article(
+        &conn,
+        &NewArticle {
+            title: "Existing Paper".to_string(),
+            doi: Some("10.1234/MiXeD".to_string()),
+            ..make_article("placeholder")
+        },
+    )
+    .expect("insert existing article failed");
+
+    let paper = make_paper("Existing Paper", Some("10.1234/mixed"));
+    let (inserted, _) =
+        reference_repo::insert_or_find_paper(&conn, &paper).expect("insert paper failed");
+
+    let matched =
+        reference_repo::auto_match_paper_to_article(&conn, &inserted).expect("auto_match failed");
+    assert_eq!(matched.as_deref(), Some(existing.id.as_str()));
+}
+
+#[test]
+fn find_unmatched_papers_by_doi_case_insensitive() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    let paper_id = seed_legacy_mixed_case_paper(&conn, "10.1234/LiNk");
+
+    // Article carries the same DOI in canonical lowercase.
+    let mut article = article_repo::insert_article(&conn, &make_article("Linking Article"))
+        .expect("insert article failed");
+    article.doi = Some("10.1234/link".to_string());
+
+    let links = reference_repo::link_imported_articles_to_papers(&conn, &[article]);
+    assert_eq!(links, 1, "post-import link must fire across casing");
+
+    let linked: String = conn
+        .query_row("SELECT reference_paper_id FROM article_reference_links LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .expect("link row");
+    assert_eq!(linked, paper_id);
+}

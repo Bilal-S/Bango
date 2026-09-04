@@ -39,6 +39,9 @@ messages include the URL + HTTP status for diagnostics.
 
 `reconstruct_abstract`, `truncate_snippet`, `map_work_to_new_article`,
 `map_works_to_new_articles`, `map_work_to_reference_paper`.
+DOI normalization delegates to the canonical `ris::doi::normalize_doi`
+(trim, ASCII case-insensitive prefix strip, placeholder filter, lowercase) -
+the module has no DOI normalizer of its own.
 
 ### Smart Search (`smart_search.rs`)
 

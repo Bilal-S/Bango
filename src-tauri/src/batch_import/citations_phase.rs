@@ -14,6 +14,7 @@
 //! RIS parsing is fast but the short-lock principle keeps other IPC commands
 //! responsive.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -43,31 +44,59 @@ fn resolve_ris_dir(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {
     Ok(ris)
 }
 
+/// Build a one-pass lowercase filename index of `dir`: lowercased file name ->
+/// path. When two files differ only in letter case (possible on Linux), the
+/// exactly-lowercase-named file wins the slot so resolution is deterministic.
+#[must_use]
+fn build_lowercase_dir_index(dir: &Path) -> HashMap<String, PathBuf> {
+    let mut index: HashMap<String, PathBuf> = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return index;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let key = name.to_lowercase();
+        let entry_is_lowercase = name == key;
+        let incumbent_is_lowercase = index
+            .get(&key)
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n == key);
+        if !index.contains_key(&key) || (entry_is_lowercase && !incumbent_is_lowercase) {
+            index.insert(key, path);
+        }
+    }
+    index
+}
+
 /// Discover importable citation files in `ris/`. For each article DOI, checks
-/// naming patterns and skips if target already has the detail flag.
+/// naming patterns (resolved against the lowercase directory index, so legacy
+/// mixed-case filenames still match) and skips if target already has the
+/// detail flag.
 fn discover_importable_files(ris_dir: &Path, match_map: &DoiMatchMap) -> Vec<PendingImport> {
     let mut importable: Vec<PendingImport> = Vec::new();
+    let dir_index = build_lowercase_dir_index(ris_dir);
 
     // Build a set of (article_id, ref_type) already present so we can skip.
     // Iterate over the match map entries so we only look for files for DOIs we
-    // actually have articles for.
+    // actually have articles for. Match-map keys are lowercase (canonical DOI
+    // form), so the formatted probes line up with the index keys.
     for (cleaned_doi, article) in &match_map.0 {
         // _references.ris - skip if article already has reference details
         if !article.has_reference_details {
-            let refs_path = ris_dir.join(format!("{cleaned_doi}_references.ris"));
-            if refs_path.exists() {
+            if let Some(refs_path) = dir_index.get(&format!("{cleaned_doi}_references.ris")) {
                 importable.push(PendingImport {
-                    path: refs_path,
+                    path: refs_path.clone(),
                     article_id: article.id.clone(),
                     ref_type: "reference",
                 });
             } else {
                 // Generic fallback: {cleaned_doi}.ris or .bib
                 for ext in CITATION_EXTENSIONS {
-                    let generic = ris_dir.join(format!("{cleaned_doi}.{ext}"));
-                    if generic.exists() {
+                    if let Some(generic) = dir_index.get(&format!("{cleaned_doi}.{ext}")) {
                         importable.push(PendingImport {
-                            path: generic,
+                            path: generic.clone(),
                             article_id: article.id.clone(),
                             ref_type: "reference",
                         });
@@ -79,10 +108,9 @@ fn discover_importable_files(ris_dir: &Path, match_map: &DoiMatchMap) -> Vec<Pen
 
         // _citations.ris - skip if article already has citation details
         if !article.has_citation_details {
-            let cits_path = ris_dir.join(format!("{cleaned_doi}_citations.ris"));
-            if cits_path.exists() {
+            if let Some(cits_path) = dir_index.get(&format!("{cleaned_doi}_citations.ris")) {
                 importable.push(PendingImport {
-                    path: cits_path,
+                    path: cits_path.clone(),
                     article_id: article.id.clone(),
                     ref_type: "citation",
                 });

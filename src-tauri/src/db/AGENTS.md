@@ -354,6 +354,21 @@ tests + `tests/migration_recovery_test.rs`.
   `clear_ai_reasoning` command) + creates the `article_embeddings` table.
   Idempotent. v001 is updated so fresh DBs get `ai_screen_clear` in the initial
   CHECK directly.
+- **`v008_audit_index_restore.rs`** (VERSION 8) - restores
+  `idx_audit_entries_article_id`, dropped by every `audit_entries` CHECK
+  rebuild (v003-v007 RENAME-CREATE-INSERT-DROP pattern).
+- **`v009_doi_canonicalization.rs`** (VERSION 9) - DOI canonicalization
+  (`tests/doi_case_migration_test.rs`, inventory
+  `docs/test-plans/doi-case-tests.md`). Heals legacy mixed-case, prefixed
+  (`https://doi.org/` / `dx.doi.org` / `doi:`), and whitespace-wrapped DOIs in
+  `articles` + `reference_papers`, merges case-variant duplicate
+  `reference_papers` (survivor by match-state rank `matched`/`imported` >
+  `unmatched`, then lowest `rowid`; links remapped with collision absorption;
+  counters recounted from links), and rebuilds `uq_ref_papers_doi` as an
+  expression index on `LOWER(doi)`. Statement order is load-bearing: the old
+  BINARY index is dropped FIRST (the healing UPDATEs would violate it on
+  case-variant data), and the new index is created LAST. v001 is updated so
+  fresh DBs get the `LOWER(doi)` index directly.
 
 ## Work Guidance
 
@@ -384,4 +399,4 @@ tests + `tests/migration_recovery_test.rs`.
 - **`biblio_repo/`** - directory module (`kpis`, `authors`, `networks/`,
   `terms`, `institutions`, `normalization`, `productivity`). No own
   `AGENTS.md`.
-- **`migrations/`** - one file per version (v002–v007). No own `AGENTS.md`.
+- **`migrations/`** - one file per version (v002-v009). No own `AGENTS.md`.

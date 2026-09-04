@@ -224,15 +224,25 @@ export const useOpenAlexStore = defineStore('openalex', () => {
     const dois = results.value
       .map((r) => r.work.doi)
       .filter((d): d is string => d !== null)
-      .map((d) => d.replace(/^https?:\/\/doi\.org\//i, '').toLowerCase());
+      .map((d) =>
+        d
+          .replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
+          .trim()
+          .toLowerCase()
+      );
 
     if (dois.length === 0) return;
 
     try {
       const libraryDois = await tauriCommand<string[]>('check_dois_in_library', { dois });
-      const librarySet = new Set(libraryDois);
+      // Backend returns lowercase canonical values; lowercase + trim as
+      // defense-in-depth so stored-casing DOIs can never break the grey-out.
+      const librarySet = new Set(libraryDois.map((d) => d.trim().toLowerCase()));
       results.value = results.value.map((r) => {
-        const normalizedDoi = r.work.doi?.replace(/^https?:\/\/doi\.org\//i, '').toLowerCase();
+        const normalizedDoi = r.work.doi
+          ?.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')
+          .trim()
+          .toLowerCase();
         return {
           ...r,
           alreadyInLibrary: normalizedDoi ? librarySet.has(normalizedDoi) : false,

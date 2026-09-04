@@ -56,16 +56,16 @@ fn clear_makes_row_absent() {
 }
 
 /// v004 must create the `gap_analysis` table. After all migrations
-/// (v001-v008), `user_version` must be 8.
+/// (v001-v009), `user_version` must be 9.
 #[test]
 fn migration_v004_creates_gap_analysis_table_and_sets_user_version() {
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("Failed to run migrations");
 
-    // user_version must be 8 (v001 + v002 + v003 + v004 + v005 + v006 + v007 + v008).
+    // user_version must be 9 (v001 + ... + v009).
     let version: i64 =
         conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("PRAGMA failed");
-    assert_eq!(version, 8, "user_version must be 8 after migrations v001-v008");
+    assert_eq!(version, 9, "user_version must be 9 after migrations v001-v009");
 
     // The gap_analysis table must exist.
     let exists: i64 = conn

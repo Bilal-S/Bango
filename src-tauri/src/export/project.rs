@@ -414,7 +414,8 @@ fn import_articles(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppEr
             serde_json::to_string(&a.get("authors").cloned().unwrap_or(serde_json::json!([])))
                 .unwrap_or_default();
         let publication_year = a.get("publicationYear").and_then(|v| v.as_i64());
-        let doi = get_str_field(a, "doi", "doi");
+        // Canonical form (trim, strip prefix, lowercase); placeholder -> NULL.
+        let doi = crate::ris::doi::normalize_doi(get_str_field(a, "doi", "doi").as_deref());
         let journal = get_str_field(a, "journal", "journal");
         let volume = get_str_field(a, "volume", "volume");
         let issue = get_str_field(a, "issue", "issue");
@@ -576,8 +577,8 @@ fn import_reference_papers(
             serde_json::to_string(&rp.get("authors").cloned().unwrap_or(serde_json::json!([])))
                 .unwrap_or_default();
         let publication_year = rp.get("publicationYear").and_then(|v| v.as_i64());
-        let doi: Option<String> =
-            get_str_field(rp, "doi", "doi").and_then(|d| if d.is_empty() { None } else { Some(d) });
+        // Canonical form (trim, strip prefix, lowercase); empty/placeholder -> None.
+        let doi = crate::ris::doi::normalize_doi(get_str_field(rp, "doi", "doi").as_deref());
         let journal = get_str_field(rp, "journal", "journal");
         let volume = get_str_field(rp, "volume", "volume");
         let issue = get_str_field(rp, "issue", "issue");
@@ -1089,9 +1090,11 @@ fn find_existing_paper_id(
 ) -> Option<String> {
     if let Some(doi) = doi {
         let result: Option<String> = conn
-            .query_row("SELECT id FROM reference_papers WHERE doi = ?1 LIMIT 1", [doi], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT id FROM reference_papers WHERE LOWER(doi) = LOWER(?1) LIMIT 1",
+                [doi],
+                |row| row.get(0),
+            )
             .ok();
         if let Some(id) = result {
             return Some(id);

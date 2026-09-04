@@ -459,6 +459,30 @@ describe('OpenAlex Store', () => {
     expect(store.results[1]?.alreadyInLibrary).toBe(false);
   });
 
+  it('library_doi_check_greys_out_case_variant', async () => {
+    tauriMock
+      .mockResolvedValueOnce(
+        makeSearchResponse(
+          [
+            makeResult('W1', {
+              work: { ...makeResult('W1').work, doi: 'https://doi.org/10.1234/In_Library' },
+            }),
+          ],
+          { totalCount: 1 }
+        )
+      )
+      // Backend returns a stored-casing value; the store must normalize
+      // (trim + lowercase) before the Set comparison so the grey-out fires.
+      .mockResolvedValueOnce(['10.1234/In_Library']);
+
+    const store = useOpenAlexStore();
+    store.setQuery('test');
+    await store.search();
+    await store.refreshLibraryFlags();
+
+    expect(store.results[0]?.alreadyInLibrary).toBe(true);
+  });
+
   it('smart_search_mode_gated_on_llm_configured', () => {
     // `smartSearchAvailable` is now a computed over `useLlmConfigured()`; no
     // `has_llm_config` IPC probe is involved. Mutate the mock ref and the

@@ -63,10 +63,10 @@ fn test_migration_v003_creates_article_chunks_table_and_sets_user_version() {
     let conn = create_connection().expect("Failed to create connection");
     run_migrations(&conn).expect("Failed to run migrations");
 
-    // user_version must be 8 (v001 + v002 + v003 + v004 + v005 + v006 + v007 + v008).
+    // user_version must be 9 (v001 + ... + v009).
     let version: i32 =
         conn.query_row("PRAGMA user_version", [], |row| row.get(0)).expect("PRAGMA failed");
-    assert_eq!(version, 8, "user_version must be 8 after migrations v001-v008");
+    assert_eq!(version, 9, "user_version must be 9 after migrations v001-v009");
 
     // article_chunks table must exist (created by v003).
     let exists: i64 = conn

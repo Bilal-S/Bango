@@ -6,6 +6,7 @@ pub mod v005_audit_note_add;
 pub mod v006_audit_metadata_edit;
 pub mod v007_audit_clear_and_embeddings;
 pub mod v008_audit_index_restore;
+pub mod v009_doi_canonicalization;
 
 pub struct Migration {
     pub version: i32,
@@ -33,6 +34,10 @@ pub fn get_migrations() -> Vec<Migration> {
         Migration {
             version: v008_audit_index_restore::VERSION,
             up_sql: v008_audit_index_restore::UP_SQL,
+        },
+        Migration {
+            version: v009_doi_canonicalization::VERSION,
+            up_sql: v009_doi_canonicalization::UP_SQL,
         },
     ]
 }
