@@ -90,12 +90,24 @@ async fn run_core(
     excluded: &[String],
     expected_version: i64,
 ) -> Result<bango_lib::commands::zotero::ZoteroImportResult, bango_lib::error::AppError> {
+    run_core_with(db, base, excluded, expected_version, false).await
+}
+
+/// `run_core` with an explicit `skip_duplicates` (the review-step checkbox).
+async fn run_core_with(
+    db: &Mutex<rusqlite::Connection>,
+    base: &str,
+    excluded: &[String],
+    expected_version: i64,
+    skip_duplicates: bool,
+) -> Result<bango_lib::commands::zotero::ZoteroImportResult, bango_lib::error::AppError> {
     import_zotero_collection_core(
         base,
         db,
         "KEY",
         excluded,
         expected_version,
+        skip_duplicates,
         &|_, _, _, _| {},
         &|_, _| {},
     )
@@ -114,6 +126,7 @@ fn import_zotero_collection_inserts_articles() {
             keys: &keys,
             skipped_by_user: 0,
             skipped_validation: 0,
+            skip_duplicates: false,
             validation_errors: vec![],
             error_groups: vec![],
             tags_by_key: &Default::default(),
@@ -157,6 +170,7 @@ fn import_zotero_collection_runs_classify() {
             keys: &keys,
             skipped_by_user: 0,
             skipped_validation: 0,
+            skip_duplicates: false,
             validation_errors: vec![],
             error_groups: vec![],
             tags_by_key: &Default::default(),
@@ -184,6 +198,7 @@ fn import_zotero_collection_assigns_tags() {
             keys: &keys,
             skipped_by_user: 0,
             skipped_validation: 0,
+            skip_duplicates: false,
             validation_errors: vec![],
             error_groups: vec![],
             tags_by_key: &tags_by_key,
@@ -245,6 +260,43 @@ async fn import_zotero_collection_respects_excluded_keys() {
         collected
     };
     assert_eq!(titles, vec!["Alpha Paper".to_string()]);
+}
+
+#[tokio::test]
+async fn import_zotero_collection_skips_library_duplicates() {
+    let conn = test_db();
+    // Seed the library with an article sharing ITEM1's canonical DOI; with
+    // the review-step Skip flag on, only the other item imports.
+    let seeded = vec![bango_lib::models::article::NewArticle {
+        title: "Already In Library".to_string(),
+        abstract_text: "Abstract.".to_string(),
+        authors: vec!["Author, A".to_string()],
+        doi: Some("10.1/ITEM1".to_string()),
+        ..bango_lib::models::article::NewArticle::default()
+    }];
+    bango_lib::db::article_repo::insert_articles_batch(&conn, &seeded, "test").unwrap();
+    let db = Mutex::new(conn);
+    let items = format!(
+        "[{},{}]",
+        valid_item_json("ITEM1", "Alpha Paper", &[]),
+        valid_item_json("ITEM2", "Beta Paper", &[])
+    );
+    let (_server, base) = import_server(items, "[]".to_string()).await;
+    let result = run_core_with(&db, &base, &[], 15, true).await.expect("import");
+    assert_eq!(result.result.imported_count, 1, "the library duplicate is not inserted");
+    assert_eq!(result.result.skipped_duplicates, 1);
+    let titles: Vec<String> = {
+        let conn = db.lock().unwrap();
+        let collected: Vec<String> = conn
+            .prepare("SELECT title FROM articles ORDER BY title")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        collected
+    };
+    assert_eq!(titles, vec!["Already In Library".to_string(), "Beta Paper".to_string()]);
 }
 
 #[tokio::test]

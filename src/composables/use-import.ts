@@ -20,6 +20,9 @@ export interface ImportPreview {
   errorCount: number;
   /** Valid records whose canonical DOI already exists in the library. */
   duplicateCount: number;
+  /** Indices into the valid records that duplicate the library (the Skip-box
+   * count and the confirm-button arithmetic). */
+  duplicateIndices: number[];
   errors: ImportError[];
   errorGroups: ErrorGroup[];
   previewArticles: PreviewArticle[];
@@ -36,6 +39,8 @@ export interface PreviewArticle {
 export interface ImportResult {
   importedCount: number;
   skippedCount: number;
+  /** Library duplicates dropped before import (review-step Skip checkbox). */
+  skippedDuplicates: number;
   skippedByUser: number;
   articles: unknown[];
   remainingCapacity: number;
@@ -79,6 +84,11 @@ export function useImport() {
   const error = ref<string | null>(null);
   const removedIndices = ref<Set<number>>(new Set());
   const dedupSummary = ref<DedupResult | null>(null);
+  // Review-step Skip checkbox: drop records whose canonical DOI already
+  // exists in the library before import (within-file duplicates and every
+  // other strategy still flow to the classify phase). Defaults to on and
+  // resets for every new preview.
+  const skipDuplicates = ref(true);
 
   // Zotero flow state (keyed by Zotero item key, never positional).
   const importSource = ref<'file' | 'zotero'>('file');
@@ -102,6 +112,18 @@ export function useImport() {
   const visibleCount = computed(() => {
     if (!preview.value) return 0;
     return preview.value.validRecords - removedIndices.value.size;
+  });
+
+  /** The confirm-button count: the visible articles minus the library
+   * duplicates the Skip checkbox will drop (they come back when it is
+   * unchecked; manually removed rows never count twice). */
+  const importableCount = computed(() => {
+    if (!preview.value) return 0;
+    if (!skipDuplicates.value) return visibleCount.value;
+    const duplicatesLeft = preview.value.duplicateIndices.filter(
+      (index) => !removedIndices.value.has(index)
+    ).length;
+    return Math.max(visibleCount.value - duplicatesLeft, 0);
   });
 
   function removeArticle(index: number): void {
@@ -143,6 +165,7 @@ export function useImport() {
     dedupSummary.value = null;
     error.value = null;
     removedIndices.value = new Set();
+    skipDuplicates.value = true;
     step.value = 'zotero';
   }
 
@@ -173,6 +196,7 @@ export function useImport() {
     dedupSummary.value = null;
     error.value = null;
     removedIndices.value = new Set();
+    skipDuplicates.value = true;
     step.value = 'import';
   }
 
@@ -206,6 +230,7 @@ export function useImport() {
           fileName: fileName.value,
         },
       });
+      skipDuplicates.value = true;
       step.value = 'import';
     } catch (e) {
       console.error('[import] parseFile failed:', e);
@@ -237,6 +262,7 @@ export function useImport() {
           filePath: filePath.value,
           fileName: fileName.value,
           excludedIndices: [...removedIndices.value],
+          skipDuplicates: skipDuplicates.value,
         },
       });
 
@@ -283,6 +309,7 @@ export function useImport() {
           collectionKey: zoteroCollectionKey.value,
           excludedKeys,
           expectedLibraryVersion: zoteroLibraryVersion.value,
+          skipDuplicates: skipDuplicates.value,
         }
       );
       importResult.value = result.result;
@@ -332,6 +359,7 @@ export function useImport() {
     zoteroLibraryVersion.value = null;
     zoteroPreviewMeta.value = null;
     zoteroAttachmentSummary.value = null;
+    skipDuplicates.value = true;
   }
 
   return {
@@ -346,8 +374,10 @@ export function useImport() {
     canImport,
     hasZeroValid,
     removedIndices,
+    skipDuplicates,
     visibleArticles,
     visibleCount,
+    importableCount,
     dedupSummary,
     importSource,
     zoteroCollectionKey,

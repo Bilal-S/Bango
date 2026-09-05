@@ -179,15 +179,21 @@ pub fn classify_write_status(
 }
 
 /// Build the `imported_file` attachment child item JSON (contentType derived
-/// from the filename extension).
+/// from the filename extension; `title` is the friendly attachment title,
+/// conventionally the same string as the filename).
 #[must_use]
-pub fn build_attachment_item_json(parent_key: &str, filename: &str) -> serde_json::Value {
+pub fn build_attachment_item_json(
+    parent_key: &str,
+    filename: &str,
+    title: &str,
+) -> serde_json::Value {
     let content_type =
         if filename.to_lowercase().ends_with(".pdf") { "application/pdf" } else { "text/plain" };
     serde_json::json!({
         "itemType": "attachment",
         "parentItem": parent_key,
         "linkMode": "imported_file",
+        "title": title,
         "contentType": content_type,
         "filename": filename,
         "tags": [],
@@ -314,6 +320,21 @@ pub async fn post_items_batch(
     api_key: &str,
     items: &[serde_json::Value],
 ) -> Result<WriteEnvelope, ZoteroWriteError> {
+    let body = serde_json::to_string(items)
+        .map_err(|e| ZoteroWriteError::Http(format!("Failed to serialize items: {e}")))?;
+    post_items_batch_body(base_url, server_id, api_key, body).await
+}
+
+/// POST one batch from a pre-serialized JSON array body (fresh
+/// `Zotero-Write-Token`, standard headers). Attachment items must go
+/// through `ordered_attachment_body` - see its doc for the field-order
+/// contract.
+async fn post_items_batch_body(
+    base_url: &str,
+    server_id: &str,
+    api_key: &str,
+    body: String,
+) -> Result<WriteEnvelope, ZoteroWriteError> {
     let url = format!("{base_url}/users/{LOCAL_USER_ID}/items");
     let response = shared_client()
         .map_err(ZoteroWriteError::from)?
@@ -321,25 +342,63 @@ pub async fn post_items_batch(
         .header("Zotero-Server-ID", server_id)
         .header("Zotero-API-Key", api_key)
         .header("Zotero-Write-Token", build_write_token())
-        .json(&items)
+        .header("Content-Type", "application/json")
+        .body(body)
         .send()
         .await
         .map_err(map_write_send_error)?;
     envelope_from_response(response).await
 }
 
+/// Serialize the attachment item with `linkMode` BEFORE `filename` /
+/// `contentType`: Zotero's local write API applies fields in document order
+/// and rejects a `filename` (the attachment path) that arrives before the
+/// link mode ("Link mode must be set before setting attachment path", 400;
+/// verified live 2026-09-05). serde_json's default Map is alphabetically
+/// ordered (`filename` sorts before `linkMode`), so the body is re-ordered
+/// by hand from the field set built by `build_attachment_item_json`.
+#[must_use]
+pub fn ordered_attachment_body(item: &serde_json::Value) -> String {
+    let field = |name: &str| {
+        serde_json::to_string(item.get(name).unwrap_or(&serde_json::Value::Null))
+            .unwrap_or_else(|_| "null".to_string())
+    };
+    format!(
+        "[{{\"itemType\":{},\"parentItem\":{},\"linkMode\":{},\"title\":{},\"contentType\":{},\"filename\":{},\"tags\":{}}}]",
+        field("itemType"),
+        field("parentItem"),
+        field("linkMode"),
+        field("title"),
+        field("contentType"),
+        field("filename"),
+        field("tags"),
+    )
+}
+
 /// Create one `imported_file` attachment child and return its new key.
+/// A 200 envelope without a created key carries Zotero's per-index
+/// rejection reasons (the `failed` map) in the error, so the Diagnostics
+/// entry names the actual cause instead of a bare "no key".
 pub async fn create_attachment_item(
     base_url: &str,
     server_id: &str,
     api_key: &str,
     parent_key: &str,
     filename: &str,
+    title: &str,
 ) -> Result<String, ZoteroWriteError> {
-    let item = build_attachment_item_json(parent_key, filename);
-    let envelope = post_items_batch(base_url, server_id, api_key, &[item]).await?;
+    let item = build_attachment_item_json(parent_key, filename, title);
+    let envelope =
+        post_items_batch_body(base_url, server_id, api_key, ordered_attachment_body(&item)).await?;
     envelope.successful_keys.first().cloned().ok_or_else(|| {
-        ZoteroWriteError::Http("Attachment item creation returned no key".to_string())
+        let failures = envelope
+            .failed
+            .iter()
+            .map(|(index, message)| format!("[{index}] {message}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        let reason = if failures.is_empty() { "empty envelope".to_string() } else { failures };
+        ZoteroWriteError::Http(format!("Attachment item creation returned no key ({reason})"))
     })
 }
 
@@ -419,6 +478,30 @@ fn phase_tag(error: ZoteroWriteError, phase: u8, url: &str) -> ZoteroWriteError 
     }
 }
 
+/// The phase-1 urlencoded body, built by hand: Zotero's local form decoder
+/// passes `+` through literally (a form-encoded space would be stored as a
+/// literal `+` in the filename), so spaces are percent-encoded as `%20`
+/// (verified live 2026-09-05 on Zotero 10.0.1). `%`, `&`, `=`, and `+` are
+/// escaped too.
+#[must_use]
+pub fn build_upload_auth_body(md5: &str, filename: &str, filesize: u64, mtime_ms: u64) -> String {
+    let encode = |value: &str| {
+        value
+            .replace('%', "%25")
+            .replace(' ', "%20")
+            .replace('&', "%26")
+            .replace('=', "%3D")
+            .replace('+', "%2B")
+    };
+    format!(
+        "md5={}&filename={}&filesize={}&mtime={}",
+        encode(md5),
+        encode(filename),
+        filesize,
+        mtime_ms
+    )
+}
+
 pub async fn upload_file(
     base_url: &str,
     server_id: &str,
@@ -436,12 +519,13 @@ pub async fn upload_file(
         .header("Zotero-Server-ID", server_id)
         .header("Zotero-API-Key", api_key)
         .header("If-None-Match", "*")
-        .form(&[
-            ("md5", params.md5.as_str()),
-            ("filename", params.filename.as_str()),
-            ("filesize", &params.filesize.to_string()),
-            ("mtime", &params.mtime_ms.to_string()),
-        ])
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(build_upload_auth_body(
+            &params.md5,
+            &params.filename,
+            params.filesize,
+            params.mtime_ms,
+        ))
         .send()
         .await
         .map_err(map_write_send_error)?;

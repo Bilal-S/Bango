@@ -3,7 +3,8 @@
 
 use bango_lib::models::article::{Article, ArticleStatus};
 use bango_lib::zotero::export_mapping::{
-    build_item_json, join_pages, map_creators_for_export, map_ris_type_to_item_type, merge_tags,
+    build_attachment_title, build_item_json, join_pages, map_creators_for_export,
+    map_ris_type_to_item_type, merge_tags,
 };
 
 fn base_article() -> Article {
@@ -222,4 +223,47 @@ fn map_notes_to_extra_user_notes_excluded() {
     // user_notes and labels never export.
     let serialized = item.to_string();
     assert!(!serialized.contains("PRIVATE user notes"));
+}
+
+#[test]
+fn build_attachment_title_lastname_and_word_boundary_truncation() {
+    let title = "The awakening of sundown phenomena in coastal regions";
+    assert_eq!(
+        build_attachment_title(
+            &["Jones, Mary".to_string(), "Smith, Anna".to_string()],
+            title,
+            "pdf"
+        ),
+        "Jones - The awakening of sundown.pdf"
+    );
+    // Short titles pass through untouched; a leading extension dot normalizes.
+    assert_eq!(
+        build_attachment_title(&["Doe, Jane".to_string()], "A study", ".pdf"),
+        "Doe - A study.pdf"
+    );
+}
+
+#[test]
+fn build_attachment_title_single_token_author_uses_whole_name() {
+    assert_eq!(
+        build_attachment_title(&["World Health Organization".to_string()], "Malaria report", "txt"),
+        "World Health Organization - Malaria report.txt"
+    );
+}
+
+#[test]
+fn build_attachment_title_no_author_or_title_fallbacks() {
+    // No author -> title only; blank author entries are skipped.
+    assert_eq!(
+        build_attachment_title(&["".to_string(), "   ".to_string()], "Short title", "pdf"),
+        "Short title.pdf"
+    );
+    // Blank title -> Untitled.
+    assert_eq!(
+        build_attachment_title(&["Doe, Jane".to_string()], "   ", "pdf"),
+        "Doe - Untitled.pdf"
+    );
+    // A single word longer than 30 chars hard-cuts at 30.
+    let long_word = "a".repeat(40);
+    assert_eq!(build_attachment_title(&[], &long_word, "pdf"), format!("{}.pdf", "a".repeat(30)));
 }

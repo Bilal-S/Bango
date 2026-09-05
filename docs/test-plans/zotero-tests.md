@@ -58,6 +58,7 @@ the PR.
 | `src-tauri/tests/zotero_import_test.rs::import_zotero_collection_runs_classify` | Non-dupes reach `working`, dupes flagged duplicate |
 | `src-tauri/tests/zotero_import_test.rs::import_zotero_collection_assigns_tags` | Sanitized Zotero tags linked via `article_tags` with source `ris_keyword` |
 | `src-tauri/tests/zotero_import_test.rs::import_zotero_collection_respects_excluded_keys` | Deselected Zotero keys are not imported; unknown keys ignored |
+| `src-tauri/tests/zotero_import_test.rs::import_zotero_collection_skips_library_duplicates` | Skip flag drops library-DOI records before insert (`skippedDuplicates` counted; keys stay aligned) |
 | `src-tauri/tests/zotero_import_test.rs::import_zotero_collection_aborts_on_library_version_change` | Version mismatch -> error, nothing written |
 | `src-tauri/tests/zotero_import_test.rs::import_zotero_collection_capacity_guard_surfaces` | Over-limit batch -> `AppError::Import`, nothing written (inherited guard) |
 | `src-tauri/tests/zotero_import_test.rs::import_zotero_collection_attaches_pdf` | PDF child copies into fulltext dir with `{clean_doi}.pdf` naming + `has_full_text = 1` |
@@ -78,6 +79,7 @@ the PR.
 | `src/__tests__/zotero-collection-picker.test.ts::select_collection_fetches_preview` | Clicking a collection calls preview command and advances |
 | `src/__tests__/zotero-collection-picker.test.ts::shows_error_state_on_fetch_failure` | Fetch failure renders error card with Retry |
 | `src/__tests__/import-drop-zone.test.ts::zotero_button_emits_zotero_selected` | New button emits `zotero-selected` |
+| `src/__tests__/zotero-import-flow.test.ts::zotero_confirm_passes_skip_duplicates` | Zotero confirm passes the review-step Skip flag (default on, resets per preview) |
 
 ### Tier 5 - backend export
 
@@ -92,14 +94,20 @@ the PR.
 | `src-tauri/tests/zotero_export_mapping_test.rs::map_non_journal_types_drop_invalid_fields` | `book` drops `publicationTitle`/`ISSN` |
 | `src-tauri/tests/zotero_export_mapping_test.rs::map_tags_and_keywords_merge_deduped` | tags + keywords -> one case-insensitively deduped Zotero tags array |
 | `src-tauri/tests/zotero_export_mapping_test.rs::map_notes_to_extra_user_notes_excluded` | `notes` -> `extra`; `user_notes` absent |
+| `src-tauri/tests/zotero_export_mapping_test.rs::build_attachment_title_lastname_and_word_boundary_truncation` | First author's last name + title cut at the last word boundary within 30 chars + extension |
+| `src-tauri/tests/zotero_export_mapping_test.rs::build_attachment_title_single_token_author_uses_whole_name` | Institutional single-token author used verbatim |
+| `src-tauri/tests/zotero_export_mapping_test.rs::build_attachment_title_no_author_or_title_fallbacks` | No author -> title only; blank title -> Untitled; >30-char single word hard-cuts |
 | `src-tauri/tests/zotero_export_test.rs::diff_by_canonical_doi_classifies_articles` | missing / already-present / no-DOI incl. prefix + case differences |
 | `src-tauri/tests/zotero_export_test.rs::diff_treats_placeholder_dois_as_no_doi` | `NA`/`-` DOIs land in the no-DOI bucket |
 | `src-tauri/tests/zotero_export_test.rs::preview_counts_match_diff` | Preview numbers equal the pure diff on fixture JSON |
 | `src-tauri/tests/zotero_write_client_test.rs::parse_write_envelope` | `successful`/`success`/`unchanged`/`failed` envelope parses; item keys extracted |
 | `src-tauri/tests/zotero_write_client_test.rs::write_auth_error_classification` | 401 -> KeyRequired(+authorize hint), 403 denied, 429 rate-limited, 428 server-id, 501 needs-10 |
 | `src-tauri/tests/zotero_write_client_test.rs::authorize_response_parses` | `{"key","remember"}` body parse; remember flag surfaced |
-| `src-tauri/tests/zotero_write_client_test.rs::build_attachment_item_json` | `imported_file` child with parentItem + contentType by extension |
+| `src-tauri/tests/zotero_write_client_test.rs::build_attachment_item_json` | `imported_file` child with parentItem + title + contentType by extension |
 | `src-tauri/tests/zotero_write_client_test.rs::build_upload_params` | md5/filename/filesize/mtime + `If-None-Match: *` |
+| `src-tauri/tests/zotero_write_client_test.rs::build_upload_auth_body_percent_encodes_spaces` | Phase-1 body sends spaces as %20 (never `+`); %, &, =, + escaped |
+| `src-tauri/tests/zotero_write_client_test.rs::attachment_item_creation_surfaces_envelope_failures` | No-key envelope error carries the `failed` map reasons |
+| `src-tauri/tests/zotero_write_client_test.rs::ordered_attachment_body_puts_link_mode_before_path_fields` | Body serializes linkMode before filename/contentType; round-trips the field set |
 | `src-tauri/tests/zotero_write_client_test.rs::upload_authorization_response_branches` | `{url, uploadKey}` vs `{"exists":1}` branches |
 | `src-tauri/tests/zotero_write_client_test.rs::batches_chunked_at_50_with_fresh_tokens` | Batch splitting + a unique `Zotero-Write-Token` per batch |
 | `src-tauri/tests/zotero_write_client_test.rs::decide_write_auth_reuses_stored_key` | Stored key + matching server id -> UseStored; no authorize call |
@@ -124,4 +132,5 @@ the PR.
 | `src/__tests__/components/zotero-export-panel.test.ts::authorize_state_prompts_remember` | No stored key -> authorize phase + "tick Remember" copy |
 | `src/__tests__/components/zotero-export-panel.test.ts::progress_events_update_bar` | `zotero-export:progress` phases drive the bar |
 | `src/__tests__/components/zotero-export-panel.test.ts::result_summary_rendered` | Exported/already/no-DOI/file counts render |
+| `src/__tests__/components/zotero-export-panel.test.ts::button_becomes_close_after_completion` | Result state renames the primary button to Close; click emits close |
 

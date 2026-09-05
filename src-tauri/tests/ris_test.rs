@@ -511,3 +511,38 @@ fn count_library_duplicates_matches_canonical_dois() {
     // Empty input short-circuits.
     assert_eq!(count_library_duplicates(&conn, &[]).unwrap(), 0);
 }
+
+#[test]
+fn filter_library_duplicates_splits_kept_and_skipped() {
+    use bango_lib::commands::import::filter_library_duplicates;
+    use bango_lib::models::article::NewArticle;
+
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+    let seeded = vec![NewArticle {
+        title: "Present In Library".to_string(),
+        abstract_text: "Abstract.".to_string(),
+        authors: vec!["Author, A".to_string()],
+        doi: Some("10.1/present".to_string()),
+        ..NewArticle::default()
+    }];
+    article_repo::insert_articles_batch(&conn, &seeded, "test").expect("seed");
+
+    // The review-step Skip checkbox splits on canonical DOIs: the library
+    // duplicate drops, the unique-DOI and no-DOI records are kept.
+    let duplicate =
+        RisRecord { doi: Some("https://doi.org/10.1/PRESENT".to_string()), ..RisRecord::default() };
+    let unique = RisRecord { doi: Some("10.1/other".to_string()), ..RisRecord::default() };
+    let no_doi = RisRecord::default();
+    let records = vec![&duplicate, &unique, &no_doi];
+
+    let (kept, skipped) = filter_library_duplicates(&conn, &records).unwrap();
+    assert_eq!(skipped, 1);
+    let kept_dois: Vec<Option<String>> = kept.iter().map(|r| r.doi.clone()).collect();
+    assert_eq!(kept_dois, vec![Some("10.1/other".to_string()), None]);
+    // Empty input short-circuits.
+    assert!(filter_library_duplicates(&conn, &[]).unwrap().0.is_empty());
+    // The preview's index signal points at exactly the library duplicate.
+    use bango_lib::commands::import::library_duplicate_indices;
+    assert_eq!(library_duplicate_indices(&conn, &records).unwrap(), vec![0]);
+}

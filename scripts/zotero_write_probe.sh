@@ -12,19 +12,67 @@
 #      -> blocks while a confirmation dialog shows in Zotero -> on Allow
 #      200 {"key": <32 chars>, "remember": bool}. remember:false keys are
 #      single-use; remember:true keys persist until the user clears write
-#      authorizations in Zotero Settings -> Advanced.
+#      authorizations in Zotero Settings -> Advanced. The probe SAVES
+#      remember:true keys to $KEYFILE (key + server id, mode 600) and
+#      reuses them on later runs while the live server id matches (the
+#      app's decide_write_auth policy); any 401 write rejection clears the
+#      file so the next run shows the dialog again.
 #   3. POST /api/users/0/items + Zotero-API-Key + Zotero-Server-ID -> 200
 #      with the successful/success/unchanged/failed envelope.
 #   4. DELETE /api/users/0/items/<key> additionally needs
 #      If-Unmodified-Since-Version: <item version> (else 428).
 #
+# Upload contract exercised by --upload (mirrors write_client.rs
+# upload_file; recorded findings live in .worktrees/zotero3.md):
+#   5. Attachment child item {"itemType":"attachment","parentItem":<key>,
+#      "linkMode":"imported_file","contentType":"text/plain",
+#      "title"/"filename": "{Author} - {<=30 title chars}.{ext}"} via the
+#      batched new-item POST with a fresh Zotero-Write-Token (the app's
+#      build_attachment_title convention; the probe item also targets the
+#      UI-selected collection or COLLECTION).
+#   6. Phase 1: POST /api/users/0/items/<attachmentKey>/file with urlencoded
+#      md5/filename/filesize/mtime + "If-None-Match: *"
+#      -> {"url","uploadKey"} or {"exists":1}.
+#   7. Phase 2: POST the file bytes to <url> with
+#      Content-Type: application/x-zotero-file -> 201.
+#   8. Phase 3: POST the file endpoint again with urlencoded
+#      upload=<uploadKey> -> 204; GET .../file then serves the upload.
+#      (Verified live 2026-09-05 on Zotero 10.0.1: phase 1 answers 200 with a
+#      LOCAL upload url <base>/api/local/uploads/<uploadKey> plus extra
+#      contentType/prefix/suffix fields; bytes -> 201; register -> 204; the
+#      file check GET -> 302 with a file:// Location into Zotero storage.)
+#
 # Usage:
-#   scripts/zotero_write_probe.sh           # read-only probes (stages 1-3)
-#   scripts/zotero_write_probe.sh --write   # stages 4-7: keyless 401 probe,
-#                                           # authorize (dialog!), one item
-#                                           # create, versioned delete
+#   scripts/zotero_write_probe.sh             # read-only probes (stages 1-3)
+#   scripts/zotero_write_probe.sh --write     # stages 4-7: keyless 401 probe,
+#                                             # authorize (dialog!), one item
+#                                             # create, versioned delete
+#   scripts/zotero_write_probe.sh --upload    # stages 4-5 + 8-13: authorize
+#                                             # (dialog!), probe parent +
+#                                             # attachment item, 3-phase file
+#                                             # upload of a tiny .txt + file
+#                                             # check + read-back verify.
+#                                             # The parent item targets the
+#                                             # UI-selected collection (or
+#                                             # COLLECTION); items are KEPT
+#                                             # in Zotero for inspection and
+#                                             # their keys recorded in $STATE
+#   scripts/zotero_write_probe.sh --cleanup   # stages 1-3 + 5 + deletes:
+#                                             # authorize (dialog!), then
+#                                             # versioned-delete every
+#                                             # recorded probe item
 # Env: ZOTERO_BASE, WRITE_TIMEOUT (default 180 s dialog wait),
-#      APP (authorize appName, default "Bango").
+#      APP (authorize appName, default "Bango"), COLLECTION (target
+#      collection key override for --upload; default: the UI-selected
+#      collection via an exact-name match, else Unfiled), STATE (probe-item
+#      key file, default ${TMPDIR:-/tmp}/zotero_write_probe_state), KEYFILE
+#      (saved write key + server id, default
+#      ${TMPDIR:-/tmp}/zotero_write_probe_key; delete it to force a fresh
+#      authorize dialog). Needs curl, jq, md5sum, GNU stat.
+# Exit codes: 0 ok or informational probe finding, 1 connector unreachable,
+#      2 local API disabled or unexpected read failure, 3 script bug,
+#      4 upload contract deviation or failed cleanup (stage output names
+#      the failing phase).
 
 set -euo pipefail
 
@@ -34,10 +82,23 @@ APP="${APP:-Bango}"
 HDR="$(mktemp)"
 BODY="$(mktemp)"
 PAYLOAD="$(mktemp)"
-trap 'rm -f "$HDR" "$BODY" "$PAYLOAD"' EXIT
+FILEBYTES="$(mktemp)"
+REMAIN="$(mktemp)"
+STATE="${STATE:-${TMPDIR:-/tmp}/zotero_write_probe_state}"
+KEYFILE="${KEYFILE:-${TMPDIR:-/tmp}/zotero_write_probe_key}"
+trap 'command -v cleanup_probe_items >/dev/null 2>&1 && cleanup_probe_items; rm -f "$HDR" "$BODY" "$PAYLOAD" "$FILEBYTES" "$REMAIN"' EXIT
 
 STATUS=""
 SERVER_ID=""
+KEY=""
+ITEM_KEY=""
+PARENT_KEY=""
+ATTACH_KEY=""
+UPLOAD_URL=""
+UPLOAD_KEY=""
+SKIP_UPLOAD=0
+COLL_KEY=""
+COLL_NAME=""
 
 say() { printf '\n==== %s ====\n' "$1"; }
 
@@ -53,6 +114,107 @@ req() {
 # hdr NAME - first response header line (case-insensitive), CR stripped.
 hdr() {
   { grep -i "^$1:" "$HDR" || true; } | head -1 | tr -d '\r'
+}
+
+# write_token - fresh 32-char idempotency token (the app's build_write_token
+# charset: no I, O, 0, 1, or l).
+write_token() {
+  local out=""
+  while [ "${#out}" -lt 32 ]; do
+    out="${out}$(tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom | head -c 64 || true)"
+  done
+  printf '%.32s' "$out"
+}
+
+# delete_item KEY - best-effort versioned delete (GET the item version, then
+# DELETE with If-Unmodified-Since-Version). Sets STATUS; a missing item maps
+# to STATUS=404-gone, an unreadable one to STATUS=no-version.
+delete_item() {
+  local key="$1" version=""
+  req GET "$API/users/0/items/$key" 10 -H "Zotero-API-Version: 3"
+  if [ "$STATUS" = "404" ]; then
+    STATUS="404-gone"
+    return 0
+  fi
+  version="$(jq -r '.version // empty' "$BODY" 2>/dev/null || true)"
+  if [ -z "$version" ]; then
+    STATUS="no-version"
+    return 0
+  fi
+  req DELETE "$API/users/0/items/$key" 15 \
+    -H "Zotero-API-Version: 3" -H "Zotero-Server-ID: $SERVER_ID" \
+    -H "Zotero-API-Key: $KEY" \
+    -H "If-Unmodified-Since-Version: $version"
+}
+
+# cleanup_probe_items - trap hook: remove probe items a failed run leaves in
+# the real library (--write's item only; --upload keeps its items on purpose
+# - they stay recorded in $STATE until --cleanup runs).
+cleanup_probe_items() {
+  [ "${MODE:-}" = "--upload" ] && return 0
+  [ -n "$KEY" ] && [ -n "$SERVER_ID" ] || return 0
+  local key
+  for key in "$ATTACH_KEY" "$PARENT_KEY" "$ITEM_KEY"; do
+    [ -n "$key" ] || continue
+    delete_item "$key" || true
+  done
+}
+
+# record_key KEY - append a kept probe item key to $STATE for --cleanup.
+record_key() {
+  printf '%s\n' "$1" >> "$STATE"
+}
+
+# title_for_upload AUTHOR TITLE EXT - the app's build_attachment_title rule:
+# "{Author} - {title cut at the last word boundary within 30 chars}.{ext}".
+title_for_upload() {
+  local author="$1" title="$2" ext="${3#.}"
+  local cut="$title"
+  if [ "${#title}" -gt 30 ]; then
+    cut="${title:0:30}"
+    cut="${cut% *}"
+  fi
+  if [ -n "$author" ]; then
+    printf '%s - %s.%s' "$author" "$cut" "$ext"
+  else
+    printf '%s.%s' "$cut" "$ext"
+  fi
+}
+
+# resolve_collection - pick the --upload target collection: COLLECTION env
+# override, else the exact-name match of the Zotero UI selection (connector
+# getSelectedCollection, like the app's export panel default: the response's
+# numeric tree id is unreliable, the name vs libraryName pair is not).
+# Sets COLL_KEY/COLL_NAME; both stay empty -> the probe item is Unfiled.
+# The connector endpoint needs Content-Length (curl: --data-binary '{}');
+# a body-less POST is rejected with 400, a form content-type with 400.
+resolve_collection() {
+  if [ -n "${COLLECTION:-}" ]; then
+    COLL_KEY="$COLLECTION"
+    req GET "$API/users/0/collections" 10 -H "Zotero-API-Version: 3"
+    COLL_NAME="$(jq -r --arg k "$COLLECTION" '[.[] | select(.key == $k)][0].data.name // "unknown"' "$BODY" 2>/dev/null || true)"
+    return 0
+  fi
+  req POST "$BASE/connector/getSelectedCollection" 5 \
+    -H "X-Zotero-Connector-API-Version: 3" \
+    -H "Content-Type: application/json" \
+    --data-binary '{}'
+  local selected="" library=""
+  selected="$(jq -r '.name // empty' "$BODY" 2>/dev/null || true)"
+  library="$(jq -r '.libraryName // empty' "$BODY" 2>/dev/null || true)"
+  if [ -z "$selected" ] || [ "$selected" = "$library" ]; then
+    echo "UI selection is the library root (${library:-unknown}) - leaving Unfiled"
+    return 0
+  fi
+  req GET "$API/users/0/collections" 10 -H "Zotero-API-Version: 3"
+  local hits=""
+  hits="$(jq -r --arg n "$selected" '[.[] | select(.data.name == $n)] | length' "$BODY" 2>/dev/null || true)"
+  if [ "$hits" = "1" ]; then
+    COLL_KEY="$(jq -r --arg n "$selected" '[.[] | select(.data.name == $n)][0].key' "$BODY" 2>/dev/null || true)"
+    COLL_NAME="$selected"
+  else
+    echo "selected collection '$selected' has $hits exact-name matches - leaving Unfiled"
+  fi
 }
 
 say "Stage 1: connector ping"
@@ -89,73 +251,282 @@ req GET "$API/users/0/collections" 10 -H "Zotero-API-Version: 3"
 echo "status=$STATUS collections=$(jq 'length' "$BODY" 2>/dev/null || echo '?')"
 echo "$(hdr Last-Modified-Version) server-id=${SERVER_ID:-none}"
 
-if [ "${1:-}" != "--write" ]; then
-  say "Done (read-only). Re-run with --write to probe key delivery."
-  exit 0
-fi
+MODE="${1:-}"
+case "$MODE" in
+  --write|--upload|--cleanup) ;;
+  *)
+    say "Done (read-only). Re-run with --write to probe the write contract,"
+    echo "with --upload to create + upload probe items (kept for inspection),"
+    echo "or with --cleanup to delete the kept probe items."
+    exit 0
+    ;;
+esac
 
-say "Stage 4: keyless write (POST /api/users/0/items, expect 401)"
-cat > "$PAYLOAD" <<'JSON'
+if [ "$MODE" != "--cleanup" ]; then
+  say "Stage 4: keyless write (POST /api/users/0/items, expect 401)"
+  cat > "$PAYLOAD" <<'JSON'
 [{"itemType":"journalArticle","title":"Bango write-probe (safe to delete)","creators":[{"creatorType":"author","name":"Bango Probe"}],"tags":[],"collections":[]}]
 JSON
-req POST "$API/users/0/items" 20 \
-  -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
-  -H "Zotero-Server-ID: $SERVER_ID" \
-  --data-binary "@$PAYLOAD"
-echo "status=$STATUS body: $(head -c 200 "$BODY")"
-if [ "$STATUS" = "428" ]; then
-  echo "no Zotero-Server-ID header echoed (bug in this script?)"
-  exit 3
-fi
-if [ "$STATUS" != "401" ]; then
-  echo "expected 401 with the authorize hint - write may need no key on this build"
+  req POST "$API/users/0/items" 20 \
+    -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
+    -H "Zotero-Server-ID: $SERVER_ID" \
+    --data-binary "@$PAYLOAD"
+  echo "status=$STATUS body: $(head -c 200 "$BODY")"
+  if [ "$STATUS" = "428" ]; then
+    echo "no Zotero-Server-ID header echoed (bug in this script?)"
+    exit 3
+  fi
+  if [ "$STATUS" != "401" ]; then
+    echo "expected 401 with the authorize hint - write may need no key on this build"
+  fi
 fi
 
-say "Stage 5: authorize (POST /api/local/authorize) - CLICK Allow in Zotero"
-printf '{"appName":"%s"}' "$APP" > "$PAYLOAD"
-req POST "$API/local/authorize" "${WRITE_TIMEOUT:-180}" \
-  -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
-  -H "Zotero-Server-ID: $SERVER_ID" \
-  --data-binary "@$PAYLOAD"
-echo "status=$STATUS"
-cat "$HDR"
-echo "body: $(head -c 300 "$BODY")"
-if [ "$STATUS" = "403" ]; then
-  echo "RESULT: authorization denied by the user."
-  exit 0
-fi
-KEY="$(jq -r '.key // empty' "$BODY" 2>/dev/null || true)"
-REMEMBER="$(jq -r '.remember // empty' "$BODY" 2>/dev/null || true)"
-if [ -z "$KEY" ]; then
-  echo "RESULT: no key granted - see body above."
-  exit 0
-fi
-echo "key granted (remember=$REMEMBER): $KEY"
+# key_expired - clear the saved write key after a 401 write rejection so
+# the next run re-authorizes (single-use or revoked key).
+key_expired() {
+  rm -f "$KEYFILE"
+  echo "stored write key rejected (401) - cleared; re-run to authorize again"
+}
 
-say "Stage 6: authenticated write (POST one probe item with the key)"
-cat > "$PAYLOAD" <<'JSON'
+say "Stage 5: authorize - CLICK Allow in Zotero"
+# Write-key reuse policy (the app's decide_write_auth): a remember:true key
+# saved in $KEYFILE is reused while the live server id matches; otherwise
+# the authorize dialog runs once and the key is saved for next time.
+STORED_KEY=""
+STORED_SID=""
+if [ -f "$KEYFILE" ]; then
+  STORED_KEY="$(sed -n 1p "$KEYFILE")"
+  STORED_SID="$(sed -n 2p "$KEYFILE")"
+fi
+if [ -n "$STORED_KEY" ] && [ "$STORED_SID" = "$SERVER_ID" ]; then
+  KEY="$STORED_KEY"
+  say "Stage 5: write authorization - reusing saved key (server id match)"
+  echo "saved key file: $KEYFILE (delete it to force a fresh dialog)"
+else
+  printf '{"appName":"%s"}' "$APP" > "$PAYLOAD"
+  req POST "$API/local/authorize" "${WRITE_TIMEOUT:-180}" \
+    -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
+    -H "Zotero-Server-ID: $SERVER_ID" \
+    --data-binary "@$PAYLOAD"
+  echo "status=$STATUS"
+  cat "$HDR"
+  echo "body: $(head -c 300 "$BODY")"
+  if [ "$STATUS" = "403" ]; then
+    echo "RESULT: authorization denied by the user."
+    exit 0
+  fi
+  KEY="$(jq -r '.key // empty' "$BODY" 2>/dev/null || true)"
+  REMEMBER="$(jq -r '.remember // empty' "$BODY" 2>/dev/null || true)"
+  if [ -z "$KEY" ]; then
+    echo "RESULT: no key granted - see body above."
+    exit 0
+  fi
+  echo "key granted (remember=$REMEMBER): $KEY"
+  if [ "$REMEMBER" = "true" ]; then
+    printf '%s\n%s\n' "$KEY" "$SERVER_ID" > "$KEYFILE"
+    chmod 600 "$KEYFILE"
+    echo "key saved for reuse in $KEYFILE"
+  else
+    echo "remember=false - key is single-use, not saved"
+  fi
+fi
+
+if [ "$MODE" = "--cleanup" ]; then
+  say "Cleanup: versioned deletes of every recorded probe item"
+  echo "state file: $STATE"
+  if [ ! -f "$STATE" ]; then
+    echo "no state file - nothing to clean up."
+    exit 0
+  fi
+  : > "$REMAIN"
+  while IFS= read -r key; do
+    case "$key" in ''|'#'*) continue ;; esac
+    delete_item "$key"
+    echo "delete $key -> $STATUS"
+    case "$STATUS" in
+      204|404-gone) ;;
+      *) printf '%s\n' "$key" >> "$REMAIN" ;;
+    esac
+  done < "$STATE"
+  if [ -s "$REMAIN" ]; then
+    mv "$REMAIN" "$STATE"
+    echo "RESULT: some probe items could not be deleted - state kept at $STATE."
+    exit 4
+  fi
+  rm -f "$REMAIN" "$STATE"
+  echo "RESULT: all recorded probe items deleted. Library left clean."
+  exit 0
+fi
+
+if [ "$MODE" = "--write" ]; then
+  say "Stage 6: authenticated write (POST one probe item with the key)"
+  cat > "$PAYLOAD" <<'JSON'
 [{"itemType":"journalArticle","title":"Bango write-probe (safe to delete)","creators":[{"creatorType":"author","name":"Bango Probe"}],"tags":[],"collections":[]}]
+JSON
+  req POST "$API/users/0/items" 20 \
+    -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
+    -H "Zotero-Server-ID: $SERVER_ID" -H "Zotero-API-Key: $KEY" \
+    --data-binary "@$PAYLOAD"
+  echo "status=$STATUS $(hdr Last-Modified-Version)"
+  if [ "$STATUS" = "401" ]; then
+    key_expired
+    exit 0
+  fi
+  ITEM_KEY="$(jq -r '.success["0"] // .successful["0"].key // empty' "$BODY" 2>/dev/null || true)"
+  echo "created item: ${ITEM_KEY:-none}"
+  if [ -z "$ITEM_KEY" ]; then
+    echo "RESULT: item creation failed: $(head -c 300 "$BODY")"
+    exit 0
+  fi
+
+  say "Stage 7: cleanup (versioned DELETE with the same key)"
+  req GET "$API/users/0/items/$ITEM_KEY" 10 -H "Zotero-API-Version: 3"
+  ITEM_VERSION="$(jq -r '.version // empty' "$BODY" 2>/dev/null || true)"
+  req DELETE "$API/users/0/items/$ITEM_KEY" 15 \
+    -H "Zotero-API-Version: 3" -H "Zotero-Server-ID: $SERVER_ID" \
+    -H "Zotero-API-Key: $KEY" -H "If-Unmodified-Since-Version: $ITEM_VERSION"
+  echo "delete status=$STATUS (204 = removed; 428 = missing version header)"
+  if [ "$STATUS" = "204" ]; then
+    ITEM_KEY=""
+    echo "RESULT: full write contract verified (authorize -> key in body ->"
+    echo "authenticated POST -> versioned DELETE). Library left clean."
+  fi
+  exit 0
+fi
+
+resolve_collection
+say "Stage 8: create probe parent item (batch POST with Zotero-Write-Token)"
+if [ -n "$COLL_KEY" ]; then
+  echo "target collection: $COLL_NAME ($COLL_KEY)"
+  COLL_JSON="[\"$COLL_KEY\"]"
+else
+  echo "target collection: none - the item will land in Unfiled Items"
+  COLL_JSON="[]"
+fi
+cat > "$PAYLOAD" <<JSON
+[{"itemType":"journalArticle","title":"Bango upload-probe (safe to delete)","creators":[{"creatorType":"author","firstName":"Bango","lastName":"Probe"}],"tags":[],"collections":$COLL_JSON}]
 JSON
 req POST "$API/users/0/items" 20 \
   -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
   -H "Zotero-Server-ID: $SERVER_ID" -H "Zotero-API-Key: $KEY" \
+  -H "Zotero-Write-Token: $(write_token)" \
   --data-binary "@$PAYLOAD"
 echo "status=$STATUS $(hdr Last-Modified-Version)"
-ITEM_KEY="$(jq -r '.success["0"] // .successful["0"].key // empty' "$BODY" 2>/dev/null || true)"
-echo "created item: ${ITEM_KEY:-none}"
-if [ -z "$ITEM_KEY" ]; then
-  echo "RESULT: item creation failed: $(head -c 300 "$BODY")"
-  exit 0
+if [ "$STATUS" = "401" ]; then
+  key_expired
+  exit 4
+fi
+PARENT_KEY="$(jq -r '.success["0"] // .successful["0"].key // empty' "$BODY" 2>/dev/null || true)"
+echo "created parent item: ${PARENT_KEY:-none}"
+if [ -z "$PARENT_KEY" ]; then
+  echo "RESULT: parent item creation failed: $(head -c 300 "$BODY")"
+  exit 4
+fi
+record_key "$PARENT_KEY"
+
+say "Stage 9: create attachment child item (imported_file, text/plain)"
+FRIENDLY="$(title_for_upload "Probe" "Bango upload-probe (safe to delete)" "txt")"
+echo "attachment title/filename: $FRIENDLY"
+# Field order matters: linkMode MUST precede filename/contentType or Zotero
+# rejects the item ("Link mode must be set before setting attachment path").
+cat > "$PAYLOAD" <<JSON
+[{"itemType":"attachment","parentItem":"$PARENT_KEY","linkMode":"imported_file","title":"$FRIENDLY","contentType":"text/plain","filename":"$FRIENDLY","tags":[]}]
+JSON
+req POST "$API/users/0/items" 20 \
+  -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
+  -H "Zotero-Server-ID: $SERVER_ID" -H "Zotero-API-Key: $KEY" \
+  -H "Zotero-Write-Token: $(write_token)" \
+  --data-binary "@$PAYLOAD"
+echo "status=$STATUS"
+if [ "$STATUS" = "401" ]; then
+  key_expired
+  exit 4
+fi
+ATTACH_KEY="$(jq -r '.success["0"] // .successful["0"].key // empty' "$BODY" 2>/dev/null || true)"
+echo "created attachment item: ${ATTACH_KEY:-none}"
+if [ -z "$ATTACH_KEY" ]; then
+  echo "RESULT: attachment item creation failed: $(head -c 300 "$BODY")"
+  exit 4
+fi
+record_key "$ATTACH_KEY"
+
+say "Stage 10: upload phase 1 - auth form (md5/filename/filesize/mtime + If-None-Match: *)"
+printf 'Bango Zotero local-API upload probe (safe to delete).\n' > "$FILEBYTES"
+MD5="$(md5sum "$FILEBYTES" | cut -d' ' -f1)"
+FSIZE="$(wc -c < "$FILEBYTES" | tr -d '[:space:]')"
+MTIME_MS="$(( $(stat -c%Y "$FILEBYTES") * 1000 ))"
+echo "probe file: $FRIENDLY size=${FSIZE}B md5=$MD5 mtime_ms=$MTIME_MS"
+# Zotero's local form decoder passes '+' through literally (a '+ '-encoded
+# space is stored as a literal '+' in the filename), so spaces are sent
+# pre-encoded as %20 in a manually built urlencoded body.
+FILENAME_ENC="$(printf '%s' "$FRIENDLY" | sed 's/%/%25/g; s/ /%20/g')"
+FILE_URL="$API/users/0/items/$ATTACH_KEY/file"
+req POST "$FILE_URL" 20 \
+  -H "Zotero-API-Version: 3" \
+  -H "Zotero-Server-ID: $SERVER_ID" \
+  -H "Zotero-API-Key: $KEY" \
+  -H "If-None-Match: *" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-binary "md5=$MD5&filename=$FILENAME_ENC&filesize=$FSIZE&mtime=$MTIME_MS"
+echo "status=$STATUS body: $(head -c 300 "$BODY")"
+if [ "$STATUS" != "200" ]; then
+  echo "RESULT: upload phase 1 (auth form $FILE_URL) failed with $STATUS."
+  exit 4
+fi
+if [ "$(jq -r '.exists // empty' "$BODY" 2>/dev/null || true)" = "1" ]; then
+  echo "phase 1 answered exists=1 (content already known) - skipping phases 2-3"
+  SKIP_UPLOAD=1
+else
+  UPLOAD_URL="$(jq -r '.url // empty' "$BODY" 2>/dev/null || true)"
+  UPLOAD_KEY="$(jq -r '.uploadKey // empty' "$BODY" 2>/dev/null || true)"
+  echo "authorized upload: url=$UPLOAD_URL uploadKey=${UPLOAD_KEY:-none}"
+  if [ -z "$UPLOAD_URL" ] || [ -z "$UPLOAD_KEY" ]; then
+    echo "RESULT: unexpected phase 1 body (neither url/uploadKey nor exists=1)."
+    exit 4
+  fi
 fi
 
-say "Stage 7: cleanup (versioned DELETE with the same key)"
-req GET "$API/users/0/items/$ITEM_KEY" 10 -H "Zotero-API-Version: 3"
-ITEM_VERSION="$(jq -r '.version // empty' "$BODY" 2>/dev/null || true)"
-req DELETE "$API/users/0/items/$ITEM_KEY" 15 \
-  -H "Zotero-API-Version: 3" -H "Zotero-Server-ID: $SERVER_ID" \
-  -H "Zotero-API-Key: $KEY" -H "If-Unmodified-Since-Version: $ITEM_VERSION"
-echo "delete status=$STATUS (204 = removed; 428 = missing version header)"
-if [ "$STATUS" = "204" ]; then
-  echo "RESULT: full write contract verified (authorize -> key in body ->"
-  echo "authenticated POST -> versioned DELETE). Library left clean."
+if [ "$SKIP_UPLOAD" = "1" ]; then
+  say "Stage 11-12: skipped (exists=1 short-circuit, no byte transfer)"
+else
+  say "Stage 11: upload phase 2 - bytes (Content-Type: application/x-zotero-file)"
+  req POST "$UPLOAD_URL" 30 \
+    -H "Zotero-Server-ID: $SERVER_ID" \
+    -H "Zotero-API-Key: $KEY" \
+    -H "Content-Type: application/x-zotero-file" \
+    --data-binary "@$FILEBYTES"
+  echo "status=$STATUS (expect 201)"
+  if [ "$STATUS" != "201" ] && [ "$STATUS" != "200" ]; then
+    echo "RESULT: upload phase 2 (bytes $UPLOAD_URL) failed with $STATUS: $(head -c 300 "$BODY")"
+    exit 4
+  fi
+
+  say "Stage 12: upload phase 3 - register (upload=<uploadKey>), then file check"
+  req POST "$FILE_URL" 20 \
+    -H "Zotero-API-Version: 3" \
+    -H "Zotero-Server-ID: $SERVER_ID" \
+    -H "Zotero-API-Key: $KEY" \
+    --data-urlencode "upload=$UPLOAD_KEY"
+  echo "register status=$STATUS (expect 204)"
+  if [ "$STATUS" != "204" ]; then
+    echo "RESULT: upload phase 3 (register $FILE_URL) failed with $STATUS: $(head -c 300 "$BODY")"
+    exit 4
+  fi
+  req GET "$FILE_URL" 10 -H "Zotero-API-Version: 3"
+  echo "file check: status=$STATUS $(hdr Location)"
+  if [ "$STATUS" != "302" ] && [ "$STATUS" != "200" ]; then
+    echo "RESULT: uploaded file not served afterwards (GET -> $STATUS): $(head -c 200 "$BODY")"
+    exit 4
+  fi
 fi
+
+say "Stage 13: read-back verify (kept items, unauthenticated GET)"
+req GET "$API/users/0/items/$PARENT_KEY" 10 -H "Zotero-API-Version: 3"
+echo "parent $PARENT_KEY -> $STATUS: $(jq -r '.data.title // empty' "$BODY" 2>/dev/null || true)"
+req GET "$API/users/0/items/$ATTACH_KEY" 10 -H "Zotero-API-Version: 3"
+echo "attachment $ATTACH_KEY -> $STATUS: title='$(jq -r '.data.title // empty' "$BODY" 2>/dev/null || true)' file=$(jq -r '.data.filename // empty' "$BODY" 2>/dev/null || true) ($(jq -r '.data.linkMode // empty' "$BODY" 2>/dev/null || true))"
+echo "RESULT: 3-phase upload verified. Items are KEPT in Zotero for inspection:"
+echo "  parent item $PARENT_KEY ('Bango upload-probe')"
+echo "  attachment  $ATTACH_KEY ($FRIENDLY; file check above)"
+echo "Keys recorded in $STATE - remove them later with:"
+echo "  scripts/zotero_write_probe.sh --cleanup"

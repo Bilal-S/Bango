@@ -253,6 +253,7 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
           :status="zoteroStatus"
           :screening-errors-only="zoteroScreeningErrorsOnly"
           @back="showZotero = false"
+          @close="emit('close')"
         />
       </div>
 

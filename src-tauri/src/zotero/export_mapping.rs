@@ -160,6 +160,58 @@ pub fn build_item_json(article: &Article, collection_key: &str) -> serde_json::V
     serde_json::Value::Object(data)
 }
 
+/// Attachment display title / upload filename convention: the last name of
+/// the first author, a dash, then the article title capped at 30 chars cut
+/// at a word boundary, plus the extension (e.g.
+/// "Jones - The awakening of sund.pdf"). A single-token (institutional)
+/// first author is used verbatim; no author drops the prefix; an empty
+/// title falls back to "Untitled". A leading dot on the extension is
+/// normalized away.
+#[must_use]
+pub fn build_attachment_title(authors: &[String], title: &str, ext: &str) -> String {
+    let title_part = {
+        let trimmed = title.trim();
+        if trimmed.is_empty() {
+            "Untitled".to_string()
+        } else {
+            truncate_prose_at_word_boundary(trimmed, 30)
+        }
+    };
+    let ext = ext.trim_start_matches('.');
+    match first_author_lastname(authors) {
+        Some(last) => format!("{last} - {title_part}.{ext}"),
+        None => format!("{title_part}.{ext}"),
+    }
+}
+
+/// Last name of the first "Lastname, Firstname" author; a single-token
+/// (institutional) name is used verbatim; blank entries are skipped.
+fn first_author_lastname(authors: &[String]) -> Option<String> {
+    let first = authors.iter().find(|a| !a.trim().is_empty())?;
+    let first = first.trim();
+    Some(
+        match first.split_once(',') {
+            Some((last, _)) => last.trim(),
+            None => first,
+        }
+        .to_string(),
+    )
+}
+
+/// Cut prose at the last space within `max_chars` (never mid-word); a single
+/// word longer than the limit hard-cuts. Char-based, not byte-based.
+fn truncate_prose_at_word_boundary(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max_chars).collect();
+    match truncated.rfind(' ') {
+        // Callers trim, so a space at index 0 cannot happen; guard anyway.
+        Some(idx) if idx > 0 => truncated[..idx].to_string(),
+        _ => truncated,
+    }
+}
+
 /// How an article compares against the target Zotero collection by canonical
 /// DOI. Placeholder DOIs normalize to `None` -> `NoDoi` (skipped + counted,
 /// never matched).

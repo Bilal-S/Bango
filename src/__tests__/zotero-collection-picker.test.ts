@@ -27,6 +27,7 @@ const previewPayload: ZoteroCollectionPreview = {
     validRecords: 1,
     errorCount: 0,
     duplicateCount: 0,
+    duplicateIndices: [],
     errors: [],
     errorGroups: [],
     previewArticles: [

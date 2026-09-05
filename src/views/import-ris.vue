@@ -21,7 +21,9 @@ const {
   canImport,
   hasZeroValid,
   removedIndices,
+  skipDuplicates,
   visibleCount,
+  importableCount,
   dedupSummary,
   importSource,
   zoteroPreviewMeta,
@@ -113,7 +115,7 @@ const hasDuplicates = () =>
         </div>
         <div v-else-if="preview.errorCount > 0" class="import-view__warning">
           {{ preview.errorCount }} of {{ preview.totalRecords }} records have validation issues and
-          will be skipped. Only {{ visibleCount }} valid articles will be imported.
+          will be skipped. Only {{ visibleCount }} valid articles can be imported.
         </div>
 
         <div v-if="zoteroPreviewMeta" class="import-view__zotero-meta">
@@ -142,6 +144,10 @@ const hasDuplicates = () =>
             >
               <span class="import-view__stat-value">{{ preview.duplicateCount }}</span>
               <span class="import-view__stat-label">Duplicates</span>
+              <label class="import-view__skip" data-test="skip-duplicates">
+                <input v-model="skipDuplicates" type="checkbox" :disabled="loading" />
+                Skip
+              </label>
             </div>
           </div>
           <div class="import-view__actions import-view__actions--inline">
@@ -156,10 +162,10 @@ const hasDuplicates = () =>
             <button v-else class="btn btn--outline" @click="reset">Cancel</button>
             <button
               class="btn btn--primary"
-              :disabled="!canImport || loading"
+              :disabled="!canImport || loading || importableCount === 0"
               @click="confirmImport"
             >
-              {{ loading ? 'Importing...' : `Import ${visibleCount} Articles` }}
+              {{ loading ? 'Importing...' : `Import ${importableCount} Articles` }}
             </button>
           </div>
         </div>
@@ -186,6 +192,12 @@ const hasDuplicates = () =>
           <p v-if="importResult.skippedByUser > 0" class="import-view__skipped">
             {{ importResult.skippedByUser }} record{{ importResult.skippedByUser !== 1 ? 's' : '' }}
             excluded by user.
+          </p>
+          <p v-if="importResult.skippedDuplicates > 0" class="import-view__skipped">
+            {{ importResult.skippedDuplicates }} duplicate{{
+              importResult.skippedDuplicates !== 1 ? 's' : ''
+            }}
+            skipped (already in library).
           </p>
           <p class="import-view__capacity">
             Remaining capacity: {{ importResult.remainingCapacity }} articles
@@ -364,6 +376,16 @@ const hasDuplicates = () =>
   border-radius: var(--radius-default);
   font-size: var(--font-size-caption);
   margin-bottom: var(--space-4);
+}
+
+.import-view__skip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-label);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  margin-top: var(--space-1);
 }
 
 .import-view__skipped {

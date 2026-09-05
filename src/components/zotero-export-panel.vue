@@ -10,7 +10,7 @@ const props = defineProps<{
   screeningErrorsOnly: boolean;
 }>();
 
-const emit = defineEmits<{ back: [] }>();
+const emit = defineEmits<{ back: []; close: [] }>();
 
 const zotero = useZoteroExport();
 
@@ -54,6 +54,10 @@ const canExport = computed(
     !zotero.exporting.value
 );
 
+/** The export run finished with a result card: the primary action becomes
+ * Close and dismisses the whole export dialog (user requirement 2026-09-05). */
+const finished = computed(() => zotero.result.value !== null && !zotero.exporting.value);
+
 async function onSelect(key: string): Promise<void> {
   const collection = zotero.collections.value.find((c) => c.key === key);
   if (collection) {
@@ -65,6 +69,15 @@ async function onSelect(key: string): Promise<void> {
 
 async function onExport(): Promise<void> {
   await zotero.exportCollection(props.status, props.screeningErrorsOnly);
+}
+
+/** Primary button: runs the export, or closes the dialog once finished. */
+function onPrimary(): void {
+  if (finished.value) {
+    emit('close');
+    return;
+  }
+  void onExport();
 }
 
 const progressPercent = computed(() => {
@@ -197,10 +210,10 @@ const progressPercent = computed(() => {
       <button
         class="btn btn--primary"
         data-test="export-button"
-        :disabled="!canExport"
-        @click="onExport"
+        :disabled="!finished && !canExport"
+        @click="onPrimary"
       >
-        {{ zotero.exporting.value ? 'Exporting...' : 'Export' }}
+        {{ finished ? 'Close' : zotero.exporting.value ? 'Exporting...' : 'Export' }}
       </button>
     </div>
   </div>

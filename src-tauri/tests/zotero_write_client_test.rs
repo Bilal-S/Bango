@@ -85,15 +85,45 @@ fn authorize_response_parses() {
 }
 
 #[test]
+fn ordered_attachment_body_puts_link_mode_before_path_fields() {
+    // Zotero's local API applies fields in document order and rejects a
+    // filename (attachment path) that precedes linkMode (verified live).
+    let item = bango_lib::zotero::write_client::build_attachment_item_json(
+        "PARENT1",
+        "Doe - A study.pdf",
+        "Doe - A study.pdf",
+    );
+    let body = bango_lib::zotero::write_client::ordered_attachment_body(&item);
+    let link_mode = body.find("\"linkMode\"").expect("linkMode present");
+    let filename = body.find("\"filename\"").expect("filename present");
+    let content_type = body.find("\"contentType\"").expect("contentType present");
+    assert!(link_mode < filename, "linkMode must precede filename: {body}");
+    assert!(link_mode < content_type, "linkMode must precede contentType: {body}");
+    // The ordered body round-trips to the exact same field set.
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid json");
+    assert_eq!(parsed[0], item);
+}
+
+#[test]
 fn build_attachment_item_json() {
-    let pdf = bango_lib::zotero::write_client::build_attachment_item_json("PARENT1", "paper.pdf");
+    let pdf = bango_lib::zotero::write_client::build_attachment_item_json(
+        "PARENT1",
+        "Jones - The awakening.pdf",
+        "Jones - The awakening.pdf",
+    );
     assert_eq!(pdf["itemType"], "attachment");
     assert_eq!(pdf["parentItem"], "PARENT1");
     assert_eq!(pdf["linkMode"], "imported_file");
     assert_eq!(pdf["contentType"], "application/pdf");
-    assert_eq!(pdf["filename"], "paper.pdf");
-    let txt = bango_lib::zotero::write_client::build_attachment_item_json("PARENT1", "notes.txt");
+    assert_eq!(pdf["filename"], "Jones - The awakening.pdf");
+    assert_eq!(pdf["title"], "Jones - The awakening.pdf");
+    let txt = bango_lib::zotero::write_client::build_attachment_item_json(
+        "PARENT1",
+        "notes.txt",
+        "Doe - Notes.txt",
+    );
     assert_eq!(txt["contentType"], "text/plain");
+    assert_eq!(txt["title"], "Doe - Notes.txt");
 }
 
 #[test]
@@ -109,6 +139,56 @@ fn build_upload_params() {
     assert_eq!(params.filesize, 1024);
     assert_eq!(params.mtime_ms, 1_700_000_000_000);
     assert!(params.if_none_match_star, "If-None-Match: * is mandatory");
+}
+
+#[test]
+fn build_upload_auth_body_percent_encodes_spaces() {
+    // Spaces must reach Zotero as %20, never '+': the local form decoder
+    // passes '+' through literally into the stored filename.
+    let body = bango_lib::zotero::write_client::build_upload_auth_body(
+        "d41d8cd98f00b204e9800998ecf8427e",
+        "Jones - The awakening.pdf",
+        1024,
+        1_700_000_000_000,
+    );
+    assert_eq!(
+        body,
+        "md5=d41d8cd98f00b204e9800998ecf8427e&filename=Jones%20-%20The%20awakening.pdf&filesize=1024&mtime=1700000000000"
+    );
+    // %, &, = and + never leak into the raw body.
+    let tricky =
+        bango_lib::zotero::write_client::build_upload_auth_body("a", "a%b&c=d+e.pdf", 1, 2);
+    assert_eq!(tricky, "md5=a&filename=a%25b%26c%3Dd%2Be.pdf&filesize=1&mtime=2");
+}
+
+#[tokio::test]
+async fn attachment_item_creation_surfaces_envelope_failures() {
+    let mut server = mockito::Server::new_async().await;
+    server
+        .mock("POST", "/api/users/0/items")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"successful":{},"success":{},"unchanged":{},"failed":{"0":"Title is empty"}}"#,
+        )
+        .create_async()
+        .await;
+    let base = format!("{}/api", server.url());
+    let err = bango_lib::zotero::write_client::create_attachment_item(
+        &base,
+        "SID",
+        "KEY",
+        "PARENT1",
+        "paper.pdf",
+        "Doe - Paper.pdf",
+    )
+    .await
+    .err()
+    .expect("must fail without a created key");
+    let message = err.to_string();
+    assert!(message.contains("returned no key"), "{message}");
+    assert!(message.contains("[0] Title is empty"), "{message}");
 }
 
 #[test]

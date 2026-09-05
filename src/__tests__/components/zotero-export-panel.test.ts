@@ -278,6 +278,35 @@ describe('zotero-export-panel.vue', () => {
     expect(result.text()).toContain('Files: 2 attached, 0 failed, 1 skipped');
   });
 
+  it('button_becomes_close_after_completion', async () => {
+    vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+      if (cmd === 'export_zotero_collection') return Promise.resolve(exportResult);
+      if (cmd === 'check_zotero_connection') return Promise.resolve(okConnection);
+      if (cmd === 'get_zotero_collections') return Promise.resolve(collections);
+      if (cmd === 'get_zotero_selected_collection')
+        return Promise.resolve({ name: null, lastCollectionKey: 'ROOT' });
+      if (cmd === 'export_zotero_preview') return Promise.resolve(preview);
+      return Promise.reject(new Error(`unexpected: ${cmd}`));
+    });
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    const button = wrapper.find('[data-test="export-button"]');
+    expect(button.text()).toBe('Export');
+    expect(wrapper.emitted('close')).toBeUndefined();
+
+    await button.trigger('click');
+    await flushPromises();
+
+    // Completed: the primary action renames to Close (enabled) and the next
+    // click dismisses the dialog instead of re-running the export.
+    expect(button.text()).toBe('Close');
+    expect((button.element as HTMLButtonElement).disabled).toBe(false);
+
+    await button.trigger('click');
+    expect(wrapper.emitted('close')).toHaveLength(1);
+  });
+
   it('version_gate_precedence_over_enable_api', async () => {
     // Zotero 9 with the API disabled: the connector-ping version wins, so the
     // panel shows the version gate, not the enable-API card.

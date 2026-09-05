@@ -69,10 +69,14 @@ excluded keys are ignored (`skippedByUser` counts known keys only). The
 preview fills the shared `ImportPreview.duplicate_count` via
 `commands::import::count_library_duplicates` (canonical-DOI check of the
 valid records against the current library, one short DB lock) - the same
-early duplicate signal the RIS/BibTeX parse commands produce. The
-`Last-Modified-Version` captured at preview must match the import fetch or
-the run aborts with nothing written. `articleKeys` align 1:1 with
-`previewArticles` (valid records only).
+early duplicate signal the RIS/BibTeX parse commands produce. The review
+step's "Skip" checkbox (default on) flows into the command's
+`skip_duplicates` arg: library-DOI duplicates are dropped in the db phase
+(records and keys stay aligned) and counted as `skipped_duplicates`;
+within-file duplicates and every other strategy still reach the classify
+phase. The `Last-Modified-Version` captured at preview must match the
+import fetch or the run aborts with nothing written. `articleKeys` align
+1:1 with `previewArticles` (valid records only).
 
 ### Write client (`write_client.rs`)
 
@@ -92,7 +96,14 @@ with a fresh 32-char `Zotero-Write-Token` per batch; the envelope's
 3 phases: `POST .../items/<key>/file` with md5/filename/filesize/mtime +
 `If-None-Match: *` -> `{url, uploadKey}` or `{"exists":1}` -> bytes (`201`)
 -> register `upload=<key>` (`204`). Deletes need
-`If-Unmodified-Since-Version`.
+`If-Unmodified-Since-Version`. Attachment items carry a `title` and upload
+`filename` from `export_mapping::build_attachment_title`: first author's
+last name, a dash, the article title capped at 30 chars cut at a word
+boundary, plus the file extension. The attachment item body is serialized
+by `ordered_attachment_body` with `linkMode` before `filename`/
+`contentType`: the local API applies fields in document order and rejects
+a path field that precedes the link mode, and a no-key envelope error
+carries the per-index `failed` reasons.
 
 ### Stored settings
 
@@ -116,7 +127,9 @@ zotero_export_mapping_test --test zotero_export_test --test
 zotero_write_client_test`. Binding inventory:
 `docs/test-plans/zotero-tests.md` (enforced by `scripts/check-test-inventory.sh`).
 Live read-API facts were verified against Zotero 10.0.1; the write contract
-is reproducible via `scripts/zotero_write_probe.sh --write`.
+is reproducible via `scripts/zotero_write_probe.sh --write`, and the
+3-phase file upload via `--upload` (probe items kept for inspection, keys
+recorded in a temp state file) followed by `--cleanup`.
 
 ## Child DOX Index
 

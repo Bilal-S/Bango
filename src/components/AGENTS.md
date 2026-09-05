@@ -141,7 +141,9 @@ the exact enable-API preference path, the Zotero-10 version gate (Export
 disabled below 10), collection dropdown defaulted via connector name match
 -> last used, the DOI-diff sync summary, include-files checkbox (default on),
 `zotero-export:progress`-driven progress bar, authorize-phase "tick
-Remember" copy, and the result card. Every communication-error state repeats
+Remember" copy, and the result card; once the result card shows, the
+primary button renames to Close and dismisses the dialog (user requirement
+2026-09-05). Every communication-error state repeats
 the enable-API instructions (user requirement 2026-09-04).
 
 ### `openalex-search.vue`

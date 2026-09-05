@@ -21,6 +21,7 @@ const mockPreview: ImportPreview = {
   validRecords: 3,
   errorCount: 0,
   duplicateCount: 0,
+  duplicateIndices: [],
   errors: [],
   errorGroups: [],
   previewArticles: [
@@ -51,6 +52,7 @@ const mockPreview: ImportPreview = {
 const mockImportResult: ImportResult = {
   importedCount: 3,
   skippedCount: 0,
+  skippedDuplicates: 0,
   skippedByUser: 0,
   articles: [],
   remainingCapacity: 4997,
@@ -153,6 +155,7 @@ describe('Zotero import flow', () => {
       collectionKey: 'KEY1',
       excludedKeys: ['K2'],
       expectedLibraryVersion: 15,
+      skipDuplicates: true,
     });
     expect(imp.step.value).toBe('complete');
     expect(imp.importResult.value).toEqual(mockImportResult);
@@ -217,5 +220,61 @@ describe('Zotero import stale-preview guard', () => {
     expect(tauriCommand).not.toHaveBeenCalledWith('import_zotero_collection', expect.anything());
     expect(imp.step.value).toBe('zotero');
     expect(imp.error.value).toContain('stale');
+  });
+
+  it('zotero_confirm_passes_skip_duplicates', async () => {
+    const zoteroResult = {
+      result: { ...mockImportResult, skippedDuplicates: 2 },
+      attachedCount: 0,
+      attachmentFailedCount: 0,
+      attachmentSkippedCount: 0,
+    };
+    vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+      if (cmd === 'import_zotero_collection') return Promise.resolve(zoteroResult);
+      if (cmd === 'check_duplicates') return Promise.reject(new Error('non-fatal'));
+      return Promise.reject(new Error(`unexpected command: ${cmd}`));
+    });
+
+    const imp = useImport();
+    imp.startZoteroImport();
+    imp.applyZoteroPreview({
+      collectionKey: 'KEY1',
+      collectionName: 'Super Collection',
+      preview: { ...mockPreview, duplicateCount: 2 },
+      articleKeys: ['K1', 'K2', 'K3'],
+      libraryVersion: 15,
+      totalItems: 3,
+      attachmentCount: 0,
+      tagCount: 0,
+    });
+
+    // Default on: library duplicates are skipped on the backend side.
+    expect(imp.skipDuplicates.value).toBe(true);
+    await imp.confirmImport();
+    const importCalls = () =>
+      vi.mocked(tauriCommand).mock.calls.filter(([cmd]) => cmd === 'import_zotero_collection');
+    expect(importCalls()).toHaveLength(1);
+    expect(importCalls()[0]?.[1]).toEqual(expect.objectContaining({ skipDuplicates: true }));
+    expect(imp.importResult.value?.skippedDuplicates).toBe(2);
+
+    // Unchecking flows through; the flag resets to on for the next preview.
+    imp.backToZoteroPicker();
+    imp.applyZoteroPreview({
+      collectionKey: 'KEY1',
+      collectionName: 'Super Collection',
+      preview: { ...mockPreview, duplicateCount: 2 },
+      articleKeys: ['K1', 'K2', 'K3'],
+      libraryVersion: 15,
+      totalItems: 3,
+      attachmentCount: 0,
+      tagCount: 0,
+    });
+    imp.skipDuplicates.value = false;
+    await imp.confirmImport();
+    const calls = vi
+      .mocked(tauriCommand)
+      .mock.calls.filter(([cmd]) => cmd === 'import_zotero_collection');
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.[1]).toEqual(expect.objectContaining({ skipDuplicates: false }));
   });
 });

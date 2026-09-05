@@ -245,10 +245,10 @@ pub async fn get_collection_preview_inner(
     // Early duplicate signal: valid records' canonical DOIs vs the current
     // library (one short DB lock; never held across the HTTP fetches above).
     let valid_records: Vec<&RisRecord> = valid_pairs.iter().map(|(record, _)| *record).collect();
-    let duplicate_count = {
+    let duplicate_indices = {
         let conn =
             crate::db::connection::lock_conn(db).map_err(|e| ZoteroError::Http(e.to_string()))?;
-        super::import::count_library_duplicates(&conn, &valid_records)
+        super::import::library_duplicate_indices(&conn, &valid_records)
             .map_err(|e| ZoteroError::Http(e.to_string()))?
     };
 
@@ -294,7 +294,8 @@ pub async fn get_collection_preview_inner(
         total_records: mapped.total_items,
         valid_records: valid_pairs.len(),
         error_count: mapped.unsupported.len() + output.errors.len(),
-        duplicate_count,
+        duplicate_count: duplicate_indices.len(),
+        duplicate_indices,
         errors,
         error_groups,
         preview_articles,
@@ -402,6 +403,9 @@ pub struct ZoteroImportDbParams<'a> {
     pub keys: &'a [String],
     pub skipped_by_user: usize,
     pub skipped_validation: usize,
+    /// Drop records whose canonical DOI already exists in the library (the
+    /// review-step Skip checkbox) before insert; keys stay aligned.
+    pub skip_duplicates: bool,
     pub validation_errors: Vec<ImportError>,
     pub error_groups: Vec<ErrorGroup>,
     pub tags_by_key: &'a std::collections::HashMap<String, Vec<String>>,
@@ -416,14 +420,37 @@ pub fn import_zotero_db_phase(
         keys,
         skipped_by_user,
         skipped_validation,
+        skip_duplicates,
         validation_errors,
         error_groups,
         tags_by_key,
     } = params;
     use rusqlite::params;
 
+    // Pre-import duplicate skip (review-step Skip checkbox): drop records
+    // whose canonical DOI already exists in the library, keeping records and
+    // keys aligned. Everything else still flows to the classify phase below.
+    let skipped_duplicates;
+    let kept: Vec<(&RisRecord, &String)> = if skip_duplicates {
+        let dois: Vec<String> = records.iter().filter_map(|r| r.doi.clone()).collect();
+        let present = super::import::library_dois_present(conn, &dois)?;
+        let kept: Vec<(&RisRecord, &String)> = records
+            .iter()
+            .zip(keys.iter())
+            .filter(|(record, _)| {
+                !crate::ris::doi::normalize_doi(record.doi.as_deref())
+                    .is_some_and(|d| present.contains(&d))
+            })
+            .collect();
+        skipped_duplicates = records.len() - kept.len();
+        kept
+    } else {
+        skipped_duplicates = 0;
+        records.iter().zip(keys.iter()).collect()
+    };
+
     let new_articles: Vec<crate::models::article::NewArticle> =
-        records.iter().map(super::import::ris_record_to_new_article).collect();
+        kept.iter().map(|(record, _)| super::import::ris_record_to_new_article(record)).collect();
     let imported = crate::db::article_repo::insert_articles_batch(conn, &new_articles, "zotero")?;
     super::dedup::classify_imported_articles(conn, &imported)?;
     crate::db::article_repo::resolve_journal_links(conn, &imported);
@@ -441,8 +468,8 @@ pub fn import_zotero_db_phase(
     }
     if !all_names.is_empty() {
         crate::db::tag_repo::create_tags_batch(conn, &all_names, "ris_keyword")?;
-        for (article, key) in imported.iter().zip(keys.iter()) {
-            let Some(names) = tags_by_key.get(key) else { continue };
+        for (article, (_, key)) in imported.iter().zip(kept.iter()) {
+            let Some(names) = tags_by_key.get(*key) else { continue };
             for name in names {
                 let tag_id: Option<String> = conn
                     .query_row("SELECT id FROM tags WHERE LOWER(name) = LOWER(?1)", [name], |row| {
@@ -470,12 +497,13 @@ pub fn import_zotero_db_phase(
     let remaining = crate::db::article_repo::remaining_capacity(conn)?;
     let article_key_status = updated
         .iter()
-        .zip(keys.iter())
-        .map(|(a, key)| (a.id.clone(), key.clone(), a.status.as_str().to_string()))
+        .zip(kept.iter())
+        .map(|(a, (_, key))| (a.id.clone(), (*key).clone(), a.status.as_str().to_string()))
         .collect();
     let import_payload = ImportResult {
         imported_count: updated.len(),
         skipped_count: skipped_validation,
+        skipped_duplicates,
         skipped_by_user,
         articles: updated,
         remaining_capacity: remaining,
@@ -501,12 +529,17 @@ pub fn import_zotero_db_phase(
 ///    under a short lock) so the mutex is never held across the file copy.
 ///    Failures are non-fatal (per-article audit errors +
 ///    `attachment_failed_count`).
+// Grouped params keep most call sites under the arg limit; this internal
+// core carries two callbacks alongside the request inputs, so the allow
+// matches the `screening::article_writer` precedent.
+#[allow(clippy::too_many_arguments)]
 pub async fn import_zotero_collection_core(
     base_url: &str,
     db: &std::sync::Mutex<rusqlite::Connection>,
     collection_key: &str,
     excluded_keys: &[String],
     expected_library_version: i64,
+    skip_duplicates: bool,
     on_progress: &(dyn Fn(&str, usize, usize, usize) + Send + Sync),
     on_imported: &(dyn Fn(&std::sync::Mutex<rusqlite::Connection>, &[String]) + Send + Sync),
 ) -> Result<ZoteroImportResult, AppError> {
@@ -560,6 +593,7 @@ pub async fn import_zotero_collection_core(
                 keys: &keys,
                 skipped_by_user: known_excluded,
                 skipped_validation,
+                skip_duplicates,
                 validation_errors,
                 error_groups,
                 tags_by_key: &mapped.tags_by_key,
@@ -685,6 +719,7 @@ pub async fn import_zotero_collection(
     collection_key: String,
     excluded_keys: Vec<String>,
     expected_library_version: i64,
+    skip_duplicates: bool,
 ) -> Result<ZoteroImportResult, AppError> {
     use tauri::Emitter;
 
@@ -696,6 +731,7 @@ pub async fn import_zotero_collection(
         &collection_key,
         &excluded_keys,
         expected_library_version,
+        skip_duplicates,
         &move |phase, done, total, failed| {
             let _ = app_for_events.emit(
                 "zotero-import:progress",
@@ -1137,11 +1173,19 @@ pub async fn export_zotero_collection_core(
                 );
                 continue;
             };
-            let filename =
-                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            // Friendly attachment title/upload filename: first author's last
+            // name, a dash, up to 30 title chars cut at a word boundary, and
+            // the extension of the local file.
+            let ext =
+                path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+            let filename = crate::zotero::export_mapping::build_attachment_title(
+                &article.authors,
+                &article.title,
+                &ext,
+            );
             let result: Result<bool, ZoteroWriteError> = async {
                 let attachment_key = write_client::create_attachment_item(
-                    base_url, &server_id, &api_key, key, &filename,
+                    base_url, &server_id, &api_key, key, &filename, &filename,
                 )
                 .await?;
                 let bytes = std::fs::read(&path).map_err(|e| {

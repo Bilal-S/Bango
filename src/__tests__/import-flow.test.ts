@@ -21,6 +21,7 @@ const mockPreview: ImportPreview = {
   validRecords: 3,
   errorCount: 0,
   duplicateCount: 0,
+  duplicateIndices: [],
   errors: [],
   errorGroups: [],
   previewArticles: [
@@ -51,6 +52,7 @@ const mockPreview: ImportPreview = {
 const mockImportResult: ImportResult = {
   importedCount: 3,
   skippedCount: 0,
+  skippedDuplicates: 0,
   skippedByUser: 0,
   articles: [],
   remainingCapacity: 4997,
@@ -249,6 +251,7 @@ describe('useImport', () => {
           filePath: null,
           fileName: 'test.ris',
           excludedIndices: [],
+          skipDuplicates: true,
         },
       });
     });
@@ -419,5 +422,72 @@ describe('ImportPreview duplicate signal', () => {
     await imp.parseFile();
 
     expect(imp.preview.value?.duplicateCount).toBe(2);
+  });
+});
+
+describe('importableCount (confirm-button label)', () => {
+  it('confirm_button_count_subtracts_duplicates', async () => {
+    vi.mocked(tauriCommand).mockResolvedValue({
+      ...mockPreview,
+      duplicateCount: 2,
+      duplicateIndices: [0, 2],
+    });
+
+    const imp = useImport();
+    const file = new File(['RIS'], 'test.ris');
+    await imp.loadFile(file);
+    await imp.parseFile();
+
+    // Skip on: 3 visible - 2 library duplicates = 1.
+    expect(imp.importableCount.value).toBe(1);
+
+    // Unchecking brings the duplicates back into the count.
+    imp.skipDuplicates.value = false;
+    expect(imp.importableCount.value).toBe(3);
+
+    // Removing a duplicate row keeps the arithmetic consistent (no double
+    // subtraction: visible drops to 2 and only 1 duplicate remains).
+    imp.skipDuplicates.value = true;
+    imp.removeArticle(2);
+    expect(imp.visibleCount.value).toBe(2);
+    expect(imp.importableCount.value).toBe(1);
+  });
+});
+
+describe('confirm skip-duplicates flag', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('confirm_passes_skip_duplicates_flag', async () => {
+    vi.mocked(tauriCommand).mockResolvedValue(mockImportResult);
+
+    const imp = useImport();
+    const file = new File(['RIS'], 'test.ris');
+    await imp.loadFile(file);
+
+    /** Args of the import_ris_file calls so far (check_duplicates excluded). */
+    const importCalls = () =>
+      vi.mocked(tauriCommand).mock.calls.filter(([cmd]) => cmd === 'import_ris_file');
+
+    // Default on: library duplicates are dropped before insert.
+    expect(imp.skipDuplicates.value).toBe(true);
+    await imp.confirmImport();
+    expect(importCalls()).toHaveLength(1);
+    expect(importCalls()[0]?.[1]).toEqual(
+      expect.objectContaining({ request: expect.objectContaining({ skipDuplicates: true }) })
+    );
+
+    // The review-step checkbox flows through to the backend request.
+    imp.skipDuplicates.value = false;
+    await imp.confirmImport();
+    expect(importCalls()).toHaveLength(2);
+    expect(importCalls()[1]?.[1]).toEqual(
+      expect.objectContaining({ request: expect.objectContaining({ skipDuplicates: false }) })
+    );
+
+    // A fresh parse resets the checkbox to the default (on).
+    await imp.parseFile();
+    expect(imp.skipDuplicates.value).toBe(true);
   });
 });

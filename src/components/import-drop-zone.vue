@@ -149,7 +149,11 @@ function onFileInput(event: Event): void {
 }
 
 .drop-zone__button {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 220px;
+  box-sizing: border-box;
   padding: var(--space-2) var(--space-4);
   background-color: var(--color-primary);
   color: var(--color-on-primary);
@@ -169,14 +173,21 @@ function onFileInput(event: Event): void {
 }
 
 .drop-zone__secondary {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 220px;
+  box-sizing: border-box;
   padding: var(--space-2) var(--space-4);
   background-color: var(--color-surface-container-high);
   color: var(--color-on-surface);
-  border: 1px solid var(--color-outline);
+  /* Same border treatment as the dashboard's Start New Project button
+     (--color-border, not the heavier --color-outline). */
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-default);
   font-size: var(--font-size-caption);
   font-weight: var(--font-weight-semibold);
+  font-family: inherit;
   cursor: pointer;
   transition: opacity 0.15s;
 }

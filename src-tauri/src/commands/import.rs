@@ -30,9 +30,69 @@ pub struct ImportPreview {
     /// early informational signal; the import itself is unchanged - the
     /// classify phase still marks them as duplicates).
     pub duplicate_count: usize,
+    /// Indices into the valid records that duplicate the library (the
+    /// review-step Skip checkbox and the confirm-button arithmetic).
+    pub duplicate_indices: Vec<usize>,
     pub errors: Vec<ImportError>,
     pub error_groups: Vec<ErrorGroup>,
     pub preview_articles: Vec<PreviewArticle>,
+}
+
+/// The canonical-DOI set from `dois` already present in the library
+/// (case-insensitive, prefix-stripped - `check_dois_in_library` canonicalizes
+/// both sides). Empty input short-circuits. Shared with the Zotero import's
+/// skip path.
+pub fn library_dois_present(
+    conn: &rusqlite::Connection,
+    dois: &[String],
+) -> Result<std::collections::HashSet<String>, AppError> {
+    if dois.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    Ok(article_repo::check_dois_in_library(conn, dois)?.into_iter().collect())
+}
+
+/// Indices (into `records`) whose canonical DOI is already present in the
+/// library (case-insensitive, prefix-stripped). Powers the preview's
+/// `duplicate_count`/`duplicate_indices` (the review-step Skip checkbox and
+/// the confirm-button count) and the import-time skip filter. Runs in the
+/// caller's short DB lock.
+pub fn library_duplicate_indices(
+    conn: &rusqlite::Connection,
+    records: &[&RisRecord],
+) -> Result<Vec<usize>, AppError> {
+    let dois: Vec<String> = records.iter().filter_map(|r| r.doi.clone()).collect();
+    let present = library_dois_present(conn, &dois)?;
+    Ok(records
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| {
+            crate::ris::doi::normalize_doi(record.doi.as_deref())
+                .is_some_and(|d| present.contains(&d))
+        })
+        .map(|(index, _)| index)
+        .collect())
+}
+
+/// Split records into (not-in-library, duplicate count) by canonical DOI
+/// against the current library (the review-step Skip checkbox; records
+/// without a DOI never match). Runs in the caller's short DB lock.
+pub fn filter_library_duplicates<'a>(
+    conn: &rusqlite::Connection,
+    records: &[&'a RisRecord],
+) -> Result<(Vec<&'a RisRecord>, usize), AppError> {
+    let duplicates: std::collections::HashSet<usize> =
+        library_duplicate_indices(conn, records)?.into_iter().collect();
+    let mut kept: Vec<&RisRecord> = Vec::with_capacity(records.len());
+    let mut skipped = 0usize;
+    for (index, record) in records.iter().enumerate() {
+        if duplicates.contains(&index) {
+            skipped += 1;
+        } else {
+            kept.push(*record);
+        }
+    }
+    Ok((kept, skipped))
 }
 
 /// Count records whose canonical DOI is already present in the library
@@ -43,20 +103,7 @@ pub fn count_library_duplicates(
     conn: &rusqlite::Connection,
     records: &[&RisRecord],
 ) -> Result<usize, AppError> {
-    let dois: Vec<String> = records.iter().filter_map(|r| r.doi.clone()).collect();
-    if dois.is_empty() {
-        return Ok(0);
-    }
-    let present: std::collections::HashSet<String> =
-        article_repo::check_dois_in_library(conn, &dois)?.into_iter().collect();
-    // Canonicalize the record side too: the library set is lowercase-canonical
-    // while record DOIs may carry prefixes/casing.
-    Ok(records
-        .iter()
-        .filter(|r| {
-            crate::ris::doi::normalize_doi(r.doi.as_deref()).is_some_and(|d| present.contains(&d))
-        })
-        .count())
+    Ok(library_duplicate_indices(conn, records)?.len())
 }
 
 #[derive(Serialize)]
@@ -81,6 +128,8 @@ pub struct PreviewArticle {
 pub struct ImportResult {
     pub imported_count: usize,
     pub skipped_count: usize,
+    /// Library duplicates dropped before insert (review-step Skip checkbox).
+    pub skipped_duplicates: usize,
     pub skipped_by_user: usize,
     pub articles: Vec<Article>,
     pub remaining_capacity: usize,
@@ -96,6 +145,10 @@ pub struct ParseRisRequest {
     pub file_name: String,
     #[serde(default)]
     pub excluded_indices: Vec<usize>,
+    /// Drop valid records whose canonical DOI already exists in the library
+    /// (review-step Skip checkbox; default on from the UI).
+    #[serde(default)]
+    pub skip_duplicates: bool,
 }
 
 #[tauri::command]
@@ -113,10 +166,10 @@ pub async fn parse_ris_file(
 
         // Early duplicate signal: valid records' DOIs vs the current library
         // (one short lock; never held across the parse).
-        let duplicate_count = {
+        let duplicate_indices = {
             let conn = crate::db::connection::lock_conn(&db_state.conn)?;
             let valid_refs: Vec<&RisRecord> = output.valid_records.iter().collect();
-            count_library_duplicates(&conn, &valid_refs)?
+            library_duplicate_indices(&conn, &valid_refs)?
         };
 
         let preview_articles: Vec<PreviewArticle> = output
@@ -136,7 +189,8 @@ pub async fn parse_ris_file(
             total_records: output.total_records,
             valid_records: output.valid_records.len(),
             error_count: output.errors.len(),
-            duplicate_count,
+            duplicate_count: duplicate_indices.len(),
+            duplicate_indices,
             errors: output
                 .errors
                 .into_iter()
@@ -230,16 +284,27 @@ pub async fn import_ris_file(
             filter_excluded(&output.valid_records, &request.excluded_indices);
         let skipped_validation = output.total_records - output.valid_records.len();
 
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+
+        // Pre-import duplicate skip (review-step Skip checkbox): drop records
+        // whose canonical DOI already exists in the library. Everything else
+        // (within-file duplicates and every other strategy) still flows to the
+        // classify phase below.
+        let (to_import, skipped_duplicates) = if request.skip_duplicates {
+            filter_library_duplicates(&conn, &to_import)?
+        } else {
+            (to_import, 0)
+        };
+
         if to_import.is_empty() {
             return Err(AppError::Import(
-                "No articles to import. All records were either excluded or failed validation."
+                "No articles to import. All records were either excluded, skipped as duplicates, or failed validation."
                     .to_string(),
             ));
         }
 
         let new_articles: Vec<NewArticle> =
             to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
-        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         let imported =
             article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
@@ -291,6 +356,7 @@ pub async fn import_ris_file(
         let import_payload = ImportResult {
             imported_count: updated_articles.len(),
             skipped_count: skipped_validation,
+            skipped_duplicates,
             skipped_by_user,
             articles: updated_articles,
             remaining_capacity: remaining,
@@ -355,10 +421,10 @@ pub async fn parse_bibtex_file(
 
         // Early duplicate signal: valid records' DOIs vs the current library
         // (one short lock; never held across the parse).
-        let duplicate_count = {
+        let duplicate_indices = {
             let conn = crate::db::connection::lock_conn(&db_state.conn)?;
             let valid_refs: Vec<&RisRecord> = output.valid_records.iter().collect();
-            count_library_duplicates(&conn, &valid_refs)?
+            library_duplicate_indices(&conn, &valid_refs)?
         };
 
         let preview_articles: Vec<PreviewArticle> = output
@@ -378,7 +444,8 @@ pub async fn parse_bibtex_file(
             total_records: output.total_records,
             valid_records: output.valid_records.len(),
             error_count: output.errors.len(),
-            duplicate_count,
+            duplicate_count: duplicate_indices.len(),
+            duplicate_indices,
             errors: output
                 .errors
                 .into_iter()
@@ -413,16 +480,27 @@ pub async fn import_bibtex_file(
             filter_excluded(&output.valid_records, &request.excluded_indices);
         let skipped_validation = output.total_records - output.valid_records.len();
 
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+
+        // Pre-import duplicate skip (review-step Skip checkbox): drop records
+        // whose canonical DOI already exists in the library. Everything else
+        // (within-file duplicates and every other strategy) still flows to the
+        // classify phase below.
+        let (to_import, skipped_duplicates) = if request.skip_duplicates {
+            filter_library_duplicates(&conn, &to_import)?
+        } else {
+            (to_import, 0)
+        };
+
         if to_import.is_empty() {
             return Err(AppError::Import(
-                "No articles to import. All records were either excluded or failed validation."
+                "No articles to import. All records were either excluded, skipped as duplicates, or failed validation."
                     .to_string(),
             ));
         }
 
         let new_articles: Vec<NewArticle> =
             to_import.iter().map(|r| ris_record_to_new_article(r)).collect();
-        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
         let imported =
             article_repo::insert_articles_batch(&conn, &new_articles, &request.file_name)?;
@@ -469,6 +547,7 @@ pub async fn import_bibtex_file(
         let import_payload = ImportResult {
             imported_count: updated_articles.len(),
             skipped_count: skipped_validation,
+            skipped_duplicates,
             skipped_by_user,
             articles: updated_articles,
             remaining_capacity: remaining,

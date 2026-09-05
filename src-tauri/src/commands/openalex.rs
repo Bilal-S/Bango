@@ -208,6 +208,7 @@ pub async fn import_openalex_articles(
         let import_payload = ImportResult {
             imported_count: updated_articles.len(),
             skipped_count: 0,
+            skipped_duplicates: 0,
             skipped_by_user: 0,
             articles: updated_articles,
             remaining_capacity: remaining,
