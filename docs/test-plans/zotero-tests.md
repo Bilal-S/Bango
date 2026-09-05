@@ -132,5 +132,21 @@ the PR.
 | `src/__tests__/components/zotero-export-panel.test.ts::authorize_state_prompts_remember` | No stored key -> authorize phase + "tick Remember" copy |
 | `src/__tests__/components/zotero-export-panel.test.ts::progress_events_update_bar` | `zotero-export:progress` phases drive the bar |
 | `src/__tests__/components/zotero-export-panel.test.ts::result_summary_rendered` | Exported/already/no-DOI/file counts render |
+| `src/__tests__/components/zotero-export-panel.test.ts::result_summary_includes_note_counts` | Result card renders "Notes: N exported, N failed" |
 | `src/__tests__/components/zotero-export-panel.test.ts::button_becomes_close_after_completion` | Result state renames the primary button to Close; click emits close |
+
+### Tier 7 - export date normalization + notes round-trip
+
+| Test identifier | Assertion |
+|---|---|
+| `src-tauri/tests/zotero/zotero_export_mapping_test.rs::build_export_date_combines_year_with_parsed_parts` | Raw `NOV 25`/`APR`/`JUL-AUG`/`02/2017` + publication year -> `YYYY-MM-DD`/`YYYY-MM` ISO forms |
+| `src-tauri/tests/zotero/zotero_export_mapping_test.rs::build_export_date_iso_passthrough_and_fallbacks` | ISO passthrough; year-only from string or `publication_year`; unparseable -> None |
+| `src-tauri/tests/zotero/zotero_export_mapping_test.rs::build_item_json_emits_iso_date` | Item JSON date is the normalized ISO form (`NOV 25`+2025 -> `2025-11-25`); omitted when unknown |
+| `src-tauri/tests/zotero/zotero_export_mapping_test.rs::split_note_blocks_round_trips_merged_format` | `Title`/`---`/body paragraphs split into blocks; free-form text -> one block; empty -> none |
+| `src-tauri/tests/zotero/zotero_export_mapping_test.rs::build_note_item_json_escapes_and_breaks_lines` | Note HTML escapes `&<>` and joins lines with `<br/>`; itemType/parentItem/tags set |
+| `src-tauri/tests/zotero/zotero_mapping_test.rs::merge_child_notes_orders_by_date_and_formats_blocks` | dateAdded-ascending blocks (title/`---`/body, blank-line join); empty notes -> None |
+| `src-tauri/tests/zotero/zotero_mapping_test.rs::note_html_to_text_strips_tags_and_decodes_entities` | Tags drop, `br`/`p` -> newlines (runs collapse), named + numeric entities decode |
+| `src-tauri/tests/zotero/zotero_client_test.rs::parse_note_list_response` | Bulk `itemType=note` JSON parses (`note`/`parentItem`/`dateAdded`); grouped by parent |
+| `src-tauri/tests/zotero/zotero_import_test.rs::import_merges_child_notes_into_user_notes` | Mockito e2e: child notes merged (date-ordered) into `articles.user_notes` |
+| `src-tauri/tests/zotero/zotero_export_test.rs::export_posts_child_notes_and_counts` | Mockito e2e: one note item POSTed per user-note block; `note_exported_count` set |
 

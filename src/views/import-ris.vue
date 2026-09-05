@@ -121,7 +121,7 @@ const hasDuplicates = () =>
         <div v-if="zoteroPreviewMeta" class="import-view__zotero-meta">
           {{ zoteroPreviewMeta.totalItems }} items in "{{ zoteroPreviewMeta.collectionName }}" -
           {{ zoteroPreviewMeta.attachmentCount }} with full-text attachments,
-          {{ zoteroPreviewMeta.tagCount }} tags.
+          {{ zoteroPreviewMeta.noteCount }} with notes, {{ zoteroPreviewMeta.tagCount }} tags.
         </div>
 
         <div class="import-view__summary">

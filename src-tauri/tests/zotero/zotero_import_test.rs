@@ -51,9 +51,13 @@ fn attachment_json(key: &str, parent: &str, content_type: &str, filename: &str) 
     )
 }
 
-/// Mock the collection fetch requests (items + subcollections + bulk
-/// attachments) and return (server, api base).
-async fn import_server(items: String, attachments: String) -> (mockito::ServerGuard, String) {
+/// Mock the collection fetch requests (items + subcollections + the bulk
+/// attachment and note item lists) and return (server, api base).
+async fn import_server(
+    items: String,
+    attachments: String,
+    notes: String,
+) -> (mockito::ServerGuard, String) {
     let mut server = mockito::Server::new_async().await;
     server
         .mock("GET", "/api/users/0/collections/KEY/items")
@@ -74,10 +78,24 @@ async fn import_server(items: String, attachments: String) -> (mockito::ServerGu
         .await;
     server
         .mock("GET", "/api/users/0/items")
-        .match_query(mockito::Matcher::Any)
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("itemType".into(), "attachment".into()),
+            mockito::Matcher::UrlEncoded("format".into(), "json".into()),
+        ]))
         .with_status(200)
         .with_header("content-type", "application/json")
         .with_body(attachments)
+        .create_async()
+        .await;
+    server
+        .mock("GET", "/api/users/0/items")
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("itemType".into(), "note".into()),
+            mockito::Matcher::UrlEncoded("format".into(), "json".into()),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(notes)
         .create_async()
         .await;
     let base = format!("{}/api", server.url());
@@ -130,6 +148,7 @@ fn import_zotero_collection_inserts_articles() {
             validation_errors: vec![],
             error_groups: vec![],
             tags_by_key: &Default::default(),
+            user_notes_by_key: &Default::default(),
         },
     )
     .expect("db phase");
@@ -174,6 +193,7 @@ fn import_zotero_collection_runs_classify() {
             validation_errors: vec![],
             error_groups: vec![],
             tags_by_key: &Default::default(),
+            user_notes_by_key: &Default::default(),
         },
     )
     .expect("db phase");
@@ -202,6 +222,7 @@ fn import_zotero_collection_assigns_tags() {
             validation_errors: vec![],
             error_groups: vec![],
             tags_by_key: &tags_by_key,
+            user_notes_by_key: &Default::default(),
         },
     )
     .expect("db phase");
@@ -243,7 +264,7 @@ async fn import_zotero_collection_respects_excluded_keys() {
         valid_item_json("ITEM1", "Alpha Paper", &[]),
         valid_item_json("ITEM2", "Beta Paper", &[])
     );
-    let (_server, base) = import_server(items, "[]".to_string()).await;
+    let (_server, base) = import_server(items, "[]".to_string(), "[]".to_string()).await;
     let excluded = vec!["ITEM2".to_string(), "UNKNOWN".to_string()];
     let result = run_core(&db, &base, &excluded, 15).await.expect("import");
     assert_eq!(result.result.imported_count, 1, "only the non-excluded item imports");
@@ -281,7 +302,7 @@ async fn import_zotero_collection_skips_library_duplicates() {
         valid_item_json("ITEM1", "Alpha Paper", &[]),
         valid_item_json("ITEM2", "Beta Paper", &[])
     );
-    let (_server, base) = import_server(items, "[]".to_string()).await;
+    let (_server, base) = import_server(items, "[]".to_string(), "[]".to_string()).await;
     let result = run_core_with(&db, &base, &[], 15, true).await.expect("import");
     assert_eq!(result.result.imported_count, 1, "the library duplicate is not inserted");
     assert_eq!(result.result.skipped_duplicates, 1);
@@ -304,7 +325,7 @@ async fn import_zotero_collection_aborts_on_library_version_change() {
     let conn = test_db();
     let db = Mutex::new(conn);
     let items = format!("[{}]", valid_item_json("ITEM1", "Alpha Paper", &[]));
-    let (_server, base) = import_server(items, "[]".to_string()).await;
+    let (_server, base) = import_server(items, "[]".to_string(), "[]".to_string()).await;
     // The mock reports Last-Modified-Version 15; a stale expectation aborts.
     let err = match run_core(&db, &base, &[], 14).await {
         Err(e) => e,
@@ -340,7 +361,7 @@ async fn import_zotero_collection_capacity_guard_surfaces() {
         valid_item_json("ITEM1", "Alpha Paper", &[]),
         valid_item_json("ITEM2", "Beta Paper", &[])
     );
-    let (_server, base) = import_server(items, "[]".to_string()).await;
+    let (_server, base) = import_server(items, "[]".to_string(), "[]".to_string()).await;
     let err = match run_core(&db, &base, &[], 15).await {
         Err(e) => e,
         Ok(_) => panic!("capacity guard must fire"),
@@ -366,7 +387,7 @@ async fn import_zotero_collection_attaches_pdf() {
     let items = format!("[{}]", valid_item_json("ITEM1", "Alpha Paper", &[]));
     let attachments =
         format!("[{}]", attachment_json("ATT1", "ITEM1", "application/pdf", "paper.txt"));
-    let (mut server, base) = import_server(items, attachments).await;
+    let (mut server, base) = import_server(items, attachments, "[]".to_string()).await;
     server
         .mock("GET", "/api/users/0/items/ATT1/file")
         .match_query(mockito::Matcher::Any)
@@ -395,7 +416,7 @@ async fn import_zotero_collection_attachment_failure_non_fatal() {
     let items = format!("[{}]", valid_item_json("ITEM1", "Alpha Paper", &[]));
     let attachments =
         format!("[{}]", attachment_json("ATT1", "ITEM1", "application/pdf", "missing.pdf"));
-    let (mut server, base) = import_server(items, attachments).await;
+    let (mut server, base) = import_server(items, attachments, "[]".to_string()).await;
     // 302 to a file that does not exist: attach fails, the import survives.
     server
         .mock("GET", "/api/users/0/items/ATT1/file")
@@ -439,7 +460,7 @@ async fn import_zotero_collection_duplicate_skips_attachment() {
     let items = format!("[{item1},{item2}]");
     let attachments =
         format!("[{}]", attachment_json("ATT_DUP", "ITEM2", "application/pdf", "dup.pdf"));
-    let (mut server, base) = import_server(items, attachments).await;
+    let (mut server, base) = import_server(items, attachments, "[]".to_string()).await;
     let file_mock = server
         .mock("GET", "/api/users/0/items/ATT_DUP/file")
         .match_query(mockito::Matcher::Any)
@@ -469,7 +490,7 @@ async fn import_zotero_collection_counts_skipped_validation() {
         missing_abstract,
         webpage
     );
-    let (_server, base) = import_server(items, "[]".to_string()).await;
+    let (_server, base) = import_server(items, "[]".to_string(), "[]".to_string()).await;
     let result = run_core(&db, &base, &[], 15).await.expect("import");
     // skipped_count mirrors RIS accounting: unsupported + missing-field records.
     assert_eq!(result.result.imported_count, 1);
@@ -488,7 +509,7 @@ async fn import_zotero_collection_url_only_attachment_skips() {
     // URL-resident attachment): expected skip, not a failure.
     let attachments =
         format!("[{}]", attachment_json("ATT1", "ITEM1", "application/pdf", "paper.pdf"));
-    let (mut server, base) = import_server(items, attachments).await;
+    let (mut server, base) = import_server(items, attachments, "[]".to_string()).await;
     server
         .mock("GET", "/api/users/0/items/ATT1/file")
         .match_query(mockito::Matcher::Any)
@@ -531,7 +552,7 @@ async fn import_zotero_collection_counts_non_candidate_siblings() {
         attachment_json("ATT1", "ITEM1", "application/pdf", "paper.txt"),
         attachment_json("ATT2", "ITEM1", "application/epub+zip", "book.epub")
     );
-    let (mut server, base) = import_server(items, attachments).await;
+    let (mut server, base) = import_server(items, attachments, "[]".to_string()).await;
     server
         .mock("GET", "/api/users/0/items/ATT1/file")
         .match_query(mockito::Matcher::Any)
@@ -544,4 +565,49 @@ async fn import_zotero_collection_counts_non_candidate_siblings() {
     assert_eq!(result.attached_count, 1);
     assert_eq!(result.attachment_failed_count, 0);
     assert_eq!(result.attachment_skipped_count, 1, "the epub sibling counts");
+}
+
+fn note_json(key: &str, parent: &str, note_html: &str, date_added: &str) -> String {
+    format!(
+        r#"{{"key":"{key}","version":1,"data":{{"itemType":"note","note":{note_html},"parentItem":"{parent}","tags":[],"dateAdded":"{date_added}","dateModified":"{date_added}"}}}}"#
+    )
+}
+
+#[tokio::test]
+async fn import_merges_child_notes_into_user_notes() {
+    let conn = test_db();
+    let db = Mutex::new(conn);
+
+    // Two child notes on ITEM1 with out-of-order dateAdded, one empty note,
+    // and a note attached to an item outside the collection (filtered).
+    let notes = format!(
+        "[{},{},{},{}]",
+        note_json(
+            "NOTE2",
+            "ITEM1",
+            "\"<p>Second note</p><p>Later body.</p>\"",
+            "2026-02-02T10:00:00Z"
+        ),
+        note_json(
+            "NOTE1",
+            "ITEM1",
+            "\"First note<br/>line two &amp; more\"",
+            "2026-01-01T09:00:00Z"
+        ),
+        note_json("NOTE3", "ITEM1", "\"<p></p>\"", "2026-03-03T10:00:00Z"),
+        note_json("NOTEX", "OTHER", "\"<p>Elsewhere</p>\"", "2026-01-01T08:00:00Z")
+    );
+    let items = format!("[{}]", valid_item_json("ITEM1", "Alpha Paper", &[]));
+    let (_server, base) = import_server(items, "[]".to_string(), notes).await;
+
+    let result = run_core(&db, &base, &[], 15).await.expect("import");
+    assert_eq!(result.result.imported_count, 1);
+    assert_eq!(result.notes_merged_count, 1, "one article received merged notes");
+    // The merged user notes: date-ordered blocks, title / --- / body, one
+    // blank line between blocks; the empty note contributes nothing.
+    let user_notes: String = {
+        let conn = db.lock().unwrap();
+        conn.query_row("SELECT user_notes FROM articles LIMIT 1", [], |r| r.get(0)).unwrap()
+    };
+    assert_eq!(user_notes, "First note\n---\nline two & more\n\nSecond note\n---\nLater body.");
 }

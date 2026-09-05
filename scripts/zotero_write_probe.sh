@@ -61,6 +61,19 @@
 #                                             # authorize (dialog!), then
 #                                             # versioned-delete every
 #                                             # recorded probe item
+#   scripts/zotero_write_probe.sh --meta      # stages 1-5 + metadata
+#                                             # round-trip: creates the
+#                                             # probe items (full-metadata +
+#                                             # year-only + month-only date
+#                                             # variants) and two child notes
+#                                             # on the full item, reads every
+#                                             # item back unauthenticated,
+#                                             # and jq-asserts every metadata
+#                                             # field, tag, parsedDate, and
+#                                             # note (PASS/FAIL summary).
+#                                             # Items are KEPT for inspection
+#                                             # (keys recorded in $STATE);
+#                                             # remove with --cleanup.
 # Env: ZOTERO_BASE, WRITE_TIMEOUT (default 180 s dialog wait),
 #      APP (authorize appName, default "Bango"), COLLECTION (target
 #      collection key override for --upload; default: the UI-selected
@@ -148,10 +161,12 @@ delete_item() {
 }
 
 # cleanup_probe_items - trap hook: remove probe items a failed run leaves in
-# the real library (--write's item only; --upload keeps its items on purpose
-# - they stay recorded in $STATE until --cleanup runs).
+# the real library (--write's item only; --upload/--meta keep their items on
+# purpose - they stay recorded in $STATE until --cleanup runs).
 cleanup_probe_items() {
-  [ "${MODE:-}" = "--upload" ] && return 0
+  if [ "${MODE:-}" = "--upload" ] || [ "${MODE:-}" = "--meta" ]; then
+    return 0
+  fi
   [ -n "$KEY" ] && [ -n "$SERVER_ID" ] || return 0
   local key
   for key in "$ATTACH_KEY" "$PARENT_KEY" "$ITEM_KEY"; do
@@ -253,10 +268,11 @@ echo "$(hdr Last-Modified-Version) server-id=${SERVER_ID:-none}"
 
 MODE="${1:-}"
 case "$MODE" in
-  --write|--upload|--cleanup) ;;
+  --write|--upload|--cleanup|--meta) ;;
   *)
     say "Done (read-only). Re-run with --write to probe the write contract,"
     echo "with --upload to create + upload probe items (kept for inspection),"
+    echo "with --meta to round-trip + validate full metadata, dates, and notes,"
     echo "or with --cleanup to delete the kept probe items."
     exit 0
     ;;
@@ -391,6 +407,199 @@ JSON
     echo "RESULT: full write contract verified (authorize -> key in body ->"
     echo "authenticated POST -> versioned DELETE). Library left clean."
   fi
+  exit 0
+fi
+
+# ── --meta: full metadata/date/tags/notes round-trip validation ──────────────
+# check LABEL EXPECTED ACTUAL - one assertion; PASS/FAIL counters.
+META_PASS=0
+META_FAIL=0
+check() {
+  if [ "$2" = "$3" ]; then
+    echo "  ok: $1"
+    META_PASS=$((META_PASS + 1))
+  else
+    echo "  FAIL: $1"
+    echo "        expected: $2"
+    echo "        actual:   $3"
+    META_FAIL=$((META_FAIL + 1))
+  fi
+}
+
+if [ "$MODE" = "--meta" ]; then
+  say "Stage 6 (--meta): create the validation items (server-assigned keys)"
+  # Live-verified contract note: the LOCAL API rejects locally generated keys
+  # on new-item POSTs (428 "Either If-Unmodified-Since-Version or 'version'
+  # property must be provided for 'key'-based writes"), so the web-API
+  # parent+child-in-one-batch trick does not apply here. The probe mirrors
+  # the app's export flow: article batch first, then child notes referencing
+  # the created parent key from the success envelope.
+  # Exactly the field set the app's build_item_json emits for a full journal
+  # article plus the two date variants build_export_date produces.
+  cat > "$PAYLOAD" <<'JSON'
+[
+  {
+    "itemType": "journalArticle",
+    "title": "Bango meta-probe full item (safe to delete)",
+    "creators": [
+      {"creatorType": "author", "firstName": "Jane", "lastName": "Doe"},
+      {"creatorType": "author", "firstName": "John", "lastName": "Smith"},
+      {"creatorType": "author", "name": "World Health Organization"}
+    ],
+    "abstractNote": "Probe abstract.",
+    "publicationTitle": "Journal of Probes",
+    "volume": "7",
+    "issue": "2",
+    "pages": "10-20",
+    "date": "2025-11-25",
+    "DOI": "10.1/meta-probe",
+    "url": "https://example.com/probe",
+    "language": "en",
+    "ISSN": "1234-5678",
+    "extra": "Imported note text line",
+    "tags": [{"tag": "machine-learning"}, {"tag": "Physics"}],
+    "collections": [],
+    "relations": {}
+  },
+  {
+    "itemType": "journalArticle",
+    "title": "Bango meta-probe year-only date (safe to delete)",
+    "creators": [{"creatorType": "author", "name": "Bango Probe"}],
+    "date": "2025",
+    "DOI": "10.1/meta-probe-year",
+    "tags": [],
+    "collections": []
+  },
+  {
+    "itemType": "journalArticle",
+    "title": "Bango meta-probe month-only date (safe to delete)",
+    "creators": [{"creatorType": "author", "name": "Bango Probe"}],
+    "date": "2025-11",
+    "DOI": "10.1/meta-probe-month",
+    "tags": [],
+    "collections": []
+  }
+]
+JSON
+  req POST "$API/users/0/items" 20 \
+    -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
+    -H "Zotero-Server-ID: $SERVER_ID" -H "Zotero-API-Key: $KEY" \
+    -H "Zotero-Write-Token: $(write_token)" \
+    --data-binary "@$PAYLOAD"
+  echo "status=$STATUS $(hdr Last-Modified-Version)"
+  if [ "$STATUS" = "401" ]; then
+    key_expired
+    exit 0
+  fi
+  if [ "$STATUS" != "200" ]; then
+    echo "RESULT: item batch creation failed: $(head -c 400 "$BODY")"
+    exit 4
+  fi
+  FULL_KEY="$(jq -r '.success["0"] // .successful["0"].key // empty' "$BODY")"
+  YEAR_KEY="$(jq -r '.success["1"] // .successful["1"].key // empty' "$BODY")"
+  MONTH_KEY="$(jq -r '.success["2"] // .successful["2"].key // empty' "$BODY")"
+  echo "created keys: full=$FULL_KEY year=$YEAR_KEY month=$MONTH_KEY"
+  if [ -z "$FULL_KEY" ] || [ -z "$YEAR_KEY" ] || [ -z "$MONTH_KEY" ]; then
+    echo "RESULT: envelope did not report all three keys: $(head -c 400 "$BODY")"
+    exit 4
+  fi
+
+  say "Stage 6b (--meta): create the child notes on the full item"
+  # The two notes build_note_item_json produces for a split user-note block.
+  cat > "$PAYLOAD" <<JSON
+[
+  {
+    "itemType": "note",
+    "parentItem": "$FULL_KEY",
+    "note": "First probe note<br/>line two",
+    "tags": []
+  },
+  {
+    "itemType": "note",
+    "parentItem": "$FULL_KEY",
+    "note": "Second probe note",
+    "tags": []
+  }
+]
+JSON
+  req POST "$API/users/0/items" 20 \
+    -H "Zotero-API-Version: 3" -H "Content-Type: application/json" \
+    -H "Zotero-Server-ID: $SERVER_ID" -H "Zotero-API-Key: $KEY" \
+    -H "Zotero-Write-Token: $(write_token)" \
+    --data-binary "@$PAYLOAD"
+  echo "status=$STATUS $(hdr Last-Modified-Version)"
+  if [ "$STATUS" = "401" ]; then
+    key_expired
+    exit 0
+  fi
+  if [ "$STATUS" != "200" ]; then
+    echo "RESULT: note batch creation failed: $(head -c 400 "$BODY")"
+    exit 4
+  fi
+  NOTE1_KEY="$(jq -r '.success["0"] // .successful["0"].key // empty' "$BODY")"
+  NOTE2_KEY="$(jq -r '.success["1"] // .successful["1"].key // empty' "$BODY")"
+  echo "created note keys: $NOTE1_KEY $NOTE2_KEY"
+
+  say "Stage 7 (--meta): read-back verify - full metadata item"
+  req GET "$API/users/0/items/$FULL_KEY" 10 -H "Zotero-API-Version: 3"
+  if [ "$STATUS" != "200" ]; then
+    echo "RESULT: read-back failed for $FULL_KEY ($STATUS)."
+    exit 4
+  fi
+  check "itemType"            "journalArticle"                       "$(jq -r '.data.itemType' "$BODY")"
+  check "title"               "Bango meta-probe full item (safe to delete)" "$(jq -r '.data.title' "$BODY")"
+  check "abstractNote"        "Probe abstract."                      "$(jq -r '.data.abstractNote' "$BODY")"
+  check "publicationTitle"    "Journal of Probes"                    "$(jq -r '.data.publicationTitle' "$BODY")"
+  check "volume"              "7"                                    "$(jq -r '.data.volume' "$BODY")"
+  check "issue"               "2"                                    "$(jq -r '.data.issue' "$BODY")"
+  check "pages"               "10-20"                                "$(jq -r '.data.pages' "$BODY")"
+  check "date (full ISO)"     "2025-11-25"                           "$(jq -r '.data.date' "$BODY")"
+  check "parsedDate (full)"   "starts with 2025-11-25"               "$(jq -r 'if (.meta.parsedDate // "" | startswith("2025-11-25")) then "starts with 2025-11-25" else .meta.parsedDate end' "$BODY")"
+  check "DOI"                 "10.1/meta-probe"                      "$(jq -r '.data.DOI' "$BODY")"
+  check "url"                 "https://example.com/probe"            "$(jq -r '.data.url' "$BODY")"
+  check "language"            "en"                                   "$(jq -r '.data.language' "$BODY")"
+  check "ISSN"                "1234-5678"                            "$(jq -r '.data.ISSN' "$BODY")"
+  check "extra"               "Imported note text line"              "$(jq -r '.data.extra' "$BODY")"
+  check "creators (count)"    "3"                                    "$(jq -r '.data.creators | length' "$BODY")"
+  check "first author name"   "Doe"                                  "$(jq -r '.data.creators[0].lastName' "$BODY")"
+  check "institutional author" "World Health Organization"            "$(jq -r '.data.creators[2].name' "$BODY")"
+  check "tags (sorted set)"   "Physics,machine-learning"             "$(jq -r '[.data.tags[].tag] | sort | join(",")' "$BODY")"
+
+  say "Stage 8 (--meta): read-back verify - date variants"
+  req GET "$API/users/0/items/$YEAR_KEY" 10 -H "Zotero-API-Version: 3"
+  check "year-only date"      "2025"                                 "$(jq -r '.data.date' "$BODY")"
+  check "year-only parsedDate" "starts with 2025"                     "$(jq -r 'if (.meta.parsedDate // "" | startswith("2025")) then "starts with 2025" else .meta.parsedDate end' "$BODY")"
+  req GET "$API/users/0/items/$MONTH_KEY" 10 -H "Zotero-API-Version: 3"
+  check "month-only date"     "2025-11"                              "$(jq -r '.data.date' "$BODY")"
+  check "month-only parsedDate" "starts with 2025-11"                 "$(jq -r 'if (.meta.parsedDate // "" | startswith("2025-11")) then "starts with 2025-11" else .meta.parsedDate end' "$BODY")"
+
+  say "Stage 9 (--meta): read-back verify - child notes"
+  req GET "$API/users/0/items/$FULL_KEY/children" 10 -H "Zotero-API-Version: 3"
+  if [ "$STATUS" != "200" ]; then
+    echo "RESULT: children fetch failed for $FULL_KEY ($STATUS)."
+    exit 4
+  fi
+  check "child note count"    "2"                                    "$(jq -r '[.[] | select(.data.itemType == "note")] | length' "$BODY")"
+  check "note 1 content"      "First probe note<br/>line two"        "$(jq -r '[.[] | select(.data.itemType == "note") | .data.note] | sort | .[0]' "$BODY")"
+  check "note 2 content"      "Second probe note"                    "$(jq -r '[.[] | select(.data.itemType == "note") | .data.note] | sort | .[1]' "$BODY")"
+  check "note parentItem"     "$FULL_KEY"                            "$(jq -r --arg k "$FULL_KEY" '[.[] | select(.data.itemType == "note") | .data.parentItem] | if (length > 0 and all(. == $k)) then $k else join(",") end' "$BODY")"
+
+  say "Stage 10 (--meta): summary"
+  record_key "$FULL_KEY"
+  record_key "$YEAR_KEY"
+  record_key "$MONTH_KEY"
+  record_key "$NOTE1_KEY"
+  record_key "$NOTE2_KEY"
+  echo "assertions: $META_PASS passed, $META_FAIL failed"
+  if [ "$META_FAIL" -gt 0 ]; then
+    echo "RESULT: metadata round-trip FAILED ($META_FAIL assertions)."
+    echo "Items kept for inspection (keys in $STATE): remove with:"
+    echo "  scripts/zotero_write_probe.sh --cleanup"
+    exit 4
+  fi
+  echo "RESULT: full metadata/date/tags/notes round-trip verified."
+  echo "Items kept for inspection (keys in $STATE): remove with:"
+  echo "  scripts/zotero_write_probe.sh --cleanup"
   exit 0
 fi
 

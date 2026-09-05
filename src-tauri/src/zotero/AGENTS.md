@@ -40,7 +40,8 @@ subcollections via `/collections/{key}/collections` with a seen-set and
 partitions out child items; `fetch_collection_top_items` (`/items/top`) is
 the non-recursive export diff baseline. Attachments come from ONE bulk
 `/users/0/items?itemType=attachment` request (grouped by `data.parentItem`),
-with a per-item `/children` fallback through a bounded pool of 4.
+with a per-item `/children` fallback through a bounded pool of 4; child
+notes come from the mirrored `fetch_all_notes` (`?itemType=note`).
 
 ### Path resolution (`client::resolve_attachment_path`)
 
@@ -61,6 +62,14 @@ deliberately NOT written to `keywords` - they flow to Bango tags post-insert
 Attachment candidacy: linkMode `imported_file`/`linked_file`/`imported_url`
 (live Zotero 10 stores connector-saved PDFs as `imported_url` with real
 files) AND pdf/plain contentType OR `.pdf`/`.txt` filename.
+Child notes: `note_html_to_text` (tags drop, `br`/block tags -> newlines with
+runs collapsed to one, named + numeric entities decode) and `merge_child_notes`
+(order by `data.dateAdded` ascending; each note -> `Title` line, `---`
+separator, body; blocks joined by one blank line; all-empty -> `None`).
+The merged text lands in `user_notes` via `user_notes_by_key` (the same
+keyed-by-Zotero-item pattern as `tags_by_key`); `notes_merged_count` reports
+it. Blank lines are reserved as the block separator - note text never
+contains one.
 
 ### Key-based exclusion + version guard (`commands/zotero.rs`)
 
@@ -92,7 +101,11 @@ the distinct `DialogTimeout` (the user ignored the 120 s dialog - never
 reported as "Zotero is not running"). New items POST in batches of 50
 with a fresh 32-char `Zotero-Write-Token` per batch; the envelope's
 `success`/`successful`/`unchanged`/`failed` maps drive counts
-(`success_by_index` maps batch positions to created keys). Files upload in
+(`success_by_index` maps batch positions to created keys). Locally
+generated item keys are NOT supported on new-item POSTs (live-verified
+428 "Either If-Unmodified-Since-Version or 'version' property must be
+provided for 'key'-based writes") - child notes always reference the
+server-assigned parent key from the envelope. Files upload in
 3 phases: `POST .../items/<key>/file` with md5/filename/filesize/mtime +
 `If-None-Match: *` -> `{url, uploadKey}` or `{"exists":1}` -> bytes (`201`)
 -> register `upload=<key>` (`204`). Deletes need
@@ -104,6 +117,23 @@ by `ordered_attachment_body` with `linkMode` before `filename`/
 `contentType`: the local API applies fields in document order and rejects
 a path field that precedes the link mode, and a no-key envelope error
 carries the per-index `failed` reasons.
+
+### Export mapping (`export_mapping.rs`)
+
+Dates: `build_export_date(date, publication_year)` always emits the most
+specific ISO form (`YYYY-MM-DD`/`YYYY-MM`/`YYYY`) - month/day come from
+`parse_partial_date` (tolerant: ISO, `NOV 25`, month-only, month ranges ->
+first month, `MM/YYYY`, `YYYY/MM/DD`, `Mon YYYY`) combined with the
+authoritative `publication_year`; raw strings are never sent because
+Zotero re-parses them (`NOV 25` + 2025 displayed as "Nov 25" with no
+year - the reported bug). Notes: `split_note_blocks` splits user notes
+back into `Title`/`---`/body blocks (free-form text -> one block, first
+line the title) and `build_note_item_json` emits the
+`{"itemType":"note","parentItem","note","tags":[]}` child with
+HTML-escaped, `<br/>`-joined lines. The export core POSTs note batches
+after the item batches (failures non-fatal: audit + counts); `notes` ->
+`extra` stays the Imported-Notes path, `user_notes` never lands in the
+item JSON.
 
 ### Stored settings
 
@@ -127,9 +157,12 @@ zotero_export_mapping_test --test zotero_export_test --test
 zotero_write_client_test`. Binding inventory:
 `docs/test-plans/zotero-tests.md` (enforced by `scripts/check-test-inventory.sh`).
 Live read-API facts were verified against Zotero 10.0.1; the write contract
-is reproducible via `scripts/zotero_write_probe.sh --write`, and the
+is reproducible via `scripts/zotero_write_probe.sh --write`, the
 3-phase file upload via `--upload` (probe items kept for inspection, keys
-recorded in a temp state file) followed by `--cleanup`.
+recorded in a temp state file) followed by `--cleanup`, and the full
+metadata/date/tags/notes export round-trip via `--meta` (26 live
+assertions: every metadata field, tags, ISO date variants incl.
+year-only, and child notes) followed by `--cleanup`.
 
 ## Child DOX Index
 

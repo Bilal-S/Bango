@@ -126,6 +126,7 @@ describe('Zotero import flow', () => {
       attachedCount: 2,
       attachmentFailedCount: 0,
       attachmentSkippedCount: 0,
+      notesMergedCount: 0,
     };
     vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
       if (cmd === 'import_zotero_collection') return Promise.resolve(zoteroResult);
@@ -143,6 +144,7 @@ describe('Zotero import flow', () => {
       libraryVersion: 15,
       totalItems: 3,
       attachmentCount: 2,
+      noteCount: 0,
       tagCount: 4,
     });
     expect(imp.step.value).toBe('import');
@@ -181,6 +183,7 @@ describe('Zotero import flow', () => {
       libraryVersion: 15,
       totalItems: 2,
       attachmentCount: 0,
+      noteCount: 0,
       tagCount: 0,
     });
 
@@ -200,6 +203,7 @@ describe('Zotero import flow', () => {
       libraryVersion: 15,
       totalItems: 3,
       attachmentCount: 2,
+      noteCount: 0,
       tagCount: 4,
     });
 
@@ -228,6 +232,7 @@ describe('Zotero import stale-preview guard', () => {
       attachedCount: 0,
       attachmentFailedCount: 0,
       attachmentSkippedCount: 0,
+      notesMergedCount: 0,
     };
     vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
       if (cmd === 'import_zotero_collection') return Promise.resolve(zoteroResult);
@@ -245,6 +250,7 @@ describe('Zotero import stale-preview guard', () => {
       libraryVersion: 15,
       totalItems: 3,
       attachmentCount: 0,
+      noteCount: 0,
       tagCount: 0,
     });
 
@@ -267,6 +273,7 @@ describe('Zotero import stale-preview guard', () => {
       libraryVersion: 15,
       totalItems: 3,
       attachmentCount: 0,
+      noteCount: 0,
       tagCount: 0,
     });
     imp.skipDuplicates.value = false;

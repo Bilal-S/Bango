@@ -33,6 +33,8 @@ export interface ZoteroCollectionPreview {
   totalItems: number;
   mappedArticles: number;
   attachmentCount: number;
+  /** Mapped items with at least one non-empty child note. */
+  noteCount: number;
   tagCount: number;
 }
 
@@ -50,6 +52,8 @@ export interface ZoteroImportResult {
   attachedCount: number;
   attachmentFailedCount: number;
   attachmentSkippedCount: number;
+  /** Articles that received merged Zotero child notes in `userNotes`. */
+  notesMergedCount: number;
 }
 
 /** Connector-reported selection + the last-collection fallback default. */
@@ -63,7 +67,7 @@ export interface ZoteroSelectedCollection {
 
 /** `zotero-export:progress` event payload. */
 export interface ZoteroExportProgress {
-  phase: 'authorize' | 'items' | 'files';
+  phase: 'authorize' | 'items' | 'notes' | 'files';
   done: number;
   total: number;
   failed: number;
@@ -89,6 +93,9 @@ export interface ZoteroExportResult {
   fileAttachedCount: number;
   fileFailedCount: number;
   fileSkippedCount: number;
+  /** Child-note items created from Bango user notes. */
+  noteExportedCount: number;
+  noteFailedCount: number;
   collectionName: string;
   libraryVersion: number | null;
 }

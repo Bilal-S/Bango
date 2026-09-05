@@ -63,6 +63,7 @@ export interface ZoteroPreviewMeta {
   collectionName: string;
   totalItems: number;
   attachmentCount: number;
+  noteCount: number;
   tagCount: number;
 }
 
@@ -178,6 +179,7 @@ export function useImport() {
     libraryVersion: number | null;
     totalItems: number;
     attachmentCount: number;
+    noteCount: number;
     tagCount: number;
   }): void {
     importSource.value = 'zotero';
@@ -188,6 +190,7 @@ export function useImport() {
       collectionName: payload.collectionName,
       totalItems: payload.totalItems,
       attachmentCount: payload.attachmentCount,
+      noteCount: payload.noteCount,
       tagCount: payload.tagCount,
     };
     fileName.value = `Zotero: ${payload.collectionName}`;

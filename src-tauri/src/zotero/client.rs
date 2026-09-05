@@ -19,7 +19,9 @@ use futures::StreamExt;
 use percent_encoding::percent_decode_str;
 use serde::de::DeserializeOwned;
 
-use super::{ZoteroChildItem, ZoteroCollection, ZoteroError, ZoteroItem, LOCAL_USER_ID};
+use super::{
+    ZoteroChildItem, ZoteroCollection, ZoteroError, ZoteroItem, ZoteroNoteItem, LOCAL_USER_ID,
+};
 
 const REQUEST_TIMEOUT_SECS: u64 = 5;
 
@@ -285,6 +287,43 @@ pub async fn fetch_all_attachments(
         children.extend(result?);
     }
     Ok(children)
+}
+
+/// Child notes of the given parent items. Mirrors `fetch_all_attachments`:
+/// primary path is ONE bulk `GET /users/0/items?itemType=note` request; if
+/// that endpoint is unavailable, fall back to per-item `/children` requests
+/// (filtered to `itemType = note`) through a bounded pool of 4.
+pub async fn fetch_all_notes(
+    base_url: &str,
+    parent_keys: &[String],
+) -> Result<Vec<ZoteroNoteItem>, ZoteroError> {
+    if parent_keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let bulk_url = format!("{base_url}/users/{LOCAL_USER_ID}/items?itemType=note&format=json");
+    if let Ok((all, _)) = get_json::<Vec<ZoteroNoteItem>>(&bulk_url).await {
+        let parents: HashSet<&str> = parent_keys.iter().map(String::as_str).collect();
+        return Ok(all
+            .into_iter()
+            .filter(|note| note.data.parent_item.as_deref().is_some_and(|p| parents.contains(p)))
+            .collect());
+    }
+
+    let owned_keys: Vec<String> = parent_keys.to_vec();
+    let requests = owned_keys.into_iter().map(|key| {
+        let url = format!("{base_url}/users/{LOCAL_USER_ID}/items/{key}/children?format=json");
+        async move {
+            get_json::<Vec<ZoteroNoteItem>>(&url).await.map(|(children, _)| {
+                children.into_iter().filter(|c| c.data.item_type == "note").collect::<Vec<_>>()
+            })
+        }
+    });
+    let results = futures::stream::iter(requests).buffer_unordered(4).collect::<Vec<_>>().await;
+    let mut notes = Vec::new();
+    for result in results {
+        notes.extend(result?);
+    }
+    Ok(notes)
 }
 
 /// Resolve the on-disk file of a stored attachment. `GET /users/0/items/{key}/file`

@@ -39,6 +39,7 @@ const previewPayload: ZoteroCollectionPreview = {
   totalItems: 1,
   mappedArticles: 1,
   attachmentCount: 0,
+  noteCount: 0,
   tagCount: 1,
 };
 

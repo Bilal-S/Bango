@@ -13,6 +13,7 @@ const emit = defineEmits<{
       libraryVersion: number | null;
       totalItems: number;
       attachmentCount: number;
+      noteCount: number;
       tagCount: number;
     },
   ];
@@ -64,6 +65,7 @@ async function select(collection: ZoteroCollection): Promise<void> {
       libraryVersion: preview.libraryVersion,
       totalItems: preview.totalItems,
       attachmentCount: preview.attachmentCount,
+      noteCount: preview.noteCount,
       tagCount: preview.tagCount,
     });
   } catch {

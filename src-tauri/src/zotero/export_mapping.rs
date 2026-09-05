@@ -1,12 +1,108 @@
 //! Pure Bango article -> Zotero item JSON mapping (export). Reverse of the
 //! import table; every helper is `#[must_use]` and unit-tested on every
-//! platform. `user_notes`, labels, and Bango-internal fields are never
-//! exported.
+//! platform. `labels` and Bango-internal fields are never exported; user
+//! notes become Zotero child-note items (see `build_note_item_json`).
 
 use std::collections::HashSet;
 
 use crate::models::article::Article;
 use crate::ris::doi::normalize_doi;
+
+/// A partially-known calendar date parsed from a bibliographic date string.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PartialDate {
+    pub year: Option<i32>,
+    pub month: Option<u32>,
+    pub day: Option<u32>,
+}
+
+/// Month name -> number (full names and 3-letter abbreviations,
+/// case-insensitive, optional trailing period). `None` for non-month words.
+fn month_from_name(token: &str) -> Option<u32> {
+    let name = token.trim().trim_end_matches('.').to_ascii_lowercase();
+    match name.as_str() {
+        "jan" | "january" => Some(1),
+        "feb" | "february" => Some(2),
+        "mar" | "march" => Some(3),
+        "apr" | "april" => Some(4),
+        "may" => Some(5),
+        "jun" | "june" => Some(6),
+        "jul" | "july" => Some(7),
+        "aug" | "august" => Some(8),
+        "sep" | "sept" | "september" => Some(9),
+        "oct" | "october" => Some(10),
+        "nov" | "november" => Some(11),
+        "dec" | "december" => Some(12),
+        _ => None,
+    }
+}
+
+/// Tolerantly parse the date shapes that actually occur in RIS `DA` fields
+/// and Zotero `data.date` strings: ISO (`2016-09-26`, `2025-11`, `2025`),
+/// `Mon DD` (`NOV 25`), month-only (`APR`), month ranges (`JUL-AUG` -> the
+/// first month), `MM/YYYY` (`02/2017`), `YYYY/MM/DD`, and `Mon YYYY`
+/// (`April 1957`). Alphabetic and numeric runs are tokens; everything else
+/// is a separator. Unknown tokens are ignored. A 4-digit number in
+/// 1000..=3000 is a year; a month name wins over ambiguous 1-12 numbers
+/// (a second such number then reads as the day, e.g. `5/6` -> May 6).
+#[must_use]
+pub fn parse_partial_date(raw: &str) -> PartialDate {
+    let mut partial = PartialDate::default();
+    let mut ambiguous: Vec<u32> = Vec::new();
+    for token in raw.split(|c: char| !c.is_ascii_alphanumeric()) {
+        if token.is_empty() {
+            continue;
+        }
+        if token.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            let Ok(value) = token.parse::<u32>() else {
+                continue;
+            };
+            if token.len() == 4 && (1000..=3000).contains(&value) {
+                if partial.year.is_none() {
+                    partial.year = Some(value as i32);
+                }
+            } else if (1..=12).contains(&value) {
+                ambiguous.push(value);
+            } else if (13..=31).contains(&value) && partial.day.is_none() {
+                partial.day = Some(value);
+            }
+        } else if partial.month.is_none() {
+            partial.month = month_from_name(token);
+        }
+    }
+    if partial.month.is_none() {
+        partial.month = ambiguous.first().copied();
+        if partial.month.is_some() && partial.day.is_none() {
+            partial.day = ambiguous.get(1).copied();
+        }
+    }
+    partial
+}
+
+/// Build the Zotero `date` value: the most specific ISO form Zotero parses
+/// exactly (`YYYY-MM-DD`, `YYYY-MM`, `YYYY`). Month/day come from the raw
+/// `date` string (tolerantly parsed); the year prefers the authoritative
+/// `publication_year` (RIS `PY`) and falls back to a year parsed from the
+/// string. Raw strings must never be sent as-is: Zotero re-parses them, so
+/// `"NOV 25"` displays as "Nov 25" with no year (ISO partial dates survive).
+#[must_use]
+pub fn build_export_date(date: Option<&str>, publication_year: Option<i32>) -> Option<String> {
+    let partial = date
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map_or_else(PartialDate::default, parse_partial_date);
+    let year = publication_year.filter(|y| *y > 0).or(partial.year)?;
+    let Some(month) = partial.month else {
+        return Some(format!("{year:04}"));
+    };
+    partial
+        .day
+        .map_or_else(
+            || format!("{year:04}-{month:02}"),
+            |day| format!("{year:04}-{month:02}-{day:02}"),
+        )
+        .into()
+}
 
 /// Reverse RIS TY -> itemType table; unknown or `None` -> `journalArticle`.
 #[must_use]
@@ -86,6 +182,102 @@ pub fn merge_tags(tags: &[String], keywords: &[String]) -> Vec<serde_json::Value
     out
 }
 
+/// One block of the merged Bango user-notes format: a title line, a `---`
+/// separator line, then the body text. The Zotero import writes this format
+/// (one block per Zotero child note); the export splits it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteBlock {
+    pub title: String,
+    pub body: String,
+}
+
+/// Split merged Bango user notes back into note blocks. Paragraphs (blank-line
+/// separated) whose second line is `---` round-trip as their own blocks; when
+/// no paragraph matches the separator format (free-form notes typed in Bango),
+/// the whole text becomes a single block whose title is the first line.
+/// Non-matching paragraphs among matching ones (user edits) each become one
+/// block. Empty/whitespace-only input yields no blocks.
+#[must_use]
+pub fn split_note_blocks(text: &str) -> Vec<NoteBlock> {
+    let normalized = text.replace("\r\n", "\n");
+    let trimmed = normalized.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let mut paragraphs: Vec<Vec<&str>> = Vec::new();
+    let mut current: Vec<&str> = Vec::new();
+    for line in trimmed.lines() {
+        if line.trim().is_empty() {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(line);
+        }
+    }
+    if !current.is_empty() {
+        paragraphs.push(current);
+    }
+    let matches = |lines: &[&str]| lines.len() >= 2 && lines[1].trim() == "---";
+    if !paragraphs.iter().any(|p| matches(p)) {
+        // Free-form text: one block, the first line acts as the title.
+        let mut lines = trimmed.lines();
+        let title = lines.next().unwrap_or_default().trim().to_string();
+        let body = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+        return vec![NoteBlock { title, body }];
+    }
+    paragraphs
+        .into_iter()
+        .map(|lines| {
+            if matches(&lines) {
+                NoteBlock {
+                    title: lines[0].trim().to_string(),
+                    body: lines[2..].join("\n").trim().to_string(),
+                }
+            } else {
+                NoteBlock {
+                    title: lines[0].trim().to_string(),
+                    body: lines[1..].join("\n").trim().to_string(),
+                }
+            }
+        })
+        .collect()
+}
+
+/// Escape the five HTML-significant characters.
+#[must_use]
+pub fn escape_note_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Build one Zotero child-note item JSON for a note block. The Zotero `note`
+/// field is HTML, so the plain-text title + body lines are escaped and joined
+/// with `<br/>` (the first line is the note's display title in Zotero).
+#[must_use]
+pub fn build_note_item_json(parent_key: &str, block: &NoteBlock) -> serde_json::Value {
+    let mut lines: Vec<String> = vec![escape_note_html(&block.title)];
+    if !block.body.is_empty() {
+        lines.extend(block.body.lines().map(escape_note_html));
+    }
+    serde_json::json!({
+        "itemType": "note",
+        "parentItem": parent_key,
+        "note": lines.join("<br/>"),
+        "tags": [],
+    })
+}
+
 /// Build the Zotero item JSON for one article. Journal-specific fields
 /// (`publicationTitle`, `ISSN`) are emitted for `journalArticle` only;
 /// `volume`/`issue` for journal + conference types. Every other type gets the
@@ -103,14 +295,10 @@ pub fn build_item_json(article: &Article, collection_key: &str) -> serde_json::V
         "creators".into(),
         serde_json::Value::Array(map_creators_for_export(&article.authors)),
     );
-    // date: raw string when present, else the year.
-    let date = article
-        .date
-        .as_deref()
-        .filter(|d| !d.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| article.publication_year.map(|y| y.to_string()));
-    if let Some(date) = date {
+    // date: the most specific ISO form Zotero parses exactly (year-month-day
+    // / year-month / year). Raw RIS strings like "NOV 25" must never be sent
+    // as-is - Zotero re-parses them into a month/day with no year.
+    if let Some(date) = build_export_date(article.date.as_deref(), article.publication_year) {
         data.insert("date".into(), serde_json::json!(date));
     }
     // DOI in canonical form; Zotero matches imports case-insensitively anyway.

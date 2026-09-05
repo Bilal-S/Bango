@@ -14,7 +14,7 @@ use crate::ris::types::RisRecord;
 use crate::ris::validator::{validate_record, ErrorGroup};
 use crate::zotero::client;
 use crate::zotero::mapping;
-use crate::zotero::{ZoteroChildItem, ZoteroError, ZoteroItem, DEFAULT_BASE_URL};
+use crate::zotero::{ZoteroChildItem, ZoteroError, ZoteroItem, ZoteroNoteItem, DEFAULT_BASE_URL};
 
 /// User-facing hint shown whenever the Zotero local API is disabled (or any
 /// communication error occurs) - the exact preference path from the Zotero
@@ -138,6 +138,8 @@ pub struct ZoteroCollectionPreview {
     pub mapped_articles: usize,
     pub attachment_count: usize,
     pub tag_count: usize,
+    /// Mapped items with at least one non-empty child note.
+    pub note_count: usize,
 }
 
 /// Items + attachments -> mapped `RisRecord`s with aligned keys + counts.
@@ -155,6 +157,10 @@ pub struct ZoteroMappedData {
     pub total_items: usize,
     pub mapped_articles: usize,
     pub attachment_count: usize,
+    /// Mapped items with at least one non-empty child note.
+    pub note_count: usize,
+    /// Merged child-note text per Zotero item key (import -> `user_notes`).
+    pub user_notes_by_key: std::collections::HashMap<String, String>,
     /// 1-based positions of unsupported top-level items (error-group indices).
     pub unsupported: Vec<usize>,
 }
@@ -162,8 +168,10 @@ pub struct ZoteroMappedData {
 pub fn build_mapped_data(
     items: &[ZoteroItem],
     attachments: &[ZoteroChildItem],
+    notes: &[ZoteroNoteItem],
 ) -> ZoteroMappedData {
     let grouped = mapping::group_attachments_by_parent(attachments);
+    let grouped_notes = mapping::group_notes_by_parent(notes);
     let mut records: Vec<RisRecord> = Vec::new();
     let mut keys: Vec<String> = Vec::new();
     let mut item_positions: Vec<usize> = Vec::new();
@@ -171,6 +179,9 @@ pub fn build_mapped_data(
     let mut tags_by_key: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
     let mut attachment_count = 0usize;
+    let mut note_count = 0usize;
+    let mut user_notes_by_key: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut unsupported: Vec<usize> = Vec::new();
 
     for (position, item) in items.iter().enumerate() {
@@ -200,6 +211,12 @@ pub fn build_mapped_data(
                 attachment_count += 1;
             }
         }
+        if let Some(item_notes) = grouped_notes.get(&item.key) {
+            if let Some(merged) = mapping::merge_child_notes(item_notes) {
+                user_notes_by_key.insert(item.key.clone(), merged);
+                note_count += 1;
+            }
+        }
     }
 
     ZoteroMappedData {
@@ -211,6 +228,8 @@ pub fn build_mapped_data(
         tags,
         tags_by_key,
         attachment_count,
+        note_count,
+        user_notes_by_key,
         unsupported,
     }
 }
@@ -223,7 +242,8 @@ pub async fn get_collection_preview_inner(
     let page = client::fetch_collection_items(base_url, collection_key).await?;
     let parent_keys: Vec<String> = page.items.iter().map(|item| item.key.clone()).collect();
     let attachments = client::fetch_all_attachments(base_url, &parent_keys).await?;
-    let mapped = build_mapped_data(&page.items, &attachments);
+    let notes = client::fetch_all_notes(base_url, &parent_keys).await?;
+    let mapped = build_mapped_data(&page.items, &attachments, &notes);
 
     // Strict validation through the existing mechanism (same as RIS/BibTeX).
     let output = parse_and_validate_from_records(&mapped.records, ValidationMode::Strict)
@@ -309,6 +329,7 @@ pub async fn get_collection_preview_inner(
         mapped_articles: mapped.mapped_articles,
         attachment_count: mapped.attachment_count,
         tag_count: mapped.tags.len(),
+        note_count: mapped.note_count,
     })
 }
 
@@ -335,7 +356,8 @@ pub struct ZoteroImportProgress {
     pub failed: usize,
 }
 
-/// Import result: the standard `ImportResult` plus attachment tallies.
+/// Import result: the standard `ImportResult` plus attachment tallies and the
+/// merged-notes count.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ZoteroImportResult {
@@ -343,6 +365,8 @@ pub struct ZoteroImportResult {
     pub attached_count: usize,
     pub attachment_failed_count: usize,
     pub attachment_skipped_count: usize,
+    /// Articles that received merged Zotero child notes in `user_notes`.
+    pub notes_merged_count: usize,
 }
 
 /// Pure version guard: the `Last-Modified-Version` captured at preview time
@@ -388,13 +412,15 @@ pub fn build_zotero_error_groups(
 /// guard + per-article `'import'` audit inherited from
 /// `insert_articles_batch`) -> classify -> resolve journal links ->
 /// reference-paper linking -> Zotero tags (`ris_keyword` source, linked per
-/// article with `changed_at` bumped) -> staleness flags. Returns the
-/// `ImportResult` payload plus `(article_id, zotero_key, status)` triples for
-/// the attachment phase (status re-read post-classify so duplicates are
-/// identifiable).
+/// article with `changed_at` bumped) -> merged Zotero child notes ->
+/// staleness flags. Returns the `ImportResult` payload plus
+/// `(article_id, zotero_key, status)` triples for the attachment phase
+/// (status re-read post-classify so duplicates are identifiable).
 pub struct ZoteroImportDbResult {
     pub import_payload: ImportResult,
     pub article_key_status: Vec<(String, String, String)>,
+    /// Articles whose `user_notes` were filled from merged Zotero child notes.
+    pub notes_merged_count: usize,
 }
 
 /// Grouped db-phase inputs (keeps the function under the clippy arg limit).
@@ -409,6 +435,8 @@ pub struct ZoteroImportDbParams<'a> {
     pub validation_errors: Vec<ImportError>,
     pub error_groups: Vec<ErrorGroup>,
     pub tags_by_key: &'a std::collections::HashMap<String, Vec<String>>,
+    /// Merged child-note text per Zotero item key (written to `user_notes`).
+    pub user_notes_by_key: &'a std::collections::HashMap<String, String>,
 }
 
 pub fn import_zotero_db_phase(
@@ -424,6 +452,7 @@ pub fn import_zotero_db_phase(
         validation_errors,
         error_groups,
         tags_by_key,
+        user_notes_by_key,
     } = params;
     use rusqlite::params;
 
@@ -487,6 +516,17 @@ pub fn import_zotero_db_phase(
         }
     }
 
+    // Zotero child notes -> the article's editable user notes. The merged
+    // text (date-ordered `Title` / `---` / body blocks, spec 3.1.1) is keyed
+    // by Zotero item key, aligned with the kept records above. Articles
+    // without notes are left untouched.
+    let mut notes_merged = 0usize;
+    for (article, (_, key)) in imported.iter().zip(kept.iter()) {
+        let Some(merged) = user_notes_by_key.get((*key).as_str()) else { continue };
+        crate::db::article_repo::update_user_notes(conn, &article.id, merged)?;
+        notes_merged += 1;
+    }
+
     crate::db::app_settings_repo::mark_biblio_needs_refresh(conn);
     crate::db::app_settings_repo::mark_wiki_needs_refresh(conn);
 
@@ -510,7 +550,11 @@ pub fn import_zotero_db_phase(
         validation_errors,
         error_groups,
     };
-    Ok(ZoteroImportDbResult { import_payload, article_key_status })
+    Ok(ZoteroImportDbResult {
+        import_payload,
+        article_key_status,
+        notes_merged_count: notes_merged,
+    })
 }
 
 /// The full import flow (no Tauri `AppHandle`, so integration tests drive it
@@ -548,7 +592,8 @@ pub async fn import_zotero_collection_core(
     check_library_version(page.library_version, expected_library_version)?;
     let parent_keys: Vec<String> = page.items.iter().map(|item| item.key.clone()).collect();
     let attachments = client::fetch_all_attachments(base_url, &parent_keys).await?;
-    let mapped = build_mapped_data(&page.items, &attachments);
+    let notes = client::fetch_all_notes(base_url, &parent_keys).await?;
+    let mapped = build_mapped_data(&page.items, &attachments, &notes);
     let grouped = mapping::group_attachments_by_parent(&attachments);
 
     // 2. Validation (identical to preview) + key-based exclusion.
@@ -597,6 +642,7 @@ pub async fn import_zotero_collection_core(
                 validation_errors,
                 error_groups,
                 tags_by_key: &mapped.tags_by_key,
+                user_notes_by_key: &mapped.user_notes_by_key,
             },
         )?
     };
@@ -706,6 +752,7 @@ pub async fn import_zotero_collection_core(
         attached_count: attached,
         attachment_failed_count: failed,
         attachment_skipped_count: skipped,
+        notes_merged_count: db_result.notes_merged_count,
     })
 }
 
@@ -893,6 +940,10 @@ pub struct ZoteroExportResult {
     pub file_attached_count: usize,
     pub file_failed_count: usize,
     pub file_skipped_count: usize,
+    /// Child-note items created from Bango user notes.
+    pub note_exported_count: usize,
+    /// Note-item batches that failed (non-fatal; audited per failure).
+    pub note_failed_count: usize,
     pub collection_name: String,
     pub library_version: Option<i64>,
 }
@@ -1151,6 +1202,66 @@ pub async fn export_zotero_collection_core(
         on_progress("items", exported, missing.len(), failed_count);
     }
 
+    // 5b. Notes: one Zotero child-note item per title/---/body block of each
+    //     CREATED article's user notes (free-form text -> a single note).
+    //     Failures are non-fatal (a system audit error per batch, mirroring
+    //     the file phase) - notes are auxiliary and must never block items.
+    let mut note_exported = 0usize;
+    let mut note_failed = 0usize;
+    {
+        let note_items: Vec<serde_json::Value> = created
+            .iter()
+            .filter_map(|(article, key)| {
+                let text = article.user_notes.as_deref()?.trim();
+                if text.is_empty() {
+                    return None;
+                }
+                Some((key, crate::zotero::export_mapping::split_note_blocks(text)))
+            })
+            .flat_map(|(key, blocks)| {
+                blocks.into_iter().map(move |block| {
+                    crate::zotero::export_mapping::build_note_item_json(key, &block)
+                })
+            })
+            .collect();
+        let total_notes = note_items.len();
+        for batch in note_items.chunks(50) {
+            match write_client::post_items_batch(base_url, &server_id, &api_key, batch).await {
+                Ok(envelope) => {
+                    note_exported += envelope.successful_keys.len();
+                    note_failed += envelope.failed.len();
+                }
+                Err(ZoteroWriteError::KeyExpired) => {
+                    // A remember:false key is single-use: abort with the same
+                    // guidance as the items phase, clear the stale key.
+                    if let Ok(conn) = crate::db::connection::lock_conn(db) {
+                        let _ = set_zotero_api_key(&conn, None);
+                        let _ = crate::db::app_settings_repo::set_setting(
+                            &conn,
+                            "zotero_server_id",
+                            None::<&str>,
+                        );
+                    }
+                    return Err(AppError::Import(ZoteroWriteError::KeyExpired.to_string()));
+                }
+                Err(e) => {
+                    note_failed += batch.len();
+                    eprintln!("[zotero] note export failed for {} note item(s): {e}", batch.len());
+                    if let Ok(conn) = crate::db::connection::lock_conn(db) {
+                        let _ = crate::db::audit_repo::log_error(
+                            &conn,
+                            &format!(
+                                "Zotero note export failed for {} note item(s): {e}",
+                                batch.len()
+                            ),
+                        );
+                    }
+                }
+            }
+            on_progress("notes", note_exported + note_failed, total_notes, note_failed);
+        }
+    }
+
     // 6. Files: best-effort 3-phase uploads for created items with an
     //    existing .pdf/.txt full text. Non-fatal failures count plus one
     //    system error audit entry each.
@@ -1255,7 +1366,7 @@ pub async fn export_zotero_collection_core(
     }
 
     eprintln!(
-        "[zotero] export done: exported {exported}, unchanged {unchanged}, failed {failed_count}; files {file_attached} attached / {file_failed} failed / {file_skipped} skipped ('{collection_name}')"
+        "[zotero] export done: exported {exported}, unchanged {unchanged}, failed {failed_count}; notes {note_exported} exported / {note_failed} failed; files {file_attached} attached / {file_failed} failed / {file_skipped} skipped ('{collection_name}')"
     );
 
     Ok(ZoteroExportResult {
@@ -1267,6 +1378,8 @@ pub async fn export_zotero_collection_core(
         file_attached_count: file_attached,
         file_failed_count: file_failed,
         file_skipped_count: file_skipped,
+        note_exported_count: note_exported,
+        note_failed_count: note_failed,
         collection_name,
         library_version: top_page.library_version,
     })

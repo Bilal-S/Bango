@@ -205,3 +205,34 @@ pub struct ZoteroItemMeta {
     #[serde(default)]
     pub parsed_date: Option<String>,
 }
+
+/// A child note item as returned by the bulk `GET /users/0/items?itemType=note`
+/// request or `/items/{key}/children`. Notes are plain HTML in `data.note`
+/// (first line = display title); `dateAdded` orders the merged Bango text.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ZoteroNoteItem {
+    pub key: String,
+    #[serde(default)]
+    pub version: i64,
+    pub data: ZoteroNoteData,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoteroNoteData {
+    #[serde(rename = "itemType")]
+    pub item_type: String,
+    /// The note body as HTML.
+    #[serde(default)]
+    pub note: Option<String>,
+    /// The parent item's key.
+    #[serde(default)]
+    pub parent_item: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<ZoteroTag>,
+    /// ISO-8601 creation timestamp (sort key for the merged import).
+    #[serde(default)]
+    pub date_added: Option<String>,
+    #[serde(default)]
+    pub date_modified: Option<String>,
+}

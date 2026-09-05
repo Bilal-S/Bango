@@ -196,6 +196,14 @@ const progressPercent = computed(() => {
           <span v-if="zotero.result.value.noDoiCount > 0">
             {{ zotero.result.value.noDoiCount }} skipped (no DOI).
           </span>
+          <span
+            v-if="
+              zotero.result.value.noteExportedCount > 0 || zotero.result.value.noteFailedCount > 0
+            "
+          >
+            Notes: {{ zotero.result.value.noteExportedCount }} exported,
+            {{ zotero.result.value.noteFailedCount }} failed.
+          </span>
           <span v-if="zotero.includeFiles.value">
             Files: {{ zotero.result.value.fileAttachedCount }} attached,
             {{ zotero.result.value.fileFailedCount }} failed,

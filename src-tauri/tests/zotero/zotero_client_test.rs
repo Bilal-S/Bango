@@ -168,3 +168,38 @@ fn resolve_attachment_path_non_file_scheme_rejected() {
     let err = resolve_attachment_path("https://example.com/a.pdf").expect_err("https rejected");
     assert!(matches!(err, ZoteroError::NonFileScheme(_)), "got: {err:?}");
 }
+
+#[test]
+fn parse_note_list_response() {
+    // Shape captured from `GET /users/0/items?itemType=note` (Zotero 10):
+    // note HTML in data.note, the parent in data.parentItem, ISO-8601
+    // creation timestamps in data.dateAdded/dateModified.
+    let json = r#"[
+        {
+            "key": "N1N1N1N1", "version": 4,
+            "data": {"key": "N1N1N1N1", "version": 4, "itemType": "note",
+                     "note": "<p>First <b>note</b></p>", "parentItem": "YRGS6H4H",
+                     "tags": [], "dateAdded": "2026-01-02T03:04:05Z",
+                     "dateModified": "2026-01-02T03:04:05Z"}
+        },
+        {
+            "key": "N2N2N2N2", "version": 7,
+            "data": {"key": "N2N2N2N2", "version": 7, "itemType": "note",
+                     "note": "Second note", "parentItem": "FLQYTTDI",
+                     "tags": [], "dateAdded": "2026-02-03T04:05:06Z",
+                     "dateModified": "2026-02-03T04:05:06Z"}
+        }
+    ]"#;
+    let notes: Vec<bango_lib::zotero::ZoteroNoteItem> = serde_json::from_str(json).expect("parses");
+    assert_eq!(notes.len(), 2);
+    assert_eq!(notes[0].data.note.as_deref(), Some("<p>First <b>note</b></p>"));
+    assert_eq!(notes[0].data.parent_item.as_deref(), Some("YRGS6H4H"));
+    assert_eq!(notes[0].data.date_added.as_deref(), Some("2026-01-02T03:04:05Z"));
+    assert_eq!(notes[1].data.date_modified.as_deref(), Some("2026-02-03T04:05:06Z"));
+
+    // Grouped by data.parentItem (the import notes map).
+    let grouped = bango_lib::zotero::mapping::group_notes_by_parent(&notes);
+    assert_eq!(grouped.len(), 2);
+    assert_eq!(grouped["YRGS6H4H"].len(), 1);
+    assert_eq!(grouped["FLQYTTDI"].len(), 1);
+}

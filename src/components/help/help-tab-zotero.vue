@@ -31,7 +31,7 @@ const steps: ZoteroStep[] = [
     title: 'Enable the Zotero local API (recommended)',
     icon: 'settings',
     summary:
-      'One setting unlocks the direct path: Import from Zotero pulls a whole collection (metadata, tags, and full-text PDFs) into Bango, and the Zotero export option syncs results back - no file juggling needed.',
+      'One setting unlocks the direct path: Import from Zotero pulls a whole collection (metadata, tags, notes, and full-text PDFs) into Bango, and the Zotero export option syncs results (including your notes) back - no file juggling needed.',
     details: [
       'Open Zotero and go to Edit > Settings (Windows/Linux) or Zotero > Settings (macOS).',
       'Select the Advanced tab.',

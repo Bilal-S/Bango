@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::{ZoteroChildData, ZoteroChildItem, ZoteroCreator, ZoteroItem};
+use super::{ZoteroChildData, ZoteroChildItem, ZoteroCreator, ZoteroItem, ZoteroNoteItem};
 use crate::ris::doi::normalize_doi;
 use crate::ris::types::RisRecord;
 use crate::screening::tags_labels::{truncate_at_word_boundary, MAX_NEW_TAG_LABEL_LEN};
@@ -172,6 +172,162 @@ pub fn map_item_to_ris_record(item: &ZoteroItem) -> Option<RisRecord> {
         notes: item.data.extra.clone(),
         ..RisRecord::default()
     })
+}
+
+/// Zotero note HTML -> plain text: `<br>` and block-element boundaries become
+/// newlines, every other tag is dropped, and the common named/numeric
+/// entities decode. Runs of newlines collapse to ONE newline (paragraph gaps
+/// included) so the text never contains a blank line - blank lines are the
+/// block separator of the merged user-notes format and must stay unambiguous.
+/// The result is trimmed.
+#[must_use]
+pub fn note_html_to_text(html: &str) -> String {
+    let decoded = decode_entities(&drop_tags_keep_breaks(html));
+    let mut collapsed = String::with_capacity(decoded.len());
+    let mut previous_was_newline = false;
+    for c in decoded.chars() {
+        if c == '\n' {
+            if !previous_was_newline {
+                collapsed.push('\n');
+            }
+            previous_was_newline = true;
+        } else {
+            previous_was_newline = false;
+            collapsed.push(c);
+        }
+    }
+    collapsed.trim().to_string()
+}
+
+/// Drop every tag, keeping one newline per line-break/block tag (`<br>`,
+/// `<p>`, headings, list items, ...). Malformed unterminated tags simply end
+/// at the string's end.
+fn drop_tags_keep_breaks(html: &str) -> String {
+    let mut text = String::with_capacity(html.len());
+    let mut chars = html.chars();
+    while let Some(c) = chars.next() {
+        if c != '<' {
+            text.push(c);
+            continue;
+        }
+        let mut tag = String::new();
+        for tc in chars.by_ref() {
+            if tc == '>' {
+                break;
+            }
+            tag.push(tc);
+        }
+        let name: String = tag
+            .trim_start_matches('/')
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if matches!(
+            name.as_str(),
+            "br" | "p"
+                | "div"
+                | "li"
+                | "blockquote"
+                | "pre"
+                | "tr"
+                | "h1"
+                | "h2"
+                | "h3"
+                | "h4"
+                | "h5"
+                | "h6"
+        ) {
+            text.push('\n');
+        }
+    }
+    text
+}
+
+/// Decode every recognizable entity (`&amp;`-style named + decimal/hex
+/// numeric); anything else passes through verbatim.
+fn decode_entities(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '&' {
+            let limit = std::cmp::min(index + 11, chars.len());
+            if let Some(semi) = (index + 1..limit).find(|&j| chars[j] == ';') {
+                let entity: String = chars[index + 1..semi].iter().collect();
+                if let Some(decoded) = decode_entity(&entity) {
+                    out.push(decoded);
+                    index = semi + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    out
+}
+
+/// One entity body (without `&`/`;`) -> its character, if recognized.
+fn decode_entity(entity: &str) -> Option<char> {
+    match entity {
+        "amp" => Some('&'),
+        "lt" => Some('<'),
+        "gt" => Some('>'),
+        "quot" => Some('"'),
+        "apos" => Some('\''),
+        "nbsp" => Some(' '),
+        _ => {
+            let number = entity.strip_prefix('#')?;
+            let code =
+                if let Some(hex) = number.strip_prefix('x').or_else(|| number.strip_prefix('X')) {
+                    u32::from_str_radix(hex, 16).ok()
+                } else {
+                    number.parse::<u32>().ok()
+                };
+            code.and_then(char::from_u32)
+        }
+    }
+}
+
+/// Merge a parent item's child notes into the single Bango user-notes text.
+/// Notes are ordered by `data.dateAdded` (oldest first; ISO-8601 strings sort
+/// chronologically, missing values first). Each note contributes one block:
+/// its first line (the title), a `---` separator line, then the remaining
+/// body text; blocks are joined by one blank line. Returns `None` when no
+/// note has non-empty text.
+#[must_use]
+pub fn merge_child_notes(notes: &[&ZoteroNoteItem]) -> Option<String> {
+    let mut ordered: Vec<&ZoteroNoteItem> = notes.to_vec();
+    ordered.sort_by_key(|note| note.data.date_added.clone().unwrap_or_default());
+    let mut blocks: Vec<String> = Vec::new();
+    for note in ordered {
+        let text = note_html_to_text(note.data.note.as_deref().unwrap_or_default());
+        if text.is_empty() {
+            continue;
+        }
+        let mut lines = text.lines();
+        let title = lines.next().unwrap_or_default().trim();
+        let body = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+        if body.is_empty() {
+            blocks.push(format!("{title}\n---"));
+        } else {
+            blocks.push(format!("{title}\n---\n{body}"));
+        }
+    }
+    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
+
+/// Group child notes by their parent item key.
+#[must_use]
+pub fn group_notes_by_parent(notes: &[ZoteroNoteItem]) -> HashMap<String, Vec<&ZoteroNoteItem>> {
+    let mut map: HashMap<String, Vec<&ZoteroNoteItem>> = HashMap::new();
+    for note in notes {
+        if let Some(parent) = note.data.parent_item.as_deref() {
+            map.entry(parent.to_string()).or_default().push(note);
+        }
+    }
+    map
 }
 
 /// True when a child attachment is a full-text candidate: a local-file

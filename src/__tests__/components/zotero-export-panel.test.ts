@@ -52,6 +52,8 @@ const exportResult: ZoteroExportResult = {
   fileAttachedCount: 2,
   fileFailedCount: 0,
   fileSkippedCount: 1,
+  noteExportedCount: 2,
+  noteFailedCount: 0,
   collectionName: 'Super Collection',
   libraryVersion: 42,
 };
@@ -276,6 +278,28 @@ describe('zotero-export-panel.vue', () => {
     expect(result.text()).toContain('2 already present');
     expect(result.text()).toContain('1 skipped (no DOI)');
     expect(result.text()).toContain('Files: 2 attached, 0 failed, 1 skipped');
+  });
+
+  it('result_summary_includes_note_counts', async () => {
+    vi.mocked(tauriCommand).mockImplementation((cmd: string) => {
+      if (cmd === 'export_zotero_collection')
+        return Promise.resolve({ ...exportResult, noteExportedCount: 5, noteFailedCount: 1 });
+      if (cmd === 'check_zotero_connection') return Promise.resolve(okConnection);
+      if (cmd === 'get_zotero_collections') return Promise.resolve(collections);
+      if (cmd === 'get_zotero_selected_collection')
+        return Promise.resolve({ name: null, lastCollectionKey: 'ROOT' });
+      if (cmd === 'export_zotero_preview') return Promise.resolve(preview);
+      return Promise.reject(new Error(`unexpected: ${cmd}`));
+    });
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    await wrapper.find('[data-test="export-button"]').trigger('click');
+    await flushPromises();
+
+    const result = wrapper.find('[data-test="result"]');
+    expect(result.exists()).toBe(true);
+    expect(result.text()).toContain('Notes: 5 exported, 1 failed');
   });
 
   it('button_becomes_close_after_completion', async () => {

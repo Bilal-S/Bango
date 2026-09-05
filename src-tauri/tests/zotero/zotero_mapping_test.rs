@@ -3,8 +3,8 @@
 //! Binding inventory: `docs/test-plans/zotero-tests.md`.
 
 use bango_lib::zotero::mapping::{
-    extract_year, map_creators, map_item_to_ris_record, map_item_type_to_ris_type, parse_pages,
-    sanitize_zotero_tag,
+    extract_year, map_creators, map_item_to_ris_record, map_item_type_to_ris_type,
+    merge_child_notes, note_html_to_text, parse_pages, sanitize_zotero_tag,
 };
 use bango_lib::zotero::ZoteroItem;
 
@@ -235,4 +235,58 @@ fn sanitize_zotero_tag_truncates_to_35_chars() {
     // A 40-char single word with no boundary hard-truncates at 35.
     let single_word = "a".repeat(40);
     assert_eq!(sanitize_zotero_tag(&single_word).map(|s| s.chars().count()), Some(35));
+}
+
+fn note_item(
+    key: &str,
+    parent: &str,
+    note: &str,
+    date_added: &str,
+) -> bango_lib::zotero::ZoteroNoteItem {
+    serde_json::from_str(&format!(
+        r#"{{"key":"{key}","version":1,"data":{{"itemType":"note","note":{note},"parentItem":"{parent}","tags":[],"dateAdded":"{date_added}","dateModified":"{date_added}"}}}}"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn merge_child_notes_orders_by_date_and_formats_blocks() {
+    // Out-of-order dateAdded values: the merge is chronological (oldest first).
+    let owned = vec![
+        note_item(
+            "N2",
+            "ITEM1",
+            "\"<p>Second note</p><p>Later body.</p>\"",
+            "2026-02-02T10:00:00Z",
+        ),
+        note_item("N1", "ITEM1", "\"First note<br/>line two &amp; more\"", "2026-01-01T09:00:00Z"),
+        // An empty note contributes nothing.
+        note_item("N3", "ITEM1", "\"<p></p>\"", "2026-03-03T10:00:00Z"),
+    ];
+    let notes: Vec<&bango_lib::zotero::ZoteroNoteItem> = owned.iter().collect();
+    let merged = merge_child_notes(&notes).expect("non-empty");
+    assert_eq!(merged, "First note\n---\nline two & more\n\nSecond note\n---\nLater body.");
+    // A title-only note emits no body lines.
+    let single_owned = vec![note_item("N4", "ITEM1", "\"Just a title\"", "2026-01-01T00:00:00Z")];
+    let single: Vec<&bango_lib::zotero::ZoteroNoteItem> = single_owned.iter().collect();
+    assert_eq!(merge_child_notes(&single).as_deref(), Some("Just a title\n---"));
+    // No notes with text -> None.
+    let empty_owned = vec![note_item("N5", "ITEM1", "\"   \"", "2026-01-01T00:00:00Z")];
+    let empty: Vec<&bango_lib::zotero::ZoteroNoteItem> = empty_owned.iter().collect();
+    assert!(merge_child_notes(&empty).is_none());
+    assert!(merge_child_notes(&[]).is_none());
+}
+
+#[test]
+fn note_html_to_text_strips_tags_and_decodes_entities() {
+    // Block and line-break tags become newlines; other tags drop.
+    assert_eq!(note_html_to_text("<p>Hello <b>world</b></p><p>Second</p>"), "Hello world\nSecond");
+    assert_eq!(note_html_to_text("a<br/>b<br />c"), "a\nb\nc");
+    // Named + numeric entities decode; unknown entities pass through.
+    assert_eq!(note_html_to_text("&amp; &lt; &gt; &quot; &#39; &nbsp;X&#x27;"), "& < > \" '  X'");
+    assert_eq!(note_html_to_text("a &unknown; b"), "a &unknown; b");
+    // Consecutive newlines (paragraph gaps) collapse to one - no blank lines.
+    assert_eq!(note_html_to_text("<p>a</p><br/><br/><p>b</p>"), "a\nb");
+    assert_eq!(note_html_to_text("  <p>trimmed</p>  "), "trimmed");
+    assert_eq!(note_html_to_text(""), "");
 }

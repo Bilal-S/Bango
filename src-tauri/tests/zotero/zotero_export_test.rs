@@ -185,3 +185,92 @@ async fn preview_counts_match_diff() {
     assert_eq!(preview.no_doi_count, 1);
     assert_eq!(preview.file_count, 1, "the missing article has an attachable .txt");
 }
+
+#[tokio::test]
+async fn export_posts_child_notes_and_counts() {
+    use bango_lib::commands::zotero::export_zotero_collection_core;
+    use bango_lib::db::app_settings_repo::{set_setting, STORAGE_ROOT_KEY};
+    use bango_lib::db::migration::run_migrations;
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    run_migrations(&conn).unwrap();
+    set_setting(&conn, STORAGE_ROOT_KEY, tmp.path().to_str()).unwrap();
+
+    // One article with merged-format user notes (two blocks) and a DOI.
+    conn.execute(
+        "INSERT INTO articles (id, sequence_id, status, title, abstract_text, authors, keywords, doi, user_notes)
+         VALUES ('e-1', 1, 'working', 'Noted Article', 'x', '[]', '[]', '10.9/noted',
+                 'First note
+---
+line two
+
+Second note
+---
+body text')",
+        [],
+    )
+    .unwrap();
+
+    // A stored key bound to the live server id -> silent reuse (no dialog).
+    let machine_key = bango_lib::crypto::aes_gcm::derive_key_from_machine();
+    let encrypted = bango_lib::crypto::aes_gcm::encrypt(b"test-key", &machine_key).unwrap();
+    set_setting(&conn, "zotero_api_key", Some(&encrypted)).unwrap();
+    set_setting(&conn, "zotero_server_id", Some("SID1")).unwrap();
+
+    let mut server = mockito::Server::new_async().await;
+    server
+        .mock("GET", "/api/")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("X-Zotero-Version", "10.0.1")
+        .with_header("Zotero-Server-ID", "SID1")
+        .create_async()
+        .await;
+    server
+        .mock("GET", "/api/users/0/collections")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"[{"key":"KEY","version":1,"data":{"key":"KEY","version":1,"name":"Target","parentCollection":false}}]"#)
+        .create_async()
+        .await;
+    server
+        .mock("GET", "/api/users/0/collections/KEY/items/top")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body("[]")
+        .create_async()
+        .await;
+    // Item batch vs note batch are distinguished by body content.
+    server
+        .mock("POST", "/api/users/0/items")
+        .match_body(mockito::Matcher::Regex(String::from("\"itemType\":\"journalArticle\"")))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"successful":{},"success":{"0":"ITEM1"},"unchanged":{},"failed":{}}"#)
+        .create_async()
+        .await;
+    server
+        .mock("POST", "/api/users/0/items")
+        .match_body(mockito::Matcher::Regex(String::from("\"itemType\":\"note\"")))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"successful":{},"success":{"0":"NOTE1","1":"NOTE2"},"unchanged":{},"failed":{}}"#,
+        )
+        .create_async()
+        .await;
+
+    let db = std::sync::Mutex::new(conn);
+    let base = format!("{}/api", server.url());
+    let result =
+        export_zotero_collection_core(&base, &db, "KEY", "all", false, false, &|_, _, _, _| {})
+            .await
+            .expect("export");
+    assert_eq!(result.exported_count, 1);
+    // One Zotero child-note item per title/---/body block.
+    assert_eq!(result.note_exported_count, 2);
+    assert_eq!(result.note_failed_count, 0);
+}
