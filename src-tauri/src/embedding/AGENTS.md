@@ -82,21 +82,21 @@ orchestrator into `HttpEmbeddingBatchSender` at the call site.
 
 ## Verification
 
-- `tests/embedding_storage_test.rs` (11)
-- `tests/embedding_text_test.rs` (5)
-- `tests/embedding_provider_test.rs` (19)
-- `tests/embedding_director_test.rs` (10)
-- `tests/embedding_recall_test.rs` (7, incl. the `f32::NEG_INFINITY`
+- `tests/embedding/embedding_storage_test.rs` (11)
+- `tests/embedding/embedding_text_test.rs` (5)
+- `tests/embedding/embedding_provider_test.rs` (19)
+- `tests/embedding/embedding_director_test.rs` (10)
+- `tests/embedding/embedding_recall_test.rs` (7, incl. the `f32::NEG_INFINITY`
   max-pool sentinel regression test)
-- `tests/embedding_runner_test.rs` (9, covering the pure `resolve_effective_dim`
+- `tests/embedding/embedding_runner_test.rs` (9, covering the pure `resolve_effective_dim`
   + `vector_matches_dim` helpers that drive the runner's per-row dimension
   validation)
-- `tests/embedding_probe_persist_test.rs` (13, covering the Test Connection
+- `tests/embedding/embedding_probe_persist_test.rs` (13, covering the Test Connection
   probe dimension-forwarding contract + the `save_llm_config`
   conditional-reset contract - `embedding_relevant_changed` - which ensures a
   parameters-only save does NOT wipe a known-good `embedding_status = enabled`,
   preventing the redundant Phase B probe on the next Citation Finder run)
-- `tests/llm_orchestrator_batch_test.rs` (17: `send_batch_parallel`
+- `tests/llm/llm_orchestrator_batch_test.rs` (17: `send_batch_parallel`
   order/mixed/panic/empty + `send_embedding_batch_parallel` mockito dispatch +
   per-provider limits table)
 - `embedding/batching.rs` inline (7: `group_into_embedding_batches` bin-pack

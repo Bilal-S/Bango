@@ -18,9 +18,9 @@ background.
 
 | Test identifier | Assertion |
 |---|---|
-| `src-tauri/tests/project_backup_test.rs::export_drops_genuine_orphan_audit_entry` | Export filter drops rows whose `article_id` references a non-existent article (defense-in-depth for orphans created while FK was off) |
-| `src-tauri/tests/project_backup_test.rs::export_preserves_null_and_empty_string_system_entries` | Export filter preserves system-level rows in BOTH shapes: `article_id IS NULL` (modern `log_error`) and `article_id = ''` (historical; normalized to NULL by v006 on next migration) |
-| `src-tauri/tests/project_backup_test.rs::import_normalizes_empty_string_article_id_to_null` | Import path coerces `"articleId": ""` -> SQL NULL so the restored row doesn't violate the FK constraint; row is preserved, not dropped |
+| `src-tauri/tests/export/project_backup_test.rs::export_drops_genuine_orphan_audit_entry` | Export filter drops rows whose `article_id` references a non-existent article (defense-in-depth for orphans created while FK was off) |
+| `src-tauri/tests/export/project_backup_test.rs::export_preserves_null_and_empty_string_system_entries` | Export filter preserves system-level rows in BOTH shapes: `article_id IS NULL` (modern `log_error`) and `article_id = ''` (historical; normalized to NULL by v006 on next migration) |
+| `src-tauri/tests/export/project_backup_test.rs::import_normalizes_empty_string_article_id_to_null` | Import path coerces `"articleId": ""` -> SQL NULL so the restored row doesn't violate the FK constraint; row is preserved, not dropped |
 
 ## `full_text_ai_summary` round-trip (`export::project`)
 
@@ -30,11 +30,11 @@ object back to text instead of reading the field as a string.
 
 | Test identifier | Assertion |
 |---|---|
-| `src-tauri/tests/project_backup_test.rs::export_import_preserves_full_text_ai_summary_json_blob` | A realistic schema_version: 2 blob seeded via `article_repo::set_ai_summary` survives export -> import semantically intact (was silently dropped to NULL because `get_str_field`'s `.as_str()` yields None for JSON objects) |
-| `src-tauri/tests/project_backup_test.rs::import_full_text_ai_summary_string_shape_passthrough` | Backups that carry the column as a plain JSON string (old/hand-edited) pass through byte-identically |
+| `src-tauri/tests/export/project_backup_test.rs::export_import_preserves_full_text_ai_summary_json_blob` | A realistic schema_version: 2 blob seeded via `article_repo::set_ai_summary` survives export -> import semantically intact (was silently dropped to NULL because `get_str_field`'s `.as_str()` yields None for JSON objects) |
+| `src-tauri/tests/export/project_backup_test.rs::import_full_text_ai_summary_string_shape_passthrough` | Backups that carry the column as a plain JSON string (old/hand-edited) pass through byte-identically |
 
 ## Migration heal (`db::migrations::v006`)
 
 | Test identifier | Assertion |
 |---|---|
-| `src-tauri/tests/migration_recovery_test.rs::v006_heals_empty_string_article_id_to_null` | v006 rebuild heals historical `article_id = ''` rows to NULL before the orphan DELETE + INSERT...SELECT (which would otherwise crash with FOREIGN KEY constraint failed) |
+| `src-tauri/tests/db/migration_recovery_test.rs::v006_heals_empty_string_article_id_to_null` | v006 rebuild heals historical `article_id = ''` rows to NULL before the orphan DELETE + INSERT...SELECT (which would otherwise crash with FOREIGN KEY constraint failed) |

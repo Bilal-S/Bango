@@ -195,6 +195,7 @@ fn merge_tag_writes_per_article_audit() {
 }
 
 #[test]
+#[ignore = "slow"]
 fn merge_tag_bumps_changed_at() {
     let conn = setup_db();
     let articles = seed_articles(&conn, 1);

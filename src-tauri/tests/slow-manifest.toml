@@ -1,0 +1,71 @@
+# Slow-test manifest for the fast/slow Rust test split.
+#
+# Each [[area]] entry maps a source area (path globs relative to
+# src-tauri/) to the `#[ignore = "slow"]` tests that exercise it.
+# `scripts/rust-test.sh` uses this to run slow tests only when their
+# areas changed (`--changed`) or all of them (`--full`).
+#
+# Test names are module-qualified: `<test_file>::<test_fn>`, where
+# `<test_file>.rs` lives in `src-tauri/tests/<area>/`.
+#
+# Kept in sync by `scripts/check-slow-manifest.sh` (wired into
+# `npm run check:all`): every `#[ignore = "slow"]` test must be listed
+# here and every listed test must exist with that tag.
+
+[[area]]
+name = "llm"
+paths = ["src/llm/**", "src/models/llm_config*"]
+tests = [
+    "llm_orchestrator_test::test_connection_fails_on_unreachable_endpoint",
+    "llm_orchestrator_test::concurrent_sends_do_not_deadlock",
+    "llm_orchestrator_test::concurrent_sends_with_delay_do_not_deadlock",
+    "llm_orchestrator_test::many_concurrent_sends_at_high_concurrency",
+    "llm_orchestrator_test::mixed_request_types_no_recursion",
+    "llm_orchestrator_test::send_unthrottled_fails_on_unreachable",
+    "llm_orchestrator_test::update_settings_during_active_requests_no_deadlock",
+    "llm_client_test::test_openai_rate_limit_429",
+    "llm_client_test::test_openai_server_error_500",
+    "llm_client_test::test_google_rate_limit_429",
+    "llm_client_test::test_google_server_error",
+    "llm_client_test::test_openai_insufficient_permissions_403_is_retried_then_succeeds",
+    "llm_client_test::test_list_models_server_error",
+    "llm_client_test::test_openai_temperature_400_retries_without_temperature",
+]
+
+[[area]]
+name = "screening"
+paths = ["src/screening/**"]
+tests = [
+    "screening_engine_test::stop_during_request_delay_success_path",
+    "screening_engine_test::stop_during_request_delay_transient_path",
+    "screening_two_stage_test::stop_during_request_delay_stage2_path",
+]
+
+[[area]]
+name = "summary"
+paths = ["src/summary/**"]
+tests = [
+    "summary_engine_test::generate_summary_propagates_llm_error",
+]
+
+[[area]]
+name = "crypto"
+paths = ["src/crypto/**"]
+tests = [
+    "crypto_test::test_derive_key_deterministic",
+]
+
+[[area]]
+name = "db"
+paths = ["src/db/**"]
+tests = [
+    "merge_tags_labels_test::merge_tag_bumps_changed_at",
+]
+
+[[area]]
+name = "utils"
+paths = ["src/utils/**"]
+tests = [
+    "pdf_extract_test::extract_pdf_text_does_not_panic_on_expert_encoded_fonts",
+    "pdf_mojibake_test::extract_recovers_japanese_mojibake_from_naika_fixture",
+]

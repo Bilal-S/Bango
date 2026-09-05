@@ -27,6 +27,7 @@ fn test_encrypted_output_differs_from_input() {
 }
 
 #[test]
+#[ignore = "slow"]
 fn test_derive_key_deterministic() {
     let key_a = derive_key_from_machine();
     let key_b = derive_key_from_machine();

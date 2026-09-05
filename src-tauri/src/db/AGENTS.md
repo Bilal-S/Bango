@@ -31,7 +31,7 @@ that maps `Mutex::lock()` poison failures to `AppError::LockPoisoned` (not
 application-state errors and the error-mapping boilerplate is not duplicated.
 The private `lock_conn` in `commands/wiki_cmd` and `lock_db` in
 `translation/engine.rs` were removed in favor of this shared helper. Tested in
-`tests/lock_poison_test.rs`.
+`tests/db/lock_poison_test.rs`.
 
 `lock_conn` also times the acquire and emits
 `lock_conn: SLOW acquire ({ms}ms)` when > `SLOW_LOCK_THRESHOLD_MS = 100`; this
@@ -162,8 +162,8 @@ malformed/NULL JSON never errors (matches `row_to_article`'s
 decode-to-empty fallback); `criteria_empty` and `exclusion_criteria_empty`
 use exact-string comparisons that are crash-proof by construction (malformed
 values simply do not match - mirroring the PRISMA literal). Tested in
-`tests/article_query_test.rs`; the PRISMA parity is pinned in
-`tests/prisma_test.rs`
+`tests/db/article_query_test.rs`; the PRISMA parity is pinned in
+`tests/prisma/prisma_test.rs`
 (`test_rejected_plus_exclusion_criteria_empty_matches_prisma_general_excluded`).
 `count_query_articles(conn, &ArticleQuery) -> i64` counts rows matching the
 SAME filters (both share the private `build_article_query_filters` helper, so
@@ -181,14 +181,14 @@ return `Vec<String>` (the IDs of articles actually affected), so the command
 layer can write one coalesced audit entry per affected article and the frontend
 toast can report the accurate affected count. Each touched article's
 `changed_at` is bumped only when a junction row is inserted/deleted. Tested in
-`tests/bulk_tag_label_test.rs` (17 tests).
+`tests/db/bulk_tag_label_test.rs` (17 tests).
 
 #### Bulk-export-by-ids fetcher
 
 `get_articles_by_ids(conn, ids)` composes `ARTICLE_SELECT_BASE` with a
 parameterized `id IN (?,…)` clause - the sole backend read path for the
 Article-list bulk action bar "Export" button. Tested in
-`tests/article_get_by_ids_test.rs`.
+`tests/db/article_get_by_ids_test.rs`.
 
 #### `clear_ai_reasoning`
 
@@ -198,7 +198,7 @@ separate `status` field, which stays intact. `screened_at` is preserved so the
 screening history survives and the article is NOT re-enqueued. Writes an
 `ai_screen_clear` audit entry. Surfaced via the `clear_ai_reasoning` Tauri
 command + the trashcan icon in the AI Decision card's expanded header. Tested
-via `tests/migration_recovery_test.rs` (final `user_version = 7`).
+via `tests/db/migration_recovery_test.rs` (final `user_version = 7`).
 
 ### `biblio_repo/` - bibliometric repos
 
@@ -236,7 +236,7 @@ all values stay bound parameters.
 distinct domain concepts per spec: separate repos, models, and commands;
 only the SQL shapes are shared. The normalized-name create-dedupe contract
 (existing row returned on case-insensitive match, original casing preserved)
-is pinned by `tests/tags_labels_test.rs::create_tag_dedupes_normalized_name`
+is pinned by `tests/db/tags_labels_test.rs::create_tag_dedupes_normalized_name`
 + `create_label_dedupes_normalized_name`.
 
 ### `journal_repo.rs` - journal_index lookup/match
@@ -254,7 +254,7 @@ article-metadata journal autocomplete: it DOES use LIKE substring (safe because
 the user reviews candidates), gated on a 4-char minimum. `articles.journal_index_id`
 is populated on import and refreshable via `rematch_journals`; intentionally NOT
 round-tripped through project backup/restore (re-derived on import). Tested in
-`tests/journal_repo_test.rs` (31 tests).
+`tests/db/journal_repo_test.rs` (31 tests).
 
 ### `chunk_repo.rs` - Tier 3 article chunk storage
 
@@ -265,7 +265,7 @@ chunk_sections) and cleared on detach. Consumed by
 `list_chunks_for_article`, `delete_chunks_for_article`, `count_chunks_for_article`,
 `get_articles_with_full_text_missing_chunks` (screening-start guard),
 `get_articles_with_full_text`, `count_articles_with_full_text`. Tested in
-`tests/chunk_retrieval_test.rs`.
+`tests/screening/chunk_retrieval_test.rs`.
 
 ### `embedding_repo.rs` - embedding vector storage
 
@@ -275,7 +275,7 @@ CRUD + `list_for_recall` for the `article_embeddings` table (v007). Keyed on
 composite PRIMARY KEY; SQLite treats NULL as distinct in a PK, which would
 defeat `INSERT OR REPLACE` on the title+abstract row. `ON DELETE CASCADE`
 removes rows when an article is hard-deleted. See `embedding/AGENTS.md` for the
-director/runner/recall contract. Tested in `tests/embedding_storage_test.rs`.
+director/runner/recall contract. Tested in `tests/embedding/embedding_storage_test.rs`.
 
 ### `schema_check.rs` + `rebuild.rs` - startup legacy-DB detection + rebuild
 
@@ -298,7 +298,7 @@ plain `VACUUM` on a WAL-mode DB writes the compacted pages to the WAL rather
 than shrinking the main file. Non-fatal. VACUUM is `O(n)` over the DB file, so
 it is intentionally NOT called on per-article deletes or other hot paths - only
 at coarse, infrequent, destructive boundaries (e.g. `reset_project`). Tested in
-`tests/maintenance_test.rs` + `tests/reset_project_test.rs`.
+`tests/db/maintenance_test.rs` + `tests/export/reset_project_test.rs`.
 
 ### `migration.rs` - transactional migration runner
 
@@ -311,7 +311,7 @@ it advances `user_version` to 3 without re-running the dangerous
 `ALTER TABLE ADD COLUMN` statements (SQLite has no `IF NOT EXISTS` for ADD
 COLUMN). Future migrations that add another `ALTER TABLE ... ADD COLUMN` MUST
 extend `heal_partial_migrations` with a marker-column check. 5 inline unit
-tests + `tests/migration_recovery_test.rs`.
+tests + `tests/db/migration_recovery_test.rs`.
 
 ### Migrations
 
@@ -338,7 +338,7 @@ tests + `tests/migration_recovery_test.rs`.
   same `article_id + action + source` arrives within `COALESCE_WINDOW_SECS`
   (300 seconds / 5 minutes), the existing row is **updated** (details +
   timestamp) instead of inserting a new row. Tested in
-  `tests/audit_coalesce_test.rs`.
+  `tests/db/audit_coalesce_test.rs`.
 - **`v006_audit_metadata_edit.rs`** (VERSION 6) - extends the
   `audit_entries.action` CHECK to include `'metadata_edit'` so in-place
   metadata field edits are correctly categorized. **Heal: empty-string
@@ -358,7 +358,7 @@ tests + `tests/migration_recovery_test.rs`.
   `idx_audit_entries_article_id`, dropped by every `audit_entries` CHECK
   rebuild (v003-v007 RENAME-CREATE-INSERT-DROP pattern).
 - **`v009_doi_canonicalization.rs`** (VERSION 9) - DOI canonicalization
-  (`tests/doi_case_migration_test.rs`, inventory
+  (`tests/db/doi_case_migration_test.rs`, inventory
   `docs/test-plans/doi-case-tests.md`). Heals legacy mixed-case, prefixed
   (`https://doi.org/` / `dx.doi.org` / `doi:`), and whitespace-wrapped DOIs in
   `articles` + `reference_papers` via a single CASE one-strip statement that
@@ -387,16 +387,16 @@ tests + `tests/migration_recovery_test.rs`.
 
 ## Verification
 
-- `tests/lock_poison_test.rs`, `tests/maintenance_test.rs`,
-  `tests/reset_project_test.rs`, `tests/migration_recovery_test.rs`,
-  `tests/biblio_repo_tests.rs`, `tests/biblio_networks_test.rs`,
-  `tests/article_metadata_test.rs`, `tests/article_query_test.rs`,
-  `tests/article_get_by_ids_test.rs`, `tests/bulk_tag_label_test.rs`,
-  `tests/biblio_needs_refresh_test.rs`, `tests/auto_translate_test.rs`,
-  `tests/journal_repo_test.rs`, `tests/chunk_retrieval_test.rs`,
-  `tests/embedding_storage_test.rs`, `tests/project_name_test.rs`,
-  `tests/audit_coalesce_test.rs`, `tests/article_repo_coverage_test.rs`,
-  `tests/prisma_test.rs` (incl. the `exclusion_criteria_empty` PRISMA parity
+- `tests/db/lock_poison_test.rs`, `tests/db/maintenance_test.rs`,
+  `tests/export/reset_project_test.rs`, `tests/db/migration_recovery_test.rs`,
+  `tests/biblio/biblio_repo_tests.rs`, `tests/biblio/biblio_networks_test.rs`,
+  `tests/db/article_metadata_test.rs`, `tests/db/article_query_test.rs`,
+  `tests/db/article_get_by_ids_test.rs`, `tests/db/bulk_tag_label_test.rs`,
+  `tests/biblio/biblio_needs_refresh_test.rs`, `tests/translation/auto_translate_test.rs`,
+  `tests/db/journal_repo_test.rs`, `tests/screening/chunk_retrieval_test.rs`,
+  `tests/embedding/embedding_storage_test.rs`, `tests/db/project_name_test.rs`,
+  `tests/db/audit_coalesce_test.rs`, `tests/db/article_repo_coverage_test.rs`,
+  `tests/prisma/prisma_test.rs` (incl. the `exclusion_criteria_empty` PRISMA parity
   test).
 
 ## Child DOX Index

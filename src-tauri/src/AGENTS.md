@@ -29,7 +29,7 @@ for re-screening on the next run. Both `update_article_status` and
 from `get_next_unscreened_working_batch`, leaving it stuck in a "previously
 screened" limbo that surfaces in the Error tab even though `screening_error` is
 `0`. The audit entry notes "(screening flags reset for re-screening)" when the
-reset fires. Tested in `tests/status_transition_screening_flags_test.rs`.
+reset fires. Tested in `tests/screening/status_transition_screening_flags_test.rs`.
 
 ### Article hard-delete cascade (`article_repo::delete_article`)
 
@@ -51,11 +51,11 @@ unmatched pool for re-matching instead of being hard-deleted. On-disk
 full-text files are removed (non-fatal on failure). Sets the biblio + wiki
 staleness flags. Frontend confirmation dialog owned by
 `article-detail-panel.vue`; `useArticleSearch().deleteArticle` invokes the
-command and closes the detail panel. Tested in `tests/article_delete_test.rs`.
+command and closes the detail panel. Tested in `tests/db/article_delete_test.rs`.
 
 ### Journal-index loader (`lib.rs::load_journal_index_from_path`)
 
-`pub` so `tests/journal_index_load_test.rs` can drive it directly. Copies the
+`pub` so `tests/db/journal_index_load_test.rs` can drive it directly. Copies the
 bundled portal DB rows into the empty target `journal_index` using **two
 separate connections** - a `SQLITE_OPEN_READ_ONLY` source and the target's own
 `unchecked_transaction` - NOT `ATTACH DATABASE`. The previous `ATTACH` +
@@ -66,7 +66,7 @@ inside the target's transaction). Resource resolution is 3-tier
 `CARGO_MANIFEST_DIR/resources/`); the loader is invoked at startup
 (best-effort, audit-error on failure) and after `reset_project` (blocking,
 `Err` on failure so the frontend Toasts). Tested in
-`tests/journal_index_load_test.rs` (7 tests incl. the WAL-mode regression +
+`tests/db/journal_index_load_test.rs` (7 tests incl. the WAL-mode regression +
 read-only-source guarantee).
 
 Auto-loads the bundled `journal_index.db` on first startup, and shows a native
@@ -96,21 +96,26 @@ delete before restarting.
 
 See each child doc's Verification section + the root footer:
 `npm run check:all` (clippy `-D warnings` on the library crate + rustfmt) and
-`cargo test` (integration-test inventory: `../tests/AGENTS.md`).
+the Rust test suites via `scripts/rust-test.sh`:
+`npm run test:rust` (fast, default), `npm run test:rust:full` (fast + slow),
+`npm run test:rust:changed` (fast + slow for changed areas).
+Slow tests are `#[ignore = "slow"]` + registered in `../tests/slow-manifest.toml`
+(`scripts/check-slow-manifest.sh` enforces the sync in `check:all`).
 
 Coverage: `cd src-tauri && cargo llvm-cov --html --output-dir target/llvm-cov/html`
 (Rust via `cargo-llvm-cov` + `llvm-tools-preview`, report at
 `src-tauri/target/llvm-cov/html/html/index.html`). Artifact dirs are
 git-ignored.
 
-Disk-space: `src-tauri/target` can balloon into hundreds of GB because each
-of the ~136 `src-tauri/tests/*.rs` files compiles into its own ~450MB test
-binary (each statically links tauri + GTK/webkit2gtk, headless_chrome, resvg,
-the PDF stack (unpdf/pdf-extract/lopdf), and reqwest/rustls; there is no
-llama.cpp dependency - "llama.cpp" is only an LLM provider label for a
-user-run server), and Cargo never deletes stale hashed binaries across builds.
-`target/llvm-cov-target` (~50G) is cargo-llvm-cov's separate target dir.
-Reclaim space with `npm run clean:rust` (full `cargo clean`) or
+Disk-space: test files are consolidated into 22 area binaries under
+`tests/<area>/` (one ~450MB binary per area, statically linking tauri +
+GTK/webkit2gtk, headless_chrome, resvg, the PDF stack (unpdf/pdf-extract/
+lopdf), and reqwest/rustls; there is no llama.cpp dependency - "llama.cpp" is
+only an LLM provider label for a user-run server). NEVER add a new top-level
+`src-tauri/tests/*.rs` file - each one becomes its own ~450MB binary. Cargo
+never deletes stale hashed binaries across builds, so `src-tauri/target` can
+still balloon; `target/llvm-cov-target` (~50G) is cargo-llvm-cov's separate
+target dir. Reclaim space with `npm run clean:rust` (full `cargo clean`) or
 `npm run sweep:rust` (`cargo-sweep -t 14`, removes only artifacts untouched
 >14 days - preferred periodic cleanup). After coverage runs,
 `cargo llvm-cov clean` drops `target/llvm-cov-target`. `cargo-sweep` must be
@@ -171,8 +176,8 @@ described inline.
   `# {Project Name}` over an h2 report title (sections demoted to h3);
   otherwise the report title is the single h1. Frontend exports it as Markdown
   (save dialog) or PDF (print dialog) from the PRISMA view. Tested in
-  `tests/prisma_test.rs`, `tests/prisma_svg_test.rs`,
-  `tests/prisma_report_test.rs`. No own `AGENTS.md`.
+  `tests/prisma/prisma_test.rs`, `tests/prisma/prisma_svg_test.rs`,
+  `tests/prisma/prisma_report_test.rs`. No own `AGENTS.md`.
 - **`crypto/`** - AES-256-GCM encryption helpers (API keys, LLM config). No
   own `AGENTS.md`.
 - **`schema/`** - Shared schema types. No own `AGENTS.md`.
@@ -180,6 +185,6 @@ described inline.
   thematic analysis: member resolution dispatcher, three-source term
   resolution mirroring the keyword network builder, Top-N article cap,
   link-protocol registry, grounded prompt builder; all `pub` + pure, tested
-  from `tests/biblio_cluster_themes_test.rs`). Plus **`summary/`** +
+  from `tests/biblio/biblio_cluster_themes_test.rs`). Plus **`summary/`** +
   **`batch/`** - summary prompts/engine, and batch processing helpers. No own
   `AGENTS.md`.

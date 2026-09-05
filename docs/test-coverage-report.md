@@ -99,15 +99,15 @@ the modules below).
 ### Rust (51.93% → 65.47% → 64.53%)
 
 Initial baseline work added these test files:
-- `src-tauri/tests/models_test.rs` - model `as_str()`/`Display`/`Default` impls (article, criterion, label, tag, llm_config).
-- `src-tauri/tests/token_estimation_test.rs` - `estimate_tokens`, `check_context_window`.
-- `src-tauri/tests/error_test.rs` - `AppError` variants + `Serialize` impl.
-- `src-tauri/tests/llm_config_repo_test.rs` - `get_config`, `save_config`, `has_config`, `get_config_no_decrypt` (all provider variants, key round-trip).
-- `src-tauri/tests/summary_repo_test.rs` - `save_summary` upsert, `get_summary`, `clear_summary`.
-- `src-tauri/tests/journal_repo_test.rs` - `match_journal` (ISSN/eISSN/name/empty), `resolve_journal_id`, `get_journal_info` (aggregates + exclusion).
-- `src-tauri/tests/prisma_svg_test.rs` - `render_prisma_svg` (structure, ongoing phase, exclusion reasons, truncation, XML escaping).
-- `src-tauri/tests/import_pipeline_test.rs` - `read_content`, `parse_and_validate` (strict/none), preview building, `filter_excluded`.
-- `src-tauri/tests/summary_engine_test.rs` - `generate_summary` (empty, single, batched, trim, error propagation).
+- `src-tauri/tests/models/models_test.rs` - model `as_str()`/`Display`/`Default` impls (article, criterion, label, tag, llm_config).
+- `src-tauri/tests/utils/token_estimation_test.rs` - `estimate_tokens`, `check_context_window`.
+- `src-tauri/tests/utils/error_test.rs` - `AppError` variants + `Serialize` impl.
+- `src-tauri/tests/db/llm_config_repo_test.rs` - `get_config`, `save_config`, `has_config`, `get_config_no_decrypt` (all provider variants, key round-trip).
+- `src-tauri/tests/db/summary_repo_test.rs` - `save_summary` upsert, `get_summary`, `clear_summary`.
+- `src-tauri/tests/db/journal_repo_test.rs` - `match_journal` (ISSN/eISSN/name/empty), `resolve_journal_id`, `get_journal_info` (aggregates + exclusion).
+- `src-tauri/tests/prisma/prisma_svg_test.rs` - `render_prisma_svg` (structure, ongoing phase, exclusion reasons, truncation, XML escaping).
+- `src-tauri/tests/ris/import_pipeline_test.rs` - `read_content`, `parse_and_validate` (strict/none), preview building, `filter_excluded`.
+- `src-tauri/tests/summary/summary_engine_test.rs` - `generate_summary` (empty, single, batched, trim, error propagation).
 
 Phase 2 additions (2026-07-04): `manual_translate_test.rs` (4 tests), `broken_language_import_test.rs` (5 tests), `auto_translate_full_text_test.rs` (4 tests).
 

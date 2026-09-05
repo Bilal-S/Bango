@@ -75,7 +75,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `app_settings.embedding_status` is NOT mutated here (read-only derivation
   for the readiness payload); the probe + runner keep reading the persisted
   value directly. Pinned by the `compute_readiness_{anthropic,zai,openai}_*`
-  tests in `tests/citation_finder_readiness_test.rs`, including
+  tests in `tests/citation_finder/citation_finder_readiness_test.rs`, including
   `compute_readiness_anthropic_overrides_persisted_enabled` which asserts the
   override wins over a stale persisted `enabled`.
 
@@ -117,8 +117,8 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   model rows on the first Citation Finder run, fixing the "100% coverage /
   zero results" silent failure at its source. Pinned by
   `director_detects_model_mismatch_as_stale` in
-  `tests/embedding_director_test.rs` + the 7 pure-helper cases in
-  `tests/embedding_model_mismatch_test.rs`.
+  `tests/embedding/embedding_director_test.rs` + the 7 pure-helper cases in
+  `tests/embedding/embedding_model_mismatch_test.rs`.
 - **`misrepresents_source`** (`CitationLlmOutput` field): `true` = the matched
   passage is taken out of context / selectively quoted in a way that
   misrepresents the source. The `#[serde(alias = "fairlyParaphrased")]` keeps
@@ -148,7 +148,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   `serde_json::from_str::<Vec<_>>` calls were all-or-nothing and dropped
   every good result alongside a single bad one (the exact `missing field
   articleId` bug-report failure mode). Pinned by the snake_case + wrapper +
-  fault-isolation tests in `tests/citation_finder_prompt_test.rs`.
+  fault-isolation tests in `tests/citation_finder/citation_finder_prompt_test.rs`.
 - **`normalize_claim_key`** (pure, `#[must_use]`) drives the
   `(article_id, claim)` lookup in `merge_outputs`: trim + collapse internal
   whitespace + lowercase so cosmetic claim drift between the splitter and the
@@ -173,7 +173,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   fallback, no regression). No extra LLM call: the field rides on the existing
   classification call (~30-60 extra output tokens per result). Pinned by the
   `ground_quotes_*` + `llm_output_justifying_sentences_*` tests in
-  `tests/citation_finder_prompt_test.rs` + the progressive-disclosure tests
+  `tests/citation_finder/citation_finder_prompt_test.rs` + the progressive-disclosure tests
   in `src/__tests__/components/citation-result-card.test.ts`.
 - **Cosine is the user-facing "match %"**, normalized from `[-1, 1]` to
   `[0, 1]`. Containment (query coverage) is internal-only (drives passage
@@ -189,7 +189,7 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   query, long document." `jaccard_similarity` is retained as a `pub` helper
   but is NOT the gate. Pinned by `containment_exact_quote_in_long_chunk_is_one`
   + `jaccard_diluted_by_long_chunk_exact_quote` in
-  `tests/citation_finder_similarity_test.rs`.
+  `tests/citation_finder/citation_finder_similarity_test.rs`.
 - **`ArticleBest::cosine` seeds at `f32::NEG_INFINITY`** (NOT `Default =
   0.0`), mirroring `embedding::recall::recall`'s own max-pool, so a hit with a
   negative cosine is recorded as the article's best score instead of being

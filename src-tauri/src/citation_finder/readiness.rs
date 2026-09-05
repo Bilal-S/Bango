@@ -125,6 +125,6 @@ fn count_embedded_articles_by_status(
     };
     Ok(count)
 }
-// Unit tests live in `src-tauri/tests/citation_finder_readiness_test.rs`
+// Unit tests live in `src-tauri/tests/citation_finder/citation_finder_readiness_test.rs`
 // (extracted per `docs/CLAUDE.md` §Testing). `compute_readiness` is DB-backed
 // (covered indirectly via `embedding_recall_multistatus_test`).

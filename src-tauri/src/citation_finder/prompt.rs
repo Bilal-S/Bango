@@ -360,5 +360,5 @@ fn resolve_array(value: &serde_json::Value) -> Option<&serde_json::Value> {
     }
 }
 
-// Unit tests live in `src-tauri/tests/citation_finder_prompt_test.rs`
+// Unit tests live in `src-tauri/tests/citation_finder/citation_finder_prompt_test.rs`
 // (extracted per `docs/CLAUDE.md` §Testing).

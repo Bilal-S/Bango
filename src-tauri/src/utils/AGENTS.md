@@ -35,8 +35,8 @@ via `CAPTION_START_RE` with greedy continuation), `detect_markdown_tables(text)`
 the I/O wrapper. Pure functions (`#[must_use]`); consumed by T1.2
 `chunking.rs`, T1.3 `summary::prompt`, T2.4 `raw_export::structure_full_text`,
 and T3.1 `attach_full_text` chunk storage. Tier 2 proptest invariants live in
-`src-tauri/tests/sections_test.rs` (page-spanning break) +
-`src-tauri/tests/chunking_test.rs` (word-count bounds + contiguous index).
+`src-tauri/tests/utils/sections_test.rs` (page-spanning break) +
+`src-tauri/tests/utils/chunking_test.rs` (word-count bounds + contiguous index).
 
 ### `chunking.rs` - semantic chunking (T1.2 + Tier 2 Phase 1)
 
@@ -51,7 +51,7 @@ hard cap); skips `References` entirely; carries section provenance
 `MAX_CHUNK_WORDS` so GFM tables survive intact into the FTS index. Pure
 functions (`#[must_use]`). Consumed by `wiki::fts` (chunk-emission) and T3.1
 `attach_full_text` chunk storage. Property-based tests (`proptest`) in
-`src-tauri/tests/chunking_test.rs` verify the word-count bound (excluding
+`src-tauri/tests/utils/chunking_test.rs` verify the word-count bound (excluding
 atomic Table/Figure) + contiguous `chunk_index` for any input.
 
 ### `text_tokens.rs`
@@ -67,7 +67,7 @@ PDF text extraction incl. **legacy-CJK mojibake recovery** via `encoding_rs` +
 Latin-1 code points - the common failure mode for CJK PDFs whose fonts lack a
 ToUnicode CMap - the `recover_mojibake` pass detects the C1 control-char
 signature and re-decodes the bytes to correct Unicode before header/footer
-stripping. Tested in `tests/pdf_mojibake_test.rs`.
+stripping. Tested in `tests/utils/pdf_mojibake_test.rs`.
 
 ### `json_repair.rs` - LLM JSON pre-parser
 
@@ -126,10 +126,10 @@ follows).
 
 ## Verification
 
-- `tests/sections_test.rs` (classify_sections + 3 real-PDF e2e + proptest)
-- `tests/chunking_test.rs` (9 inline + standalone Tier 2 + proptest)
-- `tests/pdf_mojibake_test.rs`
-- `tests/json_repair_test.rs` (5 integration tests incl. the exact bug-report
+- `tests/utils/sections_test.rs` (classify_sections + 3 real-PDF e2e + proptest)
+- `tests/utils/chunking_test.rs` (9 inline + standalone Tier 2 + proptest)
+- `tests/utils/pdf_mojibake_test.rs`
+- `tests/utils/json_repair_test.rs` (5 integration tests incl. the exact bug-report
   payload, the screening `reasoning`-with-newline regression, the
   no-op-for-valid-JSON guard, and the `prepare_llm_json` chain + no-op) + 10
   inline tests in `json_repair.rs`.

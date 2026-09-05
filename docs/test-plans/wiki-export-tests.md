@@ -16,9 +16,9 @@ Enforced by `scripts/check-test-inventory.sh` (wired into `npm run check:all`).
 | `src/__tests__/utils/wiki-site-export.test.ts` | `wrapPageHtml_subpage_emits_correct_depth_prefix` | `../../style.css` + `.markdown-content` wrapper |
 | `src/__tests__/utils/wiki-site-export.test.ts` | `pageDepth` | Index is 0, subpages are 2 |
 | `src/__tests__/utils/wiki-site-export.test.ts` | `slugifyFilename` | Normalizes to kebab-case |
-| `src-tauri/tests/wiki_export_test.rs` | `generate_export_writes_all_files` | Write bundle to `wiki-export/`, assert files exist |
-| `src-tauri/tests/wiki_export_test.rs` | `markdown_tree_excludes_log_and_articles` | `log.md` + `raw/{id}.md` excluded; `wiki/**/*.md` present |
-| `src-tauri/tests/wiki_export_test.rs` | `user_docs_markdown_included` | `source_kind: user_*` companion `.md` copied |
-| `src-tauri/tests/wiki_export_test.rs` | `generate_export_clears_previous_output` | Old files gone on re-generation |
+| `src-tauri/tests/wiki/wiki_export_test.rs` | `generate_export_writes_all_files` | Write bundle to `wiki-export/`, assert files exist |
+| `src-tauri/tests/wiki/wiki_export_test.rs` | `markdown_tree_excludes_log_and_articles` | `log.md` + `raw/{id}.md` excluded; `wiki/**/*.md` present |
+| `src-tauri/tests/wiki/wiki_export_test.rs` | `user_docs_markdown_included` | `source_kind: user_*` companion `.md` copied |
+| `src-tauri/tests/wiki/wiki_export_test.rs` | `generate_export_clears_previous_output` | Old files gone on re-generation |
 | `src/utils/wiki-site-export.ts` | `STATIC_SITE_CSS` has `color-scheme: light` | Export forces light mode; no `@media (prefers-color-scheme: dark)` |
 | `scripts/verify-export-content.mjs` | end-to-end link integrity | All `href` resolve to files; no `data-slug`/`data-art-id` attrs; no dangling `[^...]` footnotes |

@@ -173,13 +173,30 @@ The migration `DELETE FROM journal_index` clears the table. On next app startup,
 
 ## Testing
 
-- Run specific tests first before running overall test suite
-- Rust: normally run this to only get failing and ignored tests: `cargo test | grep -v " \.\.\. ok$"`
-- Rust: only run this if you need a list of all tests that have run: `cargo test` for unit and integration tests.
+- Run specific tests first before running overall test suite.
+- Rust integration tests live in area binaries under `src-tauri/tests/<area>/`
+  (one `main.rs` per area declaring `mod <file>;` for the moved test files).
+  Do NOT add new top-level `src-tauri/tests/*.rs` files - they would become
+  their own ~450MB binaries and regress the disk/link contract.
+- Rust fast suite (default): `npm run test:rust` or `cargo test`.
+  Slow tests are tagged `#[ignore = "slow"]` and are skipped by default.
+- Rust slow suites (see `scripts/rust-test.sh`):
+  - `npm run test:rust:full` - fast + every slow test.
+  - `npm run test:rust:changed` - fast + slow tests whose source areas changed
+    (git diff vs `main`, or `--changed <base>` via the script).
+  - `npm run test:rust:live` - citation_chaser live tests (Chrome + network).
+- Slow-test tagging rule: tag a test `#[ignore = "slow"]` when its cost is
+  dominated by real sleeps, retry backoff, polls, or PBKDF2 key derivation.
+  Every slow tag MUST be registered in `src-tauri/tests/slow-manifest.toml`
+  (`scripts/check-slow-manifest.sh` enforces this in `check:all`).
+- TEST-ONLY env knobs (debug builds only; the slow runner sets them):
+  `BANGO_TEST_BACKOFF_MS` (skip LLM retry backoff sleeps) and
+  `BANGO_TEST_PBKDF2_ITERATIONS` (cheap PBKDF2 in tests).
+  Release builds ignore both.
+- Rust: to see only failing and ignored tests: `cargo test | grep -v " \.\.\. ok$"`.
 - TypeScript: Vitest for unit tests.
 - Test file naming: `*.test.ts` for TS, `*_test.rs` or inline `#[cfg(test)]` for Rust.
-- Place Rust integration and database repository tests in the `src-tauri/tests/` directory.
-- Avoid large inline unit tests in library source files (e.g. database repository modules); instead, move them into standalone integration test files under `src-tauri/tests/` to keep the source code files compact and maintainable.
+- Avoid large inline unit tests in library source files (e.g. database repository modules); instead, move them into standalone integration test files under `src-tauri/tests/<area>/` to keep the source code files compact and maintainable.
 
 ### Coverage Goals
 

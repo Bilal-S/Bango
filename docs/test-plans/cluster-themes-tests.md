@@ -3,7 +3,7 @@
 Consumed by `scripts/check-test-inventory.sh` (wired into `npm run check:all`).
 Rows use the machine-parseable `` `path::fn` `` format the script's regex
 expects. All Rust tests live in the external crate
-`src-tauri/tests/biblio_cluster_themes_test.rs` (per `docs/CLAUDE.md`
+`src-tauri/tests/biblio/biblio_cluster_themes_test.rs` (per `docs/CLAUDE.md`
 §Testing and `src-tauri/tests/AGENTS.md`); the pure helpers in
 `biblio/thematic.rs` are `pub` + `#[must_use]`. Source plan:
 `.worktrees/cluster1.md` (temporary planning doc - never referenced from
@@ -13,20 +13,20 @@ production code).
 
 | Test identifier | Assertion |
 |-----------------|-----------|
-| `src-tauri/tests/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_coauthorship_contains_members_and_articles` | prompt names members and resolved articles |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_keyword_contains_terms_and_articles` | prompt names terms and resolved articles and omits the author link protocol |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_forbids_em_dash` | no U+2014 in prompt |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::system_prompt_requires_thematic_sections` | Overview, Main Themes, Representative Articles present |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_states_cap_when_truncated` | disclosure line names exact capped/total counts |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::resolve_authors_to_articles_returns_included_only` | excluded/non-included articles are filtered out |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::resolve_terms_to_articles_returns_included_only` | included scope enforced |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::resolve_terms_to_articles_dedupes_across_terms` | shared articles appear once |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::resolve_terms_to_articles_matches_tags_and_labels_sources` | tag- and label-sourced terms resolve via article_tags/article_labels |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::resolve_articles_applies_top_n_cap_and_ranking` | num_cited DESC then year DESC ranking, cap at 40 |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::resolve_members_dispatches_by_network_type` | dispatcher routes author vs term resolvers |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::resolve_members_rejects_unsupported_network_type` | citation/cocitation/bibliographic-coupling variants return Validation |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::link_protocols_per_network_restrict_author_links` | co_occurrence yields the article protocol only |
-| `src-tauri/tests/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_truncates_authors_and_skips_empty_lines` | Authors/Keywords lines truncate on a word boundary; empty values omit the line |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_coauthorship_contains_members_and_articles` | prompt names members and resolved articles |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_keyword_contains_terms_and_articles` | prompt names terms and resolved articles and omits the author link protocol |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_forbids_em_dash` | no U+2014 in prompt |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::system_prompt_requires_thematic_sections` | Overview, Main Themes, Representative Articles present |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_states_cap_when_truncated` | disclosure line names exact capped/total counts |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::resolve_authors_to_articles_returns_included_only` | excluded/non-included articles are filtered out |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::resolve_terms_to_articles_returns_included_only` | included scope enforced |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::resolve_terms_to_articles_dedupes_across_terms` | shared articles appear once |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::resolve_terms_to_articles_matches_tags_and_labels_sources` | tag- and label-sourced terms resolve via article_tags/article_labels |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::resolve_articles_applies_top_n_cap_and_ranking` | num_cited DESC then year DESC ranking, cap at 40 |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::resolve_members_dispatches_by_network_type` | dispatcher routes author vs term resolvers |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::resolve_members_rejects_unsupported_network_type` | citation/cocitation/bibliographic-coupling variants return Validation |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::link_protocols_per_network_restrict_author_links` | co_occurrence yields the article protocol only |
+| `src-tauri/tests/biblio/biblio_cluster_themes_test.rs::build_cluster_themes_prompt_truncates_authors_and_skips_empty_lines` | Authors/Keywords lines truncate on a word boundary; empty values omit the line |
 
 ## TypeScript
 

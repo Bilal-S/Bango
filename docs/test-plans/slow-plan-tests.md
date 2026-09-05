@@ -10,8 +10,8 @@ follow-up PR that adds the `#[ignore]` / `it.skip` stubs. It is **not yet
 machine-enforced** because the stubs do not exist; wiring it in prematurely
 would break `npm run check:all`.
 
-| `src-tauri/tests/auto_translate_test.rs::auto_translate_defaults_to_false_when_absent` | Decision (a): absent key returns `false` (opt-in default). |
-| `src-tauri/tests/auto_translate_test.rs::auto_translate_garbage_value_falls_back_to_default_false` | Decision (a): garbage value falls back to the opt-in `false` default. |
+| `src-tauri/tests/translation/auto_translate_test.rs::auto_translate_defaults_to_false_when_absent` | Decision (a): absent key returns `false` (opt-in default). |
+| `src-tauri/tests/translation/auto_translate_test.rs::auto_translate_garbage_value_falls_back_to_default_false` | Decision (a): garbage value falls back to the opt-in `false` default. |
 | `src-tauri/src/db/article_repo.rs::get_translatable_import_ids_filters_status_and_language` | Tier 1b: filtered SELECT returns only `is_translated=0 AND translation_status IN ('none','failed')` candidates. |
 | `src-tauri/src/db/article_repo.rs::mark_translation_queued_batch_idempotent` | Tier 1b: bulk UPDATE only touches rows still in `('none','failed')`. |
 | `src-tauri/src/db/connection.rs::busy_timeout_set_on_open` | Tier 0: `create_connection_at` + `create_connection` both set `PRAGMA busy_timeout=5000`. |
@@ -23,9 +23,9 @@ would break `npm run check:all`.
 ## Coverage status (current implementation)
 
 - `auto_translate_defaults_to_false_when_absent` - **exists + passing**
-  (`tests/auto_translate_test.rs`).
+  (`tests/translation/auto_translate_test.rs`).
 - `auto_translate_garbage_value_falls_back_to_default_false` - **exists +
-  passing** (`tests/auto_translate_test.rs`).
+  passing** (`tests/translation/auto_translate_test.rs`).
 - The remaining rows are exercised indirectly by the existing
   `manual_translate_test.rs`, `auto_translate_full_text_test.rs`, and
   `batch_import_test.rs` suites (all green). Dedicated unit tests for the new

@@ -85,7 +85,7 @@ fn reset_runs_vacuum_without_error() {
     // On an in-memory DB the VACUUM is a no-op for size but must execute
     // without error, proving the VACUUM step is wired in and runs cleanly
     // against the freshly-rebuilt schema. The space-reclaim behavior itself
-    // is proven by `tests/maintenance_test.rs` against a file-backed DB.
+    // is proven by `tests/db/maintenance_test.rs` against a file-backed DB.
     let tmp = TempDir::new().unwrap();
     let wiki_root = tmp.path().join("wiki-root");
     seed_wiki(&wiki_root);

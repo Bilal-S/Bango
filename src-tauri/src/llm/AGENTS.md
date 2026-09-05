@@ -115,9 +115,9 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   ~40 existing test call sites need zero edits. `NoOpTemperaturePersister` is
   the test/default impl (no-op). Tests inject a `RecordingPersister` fake to
   assert the persistence signal fires.
-- Tested in `tests/llm_client_test.rs` (4 temperature tests: recovery retry,
+- Tested in `tests/llm/llm_client_test.rs` (4 temperature tests: recovery retry,
   skip-when-already-skipping, no-retry-non-temperature, default-CallMeta-on-
-  success) + `tests/llm_orchestrator_test.rs` (2 persistence tests: fires-on-
+  success) + `tests/llm/llm_orchestrator_test.rs` (2 persistence tests: fires-on-
   recovery, does-not-fire-on-normal-success).
 
 ### Shared HTTP client (`client.rs`)
@@ -167,7 +167,7 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   `embedding::text::split_text_by_token_budget` (per-input) and
   `embedding::batching::group_into_embedding_batches` (sub-batch grouping). Pure
   `#[must_use]` `embedding_limits(provider, model)` is unit-tested in
-  `tests/embedding_provider_test.rs`.
+  `tests/embedding/embedding_provider_test.rs`.
 - **Triple-state capability flag** (`app_settings` keys `embedding_status`
   [`unknown` default | `enabled` | `disabled`], `embedding_model`,
   `embedding_dimensions`): records the outcome of the last probe so
@@ -184,7 +184,7 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   inline so the result + model land in the response payload + toast) and on the
   first `generate_embeddings` call when `embedding_status == unknown`.
 - **Dimension-forwarding contract** (regression-tested in
-  `tests/embedding_probe_persist_test.rs`): the Test Connection path MUST
+  `tests/embedding/embedding_probe_persist_test.rs`): the Test Connection path MUST
   forward `ProbeOutcome.dimensions` through `probe_embeddings_sync` →
   `persist_embedding_probe` → `set_embedding_status`. The prior shape hardcoded
   `dimensions = 0`, which left `recall` gated off (`dimensions <= 0` at
@@ -211,15 +211,15 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   `vector_matches_dim(vector, effective_dim)` skips + counts as error any vector
   whose length mismatches so a truncated/mismatched vector never stores a wrong
   `dimensions` column. Drift is persisted back to `app_settings`. Both are pure
-  `#[must_use]`, unit-tested in `tests/embedding_runner_test.rs`.
+  `#[must_use]`, unit-tested in `tests/embedding/embedding_runner_test.rs`.
 - **Categorization**: `LlmRequestType::Embedding`; `timeout_for(Embedding) =
   30s`. Embeddings do NOT participate in the `skip_temperature` machinery (no
   temperature parameter).
-- Tested in `tests/embedding_provider_test.rs` (19: model resolution,
+- Tested in `tests/embedding/embedding_provider_test.rs` (19: model resolution,
   OpenAI-batch parse, Ollama single-prompt, Google embedContent, probe outcomes),
-  `tests/llm_orchestrator_batch_test.rs` (17: `send_batch_parallel` order/mixed/
+  `tests/llm/llm_orchestrator_batch_test.rs` (17: `send_batch_parallel` order/mixed/
   panic/empty + `send_embedding_batch_parallel` mockito dispatch + per-provider
-  limits table), `tests/embedding_probe_persist_test.rs` (4: dimension-forwarding
+  limits table), `tests/embedding/embedding_probe_persist_test.rs` (4: dimension-forwarding
   regression).
 
 ### `send_json` + JSON pre-parser (`orchestrator.rs` + `utils/json_repair.rs`)
@@ -246,7 +246,7 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
 - When adding a new retryable signature, gate it narrowly (status + body
   substring) so real permanent errors are not retried. Document it in
   `is_retryable_response` and add a unit test in the inline `tests` module +
-  an integration test in `tests/llm_client_test.rs`.
+  an integration test in `tests/llm/llm_client_test.rs`.
 - No `unwrap()`/`expect()`/`panic!()` in this module (production code). The
   shared client uses `unwrap_or_else(|_| reqwest::Client::new())` because a
   builder failure should degrade to the default client, never crash.

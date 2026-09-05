@@ -52,8 +52,8 @@ the T2.2 repo consolidation.
 | `src/__tests__/composables/use-export.test.ts::export_ris_reports_invoke_error` | error path sets message and returns false |
 | `src/__tests__/views/article-list.test.ts::keyboard_navigation_moves_selection` | arrow/page/home/end keys move selection, wrap pinned |
 | `src/__tests__/views/article-list.test.ts::route_deep_link_params_apply_filters` | route query params drive initial filter state |
-| `src-tauri/tests/tags_labels_test.rs::create_tag_dedupes_normalized_name` | normalized-name create dedupes to the existing tag |
-| `src-tauri/tests/tags_labels_test.rs::create_label_dedupes_normalized_name` | normalized-name create dedupes to the existing label |
+| `src-tauri/tests/db/tags_labels_test.rs::create_tag_dedupes_normalized_name` | normalized-name create dedupes to the existing tag |
+| `src-tauri/tests/db/tags_labels_test.rs::create_label_dedupes_normalized_name` | normalized-name create dedupes to the existing label |
 
 ## Tier 4 tests (added with the decomposition; same binding rule)
 
@@ -71,10 +71,10 @@ the T2.2 repo consolidation.
 
 | Test identifier | Guards |
 |---|---|
-| `src-tauri/tests/summary_repo_test.rs::save_is_upsert_overwriting_existing` | T2.1 upsert semantics |
-| `src-tauri/tests/summary_repo_test.rs::clear_summary_removes_row` | T2.1 clear semantics |
-| `src-tauri/tests/gap_analysis_repo_test.rs::gap_analysis_enforces_single_row` | T2.1 single-row contract |
-| `src-tauri/tests/gap_analysis_repo_test.rs::save_get_round_trip` | T2.1 round trip |
+| `src-tauri/tests/db/summary_repo_test.rs::save_is_upsert_overwriting_existing` | T2.1 upsert semantics |
+| `src-tauri/tests/db/summary_repo_test.rs::clear_summary_removes_row` | T2.1 clear semantics |
+| `src-tauri/tests/db/gap_analysis_repo_test.rs::gap_analysis_enforces_single_row` | T2.1 single-row contract |
+| `src-tauri/tests/db/gap_analysis_repo_test.rs::save_get_round_trip` | T2.1 round trip |
 | `src/__tests__/utils/graph-filters.test.ts` (file-level; names contain spaces so the checker does not extract them) | T1.4 threshold predicates |
 | `src/__tests__/components/tag-chip.test.ts` + `label-chip.test.ts` (file-level) | T1.5 chip parity |
 | `src/__tests__/composables/use-summary.test.ts` + `use-gap-analysis.test.ts` (file-level) | T1.6 scaffold parity |

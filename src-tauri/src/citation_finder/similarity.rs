@@ -107,5 +107,5 @@ pub fn find_best_passage(
     let chunk = &chunks[idx];
     Some((chunk.text.clone(), chunk.section.clone(), score))
 }
-// Unit tests live in `src-tauri/tests/citation_finder_similarity_test.rs`
+// Unit tests live in `src-tauri/tests/citation_finder/citation_finder_similarity_test.rs`
 // (extracted per `docs/CLAUDE.md` §Testing).

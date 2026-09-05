@@ -148,16 +148,16 @@ collision + empty skip + secondary `article_id → DOI` index for the O(n)
 per-article lookup) + `citations_phase.rs` (skip-when-has-details,
 find-references, find-citations-independently, generic-ris-fallback,
 generic-bib-fallback). End-to-end integration tests live in
-`tests/batch_import_test.rs` (13 tests: Phase 1 attach + skip-already-attached
+`tests/batch_import/batch_import_test.rs` (13 tests: Phase 1 attach + skip-already-attached
 + no-matching-DOI + no-DOI-article; Phase 2 refs + citations + independent +
 skip-already-has-details; full-pipeline idempotency; multiple articles with
 mixed files; Phase 3 pre-flight skip + audit + proceed) +
-`tests/full_text_split_test.rs` (12 tests: isolated coverage of the split
+`tests/utils/full_text_split_test.rs` (12 tests: isolated coverage of the split
 pipeline `extract_full_text_data` + `commit_full_text_to_db` +
 `attach_full_text_split` - figures-flag true/false, soft-fallback on invalid
 PDF, DOI-aware destination filename, chunk write, extraction-failure audit,
 end-to-end composition; the monolithic `attach_full_text_inner` path is covered
-by `tests/figures_flag_test.rs`). Phase 3 (live translation) + Phase 4 (AI
+by `tests/commands/figures_flag_test.rs`). Phase 3 (live translation) + Phase 4 (AI
 summaries) require a live LLM and are not covered end-to-end; the pre-flight
 LLM gate is unit-tested via the pure `check_llm_configured_or_skip` helper, and
 the `generate_article_ai_summary_inner` core is tested via the existing

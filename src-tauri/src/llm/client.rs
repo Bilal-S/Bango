@@ -302,11 +302,35 @@ pub fn is_temperature_error(err_msg: &str) -> bool {
 
 /// Exponential backoff: 1s, 2s, 4s (capped at 10s) + 0-500ms jitter.
 fn calculate_backoff(attempt: u32) -> u64 {
+    if let Some(ms) = test_backoff_override_ms() {
+        return ms;
+    }
     let base = LLM_INITIAL_BACKOFF_MS * (1u64 << attempt);
     let capped = base.min(LLM_MAX_BACKOFF_MS);
     let mut rng = rand::rng();
     let jitter = rng.random_range(0..=500);
     capped + jitter
+}
+
+/*
+ * TEST-ONLY override for the retry backoff delay.
+ * Debug builds honor `BANGO_TEST_BACKOFF_MS` so retry-path tests (transport
+ * errors, 429/5xx mock servers) run in milliseconds instead of sleeping
+ * 1+2+4s per call. Release builds are compiled without this branch - the
+ * override can never change production retry timing.
+ */
+fn test_backoff_override_ms() -> Option<u64> {
+    #[cfg(debug_assertions)]
+    {
+        static OVERRIDE: OnceLock<Option<u64>> = OnceLock::new();
+        *OVERRIDE.get_or_init(|| {
+            std::env::var("BANGO_TEST_BACKOFF_MS").ok().and_then(|v| v.parse().ok())
+        })
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
 }
 
 /// Parse `Retry-After` header (delta-seconds) as milliseconds.

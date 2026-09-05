@@ -158,5 +158,5 @@ pub struct CitationFinderProgress {
     pub is_running: bool,
     pub is_cancelled: bool,
 }
-// Unit tests live in `src-tauri/tests/citation_finder_mod_test.rs`
+// Unit tests live in `src-tauri/tests/citation_finder/citation_finder_mod_test.rs`
 // (extracted per `docs/CLAUDE.md` §Testing).

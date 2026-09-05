@@ -30,13 +30,13 @@ Pure helpers (`build_chunk_batches`, `build_chunk_batches_for_indices`, `batch_i
 | `src-tauri/src/translation/engine.rs::parse_batch_translation_response_malformed_falls_back_to_all_missing` | Unparseable response records all expected ids as missing |
 | `src-tauri/src/translation/engine.rs::parse_batch_translation_response_regex_fallback_extracts_embedded_json` | Embedded `{...}` block extracted via regex when wrapped in preamble |
 
-## Rust integration tests (`tests/auto_translate_full_text_test.rs`)
+## Rust integration tests (`tests/translation/auto_translate_full_text_test.rs`)
 
 End-to-end batched full-text translation through the real `translate_full_text` engine with a mock `LlmClient`.
 
 | Test (`file::function`) | Purpose |
 | --- | --- |
-| `src-tauri/tests/auto_translate_full_text_test.rs::full_text_translation_produces_english_chunks_and_full_text` | Batched path produces English stitched text + re-chunked English chunks |
-| `src-tauri/tests/auto_translate_full_text_test.rs::parallel_chunk_dispatch_preserves_input_order` | Concurrent batch dispatch preserves chunk order in stitched output |
-| `src-tauri/tests/auto_translate_full_text_test.rs::batched_translation_resends_missing_chunks` | Truncated first batch triggers a resend round that recovers missing chunks |
-| `src-tauri/tests/auto_translate_full_text_test.rs::batched_translation_fails_after_resend_cap` | Persistently-empty response fails the job after `MAX_RESEND_ITERATIONS` |
+| `src-tauri/tests/translation/auto_translate_full_text_test.rs::full_text_translation_produces_english_chunks_and_full_text` | Batched path produces English stitched text + re-chunked English chunks |
+| `src-tauri/tests/translation/auto_translate_full_text_test.rs::parallel_chunk_dispatch_preserves_input_order` | Concurrent batch dispatch preserves chunk order in stitched output |
+| `src-tauri/tests/translation/auto_translate_full_text_test.rs::batched_translation_resends_missing_chunks` | Truncated first batch triggers a resend round that recovers missing chunks |
+| `src-tauri/tests/translation/auto_translate_full_text_test.rs::batched_translation_fails_after_resend_cap` | Persistently-empty response fails the job after `MAX_RESEND_ITERATIONS` |

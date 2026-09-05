@@ -168,6 +168,7 @@ async fn test_openai_no_usage_returns_zero_tokens() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_openai_rate_limit_429() {
     // 429 is a transient status: the client retries up to 3 times (4 total
     // attempts) before surfacing the error. This matches the spec §4.3
@@ -193,6 +194,7 @@ async fn test_openai_rate_limit_429() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_openai_server_error_500() {
     // 500 is a transient server error: the client retries up to 3 times
     // (4 total attempts) before surfacing the error.
@@ -214,6 +216,7 @@ async fn test_openai_server_error_500() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_openai_insufficient_permissions_403_is_retried_then_succeeds() {
     // Regression test for the Windows-only intermittent "insufficient permissions"
     // gateway error. The body matches the empirically-observed transient exactly
@@ -489,6 +492,7 @@ async fn test_google_standard_response() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_google_rate_limit_429() {
     // 429 is transient: the Google path now retries (parity with the OpenAI
     // path), so the mock receives 4 requests (1 initial + 3 retries).
@@ -531,6 +535,7 @@ async fn test_google_endpoint_already_has_generate_content() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_google_server_error() {
     // 500 is transient: the Google path retries (parity with OpenAI),
     // so the mock receives 4 requests (1 initial + 3 retries).
@@ -868,6 +873,7 @@ async fn test_list_models_strips_models_suffix() {
 // ── list_models: error handling ──────────────────────────────────────
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_list_models_server_error() {
     let mut server = mockito::Server::new_async().await;
     let mock = server
@@ -957,6 +963,7 @@ async fn test_endpoint_url_trailing_slash_stripped() {
 use bango_lib::llm::client::CallMeta;
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_openai_temperature_400_retries_without_temperature() {
     let mut server = mockito::Server::new_async().await;
 

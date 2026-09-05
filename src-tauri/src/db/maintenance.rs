@@ -81,7 +81,7 @@ mod tests {
         // On an in-memory DB the journal mode is "memory" and cannot be set to
         // WAL. The helper must not error when the final journal_mode=WAL pragma
         // is a no-op. (On a file-backed WAL DB the file-backed test in
-        // tests/maintenance_test.rs proves the round trip restores WAL mode.)
+        // tests/db/maintenance_test.rs proves the round trip restores WAL mode.)
         let conn = test_db();
         vacuum_database(&conn).unwrap();
         let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();

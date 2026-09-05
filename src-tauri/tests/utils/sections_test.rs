@@ -196,9 +196,9 @@ fn classify_sections_body_excludes_heading_line() {
 // ── Real-PDF end-to-end tests ──────────────────────────────────────────────
 //
 // These exercise the full pipeline (pdf-extract → classify_sections →
-// chunk_sections) against a committed open-access PDF. They are `#[ignore]` by
-// default to keep the fast unit-test run lean; run with
-// `cargo test --test sections_test -- --ignored`.
+// chunk_sections) against a committed open-access PDF. They are `#[ignore]`d
+// because they are currently broken (root cause noted on each test); run with
+// `cargo test --test utils -- --ignored sections_test`.
 //
 // Fixture: `tests/assets/plos-med-1004371.pdf`
 // Cobiac et al. (2024), "Change in consumption of free sugars among children
@@ -218,7 +218,7 @@ const PLOS_ONE_PDF: &str = "../tests/assets/pone-0285956.pdf";
 /// cannot fully cover (they don't exercise pdf-extract's space-preserving primary
 /// path or real-world heading formatting).
 #[test]
-#[ignore] // depends on a 744KB committed PDF asset
+#[ignore] // broken: multi-column flattening merges "Results" heading mid-line (see tests/AGENTS.md); fix extraction/classification before re-enabling
 fn real_pdf_pipeline_detects_methods_results_discussion() {
     let path = Path::new(PLOS_PDF);
     if !path.exists() {
@@ -283,7 +283,7 @@ fn real_pdf_pipeline_detects_methods_results_discussion() {
 /// template family as the PLoS Medicine paper, but a different journal - confirms
 /// the section detection generalises and is not hardcoded to one paper's layout.
 #[test]
-#[ignore] // depends on a 512KB committed PDF asset
+#[ignore] // broken: multi-column flattening merges "Results" heading mid-line (see tests/AGENTS.md); fix extraction/classification before re-enabling
 fn real_pdf_pipeline_plos_one_oakland_detects_methods_and_results() {
     let path = Path::new(PLOS_ONE_PDF);
     if !path.exists() {
@@ -318,7 +318,7 @@ fn real_pdf_pipeline_plos_one_oakland_detects_methods_and_results() {
 /// single Text section (no spurious headings) and chunk_sections must still split
 /// it into word-count-bounded chunks. This is the graceful-degrade regression.
 #[test]
-#[ignore] // depends on the existing 1.7MB committed PDF asset
+#[ignore] // broken: space-degenerate lopdf text still produces keyword sections (see tests/AGENTS.md); fix before re-enabling
 fn lopdf_fallback_pdf_degrades_to_single_text_section() {
     let path = Path::new("../tests/assets/demo-vfs-2022-pid-69753.pdf");
     if !path.exists() {

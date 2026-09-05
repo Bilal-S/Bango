@@ -10,6 +10,27 @@ use sha2::Sha256;
 const SALT: &[u8; 16] = b"bango-app-salt16";
 const ITERATIONS: u32 = 600_000;
 
+/*
+ * TEST-ONLY override for the PBKDF2 iteration count.
+ * Debug builds honor `BANGO_TEST_PBKDF2_ITERATIONS` so test binaries that
+ * derive keys (config saves, crypto tests) pay ~5ms instead of ~2.75s per
+ * process. Release builds always use `ITERATIONS` - the override is compiled
+ * out, so an env var can never weaken encryption in production.
+ */
+fn iterations() -> u32 {
+    #[cfg(debug_assertions)]
+    {
+        static OVERRIDE: OnceLock<Option<u32>> = OnceLock::new();
+        let parsed = *OVERRIDE.get_or_init(|| {
+            std::env::var("BANGO_TEST_PBKDF2_ITERATIONS").ok().and_then(|v| v.parse().ok())
+        });
+        if let Some(n) = parsed {
+            return n;
+        }
+    }
+    ITERATIONS
+}
+
 /// Process-wide cached key derived from machine identity.
 /// PBKDF2 with 600K iterations takes ~2.75s - we compute it once and reuse.
 static CACHED_MACHINE_KEY: OnceLock<[u8; 32]> = OnceLock::new();
@@ -24,7 +45,7 @@ pub fn derive_key_from_machine() -> [u8; 32] {
         let username = get_username();
         let identity = format!("{hostname}:{username}");
         let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(identity.as_bytes(), SALT, ITERATIONS, &mut key);
+        pbkdf2_hmac::<Sha256>(identity.as_bytes(), SALT, iterations(), &mut key);
         key
     })
 }
@@ -33,7 +54,7 @@ pub fn derive_key_from_machine() -> [u8; 32] {
 #[must_use]
 pub fn derive_key_from_password(password: &str) -> [u8; 32] {
     let mut key = [0u8; 32];
-    pbkdf2_hmac::<Sha256>(password.as_bytes(), SALT, ITERATIONS, &mut key);
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), SALT, iterations(), &mut key);
     key
 }
 

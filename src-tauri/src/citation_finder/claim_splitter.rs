@@ -46,5 +46,5 @@ pub fn enforce_max_claims(claims: Vec<String>) -> Vec<String> {
         .filter(|c| !c.is_empty())
         .collect()
 }
-// Unit tests live in `src-tauri/tests/citation_finder_claim_split_test.rs`
+// Unit tests live in `src-tauri/tests/citation_finder/citation_finder_claim_split_test.rs`
 // (extracted per `docs/CLAUDE.md` §Testing).

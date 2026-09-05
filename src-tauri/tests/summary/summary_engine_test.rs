@@ -172,6 +172,7 @@ async fn generate_summary_trims_response() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn generate_summary_propagates_llm_error() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server

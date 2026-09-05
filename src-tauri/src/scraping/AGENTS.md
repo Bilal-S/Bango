@@ -90,7 +90,7 @@ to the audit table via `log_error_best_effort` (skip outcomes are labeled
 Tested inline (15 pure tests in `citation_chaser.rs::tests`:
 `detect_empty_or_disconnect` branches, `validate_ris_nonempty`, `CancelToken`
 semantics, `sleep_or_cancel`, `clean_doi_filename`, `ScrapeKind` helpers) +
-`tests/citation_chaser_test.rs` (1 pure `Validation` check + 6 `#[ignore]`d live
+`tests/scraping/citation_chaser_test.rs` (1 pure `Validation` check + 6 `#[ignore]`d live
 tests: refs-only, cits-only, both, zero-refs-returns-NoData-promptly,
 zero-cits-returns-NoData-no-cached-file, cancel-returns-Cancelled-promptly).
 

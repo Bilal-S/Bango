@@ -535,5 +535,5 @@ fn collect_md_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), AppErr
     Ok(())
 }
 
-/* All unit tests live in `src-tauri/tests/wiki_fts_test.rs` per
+/* All unit tests live in `src-tauri/tests/wiki/wiki_fts_test.rs` per
 `docs/CLAUDE.md` §Testing: move large inline tests to standalone integration tests. */

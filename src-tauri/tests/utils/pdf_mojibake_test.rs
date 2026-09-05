@@ -146,7 +146,7 @@ fn recover_mojibake_recovers_mixed_japanese_and_english_loanwords() {
 const NAIKA_PDF: &str = "../tests/assets/multilingual-oa/ja/10.2169_naika.94.794.pdf";
 
 #[test]
-#[ignore] // slow; loads a ~3 MB PDF asset
+#[ignore = "slow"] // slow; loads a ~3 MB PDF asset
 fn extract_recovers_japanese_mojibake_from_naika_fixture() {
     let path = Path::new(NAIKA_PDF);
     if !path.exists() {

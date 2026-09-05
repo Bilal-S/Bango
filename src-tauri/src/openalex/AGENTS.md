@@ -97,11 +97,11 @@ domain set).
 
 ## Verification
 
-- `tests/openalex_mapping_test.rs` (11 tests incl.
+- `tests/openalex/openalex_mapping_test.rs` (11 tests incl.
   `deserialize_harvest_response_missing_fields`)
-- `tests/openalex_search_test.rs` (5 tests)
-- `tests/openalex_import_test.rs` (5 tests + 1 ignored Tier 2 stub)
-- `tests/openalex_smart_search_test.rs` (15 tests: prompt char-limit/stemming/
+- `tests/openalex/openalex_search_test.rs` (5 tests)
+- `tests/openalex/openalex_import_test.rs` (5 tests + 1 ignored Tier 2 stub)
+- `tests/openalex/openalex_smart_search_test.rs` (15 tests: prompt char-limit/stemming/
   wildcard, `truncate_search_query` balance + word-boundary, parser over-long
   truncation)
 

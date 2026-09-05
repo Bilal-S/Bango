@@ -26,7 +26,7 @@ pub fn get_all_tags(conn: &Connection) -> Result<Vec<Tag>, AppError> {
 
 pub fn create_tag(conn: &Connection, name: &str, source: &str) -> Result<Tag, AppError> {
     // Dedupe case-insensitively to avoid the UNIQUE constraint violation
-    // (pinned by tests/tags_labels_test.rs::create_tag_dedupes_normalized_name).
+    // (pinned by tests/db/tags_labels_test.rs::create_tag_dedupes_normalized_name).
     if let Some(raw) = tag_label_core::find_by_normalized_name(conn, "tags", name) {
         return Ok(tag_from_row(raw));
     }

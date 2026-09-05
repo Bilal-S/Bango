@@ -2,7 +2,7 @@
 //!
 //! The async `find_citations_inner` entry point depends on a live Tauri
 //! `State<DbState>` + `AppHandle`, so it cannot be driven directly from a
-//! `#[test]` (same constraint documented in `tests/embedding_runner_test.rs`).
+//! `#[test]` (same constraint documented in `tests/embedding/embedding_runner_test.rs`).
 //! Instead, the pipeline's testable decisions live in pure helpers:
 //! - `normalize_claim_key` (the drift-tolerant claim lookup key) - tested here
 //!   + in `search.rs` inline.

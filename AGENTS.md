@@ -96,9 +96,10 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
   `commands/`, `db/`, `llm/`, `screening/`, `wiki/`, `embedding/`,
   `citation_finder/`, `translation/`, `batch_import/`, `openalex/`,
   `scraping/`, `export/`, `utils/`, `zotero/`.
-- **`src-tauri/tests/`** - Rust integration tests (one self-contained crate
-  per `.rs` file; also the extraction home for inline `#[cfg(test)]` blocks).
-  See `src-tauri/tests/AGENTS.md`.
+- **`src-tauri/tests/`** - Rust integration tests (one test binary per area
+  under `tests/<area>/`; also the extraction home for inline `#[cfg(test)]`
+  blocks; slow tests are `#[ignore = "slow"]` + registered in
+  `tests/slow-manifest.toml`). See `src-tauri/tests/AGENTS.md`.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend. Owns the canonical
   LLM-configured gate, the multi-source `watch()` rule, and the shared test
   helpers, plus the frontend Child DOX Index: `views/`, `components/`,
@@ -128,8 +129,10 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
 - **`.worktrees/`** - planning documents. Not part of the shipped app.
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy
-`-D warnings` on the library crate + vitest + `check:test-inventory`) and
-`cargo test`. Clippy test-awareness details live in `docs/CLAUDE.md`
+`-D warnings` on the library crate + vitest + `check:test-inventory` +
+`check:slow-manifest`) and the Rust suites via `npm run test:rust` (fast) /
+`npm run test:rust:full` (complete) / `npm run test:rust:changed` (slow tests
+for changed areas). Clippy test-awareness details live in `docs/CLAUDE.md`
 §Error Handling; per-side coverage tooling and the `src-tauri/target`
 disk-space contract live in the `src/AGENTS.md` and `src-tauri/src/AGENTS.md`
 Verification sections.

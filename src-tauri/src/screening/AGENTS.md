@@ -345,17 +345,17 @@ matching the frontend stepper's `BATCH_MAX`.
 
 ## Verification
 
-- `tests/decision_test.rs`, `tests/error_classify_test.rs`,
-  `tests/json_parse_test.rs`, `tests/article_writer_test.rs`,
-  `tests/screening_e2e_test.rs`, `tests/screening_two_stage_test.rs`,
-  `tests/screening_engine_test.rs`, `tests/resolution_test.rs`,
-  `tests/screening_prompt_test.rs`, `tests/token_estimation_test.rs`,
-  `tests/chunk_retrieval_test.rs`, `tests/article_query_test.rs`.
+- `tests/screening/decision_test.rs`, `tests/screening/error_classify_test.rs`,
+  `tests/screening/json_parse_test.rs`, `tests/db/article_writer_test.rs`,
+  `tests/screening/screening_e2e_test.rs`, `tests/screening/screening_two_stage_test.rs`,
+  `tests/screening/screening_engine_test.rs`, `tests/screening/resolution_test.rs`,
+  `tests/screening/screening_prompt_test.rs`, `tests/utils/token_estimation_test.rs`,
+  `tests/screening/chunk_retrieval_test.rs`, `tests/db/article_query_test.rs`.
 - Inline tests in each `engine/` submodule (types serde, prompt-parts cloning,
   `is_borderline`, `is_transient_llm_error`, `is_auth_failure`,
   `stop_during_request_delay_*`, sanitize + truncate + create_or_match edge
   cases, system-prompt guidelines, chunk-progress callback, phase field serde).
-- `tests/llm_orchestrator_test.rs` (3 `timeout_for` tests).
+- `tests/llm/llm_orchestrator_test.rs` (3 `timeout_for` tests).
 
 ## Child DOX Index
 

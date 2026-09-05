@@ -45,7 +45,7 @@ These were previously the only two tag/label mutation paths that omitted the
 flags, silently desyncing the keyword co-occurrence network
 (`biblio_repo/networks/keywords.rs`) and the wiki concept hubs
 (`wiki/ingest/concepts.rs`) after a delete - every other tag/label mutation in
-`commands/articles.rs` already set them. Tested in `tests/tags_labels_test.rs`.
+`commands/articles.rs` already set them. Tested in `tests/db/tags_labels_test.rs`.
 
 **Merge ("Replace with...") contract**: `merge_tag` / `merge_label` commands
 delegate to `pub fn merge_tag_inner` / `merge_label_inner` (testable without
@@ -59,7 +59,7 @@ helper (single-entry bulk pattern; detail string
 staleness flags. The `MergeResult` (`reassigned_count` excludes co-occurrence
 overlaps; `already_had_survivor_count` reports them separately). The
 pre-confirm dialog shows an honest upper bound (`from.articleCount`); the real
-counts surface in the success toast. Tested in `tests/merge_tags_labels_test.rs`
+counts surface in the success toast. Tested in `tests/db/merge_tags_labels_test.rs`
 (15 tests incl. `merge_tag_no_dangling_overlap_rows` CASCADE regression +
 `merge_tag_chain_safe` chained-merge safety).
 
@@ -159,9 +159,9 @@ Binding inventory: `docs/test-plans/criteria-generation-tests.md` and
 ## Verification
 
 See `src-tauri/src/AGENTS.md`: `npm run check:all` + `cargo test`. Relevant
-integration tests: `tests/chunk_rebuild_test.rs` (async chunk-rebuild loop,
-translated guard, embedding-cascade helpers), `tests/tags_labels_test.rs`,
-`tests/merge_tags_labels_test.rs`, `tests/legacy_upgrade_test.rs`. Binding
+integration tests: `tests/commands/chunk_rebuild_test.rs` (async chunk-rebuild loop,
+translated guard, embedding-cascade helpers), `tests/db/tags_labels_test.rs`,
+`tests/db/merge_tags_labels_test.rs`, `tests/export/legacy_upgrade_test.rs`. Binding
 inventories: `docs/test-plans/criteria-generation-tests.md` and
 `docs/test-plans/search-strategy-tests.md` (enforced by
 `scripts/check-test-inventory.sh` via `npm run check:all`).

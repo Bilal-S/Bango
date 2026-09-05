@@ -47,7 +47,7 @@ article corpus.
   chunked ingest; submodules: `mod.rs` core pipeline + re-exports,
   `batching.rs`, `consolidation.rs`, `authors.rs`, `synthesis.rs`,
   `concepts.rs`, `sources.rs`, `slugs.rs`). Inline tests extracted to
-  `tests/wiki_ingest_test.rs` per `docs/CLAUDE.md` §Testing.
+  `tests/wiki/wiki_ingest_test.rs` per `docs/CLAUDE.md` §Testing.
 - `engine.rs` - deterministic lint + `build_graph` for link graph
   visualization. `LintKind::UngroundedPage` (ERROR-level provenance check).
 - `chat.rs` (T1.2 update) - token-budgeted RAG chat over FTS5 index; self-heals
@@ -151,7 +151,7 @@ Runs unconditionally before the LLM on every single-batch AND multi-batch run:
    `fetch_top_terms` are separate fns so `methods::fetch_methods_from_terms`
    (the abstracts-only fallback) still calls the terms-only path unchanged.
    Each concept page links to its articles (`[[uuid]]`) + co-occurring
-   concepts. Tested in `tests/wiki_concepts_tags_test.rs` (11 tests).
+   concepts. Tested in `tests/wiki/wiki_concepts_tags_test.rs` (11 tests).
 4. `preseed_methods` writes top-25 `wiki/methods/{method-slug}.md` hub pages
    from AI-summary `study_design` (when present) with a `biblio_terms`
    fallback for abstracts-only corpora; a curated study-design lexicon
@@ -246,7 +246,7 @@ Your Wiki" empty-state card after deletion. Keeps `raw/` and `templates/` so
 source documents survive for a future rebuild. The self-healing
 `ensure_initialized` guard re-creates `AGENTS.md` when the user clicks any
 ingest action. Also clears `wiki_needs_refresh` (defense-in-depth). Tested in
-`tests/wiki_test.rs::delete_wiki_de_initializes_by_removing_agents_md` +
+`tests/wiki/wiki_test.rs::delete_wiki_de_initializes_by_removing_agents_md` +
 `delete_then_mark_staleness_does_not_re_initialize`.
 
 ### External-edit drift detection (`wiki_check_for_updates`, async)
@@ -290,17 +290,17 @@ full flag contract.
 
 ## Verification
 
-- `tests/wiki_fts_test.rs` (36 unit tests)
-- `tests/wiki_ingest_test.rs` (6 freeze tests)
-- `tests/wiki_consolidation_test.rs` (multi-batch consolidation)
-- `tests/wiki_index_drift_test.rs` (two-tier external-edit drift detection)
-- `tests/wiki_concepts_tags_test.rs` (11 tests)
-- `tests/wiki_deterministic_test.rs` + `tests/wiki_methods_preseed_test.rs`
+- `tests/wiki/wiki_fts_test.rs` (36 unit tests)
+- `tests/wiki/wiki_ingest_test.rs` (6 freeze tests)
+- `tests/wiki/wiki_consolidation_test.rs` (multi-batch consolidation)
+- `tests/wiki/wiki_index_drift_test.rs` (two-tier external-edit drift detection)
+- `tests/wiki/wiki_concepts_tags_test.rs` (11 tests)
+- `tests/wiki/wiki_deterministic_test.rs` + `tests/wiki/wiki_methods_preseed_test.rs`
   (5-layer pre-seed)
-- `tests/wiki_grounding_test.rs` (Tier A1 grounding gate)
-- `tests/wiki_ensure_initialized_test.rs` (self-healing init guard)
-- `tests/wiki_test.rs` (de-init on delete + staleness)
-- `tests/wiki_full_text_refresh_test.rs` (staleness pairing)
+- `tests/wiki/wiki_grounding_test.rs` (Tier A1 grounding gate)
+- `tests/wiki/wiki_ensure_initialized_test.rs` (self-healing init guard)
+- `tests/wiki/wiki_test.rs` (de-init on delete + staleness)
+- `tests/wiki/wiki_full_text_refresh_test.rs` (staleness pairing)
 - `src/__tests__/composables/use-wiki.test.ts` +
   `src/__tests__/components/wiki-toolbar.test.ts` +
   `src/__tests__/views/wiki-view.test.ts`

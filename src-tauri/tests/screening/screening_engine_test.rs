@@ -1036,6 +1036,7 @@ impl LlmClient for AlwaysSucceedMock {
 /// run immediately (success path, engine.rs ~line 644). Without the fix
 /// this test would hang for ~3s (the full `request_delay_ms`).
 #[tokio::test]
+#[ignore = "slow"]
 async fn stop_during_request_delay_success_path() {
     let db = setup_screening_db();
     let (criteria, aims) = {
@@ -1102,6 +1103,7 @@ async fn stop_during_request_delay_success_path() {
 /// abort the run immediately (transient path, engine.rs ~line 631). Without
 /// the fix this test would hang for ~3s.
 #[tokio::test]
+#[ignore = "slow"]
 async fn stop_during_request_delay_transient_path() {
     let db = setup_screening_db();
     let (criteria, aims) = {

@@ -9,7 +9,7 @@
 //! Copy-only: no database API execution.
 //!
 //! Pure helpers (`build_search_strategy_prompt`, `parse_search_strategy_response`)
-//! are extracted as `pub fn`s so `tests/search_strategy_test.rs` can exercise
+//! are extracted as `pub fn`s so `tests/commands/search_strategy_test.rs` can exercise
 //! them without `State<DbState>` (per `docs/CLAUDE.md` §Testing).
 
 use std::sync::Arc;

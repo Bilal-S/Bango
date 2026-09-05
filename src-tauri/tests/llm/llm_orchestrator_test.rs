@@ -160,6 +160,7 @@ async fn semaphore_limits_concurrent_requests() {
 // ─── test_connection ────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn test_connection_fails_on_unreachable_endpoint() {
     let orch = LlmOrchestrator::new(1, 0);
     let config = fake_config();
@@ -171,6 +172,7 @@ async fn test_connection_fails_on_unreachable_endpoint() {
 // ─── Concurrent send() calls ────────────────────────────────────────
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn concurrent_sends_do_not_deadlock() {
     let orch = Arc::new(LlmOrchestrator::new(3, 0));
     let config = fake_config();
@@ -191,6 +193,7 @@ async fn concurrent_sends_do_not_deadlock() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn concurrent_sends_with_delay_do_not_deadlock() {
     let orch = Arc::new(LlmOrchestrator::new(2, 50)); // 50ms delay
     let config = fake_config();
@@ -211,6 +214,7 @@ async fn concurrent_sends_with_delay_do_not_deadlock() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn many_concurrent_sends_at_high_concurrency() {
     let orch = Arc::new(LlmOrchestrator::new(10, 0));
     let config = fake_config();
@@ -233,6 +237,7 @@ async fn many_concurrent_sends_at_high_concurrency() {
 // ─── Mixed request types ────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn mixed_request_types_no_recursion() {
     let orch = Arc::new(LlmOrchestrator::new(3, 0));
     let config = fake_config();
@@ -272,6 +277,7 @@ async fn send_unthrottled_does_not_consume_semaphore() {
 }
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn send_unthrottled_fails_on_unreachable() {
     let orch = LlmOrchestrator::new(1, 0);
     let config = fake_config();
@@ -283,6 +289,7 @@ async fn send_unthrottled_fails_on_unreachable() {
 // ─── update_settings_during_active_requests ─────────────────────────
 
 #[tokio::test]
+#[ignore = "slow"]
 async fn update_settings_during_active_requests_no_deadlock() {
     let orch = Arc::new(LlmOrchestrator::new(2, 0));
     let config = fake_config();

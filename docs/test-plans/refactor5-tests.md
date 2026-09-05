@@ -14,5 +14,5 @@ path directly (the source DB rejects duplicates at INSERT time).
 
 | Test identifier | Assertion |
 |---|---|
-| `src-tauri/tests/project_backup_test.rs::import_reference_papers_dedup_via_doi` | 2 papers sharing a DOI -> second remapped via `paper_id_map`, not duplicated; downstream `article_reference_links` resolve to the surviving id |
-| `src-tauri/tests/project_backup_test.rs::import_biblio_terms_dedup_composite_key` | 2 terms sharing `normalized_term` but differing `term_type` -> both survive (composite UNIQUE key); `biblio_article_terms` links to the correct one |
+| `src-tauri/tests/export/project_backup_test.rs::import_reference_papers_dedup_via_doi` | 2 papers sharing a DOI -> second remapped via `paper_id_map`, not duplicated; downstream `article_reference_links` resolve to the surviving id |
+| `src-tauri/tests/export/project_backup_test.rs::import_biblio_terms_dedup_composite_key` | 2 terms sharing `normalized_term` but differing `term_type` -> both survive (composite UNIQUE key); `biblio_article_terms` links to the correct one |

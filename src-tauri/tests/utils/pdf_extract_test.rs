@@ -15,7 +15,7 @@ use std::path::Path;
 const PROBLEMATIC_PDF: &str = "../tests/assets/demo-vfs-2022-pid-69753.pdf";
 
 #[test]
-#[ignore] // slow; uses a 1.7 MB PDF asset
+#[ignore = "slow"] // slow; uses a 1.7 MB PDF asset
 fn extract_pdf_text_does_not_panic_on_expert_encoded_fonts() {
     let path = Path::new(PROBLEMATIC_PDF);
     if !path.exists() {

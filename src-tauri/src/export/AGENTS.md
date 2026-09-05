@@ -79,7 +79,7 @@ JSON first, the exporter emits it as a nested JSON object under
 (`.as_str()` yields None for objects and silently binds NULL, losing the
 LLM-generated summary on restore); it re-serializes objects back to text and
 passes plain strings through for old/hand-edited backups. Tested in
-`tests/project_backup_test.rs` (`export_import_preserves_full_text_ai_summary_json_blob`,
+`tests/export/project_backup_test.rs` (`export_import_preserves_full_text_ai_summary_json_blob`,
 `import_full_text_ai_summary_string_shape_passthrough`); inventory at
 `docs/test-plans/exim-tests.md`.
 
@@ -92,7 +92,7 @@ pre-feature default). The export side already serialized `color` via
 `SELECT * FROM tags/labels`; the bug was that the import INSERT only named
 `id, name, source`, silently dropping the user's chosen color to `NULL` on
 restore. Tested in
-`tests/project_backup_test.rs::test_export_import_round_trip_all_tables` (seed
+`tests/export/project_backup_test.rs::test_export_import_round_trip_all_tables` (seed
 now carries colors + explicit round-trip assertions on both tables).
 
 #### Audit-entry `article_id` normalization contract
@@ -109,8 +109,8 @@ now carries colors + explicit round-trip assertions on both tables).
    via `.filter(|s| !s.is_empty())` on the `Option<String>` extraction so
    historical backups don't violate the FK constraint on the v006-rebuilt
    `audit_entries` table. The row is preserved as a system-level entry, never
-   silently dropped. Tested in `tests/project_backup_test.rs` (3 tests) +
-   `tests/migration_recovery_test.rs::v006_heals_empty_string_article_id_to_null`;
+   silently dropped. Tested in `tests/export/project_backup_test.rs` (3 tests) +
+   `tests/db/migration_recovery_test.rs::v006_heals_empty_string_article_id_to_null`;
    inventory at `docs/test-plans/exim-tests.md`.
 
 ### `legacy_project.rs`
@@ -128,11 +128,11 @@ current-format `ProjectBackup` JSON, deduplicating rows into `reference_papers`
 
 ## Verification
 
-`tests/project_backup_test.rs` (20 tests incl. round-trip all tables +
+`tests/export/project_backup_test.rs` (20 tests incl. round-trip all tables +
 dedup paths + color preservation + audit normalization + AI-summary blob
 preservation),
-`tests/legacy_upgrade_test.rs` (legacy round-trip + pure decision function),
-`tests/reset_project_test.rs` (delete-all-data + VACUUM + wiki-root wipe),
+`tests/export/legacy_upgrade_test.rs` (legacy round-trip + pure decision function),
+`tests/export/reset_project_test.rs` (delete-all-data + VACUUM + wiki-root wipe),
 inventory at `docs/test-plans/exim-tests.md` + `docs/test-plans/refactor5-tests.md`.
 
 ## Child DOX Index

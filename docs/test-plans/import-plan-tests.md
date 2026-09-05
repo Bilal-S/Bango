@@ -27,7 +27,7 @@ Pure helper + integration coverage of the `{clean_doi}.{ext}` naming decision.
 | `src-tauri/src/commands/full_text.rs::dest_filename_falls_back_to_uuid_when_doi_empty` | Empty/whitespace DOI treated as absent |
 | `src-tauri/src/commands/full_text.rs::place_file_no_op_when_source_equals_dest` | Same canonical path short-circuits (no self-copy truncation) |
 | `src-tauri/src/commands/full_text.rs::place_file_hard_links_or_copies_to_new_dest` | New dest gets the content via hard-link or copy fallback |
-| `src-tauri/tests/batch_import_test.rs::phase1_uses_doi_filename_when_article_has_doi` | Phase 1 end-to-end stores `{clean_doi}.txt` for a DOI article |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase1_uses_doi_filename_when_article_has_doi` | Phase 1 end-to-end stores `{clean_doi}.txt` for a DOI article |
 
 ## Concern 3 - Split pipeline direct tests (`commands::full_text`)
 
@@ -38,18 +38,18 @@ cover the split functions directly; previously only the monolithic
 
 | Test identifier | Assertion |
 |---|---|
-| `src-tauri/tests/full_text_split_test.rs::extract_sets_has_figures_or_tables_true_when_caption_present` | `extract_full_text_data` sets the figures flag when a caption is detected |
-| `src-tauri/tests/full_text_split_test.rs::extract_sets_has_figures_or_tables_false_for_plain_prose` | Flag stays false for prose with no captions |
-| `src-tauri/tests/full_text_split_test.rs::extract_invalid_pdf_soft_fallback_with_empty_text_and_error` | Invalid PDF -> empty `full_text` + `extraction_error` set (soft fallback) |
-| `src-tauri/tests/full_text_split_test.rs::extract_unsupported_extension_is_a_hard_error` | Unsupported extension -> hard `Err` (nothing to attach) |
-| `src-tauri/tests/full_text_split_test.rs::extract_missing_file_is_a_hard_error` | Missing source file -> hard `Err` |
-| `src-tauri/tests/full_text_split_test.rs::extract_uses_doi_based_destination_filename_when_doi_present` | Destination filename is `{clean_doi}.txt` when a DOI is supplied |
-| `src-tauri/tests/full_text_split_test.rs::extract_uses_uuid_based_destination_filename_when_doi_absent` | Destination filename is `{stem}_{id}.txt` when no DOI |
-| `src-tauri/tests/full_text_split_test.rs::commit_writes_full_text_chunks_audit_and_flags` | `commit_full_text_to_db` updates the row, writes chunks, sets the figures flag |
-| `src-tauri/tests/full_text_split_test.rs::commit_extraction_failure_writes_error_audit_but_attachment_persists` | Extraction-failure path still attaches (empty `full_text`) + writes an error audit row |
-| `src-tauri/tests/full_text_split_test.rs::split_pipeline_attaches_txt_and_commits_via_short_lock_burst` | `attach_full_text_split` end-to-end: parse + commit composes correctly |
-| `src-tauri/tests/full_text_split_test.rs::split_pipeline_uses_doi_filename_when_doi_provided` | Split pipeline produces the DOI-based destination filename end-to-end |
-| `src-tauri/tests/full_text_split_test.rs::split_pipeline_soft_fallback_on_invalid_pdf` | Split pipeline soft-fallbacks on invalid PDF (attach persists, `extraction_failed` true) |
+| `src-tauri/tests/utils/full_text_split_test.rs::extract_sets_has_figures_or_tables_true_when_caption_present` | `extract_full_text_data` sets the figures flag when a caption is detected |
+| `src-tauri/tests/utils/full_text_split_test.rs::extract_sets_has_figures_or_tables_false_for_plain_prose` | Flag stays false for prose with no captions |
+| `src-tauri/tests/utils/full_text_split_test.rs::extract_invalid_pdf_soft_fallback_with_empty_text_and_error` | Invalid PDF -> empty `full_text` + `extraction_error` set (soft fallback) |
+| `src-tauri/tests/utils/full_text_split_test.rs::extract_unsupported_extension_is_a_hard_error` | Unsupported extension -> hard `Err` (nothing to attach) |
+| `src-tauri/tests/utils/full_text_split_test.rs::extract_missing_file_is_a_hard_error` | Missing source file -> hard `Err` |
+| `src-tauri/tests/utils/full_text_split_test.rs::extract_uses_doi_based_destination_filename_when_doi_present` | Destination filename is `{clean_doi}.txt` when a DOI is supplied |
+| `src-tauri/tests/utils/full_text_split_test.rs::extract_uses_uuid_based_destination_filename_when_doi_absent` | Destination filename is `{stem}_{id}.txt` when no DOI |
+| `src-tauri/tests/utils/full_text_split_test.rs::commit_writes_full_text_chunks_audit_and_flags` | `commit_full_text_to_db` updates the row, writes chunks, sets the figures flag |
+| `src-tauri/tests/utils/full_text_split_test.rs::commit_extraction_failure_writes_error_audit_but_attachment_persists` | Extraction-failure path still attaches (empty `full_text`) + writes an error audit row |
+| `src-tauri/tests/utils/full_text_split_test.rs::split_pipeline_attaches_txt_and_commits_via_short_lock_burst` | `attach_full_text_split` end-to-end: parse + commit composes correctly |
+| `src-tauri/tests/utils/full_text_split_test.rs::split_pipeline_uses_doi_filename_when_doi_provided` | Split pipeline produces the DOI-based destination filename end-to-end |
+| `src-tauri/tests/utils/full_text_split_test.rs::split_pipeline_soft_fallback_on_invalid_pdf` | Split pipeline soft-fallbacks on invalid PDF (attach persists, `extraction_failed` true) |
 
 ## Concern 3 - Phase 1 lock scope + match map (`batch_import::full_text_phase`)
 
@@ -75,20 +75,20 @@ cover the split functions directly; previously only the monolithic
 
 | Test identifier | Assertion |
 |---|---|
-| `src-tauri/tests/batch_import_test.rs::phase1_attaches_full_text_to_matching_articles` | Phase 1 attaches files matching by DOI |
-| `src-tauri/tests/batch_import_test.rs::phase1_skips_articles_that_already_have_full_text` | Already-attached articles are skipped |
-| `src-tauri/tests/batch_import_test.rs::phase1_ignores_files_with_no_matching_doi` | Files with no matching article DOI are ignored |
-| `src-tauri/tests/batch_import_test.rs::phase1_skips_article_without_doi` | No-DOI articles are not matched |
-| `src-tauri/tests/batch_import_test.rs::phase2_imports_references_from_ris_files` | Phase 2 imports `_references.ris` |
-| `src-tauri/tests/batch_import_test.rs::phase2_imports_citations_from_ris_files` | Phase 2 imports `_citations.ris` |
-| `src-tauri/tests/batch_import_test.rs::phase2_imports_references_and_citations_independently` | Refs + citations imported independently in one pass |
-| `src-tauri/tests/batch_import_test.rs::phase2_skips_articles_that_already_have_reference_details` | Already-has-refs articles skipped |
-| `src-tauri/tests/batch_import_test.rs::full_pipeline_is_idempotent_on_second_run` | Second run finds nothing to do (flags set) |
-| `src-tauri/tests/batch_import_test.rs::pipeline_handles_multiple_articles_with_mixed_files` | Mixed attachments across multiple articles |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase1_attaches_full_text_to_matching_articles` | Phase 1 attaches files matching by DOI |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase1_skips_articles_that_already_have_full_text` | Already-attached articles are skipped |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase1_ignores_files_with_no_matching_doi` | Files with no matching article DOI are ignored |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase1_skips_article_without_doi` | No-DOI articles are not matched |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase2_imports_references_from_ris_files` | Phase 2 imports `_references.ris` |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase2_imports_citations_from_ris_files` | Phase 2 imports `_citations.ris` |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase2_imports_references_and_citations_independently` | Refs + citations imported independently in one pass |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase2_skips_articles_that_already_have_reference_details` | Already-has-refs articles skipped |
+| `src-tauri/tests/batch_import/batch_import_test.rs::full_pipeline_is_idempotent_on_second_run` | Second run finds nothing to do (flags set) |
+| `src-tauri/tests/batch_import/batch_import_test.rs::pipeline_handles_multiple_articles_with_mixed_files` | Mixed attachments across multiple articles |
 
 ## Phase 3 pre-flight LLM guard (`batch_import::translations_phase`)
 
 | Test identifier | Assertion |
 |---|---|
-| `src-tauri/tests/batch_import_test.rs::phase3_pre_flight_skips_when_llm_not_configured_and_writes_audit` | No-LLM -> skip with canonical message + system audit row |
-| `src-tauri/tests/batch_import_test.rs::phase3_pre_flight_proceeds_when_llm_is_configured` | LLM configured -> proceeds, no skip audit row |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase3_pre_flight_skips_when_llm_not_configured_and_writes_audit` | No-LLM -> skip with canonical message + system audit row |
+| `src-tauri/tests/batch_import/batch_import_test.rs::phase3_pre_flight_proceeds_when_llm_is_configured` | LLM configured -> proceeds, no skip audit row |
