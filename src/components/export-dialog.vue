@@ -61,7 +61,12 @@ const zoteroScopeLabel = computed(() =>
   isTabExport.value ? `${currentTabLabel.value} tab` : 'Included articles'
 );
 
-const isPrismaTab = computed(() => props.activeTab === 'prisma');
+/** Zotero button label mirrors the RIS button's scope-aware naming. */
+const zoteroButtonLabel = computed(() =>
+  isTabExport.value
+    ? `Export ${currentTabLabel.value} Articles (Zotero)`
+    : 'Export Included Articles (Zotero)'
+);
 </script>
 
 <template>
@@ -79,7 +84,7 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
           </div>
           <template v-else>
             <button
-              class="btn btn--primary"
+              class="btn btn--secondary"
               :disabled="exporting"
               @click="
                 async () => {
@@ -93,25 +98,10 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
           </template>
         </template>
 
-        <!-- PRISMA tab: always export included -->
-        <template v-else-if="isPrismaTab">
-          <button
-            class="btn btn--primary"
-            :disabled="exporting"
-            @click="
-              async () => {
-                if (await exportRis()) emit('close');
-              }
-            "
-          >
-            Export Included Articles (RIS)
-          </button>
-        </template>
-
-        <!-- Default fallback -->
+        <!-- PRISMA tab + default fallback: always export included -->
         <template v-else>
           <button
-            class="btn btn--primary"
+            class="btn btn--secondary"
             :disabled="exporting"
             @click="
               async () => {
@@ -123,15 +113,15 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
           </button>
         </template>
 
-        <button class="btn btn--secondary" @click="showBackup = true">Export Project Backup</button>
         <button
           v-if="!isTabExport || hasArticles"
           class="btn btn--secondary"
           data-test="zotero-export-button"
           @click="showZotero = true"
         >
-          Export Articles (Zotero)
+          {{ zoteroButtonLabel }}
         </button>
+        <button class="btn btn--secondary" @click="showBackup = true">Export Project Backup</button>
         <button
           class="btn btn--secondary"
           @click="

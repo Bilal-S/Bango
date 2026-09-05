@@ -33,7 +33,7 @@ describe('export-dialog.vue Zotero button', () => {
     const wrapper = mountDialog({ activeTab: 'working', statusCounts: { working: 5 } });
     const button = wrapper.find('[data-test="zotero-export-button"]');
     expect(button.exists()).toBe(true);
-    expect(button.text()).toBe('Export Articles (Zotero)');
+    expect(button.text()).toBe('Export Working Articles (Zotero)');
     // Sits beside the tab RIS export.
     expect(wrapper.text()).toContain('Export Working Articles (RIS)');
   });

@@ -16,14 +16,20 @@ const {
 } = usePrisma();
 const showExport = ref(false);
 
-/* ── Export Report dropdown ──────────────────────────────────────────────
- * Anchored at the "Export Report" button; closes on item pick, anchor
+/* ── Header dropdown menus (Export Diagram / Export Report) ──────────────
+ * Each is anchored at its trigger button; closes on item pick, anchor
  * re-click, outside click, and Escape (bulk-action-bar More-menu pattern). */
 const reportMenuOpen = ref(false);
 const reportMenuRef = ref<HTMLElement | null>(null);
+const diagramMenuOpen = ref(false);
+const diagramMenuRef = ref<HTMLElement | null>(null);
 
 function toggleReportMenu(): void {
   reportMenuOpen.value = !reportMenuOpen.value;
+}
+
+function toggleDiagramMenu(): void {
+  diagramMenuOpen.value = !diagramMenuOpen.value;
 }
 
 /** Item picked: close the menu, then run the export for the chosen format. */
@@ -32,26 +38,38 @@ function pickReportFormat(format: PrismaReportFormat): void {
   void exportReport(format);
 }
 
-/** Outside click closes the dropdown (suggest-input.vue pattern). */
-function handleReportOutsideClick(event: MouseEvent): void {
+/** Diagram image format picked from the Export Diagram dropdown. */
+function pickDiagramFormat(format: 'png' | 'svg'): void {
+  diagramMenuOpen.value = false;
+  void (format === 'png' ? exportPng() : exportSvg());
+}
+
+/** Outside click closes any open dropdown (suggest-input.vue pattern). */
+function handleMenuOutsideClick(event: MouseEvent): void {
+  if (diagramMenuRef.value && !diagramMenuRef.value.contains(event.target as Node)) {
+    diagramMenuOpen.value = false;
+  }
   if (reportMenuRef.value && !reportMenuRef.value.contains(event.target as Node)) {
     reportMenuOpen.value = false;
   }
 }
 
-function handleReportKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') reportMenuOpen.value = false;
+function handleMenuKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    diagramMenuOpen.value = false;
+    reportMenuOpen.value = false;
+  }
 }
 
 onMounted(() => {
   loadDiagram();
-  document.addEventListener('click', handleReportOutsideClick);
-  document.addEventListener('keydown', handleReportKeydown);
+  document.addEventListener('click', handleMenuOutsideClick);
+  document.addEventListener('keydown', handleMenuKeydown);
 });
 
 onUnmounted(() => {
-  document.removeEventListener('click', handleReportOutsideClick);
-  document.removeEventListener('keydown', handleReportKeydown);
+  document.removeEventListener('click', handleMenuOutsideClick);
+  document.removeEventListener('keydown', handleMenuKeydown);
 });
 </script>
 
@@ -76,20 +94,46 @@ onUnmounted(() => {
 
         <!-- Export actions -->
         <div class="prisma-header__actions">
-          <button class="btn btn--secondary" :disabled="loading || !data" @click="exportSvg">
-            <span class="material-symbols-outlined btn__icon">download</span>
-            Export SVG
-          </button>
-          <button class="btn btn--secondary" :disabled="loading || !data" @click="exportPng">
-            <span class="material-symbols-outlined btn__icon">download</span>
-            Export PNG
-          </button>
+          <!-- Export Diagram: dropdown with PNG / SVG -->
+          <div ref="diagramMenuRef" class="export-menu">
+            <button
+              class="btn btn--secondary"
+              :disabled="loading || !data"
+              aria-haspopup="menu"
+              :aria-expanded="diagramMenuOpen"
+              @click="toggleDiagramMenu"
+            >
+              <span class="material-symbols-outlined btn__icon">schema</span>
+              Export Diagram
+              <span class="material-symbols-outlined btn__icon export-menu__chevron">
+                expand_more
+              </span>
+            </button>
+            <ul v-if="diagramMenuOpen" class="export-menu__menu" role="menu">
+              <li
+                role="menuitem"
+                title="Save the PRISMA flow diagram as a PNG image"
+                @click="pickDiagramFormat('png')"
+              >
+                <span class="material-symbols-outlined">image</span>
+                Export to PNG
+              </li>
+              <li
+                role="menuitem"
+                title="Save the PRISMA flow diagram as an SVG vector file"
+                @click="pickDiagramFormat('svg')"
+              >
+                <span class="material-symbols-outlined">draw</span>
+                Export SVG
+              </li>
+            </ul>
+          </div>
           <button class="btn btn--secondary" @click="showExport = true">
             <span class="material-symbols-outlined btn__icon">download</span>
-            Export RIS
+            Export Data
           </button>
           <!-- Export Report: dropdown with Markdown / PDF (print dialog) -->
-          <div ref="reportMenuRef" class="export-report">
+          <div ref="reportMenuRef" class="export-menu">
             <button
               class="btn btn--secondary"
               :disabled="loading || !data"
@@ -99,11 +143,11 @@ onUnmounted(() => {
             >
               <span class="material-symbols-outlined btn__icon">summarize</span>
               Export Report
-              <span class="material-symbols-outlined btn__icon export-report__chevron">
+              <span class="material-symbols-outlined btn__icon export-menu__chevron">
                 expand_more
               </span>
             </button>
-            <ul v-if="reportMenuOpen" class="export-report__menu" role="menu">
+            <ul v-if="reportMenuOpen" class="export-menu__menu" role="menu">
               <li
                 role="menuitem"
                 title="Save the screening reasons report as a Markdown file"
@@ -584,17 +628,17 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* ── Export Report dropdown ── */
-.export-report {
+/* ── Header export dropdown menus (shared by Export Diagram / Export Report) ── */
+.export-menu {
   position: relative;
 }
 
-.export-report__chevron {
+.export-menu__chevron {
   font-size: 16px;
   margin-left: calc(var(--space-1) * -1);
 }
 
-.export-report__menu {
+.export-menu__menu {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
@@ -609,7 +653,7 @@ onUnmounted(() => {
   z-index: 40;
 }
 
-.export-report__menu li {
+.export-menu__menu li {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -621,11 +665,11 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.export-report__menu li:hover {
+.export-menu__menu li:hover {
   background-color: var(--color-surface-container-high);
 }
 
-.export-report__menu li .material-symbols-outlined {
+.export-menu__menu li .material-symbols-outlined {
   font-size: 16px;
 }
 
