@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { useExport } from '@/composables/use-export';
 import { useToast } from '@/composables/use-toast';
+import ZoteroExportPanel from '@/components/zotero-export-panel.vue';
 
 const props = defineProps<{
   activeTab?: string;
@@ -23,6 +24,7 @@ const {
 const toast = useToast();
 const showBackup = ref(false);
 const showWiki = ref(false);
+const showZotero = ref(false);
 const wikiTitle = ref('');
 const wikiGenerated = ref(false);
 
@@ -52,6 +54,13 @@ const tabCount = computed(() => {
 /** Whether the current tab has articles to export */
 const hasArticles = computed(() => tabCount.value > 0);
 
+/** Zotero export scope: the tab status (tab context) or Included elsewhere. */
+const zoteroStatus = computed(() => (isTabExport.value ? (props.activeTab ?? 'all') : 'included'));
+const zoteroScreeningErrorsOnly = computed(() => props.activeTab === 'error');
+const zoteroScopeLabel = computed(() =>
+  isTabExport.value ? `${currentTabLabel.value} tab` : 'Included articles'
+);
+
 const isPrismaTab = computed(() => props.activeTab === 'prisma');
 </script>
 
@@ -62,7 +71,7 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
 
       <div v-if="error" class="dialog__error">{{ error }}</div>
 
-      <div v-if="!showBackup && !showWiki" class="dialog__options">
+      <div v-if="!showBackup && !showWiki && !showZotero" class="dialog__options">
         <!-- Tab-aware export (article list) -->
         <template v-if="isTabExport">
           <div v-if="!hasArticles" class="dialog__empty">
@@ -115,6 +124,14 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
         </template>
 
         <button class="btn btn--secondary" @click="showBackup = true">Export Project Backup</button>
+        <button
+          v-if="!isTabExport || hasArticles"
+          class="btn btn--secondary"
+          data-test="zotero-export-button"
+          @click="showZotero = true"
+        >
+          Export Articles (Zotero)
+        </button>
         <button
           class="btn btn--secondary"
           @click="
@@ -230,7 +247,16 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
         </div>
       </div>
 
-      <div v-if="!showWiki" class="dialog__actions">
+      <div v-if="showZotero" class="dialog__zotero">
+        <ZoteroExportPanel
+          :scope-label="zoteroScopeLabel"
+          :status="zoteroStatus"
+          :screening-errors-only="zoteroScreeningErrorsOnly"
+          @back="showZotero = false"
+        />
+      </div>
+
+      <div v-if="!showWiki && !showZotero" class="dialog__actions">
         <button class="btn btn--outline" @click="emit('close')">Cancel</button>
       </div>
     </div>
@@ -289,6 +315,11 @@ const isPrismaTab = computed(() => props.activeTab === 'prisma');
   color: var(--color-on-surface-variant, #464555);
 }
 .dialog__wiki {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+.dialog__zotero {
   display: flex;
   flex-direction: column;
   gap: var(--space-3, 12px);

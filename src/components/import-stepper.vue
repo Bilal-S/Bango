@@ -11,6 +11,9 @@ const steps: { key: ImportStep; label: string }[] = [
 ];
 
 function stepIndex(step: ImportStep): number {
+  // The Zotero collection picker occupies the same visual position as the
+  // Parse step (both sit between Upload and Review).
+  if (step === 'zotero') return 1;
   return steps.findIndex((s) => s.key === step);
 }
 </script>

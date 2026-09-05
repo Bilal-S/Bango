@@ -27,6 +27,7 @@ pub mod summary;
 pub mod translation;
 pub mod utils;
 pub mod wiki;
+pub mod zotero;
 
 use commands::citation_finder::CitationFinderState;
 use commands::scraping::ScrapingState;
@@ -337,6 +338,13 @@ pub fn run() {
             commands::openalex::set_openalex_settings,
             commands::openalex::smart_search_openalex,
             commands::openalex::download_and_attach_openalex_pdf,
+            commands::zotero::check_zotero_connection,
+            commands::zotero::get_zotero_collections,
+            commands::zotero::get_zotero_collection_preview,
+            commands::zotero::import_zotero_collection,
+            commands::zotero::get_zotero_selected_collection,
+            commands::zotero::export_zotero_preview,
+            commands::zotero::export_zotero_collection,
             commands::embedding::generate_embeddings,
             commands::embedding::recall_articles,
             commands::embedding::get_embedding_status,

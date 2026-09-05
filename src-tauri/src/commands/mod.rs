@@ -23,6 +23,7 @@ pub mod tags;
 pub mod translation;
 pub mod trends;
 pub mod wiki_cmd;
+pub mod zotero;
 
 use crate::db::connection::DbState;
 use crate::error::AppError;

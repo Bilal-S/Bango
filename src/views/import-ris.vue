@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useImport } from '@/composables/use-import';
+import { useZotero } from '@/composables/use-zotero';
 import ImportDropZone from '@/components/import-drop-zone.vue';
 import ImportStepper from '@/components/import-stepper.vue';
 import ImportPreview from '@/components/import-preview.vue';
+import ZoteroCollectionPicker from '@/components/zotero-collection-picker.vue';
 
 const router = useRouter();
+const zotero = useZotero();
 
 const {
   step,
@@ -15,16 +19,40 @@ const {
   loading,
   error,
   canImport,
+  hasZeroValid,
   removedIndices,
   visibleCount,
   dedupSummary,
+  importSource,
+  zoteroPreviewMeta,
+  zoteroAttachmentSummary,
   loadFile,
   loadFilePath,
   parseFile,
   confirmImport,
   removeArticle,
+  startZoteroImport,
+  applyZoteroPreview,
+  backToZoteroPicker,
   reset,
 } = useImport();
+
+const zoteroConnecting = ref(false);
+
+/** Drop-zone "Import from Zotero": probe the connection, then enter the step. */
+async function onZoteroSelected(): Promise<void> {
+  zoteroConnecting.value = true;
+  error.value = null;
+  try {
+    const ok = await zotero.checkConnection();
+    if (ok) {
+      startZoteroImport();
+    }
+    // Non-ok states render via zotero.connectionMessage below.
+  } finally {
+    zoteroConnecting.value = false;
+  }
+}
 
 const hasDuplicates = () =>
   dedupSummary.value &&
@@ -45,7 +73,26 @@ const hasDuplicates = () =>
     <div class="import-view__body">
       <!-- Step 1: Upload -->
       <section v-if="step === 'upload'">
-        <ImportDropZone @file-selected="loadFile" @file-dropped="loadFilePath" />
+        <ImportDropZone
+          @file-selected="loadFile"
+          @file-dropped="loadFilePath"
+          @zotero-selected="onZoteroSelected"
+        />
+        <div v-if="zoteroConnecting" class="import-view__warning">
+          <span class="spinner" /> Checking Zotero...
+        </div>
+        <div
+          v-else-if="zotero.connectionState.value && zotero.connectionState.value !== 'ok'"
+          class="import-view__warning"
+        >
+          {{ zotero.connectionMessage.value }}
+          <button class="btn btn--outline" @click="onZoteroSelected">Retry</button>
+        </div>
+      </section>
+
+      <!-- Step 2: Zotero collection picker -->
+      <section v-if="step === 'zotero'">
+        <ZoteroCollectionPicker @collection-selected="applyZoteroPreview" @back="reset" />
       </section>
 
       <!-- Step 2: Parse -->
@@ -61,9 +108,18 @@ const hasDuplicates = () =>
 
       <!-- Step 3: Review & Import -->
       <section v-if="step === 'import' && preview">
-        <div v-if="preview.errorCount > 0" class="import-view__warning">
+        <div v-if="hasZeroValid" class="import-view__warning">
+          0 importable items in this collection. Go back and pick a different collection.
+        </div>
+        <div v-else-if="preview.errorCount > 0" class="import-view__warning">
           {{ preview.errorCount }} of {{ preview.totalRecords }} records have validation issues and
           will be skipped. Only {{ visibleCount }} valid articles will be imported.
+        </div>
+
+        <div v-if="zoteroPreviewMeta" class="import-view__zotero-meta">
+          {{ zoteroPreviewMeta.totalItems }} items in "{{ zoteroPreviewMeta.collectionName }}" -
+          {{ zoteroPreviewMeta.attachmentCount }} with full-text attachments,
+          {{ zoteroPreviewMeta.tagCount }} tags.
         </div>
 
         <div class="import-view__summary">
@@ -80,9 +136,24 @@ const hasDuplicates = () =>
               <span class="import-view__stat-value">{{ preview.errorCount }}</span>
               <span class="import-view__stat-label">Skipped</span>
             </div>
+            <div
+              v-if="preview.duplicateCount > 0"
+              class="import-view__stat import-view__stat--warn"
+            >
+              <span class="import-view__stat-value">{{ preview.duplicateCount }}</span>
+              <span class="import-view__stat-label">Duplicates</span>
+            </div>
           </div>
           <div class="import-view__actions import-view__actions--inline">
-            <button class="btn btn--outline" @click="reset">Cancel</button>
+            <button
+              v-if="importSource === 'zotero'"
+              class="btn btn--outline"
+              :disabled="loading"
+              @click="backToZoteroPicker"
+            >
+              Back to Collections
+            </button>
+            <button v-else class="btn btn--outline" @click="reset">Cancel</button>
             <button
               class="btn btn--primary"
               :disabled="!canImport || loading"
@@ -119,6 +190,35 @@ const hasDuplicates = () =>
           <p class="import-view__capacity">
             Remaining capacity: {{ importResult.remainingCapacity }} articles
           </p>
+          <div v-if="zoteroAttachmentSummary" class="import-view__zotero-summary">
+            <p>
+              {{ zoteroAttachmentSummary.attachedCount }} full-text file{{
+                zoteroAttachmentSummary.attachedCount !== 1 ? 's' : ''
+              }}
+              attached from Zotero.
+            </p>
+            <p v-if="zoteroAttachmentSummary.failedCount > 0" class="import-view__skipped">
+              {{ zoteroAttachmentSummary.failedCount }} attachment{{
+                zoteroAttachmentSummary.failedCount !== 1 ? 's' : ''
+              }}
+              failed (see the articles' audit timelines).
+            </p>
+            <p v-if="zoteroAttachmentSummary.skippedCount > 0" class="import-view__skipped">
+              {{ zoteroAttachmentSummary.skippedCount }} non-pdf/txt attachment{{
+                zoteroAttachmentSummary.skippedCount !== 1 ? 's' : ''
+              }}
+              skipped.
+            </p>
+            <p
+              v-if="zoteroPreviewMeta && zoteroPreviewMeta.tagCount > 0"
+              class="import-view__skipped"
+            >
+              {{ zoteroPreviewMeta.tagCount }} Zotero tag{{
+                zoteroPreviewMeta.tagCount !== 1 ? 's' : ''
+              }}
+              imported as Bango tags.
+            </p>
+          </div>
         </div>
 
         <!-- Dedup summary -->
@@ -230,6 +330,10 @@ const hasDuplicates = () =>
   color: var(--color-error);
 }
 
+.import-view__stat--warn .import-view__stat-value {
+  color: var(--color-warning, #b26a00);
+}
+
 .import-view__actions {
   display: flex;
   justify-content: flex-end;
@@ -272,6 +376,27 @@ const hasDuplicates = () =>
   color: var(--color-on-surface-variant);
   font-size: var(--font-size-caption);
   margin-top: var(--space-2);
+}
+
+.import-view__zotero-meta {
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-surface-container);
+  border-radius: var(--radius-default);
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+  margin-bottom: var(--space-3);
+}
+
+.import-view__zotero-summary {
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-outline-variant);
+  color: var(--color-on-surface-variant);
+  font-size: var(--font-size-caption);
+}
+
+.import-view__zotero-summary p {
+  margin-bottom: var(--space-1);
 }
 
 .import-view__dedup {

@@ -29,24 +29,33 @@ describe('help-tab-zotero.vue', () => {
     setActivePinia(createPinia());
   });
 
-  it('renders all six numbered step cards', () => {
+  it('renders all seven numbered step cards', () => {
     const { wrapper } = mountZotero();
-    // Six numbered indicators (1..6).
+    // Seven numbered indicators (1..7); step 1 is the enable-local-API step.
     const numbers = wrapper.findAll('.ht-step__number').map((n) => n.text());
-    expect(numbers).toEqual(['1', '2', '3', '4', '5', '6']);
+    expect(numbers).toEqual(['1', '2', '3', '4', '5', '6', '7']);
   });
 
-  it('renders the six step titles in order', () => {
+  it('renders the seven step titles in order', () => {
     const { wrapper } = mountZotero();
     const titles = wrapper.findAll('.ht-step__title').map((t) => t.text());
     expect(titles).toEqual([
+      'Enable the Zotero local API (recommended)',
       'Collect articles in Zotero',
       'Set up automatic file renaming',
-      'Export articles as RIS',
+      'Export articles as RIS (manual alternative)',
       'Copy PDF files to Bango full-text folder',
       'Import the RIS file into Bango',
       'Run Batch Import to attach full text',
     ]);
+  });
+
+  it('renders the enable-local-API preference path on step 1', () => {
+    const { wrapper } = mountZotero();
+    expect(wrapper.text()).toContain(
+      'Allow other applications on this computer to communicate with Zotero'
+    );
+    expect(wrapper.text()).toContain('Import from Zotero');
   });
 
   it('renders the no-DOI warning callout', () => {
@@ -108,20 +117,20 @@ describe('help-tab-zotero.vue', () => {
     vi.useRealTimers();
   });
 
-  it('renders Go-to buttons only on the steps that route into Bango (3, 5, 6)', () => {
+  it('renders Go-to buttons only on the steps that route into Bango (1, 4, 6, 7)', () => {
     const { wrapper } = mountZotero();
     const goButtons = wrapper.findAll('.ht-step__go-btn');
-    expect(goButtons).toHaveLength(3);
+    expect(goButtons).toHaveLength(4);
     const labels = goButtons.map((b) => b.text());
     expect(labels.some((t) => t.includes('Go to Import'))).toBe(true);
     expect(labels.some((t) => t.includes('Go to Settings'))).toBe(true);
   });
 
-  it('navigates to /import when the step 3 Go-to Import button is clicked', async () => {
+  it('navigates to /import when the step 1 Go-to Import button is clicked', async () => {
     const { wrapper, router } = mountZotero();
     const pushSpy = vi.spyOn(router, 'push');
     const goButtons = wrapper.findAll('.ht-step__go-btn');
-    // Step 3 is the first Go-to button ("Go to Import").
+    // Step 1 (enable the local API) is the first Go-to button ("Go to Import").
     await goButtons[0]!.trigger('click');
     expect(pushSpy).toHaveBeenCalledWith('/import');
   });
@@ -135,16 +144,14 @@ describe('help-tab-zotero.vue', () => {
     expect(pushSpy).toHaveBeenCalledWith('/settings');
   });
 
-  it('omits Go-to buttons on the external-tool steps (1, 2, 4)', () => {
+  it('omits Go-to buttons on the external-tool steps (2, 3, 5)', () => {
     const { wrapper } = mountZotero();
     // The external-tool step cards have no `.ht-step__go-btn` inside them.
-    // We confirm by checking the three steps whose titles correspond to
-    // external actions do not contain a go-btn.
     const stepCards = wrapper.findAll('.ht-step__card');
-    // Indices 0, 1, 3 are steps 1, 2, 4.
-    expect(stepCards[0]!.find('.ht-step__go-btn').exists()).toBe(false);
+    // Indices 1, 2, 4 are steps 2 (collect), 3 (rename), 5 (copy files).
     expect(stepCards[1]!.find('.ht-step__go-btn').exists()).toBe(false);
-    expect(stepCards[3]!.find('.ht-step__go-btn').exists()).toBe(false);
+    expect(stepCards[2]!.find('.ht-step__go-btn').exists()).toBe(false);
+    expect(stepCards[4]!.find('.ht-step__go-btn').exists()).toBe(false);
   });
 
   it('does not render the demo / about / footer sections (not needed for this tab)', () => {

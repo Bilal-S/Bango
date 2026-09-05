@@ -26,9 +26,37 @@ pub struct ImportPreview {
     pub total_records: usize,
     pub valid_records: usize,
     pub error_count: usize,
+    /// Valid records whose canonical DOI already exists in the library (an
+    /// early informational signal; the import itself is unchanged - the
+    /// classify phase still marks them as duplicates).
+    pub duplicate_count: usize,
     pub errors: Vec<ImportError>,
     pub error_groups: Vec<ErrorGroup>,
     pub preview_articles: Vec<PreviewArticle>,
+}
+
+/// Count records whose canonical DOI is already present in the library
+/// (case-insensitive, prefix-stripped - `check_dois_in_library` canonicalizes
+/// both sides). Records without a DOI never match. Runs in the caller's
+/// short DB lock.
+pub fn count_library_duplicates(
+    conn: &rusqlite::Connection,
+    records: &[&RisRecord],
+) -> Result<usize, AppError> {
+    let dois: Vec<String> = records.iter().filter_map(|r| r.doi.clone()).collect();
+    if dois.is_empty() {
+        return Ok(0);
+    }
+    let present: std::collections::HashSet<String> =
+        article_repo::check_dois_in_library(conn, &dois)?.into_iter().collect();
+    // Canonicalize the record side too: the library set is lowercase-canonical
+    // while record DOIs may carry prefixes/casing.
+    Ok(records
+        .iter()
+        .filter(|r| {
+            crate::ris::doi::normalize_doi(r.doi.as_deref()).is_some_and(|d| present.contains(&d))
+        })
+        .count())
 }
 
 #[derive(Serialize)]
@@ -71,10 +99,25 @@ pub struct ParseRisRequest {
 }
 
 #[tauri::command]
-pub async fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, AppError> {
+pub async fn parse_ris_file(
+    app: AppHandle,
+    request: ParseRisRequest,
+) -> Result<ImportPreview, AppError> {
+    // `State` cannot cross into spawn_blocking; derive it from the app handle
+    // inside the closure (OpenAlex pattern).
+    let app_for_blocking = app.clone();
     tokio::task::spawn_blocking(move || {
+        let db_state = app_for_blocking.state::<DbState>();
         let content = read_content(request.content, request.file_path)?;
         let output = parse_and_validate(&content, ValidationMode::Strict)?;
+
+        // Early duplicate signal: valid records' DOIs vs the current library
+        // (one short lock; never held across the parse).
+        let duplicate_count = {
+            let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+            let valid_refs: Vec<&RisRecord> = output.valid_records.iter().collect();
+            count_library_duplicates(&conn, &valid_refs)?
+        };
 
         let preview_articles: Vec<PreviewArticle> = output
             .valid_records
@@ -93,6 +136,7 @@ pub async fn parse_ris_file(request: ParseRisRequest) -> Result<ImportPreview, A
             total_records: output.total_records,
             valid_records: output.valid_records.len(),
             error_count: output.errors.len(),
+            duplicate_count,
             errors: output
                 .errors
                 .into_iter()
@@ -294,13 +338,28 @@ fn log_import_error(app: &AppHandle, message: &str) {
 }
 
 #[tauri::command]
-pub async fn parse_bibtex_file(request: ParseRisRequest) -> Result<ImportPreview, AppError> {
+pub async fn parse_bibtex_file(
+    app: AppHandle,
+    request: ParseRisRequest,
+) -> Result<ImportPreview, AppError> {
+    // `State` cannot cross into spawn_blocking; derive it from the app handle
+    // inside the closure (OpenAlex pattern).
+    let app_for_blocking = app.clone();
     tokio::task::spawn_blocking(move || {
+        let db_state = app_for_blocking.state::<DbState>();
         let content = read_content(request.content, request.file_path)?;
 
         let bibtex_result = parse_bibtex(&content);
         let records: Vec<RisRecord> = convert_bibtex_entries(&bibtex_result.entries);
         let output = parse_and_validate_from_records(&records, ValidationMode::Strict)?;
+
+        // Early duplicate signal: valid records' DOIs vs the current library
+        // (one short lock; never held across the parse).
+        let duplicate_count = {
+            let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+            let valid_refs: Vec<&RisRecord> = output.valid_records.iter().collect();
+            count_library_duplicates(&conn, &valid_refs)?
+        };
 
         let preview_articles: Vec<PreviewArticle> = output
             .valid_records
@@ -319,6 +378,7 @@ pub async fn parse_bibtex_file(request: ParseRisRequest) -> Result<ImportPreview
             total_records: output.total_records,
             valid_records: output.valid_records.len(),
             error_count: output.errors.len(),
+            duplicate_count,
             errors: output
                 .errors
                 .into_iter()

@@ -73,6 +73,21 @@ matches.
 
 ### `use-article-list-keyboard.ts`
 
+### `use-zotero.ts` / `use-zotero-export.ts`
+
+Zotero composables. `use-zotero.ts` (import wizard): connection probe
+mapped to the four backend states, collections/preview fetches, and the
+`zotero-import:progress` listener (unmount cleanup). `use-zotero-export.ts`
+(export panel): the same connection gate plus the `zoteroVersion` 10+ gate,
+default selection (connector exact-name match -> `lastCollectionKey` ->
+none, ambiguous names fall through), DOI-diff preview, the export run, and
+the `zotero-export:progress` listener. `use-import.ts` owns the wizard step
+machine (`ImportStep` includes `'zotero'`), the key-based exclusion state
+(`zoteroCollectionKey`/`zoteroArticleKeys`/`zoteroLibraryVersion`;
+`removedIndices` map to `excludedKeys` at confirm), the library-changed
+guard return-to-picker, and the Zotero attachment summary on the complete
+step.
+
 Articles-view arrow-key shortcuts + their keep-alive listener lifecycle.
 
 ## Work Guidance

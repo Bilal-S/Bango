@@ -482,3 +482,32 @@ ER  -\n";
     assert_eq!(rec.author_address.as_deref(), Some("Univ of A; Univ of B"));
     assert_eq!(rec.custom_field3.as_deref(), Some("Affil A; Affil B"));
 }
+
+#[test]
+fn count_library_duplicates_matches_canonical_dois() {
+    use bango_lib::commands::import::count_library_duplicates;
+    use bango_lib::models::article::NewArticle;
+
+    let conn = create_connection().expect("connection");
+    run_migrations(&conn).expect("migrations");
+    let seeded = vec![NewArticle {
+        title: "Present In Library".to_string(),
+        abstract_text: "Abstract.".to_string(),
+        authors: vec!["Author, A".to_string()],
+        doi: Some("10.1/present".to_string()),
+        ..NewArticle::default()
+    }];
+    article_repo::insert_articles_batch(&conn, &seeded, "test").expect("seed");
+
+    // Canonical matching: prefix + case variants of a library DOI count;
+    // unknown DOIs and records without a DOI never match.
+    let duplicate =
+        RisRecord { doi: Some("https://doi.org/10.1/PRESENT".to_string()), ..RisRecord::default() };
+    let unique = RisRecord { doi: Some("10.1/other".to_string()), ..RisRecord::default() };
+    let no_doi = RisRecord::default();
+    let records = vec![&duplicate, &unique, &no_doi];
+
+    assert_eq!(count_library_duplicates(&conn, &records).unwrap(), 1);
+    // Empty input short-circuits.
+    assert_eq!(count_library_duplicates(&conn, &[]).unwrap(), 0);
+}

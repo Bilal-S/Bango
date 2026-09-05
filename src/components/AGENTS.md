@@ -4,7 +4,8 @@
 
 Reusable components: shared chips/inputs, article detail + filter panels,
 OpenAlex search, settings cards, the bibliometric network graphs + shared
-network primitives, and the help tabs.
+network primitives, the Zotero import picker / export panel, and the help
+tabs.
 
 ## Ownership
 
@@ -128,6 +129,20 @@ leading color dot). Owns the `getColorScheme` bindings, the optional
 `highlight` indigo match halo, and the optional `(N)` count suffix; wrappers
 forward props and pick a variant (DOM output is byte-identical per variant).
 The canonical place for the chip pattern going forward.
+
+### `zotero-collection-picker.vue` / `zotero-export-panel.vue`
+
+Zotero UIs. The picker (import wizard step 2) uses `use-zotero.ts` internally,
+renders the flat collection list as an indented root-first tree (children
+directly after parents), and emits `collection-selected` with the full
+preview payload; loading/error/empty states + Back. The export panel (shared
+export dialog sub-panel) uses `use-zotero-export.ts`: connection gate with
+the exact enable-API preference path, the Zotero-10 version gate (Export
+disabled below 10), collection dropdown defaulted via connector name match
+-> last used, the DOI-diff sync summary, include-files checkbox (default on),
+`zotero-export:progress`-driven progress bar, authorize-phase "tick
+Remember" copy, and the result card. Every communication-error state repeats
+the enable-API instructions (user requirement 2026-09-04).
 
 ### `openalex-search.vue`
 

@@ -28,6 +28,21 @@ interface ZoteroStep {
 const steps: ZoteroStep[] = [
   {
     step: 1,
+    title: 'Enable the Zotero local API (recommended)',
+    icon: 'settings',
+    summary:
+      'One setting unlocks the direct path: Import from Zotero pulls a whole collection (metadata, tags, and full-text PDFs) into Bango, and Export Articles (Zotero) syncs results back - no file juggling needed.',
+    details: [
+      'Open Zotero and go to Edit > Settings (Windows/Linux) or Zotero > Settings (macOS).',
+      'Select the Advanced tab.',
+      'Tick "Allow other applications on this computer to communicate with Zotero".',
+      'In Bango, go to the Import tab and click "Import from Zotero". Bango connects, you pick a collection, review the preview, and confirm.',
+      'Zotero must be running while you import. Exporting back to Zotero (from the Bango Export dialog) needs Zotero 10 or newer and uses the same setting.',
+    ],
+    goTo: { route: '/import', label: 'Import' },
+  },
+  {
+    step: 2,
     title: 'Collect articles in Zotero',
     icon: 'download',
     summary:
@@ -41,7 +56,7 @@ const steps: ZoteroStep[] = [
     ],
   },
   {
-    step: 2,
+    step: 3,
     title: 'Set up automatic file renaming',
     icon: 'drive_file_rename_outline',
     summary:
@@ -55,12 +70,12 @@ const steps: ZoteroStep[] = [
     ],
   },
   {
-    step: 3,
-    title: 'Export articles as RIS',
+    step: 4,
+    title: 'Export articles as RIS (manual alternative)',
     icon: 'file_export',
     summary: 'Export your Zotero collection as an RIS file that Bango can import.',
     details: [
-      'In Zotero, right-click the collection you organized in step 1.',
+      'In Zotero, right-click the collection you organized in step 2.',
       'Choose "Export Collection..." from the menu.',
       'In the export dialog, select "RIS" as the format.',
       'Click OK and choose where to save the `.ris` file.',
@@ -69,7 +84,7 @@ const steps: ZoteroStep[] = [
     goTo: { route: '/import', label: 'Import' },
   },
   {
-    step: 4,
+    step: 5,
     title: 'Copy PDF files to Bango full-text folder',
     icon: 'content_copy',
     summary: 'Copy your renamed PDF files from Zotero storage into the Bango full-text directory.',
@@ -79,17 +94,17 @@ const steps: ZoteroStep[] = [
       'In the `storage` folder, search for all PDF files. On Windows, type `*.pdf` in the search box. On macOS, use the Finder search bar.',
       'Select all the PDF files and copy them (Ctrl+C on Windows/Linux, Cmd+C on macOS).',
       'In Bango, go to Settings and find the "Storage" card. Note the storage root path. Open that folder in your file manager, then open the `fulltext` subfolder inside it.',
-      'Paste the PDF files into the `fulltext` folder. They are now in place for Bango to find in step 6.',
+      'Paste the PDF files into the `fulltext` folder. They are now in place for Bango to find in step 7.',
     ],
   },
   {
-    step: 5,
+    step: 6,
     title: 'Import the RIS file into Bango',
     icon: 'upload_file',
     summary: 'Import the RIS file you exported from Zotero into Bango.',
     details: [
       'In Bango, go to the Import tab from the sidebar.',
-      'Click the file browser button and select the `.ris` file you saved in step 3.',
+      'Click the file browser button and select the `.ris` file you saved in step 4.',
       'Bango shows a preview of the articles it found in the file. Review them and deselect any you do not want.',
       'Click "Import" to add the articles to your project.',
       'Bango automatically checks for duplicate records and links each article to its journal in the reference database.',
@@ -97,7 +112,7 @@ const steps: ZoteroStep[] = [
     goTo: { route: '/import', label: 'Import' },
   },
   {
-    step: 6,
+    step: 7,
     title: 'Run Batch Import to attach full text',
     icon: 'playlist_play',
     summary:
@@ -152,7 +167,8 @@ async function copyTemplate(): Promise<void> {
           <p class="ht-zotero__overview-desc">
             Zotero is excellent for collecting articles and their PDFs. Bango is excellent for
             AI-assisted screening and analysis. This workflow shows how to move a Zotero collection
-            into Bango in six short steps: collect, rename, export, copy, import, and attach.
+            into Bango in steps: enable the local API for the direct import/export path, or fall
+            back to the classic collect, rename, export, copy, import, and attach workflow.
           </p>
         </div>
       </div>

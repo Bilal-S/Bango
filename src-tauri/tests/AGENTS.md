@@ -44,6 +44,16 @@ link protocols, prompt builder); binding inventory:
 `doi_case_migration_test.rs` covers migration v009 (DOI canonicalization:
 healing, duplicate-paper merge with match-state preservation, index rebuild,
 idempotency); binding inventory: `docs/test-plans/doi-case-tests.md`.
+Zotero integration: `zotero_mapping_test.rs` + `zotero_client_test.rs`
+(Tier 1 pure mapping/path/parse), `zotero_connection_test.rs` (Tier 2
+status mapping + collections + preview against mockito),
+`zotero_import_test.rs` (Tier 3 canonical import sequence, key-based
+exclusion, version guard, capacity guard, attachment phase),
+`zotero_export_mapping_test.rs` + `zotero_export_test.rs` (Tier 5 export
+mapping + DOI diff + preview counts), `zotero_write_client_test.rs`
+(envelope/authorize/upload parsing, write-error classification, batch
+tokens, stored-key reuse policy, mid-run key-expiry abort); binding
+inventory: `docs/test-plans/zotero-tests.md`.
 
 ## Work Guidance
 

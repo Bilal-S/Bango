@@ -200,7 +200,7 @@ const quickActions: QuickAction[] = [
   },
   {
     label: 'Import Articles',
-    description: 'Add new references from search',
+    description: 'Add from RIS, BibTex or Zotero',
     icon: 'upload_file',
     route: '/import',
   },

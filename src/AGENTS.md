@@ -149,7 +149,8 @@ directories are indexed inline.
   analysis; collects visible members only, skipping `hidden` nodes whose
   cluster ids can go stale after a recalculate).
 - **`types/`** - TypeScript interfaces (incl. `openalex.ts`, `wiki.ts`,
-  `index.ts`).
+  `zotero.ts` (local API payload types mirrored from the Rust serde
+  structs), `index.ts`).
 - **`router/`** - route table (see Local Contracts).
 - **`styles/`** - global CSS (`forms.css`, `base.css`, `help-shared.css`,
   `settings-card-shared.css`; see Local Contracts).

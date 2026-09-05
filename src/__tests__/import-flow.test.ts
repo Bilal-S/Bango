@@ -20,6 +20,7 @@ const mockPreview: ImportPreview = {
   totalRecords: 3,
   validRecords: 3,
   errorCount: 0,
+  duplicateCount: 0,
   errors: [],
   errorGroups: [],
   previewArticles: [
@@ -405,5 +406,18 @@ describe('useImport', () => {
       expect(imp.error.value).toBeNull();
       expect(imp.visibleCount.value).toBe(0);
     });
+  });
+});
+
+describe('ImportPreview duplicate signal', () => {
+  it('preview carries duplicateCount from the backend', async () => {
+    vi.mocked(tauriCommand).mockResolvedValue({ ...mockPreview, duplicateCount: 2 });
+
+    const imp = useImport();
+    const file = new File(['RIS'], 'test.ris');
+    await imp.loadFile(file);
+    await imp.parseFile();
+
+    expect(imp.preview.value?.duplicateCount).toBe(2);
   });
 });

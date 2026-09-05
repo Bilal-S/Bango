@@ -95,7 +95,7 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
   and the backend Child DOX Index. See `src-tauri/src/AGENTS.md`. Child docs:
   `commands/`, `db/`, `llm/`, `screening/`, `wiki/`, `embedding/`,
   `citation_finder/`, `translation/`, `batch_import/`, `openalex/`,
-  `scraping/`, `export/`, `utils/`.
+  `scraping/`, `export/`, `utils/`, `zotero/`.
 - **`src-tauri/tests/`** - Rust integration tests (one self-contained crate
   per `.rs` file; also the extraction home for inline `#[cfg(test)]` blocks).
   See `src-tauri/tests/AGENTS.md`.

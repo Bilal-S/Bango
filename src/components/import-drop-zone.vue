@@ -5,6 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 const emit = defineEmits<{
   fileSelected: [file: File];
   fileDropped: [path: string, name: string];
+  zoteroSelected: [];
 }>();
 const isDragging = ref(false);
 
@@ -103,6 +104,9 @@ function onFileInput(event: Event): void {
           @change="onFileInput"
         />
       </label>
+      <button class="drop-zone__secondary" type="button" @click="emit('zoteroSelected')">
+        Import from Zotero
+      </button>
     </div>
   </div>
 </template>
@@ -162,5 +166,22 @@ function onFileInput(event: Event): void {
 
 .drop-zone__input {
   display: none;
+}
+
+.drop-zone__secondary {
+  display: inline-block;
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-default);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.drop-zone__secondary:hover {
+  opacity: 0.9;
 }
 </style>

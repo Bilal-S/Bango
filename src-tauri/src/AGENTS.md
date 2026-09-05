@@ -152,6 +152,11 @@ described inline.
   emission. See `export/AGENTS.md`.
 - **`utils/`** - Pure helpers (sections, chunking, text_tokens, json_repair,
   pdf_extract). See `utils/AGENTS.md`.
+- **`zotero/`** - Zotero local API integration (spec 3.1.1 import + 10.2
+  export): read client (recursive collection fetch, bulk attachments,
+  302-Location path resolution), pure import/export mapping, and the
+  Zotero 10+ local write client (authorize, batched items, 3-phase file
+  upload). See `zotero/AGENTS.md`.
 - **`models/`** - Serde structs shared across modules. No own `AGENTS.md`.
 - **`dedup/`** - Duplicate detection. No own `AGENTS.md`.
 - **`ris/`** + **`bibtex/`** - Bibliographic format parsers/converters. No own

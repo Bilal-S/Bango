@@ -32,6 +32,10 @@ base64 = "0.22"
 # `reqwest::blocking` is safe there because the scrape is NOT on a tokio async
 # worker thread.
 reqwest = { version = "0.12", features = ["json", "blocking"] }
+# Percent-decoding of Zotero `file://` attachment Location headers.
+percent-encoding = "2"
+# MD5 for the Zotero file-upload API (phase-1 upload params).
+md-5 = "0.10"
 async-trait = "0.1"
 futures = "0.3"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros", "rt-multi-thread"] }

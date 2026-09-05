@@ -18,6 +18,8 @@ export interface ImportPreview {
   totalRecords: number;
   validRecords: number;
   errorCount: number;
+  /** Valid records whose canonical DOI already exists in the library. */
+  duplicateCount: number;
   errors: ImportError[];
   errorGroups: ErrorGroup[];
   previewArticles: PreviewArticle[];
@@ -42,7 +44,22 @@ export interface ImportResult {
 }
 
 type ImportFormat = 'ris' | 'bibtex';
-export type ImportStep = 'upload' | 'parse' | 'import' | 'complete';
+export type ImportStep = 'upload' | 'parse' | 'zotero' | 'import' | 'complete';
+
+/** Attachment tallies reported by the Zotero import command. */
+export interface ZoteroAttachmentSummary {
+  attachedCount: number;
+  failedCount: number;
+  skippedCount: number;
+}
+
+/** Zotero-specific preview metadata shown on the review + complete steps. */
+export interface ZoteroPreviewMeta {
+  collectionName: string;
+  totalItems: number;
+  attachmentCount: number;
+  tagCount: number;
+}
 
 /** Detect import format from file extension. */
 function detectFormat(fileName: string): ImportFormat {
@@ -63,9 +80,19 @@ export function useImport() {
   const removedIndices = ref<Set<number>>(new Set());
   const dedupSummary = ref<DedupResult | null>(null);
 
+  // Zotero flow state (keyed by Zotero item key, never positional).
+  const importSource = ref<'file' | 'zotero'>('file');
+  const zoteroCollectionKey = ref<string | null>(null);
+  const zoteroArticleKeys = ref<string[]>([]);
+  const zoteroLibraryVersion = ref<number | null>(null);
+  const zoteroPreviewMeta = ref<ZoteroPreviewMeta | null>(null);
+  const zoteroAttachmentSummary = ref<ZoteroAttachmentSummary | null>(null);
+
   const hasFile = computed(() => fileContent.value !== null || filePath.value !== null);
   const hasErrors = computed(() => (preview.value?.errorCount ?? 0) > 0);
   const canImport = computed(() => preview.value !== null && preview.value.validRecords > 0);
+  /** Distinct "0 importable items" state (Back enabled, never a dead Confirm). */
+  const hasZeroValid = computed(() => preview.value !== null && preview.value.validRecords === 0);
 
   const visibleArticles = computed(() => {
     if (!preview.value) return [];
@@ -105,6 +132,64 @@ export function useImport() {
     step.value = 'parse';
   }
 
+  /** Enter the Zotero step (connection already verified by the caller). */
+  function startZoteroImport(): void {
+    importSource.value = 'zotero';
+    fileName.value = null;
+    fileContent.value = null;
+    filePath.value = null;
+    preview.value = null;
+    importResult.value = null;
+    dedupSummary.value = null;
+    error.value = null;
+    removedIndices.value = new Set();
+    step.value = 'zotero';
+  }
+
+  /** Apply a Zotero collection preview and advance to the review step. */
+  function applyZoteroPreview(payload: {
+    collectionKey: string;
+    collectionName: string;
+    preview: ImportPreview;
+    articleKeys: string[];
+    libraryVersion: number | null;
+    totalItems: number;
+    attachmentCount: number;
+    tagCount: number;
+  }): void {
+    importSource.value = 'zotero';
+    zoteroCollectionKey.value = payload.collectionKey;
+    zoteroArticleKeys.value = payload.articleKeys;
+    zoteroLibraryVersion.value = payload.libraryVersion;
+    zoteroPreviewMeta.value = {
+      collectionName: payload.collectionName,
+      totalItems: payload.totalItems,
+      attachmentCount: payload.attachmentCount,
+      tagCount: payload.tagCount,
+    };
+    fileName.value = `Zotero: ${payload.collectionName}`;
+    preview.value = payload.preview;
+    importResult.value = null;
+    dedupSummary.value = null;
+    error.value = null;
+    removedIndices.value = new Set();
+    step.value = 'import';
+  }
+
+  /** Return to the Zotero picker (e.g. after a library-changed guard). */
+  function backToZoteroPicker(): void {
+    step.value = 'zotero';
+    preview.value = null;
+    importResult.value = null;
+    dedupSummary.value = null;
+    removedIndices.value = new Set();
+    zoteroArticleKeys.value = [];
+    zoteroLibraryVersion.value = null;
+    zoteroPreviewMeta.value = null;
+    zoteroAttachmentSummary.value = null;
+    error.value = null;
+  }
+
   async function parseFile(): Promise<void> {
     if ((!fileContent.value && !filePath.value) || !fileName.value) return;
 
@@ -131,6 +216,10 @@ export function useImport() {
   }
 
   async function confirmImport(): Promise<void> {
+    if (importSource.value === 'zotero') {
+      await confirmZoteroImport();
+      return;
+    }
     if ((!fileContent.value && !filePath.value) || !fileName.value) return;
 
     loading.value = true;
@@ -167,6 +256,65 @@ export function useImport() {
     }
   }
 
+  /** Zotero confirm: `removedIndices` map to `excludedKeys` via the stored
+   *  Zotero item keys (key-based exclusion is immune to re-ordering). */
+  async function confirmZoteroImport(): Promise<void> {
+    if (!zoteroCollectionKey.value || zoteroLibraryVersion.value === null) {
+      // A stale/incomplete preview must not silently no-op: send the user
+      // back to the picker for a fresh one.
+      backToZoteroPicker();
+      error.value = 'The Zotero preview is stale - go back and re-select the collection.';
+      return;
+    }
+
+    loading.value = true;
+    error.value = null;
+
+    // Yield to the browser so the spinner paints before the blocking IPC call
+    await nextPaint();
+
+    try {
+      const excludedKeys = [...removedIndices.value]
+        .map((index) => zoteroArticleKeys.value[index])
+        .filter((key): key is string => typeof key === 'string');
+      const result = await tauriCommand<import('@/types/zotero').ZoteroImportResult>(
+        'import_zotero_collection',
+        {
+          collectionKey: zoteroCollectionKey.value,
+          excludedKeys,
+          expectedLibraryVersion: zoteroLibraryVersion.value,
+        }
+      );
+      importResult.value = result.result;
+      zoteroAttachmentSummary.value = {
+        attachedCount: result.attachedCount,
+        failedCount: result.attachmentFailedCount,
+        skippedCount: result.attachmentSkippedCount,
+      };
+
+      // Run duplicate detection (no merge) so we can show a summary
+      try {
+        dedupSummary.value = await tauriCommand<DedupResult>('check_duplicates');
+      } catch {
+        // Non-fatal - dedup summary is optional
+      }
+
+      step.value = 'complete';
+    } catch (e) {
+      console.error('[import] confirmZoteroImport failed:', e);
+      const message = e instanceof Error ? e.message : String(e) || 'Import failed';
+      if (message.includes('changed since the preview')) {
+        // Library-version guard fired: back to the picker for a fresh preview.
+        backToZoteroPicker();
+        error.value = 'Zotero changed since the preview - re-select the collection';
+      } else {
+        error.value = message;
+      }
+    } finally {
+      loading.value = false;
+    }
+  }
+
   function reset(): void {
     step.value = 'upload';
     fileName.value = null;
@@ -178,6 +326,12 @@ export function useImport() {
     loading.value = false;
     error.value = null;
     removedIndices.value = new Set();
+    importSource.value = 'file';
+    zoteroCollectionKey.value = null;
+    zoteroArticleKeys.value = [];
+    zoteroLibraryVersion.value = null;
+    zoteroPreviewMeta.value = null;
+    zoteroAttachmentSummary.value = null;
   }
 
   return {
@@ -190,14 +344,24 @@ export function useImport() {
     hasFile,
     hasErrors,
     canImport,
+    hasZeroValid,
     removedIndices,
     visibleArticles,
     visibleCount,
     dedupSummary,
+    importSource,
+    zoteroCollectionKey,
+    zoteroArticleKeys,
+    zoteroLibraryVersion,
+    zoteroPreviewMeta,
+    zoteroAttachmentSummary,
     loadFile,
     loadFilePath,
     parseFile,
     confirmImport,
+    startZoteroImport,
+    applyZoteroPreview,
+    backToZoteroPicker,
     removeArticle,
     reset,
   };
