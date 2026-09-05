@@ -251,11 +251,10 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
 
 ## Work Guidance
 
-Follow `docs/CLAUDE.md` (Rust error handling with `?` + `AppError`, no
-`unwrap()` in production). The `#![cfg_attr(not(test), warn(clippy::unwrap_used,
-clippy::expect_used, clippy::panic))]` gate in `lib.rs` applies. Pure helpers
-(`similarity.rs`, `prompt.rs`, `claim_splitter.rs`, `readiness.rs`'s
-`coverage_percentage`) are `#[must_use]` + unit-tested.
+Follow `docs/CLAUDE.md` for Rust error handling, the unwrap/expect/panic
+clippy gate, and testing conventions. Pure helpers (`similarity.rs`,
+`prompt.rs`, `claim_splitter.rs`, `readiness.rs`'s `coverage_percentage`) are
+`#[must_use]` + unit-tested.
 
 Per `docs/CLAUDE.md` §Testing, pure-helper unit tests live in external
 `src-tauri/tests/citation_finder_*_test.rs` files. The `search.rs` pipeline

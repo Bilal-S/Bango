@@ -29,21 +29,43 @@ describe('help-tab-zotero.vue', () => {
     setActivePinia(createPinia());
   });
 
-  it('renders all seven numbered step cards', () => {
+  it('renders the two path section titles', () => {
     const { wrapper } = mountZotero();
-    // Seven numbered indicators (1..7); step 1 is the enable-local-API step.
-    const numbers = wrapper.findAll('.ht-step__number').map((n) => n.text());
-    expect(numbers).toEqual(['1', '2', '3', '4', '5', '6', '7']);
+    const titles = wrapper.findAll('.ht-zotero__path-title').map((t) => t.text());
+    expect(titles).toEqual([
+      'Automatically Moving Data via API',
+      'Manually Moving Data via Import/Export',
+    ]);
   });
 
-  it('renders the seven step titles in order', () => {
+  it('renders the big - OR - separator between the two paths', () => {
     const { wrapper } = mountZotero();
-    const titles = wrapper.findAll('.ht-step__title').map((t) => t.text());
-    expect(titles).toEqual([
-      'Enable the Zotero local API (recommended)',
+    const separator = wrapper.find('.ht-zotero__or');
+    expect(separator.exists()).toBe(true);
+    expect(separator.text()).toContain('- OR -');
+    expect(wrapper.findAll('.ht-zotero__or-line')).toHaveLength(2);
+  });
+
+  it('renders one API step numbered 1 and six manual steps numbered 1-6', () => {
+    const { wrapper } = mountZotero();
+    const paths = wrapper.findAll('.ht-zotero__path');
+    expect(paths).toHaveLength(2);
+    const apiNumbers = paths[0]!.findAll('.ht-step__number').map((n) => n.text());
+    const manualNumbers = paths[1]!.findAll('.ht-step__number').map((n) => n.text());
+    expect(apiNumbers).toEqual(['1']);
+    expect(manualNumbers).toEqual(['1', '2', '3', '4', '5', '6']);
+  });
+
+  it('renders the step titles in order within each path', () => {
+    const { wrapper } = mountZotero();
+    const paths = wrapper.findAll('.ht-zotero__path');
+    const apiTitles = paths[0]!.findAll('.ht-step__title').map((t) => t.text());
+    const manualTitles = paths[1]!.findAll('.ht-step__title').map((t) => t.text());
+    expect(apiTitles).toEqual(['Enable the Zotero local API (recommended)']);
+    expect(manualTitles).toEqual([
       'Collect articles in Zotero',
       'Set up automatic file renaming',
-      'Export articles as RIS (manual alternative)',
+      'Export articles as RIS',
       'Copy PDF files to Bango full-text folder',
       'Import the RIS file into Bango',
       'Run Batch Import to attach full text',
@@ -58,19 +80,31 @@ describe('help-tab-zotero.vue', () => {
     expect(wrapper.text()).toContain('Import from Zotero');
   });
 
-  it('renders the no-DOI warning callout', () => {
+  it('renders the no-DOI warning callout inside the manual path', () => {
     const { wrapper } = mountZotero();
     const callout = wrapper.find('.ht-zotero__callout');
     expect(callout.exists()).toBe(true);
+    // The callout concerns Batch Import DOI matching, so it must live in the
+    // manual (import/export) path section, not the API path.
+    const paths = wrapper.findAll('.ht-zotero__path');
+    expect(paths[0]!.find('.ht-zotero__callout').exists()).toBe(false);
+    expect(paths[1]!.find('.ht-zotero__callout').exists()).toBe(true);
     // The callout must mention the DOI-only matching limitation so users are
     // not silently misled by Zotero's title-fallback filename behavior.
     expect(wrapper.text()).toContain('only articles with a DOI');
     expect(wrapper.text()).toContain('no DOI');
   });
 
-  it('renders the Zotero template inside a <pre> block on step 2', () => {
+  it('renders the Zotero template inside the file-renaming step card', () => {
     const { wrapper } = mountZotero();
-    const pre = wrapper.find('.ht-zotero__pre');
+    const cards = wrapper.findAll('.ht-step__card');
+    const renameCard = cards.find((c) =>
+      c.find('.ht-step__title').text().includes('Set up automatic file renaming')
+    );
+    // Regression: the template block previously rendered on the wrong card
+    // (hard-coded step number after the API step was prepended).
+    expect(renameCard).toBeDefined();
+    const pre = renameCard!.find('.ht-zotero__pre');
     expect(pre.exists()).toBe(true);
     // The template must contain the DOI branch + the title fallback branch.
     expect(pre.text()).toContain('{{ if DOI }}');
@@ -117,7 +151,7 @@ describe('help-tab-zotero.vue', () => {
     vi.useRealTimers();
   });
 
-  it('renders Go-to buttons only on the steps that route into Bango (1, 4, 6, 7)', () => {
+  it('renders Go-to buttons only on the steps that route into Bango (API 1 + manual 3, 5, 6)', () => {
     const { wrapper } = mountZotero();
     const goButtons = wrapper.findAll('.ht-step__go-btn');
     expect(goButtons).toHaveLength(4);
@@ -126,32 +160,32 @@ describe('help-tab-zotero.vue', () => {
     expect(labels.some((t) => t.includes('Go to Settings'))).toBe(true);
   });
 
-  it('navigates to /import when the step 1 Go-to Import button is clicked', async () => {
+  it('navigates to /import when the API step Go-to Import button is clicked', async () => {
     const { wrapper, router } = mountZotero();
     const pushSpy = vi.spyOn(router, 'push');
     const goButtons = wrapper.findAll('.ht-step__go-btn');
-    // Step 1 (enable the local API) is the first Go-to button ("Go to Import").
+    // The API step (enable the local API) is the first Go-to button.
     await goButtons[0]!.trigger('click');
     expect(pushSpy).toHaveBeenCalledWith('/import');
   });
 
-  it('navigates to /settings when the step 6 Go-to Settings button is clicked', async () => {
+  it('navigates to /settings when the manual step 6 Go-to Settings button is clicked', async () => {
     const { wrapper, router } = mountZotero();
     const pushSpy = vi.spyOn(router, 'push');
     const goButtons = wrapper.findAll('.ht-step__go-btn');
-    // Step 6 is the last Go-to button ("Go to Settings").
+    // Manual step 6 (run Batch Import) is the last Go-to button.
     await goButtons[goButtons.length - 1]!.trigger('click');
     expect(pushSpy).toHaveBeenCalledWith('/settings');
   });
 
-  it('omits Go-to buttons on the external-tool steps (2, 3, 5)', () => {
+  it('omits Go-to buttons on the external-tool steps (manual 1, 2, 4)', () => {
     const { wrapper } = mountZotero();
     // The external-tool step cards have no `.ht-step__go-btn` inside them.
-    const stepCards = wrapper.findAll('.ht-step__card');
-    // Indices 1, 2, 4 are steps 2 (collect), 3 (rename), 5 (copy files).
-    expect(stepCards[1]!.find('.ht-step__go-btn').exists()).toBe(false);
-    expect(stepCards[2]!.find('.ht-step__go-btn').exists()).toBe(false);
-    expect(stepCards[4]!.find('.ht-step__go-btn').exists()).toBe(false);
+    const manualCards = wrapper.findAll('.ht-zotero__path')[1]!.findAll('.ht-step__card');
+    // Indices 0, 1, 3 are manual steps 1 (collect), 2 (rename), 4 (copy files).
+    expect(manualCards[0]!.find('.ht-step__go-btn').exists()).toBe(false);
+    expect(manualCards[1]!.find('.ht-step__go-btn').exists()).toBe(false);
+    expect(manualCards[3]!.find('.ht-step__go-btn').exists()).toBe(false);
   });
 
   it('does not render the demo / about / footer sections (not needed for this tab)', () => {

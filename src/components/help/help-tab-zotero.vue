@@ -21,11 +21,25 @@ interface ZoteroStep {
   icon: string;
   summary: string;
   details: string[];
+  /** Renders the Zotero file-renaming template block + Copy button on this step. */
+  hasTemplate?: boolean;
   /** Optional "Go to" button: route path + label. Omit for external-tool steps. */
   goTo?: { route: string; label: string };
 }
 
-const steps: ZoteroStep[] = [
+/**
+ * One of the two Zotero data-moving paths. Rendered in order with a big
+ * "- OR -" separator between them: users pick either the automatic API route
+ * or the manual import/export route, never both.
+ */
+interface ZoteroPath {
+  key: 'api' | 'manual';
+  title: string;
+  steps: ZoteroStep[];
+}
+
+/** Path A: the automatic route. One prerequisite step powers import + export. */
+const apiSteps: ZoteroStep[] = [
   {
     step: 1,
     title: 'Enable the Zotero local API (recommended)',
@@ -41,8 +55,12 @@ const steps: ZoteroStep[] = [
     ],
     goTo: { route: '/import', label: 'Import' },
   },
+];
+
+/** Path B: the manual route via RIS export/import + full-text file copy. */
+const manualSteps: ZoteroStep[] = [
   {
-    step: 2,
+    step: 1,
     title: 'Collect articles in Zotero',
     icon: 'download',
     summary:
@@ -56,9 +74,10 @@ const steps: ZoteroStep[] = [
     ],
   },
   {
-    step: 3,
+    step: 2,
     title: 'Set up automatic file renaming',
     icon: 'drive_file_rename_outline',
+    hasTemplate: true,
     summary:
       'Configure Zotero to rename PDF files using the article DOI. This produces filenames that Bango Batch Import can match automatically.',
     details: [
@@ -70,12 +89,12 @@ const steps: ZoteroStep[] = [
     ],
   },
   {
-    step: 4,
-    title: 'Export articles as RIS (manual alternative)',
+    step: 3,
+    title: 'Export articles as RIS',
     icon: 'file_export',
     summary: 'Export your Zotero collection as an RIS file that Bango can import.',
     details: [
-      'In Zotero, right-click the collection you organized in step 2.',
+      'In Zotero, right-click the collection you organized in step 1.',
       'Choose "Export Collection..." from the menu.',
       'In the export dialog, select "RIS" as the format.',
       'Click OK and choose where to save the `.ris` file.',
@@ -84,7 +103,7 @@ const steps: ZoteroStep[] = [
     goTo: { route: '/import', label: 'Import' },
   },
   {
-    step: 5,
+    step: 4,
     title: 'Copy PDF files to Bango full-text folder',
     icon: 'content_copy',
     summary: 'Copy your renamed PDF files from Zotero storage into the Bango full-text directory.',
@@ -94,17 +113,17 @@ const steps: ZoteroStep[] = [
       'In the `storage` folder, search for all PDF files. On Windows, type `*.pdf` in the search box. On macOS, use the Finder search bar.',
       'Select all the PDF files and copy them (Ctrl+C on Windows/Linux, Cmd+C on macOS).',
       'In Bango, go to Settings and find the "Storage" card. Note the storage root path. Open that folder in your file manager, then open the `fulltext` subfolder inside it.',
-      'Paste the PDF files into the `fulltext` folder. They are now in place for Bango to find in step 7.',
+      'Paste the PDF files into the `fulltext` folder. They are now in place for Bango to find in step 6.',
     ],
   },
   {
-    step: 6,
+    step: 5,
     title: 'Import the RIS file into Bango',
     icon: 'upload_file',
     summary: 'Import the RIS file you exported from Zotero into Bango.',
     details: [
       'In Bango, go to the Import tab from the sidebar.',
-      'Click the file browser button and select the `.ris` file you saved in step 4.',
+      'Click the file browser button and select the `.ris` file you saved in step 3.',
       'Bango shows a preview of the articles it found in the file. Review them and deselect any you do not want.',
       'Click "Import" to add the articles to your project.',
       'Bango automatically checks for duplicate records and links each article to its journal in the reference database.',
@@ -112,7 +131,7 @@ const steps: ZoteroStep[] = [
     goTo: { route: '/import', label: 'Import' },
   },
   {
-    step: 7,
+    step: 6,
     title: 'Run Batch Import to attach full text',
     icon: 'playlist_play',
     summary:
@@ -129,7 +148,16 @@ const steps: ZoteroStep[] = [
   },
 ];
 
-/** Navigate to a Bango route (used by the "Go to" buttons on steps 3, 5, 6). */
+/** Render order: the API path, the "- OR -" separator, then the manual path. */
+const paths: ZoteroPath[] = [
+  { key: 'api', title: 'Automatically Moving Data via API', steps: apiSteps },
+  { key: 'manual', title: 'Manually Moving Data via Import/Export', steps: manualSteps },
+];
+
+/**
+ * Navigate to a Bango route (used by the "Go to" buttons on the API step and
+ * on manual steps 3, 5, and 6).
+ */
 function navigateTo(route: string): void {
   router.push(route);
 }
@@ -166,82 +194,94 @@ async function copyTemplate(): Promise<void> {
           <h3 class="ht-zotero__overview-title">Zotero and Bango, together</h3>
           <p class="ht-zotero__overview-desc">
             Zotero is excellent for collecting articles and their PDFs. Bango is excellent for
-            AI-assisted screening and analysis. This workflow shows how to move a Zotero collection
-            into Bango in steps: enable the local API for the direct import/export path, or fall
-            back to the classic collect, rename, export, copy, import, and attach workflow.
+            AI-assisted screening and analysis. Below, choose one of two paths to move your Zotero
+            data into Bango: let the apps talk directly via the Zotero local API, or move files
+            yourself via RIS export/import and the full-text folder.
           </p>
         </div>
       </div>
     </section>
 
-    <!-- No-DOI warning callout -->
-    <section class="ht-zotero__callout" role="note">
-      <span class="material-symbols-outlined ht-zotero__callout-icon">warning</span>
-      <div class="ht-zotero__callout-body">
-        <h4 class="ht-zotero__callout-title">Important: only articles with a DOI auto-match</h4>
-        <p class="ht-zotero__callout-text">
-          Bango Batch Import matches PDFs to articles using the DOI in the filename. Articles that
-          have no DOI cannot be auto-matched, even if Zotero renames their PDF using the title. For
-          no-DOI articles you have two options: add the DOI in the article metadata first and run
-          Batch Import again, or attach the PDF manually from the article detail panel using the
-          "Attach Full Text" button.
-        </p>
-      </div>
-    </section>
-
-    <!-- Steps -->
-    <section class="ht-guide__steps">
-      <div v-for="step in steps" :key="step.step" class="ht-step">
-        <div class="ht-step__indicator">
-          <div class="ht-step__number">{{ step.step }}</div>
-          <div v-if="step.step < steps.length" class="ht-step__line" />
-        </div>
-        <div class="ht-step__card">
-          <div class="ht-step__card-header">
-            <span class="material-symbols-outlined ht-step__icon">{{ step.icon }}</span>
-            <div class="ht-step__card-title-area">
-              <h3 class="ht-step__title">{{ step.title }}</h3>
-              <p class="ht-step__summary">{{ step.summary }}</p>
+    <!-- Two paths: automatic (API) or manual (import/export), split by a big "- OR -" -->
+    <template v-for="(path, pathIdx) in paths" :key="path.key">
+      <section class="ht-zotero__path">
+        <h2 class="ht-zotero__path-title">{{ path.title }}</h2>
+        <div class="ht-guide__steps">
+          <div v-for="(step, idx) in path.steps" :key="`${path.key}-${step.step}`" class="ht-step">
+            <div class="ht-step__indicator">
+              <div class="ht-step__number">{{ step.step }}</div>
+              <div v-if="idx < path.steps.length - 1" class="ht-step__line" />
             </div>
-          </div>
-          <ul class="ht-step__details">
-            <li v-for="(detail, idx) in step.details" :key="idx" class="ht-step__detail">
-              {{ detail }}
-            </li>
-          </ul>
+            <div class="ht-step__card">
+              <div class="ht-step__card-header">
+                <span class="material-symbols-outlined ht-step__icon">{{ step.icon }}</span>
+                <div class="ht-step__card-title-area">
+                  <h3 class="ht-step__title">{{ step.title }}</h3>
+                  <p class="ht-step__summary">{{ step.summary }}</p>
+                </div>
+              </div>
+              <ul class="ht-step__details">
+                <li v-for="(detail, dIdx) in step.details" :key="dIdx" class="ht-step__detail">
+                  {{ detail }}
+                </li>
+              </ul>
 
-          <!-- Step 2: Zotero template block with Copy button -->
-          <div v-if="step.step === 2" class="ht-zotero__template">
-            <div class="ht-zotero__template-header">
-              <span class="ht-zotero__template-label">Zotero file-renaming template</span>
+              <!-- Zotero file-renaming template block with Copy button (rename step only) -->
+              <div v-if="step.hasTemplate" class="ht-zotero__template">
+                <div class="ht-zotero__template-header">
+                  <span class="ht-zotero__template-label">Zotero file-renaming template</span>
+                  <button
+                    class="ht-zotero__copy-btn"
+                    :class="{ 'ht-zotero__copy-btn--done': copied }"
+                    type="button"
+                    @click="copyTemplate"
+                  >
+                    <span class="material-symbols-outlined ht-zotero__copy-icon">{{
+                      copied ? 'check' : 'content_copy'
+                    }}</span>
+                    {{ copied ? 'Copied' : 'Copy' }}
+                  </button>
+                </div>
+                <pre class="ht-zotero__pre"><code>{{ ZOTERO_TEMPLATE }}</code></pre>
+              </div>
+
+              <!-- Optional "Go to" button -->
               <button
-                class="ht-zotero__copy-btn"
-                :class="{ 'ht-zotero__copy-btn--done': copied }"
+                v-if="step.goTo"
+                class="ht-step__go-btn"
                 type="button"
-                @click="copyTemplate"
+                @click="navigateTo(step.goTo.route)"
               >
-                <span class="material-symbols-outlined ht-zotero__copy-icon">{{
-                  copied ? 'check' : 'content_copy'
-                }}</span>
-                {{ copied ? 'Copied' : 'Copy' }}
+                <span class="material-symbols-outlined ht-step__go-icon">arrow_forward</span>
+                Go to {{ step.goTo.label }}
               </button>
             </div>
-            <pre class="ht-zotero__pre"><code>{{ ZOTERO_TEMPLATE }}</code></pre>
           </div>
-
-          <!-- Optional "Go to" button -->
-          <button
-            v-if="step.goTo"
-            class="ht-step__go-btn"
-            type="button"
-            @click="navigateTo(step.goTo.route)"
-          >
-            <span class="material-symbols-outlined ht-step__go-icon">arrow_forward</span>
-            Go to {{ step.goTo.label }}
-          </button>
         </div>
+
+        <!-- No-DOI warning callout: Batch Import DOI matching is a manual-path concern -->
+        <section v-if="path.key === 'manual'" class="ht-zotero__callout" role="note">
+          <span class="material-symbols-outlined ht-zotero__callout-icon">warning</span>
+          <div class="ht-zotero__callout-body">
+            <h4 class="ht-zotero__callout-title">Important: only articles with a DOI auto-match</h4>
+            <p class="ht-zotero__callout-text">
+              Bango Batch Import matches PDFs to articles using the DOI in the filename. Articles
+              that have no DOI cannot be auto-matched, even if Zotero renames their PDF using the
+              title. For no-DOI articles you have two options: add the DOI in the article metadata
+              first and run Batch Import again, or attach the PDF manually from the article detail
+              panel using the "Attach Full Text" button.
+            </p>
+          </div>
+        </section>
+      </section>
+
+      <!-- Big "- OR -" separator between the two paths -->
+      <div v-if="pathIdx < paths.length - 1" class="ht-zotero__or" role="separator" aria-label="or">
+        <span class="ht-zotero__or-line" aria-hidden="true"></span>
+        <span class="ht-zotero__or-label">- OR -</span>
+        <span class="ht-zotero__or-line" aria-hidden="true"></span>
       </div>
-    </section>
+    </template>
   </div>
 </template>
 
@@ -278,6 +318,35 @@ async function copyTemplate(): Promise<void> {
   color: var(--color-on-surface-variant);
   line-height: var(--line-height-body);
   margin: 0;
+}
+
+/* Two-path layout: per-path section title + the big "- OR -" separator */
+.ht-zotero__path-title {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-on-surface);
+  margin: 0 0 var(--space-4) 0;
+}
+
+.ht-zotero__or {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ht-zotero__or-line {
+  flex: 1;
+  height: 2px;
+  background-color: #c7d2fe;
+}
+
+.ht-zotero__or-label {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-bold);
+  color: #4f46e5;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
 /* No-DOI warning callout */

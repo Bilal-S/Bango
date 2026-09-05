@@ -80,9 +80,7 @@ When the user requests a durable behavior change, record it here or in the relev
 
 - **Frontend "is the LLM configured?" gate - single canonical pattern**:
   every frontend feature gate that depends on "LLM configured" MUST read
-  `useLlmConfigured()` (which wraps the `llm-config` Pinia store); no
-  component, view, composable, or store may derive its own LLM-configured
-  state. Full contract: `src/AGENTS.md` §Local Contracts.
+  `useLlmConfigured()`. Full contract: `src/AGENTS.md` §Local Contracts.
 
 ## Child DOX Index
 
@@ -92,20 +90,15 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
 
 - **`src-tauri/src/`** - Rust backend (Tauri 2.x). Owns the article state
   machine, hard-delete cascade, journal-index loader, startup upgrade path,
-  and the backend Child DOX Index. See `src-tauri/src/AGENTS.md`. Child docs:
-  `commands/`, `db/`, `llm/`, `screening/`, `wiki/`, `embedding/`,
-  `citation_finder/`, `translation/`, `batch_import/`, `openalex/`,
-  `scraping/`, `export/`, `utils/`, `zotero/`.
-- **`src-tauri/tests/`** - Rust integration tests (one test binary per area
-  under `tests/<area>/`; also the extraction home for inline `#[cfg(test)]`
-  blocks; slow tests are `#[ignore = "slow"]` + registered in
-  `tests/slow-manifest.toml`). See `src-tauri/tests/AGENTS.md`.
+  and the backend Child DOX Index (module child docs live there). See
+  `src-tauri/src/AGENTS.md`.
+- **`src-tauri/tests/`** - Rust integration tests (area binaries, fast/slow
+  split, slow-test manifest, binding test inventories). See
+  `src-tauri/tests/AGENTS.md`.
 - **`src/`** - Vue 3 + TypeScript + Tailwind v4 frontend. Owns the canonical
   LLM-configured gate, the multi-source `watch()` rule, and the shared test
-  helpers, plus the frontend Child DOX Index: `views/`, `components/`,
-  `composables/`, `stores/` each have their own `AGENTS.md`; `utils/`,
-  `types/`, `router/`, `styles/`, `workers/` are indexed inline. See
-  `src/AGENTS.md`.
+  helpers, plus the frontend Child DOX Index (module child docs + inline
+  directories live there). See `src/AGENTS.md`.
 - **`landingpage/`** - standalone marketing microsite (NOT part of the shipped
   Tauri app). Static HTML5 + Tailwind v4 (browser CDN build). Two pages
   (`index.html` + `help.html`); shared `assets/`. When porting app Help
@@ -126,6 +119,12 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
   inspired).
 - **`docs/test-plans/`** - binding test inventory files consumed by
   `scripts/check-test-inventory.sh` (wired into `npm run check:all`).
+- **`scripts/`** - repo guard + utility scripts (no own `AGENTS.md`).
+  Gates wired into `npm run check:all`: `check-test-inventory.sh` +
+  `check-slow-manifest.sh`; also `rust-test.sh` (behind `npm run
+  test:rust*`), `check-commit-msg.sh` (commit-message format), and
+  `zotero_write_probe.sh` (live Zotero write-API probe, see
+  `zotero/AGENTS.md`).
 - **`.worktrees/`** - planning documents. Not part of the shipped app.
 
 Verification gate: `npm run check:all` (type-check + eslint + prettier + rustfmt + clippy

@@ -300,90 +300,20 @@ it is intentionally NOT called on per-article deletes or other hot paths - only
 at coarse, infrequent, destructive boundaries (e.g. `reset_project`). Tested in
 `tests/db/maintenance_test.rs` + `tests/export/reset_project_test.rs`.
 
-### `migration.rs` - transactional migration runner
+### `migration.rs` + `migrations/` - transactional runner + version inventory
 
-**Transactional**: each migration's `up_sql` + `user_version` bump run in a
-single `unchecked_transaction` so a crash between the DDL and the version pragma
-rolls back cleanly. **Self-healing pre-pass** (`heal_partial_migrations`):
-detects DBs corrupted by older non-transactional builds by probing for the v003
-marker column (`articles.is_translated`) while `user_version < 3`; if present
-it advances `user_version` to 3 without re-running the dangerous
-`ALTER TABLE ADD COLUMN` statements (SQLite has no `IF NOT EXISTS` for ADD
-COLUMN). Future migrations that add another `ALTER TABLE ... ADD COLUMN` MUST
-extend `heal_partial_migrations` with a marker-column check. 5 inline unit
-tests + `tests/db/migration_recovery_test.rs`.
-
-### Migrations
-
-- **`v002_wiki_manifest.rs`** (VERSION 2, deployed) - contains only
-  `CREATE TABLE wiki_index_manifest` (per-file content hashes for Wiki
-  external-edit drift detection). The FTS5 drop, `article_chunks` creation, and
-  `audit_entries` rebuild were in v002 pre-release but moved to v003 after v002
-  was deployed with only `wiki_index_manifest`.
-- **`v003_articles_translations.rs`** (VERSION 3) - carries the reverted v002
-  content (FTS5 drop, `article_chunks`, `audit_entries` rebuild with
-  `figure_descriptions` + `ai_screen_enhanced`) plus translation schema:
-  `articles` columns (`is_translated`, `translation_status`, `translation_error`,
-  `translated_at`), `article_original_content` + `article_original_chunks`
-  tables, and `audit_entries` CHECK expansion for `translation` +
-  `translation_error`. The `ALTER TABLE ADD COLUMN` statements have no
-  `IF NOT EXISTS` guard; the transactional runner + `heal_partial_migrations`
-  pre-pass are the contract that prevents duplicate-column crashes on re-run.
-- **`v005_audit_note_add.rs`** (VERSION 5) - rebuilds `audit_entries` to add
-  `'note_add'` to the `action` CHECK; creates
-  `idx_articles_translation_status`. Idempotent. Frontend `AuditAction` type +
-  `formatAuditAction` labels + `audit-timeline.vue` `actionLabels` include
-  `note_add`. **Audit entry coalescing**
-  (`audit_repo::create_or_update_entry`): when a second audit entry with the
-  same `article_id + action + source` arrives within `COALESCE_WINDOW_SECS`
-  (300 seconds / 5 minutes), the existing row is **updated** (details +
-  timestamp) instead of inserting a new row. Tested in
-  `tests/db/audit_coalesce_test.rs`.
-- **`v006_audit_metadata_edit.rs`** (VERSION 6) - extends the
-  `audit_entries.action` CHECK to include `'metadata_edit'` so in-place
-  metadata field edits are correctly categorized. **Heal: empty-string
-  `article_id` normalization** - the rebuild also runs
-  `UPDATE audit_entries_v006_old SET article_id = NULL WHERE article_id = ''`
-  BEFORE the orphan `DELETE` so historical malformed rows are healed rather
-  than crashing the subsequent `INSERT ... SELECT`. The
-  `update_article_metadata` Tauri command writes `action = 'metadata_edit'`,
-  coalesced within the 5-min window. **Title is `TEXT NOT NULL`**, so its
-  binding arm rejects empty/whitespace-only input with `AppError::Validation`.
-- **`v007_audit_clear_and_embeddings.rs`** (VERSION 7, not yet deployed) -
-  extends `audit_entries.action` CHECK with `'ai_screen_clear'` (powers the
-  `clear_ai_reasoning` command) + creates the `article_embeddings` table.
-  Idempotent. v001 is updated so fresh DBs get `ai_screen_clear` in the initial
-  CHECK directly.
-- **`v008_audit_index_restore.rs`** (VERSION 8) - restores
-  `idx_audit_entries_article_id`, dropped by every `audit_entries` CHECK
-  rebuild (v003-v007 RENAME-CREATE-INSERT-DROP pattern).
-- **`v009_doi_canonicalization.rs`** (VERSION 9) - DOI canonicalization
-  (`tests/db/doi_case_migration_test.rs`, inventory
-  `docs/test-plans/doi-case-tests.md`). Heals legacy mixed-case, prefixed
-  (`https://doi.org/` / `dx.doi.org` / `doi:`), and whitespace-wrapped DOIs in
-  `articles` + `reference_papers` via a single CASE one-strip statement that
-  is byte-equivalent to `ris::doi::normalize_doi` (URL prefixes before
-  `doi:`, placeholders filtered AFTER the strip so `doi: NA` -> NULL);
-  merges case-variant duplicate `reference_papers` (survivor by match-state
-  rank `matched`/`imported` > `unmatched`, then lowest `rowid`; links
-  remapped with collision absorption; counters recounted from links); and
-  rebuilds `uq_ref_papers_doi` as a NON-partial expression index on
-  `LOWER(doi)`. Non-partial is load-bearing: SQLite's planner only uses a
-  partial index when the query's WHERE clause syntactically implies the
-  partial condition, and `LOWER(doi) = ?` does not imply `doi IS NOT NULL`,
-  so a partial clause turns every DOI lookup into a full scan (UNIQUE
-  already treats NULLs as distinct). Statement order is load-bearing: the old
-  BINARY index is dropped FIRST (the healing UPDATEs would violate it on
-  case-variant data), and the new index is created LAST. v001 is updated so
-  fresh DBs get the non-partial `LOWER(doi)` index directly.
+The transactional runner contract (single `unchecked_transaction` per
+migration + the `heal_partial_migrations` self-healing pre-pass) and the
+per-version inventory (v001-v009, incl. the CHECK-constraint rebuild pattern
+and the base-migration parity rule) live in `migrations/AGENTS.md`.
 
 ## Work Guidance
 
 - Route every `DbState.conn` lock through `lock_conn` (not inline `.lock()`).
 - Keep `PROJECT_PORTABLE_SETTINGS` in sync with `app_settings` key changes
   (see the DOX rule in `export/AGENTS.md`).
-- When adding an `ALTER TABLE ADD COLUMN` migration, extend
-  `heal_partial_migrations` with a marker-column check.
+- Schema changes follow `migrations/AGENTS.md` (transactional runner,
+  `heal_partial_migrations` marker rule, per-version inventory).
 
 ## Verification
 
@@ -406,4 +336,7 @@ tests + `tests/db/migration_recovery_test.rs`.
 - **`biblio_repo/`** - directory module (`kpis`, `authors`, `networks/`,
   `terms`, `institutions`, `normalization`, `productivity`). No own
   `AGENTS.md`.
-- **`migrations/`** - one file per version (v002-v009). No own `AGENTS.md`.
+- **`migrations/`** - one file per version (v001-v009) + the `mod.rs`
+  registry. See `migrations/AGENTS.md` for the transactional runner contract,
+  the `heal_partial_migrations` pre-pass, the base-migration parity rule, and
+  the per-version inventory.
