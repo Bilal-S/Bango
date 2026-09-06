@@ -36,18 +36,22 @@ Responses will be on an availability basis (takes some time).
 | | Feature | |
 |---|---|---|
 | 📥 | **RIS & BibTeX Import** | Multi-file import, 30+ metadata fields, 10,000 article capacity guard, valid RIS export with AI annotations |
+| 🧭 | **OpenAlex Discovery** | Search 300M+ scholarly works with filters or LLM Smart Search, import with OA PDF download and optional reference harvest |
+| 🔁 | **Zotero Integration** | Import collections with attachments from a running Zotero client, and export articles back via DOI diff |
 | 🔍 | **Intelligent Deduplication** | DOI, title, year, author matching with Levenshtein similarity and manual review |
 | 🤖 | **AI-Powered Screening** | Batch abstract evaluation against your criteria via hosted or local LLMs, plus Enhanced and Two-stage full-text-aware modes |
 | 🌐 | **Multilingual Translation** | Auto-translate non-English articles to English before AI workflows (10-language section classification) |
 | 🏷️ | **Tags & Labels** | AI-suggested content tags and workflow labels with curated standard taxonomy, backend sanitizer, and inline editing |
 | 📊 | **PRISMA 2020 Diagrams** | Auto-generated four-phase flow diagrams with exclusion reason breakdowns |
-| 📈 | **Bibliometric Analysis** | Six modules: co-authorship, citation, keywords, timeline, author productivity, co-citation |
+| 📈 | **Bibliometric Analysis** | Six modules: co-authorship, citation, keywords, timeline, author productivity, co-citation, plus LLM cluster thematic analysis and a Google Trends panel |
 | 🔗 | **References & Citations** | Track backward references and forward citations with promotion workflow |
 | 📎 | **Full-Text Attachments** | Attach PDFs/TXT files, extract text (with CJK mojibake recovery), inline PDF reader, AI figure/table descriptions |
 | 📚 | **LLM Wiki Knowledge Base** | Obsidian-style Markdown wiki with concept hubs, author pages, methods hubs, FTS5 search, graph visualization, and static-site export. Can be opened in Obsidian for edits and enrichments. |
-| 💬 | **Chat Assistant** | RAG-based Q&A over your articles or your wiki, with source-citation badges |
+| 💬 | **Chat Assistant** | RAG-based Q&A over your articles or your wiki, plus a Citation Finder mode, with source-citation identification |
+| 🎯 | **Citation Finder** | Paste manuscript prose and find which library articles support or contradict each claim |
+| 🧠 | **Semantic Embeddings** | Automatic background vectors per article and chunk powering fast semantic recall |
 | 🔎 | **Search Strategy Builder** | Generate Boolean search strings for 8 academic databases from your aims and criteria |
-| ⚙️ | **Batch Import Processor** | 4-phase pipeline: full-text attach, citation import, translation, and AI summaries by DOI-keyed file matching |
+| ⚙️ | **Batch Import Processor** | 5-phase pipeline: full-text attach, citation import, translation, AI summaries, and embeddings by DOI-keyed file matching |
 | 📝 | **Research Gap Analysis** | Corpus-wide gap report covering thematic coverage, identified gaps, methodological landscape, and future directions |
 | 🔒 | **Offline & Private** | Local SQLite database, AES-256-GCM encrypted API keys, no cloud upload |
 | 📝 | **Audit Trail** | Every state change, tag edit, and AI decision logged with timestamp |
@@ -256,6 +260,9 @@ Users can manually override AI decisions and move articles freely between Workin
 - Preview parsed records and manually deselect individual articles before confirming import
 - Export the included list in valid RIS format, with AI-generated tags (`KW`), reasoning notes (`N1`), user notes (`NO`), and inclusion/exclusion labels (`C1` as JSON)
 - Full project export/import as a single `.bango.json` file (API keys excluded; bibliometrics, wiki content, and AI summaries are regenerable and excluded)
+- Import **Zotero** collections from a locally running Zotero desktop client via its local API, including subcollections and PDF attachment copies
+- **Zotero export**: push articles back into Zotero from the Export dialog, with a DOI diff preview classifying items as missing, already present, or no-DOI
+- **Journal index enrichment**: bundled journal reference data matches journal names to ISSN/eISSN and publisher metadata during import and restore
 
 </details>
 
@@ -306,6 +313,9 @@ Users can manually override AI decisions and move articles freely between Workin
 - Enhanced and Two-stage modes apply per-article only when full text is attached; articles without full text fall back to abstract-only screening
 - A per-article chunk budget (default 2400 words) prevents any single article from blowing the context window
 - At screening start, previously-attached PDFs without chunks are backfilled transparently (no LLM call)
+- **Immediate stop**: cancel an in-flight screening run within milliseconds
+- **Smart error recovery**: transient failures leave articles unscreened for the next run, while authentication failures stop the run immediately
+
 
 </details>
 
@@ -340,6 +350,7 @@ This is a **Plan-A permanent rewrite**: the working article row and chunks hold 
 - **Inline editing**: double-click any tag/label chip to edit it in place (`blur` saves, `Esc` cancels)
 - Tags and labels generated in a pre-screening pass; user reviews before AI screening begins
 - Full manual editing: override any AI decision, adjust tags and labels, move articles between lists
+- Sort, filter, merge by use any Tag or Label
 
 </details>
 
@@ -364,6 +375,8 @@ A single **Normalize** transaction builds the analytical data layer; modules the
 6. **Co-Citation Analysis** - On-demand computation with four normalization modes (Raw, Cosine, Jaccard, Pearson).
    Dual visualization: interactive network graph and sortable heatmap.
    Scope: included or all articles.
+- **Cluster Thematic Analysis**: select one cluster in the co-authorship or keyword network and let the LLM explain what its members share, with clickable article and author links
+- **Google Trends panel**: a bottom drawer in the keyword view embeds Google Trends timeseries and geo-map charts for selected keywords (mostly blocked by Google at this time but you can open in separate window)
 
 </details>
 
@@ -376,6 +389,7 @@ A single **Normalize** transaction builds the analytical data layer; modules the
 - **Promotion workflow**: unmatched reference papers with abstracts can be promoted to full articles in the Working list
 - **Match status** states: `unmatched`, `matched` (linked to existing library article), `imported`, `not_in_library`
 - **Citation Chaser integration**: external tool output can be imported by placing DOI-keyed RIS files in the `{storage_root}/ris/` directory and running the Batch Import Processor
+
 
 </details>
 
@@ -444,6 +458,28 @@ The wiki lives on disk under `{storage_root}/wiki-root/` and is fully navigable 
 </details>
 
 <details>
+<summary><strong>🎯 Citation Finder</strong></summary>
+
+- Paste any paragraph of prose (for example from a manuscript) and Bango finds which articles in your library support or contradict each claim
+- Two modes: **whole-block** (one result set) or **per-statement** (the LLM splits the prose into up to 5 claims matched independently)
+- Three-layer pipeline: semantic embedding prefilter, token-Jaccard passage extraction, then LLM classification (validating or opposing, out-of-context flag, confidence score)
+- One-button flow: missing embeddings are prepared automatically with live progress, cancel support, and a model-mismatch regeneration dialog
+- Copy matched citations in APA, MLA, Chicago, IEEE, or AMA style
+- Accessed as a third toggle in the Chat view alongside Articles and Wiki
+
+</details>
+
+<details>
+<summary><strong>🧠 Semantic Embedding Search</strong></summary>
+
+- Per-article, per-chunk embedding vectors power bounded cosine-recall semantic search and act as the Citation Finder prefilter
+- Generated automatically in the background after AI summaries, full-text chunk rebuilds, and batch import Phase 5
+- A triple-state capability flag detects provider support during Test Connection; providers without embeddings (like Anthropic) are skipped gracefully
+- Per-row staleness tracking re-embeds only changed text, and switching models offers scoped regeneration
+
+</details>
+
+<details>
 <summary><strong>🔎 Search Strategy Builder</strong></summary>
 
 Generates database-ready Boolean search strings for 8 academic databases from the research aims and inclusion/exclusion criteria you have already defined in the Criteria view.
@@ -463,12 +499,13 @@ Generates database-ready Boolean search strings for 8 academic databases from th
 Scans the Bango Documents directory for files produced by external tools and imports them by DOI-keyed file matching.
 Runs as a background task with live progress and cancel support.
 
-**4-phase pipeline:**
+**5-phase pipeline:**
 
 1. **Full Text** (Phase 1): scans `fulltext/` for `{doi}.pdf` / `.txt` files and attaches them to matching articles
 2. **Citations** (Phase 2): scans `ris/` for `{doi}_references.ris`, `_citations.ris`, `.ris`, `.bib` files and imports references/citations
 3. **Translations** (Phase 3): enqueues `FullText` translation jobs for non-English newly-attached articles (only when auto-translate is enabled)
 4. **AI Summaries** (Phase 4): generates AI summaries for newly-attached articles without an existing summary (only when LLM is configured)
+5. **Embeddings** (Phase 5): generates semantic vectors for included articles with newly attached full text (only when the provider supports embeddings)
 
 Each phase skips articles that already have the relevant data, making the pipeline idempotent.
 
@@ -492,7 +529,7 @@ Each phase skips articles that already have the relevant data, making the pipeli
 </details>
 
 <details>
-<summary><strong>📝 Audit Trail and Search</strong></summary>
+<summary><strong>📝 Audit Trail, Edits, and Search</strong></summary>
 
 - Every state change, tag/label edit, and AI decision logged with timestamp and source
 - **Audit entry coalescing**: rapid same-type edits within a 5-minute window update the existing entry instead of spamming duplicates
@@ -501,6 +538,11 @@ Each phase skips articles that already have the relevant data, making the pipeli
 - Full-text search across title and abstract fields
 - Sort by title, publication year, date added, or AI confidence score
 - Filter by status, tags, labels, matched criteria, publication year range, and manual override status
+- Filter by DOI (partial match) with an "Only no DOI" mode for data cleanup, plus NOT-negation on tag/label pills to exclude matches
+- **Inline metadata editing**: double-click the title, journal (with journal-index autocomplete), authors, year, DOI, or keywords to edit in place
+- **Permanent delete**: hard-delete an article and all related data, including on-disk files, in one transaction
+- **Bulk edit selected articles**: many articles can be managed in bulk, e.g. export, include, exclude 
+- **Keyboard navigation**: arrow keys browse the article list and move between articles in the detail panel
 
 </details>
 
@@ -559,6 +601,10 @@ Project exports do not include keys; collaborators must provide their own.
 | Search Strategy Builder | `SearchStrategy` | Boolean search strings for 8 databases |
 | Figure/Table Descriptions | `FigureDescription` | Grounded caption descriptions |
 | Criteria Consistency Check | (direct) | LLM review of criteria and custom rules |
+| OpenAlex Smart Search | `OpenAlexSmartSearch` | LLM-generated Boolean query from aims + criteria |
+| Citation Finder | `CitationFinder` / `CitationFinderSplit` | Classifies matched passages as validating or opposing |
+| Cluster Thematic Analysis | `ClusterThematicAnalysis` | Explains the shared themes of one bibliometric cluster |
+| Embeddings | `Embedding` | Provider embedding endpoint for semantic vectors |
 
 All LLM calls go through a centralized **LlmOrchestrator** that enforces concurrency limits, request delays, rate-limit backoff, and diagnostic logging.
 
@@ -695,6 +741,10 @@ You can contribute via PR.
 │   │   ├── models/             # Domain models (Article, Tag, Label, etc.)
 │   │   ├── ris/                # RIS parser, validator, types
 │   │   ├── bibtex/             # BibTeX parser
+│   │   ├── zotero/             # Zotero local API import/export mapping
+│   │   ├── openalex/           # OpenAlex catalog search client + mapping
+│   │   ├── embedding/          # Semantic embedding generation + recall
+│   │   ├── citation_finder/     # Citation Finder pipeline
 │   │   ├── screening/          # AI screening engine, prompt builder, chunk retrieval
 │   │   ├── translation/        # Multilingual translation pipeline + queue worker
 │   │   ├── dedup/              # Deduplication engine, similarity scoring
@@ -704,7 +754,7 @@ You can contribute via PR.
 │   │   ├── summary/            # AI summary + research gap analysis
 │   │   ├── wiki/               # LLM Wiki knowledge base (ingest, FTS5, chat, graph)
 │   │   │   └── ingest/         # Parallel chunked ingest pipeline
-│   │   ├── batch_import/       # 4-phase batch import processor
+│   │   ├── batch_import/       # 5-phase batch import processor
 │   │   ├── prisma/             # PRISMA diagram data + SVG generation
 │   │   ├── scraping/           # Web scraping utilities + Citation Chaser
 │   │   ├── crypto/             # AES-256-GCM encryption for API keys
