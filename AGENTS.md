@@ -105,6 +105,9 @@ owning AGENTS.md; follow it for the detailed contracts. Create a child
   content to `help.html`, remove app-only interactivity (Vue router
   navigation, demo-project loader, scroll-spy) and replace CSS variables /
   Tailwind-scoped styles with plain CSS or self-contained utility classes.
+  Both pages carry a platform-adaptive top Download button (Windows ->
+  Microsoft Store; macOS/Linux -> `#macos`/`#linux` anchors on the GitHub
+  README) with a `?pf=windows|macos|linux` URL override for testing.
 - **`tests/test-citations/`** - RIS fixture data for citation/reference system
   tests. `main_articles.ris` (10 articles, DOIs `10.1001/art1`–`10.1010/art10`)
   with per-article `_references.ris` and `_citations.ris` files (filename =

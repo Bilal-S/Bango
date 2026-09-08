@@ -6,7 +6,7 @@
     <title>Bango - AI-Accelerated Systematic Literature Review Screening</title>
     <meta
       name="description"
-      content="Bango automates the screening phase of systematic literature reviews. Import RIS or BibTeX, define your criteria, and let AI screen abstracts with full bibliometric analysis. Desktop app for Windows 10 & 11."
+      content="Bango automates the screening phase of systematic literature reviews. Import RIS or BibTeX, define your criteria, and let AI screen abstracts with full bibliometric analysis. Desktop app for Windows, macOS, and Linux."
     />
     <meta name="author" content="BonCode (Bilal Soylu)" />
 
@@ -253,24 +253,111 @@
         <div class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
           <a href="#features" class="hover:text-indigo-600 transition-colors">Features</a>
           <a href="#how" class="hover:text-indigo-600 transition-colors">How it works</a>
-          <a href="#privacy" class="hover:text-indigo-600 transition-colors">Privacy</a>
+          <a href="https://github.com/Bilal-S/Bango/blob/main/PrivacyPolicy.md" class="hover:text-indigo-600 transition-colors">Privacy</a>
           <a href="help.html" class="hover:text-indigo-600 transition-colors">Help</a>
         </div>
 
         <a
+          id="nav-download"
           href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
           data-cta="store"
           class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition-all hover:bg-indigo-700 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
         >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <svg
+            data-icon="windows"
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
             <path
               d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"
             />
           </svg>
-          Download
+          <svg
+            data-icon="apple"
+            hidden
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+            />
+          </svg>
+          <svg
+            data-icon="github"
+            hidden
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+            />
+          </svg>
+          <span data-label>Download</span>
         </a>
       </nav>
     </header>
+
+    <!-- Platform-aware top download button: Windows keeps the Microsoft Store
+         destination; macOS and Linux switch to the GitHub download sections.
+         Override for testing with ?pf=windows, ?pf=macos, or ?pf=linux. -->
+    <script>
+      (function () {
+        'use strict';
+        var GITHUB_MAC_URL = 'https://github.com/Bilal-S/Bango#macos';
+        var GITHUB_LINUX_URL = 'https://github.com/Bilal-S/Bango#linux';
+
+        function resolvePlatform() {
+          var pf = null;
+          try {
+            pf = new URLSearchParams(window.location.search).get('pf');
+          } catch (err) {
+            // URLSearchParams is widely supported; fall through to detection.
+          }
+          if (pf === 'macos' || pf === 'mac') return 'macos';
+          if (pf === 'linux') return 'linux';
+          if (pf === 'windows' || pf === 'win') return 'windows';
+
+          var ua = navigator.userAgent || '';
+          var platform = navigator.platform || '';
+          if (/Mac|iPhone|iPad|iPod/i.test(platform) || /Macintosh/i.test(ua)) {
+            return 'macos';
+          }
+          if ((/Linux|X11/i.test(platform) || /Linux/i.test(ua)) && !/Android/i.test(ua)) {
+            return 'linux';
+          }
+          return 'windows';
+        }
+
+        var btn = document.getElementById('nav-download');
+        if (!btn) return;
+        var platformId = resolvePlatform();
+
+        if (platformId === 'macos' || platformId === 'linux') {
+          // Point at the matching README download section. Drop data-cta so the
+          // store-tracking script neither redirects this link nor counts it as
+          // a Microsoft Store conversion.
+          btn.setAttribute('href', platformId === 'macos' ? GITHUB_MAC_URL : GITHUB_LINUX_URL);
+          btn.removeAttribute('data-cta');
+          var label = btn.querySelector('[data-label]');
+          if (label) {
+            label.textContent = 'Download From GitHub';
+          }
+          var wantedIcon = platformId === 'macos' ? 'apple' : 'github';
+          var icons = btn.querySelectorAll('svg[data-icon]');
+          for (var i = 0; i < icons.length; i++) {
+            // SVGElement has no `hidden` IDL reflection, so toggle the attribute
+            // itself (a plain `.hidden = x` assignment would be a no-op render-wise).
+            icons[i].toggleAttribute('hidden', icons[i].getAttribute('data-icon') !== wantedIcon);
+          }
+        }
+      })();
+    </script>
 
     <!-- ===================== HERO ===================== -->
     <section id="top" class="relative overflow-hidden">
@@ -290,12 +377,21 @@
               <span
                 class="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3.5 py-1.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200"
               >
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path
-                    d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"
-                  />
+                <svg
+                  class="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="2" y="3" width="20" height="14" rx="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
                 </svg>
-                Built for Windows 10 & 11
+                Runs on Windows, macOS & Linux
               </span>
               <span
                 class="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
@@ -328,7 +424,7 @@
             </h1>
 
             <p class="mt-6 text-lg leading-relaxed text-slate-600">
-              Bango automates the slowest part of any systematic review. Import your RIS or BibTeX
+              Bango automates the slowest part of any systematic review. Import from Zotero or your RIS / BibTeX
               file, set your inclusion and exclusion criteria, and let AI evaluate every abstract
               against your rules. You get a rigorously categorized set of articles with reasoning,
               tags, and confidence scores.
@@ -376,7 +472,8 @@
 
             <p class="mt-5 text-sm text-slate-400">
               Free for any researcher, forever. Open source under Apache 2.0, with no subscription,
-              no paywall, and no account required. Verified and signed by the Microsoft Store.
+              no paywall, and no account required. Windows builds are verified and signed by the
+              Microsoft Store; macOS and Linux builds are available from GitHub.
             </p>
           </div>
 
@@ -871,7 +968,7 @@
             </div>
             <h3 class="mt-5 text-lg font-bold text-slate-900">Import</h3>
             <p class="mt-2 text-sm leading-relaxed text-slate-600 max-w-xs mx-auto md:mx-0">
-              Drop in an RIS or BibTeX file. Bango parses 30+ metadata fields, deduplicates against
+              Drop in an RIS or BibTeX file or import Zotero collection. Bango parses 30+ metadata fields, deduplicates against
               your library, and flags anything that needs a second look. Up to 10,000 articles per
               project.
             </p>
@@ -920,8 +1017,9 @@
           Start your review today.
         </h2>
         <p class="mx-auto mt-4 max-w-xl text-lg text-indigo-100 leading-relaxed">
-          Download Bango from the Microsoft Store. It is free for any researcher, open source, and
-          set up takes just a few minutes. Your data stays local the whole time.
+          Get Bango for Windows from the Microsoft Store, or grab the macOS and Linux builds from
+          GitHub. It is free for any researcher, open source, and set up takes just a few minutes.
+          Your data stays local the whole time.
         </p>
         <div class="mt-8 flex justify-center">
           <a
@@ -949,10 +1047,10 @@
             </svg>
           </a>
         </div>
-        <p class="mt-5 text-sm text-indigo-200">Verified and signed by the Microsoft Store.</p>
+        <p class="mt-5 text-sm text-indigo-200">Windows builds are verified and signed by the Microsoft Store.</p>
         <!-- cross-platform secondary note -->
         <p class="mt-3 text-xs text-indigo-200/80">
-          Not on Windows? Bango also runs on Linux and macOS (Apple Silicon). Grab
+          Not on Windows? Bango also runs on <a href="https://github.com/Bilal-S/Bango#linux">Linux</a> and <a href="https://github.com/Bilal-S/Bango#macos">macOS</a> (Apple Silicon). Grab
           <b>unsigned</b> builds from
           <a
             href="https://github.com/Bilal-S/Bango/blob/main/README.md"
@@ -973,8 +1071,7 @@
           </div>
 
           <p class="text-sm text-slate-400 max-w-xl md:text-right">
-            Requires an active Windows 10 or Windows 11 installation. Delivered and securely updated
-            by the Microsoft Store.
+            Available for <a href="https://github.com/Bilal-S/Bango#windows">Windows</a>, <a href="https://github.com/Bilal-S/Bango#linux">Linux</a>, and <a href="https://github.com/Bilal-S/Bango#macos">macOS</a>
           </p>
           
         </div>

@@ -6,7 +6,7 @@
     <title>Bango - Help & Guides</title>
     <meta
       name="description"
-      content="Complete documentation for Bango - user guide, bibliometric analysis modules, troubleshooting, local AI setup, and feature reference."
+      content="Complete documentation for Bango - user guide, bibliometric analysis modules, troubleshooting, local AI setup, Zotero integration, and feature reference."
     />
     <meta name="author" content="BonCode (Bilal Soylu)" />
 
@@ -924,6 +924,188 @@
           transition: none;
         }
       }
+
+      /* ===================== GUIDE: Starting Points ===================== */
+      .ht-guide__starting-points {
+        margin-bottom: 2.5rem;
+        scroll-margin-top: 5rem;
+      }
+      .ht-guide__sp-title {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #0f172a;
+        margin: 0 0 0.75rem 0;
+      }
+      .ht-guide__sp-icon {
+        font-size: 24px;
+        color: #4f46e5;
+      }
+      .ht-guide__sp-intro {
+        font-size: 0.9375rem;
+        color: #475569;
+        line-height: 1.625;
+        margin: 0 0 1.25rem 0;
+      }
+      .ht-guide__sp-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+      }
+      .ht-guide__sp-card {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1.25rem;
+      }
+      .ht-guide__sp-card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+      .ht-guide__sp-card-header .material-symbols-outlined {
+        font-size: 20px;
+        color: #4f46e5;
+      }
+      .ht-guide__sp-card-header h4 {
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: #0f172a;
+        margin: 0;
+      }
+      .ht-guide__sp-card p {
+        font-size: 0.8125rem;
+        color: #475569;
+        line-height: 1.625;
+        margin: 0;
+      }
+      @media (max-width: 767px) {
+        .ht-guide__sp-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ===================== ZOTERO TAB ===================== */
+      .ht-zotero__path-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #0f172a;
+        margin: 0 0 1rem 0;
+      }
+      .ht-zotero__or {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .ht-zotero__or-line {
+        flex: 1;
+        height: 2px;
+        background-color: #c7d2fe;
+      }
+      .ht-zotero__or-label {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #4f46e5;
+        letter-spacing: 0.08em;
+        white-space: nowrap;
+      }
+      .ht-zotero__callout {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+        background-color: #fffbeb;
+        border: 1px solid #fcd34d;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .ht-zotero__callout-icon {
+        font-size: 22px;
+        color: #b45309;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+      .ht-zotero__callout-title {
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: #92400e;
+        margin: 0 0 0.25rem 0;
+      }
+      .ht-zotero__callout-text {
+        font-size: 0.9375rem;
+        color: #78350f;
+        line-height: 1.625;
+        margin: 0;
+      }
+      .ht-zotero__template {
+        margin: 0 0 0.75rem 0;
+      }
+      .ht-zotero__template-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+      .ht-zotero__template-label {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: #475569;
+      }
+      .ht-zotero__copy-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.25rem 0.75rem;
+        background-color: #ffffff;
+        color: #4f46e5;
+        border: 1px solid #c7d2fe;
+        border-radius: 8px;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+          background-color 0.15s,
+          color 0.15s;
+        font-family: inherit;
+      }
+      .ht-zotero__copy-btn:hover {
+        background-color: #eef2ff;
+      }
+      .ht-zotero__copy-btn--done {
+        color: #047857;
+        border-color: #6ee7b7;
+        background-color: #ecfdf5;
+      }
+      .ht-zotero__copy-icon {
+        font-size: 16px;
+      }
+      .ht-zotero__pre {
+        margin: 0;
+        padding: 0.75rem;
+        background-color: #1f2937;
+        color: #f9fafb;
+        border-radius: 12px;
+        /* Wrap long template lines instead of horizontal-scrolling, so the dark
+           box never overflows its card on narrow viewports. */
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-family:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+          monospace;
+        font-size: 0.8125rem;
+        line-height: 1.5;
+      }
+      .ht-zotero__pre code {
+        font-family: inherit;
+        background: none;
+        color: inherit;
+        padding: 0;
+      }
     </style>
   </head>
 
@@ -939,24 +1121,111 @@
         <div class="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
           <a href="index.html#features" class="hover:text-indigo-600 transition-colors">Features</a>
           <a href="index.html#how" class="hover:text-indigo-600 transition-colors">How it works</a>
-          <a href="index.html#privacy" class="hover:text-indigo-600 transition-colors">Privacy</a>
+          <a href="https://github.com/Bilal-S/Bango/blob/main/PrivacyPolicy.md" class="hover:text-indigo-600 transition-colors">Privacy</a>
           <a href="help.html" class="text-indigo-600 font-semibold">Help</a>
         </div>
 
         <a
+          id="nav-download"
           href="https://apps.microsoft.com/detail/9np2bhgxt8h3?hl=en-US&gl=US&utm_source=linkedin&utm_medium=cpc&utm_campaign=bangoclick1&utm_term=landing_page_bridge"
           data-cta="store"
           class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-soft transition-all hover:bg-indigo-700 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
         >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <svg
+            data-icon="windows"
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
             <path
               d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 6.9h7.5v7.1L3 18.4v-6Zm8.5-8.1L21 3v8.5h-9.5V4.3Zm0 8.2H21V21l-9.5-1.3v-7.2Z"
             />
           </svg>
-          Download
+          <svg
+            data-icon="apple"
+            hidden
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"
+            />
+          </svg>
+          <svg
+            data-icon="github"
+            hidden
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+            />
+          </svg>
+          <span data-label>Download</span>
         </a>
       </nav>
     </header>
+
+    <!-- Platform-aware top download button: Windows keeps the Microsoft Store
+         destination; macOS and Linux switch to the GitHub download sections.
+         Override for testing with ?pf=windows, ?pf=macos, or ?pf=linux. -->
+    <script>
+      (function () {
+        'use strict';
+        var GITHUB_MAC_URL = 'https://github.com/Bilal-S/Bango#macos';
+        var GITHUB_LINUX_URL = 'https://github.com/Bilal-S/Bango#linux';
+
+        function resolvePlatform() {
+          var pf = null;
+          try {
+            pf = new URLSearchParams(window.location.search).get('pf');
+          } catch (err) {
+            // URLSearchParams is widely supported; fall through to detection.
+          }
+          if (pf === 'macos' || pf === 'mac') return 'macos';
+          if (pf === 'linux') return 'linux';
+          if (pf === 'windows' || pf === 'win') return 'windows';
+
+          var ua = navigator.userAgent || '';
+          var platform = navigator.platform || '';
+          if (/Mac|iPhone|iPad|iPod/i.test(platform) || /Macintosh/i.test(ua)) {
+            return 'macos';
+          }
+          if ((/Linux|X11/i.test(platform) || /Linux/i.test(ua)) && !/Android/i.test(ua)) {
+            return 'linux';
+          }
+          return 'windows';
+        }
+
+        var btn = document.getElementById('nav-download');
+        if (!btn) return;
+        var platformId = resolvePlatform();
+
+        if (platformId === 'macos' || platformId === 'linux') {
+          // Point at the matching README download section. Drop data-cta so the
+          // store-tracking script neither redirects this link nor counts it as
+          // a Microsoft Store conversion.
+          btn.setAttribute('href', platformId === 'macos' ? GITHUB_MAC_URL : GITHUB_LINUX_URL);
+          btn.removeAttribute('data-cta');
+          var label = btn.querySelector('[data-label]');
+          if (label) {
+            label.textContent = 'Download From GitHub';
+          }
+          var wantedIcon = platformId === 'macos' ? 'apple' : 'github';
+          var icons = btn.querySelectorAll('svg[data-icon]');
+          for (var i = 0; i < icons.length; i++) {
+            // SVGElement has no `hidden` IDL reflection, so toggle the attribute
+            // itself (a plain `.hidden = x` assignment would be a no-op render-wise).
+            icons[i].toggleAttribute('hidden', icons[i].getAttribute('data-icon') !== wantedIcon);
+          }
+        }
+      })();
+    </script>
 
     <!-- ===================== HELP PAGE HEADER ===================== -->
     <section id="top" class="relative overflow-hidden bg-slate-50 border-b border-slate-200">
@@ -1010,6 +1279,9 @@
             <button class="help-tabs__btn" role="tab" data-tab="local-ai" aria-selected="false">
               <span class="material-symbols-outlined help-tabs__icon">smart_toy</span> Local & Free AI
             </button>
+            <button class="help-tabs__btn" role="tab" data-tab="zotero" aria-selected="false">
+              <span class="material-symbols-outlined help-tabs__icon">book_4</span> Using Zotero
+            </button>
             <button class="help-tabs__btn" role="tab" data-tab="reference" aria-selected="false">
               <span class="material-symbols-outlined help-tabs__icon">library_books</span> Reference
             </button>
@@ -1042,11 +1314,61 @@
                     The Big Picture
                   </h3>
                   <p style="font-size: 0.9375rem; color: #475569; line-height: 1.625; margin: 0">
-                    Bango follows the standard systematic review process: you import search results
-                    from academic databases, remove duplicates, define what you are looking for, and
-                    then let AI help you screen each article's title and abstract. You always have
-                    the final say on every decision. When you are done, Bango generates a PRISMA
-                    flow diagram and a summary of your included literature.
+                    Bango follows the standard systematic review process: you bring in search
+                    results from academic databases or OpenAlex, remove duplicates, define what you
+                    are looking for, and then let AI help you screen each article's title and
+                    abstract. You always have the final say on every decision. When you are done,
+                    Bango generates a PRISMA flow diagram and a summary of your included literature.
+                    You can start from whichever entry point fits your workflow - see
+                    <a href="#starting-points">Starting Points</a> below.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Starting Points: three valid entry paths into the review workflow. -->
+            <div id="starting-points" class="ht-guide__starting-points">
+              <h3 class="ht-guide__sp-title">
+                <span class="material-symbols-outlined ht-guide__sp-icon">alt_route</span>
+                Starting Points - Where Should I Begin?
+              </h3>
+              <p class="ht-guide__sp-intro">
+                There is no single "correct" first step in Bango. Choose the entry point that best
+                matches where you are in your research. All three paths converge on the same
+                screening, review, and reporting pipeline.
+              </p>
+              <div class="ht-guide__sp-grid">
+                <div class="ht-guide__sp-card">
+                  <div class="ht-guide__sp-card-header">
+                    <span class="material-symbols-outlined">rule</span>
+                    <h4>1. Aims & Criteria First</h4>
+                  </div>
+                  <p>
+                    Best for a brand-new review. Visit the <strong>Criteria</strong> screen to
+                    write your research aims and inclusion/exclusion rules, then import or search
+                    for articles and run AI screening.
+                  </p>
+                </div>
+                <div class="ht-guide__sp-card">
+                  <div class="ht-guide__sp-card-header">
+                    <span class="material-symbols-outlined">upload_file</span>
+                    <h4>2. Articles First</h4>
+                  </div>
+                  <p>
+                    Already have an RIS or BibTeX export from PubMed, Scopus, or another database?
+                    Import it on the <strong>Import</strong> screen, then define your criteria
+                    before screening. Or, simple import your Zotero collection.
+                  </p>
+                </div>
+                <div class="ht-guide__sp-card">
+                  <div class="ht-guide__sp-card-header">
+                    <span class="material-symbols-outlined">database_search</span>
+                    <h4>3. Search & Discover</h4>
+                  </div>
+                  <p>
+                    Use the <strong>Search Strategy Builder</strong> (Criteria screen) to generate
+                    Boolean queries for use with 8 databases. For direct searches, use built-in <strong>OpenAlex</strong> (300M+
+                    works) and import the articles you discover directly into your working set.
                   </p>
                 </div>
               </div>
@@ -1230,6 +1552,12 @@
                     </div>
                   </div>
                   <ul class="ht-step__details">
+                    <li class="ht-step__detail">
+                      If your project includes non-English articles, enable <strong>Auto
+                      Translate</strong> in Settings (off by default). Bango will translate
+                      non-English abstracts to English before the AI reads them, showing a
+                      "Translating..." progress stage.
+                    </li>
                     <li class="ht-step__detail">
                       Once your criteria and tags are set, you start the AI screening. The AI reads
                       the title and abstract of each article and evaluates it against your rules.
@@ -2937,7 +3265,338 @@
           </div>
 
           <!-- ================================================================ -->
-          <!-- TAB 5: REFERENCE -->
+          <!-- TAB 5: USING ZOTERO -->
+          <!-- ================================================================ -->
+          <div class="ht-panel" id="panel-zotero" role="tabpanel" hidden>
+            <!-- Overview -->
+            <div
+              class="ht-callout"
+              style="background-color: #eef2ff; border-color: #c7d2fe; margin-bottom: 2rem"
+            >
+              <div style="display: flex; gap: 1rem; align-items: flex-start">
+                <span
+                  class="material-symbols-outlined"
+                  style="font-size: 28px; color: #4f46e5; flex-shrink: 0"
+                  >route</span
+                >
+                <div>
+                  <h3
+                    style="
+                      font-size: 1.25rem;
+                      font-weight: 600;
+                      color: #0f172a;
+                      margin: 0 0 0.5rem 0;
+                    "
+                  >
+                    Zotero and Bango, together
+                  </h3>
+                  <p style="font-size: 0.9375rem; color: #475569; line-height: 1.625; margin: 0">
+                    Zotero is excellent for collecting articles and their PDFs. Bango is excellent
+                    for AI-assisted screening and analysis. Below, choose one of two paths to move
+                    your Zotero data into Bango: let the apps talk directly via the Zotero local
+                    API, or move files yourself via RIS export/import and the full-text folder.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Path A: automatic, via the Zotero local API -->
+            <h2 class="ht-zotero__path-title">Automatically Moving Data via API</h2>
+            <div class="ht-step">
+              <div class="ht-step__number">1</div>
+              <div class="ht-step__card">
+                <div class="ht-step__card-header">
+                  <span class="material-symbols-outlined ht-step__icon">settings</span>
+                  <div>
+                    <h3 class="ht-step__title">Enable the Zotero local API (recommended)</h3>
+                    <p class="ht-step__summary">
+                      One setting unlocks the direct path: Import from Zotero pulls a whole
+                      collection (metadata, tags, notes, and full-text PDFs) into Bango, and the
+                      Zotero export option syncs results (including your notes) back - no file
+                      juggling needed.
+                    </p>
+                  </div>
+                </div>
+                <ul class="ht-step__details">
+                  <li class="ht-step__detail">
+                    Open Zotero and go to Edit &gt; Settings (Windows/Linux) or Zotero &gt;
+                    Settings (macOS).
+                  </li>
+                  <li class="ht-step__detail">Select the Advanced tab.</li>
+                  <li class="ht-step__detail">
+                    Tick "Allow other applications on this computer to communicate with Zotero".
+                  </li>
+                  <li class="ht-step__detail">
+                    In Bango, go to the Import tab and click "Import from Zotero". Bango connects,
+                    you pick a collection, review the preview, and confirm.
+                  </li>
+                  <li class="ht-step__detail">
+                    Zotero must be running while you import. Exporting back to Zotero (from the
+                    Bango Export dialog) needs Zotero 10 or newer and uses the same setting.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- Big "- OR -" separator between the two paths -->
+            <div class="ht-zotero__or" role="separator" aria-label="or">
+              <span class="ht-zotero__or-line" aria-hidden="true"></span>
+              <span class="ht-zotero__or-label">- OR -</span>
+              <span class="ht-zotero__or-line" aria-hidden="true"></span>
+            </div>
+
+            <!-- Path B: manual, via RIS export/import + full-text file copy -->
+            <h2 class="ht-zotero__path-title">Manually Moving Data via Import/Export</h2>
+            <div class="ht-step">
+              <div class="ht-step__number">1</div>
+              <div class="ht-step__card">
+                <div class="ht-step__card-header">
+                  <span class="material-symbols-outlined ht-step__icon">download</span>
+                  <div>
+                    <h3 class="ht-step__title">Collect articles in Zotero</h3>
+                    <p class="ht-step__summary">
+                      Zotero is a free, open-source reference manager. Use it to collect articles
+                      and their full-text PDFs from academic databases, publisher websites, or
+                      anywhere on the web.
+                    </p>
+                  </div>
+                </div>
+                <ul class="ht-step__details">
+                  <li class="ht-step__detail">
+                    Download Zotero from zotero.org and install the Zotero Connector browser
+                    extension.
+                  </li>
+                  <li class="ht-step__detail">
+                    When browsing PubMed, Scopus, Google Scholar, or publisher pages, click the
+                    Zotero Connector icon in your browser toolbar to save the article.
+                  </li>
+                  <li class="ht-step__detail">
+                    Zotero automatically captures the title, authors, abstract, journal, year, and
+                    DOI.
+                  </li>
+                  <li class="ht-step__detail">
+                    If a PDF is available, Zotero can download and attach it automatically (this
+                    is enabled by default in Settings).
+                  </li>
+                  <li class="ht-step__detail">
+                    Organize your articles into a collection (folder) for your review. You will
+                    export this collection in step 3.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="ht-step">
+              <div class="ht-step__number">2</div>
+              <div class="ht-step__card">
+                <div class="ht-step__card-header">
+                  <span class="material-symbols-outlined ht-step__icon"
+                    >drive_file_rename_outline</span
+                  >
+                  <div>
+                    <h3 class="ht-step__title">Set up automatic file renaming</h3>
+                    <p class="ht-step__summary">
+                      Configure Zotero to rename PDF files using the article DOI. This produces
+                      filenames that Bango Batch Import can match automatically.
+                    </p>
+                  </div>
+                </div>
+                <ul class="ht-step__details">
+                  <li class="ht-step__detail">
+                    Open Zotero and go to Edit &gt; Settings (Windows/Linux) or Zotero &gt;
+                    Settings (macOS).
+                  </li>
+                  <li class="ht-step__detail">Select the General tab.</li>
+                  <li class="ht-step__detail">
+                    Under "File Renaming", click the "Configure File Renaming..." button.
+                  </li>
+                  <li class="ht-step__detail">
+                    Paste the template below into the text box, then click OK to save.
+                  </li>
+                  <li class="ht-step__detail">
+                    From now on, any new PDF you save will be renamed automatically. To rename
+                    PDFs you already have, right-click them and choose "Rename File from Parent
+                    Metadata".
+                  </li>
+                </ul>
+                <div class="ht-zotero__template">
+                  <div class="ht-zotero__template-header">
+                    <span class="ht-zotero__template-label">Zotero file-renaming template</span>
+                    <button
+                      class="ht-zotero__copy-btn"
+                      type="button"
+                      data-copy="{{ if DOI }}{{ DOI replaceFrom=&quot;[/\?%*:|\&quot;&lt;&gt;]&quot; replaceTo=&quot;_&quot; regexOpts=&quot;g&quot; }}{{ else }}{{ title truncate=&quot;40&quot; replaceFrom=&quot;[/\?%*:|\&quot;&lt;&gt;]&quot; replaceTo=&quot;_&quot; regexOpts=&quot;g&quot; }}{{ endif }}"
+                    >
+                      <span class="material-symbols-outlined ht-zotero__copy-icon"
+                        >content_copy</span
+                      >
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </div>
+                  <pre class="ht-zotero__pre"><code>{{ if DOI }}{{ DOI replaceFrom=&quot;[/\?%*:|\&quot;&lt;&gt;]&quot; replaceTo=&quot;_&quot; regexOpts=&quot;g&quot; }}{{ else }}{{ title truncate=&quot;40&quot; replaceFrom=&quot;[/\?%*:|\&quot;&lt;&gt;]&quot; replaceTo=&quot;_&quot; regexOpts=&quot;g&quot; }}{{ endif }}</code></pre>
+                </div>
+              </div>
+            </div>
+            <div class="ht-step">
+              <div class="ht-step__number">3</div>
+              <div class="ht-step__card">
+                <div class="ht-step__card-header">
+                  <span class="material-symbols-outlined ht-step__icon">file_export</span>
+                  <div>
+                    <h3 class="ht-step__title">Export articles as RIS</h3>
+                    <p class="ht-step__summary">
+                      Export your Zotero collection as an RIS file that Bango can import.
+                    </p>
+                  </div>
+                </div>
+                <ul class="ht-step__details">
+                  <li class="ht-step__detail">
+                    In Zotero, right-click the collection you organized in step 1.
+                  </li>
+                  <li class="ht-step__detail">Choose "Export Collection..." from the menu.</li>
+                  <li class="ht-step__detail">In the export dialog, select "RIS" as the format.</li>
+                  <li class="ht-step__detail">
+                    Click OK and choose where to save the `.ris` file.
+                  </li>
+                  <li class="ht-step__detail">
+                    This RIS file contains all the metadata (title, authors, abstract, DOI, journal,
+                    year) for every article in your collection.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="ht-step">
+              <div class="ht-step__number">4</div>
+              <div class="ht-step__card">
+                <div class="ht-step__card-header">
+                  <span class="material-symbols-outlined ht-step__icon">content_copy</span>
+                  <div>
+                    <h3 class="ht-step__title">Copy PDF files to Bango full-text folder</h3>
+                    <p class="ht-step__summary">
+                      Copy your renamed PDF files from Zotero storage into the Bango full-text
+                      directory.
+                    </p>
+                  </div>
+                </div>
+                <ul class="ht-step__details">
+                  <li class="ht-step__detail">
+                    In Zotero, go to Edit &gt; Settings &gt; Advanced &gt; Files and Folders, then
+                    click "Show Data Directory".
+                  </li>
+                  <li class="ht-step__detail">
+                    Your file manager opens the Zotero data folder. Open the `storage` subfolder
+                    inside it.
+                  </li>
+                  <li class="ht-step__detail">
+                    In the `storage` folder, search for all PDF files. On Windows, type `*.pdf` in
+                    the search box. On macOS, use the Finder search bar.
+                  </li>
+                  <li class="ht-step__detail">
+                    Select all the PDF files and copy them (Ctrl+C on Windows/Linux, Cmd+C on
+                    macOS).
+                  </li>
+                  <li class="ht-step__detail">
+                    In Bango, go to Settings and find the "Storage" card. Note the storage root
+                    path. Open that folder in your file manager, then open the `fulltext` subfolder
+                    inside it.
+                  </li>
+                  <li class="ht-step__detail">
+                    Paste the PDF files into the `fulltext` folder. They are now in place for Bango
+                    to find in step 6.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="ht-step">
+              <div class="ht-step__number">5</div>
+              <div class="ht-step__card">
+                <div class="ht-step__card-header">
+                  <span class="material-symbols-outlined ht-step__icon">upload_file</span>
+                  <div>
+                    <h3 class="ht-step__title">Import the RIS file into Bango</h3>
+                    <p class="ht-step__summary">
+                      Import the RIS file you exported from Zotero into Bango.
+                    </p>
+                  </div>
+                </div>
+                <ul class="ht-step__details">
+                  <li class="ht-step__detail">In Bango, go to the Import tab from the sidebar.</li>
+                  <li class="ht-step__detail">
+                    Click the file browser button and select the `.ris` file you saved in step 3.
+                  </li>
+                  <li class="ht-step__detail">
+                    Bango shows a preview of the articles it found in the file. Review them and
+                    deselect any you do not want.
+                  </li>
+                  <li class="ht-step__detail">
+                    Click "Import" to add the articles to your project.
+                  </li>
+                  <li class="ht-step__detail">
+                    Bango automatically checks for duplicate records and links each article to its
+                    journal in the reference database.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="ht-step">
+              <div class="ht-step__number">6</div>
+              <div class="ht-step__card">
+                <div class="ht-step__card-header">
+                  <span class="material-symbols-outlined ht-step__icon">playlist_play</span>
+                  <div>
+                    <h3 class="ht-step__title">Run Batch Import to attach full text</h3>
+                    <p class="ht-step__summary">
+                      Run Bango Batch Import to match and attach your full-text PDFs to the
+                      articles by DOI.
+                    </p>
+                  </div>
+                </div>
+                <ul class="ht-step__details">
+                  <li class="ht-step__detail">
+                    Go to Settings &gt; Reprocessing and find the "Batch Import" section.
+                  </li>
+                  <li class="ht-step__detail">Click the "Import full text files" button.</li>
+                  <li class="ht-step__detail">
+                    A dialog explains the process. Click "Start" to begin.
+                  </li>
+                  <li class="ht-step__detail">
+                    Phase 1 scans your `fulltext` folder for PDFs and matches them to articles by
+                    DOI. Each matched PDF is extracted and its text is stored with the article.
+                  </li>
+                  <li class="ht-step__detail">
+                    You can watch the progress bar as it works. You can cancel at any time.
+                  </li>
+                  <li class="ht-step__detail">
+                    When complete, your articles have full-text content attached. They are ready
+                    for enhanced AI screening and the Wiki knowledge base.
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <!-- No-DOI warning callout: Batch Import DOI matching is a manual-path concern -->
+            <div class="ht-zotero__callout" role="note">
+              <span class="material-symbols-outlined ht-zotero__callout-icon">warning</span>
+              <div>
+                <h4 class="ht-zotero__callout-title">
+                  Important: only articles with a DOI auto-match
+                </h4>
+                <p class="ht-zotero__callout-text">
+                  Bango Batch Import matches PDFs to articles using the DOI in the filename.
+                  Articles that have no DOI cannot be auto-matched, even if Zotero renames their
+                  PDF using the title. For no-DOI articles you have two options: add the DOI in
+                  the article metadata first and run Batch Import again, or attach the PDF
+                  manually from the article detail panel using the "Attach Full Text" button.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ================================================================ -->
+          <!-- TAB 6: REFERENCE -->
           <!-- ================================================================ -->
           <div class="ht-panel" id="panel-reference" role="tabpanel" hidden>
             <div class="ht-intro">
@@ -4907,8 +5566,7 @@ ER  - </pre
             <span class="text-base font-bold text-white">Bango</span>
           </div>
           <p class="text-sm text-slate-400 max-w-xl md:text-right">
-            Requires an active Windows 10 or Windows 11 installation. Delivered and securely updated
-            by the Microsoft Store.
+            Supports <a href="https://github.com/Bilal-S/Bango#windows">Windows</a>, <a href="https://github.com/Bilal-S/Bango#linux">Linux</a>, and <a href="https://github.com/Bilal-S/Bango#macos">macOS</a>
           </p>
         </div>
         <hr class="my-8 border-white/10" />
@@ -5074,20 +5732,31 @@ ER  - </pre
 
         // ============ Copy-to-clipboard for code blocks ============
         document.addEventListener('click', function (e) {
-          var copyBtn = e.target.closest('.lai-code__copy');
+          var copyBtn = e.target.closest('.lai-code__copy, .ht-zotero__copy-btn');
           if (!copyBtn) return;
           var code = copyBtn.getAttribute('data-copy');
           if (code && navigator.clipboard) {
             navigator.clipboard
               .writeText(code)
               .then(function () {
+                copyBtn.classList.add('ht-zotero__copy-btn--done');
                 var icon = copyBtn.querySelector('.material-symbols-outlined');
+                var label = copyBtn.querySelector('[data-copy-label]');
                 if (icon) {
                   icon.textContent = 'check';
-                  setTimeout(function () {
-                    icon.textContent = 'content_copy';
-                  }, 1500);
                 }
+                if (label) {
+                  label.textContent = 'Copied';
+                }
+                setTimeout(function () {
+                  copyBtn.classList.remove('ht-zotero__copy-btn--done');
+                  if (icon) {
+                    icon.textContent = 'content_copy';
+                  }
+                  if (label) {
+                    label.textContent = 'Copy';
+                  }
+                }, 1500);
               })
               .catch(function () {
                 /* silently fail */
