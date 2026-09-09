@@ -71,6 +71,16 @@ from it (unfiltered keeps using the store's per-status totals). The page itself
 stays capped at the toolbar page size - the pager reaches the remaining
 matches.
 
+Toolbar search field prefixes (`use-article-filters.ts::executeToolbarSearch`):
+a leading `a:`, `d:`/`doi:`, `j:`, or `y:`/`year:` (case-insensitive; parsed by
+`src/utils/toolbar-search.ts::parseToolbarSearch`) routes the text to that
+filter field and mirrors it into the panel filter (both-sides sync like the
+`?author=` deep-link); plain text lands in `query.search` and keeps
+panel-applied filters combined. `clearSearch` reverts the field a prefix search
+had set unless the user edited that field afterwards (edits need Apply).
+Invalid `y:` values (non-numeric, outside 1850-2100, flipped range) fall back
+to the plain search.
+
 ### `use-article-list-keyboard.ts`
 
 ### `use-zotero.ts` / `use-zotero-export.ts`

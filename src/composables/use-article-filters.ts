@@ -1,4 +1,9 @@
 import type { Ref } from 'vue';
+import {
+  parseToolbarSearch,
+  type ToolbarSearch,
+  type ToolbarFieldSearch,
+} from '@/utils/toolbar-search';
 import type { ArticleStatus } from '@/types';
 
 export type TitleMatchType = 'starts_with' | 'contains' | 'ends_with' | 'exact';
@@ -304,15 +309,103 @@ export function useArticleFilters(deps: ArticleFiltersDeps) {
     void search();
   }
 
-  /** Execute a quick search from the toolbar search box. */
+  /**
+   * Execute a quick search from the toolbar search box. A recognized field
+   * prefix (`a:`, `d:`/`doi:`, `j:`, `y:`/`year:` - see `parseToolbarSearch`)
+   * routes the text to that filter instead of the free-text search and mirrors
+   * it into the panel (same both-sides sync as the `?author=` deep-link), so
+   * `a:fer` is equivalent to typing `fer` in the Author field.
+   */
   function executeToolbarSearch(): void {
-    query.search = searchText.value || null;
+    applyToolbarParsed(parseToolbarSearch(searchText.value));
     resetPage();
     void search();
   }
 
-  /** Clear the toolbar search and refresh results. */
+  /** Apply a parsed toolbar search: field kinds replace their panel field +
+   *  query value; plain text lands in `query.search` alone (panel fields stay
+   *  as last applied, matching the panel's edits-need-Apply contract). */
+  function applyToolbarParsed(parsed: ToolbarSearch): void {
+    switch (parsed.kind) {
+      case 'author':
+        filter.authorText = parsed.author;
+        query.author = parsed.author;
+        query.search = null;
+        break;
+      case 'doi':
+        filter.doiText = parsed.doi;
+        filter.doiEmpty = false;
+        query.doi = parsed.doi;
+        query.doiEmpty = false;
+        query.search = null;
+        break;
+      case 'journal':
+        filter.journal = parsed.journal;
+        query.journal = parsed.journal;
+        query.search = null;
+        break;
+      case 'year':
+        filter.yearFrom = parsed.yearFrom;
+        filter.yearTo = parsed.yearTo;
+        query.yearFrom = parsed.yearFrom;
+        query.yearTo = parsed.yearTo;
+        query.search = null;
+        break;
+      case 'plain':
+        query.search = parsed.search || null;
+        break;
+    }
+  }
+
+  /** True when the panel field still carries what the last toolbar field
+   *  search set (user has not edited it since), so the "x" may revert it. */
+  function toolbarFieldUnedited(parsed: ToolbarFieldSearch): boolean {
+    switch (parsed.kind) {
+      case 'author':
+        return filter.authorText === parsed.author;
+      case 'doi':
+        return filter.doiText === parsed.doi;
+      case 'journal':
+        return filter.journal === parsed.journal;
+      case 'year':
+        return filter.yearFrom === parsed.yearFrom && filter.yearTo === parsed.yearTo;
+    }
+  }
+
+  /** Reset the panel field + query value a toolbar field search had set. */
+  function revertToolbarField(parsed: ToolbarFieldSearch): void {
+    switch (parsed.kind) {
+      case 'author':
+        filter.authorText = '';
+        query.author = null;
+        break;
+      case 'doi':
+        filter.doiText = '';
+        query.doi = null;
+        break;
+      case 'journal':
+        filter.journal = '';
+        query.journal = null;
+        break;
+      case 'year':
+        filter.yearFrom = null;
+        filter.yearTo = null;
+        query.yearFrom = null;
+        query.yearTo = null;
+        break;
+    }
+  }
+
+  /**
+   * Clear the toolbar search and refresh results. When the last search was a
+   * field search (`a:fer`), the "x" undoes the whole search: the panel field
+   * it set is reverted too - unless the user edited that field afterwards.
+   */
   function clearSearch(): void {
+    const parsed = parseToolbarSearch(searchText.value);
+    if (parsed.kind !== 'plain' && toolbarFieldUnedited(parsed)) {
+      revertToolbarField(parsed);
+    }
     searchText.value = '';
     query.search = null;
     resetPage();

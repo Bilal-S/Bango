@@ -7,7 +7,7 @@ import HelpScrollToTop from '@/components/help/help-scroll-to-top.vue';
 /**
  * Reference tab.
  *
- * A sidebar + scroll-spy layout with 12 detailed sections. Accepts an `initialHash`
+ * A sidebar + scroll-spy layout with 22 detailed sections. Accepts an `initialHash`
  * prop (from the parent shell's route hash) so deep-links like
  * `/help?tab=reference#ref-references-citations` scroll to the right section on mount.
  */
@@ -206,11 +206,35 @@ watch(
           </button>
           <button
             class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-articles' }"
+            @click="selectRefSection('ref-articles')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">view_list</span>
+            Articles
+          </button>
+          <button
+            class="ref-nav__link"
             :class="{ 'ref-nav__link--active': activeRefSection === 'ref-review' }"
             @click="selectRefSection('ref-review')"
           >
             <span class="material-symbols-outlined ref-nav__icon">description</span>
             Article Detail Panels
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-openalex-search' }"
+            @click="selectRefSection('ref-openalex-search')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">travel_explore</span>
+            OpenAlex Search
+          </button>
+          <button
+            class="ref-nav__link"
+            :class="{ 'ref-nav__link--active': activeRefSection === 'ref-references-tab' }"
+            @click="selectRefSection('ref-references-tab')"
+          >
+            <span class="material-symbols-outlined ref-nav__icon">menu_book</span>
+            References Tab
           </button>
           <button
             class="ref-nav__link"
@@ -861,6 +885,121 @@ ER  - </pre
           </footer>
         </section>
 
+        <!-- SECTION: ARTICLES -->
+        <section id="ref-articles" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">view_list</span>
+            <h2 class="ref-section__title">Articles</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The Articles view is where your review takes shape. Every record you import lands
+              here, moves through screening, and ends up included or rejected. A row of tabs across
+              the top mirrors that pipeline, and a rich set of filters lets you slice the collection
+              any way you need.
+            </p>
+
+            <h3>The Status Tabs</h3>
+            <ul>
+              <li><strong>All:</strong> every record in the project, including duplicates.</li>
+              <li>
+                <strong>Duplicates:</strong> copies detected during import. They are kept out of
+                your working set and can be resolved on the Deduplicate page.
+              </li>
+              <li>
+                <strong>Working:</strong> records waiting to be screened. This is your to-do pile.
+                Move anything back here to have it screened automatically.
+              </li>
+              <li><strong>Included:</strong> records that passed your inclusion criteria.</li>
+              <li><strong>Rejected:</strong> records that did not pass.</li>
+              <li>
+                <strong>Errors:</strong> records the AI screened but which received no decision,
+                collected here so you can resolve them by hand. Review the Audit section in Article
+                Detail view. It will normally let you know what went wrong. Move it back to the
+                working pipeline to retry automatic screening.
+              </li>
+              <li>
+                <strong>References:</strong> browses the external reference and citation papers
+                connected to your library. See the
+                <a href="#" @click.prevent="selectRefSection('ref-references-tab')"
+                  >References Tab</a
+                >
+                section for what it offers.
+              </li>
+              <li>
+                <strong>Search:</strong> queries the OpenAlex catalog and imports what you find. See
+                the
+                <a href="#" @click.prevent="selectRefSection('ref-openalex-search')"
+                  >OpenAlex Search</a
+                >
+                section for the details.
+              </li>
+            </ul>
+
+            <h3>Toolbar Search</h3>
+            <p>
+              Plain words search titles, abstracts, and notes at once. For something narrower, begin
+              with a field shortcut: <code>a:</code> for author, <code>j:</code> for journal,
+              <code>d:</code> or <code>doi:</code> for DOI, and <code>y:</code> for year. Typing
+              <code>a:fer</code>, for example, finds every article whose author or co-author
+              contains "fer", exactly as if you had typed <code>fer</code> into the Author filter.
+              Years accept a single value or a range, so <code>y:2018-2021</code> covers four
+              publication years. A field search fills the matching filter for you, and the "x" in
+              the search box undoes it again.
+            </p>
+
+            <h3>The Filter Panel</h3>
+            <p>Open the panel with the Filter button to combine several conditions at once:</p>
+            <ul>
+              <li>
+                <strong>Title:</strong> free text with starts-with, contains, ends-with, or exact
+                matching.
+              </li>
+              <li>
+                <strong>Author:</strong> type at least two letters and pause. A dropdown of matching
+                author names appears about half a second after you stop typing, and picking one
+                fills in the full name for you.
+              </li>
+              <li>
+                <strong>Year:</strong> a from-to range, checked so both years stay between 1850 and
+                2100.
+              </li>
+              <li><strong>Journal:</strong> partial journal name.</li>
+              <li>
+                <strong>DOI:</strong> partial DOI, or tick "Only no DOI" to find records missing a
+                DOI, which is handy for cleanup before export.
+              </li>
+              <li>
+                <strong>Match Criteria:</strong> restrict the list to records that satisfied or
+                missed particular criteria, with special markers for unknown criteria, empty sets,
+                and generally excluded records.
+              </li>
+              <li>
+                <strong>Tags & Labels:</strong> click a pill to require it, click again to exclude
+                it. Exclusions display as NOT with a strike-through, so the intent is never in
+                doubt.
+              </li>
+            </ul>
+            <p>
+              While a filter is active, the toolbar reports how many articles match in total, not
+              just the current page, and the pager reaches every match. Clear Filter resets
+              everything at once.
+            </p>
+
+            <h3>Working With the Table</h3>
+            <p>
+              Click any column header to sort by it. The small selector chooses how many rows to
+              show per page, and ticking checkboxes selects several records for bulk actions such as
+              status changes, tag or label edits, AI summaries, and export. On the Included tab, the
+              Extract Refs button automatically imports the references your included articles are
+              still missing.
+            </p>
+          </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
+        </section>
+
         <!-- SECTION: ARTICLE DETAIL PANELS -->
         <section id="ref-review" class="ref-section">
           <header class="ref-section__header">
@@ -915,6 +1054,133 @@ ER  - </pre
                 for full-text caching.
               </li>
             </ul>
+          </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
+        </section>
+
+        <!-- SECTION: OPENALEX SEARCH -->
+        <section id="ref-openalex-search" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">travel_explore</span>
+            <h2 class="ref-section__title">OpenAlex Search</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The Search tab in the Articles view reaches beyond your imported files. It queries
+              OpenAlex, a free scholarly catalog of more than 300 million works, and brings the
+              records you choose straight into your working list without leaving Bango.
+            </p>
+
+            <h3>Searching</h3>
+            <p>
+              Type your terms and press Search. If an AI provider is configured, the Smart Search
+              button can turn your research aims and criteria into a Boolean query for you. The
+              collapsible Search Options box narrows the field before you search: work type
+              (articles, reviews, book chapters, and more), a publication year range, language,
+              open-access only, and whether to include retracted works. Results can then be sorted,
+              resized per page, and paged; very large result sets are capped at the first thousand.
+            </p>
+
+            <h3>Reading the Results</h3>
+            <ul>
+              <li>
+                Each row shows the first author, journal, year, an OA badge, the citation count, and
+                a short abstract snippet.
+              </li>
+              <li>Records already in your library are dimmed and marked "Already in library".</li>
+              <li>Retracted works carry a red badge, and retracted filtering is off by default.</li>
+              <li>
+                Click a row to open the detail panel with the full record and a PDF link when an
+                open-access copy exists.
+              </li>
+            </ul>
+
+            <h3>Importing Into Your Working List</h3>
+            <p>
+              Tick the checkbox next to one or more results and press Add to Working, or use the
+              button inside the detail panel for a single record. Records you already have go to
+              Duplicates rather than being imported twice. Import does more than copy metadata. When
+              an open-access PDF is available, Bango downloads it and attaches it as the full text,
+              and the article can be handed to the AI for an immediate summary. Reference and
+              citation details can be harvested too, when you enable that in Settings.
+            </p>
+
+            <div class="ref-callout">
+              <h4>Add an API Key for Heavier Use</h4>
+              <p>
+                OpenAlex is free, but anonymous use is limited to 10 requests per second. Request a
+                free API key from the OpenAlex project at
+                <a href="https://openalex.org" target="_blank" rel="noopener noreferrer"
+                  >openalex.org</a
+                >
+                and enter it under Settings, OpenAlex Search. The limit then rises to 100 requests
+                per second, which supports longer and more complex queries, harvests across articles
+                with many references, and frequent back-to-back searches. Adding your email in the
+                same panel places you in the polite pool, a lane OpenAlex serves more steadily.
+              </p>
+            </div>
+          </div>
+          <footer class="ref-section__footer">
+            <HelpScrollToTop @click="scrollToTop" />
+          </footer>
+        </section>
+
+        <!-- SECTION: REFERENCES TAB -->
+        <section id="ref-references-tab" class="ref-section">
+          <header class="ref-section__header">
+            <span class="material-symbols-outlined ref-section__icon">menu_book</span>
+            <h2 class="ref-section__title">References Tab</h2>
+          </header>
+          <div class="ref-section__body">
+            <p>
+              The References tab gathers every external paper connected to your library, whether it
+              arrived in an RIS export or was harvested from OpenAlex. It answers a simple question:
+              of all the papers surrounding your review, which ones deserve a closer look?
+            </p>
+
+            <h3>Articles of Interest</h3>
+            <p>
+              Along the top, amber cards highlight the most-used papers you have not yet added,
+              ranked by how often your articles cite them or list them as references. A paper your
+              records lean on again and again is probably worth reading, and one click on the green
+              plus adds it to your working list.
+            </p>
+
+            <h3>Searching and Filtering</h3>
+            <p>
+              Below, a search box covers title, author, abstract, and journal. The filter beside it
+              limits the list to a match state: All, Unmatched, Matched, or Imported. Unmatched
+              papers exist only in your reference data. Matched papers already correspond to a
+              library article, and imported papers have been promoted into the library.
+            </p>
+
+            <h3>Working With a Paper</h3>
+            <ul>
+              <li>Click a row to open the side panel with the full record.</li>
+              <li>
+                Expand a card to see its keywords, citation and reference counts, and its DOI.
+              </li>
+              <li>
+                The "Cited By / Referenced In" list shows which of your articles use the paper.
+                Click an entry to jump straight to that article.
+              </li>
+              <li>
+                "Add to Working list" promotes an unmatched paper to a full article in one step.
+              </li>
+            </ul>
+
+            <p>
+              The advantage is reach without noise. Rather than importing another thousand records
+              on a hunch, you cherry-pick from papers your own library already points to, and every
+              promotion is logged in the audit trail. For the match states in detail, and for
+              importing reference files article by article, see the
+              <a href="#" @click.prevent="selectRefSection('ref-references-citations')"
+                >References & Citations</a
+              >
+              section.
+            </p>
           </div>
           <footer class="ref-section__footer">
             <HelpScrollToTop @click="scrollToTop" />

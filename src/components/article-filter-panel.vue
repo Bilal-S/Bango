@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { ArticleFilter } from '@/composables/use-article-search';
 import type { TitleMatchType } from '@/composables/use-article-search';
 import type { Criterion, SuggestOption } from '@/types';
@@ -7,6 +7,7 @@ import { useTagsStore } from '@/stores/tags';
 import { useLabelsStore } from '@/stores/labels';
 import { useCriteriaStore } from '@/stores/criteria';
 import { getColorScheme, type ColorScheme } from '@/utils/color';
+import { debounce } from '@/utils/debounce';
 import SuggestInput from '@/components/suggest-input.vue';
 import ClearableInput from '@/components/clearable-input.vue';
 
@@ -104,9 +105,11 @@ function clearField(key: keyof ArticleFilter, emptyValue: unknown): void {
   emit('apply');
 }
 
-/** Close the Author autocomplete dropdown (used when clearing the Author field). */
+/** Close the Author autocomplete dropdown and drop the pending suggestion
+ *  query (used when clearing the Author field). */
 function closeAuthorDropdown(): void {
   showAuthorDropdown.value = false;
+  authorSuggestQuery.value = '';
 }
 
 function toggleTag(tag: string): void {
@@ -359,11 +362,41 @@ function hideAuthorDropdown(): void {
   window.setTimeout(() => (showAuthorDropdown.value = false), 200);
 }
 
+/* Author autocomplete gating: the dropdown only populates after the user stops
+ * typing (500ms debounce) with at least 2 characters, so the list never jumps
+ * around per keystroke or opens for a single typed letter. */
+const AUTHOR_SUGGEST_MIN_CHARS = 2;
+const AUTHOR_SUGGEST_DEBOUNCE_MS = 500;
+
+/** Author fragment the dropdown matches. Updated only by the debounce below
+ *  (or immediately on suggestion select / field clear). */
+const authorSuggestQuery = ref('');
+
+const scheduleAuthorSuggest = debounce((value: string): void => {
+  authorSuggestQuery.value = value;
+}, AUTHOR_SUGGEST_DEBOUNCE_MS);
+
+watch(
+  () => props.filter.authorText,
+  (text) => scheduleAuthorSuggest(text)
+);
+
+/** Matching author names for the dropdown. Empty until the debounced query
+ *  reaches the minimum length; matching itself is unchanged (case-insensitive
+ *  substring over `allAuthors`). */
 const matchedAuthors = computed(() => {
-  const text = props.filter.authorText.toLowerCase();
-  if (!text) return [];
+  const text = authorSuggestQuery.value.trim().toLowerCase();
+  if (text.length < AUTHOR_SUGGEST_MIN_CHARS) return [];
   return props.allAuthors.filter((a) => a.toLowerCase().includes(text));
 });
+
+/** Pick a dropdown row: fill the Author field, sync the suggestion query so a
+ *  refocus matches the full name (not the stale fragment), close the dropdown. */
+function selectAuthor(author: string): void {
+  updateField('authorText', author);
+  authorSuggestQuery.value = author;
+  showAuthorDropdown.value = false;
+}
 </script>
 
 <template>
@@ -429,16 +462,13 @@ const matchedAuthors = computed(() => {
           />
           <div
             v-if="showAuthorDropdown && matchedAuthors.length > 0"
-            class="absolute top-full left-0 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-40 overflow-y-auto"
+            class="afp-author-dropdown absolute top-full left-0 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-40 overflow-y-auto"
           >
             <button
               v-for="author in matchedAuthors"
               :key="author"
-              class="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors"
-              @click="
-                updateField('authorText', author);
-                showAuthorDropdown = false;
-              "
+              class="afp-author-option w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors"
+              @click="selectAuthor(author)"
             >
               {{ author }}
             </button>

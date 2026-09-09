@@ -103,6 +103,12 @@ clearable-input pattern going forward.
 Article-list filter panel. Metadata fields (Title, Author, Year, Journal, DOI)
 live in a responsive `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` grid; the
 **Match Criteria** cell is the 6th cell so it sits right of DOI on md/lg.
+The Author field has debounced autocomplete: the dropdown populates only after
+the user stops typing for 500ms (`AUTHOR_SUGGEST_DEBOUNCE_MS`) and the fragment
+is at least 2 characters (`AUTHOR_SUGGEST_MIN_CHARS`); matches are
+case-insensitive substrings of the `allAuthors` prop, and selecting a row fills
+the field with the full name (rows `.afp-author-option` in
+`.afp-author-dropdown`).
 Match Criteria mirrors the Tags/Labels pills + `SuggestInput` combobox pattern
 but reads `useCriteriaStore()` (warmed at bootstrap) and filters by criterion
 UUID (`filter.criteria` -> `query.matchedCriteria`; backend contract in

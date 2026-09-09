@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { setActivePinia, createPinia } from 'pinia';
+import { reactive, nextTick } from 'vue';
 import ArticleFilterPanel from '@/components/article-filter-panel.vue';
 import { makeTagsStore, makeLabelsStore } from '../helpers/fixtures';
 import type { ArticleFilter } from '@/composables/use-article-search';
@@ -791,5 +792,126 @@ describe('article-filter-panel.vue', () => {
     expect(doiClearable!.props('disabled')).toBe(true);
     // No clear button rendered while disabled.
     expect(doiClearable!.find('.clearable-input__clear').exists()).toBe(false);
+  });
+
+  // ── Author autocomplete (500ms debounce + 2-char minimum) ────────────
+  describe('author autocomplete', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const AUTHORS = ['Fernandez, Ana', 'Ferreira, Bruno', 'Smith, John'];
+
+    /**
+     * Mount with a reactive filter (so the `authorText` watch fires like in
+     * production) plus a richer author list, and return the Author input.
+     */
+    function mountAuthorPanel(filter: ArticleFilter = makeFilter(), allAuthors = AUTHORS) {
+      const reactiveFilter = reactive(filter);
+      const wrapper = mountPanel(reactiveFilter, { allAuthors });
+      const authorClearable = wrapper
+        .findAllComponents({ name: 'ClearableInput' })
+        .find((c) => c.props('placeholder') === 'Filter by author...');
+      expect(authorClearable).toBeTruthy();
+      return {
+        wrapper,
+        filter: reactiveFilter,
+        input: authorClearable!.find('input'),
+      };
+    }
+
+    /** Type into the Author field, apply emitted updates, then optionally
+     *  advance the fake clock past the debounce and flush the re-render. */
+    async function typeAuthor(
+      ctx: ReturnType<typeof mountAuthorPanel>,
+      text: string,
+      advanceMs = 0
+    ): Promise<void> {
+      await ctx.input.setValue(text);
+      applyEmittedUpdates(ctx.wrapper, ctx.filter);
+      // Flush the watch first so the debounce timer is actually scheduled.
+      await nextTick();
+      if (advanceMs > 0) {
+        vi.advanceTimersByTime(advanceMs);
+        await nextTick();
+      }
+    }
+
+    it('does not show the dropdown before the 500ms debounce elapses', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'fer', 499);
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(false);
+    });
+
+    it('shows matching authors after the user stops typing for 500ms', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'fer', 500);
+      const options = ctx.wrapper.findAll('.afp-author-option');
+      expect(options.map((o) => o.text())).toEqual(['Fernandez, Ana', 'Ferreira, Bruno']);
+    });
+
+    it('requires at least 2 characters before matching', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'f', 600);
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(false);
+    });
+
+    it('matches case-insensitively', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'FER', 500);
+      const options = ctx.wrapper.findAll('.afp-author-option');
+      expect(options.map((o) => o.text())).toEqual(['Fernandez, Ana', 'Ferreira, Bruno']);
+    });
+
+    it('reschedules the debounce on each keystroke so only the last query counts', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'fer', 300); // still pending
+      await typeAuthor(ctx, 'ferr', 300); // rescheduled by the second edit
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(false);
+      vi.advanceTimersByTime(200);
+      await nextTick();
+      const options = ctx.wrapper.findAll('.afp-author-option');
+      expect(options.map((o) => o.text())).toEqual(['Ferreira, Bruno']);
+    });
+
+    it('closes the dropdown when the fragment drops below 2 chars after the debounce', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'fer', 500);
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(true);
+      await typeAuthor(ctx, 'f', 500);
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(false);
+    });
+
+    it('selecting a suggestion fills the Author field with the full name', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'fer', 500);
+      const options = ctx.wrapper.findAll('.afp-author-option');
+      await options[1]!.trigger('click');
+      const events = ctx.wrapper.emitted('update:filter') ?? [];
+      const authorEvents = events.filter((e) => (e as [string, unknown])[0] === 'authorText');
+      const last = authorEvents[authorEvents.length - 1] as [string, unknown];
+      expect(last[1]).toBe('Ferreira, Bruno');
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(false);
+    });
+
+    it('clearing the field closes the dropdown without waiting for the debounce', async () => {
+      const ctx = mountAuthorPanel();
+      await typeAuthor(ctx, 'fer', 500);
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(true);
+      const authorClearable = ctx.wrapper
+        .findAllComponents({ name: 'ClearableInput' })
+        .find((c) => c.props('placeholder') === 'Filter by author...')!;
+      await authorClearable.vm.$emit('clear');
+      applyEmittedUpdates(ctx.wrapper, ctx.filter);
+      await nextTick();
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(false);
+      // Even after any pending debounce fires, the empty query keeps it closed.
+      vi.advanceTimersByTime(600);
+      await nextTick();
+      expect(ctx.wrapper.find('.afp-author-dropdown').exists()).toBe(false);
+    });
   });
 });

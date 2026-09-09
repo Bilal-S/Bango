@@ -319,6 +319,140 @@ describe('toolbar search', () => {
       );
     });
   });
+
+  // ── Field-prefix searches (a:, d:/doi:, j:, y:/year:) ───────────────
+  it('a: routes the search to the author filter and mirrors the panel field', async () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'a:fer';
+    s.executeToolbarSearch();
+    expect(s.query.search).toBeNull();
+    expect(s.query.author).toBe('fer');
+    expect(s.filter.authorText).toBe('fer');
+    await vi.waitFor(() => {
+      expect(tauriCommand).toHaveBeenCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ author: 'fer' }),
+        })
+      );
+    });
+  });
+
+  it('A: prefix is case-insensitive', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'A:Fer';
+    s.executeToolbarSearch();
+    expect(s.query.author).toBe('Fer');
+    expect(s.query.search).toBeNull();
+  });
+
+  it('d: routes to the DOI filter and clears the only-no-DOI mode', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.filter.doiEmpty = true;
+    s.query.doiEmpty = true;
+    s.searchText.value = 'd:10.1001/art1';
+    s.executeToolbarSearch();
+    expect(s.query.search).toBeNull();
+    expect(s.query.doi).toBe('10.1001/art1');
+    expect(s.query.doiEmpty).toBe(false);
+    expect(s.filter.doiText).toBe('10.1001/art1');
+    expect(s.filter.doiEmpty).toBe(false);
+  });
+
+  it('doi: alias routes to the DOI filter in any casing', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'DOI:10.5';
+    s.executeToolbarSearch();
+    expect(s.query.doi).toBe('10.5');
+    expect(s.query.search).toBeNull();
+  });
+
+  it('j: routes to the journal filter', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'j:nature';
+    s.executeToolbarSearch();
+    expect(s.query.search).toBeNull();
+    expect(s.query.journal).toBe('nature');
+    expect(s.filter.journal).toBe('nature');
+  });
+
+  it('y: routes a year range to the year filters', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'y:2018-2021';
+    s.executeToolbarSearch();
+    expect(s.query.search).toBeNull();
+    expect(s.query.yearFrom).toBe(2018);
+    expect(s.query.yearTo).toBe(2021);
+    expect(s.filter.yearFrom).toBe(2018);
+    expect(s.filter.yearTo).toBe(2021);
+  });
+
+  it('an invalid year falls back to the plain text search', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'y:20x0';
+    s.executeToolbarSearch();
+    expect(s.query.search).toBe('y:20x0');
+    expect(s.query.yearFrom).toBeNull();
+    expect(s.query.yearTo).toBeNull();
+  });
+
+  it('a bare a: filters nothing', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'a:';
+    s.executeToolbarSearch();
+    expect(s.query.search).toBeNull();
+    expect(s.query.author).toBeNull();
+  });
+
+  it('a plain search leaves an applied panel author filter combined', async () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.filter.authorText = 'bob';
+    await s.applyFilters();
+    s.searchText.value = 'hello';
+    s.executeToolbarSearch();
+    expect(s.query.search).toBe('hello');
+    expect(s.query.author).toBe('bob');
+  });
+
+  it('clearSearch reverts the field an a: search had set', async () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'a:fer';
+    s.executeToolbarSearch();
+    s.clearSearch();
+    expect(s.query.author).toBeNull();
+    expect(s.filter.authorText).toBe('');
+    await vi.waitFor(() => {
+      expect(tauriCommand).toHaveBeenLastCalledWith(
+        'query_articles',
+        expect.objectContaining({
+          query: expect.objectContaining({ author: null }),
+        })
+      );
+    });
+  });
+
+  it('clearSearch keeps a user-edited author field (edits need Apply)', () => {
+    mockSearchResults();
+    const s = useArticleSearch();
+    s.searchText.value = 'a:fer';
+    s.executeToolbarSearch();
+    // User refines the panel field after the toolbar search.
+    s.filter.authorText = 'fernandez';
+    s.clearSearch();
+    expect(s.filter.authorText).toBe('fernandez');
+    // Untouched until the next Apply; not clobbered by the "x".
+    expect(s.query.author).toBe('fer');
+  });
 });
 
 // ── Sort ───────────────────────────────────────────────────────────

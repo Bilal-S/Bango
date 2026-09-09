@@ -89,7 +89,8 @@ function onPageSizeChange(event: Event): void {
         <input
           type="text"
           :value="searchText"
-          placeholder="Search title, abstract, or notes..."
+          placeholder="Search title, abstract, notes, or a:author..."
+          title="Field prefixes: a: author, j: journal, d: or doi: DOI, y: year or range (y:2018-2021). Plain text searches title, abstract, and notes."
           class="toolbar-search w-full pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
           @input="emit('update:searchText', ($event.target as HTMLInputElement).value)"
           @keyup.enter="emit('search')"
