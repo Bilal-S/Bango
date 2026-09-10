@@ -26,17 +26,23 @@ use crate::summary::prompt::{
 use crate::summary::prompt::{parse_markdown_summary, ARTICLE_SUMMARY_MARKDOWN_FALLBACK_PROMPT};
 use crate::utils::sections::{classify_sections, detect_markdown_tables, extract_captions};
 
-/// Premium-gated normalization of the optional report-guidance params shared by
-/// `generate_summary` and `analyze_research_gaps`. Non-premium callers silently
-/// get `(None, None)` (today's exact prompt, no hard error); instructions are
-/// trimmed with blanks dropped; word counts of 0 are dropped.
-fn normalize_guidance(
+/// Default target output length (words) applied to the AI Summary reports
+/// (`generate_summary` + `analyze_research_gaps`) 
+const DEFAULT_TARGET_WORDS: u32 = 1000;
+
+/// Gated normalization of the optional report-guidance params shared by
+/// `generate_summary` and `analyze_research_gaps`. Non-premium callers
+/// silently get `(None, Some(DEFAULT_TARGET_WORDS))`: their instructions and
+/// word counts are dropped (no hard error) and the fixed default target
+/// length is applied instead. Premium instructions are trimmed with blanks
+#[must_use]
+pub fn normalize_guidance(
     flags: &crate::AppFlags,
     additional_instructions: Option<String>,
     target_word_count: Option<u32>,
 ) -> (Option<String>, Option<u32>) {
     if !flags.premium {
-        return (None, None);
+        return (None, Some(DEFAULT_TARGET_WORDS));
     }
     let instructions =
         additional_instructions.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
