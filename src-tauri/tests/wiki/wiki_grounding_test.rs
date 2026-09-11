@@ -201,6 +201,38 @@ fn method_page_flagged_when_ungrounded() {
 }
 
 #[test]
+fn framework_page_flagged_when_ungrounded() {
+    // Framework pages ARE subject to the grounding gate (they are concept-
+    // shaped hubs whose publications list must trace to source articles).
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let dir = root.join("wiki/frameworks");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut fm = Frontmatter::default();
+    fm.set("id", "tpb");
+    fm.set("title", "Theory of Planned Behavior");
+    fm.set("type", "framework");
+    fm.set("slug", "theory-of-planned-behavior");
+    fm.set("status", "draft");
+    fm.set("links", "[]");
+    // No source_articles -> should be flagged.
+    frontmatter::write_file(
+        &dir.join("theory-of-planned-behavior.md"),
+        &fm,
+        "Intention predicts behavior.\n",
+    )
+    .unwrap();
+
+    let report = lint(root).unwrap();
+    let grounding: Vec<_> =
+        report.issues.iter().filter(|i| i.kind == LintKind::UngroundedPage).collect();
+    assert!(
+        !grounding.is_empty(),
+        "ungrounded framework page should be flagged, got: {grounding:?}"
+    );
+}
+
+#[test]
 fn lint_run_after_ingest_reports_ungrounded_llm_pages() {
     // End-to-end: write a mix of grounded + ungrounded pages (simulating an
     // LLM ingest that produced some pages with provenance and some without),

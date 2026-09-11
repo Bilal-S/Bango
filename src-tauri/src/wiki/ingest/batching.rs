@@ -169,7 +169,7 @@ fn build_batch_prompt(
          ---\n\
          id: <slug>\n\
          title: \"<title>\"\n\
-         type: concept | author | method | synthesis\n\
+         type: concept | author | method | framework | synthesis\n\
          slug: <kebab-case-slug>\n\
          summary: \"<1-2 sentence summary>\"\n\
          status: draft\n\
@@ -192,13 +192,23 @@ fn build_batch_prompt(
          (e.g. randomized-controlled-trial, meta-analysis, systematic-review, \
          difference-in-differences). Only create pages for methods that \
          genuinely appear in the source material. \
-         2. TOPICAL and THEMATIC pages that emerge from the sources. This \
+         2. FRAMEWORK pages for named theoretical frameworks, models, or \
+         lenses that the sources explicitly use, test, or extend (e.g. a \
+         named theory like the Theory of Planned Behavior, COM-B, or \
+         realist evaluation - NOT a general topic). Each framework page \
+         MUST end with a '## Publications Using This Framework' section \
+         listing one [[article-id|Author et al. Year]] wikilink (alias \
+         form) per source article in this batch that applies it, and its \
+         source_articles frontmatter must list exactly those article ids. \
+         Only create pages for frameworks genuinely named in the source \
+         material. \
+         3. TOPICAL and THEMATIC pages that emerge from the sources. This \
          includes cross-cutting synthesis (e.g. 'Sugar Reformulation', 'Health \
          Inequalities Impact') AND section/aspect pages that a source naturally \
          covers (e.g. 'Study Population', 'Intervention Design', 'Policy \
          Context'). Use the synthesis template. Create pages for entities and \
          themes that genuinely appear in the source material. \
-         3. Any NEW author pages for authors that appear only in uploaded \
+         4. Any NEW author pages for authors that appear only in uploaded \
          documents (see the author directive above). \
          Only create pages for entities that genuinely appear in the source \
          material. Do not invent topics to fill a quota. \

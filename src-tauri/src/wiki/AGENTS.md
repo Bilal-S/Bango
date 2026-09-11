@@ -22,10 +22,12 @@ article corpus.
 ### Modules
 
 - `storage.rs` - resolves `wiki-root/`, scaffolds `raw/`,
-  `wiki/{concepts,authors,methods,synthesis}/`, `templates/`, `AGENTS.md`,
+  `wiki/{concepts,authors,methods,frameworks,synthesis}/`, `templates/`, `AGENTS.md`,
   `log.md`.
-- `agents_contract.rs` - ingest + lint rules contract.
-- `templates.rs` - page templates.
+- `agents_contract.rs` - ingest + lint rules contract (includes the
+  Theoretical Frameworks isolation + publication-linking rules).
+- `templates.rs` - page templates (concept, method, framework, synthesis,
+  author, source).
 - `frontmatter.rs` - dependency-free YAML parser/serializer.
 - `raw_export.rs` - included-article export + user-file extraction for
   PDF/TXT/HTML/etc. `resolve_user_file_title` enriches PDF titles via `lopdf`
@@ -49,13 +51,27 @@ article corpus.
   `concepts.rs`, `sources.rs`, `slugs.rs`). Inline tests extracted to
   `tests/wiki/wiki_ingest_test.rs` per `docs/CLAUDE.md` §Testing.
 - `engine.rs` - deterministic lint + `build_graph` for link graph
-  visualization. `LintKind::UngroundedPage` (ERROR-level provenance check).
+  visualization. `LintKind::UngroundedPage` (ERROR-level provenance check;
+  grounded types: concept, method, framework, synthesis).
 - `chat.rs` (T1.2 update) - token-budgeted RAG chat over FTS5 index; self-heals
   the FTS table via `fts::ensure_index_populated` when the index is empty OR its
   row count mismatches the number of `.md` pages on disk. `MAX_HITS` raised
   from 8 to 16. `build_context` dedupes by `parent_slug` (keeps top-ranked
   chunk per page, appends "(+N more passages from this page)"). `format_entry`
   includes `(§Methods)` in the header when `hit.section` is present.
+
+### Theoretical Frameworks page type (`framework`)
+
+`type: framework` pages isolate named theories/models/lenses under
+`wiki/frameworks/` (scaffolded by `storage::SUBDIRS`, routed by
+`ingest::write_page`). They are LLM-created via the batch-prompt focus list
+and the `framework.md` template - NOT deterministically pre-seeded. Contract:
+every framework page ends with a `## Publications Using This Framework`
+section listing one `[[article-id|Author et al. Year]]` wikilink per applying
+article (alias form so Obsidian shows readable citations), `source_articles`
+frontmatter mirrors those ids, and the Tier A1 grounding gate treats
+`framework` as a grounded type. Frontend: sidebar + static-site label
+"Theoretical Frameworks", graph color teal `#14b8a6`.
 
 ### Parallel chunked ingest (`ingest/batching.rs`)
 

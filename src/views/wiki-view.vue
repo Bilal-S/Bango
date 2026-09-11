@@ -185,6 +185,7 @@ const typeLabels: Record<string, string> = {
   concept: 'Concepts',
   author: 'Authors',
   method: 'Methods',
+  framework: 'Theoretical Frameworks',
   synthesis: 'Synthesis',
   source: 'Sources',
 };

@@ -8,13 +8,15 @@ pub fn agents_md_content() -> &'static str {
      \n\
      ## Purpose\n\
      Build and maintain a research knowledge base from the project's included\n\
-     articles. Synthesize concepts, methods, authors, and themes with strict\n\
+     articles. Synthesize concepts, methods, theoretical frameworks, authors,\
+     and themes with strict\n\
      provenance back to /raw sources.\n\
      \n\
      ## Directory Layout\n\
      - /raw            Immutable article exports. NEVER edit or delete from agent.\n\
      - /wiki           LLM-generated pages. Read/write here.\n\
      - /wiki/index.md  Master catalog. Regenerate on every ingest.\n\
+     - /wiki/frameworks  Theoretical framework hubs (one per named theory/model/lens).\n\
      - /templates      Page skeletons. Read-only reference.\n\
      - /wiki/log.md   Append-only run audit trail.\n\
      \n\
@@ -26,13 +28,28 @@ pub fn agents_md_content() -> &'static str {
      \n\
      ## Ingest Workflow\n\
      1. Read every .md in /raw (skip unchanged by hashing frontmatter exported_at).\n\
-     2. Extract entities: concepts, methods, authors, themes.\n\
+     2. Extract entities: concepts, methods, theoretical frameworks, authors, themes.\n\
      3. For each entity, upsert /wiki/{type}/{slug}.md (kebab-case slug).\n\
      4. Insert [[wikilinks]] between related entities and source raw files.\n\
      5. Cite every factual claim with a footnote [^art-{article_id}] linking /raw.\n\
      6. Generate the `summary` frontmatter field (1-2 sentence digest).\n\
      7. Regenerate /wiki/index.md with the full page list grouped by type.\n\
      8. Append a run entry to /wiki/log.md (timestamp, counts, model, tokens).\n\
+     \n\
+     ## Theoretical Frameworks\n\
+     - A framework page (type: framework) is for a NAMED theory, model, or\
+     lens that explains or predicts phenomena (e.g. Theory of Planned\
+     Behavior, COM-B, Diffusion of Innovations, realist evaluation). A\
+     general topic or exposure (e.g. 'sugar tax') is a concept page, NOT a\
+     framework page.\n\
+     - Every framework page MUST end with a '## Publications Using This\
+     Framework' section listing one [[article-id]] wikilink per source\
+     article that uses, tests, or extends the framework. Use the alias form\
+     [[article-id|Author et al. Year]] so the list reads as citations.\n\
+     - The source_articles frontmatter of a framework page MUST list exactly\
+     the article ids linked in that section.\n\
+     - Cross-cutting thematic pages remain type: synthesis; only named\
+     theories, models, or lenses are frameworks.\n\
      \n\
      ## External Documents (Add Documents)\n\
      User-uploaded files (PDF/TXT/web) live in /raw with slugs prefixed `user-` and\n\
@@ -80,6 +97,7 @@ mod tests {
         assert!(c.contains("## Directory Layout"));
         assert!(c.contains("## Content Hierarchy"));
         assert!(c.contains("## Ingest Workflow"));
+        assert!(c.contains("## Theoretical Frameworks"));
         assert!(c.contains("## Lint Workflow"));
         assert!(c.contains("## Rules"));
         // Directory tokens referenced
@@ -87,6 +105,7 @@ mod tests {
         assert!(c.contains("/wiki"));
         assert!(c.contains("/templates"));
         assert!(c.contains("/wiki/log.md"));
+        assert!(c.contains("/wiki/frameworks"));
         // No em dash anywhere (project rule)
         assert!(!c.contains('\u{2014}'), "em dash forbidden in generated text");
         assert!(!c.contains('\u{2013}'), "en dash forbidden in generated text");

@@ -14,8 +14,15 @@ pub const WIKI_ROOT_DIR_KEY: &str = "wiki_root_dir";
 pub const WIKI_ROOT_DIR_NAME: &str = "wiki-root";
 
 /// Subdirectories created inside `wiki-root/`.
-pub const SUBDIRS: &[&str] =
-    &["raw", "wiki/concepts", "wiki/authors", "wiki/methods", "wiki/synthesis", "templates"];
+pub const SUBDIRS: &[&str] = &[
+    "raw",
+    "wiki/concepts",
+    "wiki/authors",
+    "wiki/methods",
+    "wiki/frameworks",
+    "wiki/synthesis",
+    "templates",
+];
 
 /// Resolve the effective wiki-root: explicit override → `{storage_root}/wiki-root`. Creates dir if needed.
 pub fn resolve_root(conn: &rusqlite::Connection) -> Result<PathBuf, AppError> {

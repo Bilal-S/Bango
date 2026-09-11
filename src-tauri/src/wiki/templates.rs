@@ -9,6 +9,7 @@ use crate::error::AppError;
 const TEMPLATES: &[(&str, &str)] = &[
     ("concept.md", CONCEPT_TEMPLATE),
     ("method.md", METHOD_TEMPLATE),
+    ("framework.md", FRAMEWORK_TEMPLATE),
     ("synthesis.md", SYNTHESIS_TEMPLATE),
     ("author.md", AUTHOR_TEMPLATE),
     ("source.md", SOURCE_TEMPLATE),
@@ -91,6 +92,41 @@ links: [\"[[related-method]]\"]\n\
 \n\
 - [[related-method-1]]\n\
 - [[related-method-2]]\n\
+\n\
+[^art-<article-id>]: /raw/<article-id>.md\n\
+";
+
+const FRAMEWORK_TEMPLATE: &str = "\
+---\n\
+id: <uuid>\n\
+title: \"<Framework Name>\"\n\
+type: framework\n\
+slug: <kebab-case-slug>\n\
+summary: \"<1-2 sentence digest: what the framework explains and N articles use it>.\"\n\
+created: <ISO-8601>\n\
+updated: <ISO-8601>\n\
+status: draft\n\
+source_articles: [\"<article-uuid>\"]\n\
+tags: []\n\
+links: [\"[[related-framework]]\"]\n\
+ content_source: <full_text|ai_summary|abstract>\n\
+ llm_model: <model-id>\n\
+ ---\n\
+ \n\
+ <Opening paragraph defining the framework and why it matters to the review.>\n\
+\n\
+## Core Constructs\n\
+\n\
+- <Construct or proposition 1>\n\
+- <Construct or proposition 2>\n\
+\n\
+## Publications Using This Framework\n\
+\n\
+- [[article-id|Author et al. Year]] - <one line on how the publication uses it> [^art-<article-id>]\n\
+\n\
+## Related Frameworks\n\
+\n\
+- [[related-framework-1]]\n\
 \n\
 [^art-<article-id>]: /raw/<article-id>.md\n\
 ";

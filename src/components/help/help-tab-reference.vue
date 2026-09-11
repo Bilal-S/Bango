@@ -1886,8 +1886,8 @@ ER  - </pre
             <p>
               The result: a connected graph (author ↔ synthesis ↔ concept ↔ source) exists
               <strong>before</strong> the LLM runs. The LLM then enriches it with concept
-              relationships, method groupings, and cross-cutting synthesis - but the backbone is
-              always there.
+              relationships, method groupings, theoretical framework hubs, and cross-cutting
+              synthesis - but the backbone is always there.
             </p>
 
             <h4>3. Ingest is batched, parallel, and self-consolidating</h4>
@@ -2044,8 +2044,9 @@ ER  - </pre
             <h3>Browsing & Editing Pages</h3>
             <ul>
               <li>
-                <strong>Sidebar:</strong> lists all pages grouped by type (Concepts, Authors,
-                Methods, Synthesis). Use the search box to filter by title or summary.
+                <strong>Sidebar:</strong> lists all pages grouped by type (Concepts, Theoretical
+                Frameworks, Authors, Methods, Synthesis). Use the search box to filter by title or
+                summary.
               </li>
               <li>
                 <strong>Reading:</strong> <code>[[wikilinks]]</code> are clickable and navigate

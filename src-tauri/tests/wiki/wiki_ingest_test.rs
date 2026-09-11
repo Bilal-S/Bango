@@ -127,6 +127,23 @@ fn write_page_routes_author_to_authors_dir() {
     assert!(root.join("wiki/authors/jane-doe.md").exists());
 }
 
+#[test]
+fn write_page_routes_framework_to_frameworks_dir() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    let response =
+        "<!-- PAGE:theory-of-planned-behavior -->\n---\nid: theory-of-planned-behavior\n\
+         title: \"Theory of Planned Behavior\"\ntype: framework\n\
+         slug: theory-of-planned-behavior\nsummary: \"\"\nstatus: draft\nlinks: []\n---\n\n\
+         Intention predicts behavior.\n\n## Publications Using This Framework\n\n- [[art-1]]\n"
+            .to_string();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(bango_lib::wiki::ingest::write_pages_from_response(root, &response, None)).unwrap();
+
+    assert!(root.join("wiki/frameworks/theory-of-planned-behavior.md").exists());
+}
+
 #[tokio::test]
 async fn run_ingest_from_response_writes_pages_and_clears_flag() {
     let conn = Connection::open_in_memory().unwrap();
@@ -640,6 +657,37 @@ fn batch_prompt_invites_topical_and_section_pages_from_sources() {
     assert!(
         prompt.contains("Use the synthesis template"),
         "focus list must direct the LLM to the synthesis template for these pages, got: {prompt}"
+    );
+}
+
+#[test]
+fn batch_prompt_directs_framework_pages_with_publications_section() {
+    // The focus list must ask for FRAMEWORK pages (named theories/models/
+    // lenses, isolated from general topics) and mandate the
+    // '## Publications Using This Framework' section linking the applying
+    // articles via aliased [[article-id|Author et al. Year]] wikilinks.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 50_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+    let prompt = &batches[0].prompt;
+    assert!(
+        prompt.contains("FRAMEWORK pages for named theoretical frameworks"),
+        "focus list must direct the LLM to create framework pages, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("## Publications Using This Framework"),
+        "framework directive must mandate the publications section, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("[[article-id|Author et al. Year]]"),
+        "framework directive must teach the alias link form, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("type: concept | author | method | framework | synthesis"),
+        "format block type union must include framework, got: {prompt}"
     );
 }
 

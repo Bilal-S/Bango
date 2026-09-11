@@ -479,11 +479,12 @@ function renderIndexHtml(ctx: ExportContext, projectTitle: string): string {
     grouped.set(page.pageType, list);
   }
 
-  const typeOrder = ['synthesis', 'concept', 'method', 'source', 'author'];
+  const typeOrder = ['synthesis', 'framework', 'concept', 'method', 'source', 'author'];
   const typeLabels: Record<string, string> = {
     concept: 'Concepts',
     author: 'Authors',
     synthesis: 'Synthesis',
+    framework: 'Theoretical Frameworks',
     method: 'Methods',
     source: 'Sources',
   };

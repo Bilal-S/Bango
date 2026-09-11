@@ -150,11 +150,12 @@ pub fn lint(root: &Path) -> Result<LintReport, AppError> {
             }
         }
 
-        /* Tier A1 grounding gate: LLM-generated concept/method/synthesis pages must carry
-        provenance. Author/source pages exempt (pre-seeded, different provenance shape).
+        /* Tier A1 grounding gate: LLM-generated concept/method/framework/synthesis pages must
+        carry provenance. Author/source pages exempt (pre-seeded, different provenance shape).
         Deterministic pre-seeds all set `source_articles`, so only LLM fabrications trip this. */
         let page_type = fm.get("type").unwrap_or("");
-        let is_grounded_type = matches!(page_type, "concept" | "method" | "synthesis");
+        let is_grounded_type =
+            matches!(page_type, "concept" | "method" | "framework" | "synthesis");
         if is_grounded_type {
             let sources = frontmatter::parse_list(fm.get("source_articles").unwrap_or(""));
             if sources.is_empty() {

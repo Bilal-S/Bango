@@ -176,6 +176,9 @@ pub(super) fn write_page(root: &Path, page: &ParsedPage) -> Result<(), AppError>
     let subdir = match page_type {
         "author" => "authors",
         "method" => "methods",
+        // Theoretical framework hubs (named theories/models/lenses; see the
+        // agent contract's Theoretical Frameworks section).
+        "framework" => "frameworks",
         "synthesis" => "synthesis",
         // External-document source pages (uploaded via Add Documents). Lives
         // under `wiki/sources/` so the sidebar filter + graph can group them.

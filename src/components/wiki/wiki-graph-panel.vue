@@ -82,6 +82,7 @@ const typeColors: Record<string, string> = {
   concept: '#6366f1', // indigo
   author: '#22c55e', // green
   method: '#f97316', // orange
+  framework: '#14b8a6', // teal
   synthesis: '#a855f7', // purple
   source: '#64748b', // slate
 };
@@ -91,6 +92,7 @@ const legendItems = [
   { type: 'concept', label: 'Concepts', color: typeColors.concept! },
   { type: 'author', label: 'Authors', color: typeColors.author! },
   { type: 'method', label: 'Methods', color: typeColors.method! },
+  { type: 'framework', label: 'Theoretical Frameworks', color: typeColors.framework! },
   { type: 'synthesis', label: 'Synthesis', color: typeColors.synthesis! },
 ];
 

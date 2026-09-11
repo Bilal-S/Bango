@@ -27,7 +27,7 @@ use crate::summary::prompt::{parse_markdown_summary, ARTICLE_SUMMARY_MARKDOWN_FA
 use crate::utils::sections::{classify_sections, detect_markdown_tables, extract_captions};
 
 /// Default target output length (words) applied to the AI Summary reports
-/// (`generate_summary` + `analyze_research_gaps`) 
+/// (`generate_summary` + `analyze_research_gaps`)
 const DEFAULT_TARGET_WORDS: u32 = 1000;
 
 /// Gated normalization of the optional report-guidance params shared by
