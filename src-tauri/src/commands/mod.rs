@@ -39,7 +39,8 @@ pub struct HealthCheck {
 #[tauri::command]
 pub fn health_check(db_state: tauri::State<'_, DbState>) -> Result<HealthCheck, AppError> {
     let conn = crate::db::connection::lock_conn(&db_state.conn)?;
-    let count: usize =
-        conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0)).unwrap_or(0);
+    let count: usize = conn
+        .query_row("SELECT COUNT(*) FROM articles", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
     Ok(HealthCheck { status: "ok".to_string(), article_count: count })
 }

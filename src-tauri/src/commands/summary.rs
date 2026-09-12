@@ -138,16 +138,16 @@ pub async fn generate_summary(
         // AI-screened: articles that have an ai_decision set
         let ai_screened: usize = conn
             .query_row("SELECT COUNT(*) FROM articles WHERE ai_decision IS NOT NULL", [], |row| {
-                row.get(0)
+                row.get::<_, i64>(0)
             })
-            .unwrap_or(0);
+            .unwrap_or(0) as usize;
 
         // Manual review: articles where manual_override = 1
         let manual_reviewed: usize = conn
             .query_row("SELECT COUNT(*) FROM articles WHERE manual_override = 1", [], |row| {
-                row.get(0)
+                row.get::<_, i64>(0)
             })
-            .unwrap_or(0);
+            .unwrap_or(0) as usize;
 
         let screening_data = ScreeningData {
             records_identified: prisma.records_identified,
@@ -1031,14 +1031,14 @@ pub async fn analyze_research_gaps(
         let prisma = data::compute_prisma_data(&conn)?;
         let ai_screened: usize = conn
             .query_row("SELECT COUNT(*) FROM articles WHERE ai_decision IS NOT NULL", [], |row| {
-                row.get(0)
+                row.get::<_, i64>(0)
             })
-            .unwrap_or(0);
+            .unwrap_or(0) as usize;
         let manual_reviewed: usize = conn
             .query_row("SELECT COUNT(*) FROM articles WHERE manual_override = 1", [], |row| {
-                row.get(0)
+                row.get::<_, i64>(0)
             })
-            .unwrap_or(0);
+            .unwrap_or(0) as usize;
         let screening_data = ScreeningData {
             records_identified: prisma.records_identified,
             duplicates_removed: prisma.duplicates_removed,

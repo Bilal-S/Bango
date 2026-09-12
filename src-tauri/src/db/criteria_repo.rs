@@ -15,7 +15,7 @@ pub fn get_all_aims(conn: &Connection) -> Result<Vec<ResearchAim>, AppError> {
 }
 
 pub fn has_any_aims(conn: &Connection) -> Result<bool, AppError> {
-    let count: usize =
+    let count: i64 =
         conn.query_row("SELECT EXISTS(SELECT 1 FROM research_aims)", [], |row| row.get(0))?;
     Ok(count > 0)
 }
@@ -53,7 +53,7 @@ pub fn get_all_criteria(conn: &Connection) -> Result<Vec<Criterion>, AppError> {
 }
 
 pub fn has_inclusion_criteria(conn: &Connection) -> Result<bool, AppError> {
-    let count: usize = conn.query_row(
+    let count: i64 = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM criteria WHERE type = 'inclusion')",
         [],
         |row| row.get(0),
@@ -62,7 +62,7 @@ pub fn has_inclusion_criteria(conn: &Connection) -> Result<bool, AppError> {
 }
 
 pub fn has_exclusion_criteria(conn: &Connection) -> Result<bool, AppError> {
-    let count: usize = conn.query_row(
+    let count: i64 = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM criteria WHERE type = 'exclusion')",
         [],
         |row| row.get(0),

@@ -27,47 +27,54 @@ pub struct ExclusionReason {
 }
 
 pub fn compute_prisma_data(conn: &Connection) -> Result<PrismaData, AppError> {
-    let records_identified: usize =
-        conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0)).unwrap_or(0);
+    let records_identified: usize = conn
+        .query_row("SELECT COUNT(*) FROM articles", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
 
     let duplicates_removed: usize = conn
         .query_row("SELECT COUNT(*) FROM articles WHERE duplicate_of IS NOT NULL", [], |row| {
-            row.get(0)
+            row.get::<_, i64>(0)
         })
-        .unwrap_or(0);
+        .unwrap_or(0) as usize;
 
     let records_screened = records_identified.saturating_sub(duplicates_removed);
 
     let records_excluded: usize = conn
-        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'rejected'", [], |row| row.get(0))
-        .unwrap_or(0);
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'rejected'", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize;
 
     let records_excluded_general: usize = conn
         .query_row(
             "SELECT COUNT(*) FROM articles WHERE status = 'rejected' AND (matched_exclusion_criteria IS NULL OR matched_exclusion_criteria = '[]')",
             [],
-            |row| row.get(0),
+            |row| row.get::<_, i64>(0),
         )
-        .unwrap_or(0);
+        .unwrap_or(0) as usize;
 
     let records_excluded_with_reasons: usize = conn
         .query_row(
             "SELECT COUNT(*) FROM articles WHERE status = 'rejected' AND matched_exclusion_criteria IS NOT NULL AND matched_exclusion_criteria != '[]'",
             [],
-            |row| row.get(0),
+            |row| row.get::<_, i64>(0),
         )
-        .unwrap_or(0);
+        .unwrap_or(0) as usize;
 
     // Records actually assessed at full-text = screened minus those generally excluded at screening
     let records_assessed = records_screened.saturating_sub(records_excluded_general);
 
     let records_in_progress: usize = conn
-        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'working'", [], |row| row.get(0))
-        .unwrap_or(0);
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'working'", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize;
 
     let studies_included: usize = conn
-        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'included'", [], |row| row.get(0))
-        .unwrap_or(0);
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'included'", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize;
 
     // Exclusion reasons: count articles per matched exclusion criterion
     let mut stmt = conn.prepare(

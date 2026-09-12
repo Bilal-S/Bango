@@ -137,7 +137,7 @@ pub fn update_article_after_screening(
             update.confidence,
             matched_inc_json,
             matched_exc_json,
-            update.actual_tokens,
+            update.actual_tokens.map(|t| t as i64),
             update.article_id
         ],
     )?;

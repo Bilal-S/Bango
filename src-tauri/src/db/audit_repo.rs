@@ -34,7 +34,7 @@ pub fn get_recent_audit_entries(
              WHERE ae.action != 'import' AND ae.action != 'error' AND ae.timestamp < ?1 \
              ORDER BY ae.timestamp DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![ts, limit], row_to_audit_entry)?;
+        let rows = stmt.query_map(params![ts, limit as i64], row_to_audit_entry)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     } else {
         // Initial load: offset-based pagination (no cursor).
@@ -45,7 +45,7 @@ pub fn get_recent_audit_entries(
              LEFT JOIN articles a ON a.id = ae.article_id \
              WHERE ae.action != 'import' AND ae.action != 'error' ORDER BY ae.timestamp DESC LIMIT ?1 OFFSET ?2",
         )?;
-        let rows = stmt.query_map(params![limit, offset], row_to_audit_entry)?;
+        let rows = stmt.query_map(params![limit as i64, offset as i64], row_to_audit_entry)?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 }
@@ -68,12 +68,12 @@ pub fn get_import_activities(
              HAVING MIN(timestamp) < ?1 \
              ORDER BY MIN(timestamp) DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![ts, limit], |row| {
+        let rows = stmt.query_map(params![ts, limit as i64], |row| {
             Ok(ImportActivity {
                 id: row.get(0)?,
                 timestamp: row.get(1)?,
                 filename: row.get(2)?,
-                count: row.get::<_, usize>(3)?,
+                count: row.get::<_, i64>(3)? as usize,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -86,12 +86,12 @@ pub fn get_import_activities(
              GROUP BY details \
              ORDER BY MIN(timestamp) DESC LIMIT ?1 OFFSET ?2",
         )?;
-        let rows = stmt.query_map(params![limit, offset], |row| {
+        let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
             Ok(ImportActivity {
                 id: row.get(0)?,
                 timestamp: row.get(1)?,
                 filename: row.get(2)?,
-                count: row.get::<_, usize>(3)?,
+                count: row.get::<_, i64>(3)? as usize,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -127,7 +127,7 @@ pub fn get_activity_feed(
          GROUP BY details \
          ORDER BY timestamp DESC LIMIT ?1 OFFSET ?2",
     )?;
-    let rows = stmt.query_map(params![limit, offset], |row| {
+    let rows = stmt.query_map(params![limit as i64, offset as i64], |row| {
         Ok(ActivityFeedEntry {
             id: row.get(0)?,
             timestamp: row.get(1)?,
@@ -138,7 +138,7 @@ pub fn get_activity_feed(
             source: row.get(6)?,
             article_title: row.get(7)?,
             filename: row.get(8)?,
-            count: row.get(9)?,
+            count: row.get::<_, Option<i64>>(9)?.map(|c| c as usize),
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -390,7 +390,7 @@ pub fn get_generic_audit_entries(
          FROM audit_entries ae \
          WHERE ae.article_id IS NULL ORDER BY ae.timestamp DESC LIMIT ?1",
     )?;
-    let rows = stmt.query_map([limit], row_to_audit_entry)?;
+    let rows = stmt.query_map([limit as i64], row_to_audit_entry)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -399,8 +399,8 @@ pub fn get_generic_audit_entries(
 pub fn clear_generic_entries(conn: &Connection) -> Result<usize, AppError> {
     let count =
         conn.query_row("SELECT COUNT(*) FROM audit_entries WHERE article_id IS NULL", [], |row| {
-            row.get::<_, usize>(0)
-        })?;
+            row.get::<_, i64>(0)
+        })? as usize;
     conn.execute("DELETE FROM audit_entries WHERE article_id IS NULL", [])?;
     Ok(count)
 }

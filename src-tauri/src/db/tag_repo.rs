@@ -77,9 +77,9 @@ pub fn merge_tags(conn: &Connection, source_id: &str, target_id: &str) -> Result
 pub fn get_article_count_for_tag(conn: &Connection, tag_id: &str) -> Result<usize, AppError> {
     let count: usize = conn
         .query_row("SELECT COUNT(*) FROM article_tags WHERE tag_id = ?1", params![tag_id], |row| {
-            row.get(0)
+            row.get::<_, i64>(0)
         })
-        .unwrap_or(0);
+        .unwrap_or(0) as usize;
     Ok(count)
 }
 

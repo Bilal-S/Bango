@@ -55,7 +55,7 @@ pub fn exists_normalized(conn: &Connection, table: &'static str, name: &str) -> 
     conn.query_row(
         &format!("SELECT COUNT(*) FROM {table} WHERE LOWER(name) = LOWER(?1)"),
         params![name],
-        |row| row.get::<_, usize>(0),
+        |row| row.get::<_, i64>(0),
     )
     .map(|c| c > 0)
     .unwrap_or(false)

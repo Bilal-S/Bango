@@ -84,9 +84,9 @@ pub fn get_article_count_for_label(conn: &Connection, label_id: &str) -> Result<
         .query_row(
             "SELECT COUNT(*) FROM article_labels WHERE label_id = ?1",
             params![label_id],
-            |row| row.get(0),
+            |row| row.get::<_, i64>(0),
         )
-        .unwrap_or(0);
+        .unwrap_or(0) as usize;
     Ok(count)
 }
 

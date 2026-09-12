@@ -42,8 +42,8 @@ fn seed_articles(conn: &rusqlite::Connection, n: usize) {
                 base_seq + i as i64,
                 title,
                 abstract_text,
-                data_length,
-                data_length / 4,
+                data_length as i64,
+                data_length as i64 / 4,
             ],
         )
         .expect("insert article");
@@ -114,9 +114,9 @@ fn test_max_article_char_len_performance_at_scale() {
             .query_row(
                 "SELECT COUNT(*) FROM articles WHERE status = 'working' AND screened_at IS NULL",
                 [],
-                |row| row.get(0),
+                |row| row.get::<_, i64>(0),
             )
-            .expect("count");
+            .expect("count") as usize;
         assert_eq!(actual_count, *count, "article count mismatch");
 
         // Benchmark
@@ -150,7 +150,7 @@ fn test_max_article_char_len_excludes_non_working() {
                 id, sequence_id, status, title, abstract_text, authors,
                 publication_year, keywords, data_length, token_estimate, screened_at
             ) VALUES (?1, ?2, ?3, 'Title', 'Abstract', '[\"A\"]', 2024, '[]', ?4, ?5, CASE WHEN ?3 != 'working' THEN '2026-01-01T00:00:00Z' ELSE NULL END)",
-            rusqlite::params![id, (i + 1) as i64, status, data_length, data_length / 4],
+            rusqlite::params![id, (i + 1) as i64, status, data_length as i64, data_length as i64 / 4],
         )
         .expect("insert");
     }

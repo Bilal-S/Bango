@@ -51,7 +51,8 @@ pub fn get_article_counts(
     let mut stmt = conn.prepare(
         "SELECT status, COUNT(*) FROM articles WHERE duplicate_of IS NULL AND status != 'duplicate' GROUP BY status"
     )?;
-    let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, usize>(1)?)))?;
+    let rows =
+        stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize)))?;
 
     let mut counts = crate::models::article::ArticleCounts {
         all: 0,
@@ -76,8 +77,10 @@ pub fn get_article_counts(
     // Count duplicates: all articles with status = 'duplicate' (no duplicate_of filter,
     // matching the duplicate tab view in query_articles which uses no base_filter).
     let dup_count: usize = conn
-        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'duplicate'", [], |row| row.get(0))
-        .unwrap_or(0);
+        .query_row("SELECT COUNT(*) FROM articles WHERE status = 'duplicate'", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize;
     counts.duplicate = dup_count;
     counts.all += dup_count;
 
@@ -87,14 +90,15 @@ pub fn get_article_counts(
         .query_row(
             "SELECT COUNT(*) FROM articles WHERE status = 'working' AND screened_at IS NOT NULL AND duplicate_of IS NULL",
             [],
-            |row| row.get(0),
+            |row| row.get::<_, i64>(0),
         )
-        .unwrap_or(0);
+        .unwrap_or(0) as usize;
     counts.error = error_count;
 
     // Count references: all reference papers
-    let ref_count: usize =
-        conn.query_row("SELECT COUNT(*) FROM reference_papers", [], |row| row.get(0)).unwrap_or(0);
+    let ref_count: usize = conn
+        .query_row("SELECT COUNT(*) FROM reference_papers", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
     counts.references = ref_count;
 
     Ok(counts)

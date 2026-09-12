@@ -456,12 +456,12 @@ pub fn count_references_for_article(
     parent_article_id: &str,
     ref_type: &ReferenceType,
 ) -> Result<usize, AppError> {
-    let count: usize = conn.query_row(
+    let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM article_reference_links WHERE parent_article_id = ?1 AND type = ?2",
         params![parent_article_id, ref_type.as_int()],
         |row| row.get(0),
     )?;
-    Ok(count)
+    Ok(count as usize)
 }
 
 /// Delete all reference links for a parent article and decrement paper counters.
@@ -706,12 +706,12 @@ fn update_parent_flags_tx(
     tx: &rusqlite::Transaction<'_>,
     parent_article_id: &str,
 ) -> Result<(), AppError> {
-    let citation_count: usize = tx.query_row(
+    let citation_count: i64 = tx.query_row(
         "SELECT COUNT(*) FROM article_reference_links WHERE parent_article_id = ?1 AND type = 0",
         params![parent_article_id],
         |row| row.get(0),
     )?;
-    let reference_count: usize = tx.query_row(
+    let reference_count: i64 = tx.query_row(
         "SELECT COUNT(*) FROM article_reference_links WHERE parent_article_id = ?1 AND type = 1",
         params![parent_article_id],
         |row| row.get(0),
@@ -793,12 +793,13 @@ pub fn query_reference_papers(
     let count_boxed = build_params(search_pattern.is_some(), status_value.is_some());
     let count_params: Vec<&dyn rusqlite::types::ToSql> =
         count_boxed.iter().map(|p| p.as_ref()).collect();
-    let total: usize = conn.query_row(&count_sql, count_params.as_slice(), |row| row.get(0))?;
+    let total: usize =
+        conn.query_row(&count_sql, count_params.as_slice(), |row| row.get::<_, i64>(0))? as usize;
 
     // Data query params (same filter params as count, plus LIMIT and OFFSET)
     let mut data_boxed = build_params(search_pattern.is_some(), status_value.is_some());
-    data_boxed.push(Box::new(limit));
-    data_boxed.push(Box::new(offset));
+    data_boxed.push(Box::new(limit as i64));
+    data_boxed.push(Box::new(offset as i64));
     let data_params: Vec<&dyn rusqlite::types::ToSql> =
         data_boxed.iter().map(|p| p.as_ref()).collect();
 

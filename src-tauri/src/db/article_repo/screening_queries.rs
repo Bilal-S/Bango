@@ -11,39 +11,39 @@ use crate::models::article::Article;
 use super::MAX_ARTICLES;
 
 pub fn count_articles(conn: &Connection) -> Result<usize, AppError> {
-    let count: usize = conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0))?;
-    Ok(count)
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM articles", [], |row| row.get(0))?;
+    Ok(count as usize)
 }
 
 /// Count unscreened articles in the working list (status = 'working' AND screened_at IS NULL).
 pub fn count_unscreened_working(conn: &Connection) -> Result<usize, AppError> {
-    let count: usize = conn.query_row(
+    let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM articles WHERE status = 'working' AND screened_at IS NULL",
         [],
         |row| row.get(0),
     )?;
-    Ok(count)
+    Ok(count as usize)
 }
 
 /// Count all articles in the working list (status = 'working').
 pub fn count_working(conn: &Connection) -> Result<usize, AppError> {
-    let count: usize =
+    let count: i64 =
         conn.query_row("SELECT COUNT(*) FROM articles WHERE status = 'working'", [], |row| {
             row.get(0)
         })?;
-    Ok(count)
+    Ok(count as usize)
 }
 
 /// Max character length (title + abstract) among unscreened working articles.
 /// Uses pre-computed `data_length`. Returns 0 if none.
 pub fn max_article_char_len(conn: &Connection) -> Result<usize, AppError> {
-    let max_len: usize = conn.query_row(
+    let max_len: i64 = conn.query_row(
         "SELECT COALESCE(MAX(data_length), 0) FROM articles \
          WHERE status = 'working' AND screened_at IS NULL",
         [],
         |row| row.get(0),
     )?;
-    Ok(max_len)
+    Ok(max_len as usize)
 }
 
 /// Fetch a batch of unscreened working articles (minimal fields for screening).
@@ -61,7 +61,7 @@ pub fn get_next_unscreened_working_batch(
           WHERE status = 'working' AND screened_at IS NULL AND sequence_id > ?2 \
           ORDER BY sequence_id ASC LIMIT ?1",
     )?;
-    let rows = stmt.query_map(rusqlite::params![limit, cursor], |row| {
+    let rows = stmt.query_map(rusqlite::params![limit as i64, cursor], |row| {
         Ok(Article {
             id: row.get(0)?,
             sequence_id: row.get(1)?,
