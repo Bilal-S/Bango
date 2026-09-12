@@ -1859,8 +1859,9 @@ ER  - </pre
                     <td><strong>Synthesis pages</strong></td>
                     <td>
                       One per included article, built from the structured
-                      <code>full_text_ai_summary</code> JSON (summary + key insights). Slug =
-                      article UUID so <code>[^art-uuid]</code> citations resolve.
+                      <code>full_text_ai_summary</code> JSON (summary + key insights) with a linked
+                      author byline. Slug = article UUID so <code>[^art-uuid]</code>
+                      citations resolve.
                     </td>
                     <td>One note per paper, written by hand.</td>
                   </tr>

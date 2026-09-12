@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bango_lib::wiki::engine::{lint, LintKind};
 use bango_lib::wiki::frontmatter;
 use bango_lib::wiki::ingest::{self, IngestLlmSender};
 use rusqlite::Connection;
@@ -46,6 +47,77 @@ fn preseed_synthesis_writes_page_for_article_with_ai_summary() {
     assert!(body.contains("This is the digest."));
     assert!(body.contains("## Key Insights"));
     assert!(body.contains("- Insight one"));
+    // authors='[]' and no biblio rows -> no byline at all.
+    assert!(!body.contains("Authors:"), "no byline when the article has no authors, got: {body}");
+}
+
+#[test]
+fn preseed_synthesis_byline_links_authors_in_order() {
+    // With biblio tables populated (the normal pipeline path), the synthesis
+    // page opens with a linked, citation-ordered author byline whose slugs
+    // match the pre-seeded author pages; author slugs also join the `links`
+    // frontmatter, and the byline links resolve in lint.
+    let (mut conn, root) = setup_db_with_article_summary_and_authors();
+    bango_lib::db::biblio_repo::run_full_normalization(&mut conn).unwrap();
+
+    // Mirror the pipeline order in build_batches_with_manifest: authors
+    // before synthesis, so the byline links have real target pages.
+    let manifest = ingest::build_author_manifest(&conn).unwrap();
+    assert!(!manifest.entries.is_empty(), "normalization should populate authors");
+    ingest::preseed_authors(&root, &manifest).unwrap();
+
+    let written = ingest::preseed_synthesis_from_ai_summaries(&conn, &root).unwrap();
+    assert_eq!(written, 1);
+
+    let path = root.join("wiki/synthesis/art-111.md");
+    assert!(path.exists());
+    let (fm, body) = frontmatter::read_file(&path).unwrap();
+    assert!(
+        body.contains("Authors: [[author-smith-j|Smith, J]], [[author-doe-a|Doe, A]]"),
+        "byline should list linked authors in citation order, got: {body}"
+    );
+    assert!(
+        fm.get("links").unwrap_or("").contains("[[author-smith-j]]"),
+        "links frontmatter should carry the author slug, got: {:?}",
+        fm.get("links")
+    );
+    assert!(
+        fm.get("links").unwrap_or("").contains("[[author-doe-a]]"),
+        "links frontmatter should carry the second author slug, got: {:?}",
+        fm.get("links")
+    );
+
+    // The byline links must resolve to real pages (author pages pre-seeded).
+    let report = lint(&root).unwrap();
+    let broken_authors: Vec<_> = report
+        .issues
+        .iter()
+        .filter(|i| i.kind == LintKind::BrokenLink && i.message.contains("author-"))
+        .collect();
+    assert!(
+        broken_authors.is_empty(),
+        "byline author links must resolve to the pre-seeded author pages, got: {broken_authors:?}"
+    );
+}
+
+#[test]
+fn preseed_synthesis_byline_falls_back_to_plain_text_without_biblio() {
+    // No normalization -> biblio junction empty -> the byline still shows the
+    // authors parsed from the raw articles.authors string, but as plain text
+    // (no wikilinks, so no broken-link risk).
+    let (conn, root) = setup_db_with_article_summary_and_authors();
+    // Deliberately skip run_full_normalization.
+    let written = ingest::preseed_synthesis_from_ai_summaries(&conn, &root).unwrap();
+    assert_eq!(written, 1);
+
+    let path = root.join("wiki/synthesis/art-111.md");
+    assert!(path.exists());
+    let (_fm, body) = frontmatter::read_file(&path).unwrap();
+    assert!(
+        body.contains("Authors: Smith, J, Doe, A"),
+        "plain-text fallback byline should be present, got: {body}"
+    );
+    assert!(!body.contains("[[author-"), "no author wikilinks without biblio rows");
 }
 
 #[test]
@@ -262,6 +334,24 @@ fn setup_db_with_article_and_summary() -> (Connection, std::path::PathBuf) {
     insert_included_article(&conn, "art-111", "Test Article", Some(summary_json));
     // Leak the TempDir so the test body can use the path. (Cleanup is
     // acceptable to skip for tests; the OS reclaims temp on exit.)
+    std::mem::forget(tmp);
+    (conn, root)
+}
+
+fn setup_db_with_article_summary_and_authors() -> (Connection, std::path::PathBuf) {
+    let conn = Connection::open_in_memory().unwrap();
+    bango_lib::db::migration::run_migrations(&conn).unwrap();
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    bango_lib::wiki::storage::scaffold_tree(&root).unwrap();
+
+    let summary_json = r#"{ "summary_150_250_words": "Digest.", "keywords": ["sugar"] }"#;
+    conn.execute(
+        "INSERT INTO articles (id, title, status, authors, publication_year, abstract_text, full_text_ai_summary) \
+         VALUES ('art-111', 'Authored Test', 'included', '[\"Smith, J\", \"Doe, A\"]', 2021, 'Abstract.', ?1)",
+        rusqlite::params![summary_json],
+    )
+    .unwrap();
     std::mem::forget(tmp);
     (conn, root)
 }

@@ -1,6 +1,6 @@
 //! Synthesis page pre-seed (Phase 2). Pre-seeds `wiki/synthesis/{article_id}.md` for every
-//! included article with an AI summary. Slug = article UUID; body = summary_150_250_words +
-//! key insights + keywords → concept wikilinks. Reviewed pages preserved.
+//! included article with an AI summary. Slug = article UUID; body = author byline +
+//! summary_150_250_words + key insights + keywords → concept wikilinks. Reviewed pages preserved.
 
 use std::path::Path;
 
@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::wiki::frontmatter::{self, Frontmatter};
 
-use super::slugs::{concept_slug, sanitize_slug};
+use super::slugs::{author_slug, concept_slug, sanitize_slug};
 
 /// Parsed AI summary JSON blob. All fields optional; pre-seeder skips articles with
 /// missing/unparseable summaries.
@@ -133,13 +133,24 @@ struct ArticleWithSummary {
     id: String,
     title: String,
     year: Option<i32>,
+    /// Raw `articles.authors` string (plain-text byline fallback when the
+    /// biblio junction has no rows for the article).
+    authors_raw: String,
     ai_summary_json: Option<String>,
 }
 
-/// Query included articles that have an AI summary, plus their title/year.
+/// One byline author. `slug` present = wikilink to the pre-seeded author page
+/// (slug-aligned because both derive from `biblio_authors.normalized_name`);
+/// absent = plain-text fallback when no biblio rows exist.
+struct BylineAuthor {
+    slug: Option<String>,
+    display: String,
+}
+
+/// Query included articles that have an AI summary, plus title/year/authors.
 fn fetch_articles_with_summaries(conn: &Connection) -> Result<Vec<ArticleWithSummary>, AppError> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, publication_year, full_text_ai_summary \
+        "SELECT id, title, publication_year, authors, full_text_ai_summary \
          FROM articles \
          WHERE status = 'included' AND full_text_ai_summary IS NOT NULL AND full_text_ai_summary != ''",
     )?;
@@ -148,15 +159,61 @@ fn fetch_articles_with_summaries(conn: &Connection) -> Result<Vec<ArticleWithSum
             id: row.get(0)?,
             title: row.get(1)?,
             year: row.get(2)?,
-            ai_summary_json: row.get(3)?,
+            authors_raw: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            ai_summary_json: row.get(4)?,
         })
     })?;
     let articles: Vec<ArticleWithSummary> = rows.filter_map(Result::ok).collect();
     Ok(articles)
 }
 
+/// Query the biblio junction once: article_id -> ordered
+/// `(normalized_name, display_name)` pairs, citation order preserved via
+/// `author_order`. Empty map when the biblio tables are unpopulated.
+fn fetch_article_authors(
+    conn: &Connection,
+) -> Result<std::collections::HashMap<String, Vec<(String, String)>>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT baa.article_id, ba.normalized_name, ba.display_name \
+         FROM biblio_article_authors baa \
+         JOIN biblio_authors ba ON ba.id = baa.author_id \
+         ORDER BY baa.article_id, baa.author_order",
+    )?;
+    let mut map: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+    for (article_id, normalized, display) in rows.filter_map(Result::ok) {
+        map.entry(article_id).or_default().push((normalized, display));
+    }
+    Ok(map)
+}
+
+/// Resolve the byline for one article: biblio-joined authors (linked, citation
+/// order preserved) with a plain-text fallback parsed from the raw authors
+/// string via the biblio normalizer's splitter.
+fn byline_authors(
+    article: &ArticleWithSummary,
+    author_map: &std::collections::HashMap<String, Vec<(String, String)>>,
+) -> Vec<BylineAuthor> {
+    if let Some(rows) = author_map.get(&article.id) {
+        return rows
+            .iter()
+            .map(|(normalized, display)| BylineAuthor {
+                slug: Some(author_slug(normalized)),
+                display: display.clone(),
+            })
+            .collect();
+    }
+    crate::biblio::normalizer::split_authors(&article.authors_raw)
+        .into_iter()
+        .map(|name| BylineAuthor { slug: None, display: name })
+        .collect()
+}
+
 /// Pre-seed `wiki/synthesis/{article_id}.md` for every included article with AI summary.
-/// Body: `summary_150_250_words` + key insights + keyword wikilinks.
+/// Body: author byline + `summary_150_250_words` + key insights + keyword wikilinks.
 /// Reviewed pages preserved. Returns count written.
 pub fn preseed_synthesis_from_ai_summaries(
     conn: &Connection,
@@ -165,6 +222,9 @@ pub fn preseed_synthesis_from_ai_summaries(
     let synth_dir = root.join("wiki").join("synthesis");
     std::fs::create_dir_all(&synth_dir)?;
     let articles = fetch_articles_with_summaries(conn)?;
+    /* Author map for the byline. Non-fatal: on query error the map is empty
+    and every byline degrades to the plain-text fallback. */
+    let author_map = fetch_article_authors(conn).unwrap_or_default();
     let mut written = 0;
     for article in articles {
         let path = synth_dir.join(format!("{}.md", sanitize_slug(&article.id)));
@@ -181,7 +241,8 @@ pub fn preseed_synthesis_from_ai_summaries(
             // AI summary exists but has no digest field - skip (let the LLM handle).
             continue;
         };
-        let (fm, body) = render_synthesis_page(&article, &parsed, digest);
+        let authors = byline_authors(&article, &author_map);
+        let (fm, body) = render_synthesis_page(&article, &parsed, digest, &authors);
         frontmatter::write_file(&path, &fm, &body)?;
         written += 1;
     }
@@ -194,6 +255,7 @@ fn render_synthesis_page(
     article: &ArticleWithSummary,
     parsed: &ParsedAiSummary,
     digest: &str,
+    authors: &[BylineAuthor],
 ) -> (Frontmatter, String) {
     let mut fm = Frontmatter::default();
     fm.set("id", &article.id);
@@ -222,7 +284,11 @@ fn render_synthesis_page(
     fm.set("tags", &format!("[{}]", keyword_tags.join(", ")));
     let concept_links: Vec<String> =
         concept_slugs.iter().map(|s| format!("\"[[{}]]\"", s)).collect();
-    fm.set("links", &format!("[{}]", concept_links.join(", ")));
+    // Author slugs join the concept links so `links` lists every related page.
+    let mut all_links = concept_links;
+    all_links
+        .extend(authors.iter().filter_map(|a| a.slug.as_ref().map(|s| format!("\"[[{s}]]\""))));
+    fm.set("links", &format!("[{}]", all_links.join(", ")));
     if let Some(ref field) = parsed.field {
         fm.set("field", field);
     }
@@ -233,6 +299,19 @@ fn render_synthesis_page(
     /* Title lives in frontmatter, rendered by viewer header. Duplicating as
     `# {title}` would show the title twice on the rendered page. */
     let mut body = String::new();
+    /* Byline: linked author names when the biblio join resolved them
+    (slug-aligned with the pre-seeded author pages, citation order kept),
+    plain text otherwise. Mirrors the source-page "Authors: ..." convention. */
+    if !authors.is_empty() {
+        let parts: Vec<String> = authors
+            .iter()
+            .map(|a| match &a.slug {
+                Some(slug) => format!("[[{slug}|{}]]", a.display),
+                None => a.display.clone(),
+            })
+            .collect();
+        body.push_str(&format!("Authors: {}\n\n", parts.join(", ")));
+    }
     let year_str = article.year.map(|y| format!(" ({})", y)).unwrap_or_default();
     body.push_str(&format!("## Summary\n\n{}{}\n", digest, year_str));
     if !parsed.key_insights.is_empty() {

@@ -71,7 +71,8 @@ section listing one `[[article-id|Author et al. Year]]` wikilink per applying
 article (alias form so Obsidian shows readable citations), `source_articles`
 frontmatter mirrors those ids, and the Tier A1 grounding gate treats
 `framework` as a grounded type. Frontend: sidebar + static-site label
-"Theoretical Frameworks", graph color teal `#14b8a6`.
+"Theoretical Frameworks", graph legend label "Frameworks" (compact for the
+legend box), color teal `#14b8a6`.
 
 ### Parallel chunked ingest (`ingest/batching.rs`)
 
@@ -153,8 +154,12 @@ Runs unconditionally before the LLM on every single-batch AND multi-batch run:
 2. `preseed_synthesis_from_ai_summaries` writes one
    `wiki/synthesis/{article_id}.md` per included article that has a
    `full_text_ai_summary` JSON blob - slug = article UUID (so `[[uuid]]` links
-   resolve), body = `summary_150_250_words` digest + `key_insights` bullets,
-   `tags` = keyword-derived `[[concept-slug]]` candidates.
+   resolve), body = author byline + `summary_150_250_words` digest +
+   `key_insights` bullets, `tags` = keyword-derived `[[concept-slug]]`
+   candidates. The byline links `[[author-slug|Name]]` per author, ordered by
+   `biblio_article_authors.author_order` and slug-aligned with the pre-seeded
+   author pages (plain-text fallback parsed from `articles.authors` when the
+   biblio junction is empty); author slugs also join the `links` frontmatter.
 3. `preseed_concept_hubs` writes `wiki/concepts/{slug}.md` hub pages from
    **two sources, slug-merged so tags win on collisions**: (a) top-40
    user-curated tags by included-article count (the highest-signal source;

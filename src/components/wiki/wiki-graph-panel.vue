@@ -92,7 +92,7 @@ const legendItems = [
   { type: 'concept', label: 'Concepts', color: typeColors.concept! },
   { type: 'author', label: 'Authors', color: typeColors.author! },
   { type: 'method', label: 'Methods', color: typeColors.method! },
-  { type: 'framework', label: 'Theoretical Frameworks', color: typeColors.framework! },
+  { type: 'framework', label: 'Frameworks', color: typeColors.framework! },
   { type: 'synthesis', label: 'Synthesis', color: typeColors.synthesis! },
 ];
 
