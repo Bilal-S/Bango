@@ -597,8 +597,7 @@ PY  - 2026
 AB  - This paper describes a novel system for abstract screening...
 KW  - systematic review
 KW  - LLM
-ER  - </pre
-                >
+ER  - </pre>
               </div>
               <div>
                 <strong>BibTeX Format:</strong>
@@ -610,8 +609,7 @@ ER  - </pre
   year = {2026},
   abstract = {This paper describes a novel system...},
   keywords = {systematic review, LLM}
-}</pre
-                >
+}</pre>
               </div>
             </div>
           </div>
@@ -1946,8 +1944,7 @@ ER  - </pre
     raw/             # sources: article exports and your dropped files
     wiki/            # generated pages (concepts/ authors/ methods/ synthesis/)
       log.md         # append-only audit trail of ingest and lint runs
-    templates/       # page skeletons the LLM follows</pre
-            >
+    templates/       # page skeletons the LLM follows</pre>
             <p>
               If you set a custom <strong>Storage</strong> directory in Settings, the wiki-root is
               placed under it. Every file is plain <code>.md</code> - you own it and can edit it in

@@ -268,8 +268,7 @@ defineExpose({ openFullTextView, fullTextFileIcon });
       <pre
         v-if="fullTextContent || article.fullText"
         class="whitespace-pre-wrap font-body-main text-body-main text-on-surface leading-relaxed break-words"
-        >{{ fullTextContent ?? article.fullText }}</pre
-      >
+        >{{ fullTextContent ?? article.fullText }}</pre>
       <div v-else class="text-center py-16 text-slate-400 text-sm">
         No full text content available.
       </div>

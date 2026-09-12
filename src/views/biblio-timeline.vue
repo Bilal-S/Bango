@@ -681,8 +681,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   const handler = (window as unknown as Record<string, unknown>).__timelineRejectionHandler as
-    | ((e: PromiseRejectionEvent) => void)
-    | undefined;
+    ((e: PromiseRejectionEvent) => void) | undefined;
   if (handler) {
     window.removeEventListener('unhandledrejection', handler);
   }

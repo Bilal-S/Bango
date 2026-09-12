@@ -280,8 +280,7 @@ const datasetYearsStats = computed(() => {
 
   graph.value.forEachNode((node) => {
     const yc = graph.value!.getNodeAttribute(node, 'yearCounts') as
-      | { year: number; count: number }[]
-      | undefined;
+      { year: number; count: number }[] | undefined;
     if (yc) {
       for (const item of yc) {
         yearCountsMap.set(item.year, (yearCountsMap.get(item.year) || 0) + item.count);

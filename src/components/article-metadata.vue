@@ -59,13 +59,7 @@ const languageOtherMode = ref(false);
 
 /** The 7 fields surfaced in this card. Authors/Keywords use array values. */
 type MetaField =
-  | 'authors'
-  | 'affiliation'
-  | 'journal'
-  | 'publicationYear'
-  | 'language'
-  | 'doi'
-  | 'keywords';
+  'authors' | 'affiliation' | 'journal' | 'publicationYear' | 'language' | 'doi' | 'keywords';
 
 /** Curated language list for the Lang dropdown. Covers common academic
  *  languages + those the translation pipeline supports. "Other…" allows

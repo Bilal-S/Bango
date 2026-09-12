@@ -6,13 +6,7 @@
 import { isWindowsPlatform } from './platform';
 
 export type SharePlatformId =
-  | 'x'
-  | 'whatsapp'
-  | 'telegram'
-  | 'bluesky'
-  | 'reddit'
-  | 'linkedin'
-  | 'email';
+  'x' | 'whatsapp' | 'telegram' | 'bluesky' | 'reddit' | 'linkedin' | 'email';
 
 export interface SharePlatformInfo {
   id: SharePlatformId;
