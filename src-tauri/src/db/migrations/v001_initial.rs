@@ -271,6 +271,12 @@ CREATE INDEX IF NOT EXISTS idx_articles_screened_at ON articles(screened_at);
 CREATE INDEX IF NOT EXISTS idx_articles_data_length ON articles(data_length);
 CREATE INDEX IF NOT EXISTS idx_articles_sequence_id ON articles(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_articles_changed_at ON articles(changed_at);
+-- Match acceleration: reference auto-matching probes articles by
+-- LOWER(doi)/LOWER(title). Non-partial per the v009 planner rationale (a
+-- partial clause turns LOWER() probes back into full table scans); parity
+-- with v010, which adds these to pre-existing databases.
+CREATE INDEX IF NOT EXISTS idx_articles_doi_lower ON articles(LOWER(doi));
+CREATE INDEX IF NOT EXISTS idx_articles_title_lower ON articles(LOWER(title));
 CREATE INDEX IF NOT EXISTS idx_audit_entries_article_id ON audit_entries(article_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_type ON criteria(type);
 -- Unique DOI. Expression index on LOWER(doi): DOIs are stored in canonical

@@ -5,6 +5,7 @@ mod article_metadata_test;
 mod article_query_test;
 mod article_repo_coverage_test;
 mod article_writer_test;
+mod articles_match_index_test;
 mod audit_coalesce_test;
 mod audit_test;
 mod broken_language_import_test;

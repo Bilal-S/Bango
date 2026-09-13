@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 /// Total work steps reported by `biblio_normalize` via `biblio:progress`.
-/// Kept in sync with the emit calls below.
+/// Step 0 is emitted here; steps 1..=8 are emitted by
+/// `biblio_repo::run_full_normalization` through the forwarded callback
+/// (keep its `report(...)` calls in sync with this constant).
 const BIBLIO_NORMALIZE_TOTAL_STEPS: usize = 8;
 
 /// Parameters for the co-citation network command.
@@ -68,8 +70,8 @@ pub async fn biblio_normalize(
     let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
     emit_progress(&app_handle, 0, "Starting normalization...");
-    let (authors, terms) = biblio_repo::run_full_normalization(&mut conn)?;
-    emit_progress(&app_handle, BIBLIO_NORMALIZE_TOTAL_STEPS, "Built citation network");
+    let mut emit = |step: usize, message: &str| emit_progress(&app_handle, step, message);
+    let (authors, terms) = biblio_repo::run_full_normalization(&mut conn, Some(&mut emit))?;
 
     let status = biblio_repo::get_biblio_status(&conn)?;
 

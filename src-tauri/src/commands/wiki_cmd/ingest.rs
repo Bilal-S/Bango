@@ -198,7 +198,7 @@ fn build_batches_with_manifest(
         if let Some(cb) = prep_cb {
             cb(15, "Normalizing bibliometrics...");
         }
-        if let Err(e) = crate::db::biblio_repo::run_full_normalization(conn) {
+        if let Err(e) = crate::db::biblio_repo::run_full_normalization(conn, None) {
             eprintln!("[wiki:diag] normalization error (non-fatal): {e}");
         }
     } else {

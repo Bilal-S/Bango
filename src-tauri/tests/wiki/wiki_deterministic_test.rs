@@ -58,7 +58,7 @@ fn preseed_synthesis_byline_links_authors_in_order() {
     // match the pre-seeded author pages; author slugs also join the `links`
     // frontmatter, and the byline links resolve in lint.
     let (mut conn, root) = setup_db_with_article_summary_and_authors();
-    bango_lib::db::biblio_repo::run_full_normalization(&mut conn).unwrap();
+    bango_lib::db::biblio_repo::run_full_normalization(&mut conn, None).unwrap();
 
     // Mirror the pipeline order in build_batches_with_manifest: authors
     // before synthesis, so the byline links have real target pages.
@@ -276,7 +276,7 @@ async fn build_batches_unconditionally_pre_seeds_authors_on_single_batch() {
     bango_lib::wiki::storage::scaffold_tree(&root).unwrap();
 
     // Run normalization so biblio_authors is populated.
-    bango_lib::db::biblio_repo::run_full_normalization(&mut conn).unwrap();
+    bango_lib::db::biblio_repo::run_full_normalization(&mut conn, None).unwrap();
 
     // Build + run the ingest with an empty LLM response.
     let manifest = ingest::build_author_manifest(&conn).unwrap();

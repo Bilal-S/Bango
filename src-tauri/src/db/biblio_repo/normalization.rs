@@ -212,10 +212,14 @@ pub fn clear_regeneratable_biblio(conn: &Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Optional per-step progress sink for `run_full_normalization`: invoked with
+/// the 1-based step number and a describing message BEFORE each step runs.
+pub type NormalizeProgress<'a> = Option<&'a mut dyn FnMut(usize, &str)>;
+
 /// Run the full bibliometric normalization pipeline inside a single
 /// transaction. This is the pure DB core of `biblio_normalize` (no Tauri state,
-/// no `app_handle`, no progress events) so it can be called from both the
-/// `biblio_normalize` command and the wiki ingest path.
+/// no `app_handle`) so it can be called from both the `biblio_normalize`
+/// command and the wiki ingest path.
 ///
 /// Steps (in order):
 /// 1. Clear stale regeneratable biblio data (preserves AI-extracted + user-added terms).
@@ -227,32 +231,53 @@ pub fn clear_regeneratable_biblio(conn: &Connection) -> Result<(), AppError> {
 /// 7. Auto-match reference papers to included articles.
 /// 8. Build citation edges between included articles.
 ///
+/// `progress` (optional) is invoked with the 1-based step number and a
+/// describing message BEFORE each step runs, so callers can surface per-step
+/// progress events (the `biblio_normalize` command forwards them to the
+/// `biblio:progress` emitter; the wiki ingest path passes `None`).
+///
 /// Returns `(authors_created, terms_created)` on success.
-pub fn run_full_normalization(conn: &mut Connection) -> Result<(usize, usize), AppError> {
+pub fn run_full_normalization(
+    conn: &mut Connection,
+    mut progress: NormalizeProgress<'_>,
+) -> Result<(usize, usize), AppError> {
     let tx = conn.transaction()?;
+    let mut report = |step: usize, message: &str| {
+        if let Some(cb) = progress.as_mut() {
+            cb(step, message);
+        }
+    };
 
     // Step 1: Clear stale data (preserves AI-extracted and user-added terms).
+    report(1, "Clearing stale bibliometric data...");
     clear_regeneratable_biblio(&tx)?;
 
     // Step 2: Normalize authors from all included articles.
+    report(2, "Normalizing authors...");
     let authors = normalize_authors_from_articles(&tx)?;
 
     // Step 3: Parse raw affiliations -> institutions + links.
+    report(3, "Normalizing affiliations...");
     let _affiliations = normalize_affiliations(&tx)?;
 
     // Step 4: Extract terms from article keywords, titles, and abstracts.
+    report(4, "Extracting terms...");
     let terms = normalize_terms_from_articles(&tx)?;
 
     // Step 5: Compute author metrics (citations, avg year, h-index).
+    report(5, "Computing author metrics...");
     crate::db::biblio_repo::compute_author_metrics(&tx)?;
 
     // Step 6: Build coauthor edges (full counting + fractional counting).
+    report(6, "Building co-authorship network...");
     let _edges = crate::db::biblio_repo::build_coauthor_edges(&tx)?;
 
     // Step 7: Auto-match reference papers to included articles.
+    report(7, "Matching reference papers to articles...");
     let _matched_refs = crate::db::biblio_repo::auto_match_references_to_articles(&tx)?;
 
     // Step 8: Build citation edges between included articles.
+    report(8, "Building citation network...");
     let _citation_edges = crate::db::biblio_repo::build_citation_edges(&tx)?;
 
     tx.commit()?;

@@ -5,7 +5,9 @@ use bango_lib::db::biblio_repo::{
 };
 use bango_lib::db::connection::create_connection;
 use bango_lib::db::migration::run_migrations;
-use bango_lib::db::reference_repo::{create_link, insert_or_find_paper};
+use bango_lib::db::reference_repo::{
+    auto_match_paper_to_article, create_link, insert_or_find_paper,
+};
 use bango_lib::models::reference::{NewReferencePaper, ReferenceType};
 
 #[test]
@@ -518,4 +520,171 @@ fn test_citation_network_edges_with_auto_match() {
     let has_unmatched_node =
         nodes_um.iter().any(|n| n.get("unmatched").and_then(|v| v.as_bool()) == Some(true));
     assert!(has_unmatched_node, "expected at least one unmatched leaf node");
+}
+
+/// Batch auto-match equivalence + determinism regression test.
+///
+/// `auto_match_references_to_articles` was reworked from a per-paper nested
+/// loop (one `SELECT *` + up to two unindexed full `articles` scans per
+/// reference paper - the dominant cost of `biblio_normalize` on libraries
+/// with harvested references) into a batch hash-join over an in-memory
+/// `ArticleMatchIndex`. This test pins the behavioral contract:
+///   1. Result equivalence with `reference_repo::auto_match_paper_to_article`
+///      across DOI, title+journal+year, title+year, and title-only matches.
+///   2. DOI precedence over title: a paper whose DOI matches one article and
+///      whose title+journal+year matches another resolves via the DOI.
+///   3. No cross-fallback: a paper carrying a journal never falls back to a
+///      title-only match when the article's journal is NULL.
+///   4. Determinism: duplicate titles resolve to the first article by rowid
+///      insert order (the old full-scan `LIMIT 1` order).
+#[test]
+fn test_batch_auto_match_matches_per_paper_semantics() {
+    let conn = create_connection().expect("Failed to create connection");
+    run_migrations(&conn).expect("Failed to run migrations");
+
+    // Articles. Insert order = rowid order (drives duplicate-title determinism).
+    // art-doi carries an uppercase DOI to pin LOWER() case-insensitivity.
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, doi, journal) \
+         VALUES ('art-dup-1', 'included', 'Duplicate Study', 'x', '[\"A, B\"]', 2020, NULL, 'PLOS ONE')",
+        [],
+    )
+    .expect("insert art-dup-1");
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, doi, journal) \
+         VALUES ('art-dup-2', 'included', 'Duplicate Study', 'x', '[\"C, D\"]', 2022, NULL, 'Nature')",
+        [],
+    )
+    .expect("insert art-dup-2");
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, doi, journal) \
+         VALUES ('art-doi', 'included', 'Unique DOI Paper', 'x', '[\"E, F\"]', 2019, '10.0000/X', 'Science')",
+        [],
+    )
+    .expect("insert art-doi");
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year, doi, journal) \
+         VALUES ('art-tjy', 'included', 'Journal Year Paper', 'x', '[\"G, H\"]', 2018, NULL, 'Cell')",
+        [],
+    )
+    .expect("insert art-tjy");
+    conn.execute(
+        "INSERT INTO articles (id, status, title, abstract_text, authors, publication_year) \
+         VALUES ('art-nojournal', 'included', 'No Journal Paper', 'x', '[\"I, J\"]', 2021)",
+        [],
+    )
+    .expect("insert art-nojournal");
+
+    // Papers. Distinct authors keep `insert_or_find_paper` from deduping them.
+    // p-doi's title+journal+year would match art-dup-2, but its DOI must win.
+    // p-title-only must deterministically pick art-dup-1 (first rowid).
+    // p-no-fallback must NOT fall back to a title-only match: art-nojournal
+    // has a NULL journal, and the paper carries `journal = 'Nature'`.
+    let paper_specs: Vec<(&str, NewReferencePaper)> = vec![
+        (
+            "p-doi",
+            NewReferencePaper {
+                title: Some("Duplicate Study".to_string()),
+                authors: vec!["Z, Y".to_string()],
+                publication_year: Some(2022),
+                doi: Some("10.0000/x".to_string()),
+                journal: Some("Nature".to_string()),
+                ..Default::default()
+            },
+        ),
+        (
+            "p-title-only",
+            NewReferencePaper {
+                title: Some("duplicate study".to_string()),
+                authors: vec!["W, V".to_string()],
+                ..Default::default()
+            },
+        ),
+        (
+            "p-title-year",
+            NewReferencePaper {
+                title: Some("Duplicate Study".to_string()),
+                authors: vec!["U, T".to_string()],
+                publication_year: Some(2022),
+                ..Default::default()
+            },
+        ),
+        (
+            "p-tjy",
+            NewReferencePaper {
+                title: Some("JOURNAL YEAR PAPER".to_string()),
+                authors: vec!["S, R".to_string()],
+                publication_year: Some(2018),
+                journal: Some("cell".to_string()),
+                ..Default::default()
+            },
+        ),
+        (
+            "p-no-fallback",
+            NewReferencePaper {
+                title: Some("No Journal Paper".to_string()),
+                authors: vec!["Q, P".to_string()],
+                publication_year: Some(2021),
+                journal: Some("Nature".to_string()),
+                ..Default::default()
+            },
+        ),
+    ];
+
+    let mut papers = Vec::new();
+    for (label, spec) in paper_specs {
+        let (paper, _) = insert_or_find_paper(&conn, &spec).expect("insert paper");
+        // Link to an article so the batch candidate EXISTS filter passes.
+        create_link(&conn, "art-dup-1", &paper.id, &ReferenceType::Reference)
+            .expect("link paper to art-dup-1");
+        papers.push((label, paper));
+    }
+
+    // Oracle: the per-paper matcher (the semantic reference) on the pristine
+    // pre-batch state.
+    let expected: Vec<Option<String>> = papers
+        .iter()
+        .map(|(_, p)| auto_match_paper_to_article(&conn, p).expect("per-paper matcher"))
+        .collect();
+
+    let matched = auto_match_references_to_articles(&conn).expect("batch auto-match failed");
+    assert_eq!(matched, 4, "4 of the 5 papers match (p-no-fallback must not)");
+
+    for ((label, paper), expected_id) in papers.iter().zip(&expected) {
+        let got: Option<String> = conn
+            .query_row(
+                "SELECT matched_article_id FROM reference_papers WHERE id = ?1",
+                [&paper.id],
+                |row| row.get(0),
+            )
+            .expect("read back matched_article_id");
+        assert_eq!(
+            got, *expected_id,
+            "batch matcher diverged from per-paper semantics for {label}"
+        );
+    }
+
+    // Explicit spot checks, independent of the oracle.
+    let spot_checks: Vec<(&str, Option<&str>)> = vec![
+        ("p-doi", Some("art-doi")),
+        ("p-title-only", Some("art-dup-1")),
+        ("p-title-year", Some("art-dup-2")),
+        ("p-tjy", Some("art-tjy")),
+        ("p-no-fallback", None),
+    ];
+    for (label, want) in spot_checks {
+        let paper = papers.iter().find(|(l, _)| *l == label).expect("paper present");
+        let got: Option<String> = conn
+            .query_row(
+                "SELECT matched_article_id FROM reference_papers WHERE id = ?1",
+                [&paper.1.id],
+                |row| row.get(0),
+            )
+            .expect("read back matched_article_id");
+        assert_eq!(got.as_deref(), want, "spot check failed for {label}");
+    }
+
+    // Idempotency: a second run finds no new candidates (all matches recorded).
+    let matched_again = auto_match_references_to_articles(&conn).expect("second batch run");
+    assert_eq!(matched_again, 0, "second run must not re-match anything");
 }

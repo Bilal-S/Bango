@@ -1279,7 +1279,7 @@ async fn normalization_error_is_non_fatal() {
     bango_lib::db::app_settings_repo::mark_biblio_needs_refresh(&conn);
     assert!(bango_lib::db::app_settings_repo::get_biblio_needs_refresh(&conn).unwrap());
 
-    let result = bango_lib::db::biblio_repo::run_full_normalization(&mut conn);
+    let result = bango_lib::db::biblio_repo::run_full_normalization(&mut conn, None);
     let _ = result;
 }
 

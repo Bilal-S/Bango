@@ -1,46 +1,171 @@
 use rusqlite::Connection;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::labels::format_paper_label;
-use crate::db::reference_repo;
 use crate::error::AppError;
 
-/// Auto-match reference papers to included articles.
+/// In-memory match index over the article set, mirroring the predicate shapes
+/// of `reference_repo::auto_match_paper_to_article` (DOI first, then
+/// title+journal+year with no cross-fallback between weaker combinations).
 ///
-/// Walks all `reference_papers` whose `matched_article_id IS NULL` and runs the
-/// existing [`reference_repo::auto_match_paper_to_article`] logic (DOI or
-/// title+journal+year) against the current article set. Papers that match are
+/// Built ONCE per normalization run so matching every reference paper becomes
+/// hash lookups instead of one full `articles` scan per paper. The old
+/// per-paper `SELECT *` + unindexed `LOWER(doi)`/`LOWER(title)` scans over the
+/// widest table in the DB dominated `biblio_normalize` runtime on libraries
+/// with harvested references/citations (O(papers x articles) scans).
+///
+/// Keys use ASCII lowercasing to stay byte-equivalent to SQLite's `LOWER()`
+/// (ASCII-only in non-ICU builds). The build scan is ordered by `rowid` and
+/// key collisions keep the FIRST id, which reproduces the old full-scan
+/// `LIMIT 1` (and the v010 expression-index) row order deterministically.
+struct ArticleMatchIndex {
+    by_doi: HashMap<String, String>,
+    by_title_journal_year: HashMap<(String, String, i32), String>,
+    by_title_journal: HashMap<(String, String), String>,
+    by_title_year: HashMap<(String, i32), String>,
+    by_title: HashMap<String, String>,
+}
+
+/// One candidate row: (article/paper id, doi, title, journal, publication_year).
+type MatchRow = (String, Option<String>, String, Option<String>, Option<i32>);
+
+impl ArticleMatchIndex {
+    /// Load the article match keys once. All article statuses participate -
+    /// `auto_match_paper_to_article` never filtered by status.
+    fn build(conn: &Connection) -> Result<Self, AppError> {
+        let mut stmt = conn.prepare(
+            "SELECT id, doi, title, journal, publication_year FROM articles ORDER BY rowid",
+        )?;
+        let rows: Vec<MatchRow> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+
+        let mut index = ArticleMatchIndex {
+            by_doi: HashMap::new(),
+            by_title_journal_year: HashMap::new(),
+            by_title_journal: HashMap::new(),
+            by_title_year: HashMap::new(),
+            by_title: HashMap::new(),
+        };
+
+        for (id, doi, title, journal, year) in rows {
+            // Empty titles never match (the paper-side branch requires a
+            // non-empty title), so they are skipped to avoid '' collisions.
+            let title_key = title.to_ascii_lowercase();
+            if !title_key.is_empty() {
+                index.by_title.entry(title_key.clone()).or_insert_with(|| id.clone());
+                if let Some(j) = journal.as_deref() {
+                    let journal_key = j.to_ascii_lowercase();
+                    index
+                        .by_title_journal
+                        .entry((title_key.clone(), journal_key.clone()))
+                        .or_insert_with(|| id.clone());
+                    if let Some(y) = year {
+                        index
+                            .by_title_journal_year
+                            .entry((title_key.clone(), journal_key, y))
+                            .or_insert_with(|| id.clone());
+                    }
+                }
+                if let Some(y) = year {
+                    index.by_title_year.entry((title_key, y)).or_insert_with(|| id.clone());
+                }
+            }
+            if let Some(d) = doi.as_deref() {
+                let doi_key = d.to_ascii_lowercase();
+                if !doi_key.is_empty() {
+                    index.by_doi.entry(doi_key).or_insert_with(|| id.clone());
+                }
+            }
+        }
+
+        Ok(index)
+    }
+
+    /// Resolve one paper to an article id with the same precedence as
+    /// `reference_repo::auto_match_paper_to_article`: non-empty DOI first,
+    /// then the title combo keyed by exactly the fields the paper carries
+    /// (a paper with a journal never falls back to a title-only match).
+    fn resolve(
+        &self,
+        doi: Option<&str>,
+        title: &str,
+        journal: Option<&str>,
+        year: Option<i32>,
+    ) -> Option<&str> {
+        if let Some(d) = doi {
+            if !d.is_empty() {
+                if let Some(id) = self.by_doi.get(&d.to_ascii_lowercase()) {
+                    return Some(id);
+                }
+            }
+        }
+        if title.is_empty() {
+            return None;
+        }
+        let title_key = title.to_ascii_lowercase();
+        let found = match (journal, year) {
+            (Some(j), Some(y)) => {
+                self.by_title_journal_year.get(&(title_key, j.to_ascii_lowercase(), y))
+            }
+            (Some(j), None) => self.by_title_journal.get(&(title_key, j.to_ascii_lowercase())),
+            (None, Some(y)) => self.by_title_year.get(&(title_key, y)),
+            (None, None) => self.by_title.get(&title_key),
+        };
+        found.map(String::as_str)
+    }
+}
+
+/// Auto-match reference papers to library articles (batch, set-based).
+///
+/// Collects all `reference_papers` whose `matched_article_id IS NULL` (and
+/// that are linked to at least one article), resolves them against an
+/// in-memory [`ArticleMatchIndex`] built from the current article set using
+/// the exact `reference_repo::auto_match_paper_to_article` semantics (DOI
+/// first, then title+journal+year with no cross-fallback), and applies the
+/// `matched` updates through one prepared statement. Papers that match are
 /// updated with their `matched_article_id` and `match_status = 'matched'`.
 ///
 /// Returns the number of papers newly matched.
 pub fn auto_match_references_to_articles(conn: &Connection) -> Result<usize, AppError> {
-    // Collect candidate papers that have not been matched yet. We only
-    // consider papers that are linked to at least one article so we don't
-    // waste cycles on orphan reference rows.
+    let index = ArticleMatchIndex::build(conn)?;
+
+    // Candidate papers: not yet matched and linked to at least one article so
+    // we don't waste cycles on orphan reference rows. Only the five match
+    // columns are fetched - no per-paper `SELECT *` (abstracts stay unread).
     let mut stmt = conn.prepare(
-        "SELECT rp.id \
+        "SELECT rp.id, rp.doi, rp.title, rp.journal, rp.publication_year \
          FROM reference_papers rp \
          WHERE rp.matched_article_id IS NULL \
            AND rp.match_status IN ('unmatched', 'matched') \
            AND EXISTS (SELECT 1 FROM article_reference_links l WHERE l.reference_paper_id = rp.id)",
     )?;
-    let paper_ids: Vec<String> =
-        stmt.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?;
+    let candidates: Vec<MatchRow> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
 
+    let matches: Vec<(String, String)> = candidates
+        .iter()
+        .filter_map(|(paper_id, doi, title, journal, year)| {
+            index
+                .resolve(doi.as_deref(), title, journal.as_deref(), *year)
+                .map(|article_id| (paper_id.clone(), article_id.to_string()))
+        })
+        .collect();
+
     let mut matched = 0usize;
-    for paper_id in &paper_ids {
-        let paper = match reference_repo::get_paper_by_id(conn, paper_id) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        if let Some(article_id) = reference_repo::auto_match_paper_to_article(conn, &paper)? {
-            conn.execute(
-                "UPDATE reference_papers \
-                 SET matched_article_id = ?1, match_status = 'matched', updated_at = datetime('now') \
-                 WHERE id = ?2",
-                rusqlite::params![article_id, paper_id],
-            )?;
+    if !matches.is_empty() {
+        let mut update_stmt = conn.prepare(
+            "UPDATE reference_papers \
+             SET matched_article_id = ?1, match_status = 'matched', updated_at = datetime('now') \
+             WHERE id = ?2",
+        )?;
+        for (paper_id, article_id) in &matches {
+            update_stmt.execute(rusqlite::params![article_id, paper_id])?;
             matched += 1;
         }
     }

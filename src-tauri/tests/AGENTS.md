@@ -75,6 +75,12 @@ link protocols, prompt builder); binding inventory:
 `db/doi_case_migration_test.rs` covers migration v009 (DOI canonicalization:
 healing, duplicate-paper merge with match-state preservation, index rebuild,
 idempotency); binding inventory: `docs/test-plans/doi-case-tests.md`.
+`db/articles_match_index_test.rs` covers migration v010 (articles
+`LOWER(doi)`/`LOWER(title)` match-acceleration indexes: presence, planner
+usage via EXPLAIN QUERY PLAN, idempotency). `biblio/biblio_integration_test.rs`
+also pins the batch reference auto-matcher's equivalence with
+`auto_match_paper_to_article` (DOI precedence, no cross-fallback,
+first-rowid determinism).
 Zotero integration: `zotero/zotero_mapping_test.rs` + `zotero/zotero_client_test.rs`
 (Tier 1 pure mapping/path/parse), `zotero/zotero_connection_test.rs` (Tier 2
 status mapping + collections + preview against mockito),

@@ -198,7 +198,7 @@ separate `status` field, which stays intact. `screened_at` is preserved so the
 screening history survives and the article is NOT re-enqueued. Writes an
 `ai_screen_clear` audit entry. Surfaced via the `clear_ai_reasoning` Tauri
 command + the trashcan icon in the AI Decision card's expanded header. Tested
-via `tests/db/migration_recovery_test.rs` (final `user_version = 7`).
+via `tests/db/migration_recovery_test.rs` (final `user_version = 10`).
 
 ### `biblio_repo/` - bibliometric repos
 
@@ -215,8 +215,22 @@ network type: `persistence.rs`, `labels.rs`, `coauthors.rs`, `citations.rs`,
 modes: Raw, Cosine, Jaccard, Pearson; `CocitationScope` = included/all
 articles). `mod.rs` re-exports the public API unchanged. The full 8-step
 bibliometric pipeline is extracted into a pure
-`pub fn run_full_normalization(conn)` in `biblio_repo/normalization.rs` and
-shared by both `biblio_normalize` and the wiki ingest path.
+`pub fn run_full_normalization(conn, progress)` in
+`biblio_repo/normalization.rs` and shared by both `biblio_normalize` and the
+wiki ingest path; `progress` is an optional per-step callback invoked BEFORE
+each step (the command forwards it to `biblio:progress`, the wiki passes
+`None`). Step 7 (`networks/citations.rs::auto_match_references_to_articles`)
+is a batch hash-join: it builds an in-memory `ArticleMatchIndex` (DOI,
+title+journal+year, title+journal, title+year, and title-only maps over ALL
+articles, ASCII-lowercased to stay byte-equivalent to SQLite `LOWER()`,
+first-rowid-wins on collisions reproducing the old `LIMIT 1` order) and
+resolves every unmatched linked reference paper in one pass with the exact
+`reference_repo::auto_match_paper_to_article` precedence. The former
+per-paper `SELECT *` + unindexed `LOWER(doi)`/`LOWER(title)` full `articles`
+scans dominated `biblio_normalize` runtime on libraries with harvested
+references (minutes for ~60 articles). Tested in
+`tests/biblio/biblio_integration_test.rs`
+(`test_batch_auto_match_matches_per_paper_semantics`).
 
 ### `saved_report.rs` + `tag_label_core.rs` - shared repo cores (refactor v1 Tier 2)
 
@@ -304,7 +318,7 @@ at coarse, infrequent, destructive boundaries (e.g. `reset_project`). Tested in
 
 The transactional runner contract (single `unchecked_transaction` per
 migration + the `heal_partial_migrations` self-healing pre-pass) and the
-per-version inventory (v001-v009, incl. the CHECK-constraint rebuild pattern
+per-version inventory (v001-v010, incl. the CHECK-constraint rebuild pattern
 and the base-migration parity rule) live in `migrations/AGENTS.md`.
 
 ## Work Guidance
@@ -318,6 +332,7 @@ and the base-migration parity rule) live in `migrations/AGENTS.md`.
 ## Verification
 
 - `tests/db/lock_poison_test.rs`, `tests/db/maintenance_test.rs`,
+  `tests/db/articles_match_index_test.rs`,
   `tests/export/reset_project_test.rs`, `tests/db/migration_recovery_test.rs`,
   `tests/biblio/biblio_repo_tests.rs`, `tests/biblio/biblio_networks_test.rs`,
   `tests/db/article_metadata_test.rs`, `tests/db/article_query_test.rs`,
@@ -336,7 +351,7 @@ and the base-migration parity rule) live in `migrations/AGENTS.md`.
 - **`biblio_repo/`** - directory module (`kpis`, `authors`, `networks/`,
   `terms`, `institutions`, `normalization`, `productivity`). No own
   `AGENTS.md`.
-- **`migrations/`** - one file per version (v001-v009) + the `mod.rs`
+- **`migrations/`** - one file per version (v001-v010) + the `mod.rs`
   registry. See `migrations/AGENTS.md` for the transactional runner contract,
   the `heal_partial_migrations` pre-pass, the base-migration parity rule, and
   the per-version inventory.

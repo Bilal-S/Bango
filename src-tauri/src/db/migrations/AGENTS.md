@@ -2,14 +2,14 @@
 
 ## Purpose
 
-SQLite schema migrations, one file per version (v001-v009), plus the `mod.rs`
+SQLite schema migrations, one file per version (v001-v010), plus the `mod.rs`
 registry that feeds the transactional runner in `../migration.rs`.
 
 ## Ownership
 
 - Owns: `mod.rs` (the `get_migrations()` registry of `Migration { version,
   up_sql }` entries) + `v001_initial.rs` through
-  `v009_doi_canonicalization.rs`.
+  `v010_articles_match_indexes.rs`.
 - The runner (`../migration.rs`) and the schema classification + rebuild
   layer (`schema_check.rs`, `rebuild.rs`) stay in `../AGENTS.md`.
 
@@ -119,6 +119,19 @@ RENAME-CREATE-INSERT-DROP pattern), and every such rebuild drops
   BINARY index is dropped FIRST (the healing UPDATEs would violate it on
   case-variant data), and the new index is created LAST. v001 is updated so
   fresh DBs get the non-partial `LOWER(doi)` index directly.
+- **`v010_articles_match_indexes.rs`** (VERSION 10) - creates the non-partial
+  expression indexes `idx_articles_doi_lower ON articles(LOWER(doi))` and
+  `idx_articles_title_lower ON articles(LOWER(title))` backing
+  `reference_repo::auto_match_paper_to_article` (DOI-first, then
+  title+journal+year) and the reference-import matching flows. Before v010
+  neither column had ANY index, so every probe full-scanned the widest table
+  in the DB; multiplied by every unmatched reference paper inside
+  `biblio_normalize`, this was the minutes-long Bibliometrics normalization
+  stall (the batch matcher in `biblio_repo/networks/citations.rs` removed the
+  per-paper loop; these indexes keep the remaining per-paper API paths fast).
+  Non-partial per the v009 planner rationale. Idempotent, no `ALTER TABLE`,
+  so no `heal_partial_migrations` marker probe. v001 is updated in lockstep
+  (parity rule). Tested in `tests/db/articles_match_index_test.rs`.
 
 ## Work Guidance
 
@@ -137,6 +150,8 @@ RENAME-CREATE-INSERT-DROP pattern), and every such rebuild drops
   shape parity)
 - `tests/db/doi_case_migration_test.rs` (v009; binding inventory
   `docs/test-plans/doi-case-tests.md`)
+- `tests/db/articles_match_index_test.rs` (v010; index presence, planner
+  usage via EXPLAIN QUERY PLAN, idempotency)
 - `tests/db/audit_coalesce_test.rs` (v005 coalescing window)
 - 5 inline unit tests in `../migration.rs`
 
