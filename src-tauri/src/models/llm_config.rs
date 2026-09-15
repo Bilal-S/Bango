@@ -56,7 +56,9 @@ impl Default for LlmConfig {
             skip_temperature: false,
             max_concurrent_requests: 3,
             request_delay_ms: 500,
-            context_window_tokens: 50_000,
+            // Unconfigured baseline; the OpenAI provider default (the
+            // placeholder provider here) matches the frontend card at 128k.
+            context_window_tokens: 128_000,
         }
     }
 }

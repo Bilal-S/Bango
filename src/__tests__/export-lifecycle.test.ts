@@ -435,16 +435,25 @@ describe('useExport', () => {
   });
 
   describe('resetProject', () => {
-    it('calls reset command and invalidates stores', async () => {
+    it('calls reset command (delete-all: no LLM preservation) and invalidates stores', async () => {
       vi.mocked(tauriCommand).mockResolvedValue(undefined);
 
       const { resetProject, error, exporting } = useExport();
-      const result = await resetProject();
+      const result = await resetProject(false);
 
       expect(result).toBe(true);
-      expect(tauriCommand).toHaveBeenCalledWith('reset_project');
+      expect(tauriCommand).toHaveBeenCalledWith('reset_project', { preserveLlmConfig: false });
       expect(exporting.value).toBe(false);
       expect(error.value).toBeNull();
+    });
+
+    it('passes preserveLlmConfig=true for Start New Project', async () => {
+      vi.mocked(tauriCommand).mockResolvedValue(undefined);
+
+      const { resetProject } = useExport();
+      await resetProject(true);
+
+      expect(tauriCommand).toHaveBeenCalledWith('reset_project', { preserveLlmConfig: true });
     });
 
     it('resets wiki singleton and clears chat wiki readiness', async () => {
@@ -453,7 +462,7 @@ describe('useExport', () => {
       vi.mocked(tauriCommand).mockResolvedValue(undefined);
 
       const { resetProject } = useExport();
-      await resetProject();
+      await resetProject(false);
 
       expect(wikiResetStateMock).toHaveBeenCalledTimes(1);
       expect(chatSetWikiReadyMock).toHaveBeenCalledWith(false);
@@ -465,7 +474,7 @@ describe('useExport', () => {
       vi.mocked(tauriCommand).mockResolvedValue(undefined);
 
       const { resetProject } = useExport();
-      await resetProject();
+      await resetProject(false);
 
       expect(reloadMock).toHaveBeenCalledTimes(1);
       // Lands on the Dashboard (fresh-start view) after the reload.
@@ -476,7 +485,7 @@ describe('useExport', () => {
       vi.mocked(tauriCommand).mockRejectedValue(new Error('Reset failed'));
 
       const { resetProject, error } = useExport();
-      const result = await resetProject();
+      const result = await resetProject(false);
 
       expect(result).toBe(false);
       expect(error.value).toBe('Reset failed');

@@ -112,6 +112,59 @@ struct GooglePartResponse {
     text: String,
 }
 
+// ── Anthropic Messages API types ─────────────────────────────────────
+
+/// Required on EVERY Anthropic API request (Messages + Models). `2023-06-01`
+/// is the latest and only non-deprecated API version.
+const ANTHROPIC_VERSION_HEADER: &str = "2023-06-01";
+
+/// The Messages API rejects requests without `max_tokens`. 4096 sits within
+/// every Claude model's output cap (the tightest is 4096), so it is a safe
+/// fixed budget for screening/summary/wiki outputs.
+const ANTHROPIC_MAX_TOKENS: i64 = 4096;
+
+#[derive(Debug, Serialize)]
+struct AnthropicRequest {
+    model: String,
+    max_tokens: i64,
+    messages: Vec<AnthropicMessage>,
+    /// Top-level system prompt. The Messages API has NO "system" role -
+    /// a system-role message inside `messages` is rejected with 400.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicMessage {
+    role: &'static str,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicResponse {
+    /// Content blocks; only `type: "text"` blocks carry a `text` field
+    /// (e.g. `tool_use` blocks do not).
+    #[serde(default)]
+    content: Vec<AnthropicContentBlock>,
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicContentBlock {
+    #[serde(default)]
+    text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: usize,
+    #[serde(default)]
+    output_tokens: usize,
+}
+
 // ── Model listing types ──────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -568,6 +621,7 @@ pub async fn send_chat_completion(
 ) -> Result<(String, usize, CallMeta), AppError> {
     match config.provider {
         LlmProvider::Google => send_google(config, system_prompt, user_prompt).await,
+        LlmProvider::Anthropic => send_anthropic(config, system_prompt, user_prompt).await,
         _ => send_openai_compatible(config, system_prompt, user_prompt).await,
     }
 }
@@ -646,6 +700,96 @@ async fn send_google(
     .await
 }
 
+// ── Anthropic path (native Messages API) ─────────────────────────────
+
+/// Native Anthropic Messages API path (`POST {base}/messages`).
+///
+/// Anthropic is NOT OpenAI-compatible, so this builder mirrors `send_google`
+/// with a provider-native shape:
+/// - Every request must carry the `anthropic-version` header; omitting it is
+///   rejected with 400 `anthropic-version: header is required`.
+/// - Auth uses `x-api-key` (Bearer is also accepted by the API; this matches
+///   the `list_models` path).
+/// - `max_tokens` is a required body field; the system prompt is a TOP-LEVEL
+///   `system` field because the Messages API has no "system" role.
+async fn send_anthropic(
+    config: &LlmConfig,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<(String, usize, CallMeta), AppError> {
+    let system_prompt = normalize_llm_text(system_prompt);
+    let user_prompt = normalize_llm_text(user_prompt);
+    let client = shared_client();
+
+    // Owned `String` so the retry closure (`Fn`, up to 2 calls) can clone it
+    // into each attempt without moving out of the captured environment.
+    let api_key = config
+        .api_key_encrypted
+        .clone()
+        .ok_or_else(|| AppError::Import("API key required for Anthropic".to_string()))?;
+
+    let base_url = config.endpoint_url.trim_end_matches('/');
+    let endpoint = if base_url.ends_with("/messages") {
+        base_url.to_string()
+    } else {
+        format!("{base_url}/messages")
+    };
+
+    let model_name = config.model_name.clone();
+    /* Owned `String`s so the retry closure (an `Fn`, up to 2 calls) can clone
+    them cheaply into each `async move` block without moving out of the
+    captured environment. */
+    let system_text = system_prompt.into_owned();
+    let user_text = user_prompt.into_owned();
+
+    /* Build + send, then recover from temperature-rejection 400 by retrying
+    with `temp = None`. Same envelope as `send_google`; the closure captures
+    the Anthropic-native request shape. */
+    send_with_temperature_recovery(config.skip_temperature, config.temperature, move |temp| {
+        // Clone per-call: the outer closure is `Fn` (up to 2 calls), so each
+        // invocation must produce its own owned strings.
+        let model_name = model_name.clone();
+        let system_text = system_text.clone();
+        let user_text = user_text.clone();
+        let api_key = api_key.clone();
+        let endpoint = endpoint.clone();
+        async move {
+            let request = AnthropicRequest {
+                model: model_name,
+                max_tokens: ANTHROPIC_MAX_TOKENS,
+                messages: vec![AnthropicMessage { role: "user", content: user_text }],
+                system: if system_text.is_empty() { None } else { Some(system_text) },
+                temperature: temp,
+            };
+            let builder = client
+                .post(&endpoint)
+                .header("Content-Type", "application/json")
+                .header("x-api-key", api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION_HEADER)
+                .json(&request);
+            let body_text = send_with_retry(&builder, "Anthropic").await?;
+            let anthropic_response: AnthropicResponse = serde_json::from_str(&body_text)
+                .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
+            /* Join every text block: multi-block responses interleave text
+            with non-text blocks (`tool_use`, `thinking`) that carry no
+            `text` field and are skipped. */
+            let content = anthropic_response
+                .content
+                .iter()
+                .filter_map(|block| block.text.as_deref())
+                .collect::<Vec<&str>>()
+                .join("");
+            if content.is_empty() {
+                return Err(AppError::Import("No response from LLM".to_string()));
+            }
+            let total_tokens =
+                anthropic_response.usage.map_or(0, |u| u.input_tokens + u.output_tokens);
+            Ok((content, total_tokens))
+        }
+    })
+    .await
+}
+
 // ── OpenAI-compatible path ───────────────────────────────────────────
 
 async fn send_openai_compatible(
@@ -678,13 +822,10 @@ async fn send_openai_compatible(
                 format!("{base_url}/chat/completions")
             }
         }
-        LlmProvider::Anthropic => {
-            if base_url.ends_with("/messages") {
-                base_url.to_string()
-            } else {
-                format!("{base_url}/messages")
-            }
-        }
+        /* Anthropic is absent by design: it routes to the native
+        `send_anthropic` path in `send_chat_completion` and never reaches
+        this OpenAI-compatible builder (Google likewise routes to
+        `send_google`). */
         _ => base_url.to_string(),
     };
 

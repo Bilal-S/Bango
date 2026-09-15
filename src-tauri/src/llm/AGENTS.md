@@ -2,7 +2,8 @@
 
 ## Purpose
 
-OpenAI-compatible + Google Generative Language chat-completion client and the
+OpenAI-compatible + native Anthropic Messages API + Google Generative Language
+chat-completion client and the
 centralized LLM request orchestrator. All LLM calls in the app MUST flow
 through `LlmOrchestrator` (per `docs/CLAUDE.md`), which enforces concurrency
 limits + rate limiting and delegates to `client::send_chat_completion`.
@@ -59,8 +60,9 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   in out-of-range errors like `"temperature parameter is invalid"` that should
   NOT trigger retry-without-temperature). 6 inline unit tests in
   `client::tests` cover the OpenAI + Google shapes plus negative cases.
-- **Client-level retry inside the timeout envelope**: both provider paths
-  (`send_openai_compatible`, `send_google`) wrap their request-build + send +
+- **Client-level retry inside the timeout envelope**: all three provider paths
+  (`send_openai_compatible`, `send_google`, `send_anthropic`) wrap their
+  request-build + send +
   parse logic in `send_with_temperature_recovery(skip_temperature, temperature,
   make_request)`. On a temperature-rejection 400, it rebuilds the request with
   `temperature = None` and calls `make_request` once more. The retry happens
@@ -151,6 +153,35 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   transient. Format: `LLM request failed (<status>) [req=..., cf-ray=...]: <body>`.
 - Each retry attempt logs `[LlmClient] {label} attempt {n}/{N} failed (<status>)[trace]; retrying in {ms}ms`
   to stderr so the fix can be confirmed engaging in production logs.
+
+### Native Anthropic Messages API path (`client.rs`)
+
+`LlmProvider::Anthropic` routes to `send_anthropic` (like Google, it is NOT
+OpenAI-compatible). Routing an OpenAI-shaped body to
+`https://api.anthropic.com/v1/messages` fails: first with
+`anthropic-version: header is required`, then with body-shape 400s.
+
+- **Headers**: every request carries `anthropic-version: 2023-06-01` (the
+  latest and only non-deprecated API version, REQUIRED unconditionally - this
+  is why the header is always sent, not flag-gated like `skip_temperature`)
+  and `x-api-key` auth (Bearer is also accepted by the API; `x-api-key`
+  matches the `list_models` path).
+- **Body**: `system` prompt is a TOP-LEVEL field (the Messages API has no
+  `"system"` role in `messages`), a single `user` message, and the REQUIRED
+  `max_tokens` field fixed at `ANTHROPIC_MAX_TOKENS = 4096` (within every
+  Claude model's output cap; the tightest is 4096).
+- **Response**: text is the concatenation of every `type: "text"` content
+  block (non-text blocks like `tool_use` carry no `text` and are skipped);
+  the token total is `usage.input_tokens + usage.output_tokens`. Empty text
+  surfaces the standard `No response from LLM` error.
+- Temperature-rejection recovery applies unchanged (the path wraps in
+  `send_with_temperature_recovery` like the others).
+- Frontend complement: `src/utils/llm-error.ts` maps `anthropic-version`
+  errors to the `anthropic-version-missing` troubleshooting anchor
+  (`help-tab-troubleshooting.vue`) for Custom endpoints proxied to Anthropic.
+- Tested in `tests/llm/llm_client_test.rs` (7 tests: required headers, native
+  request shape, multi-block join, missing API key, direct `/messages`
+  endpoint, empty content, temperature recovery).
 
 ### Embeddings (`embedding.rs` + `orchestrator.rs`)
 
@@ -256,7 +287,7 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
 - `cargo test --lib llm::client::tests` - 16 inline unit tests covering
   `normalize_llm_text`, `is_retryable_response`, `calculate_backoff`, and
   `is_temperature_error`.
-- `cargo test --test llm_client_test` - 44 integration tests against a mockito
+- `cargo test --test llm_client_test` - 49 integration tests against a mockito
   HTTP server, including:
   - `test_openai_insufficient_permissions_403_is_retried_then_succeeds`
     (regression for the Windows-only intermittent gateway error),
@@ -266,7 +297,10 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   - 4 temperature-recovery tests (`test_openai_temperature_400_retries_without_temperature`,
     `test_openai_temperature_400_with_skip_temperature_true_does_not_retry`,
     `test_openai_nontemperature_400_does_not_retry`,
-    `test_openai_success_returns_default_callmeta`).
+    `test_openai_success_returns_default_callmeta`),
+  - 7 native Anthropic Messages API tests (headers, request shape,
+    multi-block join, missing key, direct endpoint, empty content,
+    temperature recovery - see the Anthropic path contract above).
 - `cargo test --test llm_orchestrator_test` - 40 orchestrator tests including 2
   temperature-persistence tests (`temperature_persister_fires_on_recovery`,
   `temperature_persister_does_not_fire_on_normal_success`), 1 in-session

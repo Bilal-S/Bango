@@ -47,6 +47,16 @@ const ERROR_PATTERNS: Array<{ pattern: RegExp; data: TroubleshootData }> = [
     },
   },
   {
+    pattern: /anthropic-version/i,
+    data: {
+      anchorId: 'anthropic-version-missing',
+      cause:
+        'Anthropic requires an anthropic-version HTTP header on every direct API call; the request was rejected because it was missing.',
+      solution:
+        'Use the Anthropic provider in Settings - Bango sends anthropic-version: 2023-06-01 automatically on every request. If you point a Custom endpoint at an Anthropic-compatible proxy, make sure the proxy sets or forwards the anthropic-version header.',
+    },
+  },
+  {
     pattern:
       /\bAPI_KEY_INVALID\b|\bAPI key not valid\b.*\b400\b|\b400\b.*\bAPI_KEY_INVALID\b|\b400\b.*\bAPI key not valid\b/i,
     data: {

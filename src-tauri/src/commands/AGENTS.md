@@ -28,6 +28,22 @@ snapshot (now a `Mutex<SchemaStatus>`) post-success. Pure decision logic lives
 in `legacy_upgrade_needed(live, fallback)`; the frontend adds a third
 sessionStorage-based guard in `use-startup-upgrade.ts`.
 
+### `export_cmd.rs` - project reset + import (LLM-config preservation)
+
+`reset_project(preserve_llm_config)` wraps `reset_project_inner(conn,
+preserve_llm_config)`. The Settings card passes `true` from **Start New
+Project** and `false` from **Delete All Data** (both share one confirm dialog;
+the frontend tracks which button opened it). Preservation snapshots the raw
+`llm_config` row via `llm_config_repo::get_config_raw` BEFORE `rebuild_schema`
+drops the table and re-inserts it verbatim via `restore_config_raw` after -
+no decrypt/re-encrypt round-trip, no PBKDF2 cost, encrypted key blob untouched.
+Preservation deliberately does NOT live inside `rebuild_schema` itself: the
+startup legacy-upgrade path (`startup.rs`) keeps the full wipe semantics.
+`import_project` (in `export/project.rs`) applies the same machine-local rule
+for **Import Backup** - see `export/AGENTS.md`. Tested in
+`tests/export/reset_project_test.rs` (preserve keeps the row verbatim, no-row
+no-op, default wipe) + `tests/export/project_backup_test.rs`.
+
 ### `tags.rs` + `labels.rs`
 
 Tag & Label management commands (v6.9 standard-taxonomy surfacing). `tags.rs`

@@ -181,7 +181,11 @@ button shows `Adding...` + disables while `importSelected` is in flight.
 ### Settings cards (`components/settings/`)
 
 `settings-view.vue` consumes: `settings-provider-card.vue` (consolidated AI
-Provider box; **Parameters auto-save** debounced 600ms via
+Provider box; **provider switch seeds per-provider defaults** - endpoint +
+model + `contextWindowTokens` from the `providerDefaults` table: OpenAI 128K,
+Anthropic 200K, Google 1M, Mistral/Z.AI 128K, local providers 50K (the
+frontend `DEFAULT_CONFIG` baseline matches OpenAI at 128K);
+**Parameters auto-save** debounced 600ms via
 `useLlmConfig().scheduleParamSave` - editing Concurrency / Max Context Tokens
 / Request Delay / Temperature triggers a trailing-edge `save_llm_config` so
 the orchestrator's `update_settings` takes effect for the next LLM call

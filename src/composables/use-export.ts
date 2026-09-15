@@ -137,11 +137,14 @@ export function useExport() {
     }
   }
 
-  async function resetProject(): Promise<boolean> {
+  async function resetProject(preserveLlmConfig: boolean): Promise<boolean> {
     exporting.value = true;
     error.value = null;
     try {
-      await tauriCommand('reset_project');
+      /* `preserveLlmConfig = true` (Start New Project) keeps the machine-local
+       * LLM provider + API key across the reset; `false` (Delete All Data)
+       * wipes everything. */
+      await tauriCommand('reset_project', { preserveLlmConfig });
       invalidateAllStores();
       useSummary().clearSummary();
       // Wipe wiki singleton state + chat store's wiki readiness flag.

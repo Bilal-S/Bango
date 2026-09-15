@@ -89,9 +89,16 @@ function formatCompact(n: number): string {
   return String(n);
 }
 
-const providerDefaults: Record<string, { url: string; models: string[] }> = {
+/** Per-provider defaults applied when the user switches provider in the
+ *  select. `contextTokens` is the provider-appropriate context window
+ *  (lowest common denominator of the provider's current lineup - users on
+ *  larger-context models raise it in the Max Context Tokens field). Local
+ *  providers keep the conservative 50k baseline (real local context is
+ *  model/VRAM-bound and the card already warns about 50k VRAM needs). */
+const providerDefaults: Record<string, { url: string; models: string[]; contextTokens: number }> = {
   openai: {
     url: 'https://api.openai.com/v1',
+    contextTokens: 128_000,
     models: [
       'gpt-5-mini',
       'chat-latest',
@@ -105,6 +112,7 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
   },
   anthropic: {
     url: 'https://api.anthropic.com/v1',
+    contextTokens: 200_000,
     models: [
       'claude-haiku-4-5',
       'claude-opus-4-5',
@@ -116,6 +124,7 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
   },
   google: {
     url: 'https://generativelanguage.googleapis.com/v1beta',
+    contextTokens: 1_000_000,
     models: [
       'gemini-flash-latest',
       'gemini-flash-lite-latest',
@@ -125,6 +134,7 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
   },
   mistralAi: {
     url: 'https://api.mistral.ai/v1',
+    contextTokens: 128_000,
     models: [
       'mistral-small-latest',
       'magistral-medium-latest',
@@ -136,18 +146,22 @@ const providerDefaults: Record<string, { url: string; models: string[] }> = {
   },
   zAi: {
     url: 'https://api.z.ai/api/paas/v4',
+    contextTokens: 128_000,
     models: ['glm-5-turbo', 'glm-4.7-flash', 'glm-5', 'glm-5.1'],
   },
   ollama: {
     url: 'http://localhost:11434/v1',
+    contextTokens: 50_000,
     models: [],
   },
   lmStudio: {
     url: 'http://localhost:1234/v1',
+    contextTokens: 50_000,
     models: [],
   },
   llamaCpp: {
     url: 'http://localhost:8080/v1',
+    contextTokens: 50_000,
     models: [],
   },
 };
@@ -202,6 +216,7 @@ watch(
       if (defaults) {
         config.value.endpointUrl = defaults.url;
         config.value.modelName = defaults.models[0] || '';
+        config.value.contextWindowTokens = defaults.contextTokens;
         isOtherModel.value = defaults.models.length === 0;
       } else {
         config.value.endpointUrl = '';

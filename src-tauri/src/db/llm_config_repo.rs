@@ -108,6 +108,78 @@ pub fn set_skip_temperature(conn: &Connection, skip: bool) -> Result<(), AppErro
     Ok(())
 }
 
+/// Snapshot of the single `llm_config` row exactly as stored - the encrypted
+/// API-key blob is carried untouched (no decrypt/re-encrypt round-trip, no
+/// PBKDF2 cost). Used by `reset_project_inner` to preserve the machine-local
+/// LLM connection (provider + API key + tuning) across the Start New Project
+/// schema rebuild.
+#[derive(Debug, Clone)]
+pub struct RawLlmConfigRow {
+    pub provider: String,
+    pub endpoint_url: String,
+    pub api_key_encrypted: Option<String>,
+    pub model_name: String,
+    pub temperature: f64,
+    pub skip_temperature: i32,
+    pub max_concurrent_requests: i32,
+    pub request_delay_ms: i32,
+    pub context_window_tokens: i32,
+}
+
+/// Snapshot the stored row verbatim. `None` when no row exists.
+pub fn get_config_raw(conn: &Connection) -> Result<Option<RawLlmConfigRow>, AppError> {
+    let result = conn.query_row(
+        "SELECT provider, endpoint_url, api_key_encrypted, model_name, temperature, \
+         skip_temperature, max_concurrent_requests, request_delay_ms, context_window_tokens \
+         FROM llm_config WHERE id = 1",
+        [],
+        |row| {
+            Ok(RawLlmConfigRow {
+                provider: row.get(0)?,
+                endpoint_url: row.get(1)?,
+                api_key_encrypted: row.get(2)?,
+                model_name: row.get(3)?,
+                temperature: row.get(4)?,
+                skip_temperature: row.get(5)?,
+                max_concurrent_requests: row.get(6)?,
+                request_delay_ms: row.get(7)?,
+                context_window_tokens: row.get(8)?,
+            })
+        },
+    );
+
+    match result {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(AppError::Database(e)),
+    }
+}
+
+/// Re-insert a raw snapshot verbatim (replaces any existing row). The caller
+/// is responsible for the table existing (run AFTER migrations).
+pub fn restore_config_raw(conn: &Connection, row: &RawLlmConfigRow) -> Result<(), AppError> {
+    conn.execute("DELETE FROM llm_config WHERE id = 1", [])?;
+
+    conn.execute(
+        "INSERT INTO llm_config (id, provider, endpoint_url, api_key_encrypted, model_name, \
+         temperature, skip_temperature, max_concurrent_requests, request_delay_ms, context_window_tokens) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            row.provider,
+            row.endpoint_url,
+            row.api_key_encrypted,
+            row.model_name,
+            row.temperature,
+            row.skip_temperature,
+            row.max_concurrent_requests,
+            row.request_delay_ms,
+            row.context_window_tokens,
+        ],
+    )?;
+
+    Ok(())
+}
+
 pub fn save_config(conn: &Connection, config: &LlmConfig) -> Result<(), AppError> {
     let key = aes_gcm::derive_key_from_machine();
     let encrypted_api_key = config

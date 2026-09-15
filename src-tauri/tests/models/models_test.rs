@@ -70,7 +70,9 @@ fn llm_config_default_values() {
     assert!(!cfg.skip_temperature);
     assert_eq!(cfg.max_concurrent_requests, 3);
     assert_eq!(cfg.request_delay_ms, 500);
-    assert_eq!(cfg.context_window_tokens, 50_000);
+    // Unconfigured baseline; the placeholder provider (OpenAI) matches the
+    // frontend per-provider default of 128k (settings-provider-card.vue).
+    assert_eq!(cfg.context_window_tokens, 128_000);
     assert!(cfg.api_key_encrypted.is_none());
 }
 

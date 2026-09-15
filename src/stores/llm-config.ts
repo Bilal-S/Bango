@@ -35,7 +35,8 @@ const DEFAULT_CONFIG: LlmConfig = {
   skipTemperature: false,
   maxConcurrentRequests: 3,
   requestDelayMs: 500,
-  contextWindowTokens: 50000,
+  // Matches the OpenAI per-provider default in settings-provider-card.vue.
+  contextWindowTokens: 128000,
 };
 
 export const useLlmConfigStore = defineStore('llm-config', () => {

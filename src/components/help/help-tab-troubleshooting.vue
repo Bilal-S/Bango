@@ -52,6 +52,16 @@ const troubleshootItems: TroubleshootItem[] = [
       'Go to Settings and verify your API key is correct. Also check with your provider whether this key is still active. If you recently regenerated the key, paste the new one. Check that your account has access to the model you selected.',
   },
   {
+    anchorId: 'anthropic-version-missing',
+    icon: 'update',
+    error: 'anthropic-version: header is required',
+    providers: 'Anthropic',
+    cause:
+      'Anthropic requires an anthropic-version HTTP header on every direct API call to decide how the request is parsed; the request was rejected because the header was missing.',
+    solution:
+      'Use the Anthropic provider in Settings - Bango sends anthropic-version: 2023-06-01 automatically on every request. If you point a Custom endpoint at an Anthropic-compatible proxy, make sure the proxy sets or forwards the anthropic-version header.',
+  },
+  {
     anchorId: 'connection-refused',
     icon: 'wifi_off',
     error: 'Connection refused / timeout',

@@ -63,7 +63,9 @@ against RIS fixtures live in `biblio/cocitation_data_test.rs`.
 `export/project_backup_test.rs` covers the ProjectBackup export/import round-trip incl.
 `full_text_ai_summary` blob preservation (inventory: `docs/test-plans/exim-tests.md`).
 `export/reset_project_test.rs` covers `reset_project_inner` (delete-all-data +
-VACUUM + wiki-root wipe). `prisma/prisma_report_test.rs` covers the screening
+VACUUM + wiki-root wipe, plus the `preserve_llm_config` contract: Start New
+Project round-trips the `llm_config` row verbatim, no-row no-op, default
+wipe; inventory: `docs/test-plans/exim-tests.md`). `prisma/prisma_report_test.rs` covers the screening
 reasons report (primary-reason attribution, general buckets,
 multi-assignment counts, Markdown rendering). `wiki/wiki_consolidation_test.rs` +
 `wiki/wiki_index_drift_test.rs` cover the wiki pipelines. `utils/sections_test.rs` +

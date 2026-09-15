@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use crate::db::article_repo;
 use crate::db::connection::DbState;
 use crate::db::criteria_repo;
+use crate::db::llm_config_repo;
 use crate::db::rebuild;
 use crate::error::AppError;
 use crate::export::project;
@@ -170,6 +171,11 @@ pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> 
 /// dropped by it. Wiki deletion + VACUUM are non-fatal (stderr-logged); DB
 /// reset already committed, so cleanup errors don't undo it.
 ///
+/// `preserve_llm_config = true` (Settings -> Start New Project) snapshots the
+/// `llm_config` row before the rebuild and re-inserts it verbatim afterwards,
+/// so the machine-local LLM connection (provider, encrypted API key, tuning)
+/// survives starting a new project. `false` (Delete All Data) wipes it.
+///
 /// VACUUM runs post-rebuild to reclaim free pages from dropped tables (SQLite
 /// never auto-shrinks). The WAL is check-pointed first so both `bango.db` and
 /// `bango.db-wal` shrink.
@@ -181,7 +187,10 @@ pub fn write_base64_to_file(path: String, data: String) -> Result<(), AppError> 
 ///
 /// Extracted from the command wrapper for testability with a plain
 /// `&mut Connection`. The post-check needs `AppHandle` (bundled resource path).
-pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppError> {
+pub fn reset_project_inner(
+    conn: &mut rusqlite::Connection,
+    preserve_llm_config: bool,
+) -> Result<(), AppError> {
     /* Resolve the wiki root while `app_settings` is still available.
     `resolve_root` also ensures the dir exists (harmless: we delete it next). */
     let wiki_root = storage::resolve_root(conn).map_err(|e| {
@@ -189,9 +198,19 @@ pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppErr
         e
     });
 
+    /* Snapshot the machine-local LLM connection before `rebuild_schema`
+    drops its table (Start New Project keeps provider + API key). */
+    let preserved_llm =
+        if preserve_llm_config { llm_config_repo::get_config_raw(conn)? } else { None };
+
     /* Rebuild DB schema (drops all user tables + wiki_pages_fts, resets
     user_version, re-runs migrations). journal_index is preserved. */
     rebuild::rebuild_schema(conn)?;
+
+    // Restore the preserved LLM connection into the freshly-rebuilt table.
+    if let Some(row) = preserved_llm {
+        llm_config_repo::restore_config_raw(conn, &row)?;
+    }
 
     // Delete the on-disk wiki-root directory (non-fatal on failure).
     if let Ok(root) = &wiki_root {
@@ -211,10 +230,14 @@ pub fn reset_project_inner(conn: &mut rusqlite::Connection) -> Result<(), AppErr
 }
 
 #[tauri::command]
-pub fn reset_project(app: tauri::AppHandle, db_state: State<'_, DbState>) -> Result<(), AppError> {
+pub fn reset_project(
+    app: tauri::AppHandle,
+    db_state: State<'_, DbState>,
+    preserve_llm_config: bool,
+) -> Result<(), AppError> {
     let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
 
-    reset_project_inner(&mut conn)?;
+    reset_project_inner(&mut conn, preserve_llm_config)?;
 
     /* Post-reset: ensure journal_index populated. Heals the case where startup
     auto-load silently failed (e.g. Windows `resource_dir()` bug) and

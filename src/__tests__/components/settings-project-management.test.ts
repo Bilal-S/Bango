@@ -248,7 +248,9 @@ describe('settings-project-management.vue - Start New Project button + info-box'
     const infoBox = wrapper.find('.settings-card__info-box');
     expect(infoBox.exists()).toBe(true);
     expect(infoBox.text()).toContain('one project at a time');
-    expect(infoBox.text()).toContain('Delete All Data');
+    expect(infoBox.text()).toContain('Start New Project');
+    // The LLM-connection-preservation note is surfaced in the info-box.
+    expect(infoBox.text()).toContain('LLM provider and API key are kept');
     // The "Learn more" link is present.
     expect(wrapper.find('.settings-card__learn-more').exists()).toBe(true);
   });
@@ -265,7 +267,7 @@ describe('settings-project-management.vue - Start New Project button + info-box'
     expect(startBtn?.classes()).toContain('btn--primary');
   });
 
-  it('Start New Project button opens the existing Delete dialog (no separate dialog)', async () => {
+  it('Start New Project button opens the shared dialog in start-new mode (LLM config kept)', async () => {
     setActivePinia(createPinia());
     const wrapper = mount(SettingsProjectManagement, {
       global: { plugins: [createPinia(), buildTestRouter()] },
@@ -278,10 +280,30 @@ describe('settings-project-management.vue - Start New Project button + info-box'
     await startBtn!.trigger('click');
     await flushPromises();
 
-    // The existing Delete All Project Data dialog opens.
+    // The shared confirm dialog opens in start-new mode: start-fresh copy +
+    // the LLM-connection-preservation note, still styled as destructive.
+    const overlay = wrapper.find('.dialog-overlay');
+    expect(overlay.exists()).toBe(true);
+    expect(overlay.text()).toContain('Start New Project');
+    expect(overlay.text()).toContain('LLM provider, API key, and connection settings are kept');
+    expect(overlay.find('.dialog--danger').exists()).toBe(true);
+  });
+
+  it('Delete All Data button opens the shared dialog in full-wipe mode', async () => {
+    setActivePinia(createPinia());
+    const wrapper = mount(SettingsProjectManagement, {
+      global: { plugins: [createPinia(), buildTestRouter()] },
+    });
+    await flushPromises();
+
+    const deleteBtn = wrapper.findAll('button').find((b) => b.text().includes('Delete All Data'));
+    await deleteBtn!.trigger('click');
+    await flushPromises();
+
     const overlay = wrapper.find('.dialog-overlay');
     expect(overlay.exists()).toBe(true);
     expect(overlay.text()).toContain('Delete All Project Data');
-    expect(overlay.find('.dialog--danger').exists()).toBe(true);
+    expect(overlay.text()).toContain('including your LLM provider and API key');
+    expect(overlay.text()).toContain('Delete Everything');
   });
 });

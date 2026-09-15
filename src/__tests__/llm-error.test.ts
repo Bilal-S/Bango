@@ -10,6 +10,16 @@ describe('formatLlmError', () => {
     expect(result.helpLink).toContain('#rate-limited');
   });
 
+  it('matches missing anthropic-version header errors', () => {
+    const raw =
+      'Connection failed: Import error: LLM request failed (400 Bad Request) [cf-ray=a3a9af466ddaed23-MXP]: ' +
+      '{"type":"error","error":{"type":"invalid_request_error","message":"anthropic-version: header is required"},"request_id":"req_011Cf229iY3EqgZcpuMeYNkm"}';
+    const result = formatLlmError(raw);
+    expect(result.matched).toBe(true);
+    expect(result.anchorId).toBe('anthropic-version-missing');
+    expect(result.helpLink).toContain('#anthropic-version-missing');
+  });
+
   it('matches authentication failed (401)', () => {
     const result = formatLlmError('401 authentication failed');
     expect(result.matched).toBe(true);

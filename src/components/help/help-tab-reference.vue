@@ -2404,15 +2404,22 @@ ER  - </pre>
               <li>
                 <strong>Import Backup:</strong> Restores a project from a
                 <code>.bango.json</code> backup file. Importing will completely overwrite your
-                current project database. A warnings modal requires explicit confirmation before
-                initiating the overwrite.
+                current project database; your LLM provider, API key, and connection settings are
+                kept (a locally undefined connection adopts the backup's provider/endpoint/model). A
+                warnings modal requires explicit confirmation before initiating the overwrite.
+              </li>
+              <li>
+                <strong>Start New Project:</strong> Permanently deletes project data (articles,
+                criteria, tags, labels, audit trail, Wiki) AND the on-disk
+                <code>wiki-root/</code> directory, then starts fresh. Your LLM provider, API key,
+                and connection settings are kept. Requires typing <code>DELETE</code> to confirm.
               </li>
               <li>
                 <strong>Delete All Data:</strong> Permanently wipes the database (articles,
                 criteria, tags, labels, audit trail) AND the on-disk
-                <code>wiki-root/</code> directory and generated wiki. The
-                <code>journal_index</code> reference table and your LLM/API settings survive.
-                Requires typing <code>DELETE</code> to confirm.
+                <code>wiki-root/</code> directory and generated wiki, including your LLM provider
+                and API key. The <code>journal_index</code> reference table survives. Requires
+                typing <code>DELETE</code> to confirm.
               </li>
             </ul>
 

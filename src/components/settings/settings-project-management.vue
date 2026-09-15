@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { useExport } from '@/composables/use-export';
@@ -15,6 +15,19 @@ function openBackupHelp(): void {
 const showImportDialog = ref(false);
 const showExportDialog = ref(false);
 const showDeleteDialog = ref(false);
+
+/** Which destructive action opened the shared confirm dialog. Start New
+ *  Project preserves the machine-local LLM provider + API key; Delete All
+ *  Data wipes everything. */
+type DeleteDialogMode = 'start-new' | 'delete-all';
+const deleteDialogMode = ref<DeleteDialogMode>('delete-all');
+const isStartNewMode = computed(() => deleteDialogMode.value === 'start-new');
+
+function openDeleteDialog(mode: DeleteDialogMode): void {
+  deleteDialogMode.value = mode;
+  showDeleteDialog.value = true;
+}
+
 const deleteConfirmText = ref('');
 const importFile = ref<File | null>(null);
 /** Validation error shown inline when the user picks a non-backup file type.
@@ -111,7 +124,8 @@ async function doExportProject(): Promise<void> {
 
 async function doDeleteProject(): Promise<void> {
   if (deleteConfirmText.value.toUpperCase() !== 'DELETE') return;
-  const success = await resetProject();
+  // Start New Project keeps the LLM connection; Delete All Data wipes it.
+  const success = await resetProject(deleteDialogMode.value === 'start-new');
   if (success) {
     showDeleteDialog.value = false;
     deleteConfirmText.value = '';
@@ -139,8 +153,8 @@ async function doDeleteProject(): Promise<void> {
       <div>
         <p>
           Bango manages <strong>one project at a time</strong>. To start a new review, export a
-          backup of your current project first, then use <strong>Delete All Data</strong> to begin
-          fresh.
+          backup of your current project first, then use <strong>Start New Project</strong> to begin
+          fresh (your LLM provider and API key are kept).
         </p>
         <button class="settings-card__learn-more" @click="openBackupHelp">
           <span class="material-symbols-outlined">menu_book</span>
@@ -150,7 +164,7 @@ async function doDeleteProject(): Promise<void> {
     </div>
 
     <div class="settings-card__actions">
-      <button class="btn btn--primary" @click="showDeleteDialog = true">
+      <button class="btn btn--primary" @click="openDeleteDialog('start-new')">
         <span class="material-symbols-outlined btn__icon">restart_alt</span>
         Start New Project
       </button>
@@ -162,7 +176,7 @@ async function doDeleteProject(): Promise<void> {
         <span class="material-symbols-outlined btn__icon">download</span>
         Export Backup
       </button>
-      <button class="btn btn--danger" @click="showDeleteDialog = true">
+      <button class="btn btn--danger" @click="openDeleteDialog('delete-all')">
         <span class="material-symbols-outlined btn__icon">delete_forever</span>
         Delete All Data
       </button>
@@ -183,7 +197,8 @@ async function doDeleteProject(): Promise<void> {
           <span class="material-symbols-outlined">warning</span>
           <p>
             <strong>All existing data will be deleted</strong> and replaced with the backup data.
-            This action cannot be undone.
+            Your LLM provider, API key, and connection settings are kept. This action cannot be
+            undone.
           </p>
         </div>
         <div class="field">
@@ -252,16 +267,23 @@ async function doDeleteProject(): Promise<void> {
       </div>
     </div>
 
-    <!-- Delete Confirmation Dialog -->
+    <!-- Delete Confirmation Dialog (shared: Start New Project keeps the LLM
+         connection; Delete All Data wipes everything) -->
     <div v-if="showDeleteDialog" class="dialog-overlay" @click.self="showDeleteDialog = false">
       <div class="dialog dialog--danger">
-        <h2>Delete All Project Data</h2>
+        <h2>{{ isStartNewMode ? 'Start New Project' : 'Delete All Project Data' }}</h2>
         <div class="dialog__danger-box">
           <span class="material-symbols-outlined">warning</span>
-          <p>
+          <p v-if="isStartNewMode">
             This will permanently delete
-            <strong>all articles, criteria, tags, labels, Wiki, and settings</strong>. This action
-            cannot be undone.
+            <strong>all articles, criteria, tags, labels, and Wiki</strong> and start a fresh
+            project. Your <strong>LLM provider, API key, and connection settings are kept</strong>.
+            This action cannot be undone.
+          </p>
+          <p v-else>
+            This will permanently delete
+            <strong>all articles, criteria, tags, labels, Wiki, and settings</strong>, including
+            your LLM provider and API key. This action cannot be undone.
           </p>
         </div>
         <div class="field">
@@ -288,7 +310,7 @@ async function doDeleteProject(): Promise<void> {
             :disabled="deleteConfirmText.toUpperCase() !== 'DELETE'"
             @click="doDeleteProject"
           >
-            Delete Everything
+            {{ isStartNewMode ? 'Start New Project' : 'Delete Everything' }}
           </button>
         </div>
       </div>

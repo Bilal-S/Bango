@@ -94,6 +94,16 @@ fn google_chat_response(content: &str, tokens: usize) -> String {
     )
 }
 
+// Standard Anthropic Messages API response body (usage = input + output)
+fn anthropic_chat_response(content: &str, input_tokens: usize, output_tokens: usize) -> String {
+    format!(
+        r#"{{"content":[{{"type":"text","text":{content_json}}}],"usage":{{"input_tokens":{input_tokens},"output_tokens":{output_tokens}}}}}"#,
+        content_json = serde_json::to_string(content).unwrap(),
+        input_tokens = input_tokens,
+        output_tokens = output_tokens,
+    )
+}
+
 // Standard OpenAI models list response body
 fn openai_models_response(model_ids: &[&str]) -> String {
     let entries: Vec<String> =
@@ -573,17 +583,21 @@ async fn test_google_no_candidates_returns_error() {
     assert!(err.to_string().contains("No response"), "expected no-response error, got: {}", err);
 }
 
-// ── send_chat_completion: Anthropic path ─────────────────────────────
+// ── send_chat_completion: Anthropic path (native Messages API) ────────
 
 #[tokio::test]
-async fn test_anthropic_uses_messages_endpoint() {
+async fn test_anthropic_sends_required_headers() {
+    // Every Anthropic request must carry `anthropic-version` (missing header
+    // => 400 "anthropic-version: header is required") and the `x-api-key`
+    // auth header, matching the `list_models` path.
     let mut server = mockito::Server::new_async().await;
-    // Anthropic uses OpenAI-compatible ChatResponse format in the fallback parser
     let mock = server
         .mock("POST", "/messages")
         .match_header("content-type", "application/json")
+        .match_header("x-api-key", "test-anthropic-key")
+        .match_header("anthropic-version", "2023-06-01")
         .with_status(200)
-        .with_body(openai_chat_response("Anthropic reply", 77))
+        .with_body(anthropic_chat_response("Anthropic reply", 30, 47))
         .create_async()
         .await;
 
@@ -592,7 +606,58 @@ async fn test_anthropic_uses_messages_endpoint() {
 
     mock.assert_async().await;
     assert_eq!(content, "Anthropic reply");
-    assert_eq!(tokens, 77);
+    assert_eq!(tokens, 77, "usage total = input_tokens + output_tokens");
+}
+
+#[tokio::test]
+async fn test_anthropic_native_request_shape() {
+    // Native Messages API body: system prompt is a TOP-LEVEL field (the API
+    // has no "system" role), a single user message, and the required
+    // `max_tokens` budget. Temperature is carried when not skipped.
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::Json(serde_json::json!({
+            "model": "claude-3-sonnet",
+            "max_tokens": 4096,
+            "system": "be brief",
+            "temperature": 0.2,
+            "messages": [{ "role": "user", "content": "hello" }]
+        })))
+        .with_status(200)
+        .with_body(anthropic_chat_response("ok", 1, 2))
+        .create_async()
+        .await;
+
+    let config = anthropic_config(&server.url());
+    let _ = client::send_chat_completion(&config, "be brief", "hello").await.unwrap();
+    mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_anthropic_joins_multiple_text_blocks() {
+    // Multi-block responses interleave text with non-text blocks (e.g.
+    // `tool_use`) that carry no `text` field; only text blocks concatenate.
+    let mut server = mockito::Server::new_async().await;
+    let body = r#"{"content":[{"type":"text","text":"part one "},{"type":"tool_use","id":"toolu_1"},{"type":"text","text":"part two"}],"usage":{"input_tokens":5,"output_tokens":7}}"#;
+    let mock =
+        server.mock("POST", "/messages").with_status(200).with_body(body).create_async().await;
+
+    let config = anthropic_config(&server.url());
+    let (content, tokens, _) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    mock.assert_async().await;
+    assert_eq!(content, "part one part two");
+    assert_eq!(tokens, 12);
+}
+
+#[tokio::test]
+async fn test_anthropic_missing_api_key() {
+    let mut config = anthropic_config("http://unused");
+    config.api_key_encrypted = None;
+
+    let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
+    assert!(err.to_string().contains("API key required"), "expected API key error, got: {err}");
 }
 
 #[tokio::test]
@@ -601,7 +666,7 @@ async fn test_anthropic_endpoint_already_has_messages() {
     let mock = server
         .mock("POST", "/v1/messages")
         .with_status(200)
-        .with_body(openai_chat_response("ok", 5))
+        .with_body(anthropic_chat_response("ok", 1, 4))
         .create_async()
         .await;
 
@@ -610,6 +675,69 @@ async fn test_anthropic_endpoint_already_has_messages() {
 
     let _ = client::send_chat_completion(&config, "s", "u").await.unwrap();
     mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_anthropic_empty_content_returns_error() {
+    let mut server = mockito::Server::new_async().await;
+    let body = r#"{"content":[],"usage":{"input_tokens":3,"output_tokens":0}}"#;
+    let mock = server
+        .mock("POST", mockito::Matcher::Any)
+        .with_status(200)
+        .with_body(body)
+        .create_async()
+        .await;
+
+    let config = anthropic_config(&server.url());
+    let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
+
+    mock.assert_async().await;
+    assert!(err.to_string().contains("No response"), "expected no-response error, got: {err}");
+}
+
+#[tokio::test]
+async fn test_anthropic_temperature_400_retries_without_temperature() {
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"temperature does not support 0.2 with this model. Only the default (1) value is supported."}}"#;
+
+    // First attempt: 400 with a temperature-rejection body (request carries
+    // temperature because skip_temperature=false in anthropic_config).
+    let first = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({"temperature": 0.2})))
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Second attempt: 200. The rebuilt body must carry the native shape
+    // WITHOUT temperature (serde skips None).
+    let second = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::JsonString(
+            serde_json::json!({
+                "model": "claude-3-sonnet",
+                "max_tokens": 4096,
+                "system": "s",
+                "messages": [{ "role": "user", "content": "u" }]
+            })
+            .to_string(),
+        ))
+        .with_status(200)
+        .with_body(anthropic_chat_response("recovered", 2, 3))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let config = anthropic_config(&server.url());
+    let (_, tokens, meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    first.assert_async().await;
+    second.assert_async().await;
+    assert_eq!(tokens, 5);
+    assert!(meta.temperature_was_rejected, "recovery must be surfaced in CallMeta");
 }
 
 // ── send_chat_completion: Ollama (no API key) ───────────────────────

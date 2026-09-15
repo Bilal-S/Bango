@@ -210,6 +210,9 @@ fn to_camel_case(s: &str) -> String {
 // ── Import ──────────────────────────────────────────────────────────────────
 
 /// Reverse-dependency DELETE order. Child tables before parent tables; derived tables explicitly purged (`foreign_keys=OFF` during import).
+/// `llm_config` is cleared here but immediately re-seeded by `import_llm_config`
+/// (a usable local row wins; the backup triple is the fallback) - clearing it
+/// avoids a PRIMARY KEY clash when the fallback inserts.
 const DELETE_STATEMENTS: &[&str] = &[
     "DELETE FROM biblio_network_edges",
     "DELETE FROM biblio_network_nodes",
@@ -279,6 +282,16 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     // PRAGMA cannot be changed inside a transaction, so set it before starting
     // one. Safe because we delete all data first, then insert in dependency order.
     conn.execute("PRAGMA foreign_keys = OFF", [])?;
+
+    /* Snapshot the machine-local LLM connection BEFORE the import clears the
+    table: a locally defined provider + encrypted API key survives the import
+    because the backup carries no secret (see `import_llm_config`). */
+    let local_llm_row = if llm_config_repo::has_config(conn)? {
+        llm_config_repo::get_config_raw(conn)?
+    } else {
+        None
+    };
+
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| AppError::Import(format!("Failed to start import transaction: {}", e)))?;
@@ -309,7 +322,7 @@ pub fn import_project(conn: &Connection, json_str: &str) -> Result<(), AppError>
     import_biblio_terms(&tx, &backup, &mut maps.term)?;
     import_biblio_article_terms(&tx, &backup, &maps.term)?;
     import_biblio_networks(&tx, &backup)?;
-    import_llm_config(&tx, &backup)?;
+    import_llm_config(&tx, &backup, local_llm_row.as_ref())?;
     import_app_settings(&tx, &backup)?;
 
     tx.commit()
@@ -1031,7 +1044,24 @@ fn import_biblio_networks(tx: &Transaction, backup: &ProjectBackup) -> Result<()
     Ok(())
 }
 
-fn import_llm_config(tx: &Transaction, backup: &ProjectBackup) -> Result<(), AppError> {
+/// Re-seed `llm_config` after the import cleared it.
+///
+/// A locally defined connection (the `llm_config_repo::has_config` contract:
+/// endpoint + model + (local provider or API key), snapshotted by the caller
+/// before the DELETE loop) is machine-local state and is restored verbatim -
+/// the backup carries no secret, so adopting its triple would strand the user
+/// with a keyless config and silently reset their tuning. The backup triple
+/// (provider/endpoint/model) restores only when no usable local row exists
+/// (e.g. a fresh machine importing a project).
+fn import_llm_config(
+    tx: &Transaction,
+    backup: &ProjectBackup,
+    local_row: Option<&llm_config_repo::RawLlmConfigRow>,
+) -> Result<(), AppError> {
+    if let Some(row) = local_row {
+        llm_config_repo::restore_config_raw(tx, row)?;
+        return Ok(());
+    }
     if let Some(ref llm_backup) = backup.llm_config {
         tx.execute(
             "INSERT INTO llm_config (id, provider, endpoint_url, model_name, \

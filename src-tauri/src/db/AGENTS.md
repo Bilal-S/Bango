@@ -303,6 +303,14 @@ virtual table (self-heals via `fts::ensure_index_populated`) and the
 `wiki_index_manifest` drift-detection cache (self-heals via
 `wiki_check_for_updates`).
 
+**Preservation lives at the command level, not here**: `rebuild_schema` itself
+preserves nothing beyond `journal_index`. Start-New-Project LLM-config
+preservation snapshots/restores the raw `llm_config` row around the
+`rebuild_schema` call inside `reset_project_inner` (see
+`commands/AGENTS.md`), via `llm_config_repo::get_config_raw` /
+`restore_config_raw` (verbatim row incl. the encrypted key blob - no
+decrypt/re-encrypt, no PBKDF2).
+
 ### `maintenance.rs` - VACUUM
 
 `vacuum_database` does a journal-mode round trip - `DELETE` (forces a WAL

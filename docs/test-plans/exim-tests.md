@@ -22,6 +22,19 @@ background.
 | `src-tauri/tests/export/project_backup_test.rs::export_preserves_null_and_empty_string_system_entries` | Export filter preserves system-level rows in BOTH shapes: `article_id IS NULL` (modern `log_error`) and `article_id = ''` (historical; normalized to NULL by v006 on next migration) |
 | `src-tauri/tests/export/project_backup_test.rs::import_normalizes_empty_string_article_id_to_null` | Import path coerces `"articleId": ""` -> SQL NULL so the restored row doesn't violate the FK constraint; row is preserved, not dropped |
 
+## LLM config preservation (`export::project` + `commands::export_cmd`)
+
+Import Backup and Start New Project keep a locally defined LLM connection
+(the backup carries no secret; overwriting would strand a keyless config).
+
+| Test identifier | Assertion |
+|---|---|
+| `src-tauri/tests/export/project_backup_test.rs::import_keeps_locally_defined_llm_config` | A usable local row (provider + key blob + custom tuning) survives the import verbatim; the backup triple does NOT overwrite it |
+| `src-tauri/tests/export/project_backup_test.rs::import_restores_backup_llm_config_when_local_not_usable` | With no usable local connection (`has_config` false), the backup's provider/endpoint/model triple restores with default tuning |
+| `src-tauri/tests/export/reset_project_test.rs::reset_preserve_llm_config_keeps_row_verbatim` | `reset_project_inner(conn, true)` (Start New Project) round-trips the whole `llm_config` row - provider, encrypted key blob, tuning - across the schema rebuild |
+| `src-tauri/tests/export/reset_project_test.rs::reset_preserve_llm_config_without_row_is_noop` | Preserving with no existing row never fabricates one |
+| `src-tauri/tests/export/reset_project_test.rs::reset_wipes_llm_config_when_not_preserved` | `reset_project_inner(conn, false)` (Delete All Data) still wipes `llm_config` |
+
 ## `full_text_ai_summary` round-trip (`export::project`)
 
 `serialize_table` parses TEXT as JSON first, so the always-JSON AI summary

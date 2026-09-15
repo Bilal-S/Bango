@@ -315,6 +315,80 @@ fn test_import_old_backup_without_biblio_data() {
     assert_eq!(count_rows(&conn, "biblio_network_edges"), 0);
 }
 
+// ── LLM config preservation on import ────────────────────────────────
+
+/// Minimal backup carrying an Anthropic llmConfig triple (no secret - the
+/// backup never contains the API key).
+fn backup_with_llm_config(provider: &str, endpoint: &str, model: &str) -> String {
+    format!(
+        r#"{{
+            "metadata": {{ "specVersion": "3.0", "exportedAt": "2026-01-01T00:00:00Z", "appName": "Bango", "appVersion": "2.0.0" }},
+            "researchAims": [], "criteria": [], "articles": [], "tags": [], "labels": [],
+            "articleTags": [], "articleLabels": [], "auditEntries": [],
+            "llmConfig": {{ "provider": "{provider}", "endpointUrl": "{endpoint}", "modelName": "{model}" }}
+        }}"#
+    )
+}
+
+#[test]
+fn import_keeps_locally_defined_llm_config() {
+    // A usable local connection (cloud provider + key blob + custom tuning)
+    // is machine-local state: the backup triple must NOT overwrite it.
+    let conn = setup_db();
+    conn.execute(
+        "INSERT INTO llm_config (id, provider, endpoint_url, api_key_encrypted, model_name, \
+         temperature, skip_temperature, max_concurrent_requests, request_delay_ms, context_window_tokens) \
+         VALUES (1, 'openai', 'https://api.openai.com/v1', 'opaque-key-blob', 'gpt-4o', \
+         0.4, 1, 5, 250, 128000)",
+        [],
+    )
+    .expect("seed local llm config");
+
+    let backup =
+        backup_with_llm_config("anthropic", "https://api.anthropic.com/v1", "claude-sonnet-4-5");
+    import_project(&conn, &backup).expect("import should succeed");
+
+    let (provider, key, model, delay, ctx): (String, Option<String>, String, i32, i32) = conn
+        .query_row(
+            "SELECT provider, api_key_encrypted, model_name, request_delay_ms, context_window_tokens FROM llm_config WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .expect("llm_config row must survive import");
+
+    assert_eq!(provider, "openai", "local provider wins over the backup triple");
+    assert_eq!(key.as_deref(), Some("opaque-key-blob"), "key blob preserved");
+    assert_eq!(model, "gpt-4o");
+    assert_eq!(delay, 250, "custom tuning not reset to defaults");
+    assert_eq!(ctx, 128000);
+}
+
+#[test]
+fn import_restores_backup_llm_config_when_local_not_usable() {
+    // An incomplete local row (cloud provider WITHOUT a key -> has_config =
+    // false) is not a defined connection; the backup triple wins.
+    let conn = setup_db();
+    conn.execute(
+        "INSERT INTO llm_config (id, provider, endpoint_url, model_name, temperature, \
+         max_concurrent_requests, request_delay_ms, context_window_tokens) \
+         VALUES (1, 'mistral_ai', 'https://api.mistral.ai/v1', 'mistral-small-latest', 0.2, 3, 500, 50000)",
+        [],
+    )
+    .expect("seed incomplete local llm config");
+
+    let backup = backup_with_llm_config("openai", "https://api.openai.com/v1", "gpt-4o-mini");
+    import_project(&conn, &backup).expect("import should succeed");
+
+    let (provider, model): (String, String) = conn
+        .query_row("SELECT provider, model_name FROM llm_config WHERE id = 1", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("llm_config row must exist post-import");
+
+    assert_eq!(provider, "openai", "backup triple restores onto an unconfigured machine state");
+    assert_eq!(model, "gpt-4o-mini");
+}
+
 /// Plan-A originals archive must survive a backup/restore cycle (plan §5).
 /// Regression for the data-loss gap where `export_project` did not serialize
 /// `article_original_content` / `article_original_chunks`.
