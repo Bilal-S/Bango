@@ -619,7 +619,7 @@ async fn test_anthropic_native_request_shape() {
         .mock("POST", "/messages")
         .match_body(mockito::Matcher::Json(serde_json::json!({
             "model": "claude-3-sonnet",
-            "max_tokens": 4096,
+            "max_tokens": 32768,
             "system": "be brief",
             "temperature": 0.2,
             "messages": [{ "role": "user", "content": "hello" }]
@@ -719,7 +719,7 @@ async fn test_anthropic_temperature_400_retries_without_temperature() {
         .match_body(mockito::Matcher::JsonString(
             serde_json::json!({
                 "model": "claude-3-sonnet",
-                "max_tokens": 4096,
+                "max_tokens": 32768,
                 "system": "s",
                 "messages": [{ "role": "user", "content": "u" }]
             })
@@ -738,6 +738,201 @@ async fn test_anthropic_temperature_400_retries_without_temperature() {
     second.assert_async().await;
     assert_eq!(tokens, 5);
     assert!(meta.temperature_was_rejected, "recovery must be surfaced in CallMeta");
+}
+
+#[tokio::test]
+async fn test_anthropic_over_cap_backs_down_to_reported_limit() {
+    // Exact production body: the 400 message states the model's true output
+    // cap; the retry must carry that parsed cap as max_tokens and surface it
+    // via CallMeta. Unique model name so the session cap latch never collides
+    // with other tests in this binary.
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 32768 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229-probe-a"}}"#;
+
+    let first = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 32768 })))
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let second = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 4096 })))
+        .with_status(200)
+        .with_body(anthropic_chat_response("backed down", 4, 5))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mut config = anthropic_config(&server.url());
+    config.model_name = "claude-3-opus-20240229-probe-a".to_string();
+    let (content, tokens, meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    first.assert_async().await;
+    second.assert_async().await;
+    assert_eq!(content, "backed down");
+    assert_eq!(tokens, 9);
+    assert_eq!(meta.max_tokens_backed_down, Some(4096));
+}
+
+#[tokio::test]
+async fn test_anthropic_over_cap_unparseable_falls_back_to_4096() {
+    // A proxy may reword the message while keeping the marker sentence;
+    // without a parseable `> N` limit the back-down targets the
+    // universal-safe floor.
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: value above the limit, which is the maximum allowed number of output tokens for this model"}}"#;
+
+    let first = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 32768 })))
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let second = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 4096 })))
+        .with_status(200)
+        .with_body(anthropic_chat_response("safe floor", 1, 1))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mut config = anthropic_config(&server.url());
+    config.model_name = "claude-proxy-model-probe-b".to_string();
+    let (_, _, meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    first.assert_async().await;
+    second.assert_async().await;
+    assert_eq!(meta.max_tokens_backed_down, Some(4096));
+}
+
+#[tokio::test]
+async fn test_anthropic_over_cap_uses_reported_8192_not_floor() {
+    // claude-3.5-era models report 8192; the parsed limit wins over the
+    // conservative 4096 floor (probe the capability, not a fixed budget).
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 32768 > 8192, which is the maximum allowed number of output tokens for claude-3-5-sonnet-probe-c"}}"#;
+
+    let first = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 32768 })))
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let second = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 8192 })))
+        .with_status(200)
+        .with_body(anthropic_chat_response("8k model", 2, 2))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let mut config = anthropic_config(&server.url());
+    config.model_name = "claude-3-5-sonnet-probe-c".to_string();
+    let (_, _, meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    first.assert_async().await;
+    second.assert_async().await;
+    assert_eq!(meta.max_tokens_backed_down, Some(8192));
+}
+
+#[tokio::test]
+async fn test_anthropic_cap_latch_skips_probe_on_second_call() {
+    // After a back-down, the discovered cap is latched per model for the
+    // session: the next call goes straight out at the latched budget with no
+    // failed-request round trip (meta carries no back-down flag).
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 32768 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-probe-d"}}"#;
+
+    let first = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 32768 })))
+        .with_status(400)
+        .with_body(error_body)
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Hit twice: once by the back-down retry, once by the direct second call.
+    let second = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 4096 })))
+        .with_status(200)
+        .with_body(anthropic_chat_response("latched", 3, 3))
+        .expect(2)
+        .create_async()
+        .await;
+
+    let mut config = anthropic_config(&server.url());
+    config.model_name = "claude-3-opus-probe-d".to_string();
+
+    let (_, _, first_meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    assert_eq!(first_meta.max_tokens_backed_down, Some(4096));
+
+    let (_, _, second_meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    assert_eq!(second_meta.max_tokens_backed_down, None, "second call must skip the probe");
+
+    first.assert_async().await;
+    second.assert_async().await;
+}
+
+#[tokio::test]
+async fn test_anthropic_persistent_over_cap_surfaces_error() {
+    // Loop guard: exactly one back-down per call. A server rejecting even the
+    // backed-down budget (broken proxy) surfaces the error instead of looping.
+    let mut server = mockito::Server::new_async().await;
+
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 32768 > 4096, which is the maximum allowed number of output tokens for claude-broken-proxy-probe-e"}}"#;
+
+    let mock = server
+        .mock("POST", "/messages")
+        .with_status(400)
+        .with_body(error_body)
+        // Exactly 2 requests: the initial ask + the single backed-down retry.
+        .expect(2)
+        .create_async()
+        .await;
+
+    let mut config = anthropic_config(&server.url());
+    config.model_name = "claude-broken-proxy-probe-e".to_string();
+    let err = client::send_chat_completion(&config, "s", "u").await.unwrap_err();
+
+    mock.assert_async().await;
+    assert!(err.to_string().contains("max_tokens"), "expected over-cap error, got: {err}");
+}
+
+#[tokio::test]
+async fn test_anthropic_stop_reason_max_tokens_returns_content() {
+    // stop_reason=max_tokens means the output was truncated by the budget;
+    // the content still parses and returns (the diagnostic goes to stderr).
+    let mut server = mockito::Server::new_async().await;
+
+    let body = r#"{"content":[{"type":"text","text":"partial answer"}],"stop_reason":"max_tokens","usage":{"input_tokens":10,"output_tokens":4096}}"#;
+    let mock =
+        server.mock("POST", "/messages").with_status(200).with_body(body).create_async().await;
+
+    let config = anthropic_config(&server.url());
+    let (content, tokens, meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+
+    mock.assert_async().await;
+    assert_eq!(content, "partial answer");
+    assert_eq!(tokens, 4106);
+    assert_eq!(meta, client::CallMeta::default());
 }
 
 // ── send_chat_completion: Ollama (no API key) ───────────────────────

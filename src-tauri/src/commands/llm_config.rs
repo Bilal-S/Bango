@@ -101,6 +101,11 @@ pub async fn test_llm_connection(
     the flag + show the auto-adjusted toast. */
     match orchestrator.test_connection(&config).await {
         Ok((_, _, meta)) => {
+            /* Anthropic over-cap back-down visibility: explain the adjusted
+            output budget in the success message. */
+            let cap_suffix = meta.max_tokens_backed_down.map_or_else(String::new, |n| {
+                format!(" (model output cap: {n} tokens - request budget adjusted)")
+            });
             if meta.temperature_was_rejected && !config.skip_temperature {
                 /* The client recovered from a temperature-rejection 400.
                 Persist `skip_temperature = true` so future calls skip the
@@ -124,7 +129,7 @@ pub async fn test_llm_connection(
                 Ok(TestConnectionResult {
                     success: true,
                     message: format!(
-                        "Connection successful! (temperature not supported by this model - auto-adjusted){emb_suffix}"
+                        "Connection successful! (temperature not supported by this model - auto-adjusted){cap_suffix}{emb_suffix}"
                     ),
                     embedding_status: emb_status,
                     embedding_model: emb_model,
@@ -138,7 +143,7 @@ pub async fn test_llm_connection(
                 persist_embedding_probe(&db_state, &emb_status, &emb_model, emb_dims);
                 Ok(TestConnectionResult {
                     success: true,
-                    message: format!("Connection successful!{emb_suffix}"),
+                    message: format!("Connection successful!{cap_suffix}{emb_suffix}"),
                     embedding_status: emb_status,
                     embedding_model: emb_model,
                 })

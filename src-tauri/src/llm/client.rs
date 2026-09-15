@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use rand::RngExt;
@@ -118,10 +119,25 @@ struct GooglePartResponse {
 /// is the latest and only non-deprecated API version.
 const ANTHROPIC_VERSION_HEADER: &str = "2023-06-01";
 
-/// The Messages API rejects requests without `max_tokens`. 4096 sits within
-/// every Claude model's output cap (the tightest is 4096), so it is a safe
-/// fixed budget for screening/summary/wiki outputs.
-const ANTHROPIC_MAX_TOKENS: i64 = 4096;
+/// Default output budget REQUESTED from the Messages API (`max_tokens` is a
+/// required field and cannot be omitted). Current Claude models cap output at
+/// 64K-128K tokens, so 32_768 leaves generous headroom for long outputs
+/// (summaries, wiki, translation) while bounding worst-case runaway cost.
+/// `max_tokens` is a ceiling, not a target: short answers stop naturally and
+/// are billed only for tokens actually generated, so the high default never
+/// lengthens or surcharges them.
+const ANTHROPIC_REQUESTED_MAX_TOKENS: i64 = 32_768;
+
+/// Universal-safe fallback output budget: no Claude model rejects 4096 (the
+/// tightest historical cap, claude-3-era models). Used when an over-cap 400
+/// body does not carry a parseable model limit (proxy wording variance).
+const ANTHROPIC_SAFE_MAX_TOKENS: i64 = 4096;
+
+/// Marker sentence Anthropic includes in the 400 body when `max_tokens`
+/// exceeds the model's output limit. Example message:
+/// `max_tokens: 20000 > 4096, which is the maximum allowed number of output
+/// tokens for claude-3-opus-20240229`
+const ANTHROPIC_OVER_CAP_MARKER: &str = "which is the maximum allowed number of output tokens";
 
 #[derive(Debug, Serialize)]
 struct AnthropicRequest {
@@ -149,6 +165,11 @@ struct AnthropicResponse {
     #[serde(default)]
     content: Vec<AnthropicContentBlock>,
     usage: Option<AnthropicUsage>,
+    /// `"max_tokens"` = output truncated by the budget; `"end_turn"` = natural
+    /// stop. Surfaced as a diagnostic log (parity with the OpenAI path's
+    /// `finish_reason == "length"` handling).
+    #[serde(default)]
+    stop_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -264,12 +285,66 @@ const LLM_MAX_BACKOFF_MS: u64 = 10_000;
 /// temperature-rejection 400 by re-issuing with `temperature` omitted. The
 /// orchestrator inspects this to persist `skip_temperature = true`.
 ///
-/// Normal success path returns `CallMeta::default()` (`false`).
+/// When `max_tokens_backed_down` is `Some(n)`, the Anthropic path recovered
+/// from an over-cap `max_tokens` 400 by re-issuing with the model-reported
+/// limit `n` (or the universal-safe fallback). Test Connection surfaces this
+/// so users understand the adjusted budget.
+///
+/// Normal success path returns `CallMeta::default()`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CallMeta {
     /// `true` iff the call recovered from a temperature-rejection 400 by
     /// omitting the `temperature` parameter on retry.
     pub temperature_was_rejected: bool,
+    /// `Some(n)` iff the call recovered from an over-cap `max_tokens` 400 by
+    /// backing down to the model-reported limit `n`.
+    pub max_tokens_backed_down: Option<i64>,
+}
+
+/// Session-scoped cache of per-model discovered Anthropic output caps.
+/// Populated by the over-cap back-down path in `send_anthropic`; keyed by
+/// model name so a mid-session model switch re-probes instead of reusing a
+/// stale cap. Poisoned-lock failures degrade to the uncached default budget
+/// (never crash, mirroring `shared_client`'s degrade philosophy).
+static ANTHROPIC_CAP_CACHE: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+
+/// Look up the latched output cap for a model, if a previous call already
+/// probed it this session.
+fn anthropic_cached_cap(model: &str) -> Option<i64> {
+    let cache = ANTHROPIC_CAP_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    cache.lock().ok()?.get(model).copied()
+}
+
+/// Latch a discovered output cap for a model (best-effort; lock failure is a
+/// no-op, the next call simply re-probes).
+fn anthropic_latch_cap(model: &str, cap: i64) {
+    let cache = ANTHROPIC_CAP_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut map) = cache.lock() {
+        map.insert(model.to_string(), cap);
+    }
+}
+
+/// `true` iff an LLM error string is an Anthropic over-cap `max_tokens` 400.
+/// Two-marker gate (`max_tokens` + the marker sentence from
+/// [`ANTHROPIC_OVER_CAP_MARKER`]) so unrelated 400s (temperature, body shape,
+/// auth) never trigger a back-down retry.
+#[must_use]
+fn is_over_cap_error(msg: &str) -> bool {
+    msg.contains("max_tokens") && msg.contains(ANTHROPIC_OVER_CAP_MARKER)
+}
+
+/// Parse the model-reported output limit out of an over-cap error message:
+/// the number after the `>` in `max_tokens: 32768 > 4096, ...`. Returns
+/// `None` when no positive limit can be extracted (proxy wording variance);
+/// callers then fall back to [`ANTHROPIC_SAFE_MAX_TOKENS`].
+#[must_use]
+fn parse_model_cap(msg: &str) -> Option<i64> {
+    let start = msg.find("max_tokens:")?;
+    let gt = msg[start..].find('>')? + start;
+    let tail = msg[gt + 1..].trim_start();
+    let end = tail.find(|c: char| !c.is_ascii_digit()).unwrap_or(tail.len());
+    let cap: i64 = tail[..end].parse().ok()?;
+    (cap > 0).then_some(cap)
 }
 
 /// Lazily-built shared HTTP client. Reusing one `reqwest::Client` enables
@@ -712,6 +787,13 @@ async fn send_google(
 ///   the `list_models` path).
 /// - `max_tokens` is a required body field; the system prompt is a TOP-LEVEL
 ///   `system` field because the Messages API has no "system" role.
+///
+/// Output-cap capability probe: the first request for a model asks for
+/// [`ANTHROPIC_REQUESTED_MAX_TOKENS`]. Models with a lower cap reject it with
+/// a 400 whose message states the model's true limit; the path then backs
+/// down to the parsed limit ([`ANTHROPIC_SAFE_MAX_TOKENS`] when unparseable),
+/// latches it per model for the rest of the session, and retries once. The
+/// probe therefore costs a single failed request once per model per session.
 async fn send_anthropic(
     config: &LlmConfig,
     system_prompt: &str,
@@ -736,16 +818,98 @@ async fn send_anthropic(
     };
 
     let model_name = config.model_name.clone();
-    /* Owned `String`s so the retry closure (an `Fn`, up to 2 calls) can clone
-    them cheaply into each `async move` block without moving out of the
+    /* Owned `String`s so the retry envelopes (`Fn`, up to 2 calls each) can
+    clone them cheaply into each `async move` block without moving out of the
     captured environment. */
     let system_text = system_prompt.into_owned();
     let user_text = user_prompt.into_owned();
 
-    /* Build + send, then recover from temperature-rejection 400 by retrying
-    with `temp = None`. Same envelope as `send_google`; the closure captures
-    the Anthropic-native request shape. */
-    send_with_temperature_recovery(config.skip_temperature, config.temperature, move |temp| {
+    /* First budget: the latched per-model cap when a previous call already
+    probed this model this session, otherwise the generous default request. */
+    let initial_budget =
+        anthropic_cached_cap(&model_name).unwrap_or(ANTHROPIC_REQUESTED_MAX_TOKENS);
+
+    match anthropic_attempt(
+        client,
+        endpoint.clone(),
+        api_key.clone(),
+        model_name.clone(),
+        system_text.clone(),
+        user_text.clone(),
+        initial_budget,
+        config.skip_temperature,
+        config.temperature,
+    )
+    .await
+    {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            let err_text = format!("{e}");
+            /* Only back down on a genuine over-cap 400, and never when the
+            budget already sits at the safe floor (a 4096 rejection means a
+            broken proxy: fail loudly instead of spinning). */
+            if !is_over_cap_error(&err_text) || initial_budget <= ANTHROPIC_SAFE_MAX_TOKENS {
+                return Err(e);
+            }
+            /* The 400 message states the model's true limit
+            (`max_tokens: 32768 > 4096, which is the maximum allowed ...`).
+            Parse it, fall back to the universal-safe floor when unparseable,
+            and latch per model so later calls skip the probe entirely. */
+            let backed_down = parse_model_cap(&err_text)
+                .map_or(ANTHROPIC_SAFE_MAX_TOKENS, |cap| cap.min(initial_budget));
+            anthropic_latch_cap(&config.model_name, backed_down);
+            eprintln!(
+                "[LlmClient] Anthropic max_tokens {} above model cap; backing down to {backed_down} for this session",
+                initial_budget
+            );
+            /* Exactly one back-down per call: a second over-cap surfaces as-is
+            (loop guard). Merge CallMeta so a temperature recovery inside the
+            second envelope is still visible to the orchestrator. */
+            let (content, total_tokens, meta) = anthropic_attempt(
+                client,
+                endpoint,
+                api_key,
+                model_name,
+                system_text,
+                user_text,
+                backed_down,
+                config.skip_temperature,
+                config.temperature,
+            )
+            .await?;
+            Ok((
+                content,
+                total_tokens,
+                CallMeta {
+                    temperature_was_rejected: meta.temperature_was_rejected,
+                    max_tokens_backed_down: Some(backed_down),
+                },
+            ))
+        }
+    }
+}
+
+/// One full Anthropic send envelope at a given output `budget`: build + send,
+/// then recover from temperature-rejection 400 by retrying with `temp = None`
+/// (same envelope as `send_google`; the closure captures the Anthropic-native
+/// request shape). Split out of `send_anthropic` so the over-cap back-down can
+/// re-run the whole envelope with a lower budget.
+//
+// Nine parameters keep every input owned/copyable; bundling them into a struct
+// would add ceremony without reuse elsewhere.
+#[allow(clippy::too_many_arguments)]
+async fn anthropic_attempt(
+    client: &'static reqwest::Client,
+    endpoint: String,
+    api_key: String,
+    model_name: String,
+    system_text: String,
+    user_text: String,
+    budget: i64,
+    skip_temperature: bool,
+    temperature: f64,
+) -> Result<(String, usize, CallMeta), AppError> {
+    send_with_temperature_recovery(skip_temperature, temperature, move |temp| {
         // Clone per-call: the outer closure is `Fn` (up to 2 calls), so each
         // invocation must produce its own owned strings.
         let model_name = model_name.clone();
@@ -756,7 +920,7 @@ async fn send_anthropic(
         async move {
             let request = AnthropicRequest {
                 model: model_name,
-                max_tokens: ANTHROPIC_MAX_TOKENS,
+                max_tokens: budget,
                 messages: vec![AnthropicMessage { role: "user", content: user_text }],
                 system: if system_text.is_empty() { None } else { Some(system_text) },
                 temperature: temp,
@@ -770,6 +934,14 @@ async fn send_anthropic(
             let body_text = send_with_retry(&builder, "Anthropic").await?;
             let anthropic_response: AnthropicResponse = serde_json::from_str(&body_text)
                 .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
+            /* Surface budget truncation: `max_tokens` means the server hit
+            the output-token budget before the model finished (parity with
+            the OpenAI path's `finish_reason == "length"` log). */
+            if anthropic_response.stop_reason.as_deref() == Some("max_tokens") {
+                eprintln!(
+                    "[LlmClient] Anthropic response truncated by output-token budget (stop_reason=max_tokens); content may be incomplete"
+                );
+            }
             /* Join every text block: multi-block responses interleave text
             with non-text blocks (`tool_use`, `thinking`) that carry no
             `text` field and are skipped. */
@@ -932,7 +1104,11 @@ where
                 "[LlmClient] temperature rejected by model; retrying without temperature parameter"
             );
             match make_request(None).await {
-                Ok(tuple) => Ok((tuple.0, tuple.1, CallMeta { temperature_was_rejected: true })),
+                Ok(tuple) => Ok((
+                    tuple.0,
+                    tuple.1,
+                    CallMeta { temperature_was_rejected: true, ..CallMeta::default() },
+                )),
                 // Surface the ORIGINAL (temperature) error: it carries the
                 // actionable diagnostic. The second failure is likely unrelated.
                 Err(_) => Err(e),
@@ -1127,6 +1303,46 @@ mod tests {
     }
 
     // ── is_temperature_error ─────────────────────────────────────────
+
+    // ── is_over_cap_error / parse_model_cap ─────────────────────────
+
+    #[test]
+    fn is_over_cap_error_matches_production_body() {
+        // The exact body shape from the Anthropic API (claude-3-era cap).
+        let msg = r#"LLM request failed (400 Bad Request): {"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 20000 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229"}}"#;
+        assert!(is_over_cap_error(msg));
+    }
+
+    #[test]
+    fn is_over_cap_error_rejects_unrelated_bodies() {
+        assert!(!is_over_cap_error(
+            "LLM request failed (400 Bad Request): temperature does not support 0.2 with this model."
+        ));
+        assert!(!is_over_cap_error("LLM request failed (401 Unauthorized): Incorrect API key"));
+        // Mentions max_tokens but not the marker sentence.
+        assert!(!is_over_cap_error(
+            "LLM request failed (400 Bad Request): max_tokens: field required"
+        ));
+    }
+
+    #[test]
+    fn parse_model_cap_extracts_reported_limit() {
+        let msg = r#"max_tokens: 32768 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229"#;
+        assert_eq!(parse_model_cap(msg), Some(4096));
+        let msg_8k = "max_tokens: 32768 > 8192, which is the maximum allowed number of output tokens for claude-3-5-sonnet";
+        assert_eq!(parse_model_cap(msg_8k), Some(8192));
+    }
+
+    #[test]
+    fn parse_model_cap_returns_none_when_unparseable() {
+        // Marker sentence present but no `> N` comparison (reworded proxy error).
+        assert_eq!(
+            parse_model_cap("max_tokens: value above the limit, which is the maximum allowed number of output tokens"),
+            None
+        );
+        // No max_tokens mention at all.
+        assert_eq!(parse_model_cap("temperature does not support 0.2"), None);
+    }
 
     #[test]
     fn is_temperature_error_matches_openai_unsupported_value_body() {

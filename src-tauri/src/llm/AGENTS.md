@@ -168,20 +168,33 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
   matches the `list_models` path).
 - **Body**: `system` prompt is a TOP-LEVEL field (the Messages API has no
   `"system"` role in `messages`), a single `user` message, and the REQUIRED
-  `max_tokens` field fixed at `ANTHROPIC_MAX_TOKENS = 4096` (within every
-  Claude model's output cap; the tightest is 4096).
+  `max_tokens` field. Output-cap capability probe: requests ask for
+  `ANTHROPIC_REQUESTED_MAX_TOKENS = 32_768` first; an over-cap 400 (whose
+  message states the model's true limit, `max_tokens: N > M, which is the
+  maximum allowed...`) backs down to the parsed `M`, falls back to
+  `ANTHROPIC_SAFE_MAX_TOKENS = 4096` when unparseable, latches the cap per
+  model name in `ANTHROPIC_CAP_CACHE` (session-scoped), and retries exactly
+  once (a second over-cap surfaces as-is - loop guard). Back-downs surface
+  via `CallMeta.max_tokens_backed_down`, which Test Connection appends to its
+  success message.
 - **Response**: text is the concatenation of every `type: "text"` content
   block (non-text blocks like `tool_use` carry no `text` and are skipped);
   the token total is `usage.input_tokens + usage.output_tokens`. Empty text
-  surfaces the standard `No response from LLM` error.
-- Temperature-rejection recovery applies unchanged (the path wraps in
-  `send_with_temperature_recovery` like the others).
+  surfaces the standard `No response from LLM` error. `stop_reason ==
+  "max_tokens"` logs a truncation diagnostic (parity with the OpenAI path's
+  `finish_reason == "length"` handling).
+- Temperature-rejection recovery applies unchanged inside every envelope
+  (`send_with_temperature_recovery` via `anthropic_attempt`); a recovery in
+  the backed-down envelope still sets `CallMeta.temperature_was_rejected`.
 - Frontend complement: `src/utils/llm-error.ts` maps `anthropic-version`
   errors to the `anthropic-version-missing` troubleshooting anchor
   (`help-tab-troubleshooting.vue`) for Custom endpoints proxied to Anthropic.
-- Tested in `tests/llm/llm_client_test.rs` (7 tests: required headers, native
+- Tested in `tests/llm/llm_client_test.rs` (13 tests: required headers, native
   request shape, multi-block join, missing API key, direct `/messages`
-  endpoint, empty content, temperature recovery).
+  endpoint, empty content, temperature recovery, back-down to reported cap,
+  unparseable-body 4096 fallback, reported-8192 win, per-model latch,
+  persistent-over-cap loop guard, stop_reason truncation) plus inline units
+  for `is_over_cap_error` / `parse_model_cap`.
 
 ### Embeddings (`embedding.rs` + `orchestrator.rs`)
 
@@ -284,10 +297,10 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
 
 ## Verification
 
-- `cargo test --lib llm::client::tests` - 16 inline unit tests covering
-  `normalize_llm_text`, `is_retryable_response`, `calculate_backoff`, and
-  `is_temperature_error`.
-- `cargo test --test llm_client_test` - 49 integration tests against a mockito
+- `cargo test --lib llm::client::tests` - 20 inline unit tests covering
+  `normalize_llm_text`, `is_retryable_response`, `calculate_backoff`,
+  `is_temperature_error`, `is_over_cap_error`, and `parse_model_cap`.
+- `cargo test --test llm` - 55 integration tests against a mockito
   HTTP server, including:
   - `test_openai_insufficient_permissions_403_is_retried_then_succeeds`
     (regression for the Windows-only intermittent gateway error),
@@ -298,9 +311,12 @@ OpenAI-compatible). Routing an OpenAI-shaped body to
     `test_openai_temperature_400_with_skip_temperature_true_does_not_retry`,
     `test_openai_nontemperature_400_does_not_retry`,
     `test_openai_success_returns_default_callmeta`),
-  - 7 native Anthropic Messages API tests (headers, request shape,
+  - 13 native Anthropic Messages API tests (headers, request shape,
     multi-block join, missing key, direct endpoint, empty content,
-    temperature recovery - see the Anthropic path contract above).
+    temperature recovery, over-cap back-down to reported limit,
+    unparseable-body 4096 fallback, reported-8192 win, per-model cap latch,
+    persistent-over-cap loop guard, stop_reason truncation - see the
+    Anthropic path contract above).
 - `cargo test --test llm_orchestrator_test` - 40 orchestrator tests including 2
   temperature-persistence tests (`temperature_persister_fires_on_recovery`,
   `temperature_persister_does_not_fire_on_normal_success`), 1 in-session
