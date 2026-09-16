@@ -1,13 +1,11 @@
 //! Integration tests for the Citation Finder search pipeline's public surface.
 //!
-//! The async `find_citations_inner` entry point depends on a live Tauri
-//! `State<DbState>` + `AppHandle`, so it cannot be driven directly from a
-//! `#[test]` (same constraint documented in `tests/embedding/embedding_runner_test.rs`).
-//! Instead, the pipeline's testable decisions live in pure helpers:
-//! - `normalize_claim_key` (the drift-tolerant claim lookup key) - tested here
-//!   + in `search.rs` inline.
-//! - `merge_outputs`, `pool_finalists` - private, covered by the inline
-//!   `#[cfg(test)] mod tests` in `search.rs`.
+//! `normalize_claim_key` (the drift-tolerant claim lookup key) - tested here
+//! + in `search.rs` inline. `merge_outputs`, `pool_finalists`, and
+//! `cosine_best_chunk` are private, covered by the inline `#[cfg(test)] mod
+//! tests` in `search.rs`. The full pipeline (including these helpers) is
+//! driven end-to-end by `citation_finder_pipeline_test.rs` via the
+//! `run_phase_c` + mock-sender seam.
 //!
 //! This file exists so the binding test-inventory (`docs/test-plans/citation-
 //! finder-tests.md`) has a machine-parseable `path::fn` row pointing at the

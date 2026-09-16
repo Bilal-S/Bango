@@ -3,9 +3,13 @@
 ## Purpose
 
 Paste-prose-to-citations matching over the user's article library. Three-layer
-pipeline: embedding prefilter (reuses `embedding::recall`) → token-containment
-passage extraction (pure) → LLM classification (validating/opposing +
-`misrepresents_source` + cosine confidence).
+pipeline: embedding prefilter (reuses `embedding::recall`, hits carry the
+winning row's `chunk_index` provenance) → token-containment passage-evidence
+selection (pure; containment-best chunk, cosine-best chunk fallback for
+paraphrased claims, abstract fallback; abstract attached as prompt context) →
+LLM classification (validating/opposing + `misrepresents_source` + cosine
+confidence). A funnel-counts progress event closes every search so dropped
+candidates are observable, not silent.
 
 Two modes: **whole-block** (one embedding, one result set) and **per-statement**
 (LLM splits prose into ≤5 claims; each claim is embedded + matched
@@ -190,6 +194,43 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
   but is NOT the gate. Pinned by `containment_exact_quote_in_long_chunk_is_one`
   + `jaccard_diluted_by_long_chunk_exact_quote` in
   `tests/citation_finder/citation_finder_similarity_test.rs`.
+- **Passage evidence is 3-tier, first match wins** (`build_claim_work`):
+  (1) containment-best chunk (gate 0.3); (2) the cosine-best chunk resolved
+  from the recall hit's `chunk_index` provenance - an embedding-vouched
+  fallback for paraphrased claims whose vocabulary does not overlap at all
+  (e.g. "decline in consumption" vs "reduction in household purchasing"),
+  which may carry a sub-gate containment score; (3) the gated title+abstract.
+  Stale `chunk_index` after a re-chunk can point at the wrong chunk of the
+  right article - acceptable (still real evidence; `cosine_best_chunk`
+  range-checks and returns `None` for out-of-range / `-1` rows). Pinned by
+  `cosine_best_chunk_*` (inline) +
+  `paraphrased_claim_falls_back_to_cosine_chunk` (E2E).
+- **Abstract context rides with chunk passages**: whenever the primary
+  passage is a chunk, `title + "\n\n" + abstract` is attached to the prompt
+  candidate as `- abstract (article summary, extra context for judging
+  relevance):` so the classifier sees the paper's thesis even when the best
+  chunk is a Methods fragment. Abstract-primary candidates omit the line
+  (their passage already IS the abstract). `justifying_sentences` ground
+  against passage + abstract. Pinned by
+  `whole_block_prompt_renders_abstract_context` +
+  `merge_grounds_against_abstract_context` + the `sdil_claim_*` E2E tests.
+- **Finalist pool is a union ranking** (`pool_finalists`): top
+  `FINALISTS_BY_CONTAINMENT` (15) by best containment, plus up to
+  `FINALISTS_BY_COSINE` (5) top-cosine articles not already included, capped
+  at `FINALISTS_MAX` (20). Containment-only truncation let lexically-similar
+  articles evict semantically-right ones on paraphrased claims. Per-claim
+  passages are FILTERED to the finalist set before prompt building (prompt
+  hygiene: the LLM never sees candidates that cannot survive
+  `merge_outputs`' metadata check). Pinned by `pool_finalists_*` (inline) +
+  `cosine_union_keeps_semantically_strong_finalist` (E2E).
+- **Funnel transparency**: every search's final `citation:progress` event
+  carries `funnel: CitationFunnel { recalled, passage_survivors, finalists,
+  classified, dropped_unrelated }` (serde camelCase, `Option` +
+  skip-if-none on `CitationFinderProgress`) and a summary message
+  ("Reviewed N candidates: X matched, Y not related"). Empty recall emits a
+  zero-funnel event. Previously an `unrelated` classification vanished with
+  no trace, leaving "why isn't my article here?" unanswerable. The TS mirror
+  (`src/types/citation-finder.ts` `CitationFunnel`) must stay in sync.
 - **`ArticleBest::cosine` seeds at `f32::NEG_INFINITY`** (NOT `Default =
   0.0`), mirroring `embedding::recall::recall`'s own max-pool, so a hit with a
   negative cosine is recorded as the article's best score instead of being
@@ -208,6 +249,12 @@ prefilter + prepare) and `screening/` (whose `RunSyncContext` pattern inspired
 - **`CitationLlmSender` trait** (injectable, mirrors `EmbeddingBatchSender`):
   production `HttpCitationLlmSender` wraps `Arc<LlmOrchestrator>` +
   `AppHandle`; tests inject a fake.
+- **`run_phase_c` is the `&DbState` Phase-C core** (NOT Tauri `State`), so
+  integration tests drive the full pipeline (recall mock → passage evidence →
+  pool → prompt → classify → merge → funnel) against a seeded temp DB -
+  `tests/citation_finder/citation_finder_pipeline_test.rs`. `find_citations_inner`
+  keeps the `State` + `AppHandle`-bound Phases A/B and delegates Phase C to
+  `run_phase_c(db_state.inner(), ...)`.
 - **`FindCitationsContext`** bundles `text + mode + status_filter +
   cancel_token + emit_progress + app_handle` so `find_citations_inner` stays
   under the clippy `too_many_arguments` threshold (mirrors screening's
@@ -266,15 +313,21 @@ external test.
 
 - `cargo test --lib citation_finder` - the inline `search.rs` tests
   (`normalize_claim_key`, `merge_outputs` whole-block + per-statement +
-  drift-tolerance + drop paths + cosine-normalization edge cases,
-  `pool_finalists` dedup/truncate/empty).
+  drift-tolerance + drop paths + cosine-normalization edge cases +
+  abstract-context grounding, `pool_finalists` dedup/truncate/union-cap/
+  passage-filter/empty, `cosine_best_chunk` provenance resolution).
+- `cargo test --test citation_finder` - includes the E2E pipeline suite
+  (`citation_finder_pipeline_test.rs`: SDIL reproduction, paraphrase
+  cosine-chunk fallback, unrelated-drop funnel visibility, finalist-union
+  rescue, per-statement grouping, empty-recall funnel).
 - `cargo test --test citation_finder_similarity_test` - containment +
   Jaccard (failure-mode pin) + `find_best_passage` + tokenizer edge cases.
 - `cargo test --test citation_finder_prompt_test` - system-prompt shape,
-  whole-block/per-statement structure, metadata render, `parse_classification`,
-  `CitationLlmOutput` deserialization (camelCase alias + snake_case canonical
-  + mixed-case), and `parse_citation_outputs` lenient parsing (bare array,
-  object wrappers, per-element fault isolation, bug-report regression).
+  whole-block/per-statement structure, metadata render, abstract-context
+  render, `parse_classification`, `CitationLlmOutput` deserialization
+  (camelCase alias + snake_case canonical + mixed-case), and
+  `parse_citation_outputs` lenient parsing (bare array, object wrappers,
+  per-element fault isolation, bug-report regression).
 - `cargo test --test citation_finder_claim_split_test` - `enforce_max_claims`
   truncation/trim/drop + prompt builder.
 - `cargo test --test citation_finder_readiness_test` - `coverage_percentage`
@@ -283,8 +336,8 @@ external test.
   whitelist contract.
 - `cargo test --test citation_finder_search_test` - the public
   `normalize_claim_key` pipeline contract (external pin).
-- `cargo test --test embedding_recall_multistatus_test` - the multi-status
-  prefilter extension.
+- `cargo test --test embedding` - the multi-status prefilter extension +
+  `pool_hits` max-pool chunk-provenance tests.
 - `cargo clippy --lib -- -D warnings` - clean (the project gate).
 - `cargo fmt --check` - clean.
 - Frontend: `npx vitest run src/__tests__/composables/use-citation-finder.test.ts

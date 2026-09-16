@@ -34,6 +34,23 @@ fn passage(
         claim: claim.map(str::to_string),
         passage: passage.to_string(),
         section: section.map(str::to_string),
+        abstract_text: None,
+    }
+}
+
+fn passage_with_abstract(
+    id: &str,
+    claim: Option<&str>,
+    passage: &str,
+    section: Option<&str>,
+    abstract_text: &str,
+) -> CandidatePassage {
+    CandidatePassage {
+        article_id: id.to_string(),
+        claim: claim.map(str::to_string),
+        passage: passage.to_string(),
+        section: section.map(str::to_string),
+        abstract_text: Some(abstract_text.to_string()),
     }
 }
 
@@ -109,6 +126,49 @@ fn whole_block_prompt_omits_metadata_lines_when_article_absent_from_map() {
     assert!(prompt.contains("article_id: ghost"));
     assert!(!prompt.contains("title:"));
     assert!(!prompt.contains("authors:"));
+}
+
+#[test]
+fn whole_block_prompt_renders_abstract_context() {
+    // P1.5: full-text candidates carry the abstract as extra context so the
+    // classifier sees the paper's thesis even when the best passage is a
+    // Methods fragment. Abstract-only candidates (abstract_text: None) omit
+    // the line (their passage already IS the abstract).
+    let passages = vec![
+        passage_with_abstract(
+            "a1",
+            None,
+            "Segmented regression models were fitted to monthly series.",
+            Some("Methods"),
+            "Title a1\n\nThe sugar tax reduced purchases of sugary drinks.",
+        ),
+        passage("a2", None, "Title a2\n\nAbstract-only body text.", Some("Abstract")),
+    ];
+    let metadata = one_meta_map(&["a1", "a2"]);
+    let prompt = build_whole_block_prompt("claim text", &passages, &metadata);
+
+    let a1_block_start = prompt.find("article_id: a1").expect("a1 candidate");
+    let a2_block_start = prompt.find("article_id: a2").expect("a2 candidate");
+    let a1_block = &prompt[a1_block_start..a2_block_start];
+    let a2_block = &prompt[a2_block_start..];
+
+    assert!(
+        a1_block.contains("- abstract (article summary, extra context for judging relevance):"),
+        "chunk-backed candidate carries the abstract context"
+    );
+    assert!(
+        a1_block.contains("The sugar tax reduced purchases of sugary drinks."),
+        "abstract text rendered"
+    );
+    // The abstract line comes AFTER the passage line (passage stays primary).
+    let passage_pos = a1_block.find("- passage:").expect("passage line");
+    let abstract_pos = a1_block.find("- abstract (article summary").expect("abstract line");
+    assert!(passage_pos < abstract_pos, "passage precedes the abstract context");
+
+    assert!(
+        !a2_block.contains("- abstract (article summary"),
+        "abstract-primary candidate omits the duplicate abstract line"
+    );
 }
 
 // ── build_per_statement_prompt ───────────────────────────────────────────

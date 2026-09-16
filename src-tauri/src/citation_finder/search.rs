@@ -23,10 +23,10 @@ use super::prompt::{
     CITATION_FINDER_SYSTEM_PROMPT,
 };
 use super::readiness::compute_readiness;
-use super::similarity::{find_best_passage, tokenize_and_stem};
+use super::similarity::{containment, find_best_passage, tokenize_and_stem, MIN_PASSAGE_SCORE};
 use crate::citation_finder::{
-    filter_valid_statuses, CitationFinderMode, CitationFinderProgress, CitationMatch,
-    CitationResult,
+    filter_valid_statuses, CitationFinderMode, CitationFinderProgress, CitationFunnel,
+    CitationMatch, CitationResult,
 };
 use crate::db::article_repo;
 use crate::db::chunk_repo;
@@ -37,6 +37,7 @@ use crate::embedding::recall::{self, EmbeddingHit};
 use crate::embedding::runner::{generate_embeddings_inner, EmbeddingBatchSender};
 use crate::error::AppError;
 use crate::llm::orchestrator::{LlmOrchestrator, LlmRequestType};
+use crate::utils::chunking::Chunk;
 
 /// Injectable sender trait (mirrors `EmbeddingBatchSender`).
 #[async_trait::async_trait]
@@ -123,13 +124,33 @@ impl CitationLlmSender for HttpCitationLlmSender {
     }
 }
 
+/// One passage-evidence entry per surviving article (per claim). Exactly one
+/// entry per (article, claim): the primary passage plus optional abstract
+/// context for the LLM.
+struct PassageEvidence {
+    article_id: String,
+    /// Primary passage shown to the LLM and quoted in the result card:
+    /// the containment-best chunk, else the cosine-best chunk (embedding-
+    /// vouched fallback), else the abstract.
+    passage: String,
+    section: Option<String>,
+    /// Containment score of `passage`. May be < `MIN_PASSAGE_SCORE` for the
+    /// cosine-chunk fallback (the embedding layer vouches for relevance);
+    /// finalist ranking treats such articles accordingly.
+    score: f64,
+    /// Abstract context (`title + "\n\n" + abstract`) attached when `passage`
+    /// is a chunk so the classifier also sees the paper's thesis. `None`
+    /// when `passage` already is the abstract.
+    abstract_text: Option<String>,
+}
+
 /// One input claim: text + recall hits + per-candidate best passage.
 struct ClaimWork {
     text: String,
     hits: Vec<EmbeddingHit>,
-    /// (article_id, passage, section, containment_score) per hit with a usable
-    /// passage. Articles below `MIN_PASSAGE_SCORE` are absent.
-    passages: Vec<(String, String, Option<String>, f64)>,
+    /// One `PassageEvidence` per hit article with usable evidence. Articles
+    /// where no chunk, cosine chunk, or abstract cleared the gate are absent.
+    passages: Vec<PassageEvidence>,
 }
 
 /// Pooled finalists across claims: union of article IDs + per-claim passages.
@@ -187,6 +208,7 @@ pub async fn find_citations_inner(
             message: "No articles match the selected filters.".to_string(),
             is_running: false,
             is_cancelled: false,
+            funnel: None,
         });
         return Ok(vec![CitationResult { claim: None, matches: vec![] }]);
     }
@@ -215,6 +237,7 @@ pub async fn find_citations_inner(
             ),
             is_running: true,
             is_cancelled: false,
+            funnel: None,
         });
         // Reuse the embedding runner. The director's `EmbeddingScope.status_filter`
         // is `Option<String>` (single comma-joined value), matching the existing
@@ -257,25 +280,47 @@ pub async fn find_citations_inner(
     // ═══════════════════════════════════════════════════════════════════
     //  Phase C: search pipeline
     // ═══════════════════════════════════════════════════════════════════
+    run_phase_c(
+        db_state.inner(),
+        &text,
+        mode,
+        &status_filter,
+        &llm_sender,
+        &cancel_token,
+        emit_progress,
+    )
+    .await
+}
+
+/// Phase C search core: claim-split (per-statement only) → recall → passage
+/// evidence → LLM classify → merge into `CitationResult[]`.
+///
+/// Takes `&DbState` (NOT Tauri `State`) so integration tests can drive the
+/// full pipeline with mock senders against a seeded temp DB
+/// (`tests/citation_finder/citation_finder_pipeline_test.rs`). Phases A/B
+/// need the `AppHandle` for config reads + event emission and stay in
+/// [`find_citations_inner`].
+pub async fn run_phase_c(
+    db_state: &DbState,
+    text: &str,
+    mode: CitationFinderMode,
+    status_filter: &[String],
+    llm_sender: &Arc<dyn CitationLlmSender>,
+    cancel_token: &Arc<AtomicBool>,
+    emit_progress: &(dyn Fn(CitationFinderProgress) + Send + Sync),
+) -> Result<Vec<CitationResult>, AppError> {
     match mode {
         CitationFinderMode::WholeBlock => {
-            run_whole_block(
-                &text,
-                &status_filter,
-                &llm_sender,
-                db_state,
-                &cancel_token,
-                emit_progress,
-            )
-            .await
+            run_whole_block(text, status_filter, llm_sender, db_state, cancel_token, emit_progress)
+                .await
         }
         CitationFinderMode::PerStatement => {
             run_per_statement(
-                &text,
-                &status_filter,
-                &llm_sender,
+                text,
+                status_filter,
+                llm_sender,
                 db_state,
-                &cancel_token,
+                cancel_token,
                 emit_progress,
             )
             .await
@@ -288,7 +333,7 @@ async fn run_whole_block(
     text: &str,
     status_filter: &[String],
     llm_sender: &Arc<dyn CitationLlmSender>,
-    db_state: &State<'_, DbState>,
+    db_state: &DbState,
     cancel_token: &Arc<AtomicBool>,
     emit_progress: &(dyn Fn(CitationFinderProgress) + Send + Sync),
 ) -> Result<Vec<CitationResult>, AppError> {
@@ -299,6 +344,13 @@ async fn run_whole_block(
         return Err(AppError::Import("Cancelled".to_string()));
     }
     if hits.is_empty() {
+        /* Empty recall is also a funnel outcome (embedding miss, empty pool,
+        or a swallowed embedding-API error) - report it instead of returning
+        silently. */
+        emit_funnel_progress(
+            emit_progress,
+            CitationFunnel { recalled: 0, ..CitationFunnel::default() },
+        );
         return Ok(vec![CitationResult { claim: None, matches: vec![] }]);
     }
 
@@ -313,16 +365,17 @@ async fn run_whole_block(
     let finalists = pool_finalists(vec![work]);
     let metadata = load_metadata(db_state, &finalists.article_ids).await?;
     /* Build one CandidatePassage per finalist (best passage per article).
-    Inlined here (mirrors per-statement path) — one passage-building pattern. */
+    Inlined here (mirrors per-statement path) - one passage-building pattern. */
     let passages: Vec<CandidatePassage> = finalists
         .per_claim
         .iter()
         .flat_map(|w| {
-            w.passages.iter().map(|(aid, passage, section, _score)| CandidatePassage {
-                article_id: aid.clone(),
+            w.passages.iter().map(|ev| CandidatePassage {
+                article_id: ev.article_id.clone(),
                 claim: None,
-                passage: passage.clone(),
-                section: section.clone(),
+                passage: ev.passage.clone(),
+                section: ev.section.clone(),
+                abstract_text: ev.abstract_text.clone(),
             })
         })
         .collect();
@@ -339,6 +392,7 @@ async fn run_whole_block(
         .map_err(|e| AppError::Import(format!("Citation Finder LLM returned invalid JSON: {e}")))?;
 
     let matches = merge_outputs(&llm_outputs, &finalists, &metadata, None);
+    emit_funnel_progress(emit_progress, funnel_from(&finalists, &llm_outputs, matches.len()));
     Ok(vec![CitationResult { claim: None, matches }])
 }
 
@@ -348,7 +402,7 @@ async fn run_per_statement(
     text: &str,
     status_filter: &[String],
     llm_sender: &Arc<dyn CitationLlmSender>,
-    db_state: &State<'_, DbState>,
+    db_state: &DbState,
     cancel_token: &Arc<AtomicBool>,
     emit_progress: &(dyn Fn(CitationFinderProgress) + Send + Sync),
 ) -> Result<Vec<CitationResult>, AppError> {
@@ -393,12 +447,13 @@ async fn run_per_statement(
     // multiple claims gets multiple entries.
     let mut passages: Vec<CandidatePassage> = Vec::new();
     for per_claim in &finalists.per_claim {
-        for (article_id, passage, section, _score) in &per_claim.passages {
+        for ev in &per_claim.passages {
             passages.push(CandidatePassage {
-                article_id: article_id.clone(),
+                article_id: ev.article_id.clone(),
                 claim: Some(per_claim.text.clone()),
-                passage: passage.clone(),
-                section: section.clone(),
+                passage: ev.passage.clone(),
+                section: ev.section.clone(),
+                abstract_text: ev.abstract_text.clone(),
             });
         }
     }
@@ -416,10 +471,13 @@ async fn run_per_statement(
 
     // Group LLM outputs by claim.
     let mut results: Vec<CitationResult> = Vec::with_capacity(claims.len());
+    let mut classified_total = 0usize;
     for claim in &claims {
         let matches = merge_outputs(&llm_outputs, &finalists, &metadata, Some(claim));
+        classified_total += matches.len();
         results.push(CitationResult { claim: Some(claim.clone()), matches });
     }
+    emit_funnel_progress(emit_progress, funnel_from(&finalists, &llm_outputs, classified_total));
     Ok(results)
 }
 
@@ -448,8 +506,26 @@ pub fn normalize_claim_key(claim: &str) -> String {
     out
 }
 
-/// Build one `ClaimWork`: load chunks per article, run
-/// `find_best_passage`, drop articles below `MIN_PASSAGE_SCORE`.
+/// Build one `ClaimWork`: per recall hit, select passage evidence and drop
+/// articles with none.
+///
+/// Evidence selection per article (first match wins):
+/// 1. **Containment-best chunk** - `find_best_passage` over full-text chunks,
+///    gated at `MIN_PASSAGE_SCORE` (0.3).
+/// 2. **Cosine-best chunk fallback** - when no chunk clears the containment
+///    gate but the recall hit carries chunk provenance (`EmbeddingHit.chunk_index`),
+///    that chunk is used with its (possibly low) containment score. The
+///    embedding layer vouches for semantic relevance where lexical overlap
+///    fails (paraphrased claims). Caveat: stale chunk indexes after a
+///    re-chunk can point elsewhere in the paper - acceptable, it is still a
+///    real chunk of the right article and the abstract context mitigates.
+/// 3. **Abstract** - `title + "\n\n" + abstract` gated at `MIN_PASSAGE_SCORE`
+///    (abstract-only articles, or full-text articles whose chunks and abstract
+///    both fail lexically but... only when 1 and 2 found nothing).
+///
+/// The abstract is additionally attached as `abstract_text` context whenever
+/// the primary passage is a chunk, so the classifier always sees the paper's
+/// thesis sentence.
 ///
 /// **Lock discipline**: brief `lock_conn` per article, releasing between.
 /// `tokio::task::yield_now()` between articles prevents mutex starvation
@@ -458,41 +534,83 @@ async fn build_claim_work(
     user_tokens: &[String],
     claim_text: &str,
     hits: Vec<EmbeddingHit>,
-    db_state: &State<'_, DbState>,
+    db_state: &DbState,
 ) -> Result<ClaimWork, AppError> {
-    let mut passages: Vec<(String, String, Option<String>, f64)> = Vec::new();
+    let mut passages: Vec<PassageEvidence> = Vec::new();
     for hit in &hits {
-        /* Brief lock burst per article: read chunks (synthesize abstract
-        fallback if needed), then release. */
+        /* Brief lock burst per article: read chunks + article (abstract),
+        select evidence, then release. */
         let best = {
             let conn = lock_conn(&db_state.conn)?;
             let chunks = chunk_repo::list_chunks_for_article(&conn, &hit.article_id)?;
+            let article = article_repo::get_article_by_id(&conn, &hit.article_id)?;
+            let abstract_text = if article.abstract_text.trim().is_empty() {
+                None
+            } else {
+                Some(format!("{}\n\n{}", article.title.trim(), article.abstract_text.trim()))
+            };
             if chunks.is_empty() {
-                // Abstract-only article: synthesize a chunk from the abstract
-                // with section: Some("Abstract") (`citation_finder/AGENTS.md`).
-                let article = article_repo::get_article_by_id(&conn, &hit.article_id)?;
-                let text = if article.abstract_text.is_empty() {
-                    article.title.clone()
-                } else {
-                    format!("{}\n\n{}", article.title, article.abstract_text)
-                };
+                // Abstract-only article: the title(+abstract) text IS the passage.
+                let text = abstract_text.clone().unwrap_or_else(|| article.title.clone());
                 let tokens = tokenize_and_stem(&text);
                 /* Containment (query coverage), NOT Jaccard: the abstract is
                 typically much longer than the query, so Jaccard would be
                 diluted and drop exact-quote matches. Containment is
                 length-insensitive on the document side. */
-                let score = super::similarity::containment(user_tokens, &tokens);
-                if score < super::similarity::MIN_PASSAGE_SCORE {
+                let score = containment(user_tokens, &tokens);
+                if score < MIN_PASSAGE_SCORE {
                     None
                 } else {
-                    Some((text, Some("Abstract".to_string()), score))
+                    Some(PassageEvidence {
+                        article_id: hit.article_id.clone(),
+                        passage: text,
+                        section: Some("Abstract".to_string()),
+                        score,
+                        abstract_text: None,
+                    })
                 }
             } else {
-                find_best_passage(user_tokens, &chunks)
+                // 1) Containment-best chunk (gate 0.3).
+                let by_containment = find_best_passage(user_tokens, &chunks);
+                if let Some((passage, section, score)) = by_containment {
+                    Some(PassageEvidence {
+                        article_id: hit.article_id.clone(),
+                        passage,
+                        section,
+                        score,
+                        abstract_text: abstract_text.clone(),
+                    })
+                } else if let Some(chunk) = cosine_best_chunk(hit, &chunks) {
+                    // 2) Cosine-best chunk fallback (embedding-vouched).
+                    let score = containment(user_tokens, &tokenize_and_stem(&chunk.text));
+                    Some(PassageEvidence {
+                        article_id: hit.article_id.clone(),
+                        passage: chunk.text.clone(),
+                        section: chunk.section.clone(),
+                        score,
+                        abstract_text: abstract_text.clone(),
+                    })
+                } else if let Some(abs) = abstract_text {
+                    // 3) Abstract fallback (gated).
+                    let score = containment(user_tokens, &tokenize_and_stem(&abs));
+                    if score < MIN_PASSAGE_SCORE {
+                        None
+                    } else {
+                        Some(PassageEvidence {
+                            article_id: hit.article_id.clone(),
+                            passage: abs,
+                            section: Some("Abstract".to_string()),
+                            score,
+                            abstract_text: None,
+                        })
+                    }
+                } else {
+                    None
+                }
             }
         };
-        if let Some((passage, section, score)) = best {
-            passages.push((hit.article_id.clone(), passage, section, score));
+        if let Some(evidence) = best {
+            passages.push(evidence);
         }
         // Yield between articles so the runtime can flush `citation:progress`
         // events and queued IPC commands get a turn at the mutex.
@@ -501,30 +619,104 @@ async fn build_claim_work(
     Ok(ClaimWork { text: claim_text.to_string(), hits, passages })
 }
 
-/// Union the article IDs across works + keep the per-claim passages. Top-N
-/// (15) by the best containment score across the pool.
+/// Resolve the cosine-best chunk for a recall hit: `EmbeddingHit.chunk_index`
+/// mapped into the article's current chunk list. Returns `None` for the
+/// title+abstract row (`-1`), missing provenance, or out-of-range indexes
+/// (stale rows after a re-chunk). Pure.
+fn cosine_best_chunk<'a>(hit: &EmbeddingHit, chunks: &'a [Chunk]) -> Option<&'a Chunk> {
+    let idx = hit.chunk_index?;
+    if idx < 0 {
+        return None; // title+abstract row, not a chunk
+    }
+    let idx = usize::try_from(idx).ok()?;
+    chunks.get(idx)
+}
+
+/// Finalist-pool caps. Containment keeps its historical 15 slots; the cosine
+/// union adds up to 5 semantically-strong articles that lexical overlap
+/// ranked below the cut (paraphrased claims), capped at 20 total to bound
+/// the classification prompt.
+const FINALISTS_BY_CONTAINMENT: usize = 15;
+const FINALISTS_BY_COSINE: usize = 5;
+const FINALISTS_MAX: usize = 20;
+
+/// Union the article IDs across works + keep the per-claim passages.
+///
+/// Ranking is a UNION of two orderings:
+/// - top `FINALISTS_BY_CONTAINMENT` (15) by best containment score (lexical
+///   overlap with the claim), and
+/// - top `FINALISTS_BY_COSINE` (5) by best recall cosine (semantic
+///   similarity), added while under `FINALISTS_MAX` (20).
+///
+/// Rationale: containment-only truncation let lexically-similar articles
+/// evict semantically-right ones when the claim paraphrases the source
+/// vocabulary (e.g. "decline in consumption" vs "reduction in household
+/// purchasing"). The union guarantees strong semantic matches a slot.
+///
+/// Per-claim passages are FILTERED to the finalist set so the LLM prompt only
+/// contains candidates that can survive `merge_outputs`' metadata check
+/// (previously up to 30 raw passages were sent for 15 finalist slots).
 fn pool_finalists(works: Vec<ClaimWork>) -> Finalists {
-    let mut best_score: HashMap<String, f64> = HashMap::new();
+    // Best containment per article (passage survivors only).
+    let mut containment: HashMap<String, f64> = HashMap::new();
+    // Best cosine per article (all recall hits, including gate-dropped ones;
+    // they carry no passage so they still cannot be prompted).
+    let mut cosine: HashMap<String, f32> = HashMap::new();
     for work in &works {
-        for (article_id, _passage, _section, score) in &work.passages {
-            let entry = best_score.entry(article_id.clone()).or_insert(-1.0);
-            if *score > *entry {
-                *entry = *score;
+        for ev in &work.passages {
+            let entry = containment.entry(ev.article_id.clone()).or_insert(-1.0);
+            if ev.score > *entry {
+                *entry = ev.score;
+            }
+        }
+        for hit in &work.hits {
+            let entry = cosine.entry(hit.article_id.clone()).or_insert(f32::NEG_INFINITY);
+            if hit.score > *entry {
+                *entry = hit.score;
             }
         }
     }
-    let mut scored: Vec<(String, f64)> = best_score.into_iter().collect();
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    scored.truncate(15);
-    let article_ids: Vec<String> = scored.into_iter().map(|(id, _)| id).collect();
-    Finalists { article_ids, per_claim: works }
+
+    let mut by_containment: Vec<(String, f64)> = containment.into_iter().collect();
+    by_containment.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0))
+    });
+    by_containment.truncate(FINALISTS_BY_CONTAINMENT);
+
+    let mut by_cosine: Vec<(String, f32)> = cosine.into_iter().collect();
+    by_cosine.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0))
+    });
+    by_cosine.truncate(FINALISTS_BY_COSINE);
+
+    // Union: containment ranking first, then cosine-ranked additions.
+    let mut article_ids: Vec<String> = by_containment.into_iter().map(|(id, _)| id).collect();
+    for (id, _) in by_cosine {
+        if article_ids.len() >= FINALISTS_MAX {
+            break;
+        }
+        if !article_ids.contains(&id) {
+            article_ids.push(id);
+        }
+    }
+
+    // Filter per-claim passages to the finalist set (prompt hygiene).
+    let finalists_set: std::collections::HashSet<&String> = article_ids.iter().collect();
+    let per_claim = works
+        .into_iter()
+        .map(|mut w| {
+            w.passages.retain(|ev| finalists_set.contains(&ev.article_id));
+            w
+        })
+        .collect();
+    Finalists { article_ids, per_claim }
 }
 
 /// Load metadata (title, authors, year, journal, doi) per finalist ID.
 /// Brief `lock_conn` per article, releasing between. Mirrors
 /// `build_claim_work`'s lock discipline.
 async fn load_metadata(
-    db_state: &State<'_, DbState>,
+    db_state: &DbState,
     article_ids: &[String],
 ) -> Result<HashMap<String, CandidateMetadata>, AppError> {
     let mut out = HashMap::new();
@@ -577,10 +769,17 @@ fn merge_outputs(
         cosine: f32,
         passage: String,
         section: Option<String>,
+        /// Abstract context attached to the passage (for grounding only).
+        abstract_text: Option<String>,
     }
     impl ArticleBest {
         fn new() -> Self {
-            Self { cosine: f32::NEG_INFINITY, passage: String::new(), section: None }
+            Self {
+                cosine: f32::NEG_INFINITY,
+                passage: String::new(),
+                section: None,
+                abstract_text: None,
+            }
         }
     }
     let mut best_by_article_claim: HashMap<(String, String), ArticleBest> = HashMap::new();
@@ -594,11 +793,12 @@ fn merge_outputs(
                 entry.cosine = hit.score;
             }
         }
-        for (article_id, passage, section, _score) in &work.passages {
-            let key = (article_id.clone(), claim_key.clone());
+        for ev in &work.passages {
+            let key = (ev.article_id.clone(), claim_key.clone());
             let entry = best_by_article_claim.entry(key).or_insert_with(ArticleBest::new);
-            entry.passage = passage.clone();
-            entry.section = section.clone();
+            entry.passage = ev.passage.clone();
+            entry.section = ev.section.clone();
+            entry.abstract_text = ev.abstract_text.clone();
         }
     }
 
@@ -643,10 +843,16 @@ fn merge_outputs(
                 // its claim-score was below the Jaccard threshold, OR an LLM
                 // returned an article_id the recall layer never surfaced).
         };
-        /* Ground the LLM's justifying_sentences against the actual passage.
-        Paraphrases/hallucinations are dropped before display. Empty when
-        none grounded (UI falls back to full passage). */
-        let highlighted_sentences = ground_quotes(&out.justifying_sentences, &best.passage);
+        /* Ground the LLM's justifying_sentences against the actual passage
+        PLUS the abstract context when present (the classifier may quote the
+        paper's thesis sentence from the abstract). Paraphrases/hallucinations
+        are dropped before display. Empty when none grounded (UI falls back to
+        full passage). */
+        let grounding_source = match &best.abstract_text {
+            Some(abs) if !abs.is_empty() => format!("{}\n\n{}", best.passage, abs),
+            _ => best.passage.clone(),
+        };
+        let highlighted_sentences = ground_quotes(&out.justifying_sentences, &grounding_source);
         matches.push(CitationMatch {
             article_id: out.article_id.clone(),
             title: meta.title.clone(),
@@ -665,6 +871,53 @@ fn merge_outputs(
     }
     matches.truncate(10);
     matches
+}
+
+/// Compute the Phase-C funnel counts from the pooled works + LLM outputs.
+/// Pure.
+///
+/// `classified` is the caller's match count (whole-block: one merge over all
+/// outputs; per-statement: summed across claim groups).
+fn funnel_from(
+    finalists: &Finalists,
+    llm_outputs: &[CitationLlmOutput],
+    classified: usize,
+) -> CitationFunnel {
+    let recalled: usize = finalists.per_claim.iter().map(|w| w.hits.len()).sum();
+    let passage_survivors: usize = finalists.per_claim.iter().map(|w| w.passages.len()).sum();
+    let dropped_unrelated =
+        llm_outputs.iter().filter(|o| parse_classification(&o.classification).is_none()).count();
+    CitationFunnel {
+        recalled,
+        passage_survivors,
+        finalists: finalists.article_ids.len(),
+        classified,
+        dropped_unrelated,
+    }
+}
+
+/// Emit the final Phase-C progress event carrying the funnel counts. The
+/// message doubles as a one-line summary the progress UI shows ("Reviewed N
+/// candidates: X matched, Y not related"), replacing the previous silent
+/// drop of `unrelated` classifications.
+fn emit_funnel_progress(
+    emit_progress: &(dyn Fn(CitationFinderProgress) + Send + Sync),
+    funnel: CitationFunnel,
+) {
+    emit_progress(CitationFinderProgress {
+        phase: "searching".to_string(),
+        stage: None,
+        done: funnel.classified,
+        total: funnel.finalists,
+        overall_percent: 100,
+        message: format!(
+            "Reviewed {} candidates: {} matched, {} not related",
+            funnel.finalists, funnel.classified, funnel.dropped_unrelated
+        ),
+        is_running: true,
+        is_cancelled: false,
+        funnel: Some(funnel),
+    });
 }
 
 /// Phase B: 0-90% of the overall bar. Phase C uses 90-100%.
@@ -711,6 +964,7 @@ fn searching_progress(stage: &str, message: &str) -> CitationFinderProgress {
         message: message.to_string(),
         is_running: true,
         is_cancelled: false,
+        funnel: None,
     }
 }
 
@@ -720,7 +974,9 @@ mod tests {
     use crate::citation_finder::MatchClassification;
 
     /// Build a `ClaimWork` for testing (the struct is private but inline tests
-    /// can reach it).
+    /// can reach it). Passages take `(article_id, passage, section, score)`;
+    /// abstract context defaults to `None` (use `claim_work_with_abstract`
+    /// when the grounding test needs it).
     fn claim_work(
         claim: &str,
         hits: Vec<(&str, f32)>,
@@ -730,12 +986,50 @@ mod tests {
             text: claim.to_string(),
             hits: hits
                 .into_iter()
-                .map(|(id, score)| EmbeddingHit { article_id: id.to_string(), score })
+                .map(|(id, score)| EmbeddingHit {
+                    article_id: id.to_string(),
+                    score,
+                    chunk_index: None,
+                })
                 .collect(),
             passages: passages
                 .into_iter()
-                .map(|(id, passage, section, score)| {
-                    (id.to_string(), passage.to_string(), section.map(str::to_string), score)
+                .map(|(id, passage, section, score)| PassageEvidence {
+                    article_id: id.to_string(),
+                    passage: passage.to_string(),
+                    section: section.map(str::to_string),
+                    score,
+                    abstract_text: None,
+                })
+                .collect(),
+        }
+    }
+
+    /// Like [`claim_work`] but attaches abstract context to every passage
+    /// entry (for grounding tests).
+    fn claim_work_with_abstract(
+        claim: &str,
+        hits: Vec<(&str, f32)>,
+        passages: Vec<(&str, &str, Option<&str>, f64, &str)>,
+    ) -> ClaimWork {
+        ClaimWork {
+            text: claim.to_string(),
+            hits: hits
+                .into_iter()
+                .map(|(id, score)| EmbeddingHit {
+                    article_id: id.to_string(),
+                    score,
+                    chunk_index: None,
+                })
+                .collect(),
+            passages: passages
+                .into_iter()
+                .map(|(id, passage, section, score, abs)| PassageEvidence {
+                    article_id: id.to_string(),
+                    passage: passage.to_string(),
+                    section: section.map(str::to_string),
+                    score,
+                    abstract_text: Some(abs.to_string()),
                 })
                 .collect(),
         }
@@ -978,7 +1272,9 @@ mod tests {
 
     #[test]
     fn pool_finalists_truncates_to_fifteen() {
-        // 20 distinct articles → top 15 by best score.
+        // 20 distinct articles, containment and cosine perfectly correlated →
+        // the cosine union adds nothing (all 5 cosine-best are already in the
+        // containment top-15) → still exactly 15.
         let works: Vec<ClaimWork> = (0..20)
             .map(|i| {
                 claim_work(
@@ -993,8 +1289,156 @@ mod tests {
     }
 
     #[test]
+    fn pool_finalists_cosine_union_rescues_low_containment_article() {
+        // 15 articles with high containment (0.9..0.76) fill the containment
+        // slots; article "rescue" has weak containment (0.32, paraphrased
+        // claim) but the top cosine (0.99). Containment-only truncation (the
+        // pre-union behavior) would evict it; the union must keep it.
+        let mut works: Vec<ClaimWork> = (0..15)
+            .map(|i| {
+                claim_work(
+                    "c",
+                    vec![(format!("f{i}").leak(), 0.2)],
+                    vec![(format!("f{i}").leak(), "p", None, 0.9 - 0.01 * i as f64)],
+                )
+            })
+            .collect();
+        works.push(claim_work("c", vec![("rescue", 0.99)], vec![("rescue", "p", None, 0.32)]));
+        let finalists = pool_finalists(works);
+        assert!(
+            finalists.article_ids.contains(&"rescue".to_string()),
+            "cosine union must rescue the paraphrased match"
+        );
+        assert_eq!(finalists.article_ids.len(), 16);
+    }
+
+    #[test]
+    fn pool_finalists_caps_union_at_twenty() {
+        // 18 containment survivors + 5 high-cosine non-survivors → capped at 20.
+        let mut works: Vec<ClaimWork> = (0..18)
+            .map(|i| {
+                claim_work(
+                    "c",
+                    vec![(format!("f{i}").leak(), 0.05)],
+                    vec![(format!("f{i}").leak(), "p", None, 0.5)],
+                )
+            })
+            .collect();
+        for i in 0..5 {
+            // No passage (gate-dropped): only present in the cosine ranking.
+            works.push(claim_work("c", vec![(format!("x{i}").leak(), 0.9)], vec![]));
+        }
+        let finalists = pool_finalists(works);
+        assert_eq!(finalists.article_ids.len(), 20);
+    }
+
+    #[test]
+    fn pool_finalists_filters_passages_to_finalist_set() {
+        // Works carrying 18 passage entries (only 15 can be finalists) must
+        // have their per-claim passages filtered to the finalist set, so the
+        // classification prompt never carries un-promptable candidates.
+        // Cosine scores correlate with containment so the union adds nothing.
+        let works: Vec<ClaimWork> = (0..18)
+            .map(|i| {
+                claim_work(
+                    "c",
+                    vec![(format!("a{i}").leak(), 0.1 * i as f32)],
+                    vec![(format!("a{i}").leak(), "p", None, 0.1 * i as f64)],
+                )
+            })
+            .collect();
+        let finalists = pool_finalists(works);
+        assert_eq!(finalists.article_ids.len(), 15);
+        let survivors: usize = finalists.per_claim.iter().map(|w| w.passages.len()).sum();
+        assert_eq!(survivors, 15, "per-claim passages must be filtered to finalists");
+    }
+
+    #[test]
     fn pool_finalists_empty_works_yields_empty() {
         let finalists = pool_finalists(vec![]);
         assert!(finalists.article_ids.is_empty());
+    }
+
+    // ── cosine_best_chunk ────────────────────────────────────────────────
+
+    #[test]
+    fn cosine_best_chunk_resolves_valid_index() {
+        let chunks = vec![
+            Chunk { section: None, chunk_index: 0, text: "intro".to_string(), word_count: 1 },
+            Chunk {
+                section: Some("Methods".to_string()),
+                chunk_index: 1,
+                text: "methods".to_string(),
+                word_count: 1,
+            },
+        ];
+        let hit = EmbeddingHit { article_id: "a1".to_string(), score: 0.5, chunk_index: Some(1) };
+        assert_eq!(cosine_best_chunk(&hit, &chunks).map(|c| c.text.as_str()), Some("methods"));
+    }
+
+    #[test]
+    fn cosine_best_chunk_title_abstract_row_is_none() {
+        // chunk_index = -1 is the title+abstract embedding row, not a chunk.
+        let chunks =
+            vec![Chunk { section: None, chunk_index: 0, text: "intro".to_string(), word_count: 1 }];
+        let hit = EmbeddingHit { article_id: "a1".to_string(), score: 0.5, chunk_index: Some(-1) };
+        assert!(cosine_best_chunk(&hit, &chunks).is_none());
+    }
+
+    #[test]
+    fn cosine_best_chunk_out_of_range_is_none() {
+        // Stale chunk provenance after a re-chunk: index beyond the list.
+        let chunks =
+            vec![Chunk { section: None, chunk_index: 0, text: "intro".to_string(), word_count: 1 }];
+        let hit = EmbeddingHit { article_id: "a1".to_string(), score: 0.5, chunk_index: Some(7) };
+        assert!(cosine_best_chunk(&hit, &chunks).is_none());
+    }
+
+    #[test]
+    fn cosine_best_chunk_missing_provenance_is_none() {
+        let chunks =
+            vec![Chunk { section: None, chunk_index: 0, text: "intro".to_string(), word_count: 1 }];
+        let hit = EmbeddingHit { article_id: "a1".to_string(), score: 0.5, chunk_index: None };
+        assert!(cosine_best_chunk(&hit, &chunks).is_none());
+    }
+
+    // ── merge_outputs: abstract-context grounding ─────────────────────────
+
+    #[test]
+    fn merge_grounds_against_abstract_context() {
+        // The classifier quoted the paper's thesis sentence from the abstract
+        // context (not present in the chunk passage). The grounding gate must
+        // accept it (passage + abstract is the source), otherwise abstract
+        // evidence could never surface as a highlighted sentence.
+        let work = claim_work_with_abstract(
+            "text",
+            vec![("a1", 0.6)],
+            vec![(
+                "a1",
+                "Methods paragraph about regression models.",
+                None,
+                0.5,
+                "Title\n\nThe sugar tax reduced purchases of sugary drinks.",
+            )],
+        );
+        let finalists = Finalists { article_ids: vec!["a1".to_string()], per_claim: vec![work] };
+        let metadata = meta_map(&["a1"]);
+        let outputs = vec![CitationLlmOutput {
+            article_id: "a1".to_string(),
+            claim: String::new(),
+            classification: "validating".to_string(),
+            relevance_explanation: "expl".to_string(),
+            misrepresents_source: false,
+            justifying_sentences: vec![
+                "The sugar tax reduced purchases of sugary drinks.".to_string()
+            ],
+        }];
+        let matches = merge_outputs(&outputs, &finalists, &metadata, None);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(
+            matches[0].highlighted_sentences.len(),
+            1,
+            "abstract-context quote must survive grounding"
+        );
     }
 }

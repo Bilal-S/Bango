@@ -157,6 +157,33 @@ pub struct CitationFinderProgress {
     pub message: String,
     pub is_running: bool,
     pub is_cancelled: bool,
+    /// Phase-C funnel counts. Present ONLY on the final search event (after
+    /// classification), so the UI can explain how many candidates were
+    /// reviewed vs. matched vs. dropped as not related. Absent elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub funnel: Option<CitationFunnel>,
+}
+
+/// Funnel counts for one completed Phase-C search (transparency contract:
+/// before this, an article the LLM dropped as `unrelated` vanished with no
+/// trace, leaving the user unable to tell a recall miss from a
+/// classification drop).
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CitationFunnel {
+    /// Recall hits across all claims (pre-gate).
+    pub recalled: usize,
+    /// Per-claim passage-evidence survivors summed across claims (an article
+    /// matching two claims counts twice).
+    pub passage_survivors: usize,
+    /// Distinct articles sent to the LLM (containment top-15 union cosine
+    /// top-5, capped at 20).
+    pub finalists: usize,
+    /// LLM outputs that produced a validating/opposing match.
+    pub classified: usize,
+    /// LLM outputs dropped because the classification was `unrelated` (or
+    /// unparseable). Hallucinated article ids are a separate silent guard.
+    pub dropped_unrelated: usize,
 }
 // Unit tests live in `src-tauri/tests/citation_finder/citation_finder_mod_test.rs`
 // (extracted per `docs/CLAUDE.md` §Testing).

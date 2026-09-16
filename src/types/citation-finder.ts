@@ -88,4 +88,25 @@ export interface CitationFinderProgress {
   message: string;
   isRunning: boolean;
   isCancelled: boolean;
+  /** Present ONLY on the final search event: how many candidates the funnel
+   *  reviewed vs. matched vs. dropped as not related (transparency for
+   *  "why didn't my article show up"). Mirrors Rust `CitationFunnel`. */
+  funnel?: CitationFunnel;
+}
+
+/** Phase-C funnel counts (mirrors `CitationFunnel` in
+ *  `citation_finder/mod.rs`). */
+export interface CitationFunnel {
+  /** Recall hits across all claims (pre-gate). */
+  recalled: number;
+  /** Per-claim passage-evidence survivors summed across claims. */
+  passageSurvivors: number;
+  /** Distinct articles sent to the LLM (containment top-15 union cosine
+   *  top-5, capped at 20). */
+  finalists: number;
+  /** LLM outputs that produced a validating/opposing match. */
+  classified: number;
+  /** LLM outputs dropped because the classification was `unrelated` (or
+   *  unparseable). */
+  droppedUnrelated: number;
 }

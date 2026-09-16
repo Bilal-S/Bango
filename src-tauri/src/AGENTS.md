@@ -143,8 +143,10 @@ described inline.
 - **`embedding/`** - Semantic search (director, runner, recall, batching).
   See `embedding/AGENTS.md`.
 - **`citation_finder/`** - Paste-prose-to-citations matching (three-layer
-  pipeline: embedding prefilter → token-Jaccard passage extraction → LLM
-  classify). See `citation_finder/AGENTS.md`.
+  pipeline: embedding prefilter with chunk provenance → containment passage
+  evidence with cosine-chunk fallback + abstract context → LLM classify,
+  closed by a funnel-transparency progress event). See
+  `citation_finder/AGENTS.md`.
 - **`translation/`** - Non-English article translation (worker, wait, language
   detection). See `translation/AGENTS.md`.
 - **`batch_import/`** - 4-phase batch import processor. See

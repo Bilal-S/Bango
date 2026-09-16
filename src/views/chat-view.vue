@@ -9,6 +9,7 @@ import type { WikiStatus } from '@/types/wiki';
 import type { CitationResult, CitationStyle } from '@/types/citation-finder';
 import { marked } from 'marked';
 import { renderWikiMarkdown } from '@/utils/wiki-markdown';
+import { scrollAnchorToContainerTop } from '@/utils/chat-scroll';
 import { useArticleSearch } from '@/composables/use-article-search';
 import { useScreening } from '@/composables/use-screening';
 import { useWiki } from '@/composables/use-wiki';
@@ -566,6 +567,45 @@ function scrollToBottom() {
   });
 }
 
+/**
+ * When citation results arrive (`citation:done` pushes the assistant bubble),
+ * pin the user's claim entry - the user message immediately preceding the
+ * citation bubble - to the top of the chat scroll area so the result cards
+ * are visible beneath it without manual scrolling. In per-statement mode the
+ * first claim group renders directly under the same anchor.
+ */
+function scrollClaimEntryToTop() {
+  void nextTick(() => {
+    const container = chatScrollContainer.value;
+    if (!container) return;
+    const msgs = chatStore.messages;
+    const last = msgs.length - 1;
+    if (last < 0 || !msgs[last]?.citations) return;
+    // Anchor on the nearest preceding user message; fall back to the
+    // citation bubble itself when no user message precedes it.
+    let anchorIdx = last;
+    for (let i = last - 1; i >= 0; i -= 1) {
+      if (msgs[i]?.role === 'user') {
+        anchorIdx = i;
+        break;
+      }
+    }
+    const anchor = container.querySelector<HTMLElement>(`[data-msg-idx="${anchorIdx}"]`);
+    if (anchor) {
+      scrollAnchorToContainerTop(container, anchor);
+    }
+  });
+}
+
+/* Fire when the trailing message gains a non-empty citations array - the
+exact moment citation results land in the transcript (`citation:done`). */
+watch(
+  () => chatStore.messages[chatStore.messages.length - 1]?.citations,
+  (citations) => {
+    if (citations && citations.length > 0) scrollClaimEntryToTop();
+  }
+);
+
 function formatAuthorsList(authors: string[]): string {
   if (!authors || authors.length === 0) return 'Unknown';
   if (authors.length <= 2) return authors.join('; ');
@@ -810,6 +850,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
             <div
               v-for="(msg, idx) in chatStore.messages"
               :key="idx"
+              :data-msg-idx="idx"
               class="flex flex-col max-w-[80%]"
               :class="
                 msg.role === 'user'

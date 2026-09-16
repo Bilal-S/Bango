@@ -41,7 +41,12 @@ describe('CitationResultCard', () => {
     const text = wrapper.text();
     expect(text).toContain('Smith, J.');
     expect(text).toContain('(2024)');
-    expect(text).toContain('BMJ Global Health');
+    // Title renders immediately after the authors (fixture title is 39 chars,
+    // under the 40 cap, so it renders in full with no ellipsis).
+    expect(text).toContain('Sugar levy effects on childhood obesity');
+    // Journal + DOI are copy-citation-only; they never display on the card.
+    expect(text).not.toContain('BMJ Global Health');
+    expect(text).not.toContain('doi:');
     expect(text).toContain('The sugar tax reduced obesity significantly.');
     expect(text).toContain('§Results');
     expect(text).toContain('✓ Validating');
@@ -87,22 +92,34 @@ describe('CitationResultCard', () => {
     expect(viewEvents?.[0]?.[0]).toBe('art-1');
   });
 
-  it('truncates a long DOI for display', () => {
-    const longDoi = '10.1136/bmjgh-2024-009999-very-long-suffix-abcdef123456';
+  it('truncates_long_title_at_word_boundary_with_tooltip', () => {
+    const longTitle =
+      'Impact of the UK soft drinks industry levy on health and health inequalities in children and adolescents';
     const wrapper = mountCard({
-      match: makeMatch({ doi: longDoi }),
+      match: makeMatch({ title: longTitle }),
     });
-    // The display DOI keeps the prefix + last 12 chars; it should NOT be the
-    // full string.
-    expect(wrapper.text()).not.toContain(longDoi);
-    expect(wrapper.text()).toContain('doi:');
+    // The visible meta line carries the ~65-char prefix broken at the last
+    // word boundary plus the ellipsis, NOT the untruncated tail.
+    expect(wrapper.text()).toContain(
+      'Impact of the UK soft drinks industry levy on health and health...'
+    );
+    expect(wrapper.text()).not.toContain('inequalities');
+    // The full title lives in the span's title attribute for hover.
+    const titleSpan = wrapper.find('.citation-card__title');
+    expect(titleSpan.exists()).toBe(true);
+    expect(titleSpan.attributes('title')).toBe(longTitle);
   });
 
-  it('hides the DOI segment when doi is null', () => {
-    const wrapper = mountCard({
-      match: makeMatch({ doi: null }),
-    });
+  it('hides_journal_and_doi_keeps_them_in_copy', async () => {
+    const wrapper = mountCard();
+    // Copy-only contract: neither renders on the card...
+    expect(wrapper.text()).not.toContain('BMJ Global Health');
     expect(wrapper.text()).not.toContain('doi:');
+    // ...but the Copy button emits the complete record (journal + doi).
+    await wrapper.find('.citation-card__btn--copy').trigger('click');
+    const copyEvents = wrapper.emitted('copy');
+    expect(copyEvents?.[0]?.[0]).toContain('BMJ Global Health');
+    expect(copyEvents?.[0]?.[0]).toContain('10.1136/bmjgh-2024-009999');
   });
 
   // ── Progressive passage disclosure ─────────────────────────────────────

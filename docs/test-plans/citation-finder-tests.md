@@ -84,13 +84,32 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src-tauri/src/citation_finder/search.rs::merge_confidence_negative_cosine_normalizes_correctly` | NEG_INFINITY seed preserves negative cosine |
 | `src-tauri/src/citation_finder/search.rs::merge_confidence_missing_cosine_falls_to_neutral` | missing recall → 0.5 neutral |
 | `src-tauri/src/citation_finder/search.rs::pool_finalists_dedups_article_ids_keeping_best_score` | union dedup |
-| `src-tauri/src/citation_finder/search.rs::pool_finalists_truncates_to_fifteen` | 15-finalist cap |
+| `src-tauri/src/citation_finder/search.rs::pool_finalists_truncates_to_fifteen` | 15-finalist cap (correlated cosine adds nothing) |
+| `src-tauri/src/citation_finder/search.rs::pool_finalists_cosine_union_rescues_low_containment_article` | weak-containment/top-cosine article kept via the union |
+| `src-tauri/src/citation_finder/search.rs::pool_finalists_caps_union_at_twenty` | union capped at 20 finalists |
+| `src-tauri/src/citation_finder/search.rs::pool_finalists_filters_passages_to_finalist_set` | per-claim passages filtered to finalists (prompt hygiene) |
+| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_resolves_valid_index` | provenance index → that chunk |
+| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_title_abstract_row_is_none` | `-1` sentinel row is not a chunk |
+| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_out_of_range_is_none` | stale out-of-range index → None |
+| `src-tauri/src/citation_finder/search.rs::cosine_best_chunk_missing_provenance_is_none` | None provenance → None |
+| `src-tauri/src/citation_finder/search.rs::merge_grounds_against_abstract_context` | justifying sentence quoted from the abstract context survives grounding |
 | `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_drift_tolerant_pipeline_contract` | external pin on the pub helper |
 | `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_empty_input_is_stable` | empty → "" (whole-block key) |
 | `src-tauri/tests/citation_finder/citation_finder_search_test.rs::normalize_claim_key_does_not_strip_punctuation` | punctuation preserved (conservative) |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::sdil_claim_surfaces_with_thesis_evidence` | E2E SDIL reproduction: claim surfaces + thesis sentence grounded + abstract in prompt + funnel counts |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::paraphrased_claim_falls_back_to_cosine_chunk` | zero lexical overlap → cosine-chunk fallback keeps the article |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::unrelated_drop_is_visible_in_funnel` | `unrelated` classification counted in the funnel, not silent |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::cosine_union_keeps_semantically_strong_finalist` | 16th-by-containment article rescued into the LLM prompt |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::per_statement_mode_groups_by_claim` | per-statement grouping + funnel emission |
+| `src-tauri/tests/citation_finder/citation_finder_pipeline_test.rs::empty_recall_reports_zero_funnel` | empty recall emits a zero-funnel event |
+| `src-tauri/tests/citation_finder/citation_finder_prompt_test.rs::whole_block_prompt_renders_abstract_context` | chunk-backed candidate renders `- abstract` context after the passage; abstract-primary omits it |
 | `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::empty_filter_returns_all_statuses` | §7 API: empty filter = all rows |
 | `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::single_status_filter_matches_historical_behavior` | backward-compat single status |
 | `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::multi_status_filter_working_plus_included` | working+included excludes rejected/duplicate |
+| `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::pool_hits_tracks_winning_chunk_provenance` | max-pool reports the winning row's chunk_index |
+| `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::pool_hits_reports_title_abstract_row_when_it_wins` | `-1` sentinel reported when the title+abstract row wins |
+| `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::pool_hits_skips_dimension_mismatched_rows` | length-mismatched vectors skipped |
+| `src-tauri/tests/embedding/embedding_recall_multistatus_test.rs::pool_hits_orders_by_score_desc_then_id` | deterministic score-desc + id-asc ordering |
 | `src-tauri/tests/embedding/embedding_director_test.rs::director_detects_model_mismatch_as_stale` | stored model differs from current → row marked stale (pins the silent zero-results fix) |
 | `src-tauri/tests/embedding/embedding_director_test.rs::director_skips_fresh_rows_when_hash_matches` | hash + model both match → row skipped (AllFresh) |
 | `src-tauri/tests/embedding/embedding_model_mismatch_test.rs::no_mismatch_when_stored_matches_current` | stored == current → None |
@@ -115,22 +134,28 @@ private internals (`merge_outputs`, `pool_finalists`, `ClaimWork`, `Finalists`)
 | `src/__tests__/composables/use-citation-finder.test.ts::getModelMismatch_returns_null_when_no_mismatch` | null passthrough when no mismatch |
 | `src/__tests__/composables/use-citation-finder.test.ts::regenerateEmbeddings_dispatches_scoped_command` | scoped regenerate IPC wiring |
 | `src/__tests__/composables/use-citation-finder.test.ts::regenerateEmbeddings_passes_null_for_all_statuses` | null filter = all statuses |
-| `src/__tests__/components/citation-result-card.test.ts::renders_metadata_passage_badge_confidence` | card layout contract |
+| `src/__tests__/components/citation-result-card.test.ts::renders_metadata_passage_badge_confidence` | card layout contract: author + year + title rendered; journal/DOI hidden |
 | `src/__tests__/components/citation-result-card.test.ts::sectionOrigin_null_omits_badge` | null section → no § badge |
+| `src/__tests__/components/citation-result-card.test.ts::truncates_long_title_at_word_boundary_with_tooltip` | >65-char title → word-boundary prefix + `...` on-card, full title in the `title` attribute |
+| `src/__tests__/components/citation-result-card.test.ts::hides_journal_and_doi_keeps_them_in_copy` | copy-only contract for journal + DOI |
+| `src/__tests__/utils/chat-scroll.test.ts::scrolls_so_anchor_top_meets_container_top` | citation-results arrival pins the claim message to the scroll-area top (offset arithmetic) |
+| `src/__tests__/utils/chat-scroll.test.ts::clamps_to_zero_when_anchor_is_above_container_top` | negative scroll targets clamp to 0 |
+| `src/__tests__/utils/chat-scroll.test.ts::no_op_when_already_pinned` | pinned anchor → no scroll call |
 | `src/__tests__/chat.test.ts::citation_finder_source_toggle` | 3rd source toggle works |
 | `src/__tests__/chat.test.ts::sendMessage_branch_dispatches_find_citations` | citation branch does not call send_chat_message |
 | `src/__tests__/chat.test.ts::clearChat_drops_citation_bubbles` | reset clears citations array |
 
 ## Notes
 
-- The async `find_citations_inner` entry point depends on a live Tauri
-  `State<DbState>` + `AppHandle` and cannot be driven from a `#[test]` (same
-  constraint documented in `tests/embedding/embedding_runner_test.rs`). The pipeline's
-  testable decisions are extracted into pure helpers (`normalize_claim_key`,
-  `merge_outputs`, `pool_finalists`). `normalize_claim_key` is `pub` and
-  covered externally; `merge_outputs` + `pool_finalists` are private and
-  covered by the inline `search.rs` tests (the only inline block remaining -
-  see the `src/citation_finder/search.rs::` rows above).
+- `find_citations_inner` still depends on a live Tauri `State<DbState>` +
+  `AppHandle` (Phases A/B need config reads + event emission), but its Phase-C
+  core is extracted as `run_phase_c(&DbState, ...)`, which integration tests
+  drive end-to-end with a mock `CitationLlmSender` against a seeded temp DB
+  (`citation_finder_pipeline_test.rs`). The private pure helpers
+  (`normalize_claim_key`, `merge_outputs`, `pool_finalists`,
+  `cosine_best_chunk`) stay covered by the inline `search.rs` tests (the only
+  inline block remaining - see the `src/citation_finder/search.rs::` rows
+  above).
 - The pure-helper tests (`similarity`, `prompt`, `claim_split`, `readiness`,
   `mod`) were extracted from inline `#[cfg(test)] mod tests` blocks into the
   external `src-tauri/tests/citation_finder_*_test.rs` files per

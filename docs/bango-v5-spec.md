@@ -367,7 +367,13 @@ The `article_embeddings` table is keyed on `(article_id, chunk_index)` with `-1`
 
 Paste-prose-to-citations matching over the user's article library, accessed as a third toggle in the Chat view alongside Articles and Wiki. Two modes: **whole-block** (one embedding, one result set) and **per-statement** (LLM splits prose into ≤5 claims; each embedded + matched independently).
 
-**Three-layer pipeline**: embedding prefilter (reuses `recall_articles`, extended to multi-status) → token-Jaccard passage extraction → LLM classification (validating/opposing + `misrepresents_source` + cosine confidence). Candidate pool scoped by status filter (Working + Included checked by default; Duplicates excluded).
+**Three-layer pipeline**: embedding prefilter (reuses `recall_articles`, extended to multi-status; each recall hit carries the winning row's `chunkIndex` provenance) → token-containment passage evidence → LLM classification (validating/opposing + `misrepresents_source` + cosine confidence). Candidate pool scoped by status filter (Working + Included checked by default; Duplicates excluded).
+
+**Passage evidence selection** (per article, first match wins): (1) the containment-best full-text chunk (gate: ≥ 0.3 of the claim's tokens present); (2) the cosine-best chunk from the recall hit's `chunkIndex` provenance (embedding-vouched fallback for paraphrased claims whose vocabulary does not overlap, e.g. "decline in consumption" vs "reduction in household purchasing"; may carry a sub-gate containment score); (3) the title+abstract text (gated). Whenever the primary passage is a chunk, the title+abstract is also attached to the candidate prompt as `- abstract` extra context, so the classifier always sees the paper's thesis sentence; `justifying_sentences` are grounded verbatim against the passage plus that abstract context.
+
+**Finalist pool** is a union of two rankings: top 15 by best containment, plus up to 5 top-cosine articles not already included, capped at 20 total. Per-claim passages are filtered to the finalist set before prompt building.
+
+**Funnel transparency**: the final `citation:progress` event of every search carries optional `funnel` counts (`recalled`, `passageSurvivors`, `finalists`, `classified`, `droppedUnrelated`) plus a one-line summary message ("Reviewed N candidates: X matched, Y not related"), so an article the LLM dropped as `unrelated` is observable rather than silently absent. Empty recall emits a zero-funnel event.
 
 **One-button flow**: `find_citations` is the single entry point. It runs Phase A (readiness) → Phase B (auto-prepare embeddings if coverage < 100%) → Phase C (the search pipeline). No separate "Prepare Embeddings" button.
 
@@ -379,7 +385,11 @@ Paste-prose-to-citations matching over the user's article library, accessed as a
 
 **Cancel + background**: `find_citations` spawns a background task emitting `citation:progress` / `citation:done` / `citation:error` events. One Cancel button covers both Phase B + Phase C.
 
+**Result-arrival scroll**: when `citation:done` lands, the chat scrolls so the user's claim message (the user bubble immediately preceding the results bubble) is pinned to the top of the chat scroll area (`scrollAnchorToContainerTop` in `src/utils/chat-scroll.ts`, container-relative - never `scrollIntoView`, which would also scroll ancestor areas), keeping the result cards visible beneath it without manual scrolling; in per-statement mode the first claim group renders directly under that anchor. The submit-time scroll-to-bottom (which shows the progress bar) is unchanged.
+
 **Citation style**: reuses the existing 5-style LLM-hint list (APA/MLA/Chicago/IEEE/AMA). The active style is captured at submit time and frozen per-bubble so each bubble renders all its cards with the style selected when the search ran. No `@citation-js` dependency; the Copy button builds plain-text citations via a pure TS helper.
+
+**Result card metadata line**: first author, `(year)`, then the publication title truncated at ~65 characters on the last word boundary (`truncateAtWordBoundary` from `src/utils/formatters.ts`, italic slate-600), with the full title available on hover via the element's `title` attribute. The journal name and DOI are **copy-citation-only**: they never render on the card but always appear in the Copy button's formatted citation (and the article detail panel).
 
 **Data contract**: `misrepresents_source` (`true` = passage taken out of context), `confidence` = cosine normalized from `[-1, 1]` to `[0, 1]`, `section_origin: Option<String>` (None omits the `§…` badge). `ChatMessage` extends with `citations?: CitationResult[]` + `citationStyle?: CitationStyle`.
 

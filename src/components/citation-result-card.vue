@@ -8,6 +8,7 @@
  * `misrepresentsSource` is latent - reserved for future warning chip. */
 import { computed, ref } from 'vue';
 import { formatCitation } from '@/composables/use-citation-finder';
+import { truncateAtWordBoundary } from '@/utils/formatters';
 import type { CitationMatch, CitationStyle } from '@/types/citation-finder';
 
 const props = defineProps<{
@@ -32,12 +33,11 @@ const confidencePct = computed(() => `${Math.round(props.match.confidence * 100)
  *  `null` (Text-derived chunks) → the template omits the `§…` badge. */
 const sectionBadge = computed(() => props.match.sectionOrigin);
 
-/** Truncated DOI for display (keeps the prefix + last 12 chars). */
-const doiDisplay = computed(() => {
-  const doi = props.match.doi;
-  if (!doi) return null;
-  return doi.length > 24 ? `${doi.slice(0, 8)}…${doi.slice(-12)}` : doi;
-});
+/** Truncated publication title for the card's meta line: ~40 visible chars,
+ * broken at the last word boundary (existing pure utility), with the full
+ * title available on hover via the `title` attribute. The journal + DOI are
+ * copy-citation-only and never displayed on the card. */
+const titleDisplay = computed(() => truncateAtWordBoundary(props.match.title, 65));
 
 /** Plain-text citation for the Copy button. */
 const citationText = computed(() => formatCitation(props.match, props.style, props.ieeeIndex));
@@ -140,8 +140,9 @@ function onView() {
         <span v-if="match.publicationYear" class="citation-card__year"
           >({{ match.publicationYear }})</span
         >
-        <span v-if="match.journal" class="citation-card__journal">{{ match.journal }}</span>
-        <span v-if="doiDisplay" class="citation-card__doi">doi:{{ doiDisplay }}</span>
+        <span v-if="titleDisplay" class="citation-card__title" :title="match.title">{{
+          titleDisplay
+        }}</span>
       </div>
       <div class="citation-card__actions">
         <button
@@ -263,14 +264,11 @@ function onView() {
   color: rgb(100 116 139); /* slate-500 */
 }
 
-.citation-card__journal {
+.citation-card__title {
+  /* The title inherits the journal's former slot styling: italic slate-600.
+   * The journal + DOI are copy-citation-only and never displayed. */
   font-style: italic;
   color: rgb(71 85 105); /* slate-600 */
-}
-
-.citation-card__doi {
-  color: rgb(148 163 184); /* slate-400 */
-  font-size: 0.6875rem;
 }
 
 .citation-card__actions {

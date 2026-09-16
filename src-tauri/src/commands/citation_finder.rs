@@ -84,6 +84,7 @@ pub async fn find_citations(
             message: "Starting citation search…".to_string(),
             is_running: true,
             is_cancelled: false,
+            funnel: None,
         };
     }
 

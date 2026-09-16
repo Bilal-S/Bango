@@ -34,11 +34,11 @@ Return ONLY a JSON array. For each element, use these fields:
 - classification (\"validating\" | \"opposing\")
 - relevance_explanation (string, 1-2 sentences)
 - misrepresents_source (boolean)
-- justifying_sentences: a JSON array of 1-3 EXACT verbatim sentences from the passage that
-  most directly justify the classification. Copy each sentence character-for-character from
-  the passage; do NOT paraphrase, merge, truncate, or invent. Each sentence MUST appear in
-  the passage verbatim (the UI highlights these as quotes). An empty array is acceptable when
-  no single sentence is decisive.
+- justifying_sentences: a JSON array of 1-3 EXACT verbatim sentences from the passage (or the
+  abstract context, when provided) that most directly justify the classification. Copy each
+  sentence character-for-character from that text; do NOT paraphrase, merge, truncate, or
+  invent. Each sentence MUST appear verbatim in the passage or the abstract context (the UI
+  highlights these as quotes). An empty array is acceptable when no single sentence is decisive.
 
 Filter out \"unrelated\" candidates. Return at most 10 results. Order by relevance.";
 
@@ -62,6 +62,12 @@ pub struct CandidatePassage {
     pub claim: Option<String>,
     pub passage: String,
     pub section: Option<String>,
+    /// Article abstract (`title + "\n\n" + abstract`), attached as additional
+    /// context for full-text articles so the classifier sees the paper's
+    /// thesis even when the best passage is a Methods/Results fragment.
+    /// `None` when the passage already IS the abstract (abstract-only
+    /// articles, or the abstract won passage selection).
+    pub abstract_text: Option<String>,
 }
 
 /// Build the user prompt for the whole-block mode.
@@ -149,6 +155,11 @@ fn format_candidates_section(
             out.push_str(&format!("- section: {section}\n"));
         }
         out.push_str(&format!("- passage:\n\n{}\n\n", p.passage));
+        if let Some(abstract_text) = &p.abstract_text {
+            out.push_str(&format!(
+                "- abstract (article summary, extra context for judging relevance):\n\n{abstract_text}\n\n"
+            ));
+        }
     }
     out
 }

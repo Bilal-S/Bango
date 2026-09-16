@@ -5,10 +5,18 @@
 //! `duplicate`/`rejected`. The previous `Option<&str>` single-status signature
 //! could not express that, so the API was extended to `&[String]` with
 //! `status IN (?, ?, ?)` SQL. These tests pin the new contract.
+//!
+//! The trailing `pool_hits` tests pin the recall max-pool's chunk-provenance
+//! contract: each hit reports the `chunk_index` of the row that produced its
+//! max cosine, so the Citation Finder passage layer can fall back to the
+//! cosine-best chunk when token containment ranks a different chunk first.
 
 use bango_lib::db::connection::create_connection;
-use bango_lib::db::embedding_repo::{self, NewEmbeddingRow, TITLE_ABSTRACT_CHUNK_INDEX};
+use bango_lib::db::embedding_repo::{
+    self, EmbeddingRow, NewEmbeddingRow, TITLE_ABSTRACT_CHUNK_INDEX,
+};
 use bango_lib::db::migration::run_migrations;
+use bango_lib::embedding::recall::pool_hits;
 use rusqlite::Connection;
 
 fn seed_article(conn: &Connection, id: &str, status: &str) {
@@ -198,4 +206,71 @@ fn multi_status_filter_returns_all_chunks_for_matched_articles() {
 
     let hits = embedding_repo::list_for_recall(&conn, 4, &["included".to_string()]).unwrap();
     assert_eq!(hits.len(), 3, "all 3 chunk rows returned for the matched article");
+}
+
+// ── pool_hits (max-pool + chunk provenance) ─────────────────────────────
+
+fn pool_row(article_id: &str, chunk_index: i32, vec: &[f32]) -> EmbeddingRow {
+    EmbeddingRow {
+        article_id: article_id.to_string(),
+        chunk_index,
+        embedding: vec.to_vec(),
+        dimensions: vec.len() as i32,
+        input_hash: "test-hash".to_string(),
+        model_name: "test-model".to_string(),
+        provider: "test".to_string(),
+    }
+}
+
+/// The hit reports the chunk_index of the row that produced the max cosine.
+#[test]
+fn pool_hits_tracks_winning_chunk_provenance() {
+    let q = vec![1.0_f32, 0.0];
+    let rows = vec![
+        pool_row("a", TITLE_ABSTRACT_CHUNK_INDEX, &[0.6, 0.8]),
+        pool_row("a", 0, &[1.0, 0.0]), // cosine 1.0 → winner
+        pool_row("a", 1, &[0.0, 1.0]),
+    ];
+    let hits = pool_hits(&rows, &q);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].article_id, "a");
+    assert_eq!(hits[0].chunk_index, Some(0));
+    assert!((hits[0].score - 1.0).abs() < 1e-5, "got {}", hits[0].score);
+}
+
+/// The title+abstract row (`-1`) wins → its sentinel index is reported.
+#[test]
+fn pool_hits_reports_title_abstract_row_when_it_wins() {
+    let q = vec![1.0_f32, 0.0];
+    let rows =
+        vec![pool_row("a", TITLE_ABSTRACT_CHUNK_INDEX, &[1.0, 0.0]), pool_row("a", 3, &[0.0, 1.0])];
+    let hits = pool_hits(&rows, &q);
+    assert_eq!(hits[0].chunk_index, Some(TITLE_ABSTRACT_CHUNK_INDEX));
+}
+
+/// Dimension-mismatched rows are skipped (defense-in-depth guard).
+#[test]
+fn pool_hits_skips_dimension_mismatched_rows() {
+    let q = vec![1.0_f32, 0.0];
+    let rows = vec![
+        pool_row("a", 0, &[1.0, 0.0, 0.0]), // 3-dim vs 2-dim query → skipped
+        pool_row("b", 1, &[1.0, 0.0]),
+    ];
+    let hits = pool_hits(&rows, &q);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].article_id, "b");
+}
+
+/// Deterministic ordering: score desc, then article id asc on ties.
+#[test]
+fn pool_hits_orders_by_score_desc_then_id() {
+    let q = vec![1.0_f32, 0.0];
+    let rows = vec![
+        pool_row("z", 0, &[0.5, 0.5]),
+        pool_row("a", 0, &[0.5, 0.5]), // tie with z → id asc
+        pool_row("m", 0, &[1.0, 0.0]),
+    ];
+    let hits = pool_hits(&rows, &q);
+    let ids: Vec<&str> = hits.iter().map(|h| h.article_id.as_str()).collect();
+    assert_eq!(ids, vec!["m", "a", "z"]);
 }
