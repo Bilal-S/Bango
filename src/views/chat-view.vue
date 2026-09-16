@@ -854,7 +854,7 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
               class="flex flex-col max-w-[80%]"
               :class="
                 msg.role === 'user'
-                  ? 'self-end items-end animate-slide-in-right'
+                  ? 'self-end items-end animate-slide-in-up'
                   : 'self-start items-start animate-slide-in-left'
               "
             >
@@ -1651,13 +1651,17 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
 </template>
 
 <style scoped>
-@keyframes slide-in-right {
+/* User bubbles float in from the bottom (rising from the input area where the
+ * message was sent / Find Citations was clicked) - the natural chat idiom.
+ * The former horizontal slide-in-right was imperceptible next to the
+ * submit-time scroll-to-bottom and read as an abrupt appearance. */
+@keyframes slide-in-up {
   from {
-    transform: translateX(12px);
+    transform: translateY(18px);
     opacity: 0;
   }
   to {
-    transform: translateX(0);
+    transform: translateY(0);
     opacity: 1;
   }
 }
@@ -1693,8 +1697,8 @@ const { handleClearAiReasoning } = useClearAiReasoning({ clearAiReasoning });
   }
 }
 
-.animate-slide-in-right {
-  animation: slide-in-right 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+.animate-slide-in-up {
+  animation: slide-in-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-slide-in-left {
