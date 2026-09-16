@@ -18,7 +18,9 @@ use bango_lib::wiki::fts;
 use bango_lib::wiki::ingest::authors::{
     render_author_page, AuthorArticle, AuthorManifest, AuthorManifestEntry, CoauthorLink,
 };
-use bango_lib::wiki::ingest::batching::{build_ingest_prompt_batches, MAX_BATCH_INPUT_CHARS};
+use bango_lib::wiki::ingest::batching::{
+    build_ingest_prompt_batches, build_ingest_prompt_batches_with_budgets, MAX_BATCH_INPUT_CHARS,
+};
 use bango_lib::wiki::ingest::consolidation::{jaccard_similarity, rewrite_body_links};
 use bango_lib::wiki::ingest::slugs::{author_slug, sanitize_slug};
 use bango_lib::wiki::ingest::{
@@ -346,12 +348,14 @@ fn render_author_page_emits_art_prefixed_refs_and_no_raw_lines() {
                 title: "Paper One".to_string(),
                 year: Some(2020),
                 journal: Some("Nature".to_string()),
+                citation_count: Some(42),
             },
             AuthorArticle {
                 id: "22222222-2222-2222-2222-222222222222".to_string(),
                 title: "Paper Two".to_string(),
                 year: Some(2023),
                 journal: None,
+                citation_count: None,
             },
         ],
         h_index: Some(5),
@@ -393,6 +397,7 @@ fn render_author_page_includes_coauthors_section() {
             title: "Paper One".to_string(),
             year: Some(2021),
             journal: Some("Nature".to_string()),
+            citation_count: None,
         }],
         coauthors: vec![
             CoauthorLink {
@@ -456,8 +461,8 @@ fn write_many_sources(root: &std::path::Path, n: usize, body_chars: usize) {
 #[test]
 fn batch_input_char_budget_uses_fraction_of_context_window() {
     use bango_lib::wiki::ingest::batching::batch_input_char_budget;
-    // 50_000 tokens * 0.4 * 4 chars/token = 80_000, but capped at MAX_BATCH_INPUT_CHARS.
-    assert_eq!(batch_input_char_budget(50_000), MAX_BATCH_INPUT_CHARS);
+    // 50_000 tokens * 0.4 * 4 chars/token = 80_000, below the 2M ceiling.
+    assert_eq!(batch_input_char_budget(50_000), 80_000);
     // 10_000 tokens * 0.4 * 4 = 16_000 chars.
     assert_eq!(batch_input_char_budget(10_000), 16_000);
     // Zero/negative falls back to MAX_SOURCE_CHARS.
@@ -465,6 +470,18 @@ fn batch_input_char_budget_uses_fraction_of_context_window() {
     assert_eq!(batch_input_char_budget(-1), MAX_SOURCE_CHARS);
     // Tiny window clamps to the 4_000 floor.
     assert_eq!(batch_input_char_budget(1), 4_000);
+}
+
+#[test]
+fn batch_input_char_budget_scales_past_80k_up_to_2m_ceiling() {
+    use bango_lib::wiki::ingest::batching::batch_input_char_budget;
+    // 800K window: 0.4 * 800_000 * 4 = 1.28M chars (the old 80K cap clipped this).
+    assert_eq!(batch_input_char_budget(800_000), 1_280_000);
+    // 125K window already exceeds the old cap: 0.4 * 125_000 * 4 = 200_000.
+    assert_eq!(batch_input_char_budget(125_000), 200_000);
+    // 3M window clamps at the 2M pathological-call ceiling.
+    assert_eq!(batch_input_char_budget(3_000_000), MAX_BATCH_INPUT_CHARS);
+    assert_eq!(MAX_BATCH_INPUT_CHARS, 2_000_000);
 }
 
 #[test]
@@ -905,6 +922,39 @@ async fn run_chunked_ingest_empty_when_no_batches() {
     assert!(report.errors.is_empty());
 }
 
+/// Sender whose response parses to zero pages (empty body). The 0-page guard
+/// must surface it as an error, never a silent no-op (wikifix-final; the live
+/// 2026-09-16 12:38 regen hit exactly this hole with 0 pages + 0 errors).
+/// The coverage guard also issues bounded continuations (empty again) and
+/// reports the uncovered sources.
+struct EmptyResponseSender;
+
+#[async_trait]
+impl IngestLlmSender for EmptyResponseSender {
+    async fn send(&self, _prompt: &str) -> Result<String, AppError> {
+        Ok(String::new())
+    }
+}
+
+#[tokio::test]
+async fn zero_page_batch_response_is_reported_as_error() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
+    assert!(!batches.is_empty());
+    let sender: Arc<dyn IngestLlmSender> = Arc::new(EmptyResponseSender);
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
+
+    assert_eq!(report.pages_written, 0);
+    assert!(report.errors.iter().any(|e| e.contains("0 parseable pages")), "{report:?}");
+    assert!(!report.uncovered_sources.is_empty(), "uncovered sources must be reported");
+    // Bounded: initial call + at most 2 continuations.
+    assert!(report.continuation_calls <= 2, "{report:?}");
+}
+
 #[tokio::test]
 async fn run_chunked_ingest_parallel_is_faster_than_sequential_sum() {
     // Sanity check that batches actually run concurrently: with 4 batches
@@ -953,8 +1003,11 @@ async fn run_chunked_ingest_reports_ungrounded_llm_pages() {
         Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: true });
     let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
 
-    // Pages are still written (gate is non-fatal).
-    assert_eq!(report.pages_written, 3);
+    // Pages are still written (gate is non-fatal). Provenance-less pages are
+    // also uncovered, so the Change 4 coverage guard issues the 2 bounded
+    // continuations, which re-emit the same pages (3 rounds x 3 pages).
+    assert_eq!(report.continuation_calls, 2, "{report:?}");
+    assert_eq!(report.pages_written, 9, "{report:?}");
     // But the errors field carries the grounding gate message.
     let has_grounding_err = report
         .errors
@@ -1227,8 +1280,9 @@ fn progress_events_fire_for_each_preseed_step() {
         (17, "Preparing synthesis pages..."),
         (18, "Preparing concept hubs..."),
         (19, "Preparing method hubs..."),
-        (20, "Preparing source pages..."),
-        (21, "Building LLM batches..."),
+        (20, "Preparing framework pages..."),
+        (21, "Preparing source pages..."),
+        (22, "Building LLM batches..."),
     ];
     for (step, msg) in &steps {
         if let Some(f) = cb {
@@ -1237,11 +1291,11 @@ fn progress_events_fire_for_each_preseed_step() {
     }
 
     let collected = events.borrow();
-    assert_eq!(collected.len(), 7, "all 7 pre-seed steps should fire the callback");
+    assert_eq!(collected.len(), 8, "all 8 pre-seed steps should fire the callback");
     assert_eq!(collected[0].0, 15);
-    assert_eq!(collected[6].0, 21);
+    assert_eq!(collected[7].0, 22);
     assert!(collected[0].1.contains("Normalizing"));
-    assert!(collected[6].1.contains("Building LLM batches"));
+    assert!(collected[7].1.contains("Building LLM batches"));
 }
 
 #[tokio::test]
@@ -1303,3 +1357,246 @@ async fn wiki_ingest_emits_batch_progress_with_app_handle() {
 // the build configuration changes.
 #[allow(dead_code)]
 fn _ensure_ingest_linked(_: &ingest::IngestReport) {}
+
+// ---- Binding inventory implementations (`docs/test-plans/wiki-output-budget-tests.md`,
+// `.worktrees/wikifix-final.md` Changes 3, 4, 6). ----
+
+/// Emits one provenance-carrying page per `slug: (art-N)` occurrence, with a
+/// provider truncation flag (used to exercise the partial-page drop).
+struct TruncatingFakeSender;
+
+impl TruncatingFakeSender {
+    fn emit(prompt: &str) -> String {
+        let mut out = String::new();
+        for cap in regex::Regex::new(r"slug: (art-\d+)").unwrap().captures_iter(prompt) {
+            let slug = &cap[1];
+            out.push_str(&format!(
+                "<!-- PAGE:{slug} -->\n---\nid: {slug}\ntitle: \"{slug}\"\ntype: concept\n\
+                 slug: {slug}\nsummary: \"\"\nstatus: draft\nlinks: []\n\
+                 source_articles: [\"{slug}\"]\n---\n\n# {slug}\n\nBody. [^art-{slug}]\n\n"
+            ));
+        }
+        out
+    }
+}
+
+#[async_trait]
+impl IngestLlmSender for TruncatingFakeSender {
+    async fn send(&self, prompt: &str) -> Result<String, AppError> {
+        Ok(Self::emit(prompt))
+    }
+    async fn send_with_truncation(&self, prompt: &str) -> Result<(String, bool), AppError> {
+        Ok((Self::emit(prompt), true))
+    }
+}
+
+/// Scripted continuation sender: the first call reports truncation; every
+/// later call completes normally. Records every prompt it receives.
+struct ScriptedContinuationSender {
+    prompts: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl IngestLlmSender for ScriptedContinuationSender {
+    async fn send(&self, prompt: &str) -> Result<String, AppError> {
+        Ok(TruncatingFakeSender::emit(prompt))
+    }
+    async fn send_with_truncation(&self, prompt: &str) -> Result<(String, bool), AppError> {
+        self.prompts.lock().unwrap().push(prompt.to_string());
+        let first = self.prompts.lock().unwrap().len() == 1;
+        Ok((TruncatingFakeSender::emit(prompt), first))
+    }
+}
+
+/// Always returns exactly one complete page covering `art-0` (regression run).
+struct SinglePageSender;
+
+#[async_trait]
+impl IngestLlmSender for SinglePageSender {
+    async fn send(&self, _prompt: &str) -> Result<String, AppError> {
+        Ok("<!-- PAGE:art-0 -->\n---\nid: art-0\ntitle: \"art-0\"\ntype: concept\n\
+            slug: art-0\nsummary: \"\"\nstatus: draft\nlinks: []\n\
+            source_articles: [\"art-0\"]\n---\n\n# art-0\n\nBody. [^art-art-0]\n"
+            .to_string())
+    }
+}
+
+#[test]
+fn oversize_single_source_truncated_at_word_boundary_and_counted() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    // One word-delimited source whose body alone exceeds the tiny budget.
+    let mut fm = Frontmatter::default();
+    fm.set("id", "art-0");
+    fm.set("title", "Article 0");
+    fm.set("type", "source");
+    fm.set("slug", "art-0");
+    fm.set("status", "draft");
+    fm.set("summary", "");
+    fm.set("links", "[]");
+    let body = "word ".repeat(5_000);
+    frontmatter::write_file(&root.join("raw/art-0.md"), &fm, body.trim()).unwrap();
+
+    let batches = build_ingest_prompt_batches(root, 2_000, None, false).unwrap();
+    assert_eq!(batches.len(), 1);
+    let batch = &batches[0];
+    assert_eq!(batch.truncated_sources, 1, "oversize source must be counted");
+    assert!(batch.prompt.contains("[truncated to fit the batch budget]"));
+    // Word boundary: the text before the marker ends in whitespace, never mid-word.
+    let before_marker = batch.prompt.split("[truncated").next().unwrap();
+    assert!(before_marker.ends_with(|c: char| c.is_whitespace()), "cut not at a word boundary");
+    assert!(batch.prompt.len() < 20_000, "oversize source sent whole");
+}
+
+#[tokio::test]
+async fn truncated_response_drops_partial_trailing_page() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
+    let sender: Arc<dyn IngestLlmSender> = Arc::new(TruncatingFakeSender);
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
+
+    // Every response is provider-truncated, so the trailing page is dropped
+    // each time; art-1 never survives and lands uncovered after the bound.
+    assert_eq!(report.pages_written, 1, "partial trailing page must be dropped: {report:?}");
+    assert!(report.truncated_batches >= 1, "{report:?}");
+    assert!(report.uncovered_sources.contains(&"art-1".to_string()), "{report:?}");
+    assert!(report.continuation_calls <= 2, "{report:?}");
+}
+
+#[tokio::test]
+async fn continuation_redispatches_only_uncovered_sources_bounded_at_two() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 2, 500);
+
+    let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
+    let sender =
+        Arc::new(ScriptedContinuationSender { prompts: std::sync::Mutex::new(Vec::new()) });
+    let report = run_chunked_ingest(
+        root,
+        batches,
+        Arc::clone(&sender) as Arc<dyn IngestLlmSender>,
+        None,
+        (25, 95),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.continuation_calls, 1, "{report:?}");
+    assert!(report.uncovered_sources.is_empty(), "{report:?}");
+    assert_eq!(report.pages_written, 2, "{report:?}");
+    assert_eq!(report.truncated_batches, 1, "{report:?}");
+
+    let prompts = sender.prompts.lock().unwrap();
+    assert_eq!(prompts.len(), 2, "initial call + exactly one continuation");
+    // The continuation prompt carries ONLY the uncovered source, not art-0.
+    assert!(prompts[1].contains("slug: art-1"), "continuation must carry art-1");
+    assert!(
+        !prompts[1].contains("### Source: Article 0 (slug: art-0)"),
+        "continuation must not re-dispatch covered sources"
+    );
+}
+
+#[test]
+fn batch_sizing_respects_estimated_output_budget() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 20, 500);
+
+    // fit = floor(0.7 * 32_768 / 2_200) = 10; fewest calls in 3..=7 whose
+    // per-batch count fits: 3 calls x ceil(20/3)=7 <= 10 -> 3 batches of <= 7.
+    let batches =
+        build_ingest_prompt_batches_with_budgets(root, 800_000, None, false, 32_768).unwrap();
+    assert_eq!(batches.len(), 3, "expected the 3-7 call sweet spot");
+    assert!(batches.iter().all(|b| b.source_slugs.len() <= 7));
+
+    // Legacy wrapper (output side disabled): single batch by input alone.
+    let legacy = build_ingest_prompt_batches(root, 800_000, None, false).unwrap();
+    assert_eq!(legacy.len(), 1);
+}
+
+#[test]
+fn build_batch_prompt_carries_soft_page_budget_and_no_word_cap() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 6, 500);
+
+    let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
+    let prompt = &batches[0].prompt;
+    // Qualitative coverage guidance: no numeric quota (Tier D1: "at least N"
+    // causes hallucinated entities), no cap, no per-page word cap.
+    assert!(
+        prompt.contains("create a page for every distinct theme"),
+        "coverage guidance missing: {prompt}"
+    );
+    assert!(prompt.contains("typically yields several pages"), "{prompt}");
+    assert!(prompt.contains("named theoretical frameworks"), "{prompt}");
+    assert!(prompt.contains("as much depth as the material warrants"), "{prompt}");
+    assert!(!prompt.to_lowercase().contains("at least "), "quota language leaked: {prompt}");
+    assert!(!prompt.contains("150-350"), "word cap leaked: {prompt}");
+    assert!(!prompt.contains("words per page"), "word cap leaked: {prompt}");
+}
+
+#[test]
+fn build_batch_prompt_carries_existing_pages_index() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 2, 500);
+    // Pre-existing wiki page (as a prior run would leave behind).
+    let mut fm = Frontmatter::default();
+    fm.set("type", "concept");
+    fm.set("slug", "sugar-tax");
+    fm.set("title", "Sugar Tax");
+    frontmatter::write_file(&root.join("wiki/concepts/sugar-tax.md"), &fm, "Body").unwrap();
+
+    let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
+    let prompt = &batches[0].prompt;
+    assert!(prompt.contains("# Existing Wiki Pages (reuse these slugs)"), "{prompt}");
+    assert!(prompt.contains("- concept: Sugar Tax [[sugar-tax]]"), "{prompt}");
+    assert!(prompt.contains("genuinely absent from this list"), "{prompt}");
+}
+
+#[tokio::test]
+async fn ingest_report_records_volume_metrics_and_warns_on_regression() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    bango_lib::wiki::storage::scaffold_tree(root).unwrap();
+    write_many_sources(root, 6, 300);
+
+    // Run 1: healthy volume, no previous metrics -> no warning.
+    let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
+    let sender: Arc<dyn IngestLlmSender> =
+        Arc::new(FakeSender { delay_ms: 0, fail_marker: None, omit_provenance: false });
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
+    assert_eq!(report.pages_written, 6);
+    assert!(report.warnings.is_empty(), "{report:?}");
+
+    let metrics_path = root.join(".ingest-metrics.json");
+    let metrics: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&metrics_path).unwrap()).unwrap();
+    assert_eq!(metrics["pagesWritten"], 6, "{metrics}");
+    assert_eq!(metrics["llmBatches"], 1, "{metrics}");
+    assert_eq!(metrics["pagesByType"]["concept"], 6, "{metrics}");
+
+    // Run 2: SinglePageSender covers only art-0; the 2 bounded continuations
+    // re-emit the same art-0 page, so 3 pages survive (< 80% of 6) and the
+    // regression warning must surface.
+    let batches = build_ingest_prompt_batches(root, 128_000, None, false).unwrap();
+    let sender: Arc<dyn IngestLlmSender> = Arc::new(SinglePageSender);
+    let report = run_chunked_ingest(root, batches, sender, None, (25, 95), None).await.unwrap();
+    assert_eq!(report.pages_written, 3, "{report:?}");
+    assert!(
+        report.warnings.iter().any(|w| w.contains("dropped from 6 to 3")),
+        "regression warning missing: {report:?}"
+    );
+}

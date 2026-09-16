@@ -213,13 +213,17 @@ impl LlmOrchestrator {
 
     /// Send a chat completion request through the orchestrator.
     /// Enforces concurrency limits + rate limiting + per-request-type timeout.
-    pub async fn send(
+    /// Send a chat completion and also return the [`client::CallMeta`]
+    /// side-channel (truncation, rejection recovery). Wiki ingest uses this
+    /// to detect output-budget truncation; `send` drops the meta for
+    /// existing callers.
+    pub async fn send_with_meta(
         &self,
         config: &LlmConfig,
         system_prompt: &str,
         user_prompt: &str,
         request_type: LlmRequestType,
-    ) -> Result<(String, usize), AppError> {
+    ) -> Result<(String, usize, client::CallMeta), AppError> {
         // 1. Acquire semaphore permit (waits if at concurrency limit).
         // Clone the Arc under a brief read lock, then drop the guard before
         // awaiting so update_settings is never blocked by an active request.
@@ -278,8 +282,8 @@ impl LlmOrchestrator {
         /* Unpack the (content, tokens, CallMeta) 3-tuple, persist temperature
         flag on recovery, and centralize error logging. */
         let result = result.map(|(content, tokens, meta)| {
-            self.maybe_persist_skip_temperature(meta);
-            (content, tokens)
+            self.maybe_persist_skip_temperature(meta.clone());
+            (content, tokens, meta)
         });
 
         // 5. Log errors centrally
@@ -288,6 +292,20 @@ impl LlmOrchestrator {
         }
 
         result
+    }
+
+    /// Prose-call wrapper around [`Self::send_with_meta`] that drops the
+    /// `CallMeta` side-channel (pre-existing caller contract).
+    pub async fn send(
+        &self,
+        config: &LlmConfig,
+        system_prompt: &str,
+        user_prompt: &str,
+        request_type: LlmRequestType,
+    ) -> Result<(String, usize), AppError> {
+        let (content, tokens, _meta) =
+            self.send_with_meta(config, system_prompt, user_prompt, request_type).await?;
+        Ok((content, tokens))
     }
 
     /// Send a chat completion whose response is expected to be JSON. Chains

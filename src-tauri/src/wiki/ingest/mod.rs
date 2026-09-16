@@ -18,6 +18,7 @@ pub mod authors;
 pub mod batching;
 pub mod concepts;
 pub mod consolidation;
+pub mod frameworks;
 pub mod methods;
 pub mod slugs;
 pub mod sources;
@@ -28,11 +29,19 @@ pub use authors::{
     AuthorManifest, AuthorManifestEntry, CoauthorLink,
 };
 pub use batching::{
-    build_ingest_prompt_batches, load_raw_sources, run_chunked_ingest, IngestBatch,
-    IngestLlmSender, OrchestratorIngestSender, RawSource, INGEST_SYSTEM_PROMPT,
+    build_ingest_prompt_batches, build_ingest_prompt_batches_with_budgets, load_raw_sources,
+    run_chunked_ingest, IngestBatch, IngestLlmSender, IngestRunMetrics, OrchestratorIngestSender,
+    PromptContext, RawSource, ESTIMATED_OUTPUT_TOKENS_PER_ARTICLE, INGEST_SYSTEM_PROMPT,
+    MAX_CONTINUATIONS_PER_BATCH,
 };
 pub use concepts::{preseed_concept_hubs, tag_to_display_name, TAG_CONCEPT_LIMIT};
 pub use consolidation::{consolidate_pages, rewrite_page_links};
+pub use frameworks::{
+    apply_alias_merges, canonical_name_map, fetch_framework_rows, polish_framework_pages,
+    preseed_framework_pages, preseed_frameworks, FrameworkArticle, FrameworkRow,
+    FrameworkSynthesizer, OrchestratorFrameworkSynthesizer, FRAMEWORK_EXTRACTION_SYSTEM_PROMPT,
+    FRAMEWORK_SYNTHESIS_SYSTEM_PROMPT,
+};
 pub use methods::preseed_methods;
 pub use sources::preseed_document_source_pages;
 pub use synthesis::preseed_synthesis_from_ai_summaries;
@@ -48,6 +57,16 @@ pub struct IngestReport {
     pub pages_written: usize,
     pub pages_skipped: usize,
     pub source_chars_truncated: bool,
+    /// Batches whose response hit the output budget (provider flag or
+    /// structural cut) at least once (Change 4).
+    pub truncated_batches: usize,
+    /// Continuation calls issued for uncovered sources (Change 4).
+    pub continuation_calls: usize,
+    /// Batch sources no page's `source_articles` covers after the
+    /// continuation bound (Change 4 source-coverage guard).
+    pub uncovered_sources: Vec<String>,
+    /// Non-fatal advisories (e.g. Change 6.2 run-over-run volume regression).
+    pub warnings: Vec<String>,
     pub errors: Vec<String>,
 }
 

@@ -68,7 +68,23 @@ Project round-trips the `llm_config` row verbatim, no-row no-op, default
 wipe; inventory: `docs/test-plans/exim-tests.md`). `prisma/prisma_report_test.rs` covers the screening
 reasons report (primary-reason attribution, general buckets,
 multi-assignment counts, Markdown rendering). `wiki/wiki_consolidation_test.rs` +
-`wiki/wiki_index_drift_test.rs` cover the wiki pipelines. `utils/sections_test.rs` +
+`wiki/wiki_index_drift_test.rs` cover the wiki pipelines. `wiki/wiki_summary_export_test.rs`
+plus the wikifix tests in `wiki/wiki_ingest_test.rs`,
+`wiki/wiki_full_text_refresh_test.rs`, and `llm/llm_client_test.rs` cover the
+wiki output-budget plan (Changes 1-4 and 6 fully implemented: summary-blob
+export, ensure-summaries, 2M input ceiling, two-sided sizing, Existing Pages
+Index, oversize truncation, truncation detection + bounded continuation,
+coverage guard, run-over-run metrics; plan: `.worktrees/wikifix-final.md`);
+binding inventory: `docs/test-plans/wiki-output-budget-tests.md`.
+`wiki/wiki_author_enrichment_test.rs` covers the bibliometric author-page
+enrichment (co-author regression, most-cited, key references, main themes,
+keyword curation); binding inventory:
+`docs/test-plans/wiki-author-enrichment-tests.md`.
+`wiki/wiki_frameworks_test.rs` (+ one render test in
+`wiki_summary_export_test.rs`) covers the frameworks pipeline (canonical
+clustering, alias merges, skeleton pre-seed, LLM polish + fallback, blob
+schema/merge, article links); binding inventory:
+`docs/test-plans/wiki-frameworks-tests.md`. `utils/sections_test.rs` +
 `utils/chunking_test.rs` cover the utils text-classification + chunking.
 `biblio/biblio_cluster_themes_test.rs` covers the cluster thematic analysis pure
 helpers (resolution dispatcher, three-source term resolution, Top-N cap,

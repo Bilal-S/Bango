@@ -33,7 +33,10 @@ use super::{
 /// `(step_pct, message)` so the caller can emit a `wiki:progress` event in the
 /// 15-25% range (the gap between "Raw sources prepared" and "Generating wiki
 /// pages via LLM..."). The callback is `Option` so tests can pass `None`.
-pub(super) type WikiPrepProgressCb<'a> = Option<&'a dyn Fn(usize, &str)>;
+/// Prep-progress callback slot. `Send + Sync` bound required because the
+/// callback stays alive across `.await` points inside the async pre-seed
+/// pipeline (tauri command futures must be `Send`).
+pub(super) type WikiPrepProgressCb<'a> = Option<&'a (dyn Fn(usize, &str) + Send + Sync)>;
 
 /// Run the LLM wiki ingest: build prompt batches from raw sources, dispatch
 /// them to the LLM in parallel (bounded by the orchestrator's concurrency
@@ -94,11 +97,18 @@ async fn wiki_ingest_inner(
         (root, config)
     };
 
+    // Frameworks pre-phase: backfill + canonicalize blob framework names so
+    // the deterministic framework pre-seed has grounded input.
+    if !skip_llm {
+        ensure_wiki_frameworks(db_state, orchestrator, app_handle, cancel).await?;
+    }
+
     // Build batches (with author manifest if multi-batch) inside a DB scope.
     let prep_cb: WikiPrepProgressCb<'_> = Some(&|step, msg| {
         emit_wiki_progress(app_handle, step, msg);
     });
     let mut pre_seed_pages = 0usize;
+    let mut framework_rows: Vec<ingest::FrameworkRow> = Vec::new();
     let batches = {
         let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
         build_batches_with_manifest(
@@ -108,8 +118,16 @@ async fn wiki_ingest_inner(
             cancel,
             prep_cb,
             &mut pre_seed_pages,
+            &mut framework_rows,
         )?
     };
+    // Framework polish pass: one LLM call per framework, outside the DB lock.
+    if !skip_llm && !framework_rows.is_empty() {
+        let polished =
+            ingest::polish_framework_pages(framework_rows, &root, orchestrator.inner(), &config)
+                .await?;
+        eprintln!("[wiki:diag] framework pages polished: {polished}");
+    }
     if is_cancelled(cancel) {
         let mut report = ingest::IngestReport::default();
         report.errors.push("Cancelled".to_string());
@@ -170,6 +188,311 @@ async fn wiki_ingest_inner(
 /// step with a `(step_pct, message)` tuple in the 15-25% range so the
 /// frontend progress bar advances past 15% with a meaningful phase label
 /// instead of freezing silently.
+/// Wiki ensure-summaries query (wikifix-final Change 1): included articles
+/// with full text but a missing/empty AI-summary blob. Pub for integration
+/// tests (`wiki_full_text_refresh_test.rs`).
+pub fn wiki_articles_missing_summary(conn: &rusqlite::Connection) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id FROM articles \
+         WHERE status = 'included' \
+           AND full_text IS NOT NULL AND TRIM(full_text) <> '' \
+           AND (full_text_ai_summary IS NULL OR TRIM(full_text_ai_summary) = '')",
+    )?;
+    let ids = stmt.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
+
+/// Record a per-article ensure-summaries failure (non-fatal): the article
+/// falls back to its abstract for this wiki export. Pub for tests.
+pub fn record_wiki_summary_failure(
+    conn: &rusqlite::Connection,
+    article_id: &str,
+    err: &str,
+) -> Result<(), AppError> {
+    crate::db::audit_repo::create_entry(
+        conn,
+        article_id,
+        "ai_summary",
+        None,
+        None,
+        Some(&format!("Wiki ensure-summaries failed ({err}); abstract used for wiki export")),
+        "ai",
+    )?;
+    Ok(())
+}
+
+/// Ensure-summaries pre-phase: generate the missing blob for every target so
+/// the wiki export carries summary-scale content (full text is never sent).
+/// Per-article failures are non-fatal (audit entry + abstract fallback).
+/// Emits `wiki:progress` in the 1-9% slice; cancel-checked between articles.
+async fn ensure_wiki_summaries(
+    db_state: &tauri::State<'_, DbState>,
+    orchestrator: &tauri::State<'_, std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>,
+    app_handle: &tauri::AppHandle,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<(), AppError> {
+    let targets = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        wiki_articles_missing_summary(&conn)?
+    };
+    let total = targets.len();
+    for (i, article_id) in targets.into_iter().enumerate() {
+        if is_cancelled(cancel) {
+            return Ok(());
+        }
+        emit_wiki_progress(
+            app_handle,
+            1 + (i.saturating_mul(8) / total.max(1)),
+            &format!("Generating AI summary {} of {}", i + 1, total),
+        );
+        if let Err(e) = crate::commands::summary::generate_article_ai_summary_inner(
+            db_state,
+            app_handle,
+            orchestrator,
+            &article_id,
+            true,
+        )
+        .await
+        {
+            eprintln!("[wiki:diag] ensure-summaries failed for {article_id}: {e}");
+            let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+            let _ = record_wiki_summary_failure(&conn, &article_id, &e.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// Wiki ensure-frameworks query: included full-text articles whose blob
+/// exists but lacks the `theoretical_frameworks` key. Pub for tests.
+pub fn wiki_articles_missing_frameworks(
+    conn: &rusqlite::Connection,
+) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id FROM articles \
+         WHERE status = 'included' \
+           AND full_text IS NOT NULL AND TRIM(full_text) <> '' \
+           AND full_text_ai_summary IS NOT NULL AND full_text_ai_summary != '' \
+           AND full_text_ai_summary NOT LIKE '%\"theoretical_frameworks\"%'",
+    )?;
+    let ids = stmt.query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
+
+/// System prompt for the one-shot corpus-level framework-alias merge.
+const FRAMEWORK_ALIAS_MERGE_SYSTEM_PROMPT: &str = "You merge duplicate theoretical-framework \
+     names. You receive distinct framework names found across a review's articles; some are \
+     spelling or acronym variants of the same framework. Respond with JSON ONLY: \
+     {\"merges\": [{\"canonical\": \"<chosen canonical name>\", \"absorb\": [\"<names to merge \
+     into it>\"]}]}. Merge ONLY true variants/acronyms of the same framework (e.g. \"DSM-5\" \
+     and \"Diagnostic and Statistical Manual of Mental Disorders\"); keep genuinely different \
+     frameworks separate. Empty merges list when nothing should merge. No code fences.";
+
+/// Ensure-frameworks pre-phase (frameworks plan Stage 1-2): backfill the
+/// `theoretical_frameworks` blob field for included full-text articles, then
+/// canonicalize names across the corpus (deterministic clustering + one LLM
+/// alias-merge call) so every consumer sees identical names. Non-fatal per
+/// article; a no-op without LLM config.
+async fn ensure_wiki_frameworks(
+    db_state: &tauri::State<'_, DbState>,
+    orchestrator: &tauri::State<'_, std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>,
+    app_handle: &tauri::AppHandle,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<(), AppError> {
+    let config = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        crate::db::llm_config_repo::get_config(&conn)?
+    };
+    let Some(config) = config else { return Ok(()) };
+
+    // Phase 1: backfill the missing `theoretical_frameworks` fields.
+    let targets = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        wiki_articles_missing_frameworks(&conn)?
+    };
+    let total = targets.len();
+    for (i, article_id) in targets.into_iter().enumerate() {
+        if is_cancelled(cancel) {
+            return Ok(());
+        }
+        emit_wiki_progress(
+            app_handle,
+            2 + (i.saturating_mul(3) / total.max(1)),
+            &format!("Extracting frameworks {} of {}", i + 1, total),
+        );
+        let (title, full_text) = {
+            let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+            crate::db::article_repo::get_full_text_for_summary(&conn, &article_id)?
+        };
+        let max_chars = ((config.context_window_tokens as usize).saturating_sub(2000)) * 4;
+        let truncated =
+            if full_text.len() > max_chars { &full_text[..max_chars] } else { &full_text };
+        let user_prompt = format!("## Article Title\n{title}\n\n## Full Text\n{truncated}");
+        match orchestrator
+            .send_json(
+                &config,
+                ingest::FRAMEWORK_EXTRACTION_SYSTEM_PROMPT,
+                &user_prompt,
+                crate::llm::orchestrator::LlmRequestType::ArticleSummary,
+            )
+            .await
+        {
+            Ok((json, _tokens)) => {
+                let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+                let existing: Option<String> = conn
+                    .query_row(
+                        "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+                        rusqlite::params![&article_id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let merged = existing.as_deref().and_then(|blob| {
+                    crate::commands::summary::merge_frameworks_into_blob(blob, &json)
+                });
+                if let Some(merged) = merged {
+                    crate::db::article_repo::set_ai_summary(&conn, &article_id, &merged)?;
+                    crate::db::audit_repo::create_entry(
+                        &conn,
+                        &article_id,
+                        "ai_summary",
+                        None,
+                        None,
+                        Some("Wiki frameworks extracted from full text"),
+                        "ai",
+                    )?;
+                }
+            }
+            Err(e) => {
+                eprintln!("[wiki:diag] framework extraction failed for {article_id}: {e}");
+            }
+        }
+    }
+
+    // Phase 2: canonicalize names across blobs.
+    canonicalize_framework_names(db_state, orchestrator, &config).await?;
+    Ok(())
+}
+
+/// Stage 2 canonicalization: deterministic slug clustering, one LLM
+/// alias-merge call for acronym variants, then blob rewrites so every
+/// downstream consumer (export, pre-seed, article pages) sees identical names.
+async fn canonicalize_framework_names(
+    db_state: &tauri::State<'_, DbState>,
+    orchestrator: &tauri::State<'_, std::sync::Arc<crate::llm::orchestrator::LlmOrchestrator>>,
+    config: &crate::models::llm_config::LlmConfig,
+) -> Result<(), AppError> {
+    let articles: Vec<(String, String)> = {
+        let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, full_text_ai_summary FROM articles \
+             WHERE status = 'included' AND full_text_ai_summary IS NOT NULL \
+               AND full_text_ai_summary LIKE '%\"theoretical_frameworks\"%'",
+        )?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .filter_map(Result::ok)
+            .collect();
+        rows
+    };
+    if articles.is_empty() {
+        return Ok(());
+    }
+    let mut all_names: Vec<String> = Vec::new();
+    for (_, blob) in &articles {
+        if let Some(parsed) = crate::wiki::ingest::synthesis::parse_ai_summary(blob) {
+            for fw in &parsed.theoretical_frameworks {
+                all_names.push(fw.name.clone());
+            }
+        }
+    }
+    let mut map = ingest::canonical_name_map(&all_names);
+    let mut distinct: Vec<String> =
+        map.values().cloned().collect::<std::collections::HashSet<_>>().into_iter().collect();
+    distinct.sort();
+    // One LLM alias-merge call when more than one distinct name exists.
+    if distinct.len() > 1 {
+        let list = distinct.iter().map(|n| format!("- {n}")).collect::<Vec<_>>().join("\n");
+        let prompt = format!("Distinct framework names found in the review:\n\n{list}\n");
+        if let Ok((json, _)) = orchestrator
+            .send_json(
+                config,
+                FRAMEWORK_ALIAS_MERGE_SYSTEM_PROMPT,
+                &prompt,
+                crate::llm::orchestrator::LlmRequestType::ArticleSummary,
+            )
+            .await
+        {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                let mut merges: Vec<(String, Vec<String>)> = Vec::new();
+                if let Some(arr) = value.get("merges").and_then(|v| v.as_array()) {
+                    for entry in arr {
+                        let Some(canonical) =
+                            entry.get("canonical").and_then(|v| v.as_str()).map(str::to_string)
+                        else {
+                            continue;
+                        };
+                        let absorb: Vec<String> = entry
+                            .get("absorb")
+                            .and_then(|v| v.as_array())
+                            .map(|a| {
+                                a.iter().filter_map(|x| x.as_str()).map(str::to_string).collect()
+                            })
+                            .unwrap_or_default();
+                        if !canonical.is_empty() && !absorb.is_empty() {
+                            merges.push((canonical, absorb));
+                        }
+                    }
+                }
+                if !merges.is_empty() {
+                    map = ingest::apply_alias_merges(&map, &merges);
+                }
+            }
+        }
+    }
+    // Rewrite blobs whose raw names map to a different canonical name.
+    let conn = crate::db::connection::lock_conn(&db_state.conn)?;
+    let mut rewritten = 0usize;
+    for (article_id, blob) in &articles {
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(blob) else { continue };
+        let Some(arr) = value.get_mut("theoretical_frameworks").and_then(|v| v.as_array_mut())
+        else {
+            continue;
+        };
+        let mut changed = false;
+        for entry in arr.iter_mut() {
+            let raw = entry.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if let Some(canonical) = map.get(&raw) {
+                if *canonical != raw {
+                    if let Some(obj) = entry.as_object_mut() {
+                        obj.insert(
+                            "name".to_string(),
+                            serde_json::Value::String(canonical.clone()),
+                        );
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            let merged = serde_json::to_string(&value).unwrap_or_default();
+            crate::db::article_repo::set_ai_summary(&conn, article_id, &merged)?;
+            crate::db::audit_repo::create_entry(
+                &conn,
+                article_id,
+                "ai_summary",
+                None,
+                None,
+                Some("Wiki framework names canonicalized"),
+                "ai",
+            )?;
+            rewritten += 1;
+        }
+    }
+    if rewritten > 0 {
+        eprintln!("[wiki:diag] canonicalized framework names in {rewritten} blob(s)");
+    }
+    Ok(())
+}
+
 fn build_batches_with_manifest(
     conn: &mut rusqlite::Connection,
     root: &std::path::Path,
@@ -177,6 +500,7 @@ fn build_batches_with_manifest(
     cancel: Option<&Arc<AtomicBool>>,
     prep_cb: WikiPrepProgressCb<'_>,
     pre_seed_pages: &mut usize,
+    framework_rows: &mut Vec<ingest::FrameworkRow>,
 ) -> Result<Vec<ingest::IngestBatch>, AppError> {
     // Run the full 8-step bibliometric normalization pipeline so
     // `biblio_authors` (with metrics), `biblio_terms`, `biblio_article_terms`,
@@ -268,6 +592,17 @@ fn build_batches_with_manifest(
         return Ok(Vec::new());
     }
 
+    // Phase 5: Pre-seed framework SKELETON pages from the canonicalized blob
+    // `theoretical_frameworks` field (sync, inside the DB lock). The LLM
+    // polish pass (one call per framework, sees every naming article) runs
+    // after this function returns, outside the DB lock, at the call sites.
+    eprintln!("[wiki:diag] phase=preparing:frameworks");
+    if let Some(cb) = prep_cb {
+        cb(20, "Preparing framework pages...");
+    }
+    *framework_rows = ingest::fetch_framework_rows(conn)?;
+    *pre_seed_pages += ingest::preseed_framework_pages(framework_rows, root)?;
+
     // Layer 1 (External Documents): Pre-seed source pages for user-uploaded
     // documents (Add Documents). Each external doc in `raw/` with a
     // `source_kind: user_*` gets a first-class wiki node at
@@ -275,7 +610,7 @@ fn build_batches_with_manifest(
     // `[^art-user-slug]` footnote refs resolve to a navigable page.
     eprintln!("[wiki:diag] phase=preparing:sources");
     if let Some(cb) = prep_cb {
-        cb(20, "Preparing source pages...");
+        cb(21, "Preparing source pages...");
     }
     *pre_seed_pages += ingest::preseed_document_source_pages(root).unwrap_or(0);
     if is_cancelled(cancel) {
@@ -288,22 +623,27 @@ fn build_batches_with_manifest(
     // author pages and to link to the canonical slugs instead.
     eprintln!("[wiki:diag] phase=preparing:batches");
     if let Some(cb) = prep_cb {
-        cb(21, "Building LLM batches...");
+        cb(22, "Building LLM batches...");
     }
     let methods_pre_seeded = methods_written > 0;
+    // Two-sided sizing (wikifix-final Change 4.4): planning-only estimate,
+    // nothing is sent to the provider.
+    let output_budget = crate::llm::client::estimated_output_budget_tokens(config);
     if manifest.entries.is_empty() {
-        ingest::build_ingest_prompt_batches(
+        ingest::build_ingest_prompt_batches_with_budgets(
             root,
             config.context_window_tokens,
             None,
             methods_pre_seeded,
+            output_budget,
         )
     } else {
-        ingest::build_ingest_prompt_batches(
+        ingest::build_ingest_prompt_batches_with_budgets(
             root,
             config.context_window_tokens,
             Some(&manifest),
             methods_pre_seeded,
+            output_budget,
         )
     }
 }
@@ -367,6 +707,14 @@ async fn wiki_rebuild_inner(
         let _ = ensure_initialized(&root);
     }
 
+    // Step 0.5 (wikifix-final Change 1): ensure every included full-text
+    // article has an AI-summary blob before export; the wiki LLM never sees
+    // full text. Skipped when the LLM is not configured (abstract fallback).
+    if !skip_llm {
+        ensure_wiki_summaries(db_state, orchestrator, app_handle, cancel).await?;
+        ensure_wiki_frameworks(db_state, orchestrator, app_handle, cancel).await?;
+    }
+
     // Step 1: Lock briefly to load articles + config, then release so the
     // CPU-bound extraction runs lock-free. Per-article progress events fire
     // in the 10-15% range so the user sees "Exporting article N of M..." instead
@@ -418,6 +766,7 @@ async fn wiki_rebuild_inner(
         emit_wiki_progress(app_handle, step, msg);
     });
     let mut pre_seed_pages = 0usize;
+    let mut framework_rows: Vec<ingest::FrameworkRow> = Vec::new();
     let batches = {
         let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
         build_batches_with_manifest(
@@ -427,8 +776,16 @@ async fn wiki_rebuild_inner(
             cancel,
             prep_cb,
             &mut pre_seed_pages,
+            &mut framework_rows,
         )?
     };
+    // Framework polish pass: one LLM call per framework, outside the DB lock.
+    if !skip_llm && !framework_rows.is_empty() {
+        let polished =
+            ingest::polish_framework_pages(framework_rows, &root, orchestrator.inner(), &config)
+                .await?;
+        eprintln!("[wiki:diag] framework pages polished: {polished}");
+    }
     if is_cancelled(cancel) {
         let mut report = ingest::IngestReport::default();
         report.errors.push("Cancelled".to_string());
@@ -515,6 +872,14 @@ async fn wiki_export_and_ingest_inner(
 
     emit_wiki_progress(app_handle, 0, "Preparing raw sources...");
 
+    // Ensure-summaries pre-phase (wikifix-final Change 1): generate missing
+    // blobs before the article load below so exports carry summary-scale
+    // content. Skipped when the LLM is not configured (abstract fallback).
+    if !skip_llm {
+        ensure_wiki_summaries(db_state, orchestrator, app_handle, cancel).await?;
+        ensure_wiki_frameworks(db_state, orchestrator, app_handle, cancel).await?;
+    }
+
     // Lock briefly to load articles + config, then release so the CPU-bound
     // extraction runs lock-free. Per-article progress events fire in the
     // 10-15% range. Cancel is checked before each article.
@@ -567,6 +932,7 @@ async fn wiki_export_and_ingest_inner(
         emit_wiki_progress(app_handle, step, msg);
     });
     let mut pre_seed_pages = 0usize;
+    let mut framework_rows: Vec<ingest::FrameworkRow> = Vec::new();
     let batches = {
         let mut conn = crate::db::connection::lock_conn(&db_state.conn)?;
         build_batches_with_manifest(
@@ -576,8 +942,16 @@ async fn wiki_export_and_ingest_inner(
             cancel,
             prep_cb,
             &mut pre_seed_pages,
+            &mut framework_rows,
         )?
     };
+    // Framework polish pass: one LLM call per framework, outside the DB lock.
+    if !skip_llm && !framework_rows.is_empty() {
+        let polished =
+            ingest::polish_framework_pages(framework_rows, &root, orchestrator.inner(), &config)
+                .await?;
+        eprintln!("[wiki:diag] framework pages polished: {polished}");
+    }
     if is_cancelled(cancel) {
         let mut report = ingest::IngestReport::default();
         report.errors.push("Cancelled".to_string());

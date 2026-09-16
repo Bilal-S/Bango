@@ -1,17 +1,20 @@
 //! Regression tests for the `wiki_needs_refresh` flag being set when the
 //! Wiki's content source fields change.
 //!
-//! The Wiki ingest content fallback chain in
+//! The Wiki ingest content resolution in
 //! `src-tauri/src/wiki/raw_export.rs::article_content()` is:
 //!
 //! ```text
-//! full_text → full_text_ai_summary → abstract_text
+//! full_text_ai_summary blob → abstract_text (full text is never exported)
 //! ```
 //!
-//! The Tauri commands that mutate these three fields (`attach_full_text`,
+//! The Tauri commands that mutate these fields (`attach_full_text`,
 //! `delete_full_text`, `generate_article_ai_summary`) must mark the wiki
 //! staleness flag so the frontend `autoIngestIfStale()` flow in
 //! `src/views/wiki-view.vue` re-runs ingest with the new content.
+//!
+//! Also covers the ensure-summaries pre-phase query + failure contract
+//! (`.worktrees/wikifix-final.md` Change 1).
 //!
 //! Because the flag-setting is a one-liner at the command layer (which requires
 //! `State<DbState>` that the project deliberately avoids mocking - see
@@ -19,13 +22,14 @@
 //! the repo layer: that calling `mark_wiki_needs_refresh` after the content
 //! mutation is the correct pairing.
 
+use bango_lib::commands::wiki_cmd::{record_wiki_summary_failure, wiki_articles_missing_summary};
 use bango_lib::db::app_settings_repo::{
     clear_wiki_needs_refresh, get_wiki_needs_refresh, mark_wiki_needs_refresh,
 };
 use bango_lib::db::article_repo;
 use bango_lib::db::migration::run_migrations;
 use bango_lib::models::article::NewArticle;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 /// In-memory DB with all migrations applied (same pattern as
 /// `biblio_needs_refresh_test.rs`).
@@ -132,4 +136,67 @@ fn test_flag_defaults_fresh_and_round_trips() {
     mark_wiki_needs_refresh(&conn);
     mark_wiki_needs_refresh(&conn);
     assert!(get_wiki_needs_refresh(&conn).unwrap());
+}
+
+// ---- Ensure-summaries pre-phase (`.worktrees/wikifix-final.md` Change 1;
+// inventory: `docs/test-plans/wiki-output-budget-tests.md`). ----
+
+/// Ensure-summaries query returns exactly included full-text articles whose
+/// blob is NULL/empty; skips articles with a blob, without full text, or not
+/// included.
+#[test]
+fn ensure_summaries_targets_only_full_text_articles_missing_blobs() {
+    let conn = test_db();
+    let missing = seed_included_article(&conn);
+    conn.execute("UPDATE articles SET full_text = 'full body' WHERE id = ?1", params![&missing])
+        .unwrap();
+    let has_blob = seed_included_article(&conn);
+    conn.execute(
+        "UPDATE articles SET full_text = 'full body', \
+         full_text_ai_summary = '{\"summary_150_250_words\":\"x\"}' WHERE id = ?1",
+        params![&has_blob],
+    )
+    .unwrap();
+    let abstract_only = seed_included_article(&conn);
+    let rejected = seed_included_article(&conn);
+    conn.execute("UPDATE articles SET full_text = 'full body' WHERE id = ?1", params![&rejected])
+        .unwrap();
+    article_repo::update_article_status(&conn, &rejected, "rejected").unwrap();
+
+    let ids = wiki_articles_missing_summary(&conn).unwrap();
+    assert_eq!(ids, vec![missing], "only the blob-less full-text included article counts");
+    assert!(!ids.contains(&has_blob));
+    assert!(!ids.contains(&abstract_only));
+    assert!(!ids.contains(&rejected));
+}
+
+/// Generation failure is non-fatal: a per-article audit entry is written, the
+/// blob stays NULL, so wiki export falls back to the abstract.
+#[test]
+fn ensure_summaries_failure_falls_back_to_abstract_with_audit_entry() {
+    let conn = test_db();
+    let article_id = seed_included_article(&conn);
+    conn.execute("UPDATE articles SET full_text = 'full body' WHERE id = ?1", params![&article_id])
+        .unwrap();
+
+    record_wiki_summary_failure(&conn, &article_id, "boom: LLM unavailable").unwrap();
+
+    let logged: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audit_entries \
+             WHERE article_id = ?1 AND action = 'ai_summary' AND details LIKE '%boom%'",
+            params![&article_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(logged, 1, "failure audit entry missing");
+    // Blob still absent -> article_content falls back to the abstract.
+    let blob: Option<String> = conn
+        .query_row(
+            "SELECT full_text_ai_summary FROM articles WHERE id = ?1",
+            params![&article_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(blob.is_none());
 }

@@ -224,6 +224,22 @@ pub async fn generate_article_ai_summary(
     .await
 }
 
+/// Merge a framework-extraction JSON response
+/// (`{"theoretical_frameworks": [...]}`) into an existing AI-summary blob,
+/// preserving every other key. Empty arrays ARE stored (they mark the
+/// backfill as done; the missing-field query checks key presence).
+/// Returns `None` when either input is unparseable or the response lacks a
+/// well-formed `theoretical_frameworks` array.
+#[must_use]
+pub fn merge_frameworks_into_blob(existing_blob: &str, extraction_json: &str) -> Option<String> {
+    let mut obj: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(existing_blob).ok()?;
+    let extraction: serde_json::Value = serde_json::from_str(extraction_json).ok()?;
+    let frameworks = extraction.get("theoretical_frameworks")?.as_array()?.clone();
+    obj.insert("theoretical_frameworks".to_string(), serde_json::Value::Array(frameworks));
+    serde_json::to_string(&serde_json::Value::Object(obj)).ok()
+}
+
 /// Reusable summary-generation core (no Tauri state). Extracted so the
 /// batch-import runner can call it per-article without re-implementing the
 /// LLM call + parse + store pipeline. Emits the same

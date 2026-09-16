@@ -1,5 +1,5 @@
 //! Raw source preparation for the wiki. Two on-ramps feed `wiki-root/raw/`:
-//! 1. Article exports: included articles → `raw/{article_id}.md` (full_text > ai_summary > abstract).
+//! 1. Article exports: included articles → `raw/{article_id}.md` (full AI-summary blob > abstract; full text is never exported).
 //! 2. User-added files: PDF/TXT/HTML/RTF/CSV/MD/JSON/XML/code → companion `.md` (pdf_extract + regex).
 //!
 //! Both idempotent via `source_hash` in companion frontmatter.
@@ -16,9 +16,6 @@ use crate::db::article_repo;
 use crate::error::AppError;
 use crate::models::article::Article;
 use crate::utils::pdf_extract;
-use crate::utils::sections::{
-    extract_captions, extract_sections_with_tables, CaptionKind, SectionKind,
-};
 use crate::wiki::frontmatter::{self, Frontmatter};
 
 /// Result of a raw preparation run.
@@ -42,28 +39,98 @@ pub struct RawExportReport {
 // Article export (Phase 2a)
 // ---------------------------------------------------------------------------
 
-/// Resolve article content: full_text → ai_summary `summary_150_250_words` → abstract_text.
+/// Resolve article content for wiki export: full AI-summary blob rendered as
+/// structured Markdown -> legacy plain-text blob -> abstract_text. Article
+/// full text is NEVER exported (wikifix-final Change 1).
 #[must_use]
 pub fn article_content(article: &Article) -> (String, &'static str) {
-    if let Some(ref ft) = article.full_text {
-        let t = ft.trim();
-        if !t.is_empty() {
-            return (ft.clone(), "full_text");
-        }
-    }
     if let Some(ref s) = article.full_text_ai_summary {
-        let summary = extract_ai_summary_field(s).unwrap_or_else(|| s.clone());
-        if !summary.trim().is_empty() {
-            return (summary, "ai_summary");
+        let t = s.trim();
+        if !t.is_empty() {
+            if let Some(rendered) = render_summary_blob(s) {
+                return (rendered, "ai_summary");
+            }
+            // Legacy plain-text blob (pre-JSON schema): pass through verbatim.
+            if !t.starts_with('{') {
+                return (s.clone(), "ai_summary");
+            }
+            // Valid JSON blob with no usable fields: fall through to abstract.
         }
     }
     (article.abstract_text.clone(), "abstract")
 }
 
-/// Pull `summary_150_250_words` from stored AI summary JSON. Returns `None` on parse failure.
-fn extract_ai_summary_field(raw: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    value.get("summary_150_250_words")?.as_str().map(str::to_string)
+/// Render the unified AI-summary blob as structured Markdown: summary, key
+/// insights, keywords, field, then per-section summaries with key points and
+/// typed facts. No word-count caps (user ruling 3). `None` when the blob
+/// yields no usable content.
+#[must_use]
+fn render_summary_blob(raw: &str) -> Option<String> {
+    let parsed = crate::wiki::ingest::synthesis::parse_ai_summary(raw)?;
+    let mut out = String::new();
+    if let Some(summary) = parsed.summary.as_deref().filter(|s| !s.trim().is_empty()) {
+        out.push_str(&format!("## Summary\n\n{summary}\n\n"));
+    }
+    if !parsed.key_insights.is_empty() {
+        out.push_str("## Key Insights\n\n");
+        for insight in &parsed.key_insights {
+            out.push_str(&format!("- {insight}\n"));
+        }
+        out.push('\n');
+    }
+    if !parsed.keywords.is_empty() {
+        out.push_str(&format!("## Keywords\n\n{}\n\n", parsed.keywords.join(", ")));
+    }
+    let field = match (&parsed.field, &parsed.subfield) {
+        (Some(f), Some(sf)) => format!("{f} > {sf}"),
+        (Some(f), None) => f.clone(),
+        (None, Some(sf)) => sf.clone(),
+        (None, None) => String::new(),
+    };
+    if !field.is_empty() {
+        out.push_str(&format!("## Field\n\n{field}\n\n"));
+    }
+    if !parsed.theoretical_frameworks.is_empty() {
+        out.push_str("## Theoretical Frameworks\n\n");
+        for fw in &parsed.theoretical_frameworks {
+            match fw.usage.as_deref().filter(|u| !u.trim().is_empty()) {
+                Some(usage) => out.push_str(&format!("- {}: {usage}\n", fw.name)),
+                None => out.push_str(&format!("- {}\n", fw.name)),
+            }
+        }
+        out.push('\n');
+    }
+    if !parsed.section_summaries.is_empty() {
+        out.push_str("## Section Summaries\n\n");
+        for sec in &parsed.section_summaries {
+            out.push_str(&format!("### {}\n\n", sec.section));
+            if !sec.summary.trim().is_empty() {
+                out.push_str(&sec.summary);
+                out.push_str("\n\n");
+            }
+            for point in &sec.key_points {
+                out.push_str(&format!("- {point}\n"));
+            }
+            let typed_facts = [
+                ("Study design", sec.study_design.as_deref()),
+                ("Sample size", sec.sample_size.as_deref()),
+                ("Effect size", sec.effect_size.as_deref()),
+                ("95% CI", sec.confidence_interval.as_deref()),
+            ];
+            for (label, value) in typed_facts {
+                if let Some(v) = value.filter(|v| !v.trim().is_empty()) {
+                    out.push_str(&format!("- {label}: {v}\n"));
+                }
+            }
+            out.push('\n');
+        }
+    }
+    let rendered = out.trim_end().to_string();
+    if rendered.is_empty() {
+        None
+    } else {
+        Some(rendered)
+    }
 }
 
 /// Build the frontmatter for an article-export raw page.
@@ -124,10 +191,10 @@ fn fmt_list(items: &[String]) -> String {
     format!("[{}]", inner.join(", "))
 }
 
-/// Build the Markdown body for an article raw page. Full-text sources run through
-/// `structure_full_text` (## Methods/Results headings + GFM tables + figure captions via T2.4 Phase 2).
-/// Other sources (`abstract`, `ai_summary`) pass through unchanged.
-fn article_body(article: &Article, content: &str, content_source: &str) -> String {
+/// Build the Markdown body for an article raw page. Content is summary-scale
+/// (blob render or abstract) and passes through unchanged; full text is never
+/// exported (wikifix-final Change 1).
+fn article_body(article: &Article, content: &str) -> String {
     let year =
         article.publication_year.map(|y| y.to_string()).unwrap_or_else(|| "Unknown".to_string());
     let authors =
@@ -139,76 +206,7 @@ fn article_body(article: &Article, content: &str, content_source: &str) -> Strin
         format!("Authors: {}  |  Year: {}  |  Journal: {}", authors, year, journal)
     };
 
-    let body_content = if content_source == "full_text" {
-        structure_full_text(content)
-    } else {
-        content.to_string()
-    };
-
-    format!("# {}\n\n{}\n\n## Content\n\n{}", article.title, meta_line, body_content)
-}
-
-/// Re-emit flat full-text as structured Markdown (T2.4 Phase 2). Detects GFM tables
-/// (preserved as SectionKind::Table), splits prose into heading-bounded sections, emits
-/// `## {Section}` headings for high-value sections, appends `**Figure N:**` caption lines.
-/// Low-value sections (Heading/Text/References) emit as plain paragraphs.
-#[must_use]
-fn structure_full_text(text: &str) -> String {
-    let sections = extract_sections_with_tables(text);
-    let captions = extract_captions(text);
-
-    let mut out = String::new();
-
-    for s in &sections {
-        if s.body.trim().is_empty() {
-            continue;
-        }
-        match s.kind {
-            SectionKind::Methods
-            | SectionKind::Results
-            | SectionKind::Discussion
-            | SectionKind::Conclusion
-            | SectionKind::Introduction
-            | SectionKind::Abstract => {
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(&format!("## {}\n\n{}", s.kind.label(), s.body));
-            }
-            SectionKind::Table => {
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                let heading = s.heading.as_deref().unwrap_or("Table");
-                out.push_str(&format!("## {heading}\n\n{}", s.body));
-            }
-            SectionKind::Figure => {
-                if !out.is_empty() {
-                    out.push('\n');
-                }
-                out.push_str(&format!("## Figure\n\n{}", s.body));
-            }
-            SectionKind::Heading | SectionKind::Text | SectionKind::References => {
-                if !out.is_empty() {
-                    out.push_str("\n\n");
-                }
-                out.push_str(&s.body);
-            }
-        }
-    }
-
-    if !captions.is_empty() {
-        out.push_str("\n\n## Captions\n\n");
-        for c in &captions {
-            let label = match c.kind {
-                CaptionKind::Figure => "Figure",
-                CaptionKind::Table => "Table",
-            };
-            out.push_str(&format!("**{} {}:** {}\n", label, c.number, c.caption));
-        }
-    }
-
-    out
+    format!("# {}\n\n{}\n\n## Content\n\n{}", article.title, meta_line, content)
 }
 
 /// Hash a string for content-based idempotency checks.
@@ -279,7 +277,7 @@ pub fn write_article_exports(
         }
 
         let (content, content_source) = article_content(article);
-        let body = article_body(article, &content, content_source);
+        let body = article_body(article, &content);
         let source_hash = hash_str(&body);
 
         let path = raw_dir.join(format!("{}.md", sanitize_filename(&article.id)));
@@ -746,13 +744,14 @@ mod tests {
     // ---- article_content ----
 
     #[test]
-    fn article_content_prefers_full_text() {
+    fn article_content_ignores_full_text_prefers_blob() {
         let mut a = sample_article();
         a.full_text = Some("full body".to_string());
         a.full_text_ai_summary = Some("{\"summary_150_250_words\":\"ai\"}".to_string());
         let (content, kind) = article_content(&a);
-        assert_eq!(content, "full body");
-        assert_eq!(kind, "full_text");
+        assert_eq!(kind, "ai_summary");
+        assert_eq!(content, "## Summary\n\nai");
+        assert!(!content.contains("full body"), "full text leaked: {content}");
     }
 
     #[test]
@@ -761,7 +760,7 @@ mod tests {
         a.full_text = None;
         a.full_text_ai_summary = Some("{\"summary_150_250_words\":\"ai digest\"}".to_string());
         let (content, kind) = article_content(&a);
-        assert_eq!(content, "ai digest");
+        assert_eq!(content, "## Summary\n\nai digest");
         assert_eq!(kind, "ai_summary");
     }
 
@@ -973,57 +972,35 @@ mod tests {
         assert_eq!(slugify("UPPER"), "upper");
     }
 
-    // ---- T2.4: structure_full_text (Phase 2 structured re-emit) ----
+    // ---- AI-summary blob rendering (wikifix-final Change 1) ----
 
     #[test]
-    fn structure_full_text_emits_methods_heading_for_full_text() {
-        // When the source is full_text, the structured re-emit runs
-        // extract_sections_with_tables and emits `## Methods` headings for
-        // detected high-value sections.
-        let text = "## Abstract\nAn abstract.\n\n## Methods\nWe did the study.\n\n## Results\nWe found things.";
-        let structured = structure_full_text(text);
-        assert!(structured.contains("## Methods"), "Methods heading missing: {structured}");
-        assert!(structured.contains("## Results"), "Results heading missing: {structured}");
-        assert!(structured.contains("We did the study."), "Methods body missing: {structured}");
-    }
-
-    #[test]
-    fn structure_full_text_preserves_gfm_table() {
-        // A detected pipe-delimited table survives into the structured body as
-        // a GFM table (under a `## Table N` heading).
-        let text = "## Methods\nBody.\n\n| Col1 | Col2 |\n| a | b |\n| c | d |";
-        let structured = structure_full_text(text);
-        assert!(structured.contains("| Col1 | Col2 |"), "GFM table header missing: {structured}");
-        assert!(structured.contains("| a | b |"), "GFM table row missing: {structured}");
-        assert!(structured.contains("---"), "GFM delimiter row missing: {structured}");
-    }
-
-    #[test]
-    fn structure_full_text_emits_figure_caption_lines() {
-        // Detected captions are appended as `**Figure N:** caption` lines.
-        let text = "## Methods\nBody.\n\nFigure 1. A bar chart of BMI by age group.";
-        let structured = structure_full_text(text);
-        assert!(structured.contains("**Figure 1:**"), "figure caption line missing: {structured}");
-        assert!(structured.contains("A bar chart of BMI"), "caption text missing: {structured}");
-    }
-
-    #[test]
-    fn structure_full_text_abstract_source_unchanged() {
-        // When the source is NOT full_text (abstract/ai_summary), article_body
-        // passes the content through unchanged (no structured re-emit).
+    fn render_summary_blob_renders_all_fields() {
+        let blob = r#"{"summary_150_250_words":"digest words","key_insights":["insight one"],"keywords":["kw-a"],"field":"Public Health","subfield":"Nutrition","section_summaries":[{"section":"Methods","summary":"We ran a trial.","key_points":["randomised"],"study_design":"RCT","sample_size":"120","effect_size":"d=0.4","confidence_interval":"0.1 to 0.7"}]}"#;
         let mut a = sample_article();
-        a.full_text = None;
-        a.abstract_text = "## Methods\nWe did the study.\n\nPlain abstract text.".to_string();
-        let body = article_body(&a, &a.abstract_text.clone(), "abstract");
-        // The abstract text is present verbatim (no re-classification).
-        assert!(body.contains("Plain abstract text."), "abstract content missing: {body}");
-        // No synthetic `## Methods` heading was injected by the structure path
-        // (the abstract already contains one, but the point is the structure
-        // re-emit did not run).
-        assert!(
-            !body.contains("## Content\n\n## Methods\n\n"),
-            "abstract source should not run the structured re-emit: {body}"
-        );
+        a.full_text_ai_summary = Some(blob.to_string());
+        let (content, kind) = article_content(&a);
+        assert_eq!(kind, "ai_summary");
+        assert!(content.contains("## Summary\n\ndigest words"), "{content}");
+        assert!(content.contains("- insight one"), "{content}");
+        assert!(content.contains("## Keywords\n\nkw-a"), "{content}");
+        assert!(content.contains("## Field\n\nPublic Health > Nutrition"), "{content}");
+        assert!(content.contains("### Methods"), "{content}");
+        assert!(content.contains("We ran a trial."), "{content}");
+        assert!(content.contains("- randomised"), "{content}");
+        assert!(content.contains("- Study design: RCT"), "{content}");
+        assert!(content.contains("- Sample size: 120"), "{content}");
+        assert!(content.contains("- Effect size: d=0.4"), "{content}");
+        assert!(content.contains("- 95% CI: 0.1 to 0.7"), "{content}");
+    }
+
+    #[test]
+    fn article_content_empty_json_blob_falls_to_abstract() {
+        let mut a = sample_article();
+        a.full_text_ai_summary = Some("{}".to_string());
+        let (content, kind) = article_content(&a);
+        assert_eq!(kind, "abstract");
+        assert_eq!(content, "the abstract");
     }
 
     // ---- helpers ----

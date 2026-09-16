@@ -99,8 +99,12 @@ struct GoogleUsage {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GoogleCandidate {
     content: GoogleContentResponse,
+    /// `"STOP"` = natural stop; `"MAX_TOKENS"` = truncated by output budget.
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,7 +295,7 @@ const LLM_MAX_BACKOFF_MS: u64 = 10_000;
 /// so users understand the adjusted budget.
 ///
 /// Normal success path returns `CallMeta::default()`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CallMeta {
     /// `true` iff the call recovered from a temperature-rejection 400 by
     /// omitting the `temperature` parameter on retry.
@@ -299,6 +303,66 @@ pub struct CallMeta {
     /// `Some(n)` iff the call recovered from an over-cap `max_tokens` 400 by
     /// backing down to the model-reported limit `n`.
     pub max_tokens_backed_down: Option<i64>,
+    /// Parsed stop/finish reason: `finish_reason` (OpenAI), `stop_reason`
+    /// (Anthropic), `finishReason` (Google). `None` when the provider omitted
+    /// it or the response shape had none.
+    pub finish_reason: Option<String>,
+}
+
+impl CallMeta {
+    /// `true` iff the provider stopped generation at the output-token budget
+    /// (`finish_reason = "length"`, `stop_reason = "max_tokens"`, Google
+    /// `finishReason = "MAX_TOKENS"`). Consumed by the wiki ingest
+    /// truncation-detection + continuation machinery (wikifix-final Change 4).
+    #[must_use]
+    pub fn truncated_by_output_budget(&self) -> bool {
+        self.finish_reason
+            .as_deref()
+            .is_some_and(|r| matches!(r.to_ascii_lowercase().as_str(), "length" | "max_tokens"))
+    }
+}
+
+/// Planning-only estimate of the provider's effective output budget (tokens).
+/// NOTHING here is sent to the provider (user ruling: no generic output-cap
+/// restriction; the OpenAI-compatible and Google paths send no output field).
+/// Used solely for two-sided wiki batch sizing; the truncation detection +
+/// bounded continuation machinery covers mis-estimates.
+#[must_use]
+pub fn estimated_output_budget_tokens(config: &LlmConfig) -> usize {
+    let model = config.model_name.to_ascii_lowercase();
+    let name = model.as_str();
+    if name.contains("gpt-5")
+        || name.contains("gpt-4.1")
+        || name.contains("o3")
+        || name.contains("o4")
+    {
+        return 128_000;
+    }
+    if name.contains("claude-3-5-haiku") {
+        return 8_192;
+    }
+    if name.contains("claude-3") {
+        return 4_096;
+    }
+    if name.contains("claude") {
+        // Honest planning number: the requested ceiling, not the model max
+        // (ANTHROPIC_REQUESTED_MAX_TOKENS; back-down can only lower it).
+        return 32_768;
+    }
+    if name.contains("gemini-1.5-flash") || name.contains("gemini-2.0") {
+        return 8_192;
+    }
+    if name.contains("gemini") {
+        return 65_536;
+    }
+    match config.provider {
+        // Local endpoints usually default to small output budgets.
+        LlmProvider::Ollama | LlmProvider::LlamaCpp | LlmProvider::LmStudio => 8_192,
+        // Hosted OpenAI-compatible providers default to the model max, which
+        // is >= 32K for current-generation models; 32K is the conservative
+        // planning number.
+        _ => 32_768,
+    }
 }
 
 /// Session-scoped cache of per-model discovered Anthropic output caps.
@@ -761,15 +825,15 @@ async fn send_google(
             let body_text = send_with_retry(&builder, "Google").await?;
             let google_response: GoogleResponse = serde_json::from_str(&body_text)
                 .map_err(|e| AppError::Import(format!("Failed to parse LLM response: {e}")))?;
-            let content = google_response
-                .candidates
-                .first()
+            let candidate = google_response.candidates.first();
+            let finish_reason = candidate.and_then(|c| c.finish_reason.clone());
+            let content = candidate
                 .and_then(|c| c.content.parts.first())
                 .map(|p| p.text.clone())
                 .ok_or_else(|| AppError::Import("No response from LLM".to_string()))?;
             let total_tokens =
                 google_response.usage_metadata.map(|u| u.total_token_count).unwrap_or(0);
-            Ok((content, total_tokens))
+            Ok((content, total_tokens, finish_reason))
         }
     })
     .await
@@ -883,6 +947,7 @@ async fn send_anthropic(
                 CallMeta {
                     temperature_was_rejected: meta.temperature_was_rejected,
                     max_tokens_backed_down: Some(backed_down),
+                    finish_reason: meta.finish_reason,
                 },
             ))
         }
@@ -956,7 +1021,7 @@ async fn anthropic_attempt(
             }
             let total_tokens =
                 anthropic_response.usage.map_or(0, |u| u.input_tokens + u.output_tokens);
-            Ok((content, total_tokens))
+            Ok((content, total_tokens, anthropic_response.stop_reason.clone()))
         }
     })
     .await
@@ -1050,7 +1115,8 @@ async fn send_openai_compatible(
                 );
                 }
                 let total_tokens = chat_response.usage.and_then(|u| u.total_tokens).unwrap_or(0);
-                return Ok((choice.message.content, total_tokens));
+                let finish_reason = choice.finish_reason.clone();
+                return Ok((choice.message.content, total_tokens, finish_reason));
             }
 
             // Strategy 2: Fallback - extract content from arbitrary JSON envelope
@@ -1066,7 +1132,7 @@ async fn send_openai_compatible(
             })?;
 
             let total_tokens = extract_total_tokens(&value);
-            Ok((content, total_tokens))
+            Ok((content, total_tokens, None))
         }
     })
     .await
@@ -1088,12 +1154,14 @@ async fn send_with_temperature_recovery<F, Fut>(
 ) -> Result<(String, usize, CallMeta), AppError>
 where
     F: Fn(Option<f64>) -> Fut,
-    Fut: std::future::Future<Output = Result<(String, usize), AppError>>,
+    Fut: std::future::Future<Output = Result<(String, usize, Option<String>), AppError>>,
 {
     let first_temp = if skip_temperature { None } else { Some(temperature) };
 
     match make_request(first_temp).await {
-        Ok(tuple) => Ok((tuple.0, tuple.1, CallMeta::default())),
+        Ok(tuple) => {
+            Ok((tuple.0, tuple.1, CallMeta { finish_reason: tuple.2, ..CallMeta::default() }))
+        }
         Err(e) => {
             /* Only retry if temperature was actually sent. If skip_temperature
             was already true, surface the error immediately. */
@@ -1107,7 +1175,11 @@ where
                 Ok(tuple) => Ok((
                     tuple.0,
                     tuple.1,
-                    CallMeta { temperature_was_rejected: true, ..CallMeta::default() },
+                    CallMeta {
+                        temperature_was_rejected: true,
+                        finish_reason: tuple.2,
+                        ..CallMeta::default()
+                    },
                 )),
                 // Surface the ORIGINAL (temperature) error: it carries the
                 // actionable diagnostic. The second failure is likely unrelated.

@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use crate::error::AppError;
 use crate::wiki::frontmatter::{self, Frontmatter};
 
-use super::slugs::{author_slug, concept_slug, sanitize_slug};
+use super::slugs::{author_slug, concept_slug, framework_slug, sanitize_slug};
 
 /// Parsed AI summary JSON blob. All fields optional; pre-seeder skips articles with
 /// missing/unparseable summaries.
@@ -25,6 +25,8 @@ pub struct ParsedAiSummary {
     /// blobs (no `section_summaries`) keep this empty and render via the
     /// legacy synthesis shape.
     pub section_summaries: Vec<ParsedSectionSummary>,
+    /// Named theories/models/lenses the article uses (framework pages).
+    pub theoretical_frameworks: Vec<ParsedFramework>,
 }
 
 /// One element of the `section_summaries` array (v2 AI-summary blob). Typed facts optional.
@@ -37,6 +39,14 @@ pub struct ParsedSectionSummary {
     pub sample_size: Option<String>,
     pub effect_size: Option<String>,
     pub confidence_interval: Option<String>,
+}
+
+/// One entry of the `theoretical_frameworks` array: a named theory/model/lens
+/// the article uses, tests, or extends, plus how it is used (when captured).
+#[derive(Debug, Clone)]
+pub struct ParsedFramework {
+    pub name: String,
+    pub usage: Option<String>,
 }
 
 /// Parse `full_text_ai_summary` JSON into `ParsedAiSummary`. Returns `None` on empty/unparseable.
@@ -76,6 +86,7 @@ pub fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
             .unwrap_or_default()
     };
     let section_summaries = parse_section_summaries(&value);
+    let theoretical_frameworks = parse_frameworks(&value);
     Some(ParsedAiSummary {
         summary: get_str("summary_150_250_words"),
         key_insights: get_str_array("key_insights"),
@@ -83,7 +94,39 @@ pub fn parse_ai_summary(raw: &str) -> Option<ParsedAiSummary> {
         field: get_str("field"),
         subfield: get_str("subfield"),
         section_summaries,
+        theoretical_frameworks,
     })
+}
+
+/// Parse `theoretical_frameworks` from the blob. Accepts both object entries
+/// (`{"name", "usage"}`) and plain strings (backward compat).
+fn parse_frameworks(value: &serde_json::Value) -> Vec<ParsedFramework> {
+    let Some(arr) = value.get("theoretical_frameworks").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|entry| {
+            if let Some(s) = entry.as_str() {
+                let name = s.trim().to_string();
+                return if name.is_empty() {
+                    None
+                } else {
+                    Some(ParsedFramework { name, usage: None })
+                };
+            }
+            let name = entry.get("name")?.as_str()?.trim().to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let usage = entry
+                .get("usage")
+                .and_then(|u| u.as_str())
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+                .map(str::to_string);
+            Some(ParsedFramework { name, usage })
+        })
+        .collect()
 }
 
 /// Parse `section_summaries` array from v2 blob. Empty vec for v1 blobs or absent array.
@@ -326,6 +369,14 @@ fn render_synthesis_page(
             parsed.keywords.iter().map(|k| format!("[[{}]]", concept_slug(k))).collect();
         body.push_str(&links.join(", "));
         body.push('\n');
+    }
+    // Framework links: canonical slugs so articles connect to the pre-seeded
+    // framework pages (graph edges before the LLM ever runs).
+    if !parsed.theoretical_frameworks.is_empty() {
+        body.push_str("\n## Theoretical Frameworks\n\n");
+        for fw in &parsed.theoretical_frameworks {
+            body.push_str(&format!("- [[{}|{}]]\n", framework_slug(&fw.name), fw.name));
+        }
     }
     /* T1.3: per-section subsections when v2 blob carries `section_summaries`.
     Old (v1) blobs have empty list → graceful backward compat. */

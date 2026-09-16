@@ -56,3 +56,16 @@ pub fn sanitize_slug(slug: &str) -> String {
         slug.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' }).collect();
     cleaned.trim_matches('-').to_string()
 }
+
+/// Derive kebab-case slug for a theoretical framework from its canonical
+/// name (same squeeze as concepts; no prefix - the framework page type lives
+/// under `wiki/frameworks/`). Falls back to `framework-unnamed` on empty.
+#[must_use]
+pub fn framework_slug(name: &str) -> String {
+    let squeezed = squeeze_slug(name);
+    if squeezed.is_empty() {
+        "framework-unnamed".to_string()
+    } else {
+        squeezed
+    }
+}

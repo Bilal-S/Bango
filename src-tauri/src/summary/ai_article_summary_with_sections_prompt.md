@@ -117,6 +117,7 @@ If a delimited section is present in the input but contains no substantive conte
   "summary_150_250_words": "",
   "key_insights": [],
   "keywords": [],
+  "theoretical_frameworks": [{"name": "", "usage": ""}],
   "section_summaries": [
     {
       "section": "Methods",
@@ -141,3 +142,4 @@ If a delimited section is present in the input but contains no substantive conte
 ```
 
 Return ONLY the JSON object. Do not wrap it in markdown code fences. Do not include any prose before or after the JSON.
+`theoretical_frameworks`: named theories, models, or theoretical lenses the paper explicitly uses, tests, or extends (NOT general topics and NOT the paper's own novel results). `name` = the established published name; `usage` = 1-2 sentences on how THIS paper applies it. Use `[]` when the paper names none.

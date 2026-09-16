@@ -34,8 +34,12 @@ article corpus.
   (reads the `/Title` entry from the Info dictionary) so the pre-seed source
   page + LLM prompt use the document's real title instead of the filename stem.
   `prepare_all_with_progress` splits the article load (under DB lock) from the
-  file writes (lock-free) so the CPU-bound `structure_full_text` extraction does
-  not block other IPC commands.
+  file writes (lock-free) so neither blocks other IPC commands.
+  Content resolution (wikifix-final Change 1): `article_content` renders the
+  full unified AI-summary blob as structured Markdown (summary, key insights,
+  keywords, field, section summaries + typed facts; no word-count caps), falls
+  back to legacy plain-text blobs, then `abstract_text`. Article full text is
+  NEVER exported (`structure_full_text` was removed with the full-text branch).
 - `fts.rs` (T1.2 update) - chunk-aware FTS5 schema: `ensure_table` creates
   `chunk_index UNINDEXED, section UNINDEXED, parent_slug UNINDEXED` columns.
   `PageRow` carries the same three optional fields; `WikiPageHit` surfaces them.
@@ -50,6 +54,10 @@ article corpus.
   `batching.rs`, `consolidation.rs`, `authors.rs`, `synthesis.rs`,
   `concepts.rs`, `sources.rs`, `slugs.rs`). Inline tests extracted to
   `tests/wiki/wiki_ingest_test.rs` per `docs/CLAUDE.md` §Testing.
+  Batching budget (wikifix-final Change 2): `batch_input_char_budget` =
+  `window * 0.4 * 4` chars, clamped `[4_000, 2_000_000]`
+  (`MAX_BATCH_INPUT_CHARS = 2_000_000`, about 500K input tokens; the old 80K
+  cap budgeted every window >= 50K tokens identically).
 - `engine.rs` - deterministic lint + `build_graph` for link graph
   visualization. `LintKind::UngroundedPage` (ERROR-level provenance check;
   grounded types: concept, method, framework, synthesis).
@@ -77,18 +85,38 @@ legend box), color teal `#14b8a6`.
 ### Parallel chunked ingest (`ingest/batching.rs`)
 
 `wiki_ingest`, `wiki_rebuild`, and `wiki_export_and_ingest` no longer make one
-monolithic LLM call. They split raw sources into batches sized to
-`config.context_window_tokens * 0.4` (input budget; remainder is available for
-output pages), dispatch all batches concurrently via a
-`tokio::task::JoinSet` (bounded by the orchestrator's
-`max_concurrent_requests` semaphore), and emit `wiki:progress` on every batch
-completion so the progress bar moves smoothly across the 25-95% range. Each
-batch carries a compact full-source index (title + slug) so the model can
-`[[link]]` across batches without sequential slug-forwarding. Per-batch
-failures are tolerated (recorded in `report.errors`; other batches still
-write). Key types: `IngestBatch`, `IngestLlmSender` (injectable trait;
-production `OrchestratorIngestSender`, test `FakeSender`),
-`build_ingest_prompt_batches`, `run_chunked_ingest`. (`write_pages_from_response`
+monolithic LLM call. They split raw sources into batches sized to BOTH the
+input budget (`config.context_window_tokens * 0.4`, clamped
+`[4_000, 2_000_000]` chars) and the estimated output budget
+(`client::estimated_output_budget_tokens` * 0.7 / ~2.2K tokens per article,
+adaptive 3-7 call sweet spot; `estimated_output_tokens = 0` disables the
+output side - the legacy `build_ingest_prompt_batches` wrapper), dispatch all
+batches concurrently via a `tokio::task::JoinSet` (bounded by the
+orchestrator's `max_concurrent_requests` semaphore), and emit `wiki:progress`
+on every batch completion so the progress bar moves smoothly across the
+25-95% range. Each batch carries a compact full-source index (title + slug)
+for cross-batch linking, an Existing Pages Index (slug/type/title of every
+page under `wiki/`; Change 6.1 page-vocabulary pinning: reuse existing slugs,
+fork nothing), and qualitative page guidance ("a page for every distinct
+theme, method, or framework; typically yields several pages; no padding" -
+no numeric quotas per the Tier D1 anti-hallucination rule, no word caps). A
+lone
+oversize source is word-boundary truncated with a disclosure marker and
+counted in `report.source_chars_truncated` (Change 3). Per batch,
+`process_batch` parses the response, drops a partial trailing page when the
+provider reports truncation (`finish_reason`/`stop_reason` via
+`IngestLlmSender::send_with_truncation`) or the trailing block fails to parse
+(structural), re-dispatches bounded continuations (max 2) carrying only
+sources missing from the pages' `source_articles`, and reports uncovered
+sources as non-fatal errors; a 0-page parse is never silent. `run_chunked_ingest`
+records run metrics (pages per type, chars, truncation/continuation counts) in
+`wiki-root/.ingest-metrics.json` and warns in `report.warnings` when LLM pages
+drop >20% vs the previous run (Change 6.2). Per-batch call failures are
+tolerated (recorded in `report.errors`; other batches still write). Key types:
+`IngestBatch` (carries `PromptContext` + sources for continuation rendering),
+`IngestLlmSender` (injectable trait; production `OrchestratorIngestSender`,
+test `FakeSender`), `build_ingest_prompt_batches_with_budgets`,
+`run_chunked_ingest`, `IngestRunMetrics`. (`write_pages_from_response`
 remains for the async write-and-index path; the legacy single-call
 `build_ingest_prompt` was deleted - the batch path now covers all production
 callers.)
@@ -125,6 +153,43 @@ Single-batch runs (`batches.len() == 1`) skip all consolidation - the LLM sees
 all sources at once and produces a self-consistent page set, so the manifest,
 pre-seed, dedup, and link rewrite are zero-cost no-ops.
 
+### Theoretical Frameworks: extraction, canonicalization, pre-seed, polish (`ingest/frameworks.rs`)
+
+Root cause (2026-09-16): the wiki input switch to AI summaries dropped
+named-theory mentions, so the LLM ingest could no longer ground framework
+pages (three fresh runs produced zero). The blob now carries
+`theoretical_frameworks: [{name, usage}]` (both summary prompt schemas ask
+for it; an ensure-frameworks pre-phase backfills + canonicalizes it on
+`wiki_ingest`/`wiki_rebuild`/`wiki_export_and_ingest`).
+
+- Canonicalization runs before anything is generated out: deterministic slug
+  clustering (`canonical_name_map`, most-frequent variant wins) + ONE
+  corpus-level LLM alias-merge call (`apply_alias_merges` unifies acronym
+  variants like DSM-5 vs its full title); blobs are rewritten to the
+  canonical names so every consumer sees identical names.
+- Deterministic skeleton pre-seed (`preseed_framework_pages`, phase 5, step
+  20): one `wiki/frameworks/{slug}.md` per canonical framework, complete
+  `source_articles` + Publications list (provenance never LLM-truncated).
+- LLM polish pass (`polish_framework_pages`): one orchestrator call per
+  framework that sees EVERY naming article's usage note (each paper alone may
+  carry only a partial explanation); runs outside the DB lock at the command
+  layer, skeleton stays on failure (non-fatal).
+- Connections: per-article synthesis pages + the wiki raw export render
+  `[[framework-slug|name]]` / `## Theoretical Frameworks` from the same
+  canonical field, so article-to-framework graph edges exist before the LLM
+  batch ingest runs (the Existing Pages Index then pins the slugs).
+
+### Ensure-summaries pre-phase (wikifix-final Change 1)
+
+`wiki_rebuild` and `wiki_export_and_ingest` run `ensure_wiki_summaries`
+(`commands/wiki_cmd/ingest.rs`) before the article load: included full-text
+articles whose `full_text_ai_summary` is missing/empty get their blob
+generated via `generate_article_ai_summary_inner`, so wiki export is
+summary-scale for every article. Per-article failures are non-fatal
+(`record_wiki_summary_failure` audit entry; abstract fallback). Skipped when
+the LLM is not configured. Emits `wiki:progress` directly in the 1-9% slice
+(outside the `prep_cb` 15-25% pre-seed range); cancel-checked between articles.
+
 ### Cancel-token + progress contract (v2, see `.worktrees/wiki2.md`)
 
 All three entry points (`wiki_ingest`, `wiki_rebuild`,
@@ -150,7 +215,16 @@ Bibliometrics dashboard). `[wiki:diag]` always-on logging (mirrors
 Runs unconditionally before the LLM on every single-batch AND multi-batch run:
 
 1. `preseed_authors` writes rich author pages from `biblio_authors` (metrics,
-   publications, research areas, collaborators).
+   main themes, publications, most cited, key references, research areas,
+   collaborators). Enrichment (2026-09-16): Main Themes link `[[concept-slug]]`
+   to the seeded concept hubs (tags outrank extracted terms); Most Cited ranks
+   the author's own papers by `articles.num_cited` (top 5); Key References
+   rank `reference_papers` by usage across the author's articles (type=1
+   links, metadata-only); Research Areas are curated (blocklist + min length
+   + cap 10). `collect_coauthors` was doubly broken behind a swallowed error
+   (parameter count + name columns from the wrong table) and silently emptied
+   the Collaborators section on every page; both are fixed and covered by
+   `tests/wiki/wiki_author_enrichment_test.rs`.
 2. `preseed_synthesis_from_ai_summaries` writes one
    `wiki/synthesis/{article_id}.md` per included article that has a
    `full_text_ai_summary` JSON blob - slug = article UUID (so `[[uuid]]` links

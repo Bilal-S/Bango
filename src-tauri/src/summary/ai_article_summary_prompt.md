@@ -86,5 +86,6 @@ Provide **5-7** keywords.
   "structured_extraction": {},
   "summary_150_250_words": "",
   "key_insights": [],
-  "keywords": []
+  "keywords": [],
+  "theoretical_frameworks": [{"name": "", "usage": ""}]
 }

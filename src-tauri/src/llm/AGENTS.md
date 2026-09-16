@@ -81,6 +81,17 @@ limits + rate limiting and delegates to `client::send_chat_completion`.
   `(String, usize, CallMeta)` where `CallMeta.temperature_was_rejected` is
   `true` iff the call recovered from a temperature 400. The orchestrator
   inspects this flag and persists the flag; callers see only `(String, usize)`.
+- **`CallMeta.finish_reason` truncation flag** (wikifix-final Change 4): every
+  provider path parses its stop reason (`finish_reason` OpenAI, `stop_reason`
+  Anthropic, `finishReason` Google) into `CallMeta.finish_reason`;
+  `truncated_by_output_budget()` is `true` for `length` / `max_tokens` /
+  `MAX_TOKENS`. `LlmOrchestrator::send_with_meta` exposes the meta to callers
+  (wiki ingest); plain `send` still drops it. No output-cap field is EVER sent
+  on the OpenAI-compatible or Google paths (user ruling: no generic output
+  restriction); Anthropic keeps the ceiling-not-target `max_tokens` + back-down.
+- **`estimated_output_budget_tokens(config)`**: planning-only estimate
+  (per-model table, Anthropic latched-request ceiling, conservative defaults
+  for local endpoints). Used solely for wiki batch sizing; never sent.
 - **Orchestrator post-call persistence**: `LlmOrchestrator::send` calls
   `maybe_persist_skip_temperature(meta)` after a successful call. If the flag
   is set, it (a) latches an in-session `AtomicBool`

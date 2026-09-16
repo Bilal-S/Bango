@@ -932,7 +932,11 @@ async fn test_anthropic_stop_reason_max_tokens_returns_content() {
     mock.assert_async().await;
     assert_eq!(content, "partial answer");
     assert_eq!(tokens, 4106);
-    assert_eq!(meta, client::CallMeta::default());
+    // Change 4: the stop reason now surfaces in CallMeta as truncation.
+    assert_eq!(meta.finish_reason.as_deref(), Some("max_tokens"));
+    assert!(meta.truncated_by_output_budget());
+    assert!(!meta.temperature_was_rejected);
+    assert_eq!(meta.max_tokens_backed_down, None);
 }
 
 // ── send_chat_completion: Ollama (no API key) ───────────────────────
@@ -1405,4 +1409,145 @@ async fn test_openai_success_returns_default_callmeta() {
         CallMeta::default(),
         "normal success must return CallMeta::default (no rejection)"
     );
+}
+
+// ---- Binding inventory implementations (`docs/test-plans/wiki-output-budget-tests.md`,
+// `.worktrees/wikifix-final.md` Change 4 output-cap policy). ----
+
+/// `CallMeta` surfaces truncation for `finish_reason=length`,
+/// `stop_reason=max_tokens`, and the Google `finishReason=MAX_TOKENS`.
+#[tokio::test]
+async fn call_meta_flags_truncation_from_finish_and_stop_reasons() {
+    // OpenAI: finish_reason = "length".
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(
+            r#"{"choices":[{"message":{"role":"assistant","content":"partial"},
+                 "finish_reason":"length"}],"usage":{"total_tokens":10}}"#,
+        )
+        .create_async()
+        .await;
+    let (_c, _t, meta) =
+        client::send_chat_completion(&openai_config(&server.url()), "s", "u").await.unwrap();
+    mock.assert_async().await;
+    assert_eq!(meta.finish_reason.as_deref(), Some("length"));
+    assert!(meta.truncated_by_output_budget(), "{meta:?}");
+
+    // Anthropic: stop_reason = "max_tokens".
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/messages")
+        .with_status(200)
+        .with_body(
+            r#"{"content":[{"type":"text","text":"partial"}],
+                "usage":{"input_tokens":1,"output_tokens":2},"stop_reason":"max_tokens"}"#,
+        )
+        .create_async()
+        .await;
+    let (_c, _t, meta) =
+        client::send_chat_completion(&anthropic_config(&server.url()), "s", "u").await.unwrap();
+    mock.assert_async().await;
+    assert_eq!(meta.finish_reason.as_deref(), Some("max_tokens"));
+    assert!(meta.truncated_by_output_budget(), "{meta:?}");
+
+    // Google: finishReason = "MAX_TOKENS".
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/models/gemini-1.5-flash:generateContent")
+        .with_status(200)
+        .with_body(
+            r#"{"candidates":[{"content":{"parts":[{"text":"partial"}]},
+                "finishReason":"MAX_TOKENS"}]}"#,
+        )
+        .create_async()
+        .await;
+    let (_c, _t, meta) =
+        client::send_chat_completion(&google_config(&server.url()), "s", "u").await.unwrap();
+    mock.assert_async().await;
+    assert_eq!(meta.finish_reason.as_deref(), Some("MAX_TOKENS"));
+    assert!(meta.truncated_by_output_budget(), "{meta:?}");
+
+    // Default (no reason reported) is not truncated.
+    assert!(!bango_lib::llm::client::CallMeta::default().truncated_by_output_budget());
+}
+
+/// Anthropic keeps the ceiling-not-target `max_tokens` plus over-cap
+/// back-down; NO output-cap field is ever added to the OpenAI-compatible or
+/// Google request bodies (user ruling: no generic output restriction).
+#[tokio::test]
+async fn anthropic_request_keeps_max_tokens_ceiling_and_backdown() {
+    // OpenAI-compatible body: exact-shape match with NO output-cap field.
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::JsonString(
+            serde_json::json!({
+                "model": "gpt-4o",
+                "messages": [
+                    { "role": "system", "content": "s" },
+                    { "role": "user", "content": "u" }
+                ],
+                "temperature": 0.2
+            })
+            .to_string(),
+        ))
+        .with_status(200)
+        .with_body(openai_chat_response("ok", 1))
+        .expect(1)
+        .create_async()
+        .await;
+    client::send_chat_completion(&openai_config(&server.url()), "s", "u").await.unwrap();
+    mock.assert_async().await;
+
+    // Google body: exact-shape match with NO maxOutputTokens field.
+    let mut server = mockito::Server::new_async().await;
+    let mock = server
+        .mock("POST", "/models/gemini-1.5-flash:generateContent")
+        .match_body(mockito::Matcher::JsonString(
+            serde_json::json!({
+                "systemInstruction": { "parts": { "text": "s" } },
+                "contents": [ { "role": "user", "parts": [ { "text": "u" } ] } ],
+                "generationConfig": { "temperature": 0.2 }
+            })
+            .to_string(),
+        ))
+        .with_status(200)
+        .with_body(r#"{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}"#)
+        .expect(1)
+        .create_async()
+        .await;
+    client::send_chat_completion(&google_config(&server.url()), "s", "u").await.unwrap();
+    mock.assert_async().await;
+
+    // Anthropic: ceiling present, over-cap 400 backs down to the parsed limit.
+    // Unique model name isolates the session-scoped cap cache from other tests.
+    let mut server = mockito::Server::new_async().await;
+    let first = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 32768 })))
+        .with_status(400)
+        .with_body(
+            r#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: 32768 > 4096, which is the maximum allowed number of output tokens for claude-3-opus-20240229"}}"#,
+        )
+        .expect(1)
+        .create_async()
+        .await;
+    let second = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(serde_json::json!({ "max_tokens": 4096 })))
+        .with_status(200)
+        .with_body(anthropic_chat_response("ok", 1, 1))
+        .expect(1)
+        .create_async()
+        .await;
+    let config = LlmConfig {
+        model_name: "claude-3-opus-20240229".to_string(),
+        ..anthropic_config(&server.url())
+    };
+    let (_c, _t, meta) = client::send_chat_completion(&config, "s", "u").await.unwrap();
+    first.assert_async().await;
+    second.assert_async().await;
+    assert_eq!(meta.max_tokens_backed_down, Some(4096), "{meta:?}");
 }
