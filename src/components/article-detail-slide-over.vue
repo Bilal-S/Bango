@@ -134,18 +134,3 @@ function close(): void {
 
 defineExpose({ open, close });
 </script>
-
-<style scoped>
-.detail-slide-enter-active,
-.detail-slide-leave-active {
-  transition:
-    transform 0.25s ease,
-    opacity 0.25s ease;
-}
-
-.detail-slide-enter-from,
-.detail-slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
-}
-</style>

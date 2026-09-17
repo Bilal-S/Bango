@@ -995,19 +995,8 @@ watch(searchQuery, (q) => {
   animation: fade-in 0.3s ease-out forwards;
 }
 
-/* Article detail panel slide-over: fly in from the right */
-.detail-slide-enter-active,
-.detail-slide-leave-active {
-  transition:
-    transform 0.25s ease,
-    opacity 0.25s ease;
-}
-
-.detail-slide-enter-from,
-.detail-slide-leave-to {
-  transform: translateX(100%);
-  opacity: 0;
-}
+/* Article detail panel slide-over transition: shared rule in
+   `src/styles/transitions.css` (always loaded via base.css). */
 
 /* Override the panel's flex behavior so it floats on the right */
 .wiki-view :deep(.detail-panel) {

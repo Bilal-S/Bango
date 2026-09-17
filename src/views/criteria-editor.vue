@@ -1675,13 +1675,6 @@ async function handleOpenAlexSmartSearch(): Promise<void> {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
-.ai-critique-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.75rem;
-}
-
 /* Collapse/expand + close actions wrapper for the critique card header
  * (same shape as the search-strategy-card header actions). */
 .ai-critique-card__header-actions {

@@ -1303,30 +1303,7 @@ onUnmounted(() => {
   flex: 1;
 }
 
-.sidebar__action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  width: 100%;
-  padding: 0.375rem 0.75rem;
-  border: none;
-  border-radius: 0.5rem;
-  background: var(--color-surface-container-low);
-  color: var(--color-on-surface-variant);
-  font-size: 0.75rem;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-  transition:
-    background-color 0.15s,
-    color 0.15s;
-}
-
-.sidebar__action-btn:hover,
-.sidebar__action-btn--active {
-  background: var(--color-outline-variant);
-}
+/* Shared `.sidebar__action-btn` chrome lives in `src/styles/biblio-chrome.css`. */
 
 /* ── Main ────────────────────────────────────────────────────── */
 .timeline-main {

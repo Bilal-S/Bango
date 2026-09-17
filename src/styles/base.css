@@ -3,6 +3,7 @@
 @import './tokens.css';
 @import './forms.css';
 @import './markdown.css';
+@import './transitions.css';
 
 @theme {
   /* Colors - Scholarly Precision */

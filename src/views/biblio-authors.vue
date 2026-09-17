@@ -1052,31 +1052,9 @@ function onPanelKeydown(event: KeyboardEvent): void {
   flex: 1;
 }
 
-.sidebar__action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-  width: 100%;
-  padding: 0.375rem 0.75rem;
-  border: none;
-  border-radius: 0.5rem;
-  background: var(--color-surface-container);
-  color: var(--color-on-surface-variant);
-  font-size: 0.75rem;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-  transition:
-    background-color 0.15s,
-    color 0.15s;
-}
+/* Shared `.sidebar__action-btn` chrome lives in `src/styles/biblio-chrome.css`. */
 
-.sidebar__action-btn:hover,
-.sidebar__action-btn--active {
-  background: var(--color-surface-container-high);
-}
-
+.sidebar__icon-btn {
 /* Dual-handle year range */
 .dual-range-block {
   display: flex;

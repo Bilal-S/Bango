@@ -4,7 +4,7 @@ import Graph from 'graphology';
 import Sigma from 'sigma';
 import { NodeCircleProgram, createEdgeArrowProgram } from 'sigma/rendering';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
-import { applyMinimumSeparation, spiralPosition } from '../../utils/graph-layout';
+import { applyMinimumSeparation, spiralPosition } from '@/utils/graph-layout';
 import { useWiki } from '@/composables/use-wiki';
 import type { WikiGraph } from '@/types/wiki';
 

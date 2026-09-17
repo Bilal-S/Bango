@@ -31,6 +31,10 @@ tabs.
   data-attribute spans, escapes raw HTML, renders every other link as plain
   text).
 - `help/` holds the six `help-tab-*.vue` tab components.
+- `wiki/wiki-graph-panel.vue` renders the wiki page graph; layout seeding is
+  the deterministic sunflower spiral + post-ForceAtlas2 minimum-separation
+  guard from `utils/graph-layout.ts` (no `Math.random` seeds - coincident
+  seeds leave FA2 label-overlap local minima).
 - `settings/` holds the settings sub-components (see Settings cards below).
 - Other notable components: `journal-info-card.vue`,
   `article-detail-panel.vue`, `article-filter-panel.vue`,

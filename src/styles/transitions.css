@@ -1,0 +1,18 @@
+/* Shared UI transitions (always loaded via base.css).
+   `.detail-slide-*` is the right-side slide-over transition used by the
+   article-detail slide-over component and the biblio/wiki in-view detail
+   panels. It lives here - not in a view-scoped block - so it applies
+   wherever a <Transition name="detail-slide"> mounts, independent of which
+   lazy route chunk loaded first. */
+.detail-slide-enter-active,
+.detail-slide-leave-active {
+  transition:
+    transform 0.25s ease,
+    opacity 0.25s ease;
+}
+
+.detail-slide-enter-from,
+.detail-slide-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
