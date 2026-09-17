@@ -1054,7 +1054,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
 
 /* Shared `.sidebar__action-btn` chrome lives in `src/styles/biblio-chrome.css`. */
 
-.sidebar__icon-btn {
 /* Dual-handle year range */
 .dual-range-block {
   display: flex;
